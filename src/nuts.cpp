@@ -434,6 +434,131 @@ static void apply_interval_constraints(
     }
 }
 
+// Prune each seat window to the positions its PERPENDICULAR PARTNERS can still
+// reach — the keepout half of reachability, which nothing else applies.
+//
+// NUTS places every segment against keepouts on its OWN layer (solver_keepouts
+// / keepout_occupied).  What no pass consults is the keepouts on a PARTNER's
+// layer: a segment's seat is one END of every perpendicular partner's span, so
+// where this segment lands decides what its partners have to cross.  Seat a
+// trunk on M4 in the middle of a wide-open M4 window and the M5 stub climbing
+// out of it can be left with no legal position at all — the trunk saw no
+// obstacle, because the obstacle was never on its layer.
+//
+// Measured on flow/keepout_blocks_partner_reach.buda: a WL-FLAT trunk window
+// [220..580] whose centre (400) sits inside an M5 keepout's y-band 380..450.
+// Every bit of the M5 stub into `rcv` is culled; the healer rescues it by
+// re-pinning to a detour at +15.7% detailed WL, to buy back what a 50-unit
+// slide inside a free window gives for nothing.  Pruning the window to
+// [450..580] is clean at the same detailed WL as every other legal seat.
+//
+// CONSERVATIVE BY CONSTRUCTION, and that is the whole design: a zone only
+// dooms a partner when the partner cannot SLIDE CLEAR of it, i.e. when the
+// zone's perpendicular band covers the partner's ENTIRE seat window.  A zone
+// covering part of the window is ignored — the partner has an out, and
+// pruning would forbid seats that route today.  So the pass either removes
+// provably-dead positions or removes nothing; it never trades QoR for safety.
+//
+// It runs HERE, at seat derivation, rather than on the candidate: mutating a
+// candidate re-sorts the pool, renumbers indices and invalidates the cached
+// topo_uid every `select_topology` pin is keyed on — the coupling that makes
+// set_prune_dominated / set_dedup_loci / set_trim_mst_legs opt-in.  A seat
+// window has no such coupling, so this can simply be right by default.
+static void prune_unreachable_partner_windows(
+    std::vector<TrackSegment>& segments,
+    const std::map<std::pair<int,int>, std::vector<SpanAdjConn>>& rev_conn_map,
+    const Floorplan& floorplan,
+    int& n_pruned,
+    int& n_doomed,
+    int only_layer)
+{
+    const auto& zones = floorplan.get_keepout_zones();
+    if (zones.empty()) return;        // the common case: nothing declared
+
+    // DECLARED zones only — the set add_keepout / import_def_lef install on the
+    // RoutingGrid, which is exactly what DetailedNUTS's cull_keepout_crossers
+    // tests a final bit span against.  Deliberately NOT the NUTS solver's wider
+    // set (solver_keepouts adds block footprints on LOW layers and, in a trial,
+    // another bundle's fixed occupancy): pruning against obstacles the cull does
+    // not apply would make the two disagree about what is legal, and occupancy
+    // is a placement, not a property of the design.
+    std::map<int, std::vector<const KeepoutZone*>> by_layer;
+    for (const auto& z : zones)
+        for (int lid : z.layer_ids) by_layer[lid].push_back(&z);
+
+    std::map<std::pair<int,int>, const TrackSegment*> by_key;
+    for (const auto& ts : segments) by_key[{ts.bundle_id, ts.seg_idx}] = &ts;
+
+    // Every bound is computed from the PRE-prune intervals and applied after,
+    // so the result cannot depend on the order segments are visited in.
+    std::map<std::pair<int,int>, std::pair<double,double>> bounds;
+
+    for (const auto& ts : segments) {
+        if (only_layer >= 0 && ts.layer != only_layer) continue;
+        auto key = std::make_pair(ts.bundle_id, ts.seg_idx);
+        auto it = rev_conn_map.find(key);
+        if (it == rev_conn_map.end()) continue;
+
+        double lo = ts.interval_lo, hi = ts.interval_hi;
+        for (const auto& f : it->second) {
+            auto pit = by_key.find({f.src_bid, f.src_si});
+            if (pit == by_key.end()) continue;
+            const TrackSegment& p = *pit->second;
+            if (p.horiz == ts.horiz) continue;   // a partner, not a collinear follower
+            auto zit = by_layer.find(p.layer);
+            if (zit == by_layer.end()) continue;
+
+            // The partner's own seat window, on ITS perpendicular axis.
+            const double q_lo = std::min(p.interval_lo, p.interval_hi);
+            const double q_hi = std::max(p.interval_lo, p.interval_hi);
+            // Its FAR end.  The junction with `ts` rides the near end (that end
+            // IS ts's track position, which is what makes this segment's seat
+            // decide the partner's span); the other end is fixed geometry.
+            const double far = f.lo_end ? std::max(p.span_lo, p.span_hi)
+                                        : std::min(p.span_lo, p.span_hi);
+
+            for (const KeepoutZone* z : zit->second) {
+                const Rect& k = z->bbox;
+                // The zone in the PARTNER's frame: same axis convention as
+                // cull_keepout_crossers, so the two read one geometry.
+                const double k_p1 = p.horiz ? (double)k.y1 : (double)k.x1;
+                const double k_p2 = p.horiz ? (double)k.y2 : (double)k.x2;
+                if (!(k_p1 <= q_lo && q_hi <= k_p2)) continue;   // partner can slide clear
+                const double k_a1 = p.horiz ? (double)k.x1 : (double)k.y1;
+                const double k_a2 = p.horiz ? (double)k.x2 : (double)k.y2;
+
+                // The partner's span runs from ts's seat to `far`, and crosses
+                // the zone iff span_lo < k_a2 && span_hi > k_a1 (the cull's own
+                // strict test).  With one end free that is a half-line in ts's
+                // seat coordinate — so the legal side is a single bound.
+                if (far >= k_a2)      lo = std::max(lo, k_a2);
+                else if (far <= k_a1) hi = std::min(hi, k_a1);
+                // else: `far` is INSIDE the zone's along range and the partner
+                // cannot slide clear, so it crosses wherever ts goes.  Nothing
+                // to prune — no seat helps — and the exhausted-window path is
+                // the honest reporter for it.
+                else ++n_doomed;
+            }
+        }
+        if (lo == ts.interval_lo && hi == ts.interval_hi) continue;
+        // An EMPTY pruned window means every seat dooms a partner.  Leave the
+        // interval alone rather than inventing one: NUTS then exhausts the
+        // window and says so ("placed ON a keepout"), which is the truth.
+        // Silently narrowing to nothing would replace a reported conflict with
+        // an unreported one.
+        if (hi - lo < ts.width) { ++n_doomed; continue; }
+        bounds[key] = { lo, hi };
+    }
+
+    for (auto& ts : segments) {
+        auto bit = bounds.find({ts.bundle_id, ts.seg_idx});
+        if (bit == bounds.end()) continue;
+        ts.interval_lo = bit->second.first;
+        ts.interval_hi = bit->second.second;
+        ++n_pruned;
+    }
+}
+
 static void do_span_adjustments(
     const std::vector<TrackSegment*>&                               layer_segs,
     const std::map<std::pair<int,int>, std::vector<SpanAdjConn>>&   rev_conn_map,
@@ -1040,6 +1165,9 @@ static NutsContext build_context(const std::vector<BundleWrapper>& bundles,
     if (prep) {
         apply_interval_constraints(segments, ctx.slide_map, ctx.trunk_set,
                                    ctx.net_pull_map, only_layer);
+        prune_unreachable_partner_windows(segments, ctx.rev_conn_map, floorplan,
+                                          ctx.n_reach_pruned, ctx.n_reach_doomed,
+                                          only_layer);
         relax_boundary_intervals(segments, ctx.pull_map, ctx.net_pull_map,
                                  ctx.busterm_set, only_layer);
         set_pull_targets(segments, ctx.pull_map, ctx.net_pull_map);
@@ -2960,6 +3088,11 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
     // One full placement of a (possibly dogleg-mutated) bundle set: extract
     // segments, build maps, run the orientation fixpoint, classify cycles, then
     // the repair/corner safety net.  Returned so the dogleg pass can re-place.
+    // Partner-reach pruning counts from the LAST solve — i.e. the state that
+    // was accepted.  Carried out of the lambda because the context dies with
+    // it, and reported once at the tail: the pass runs on every trial solve
+    // too, and a per-solve print would bury a ripup run.
+    int reach_pruned = 0, reach_doomed = 0;
     auto solve = [&](const std::vector<BundleWrapper>& bs,
                      const std::map<int, LayerConstraints>& seed_cons) -> DoglegSolveOut {
         ++n_solves;
@@ -2968,6 +3101,8 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
         result.segments = extract_segments(bs, x_grid, y_grid);
         charge("extract", t0);
         NutsContext ctx = build_context(bs, floorplan_, result.segments);
+        reach_pruned = ctx.n_reach_pruned;
+        reach_doomed = ctx.n_reach_doomed;
         std::map<int, std::vector<TrackSegment*>> by_layer;
         for (auto& ts : result.segments)
             by_layer[ts.layer].push_back(&ts);
@@ -3096,6 +3231,15 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
         std::cout << "[NUTS] WARNING: " << out.result.num_keepout_conflicts
                   << " segment(s) placed ON a keepout (window exhausted; the "
                   << "bus cannot physically route there — re-pin or re-plan).\n";
+    if (reach_pruned > 0)
+        std::cout << "[NUTS] " << reach_pruned << " seat window(s) pruned to "
+                  << "what a perpendicular partner can reach (a keepout on the "
+                  << "PARTNER's layer, which the segment's own layer never "
+                  << "sees).\n";
+    if (reach_doomed > 0)
+        std::cout << "[NUTS] WARNING: " << reach_doomed << " segment(s) have a "
+                  << "perpendicular partner that crosses a keepout wherever "
+                  << "they are seated (no seat helps — re-pin or re-plan).\n";
     if (!out.result.unseatable_trunks.empty())
         std::cout << "[NUTS] WARNING: " << out.result.unseatable_trunks.size()
                   << " out-of-bbox trunk(s) unseatable within the routable "

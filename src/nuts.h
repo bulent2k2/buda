@@ -263,6 +263,14 @@ struct NutsContext {
     std::map<std::pair<int,int>, std::vector<double>>        busterm_face_map;
     std::map<std::pair<int,int>, std::vector<PassthruCrossing>> passthru_map;
     std::map<std::pair<int,int>, TrackSegment*>              ts_ptr_map;
+    // Partner-reach window pruning (prune_unreachable_partner_windows): how
+    // many seat windows were narrowed because a perpendicular partner could
+    // not otherwise clear a keepout on ITS layer, and how many segments were
+    // found doomed whatever this one does (no seat helps — reported, never
+    // silently narrowed to nothing).  Counters rather than prints so a ripup
+    // trial's thousands of solves stay quiet; run() is what speaks.
+    int n_reach_pruned = 0;
+    int n_reach_doomed = 0;
 };
 
 class NUTSEngine {
