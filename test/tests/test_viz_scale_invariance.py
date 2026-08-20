@@ -106,6 +106,28 @@ def _viz(sess):
     return v
 
 
+def _explorer(sess):
+    """The topology explorer is a SEPARATE window class with its own widths.
+
+    It is the view that looked CORRECT on the DBU-scale design while the main
+    window's detailed view was drawing canvas-wide bands, so it is the natural
+    control -- and a control is worth pinning, because "it happened to be
+    right" and "it is kept right" are different claims.  Its widths survive
+    the unit scale by SATURATION rather than by being scale-free: `viz_lw` is
+    `min(3.0 + log2(1 + width) * 1.5, 4.5)`, and both scales land on the 4.5
+    cap.  That is a real property and a fragile one -- raise or drop the cap
+    and the layout-unit `width` underneath is exposed again -- which is
+    exactly what a guard is for.
+    """
+    start = next((i for i, w in enumerate(sess.bundles) if w.input.candidates), 0)
+    ex = buda_viz.TopologyExplorer(sess.fp, sess.bundles,
+                                   layer_stack=sess.layers,
+                                   routing_grid=sess.routing_grid,
+                                   start_bidx=start)
+    ex.fig.canvas.draw()
+    return ex
+
+
 def _prop(out, key, val):
     """Record a screen-space value.  Never skip one it cannot reduce: see
     the module docstring -- dropping the unreducible ones is what made the
@@ -175,8 +197,9 @@ def swept(tmp_path_factory):
     for scale in (1, 2000):
         sess = _session(scale, tmp)
         v = _viz(sess)
+        ex = _explorer(sess)
         out[scale] = (_screen_props(v), _label_props(v, scale), v,
-                      _fan_offset(v, sess, scale))
+                      _fan_offset(v, sess, scale), _screen_props(ex))
     return out
 
 
@@ -229,3 +252,66 @@ def test_the_nudge_scales_with_the_design(swept):
     assert v2._nudge() == pytest.approx(v1._nudge() * 2000, rel=1e-6)
     # Non-zero on a degenerate design, so a nudge is never a no-op.
     assert v1._nudge() > 0
+
+
+def test_a_points_width_input_stays_unit_independent(swept):
+    """THE invariant every point-valued width in the viewer rests on.
+
+    Two different "widths" exist and they are NOT interchangeable:
+
+      * `wrapper.input.width` -- bits x the inter-bus track pitch.  Measured
+        12.0 at BOTH scales here, because the pitch is a bus-planning number
+        and not a layout distance.  This is what the point-valued widths use
+        (`viz_lw = 3.0 + log2(1 + width) * k`), and it is sound ONLY because
+        the input does not scale;
+      * `eff_bus_width` / `TrackSegment.width` -- grid-derived, and they DO
+        scale (24.0 -> 48000.0 here).  These are what the data-space widths
+        and the zoom sync use (`phys_w`).
+
+    The bug this file exists for was a THIRD case: a grid-derived width fed
+    to a point-valued parameter.  Pinning the split is what keeps the other
+    two honest -- make `input.width` grid-derived one day and every `viz_lw`
+    site becomes unit-dependent at once, silently, because each one looks
+    perfectly reasonable in isolation.
+
+    Both halves are asserted, so the test fails whichever side moves.
+    """
+    v1, v2 = swept[1][2], swept[2000][2]
+    w1 = v1.bundles[0].input.width
+    w2 = v2.bundles[0].input.width
+    assert w1 == pytest.approx(w2), (
+        "bundle width became unit-dependent — every point-valued viz width "
+        f"derived from it is now scale-dependent too: {w1} vs {w2}")
+    # …and the grid-derived width must still scale, or the split has
+    # collapsed the other way and `phys_w` has stopped being physical.
+    e1 = v1.layer_stack.eff_bus_width(8, w1, 5)
+    e2 = v2.layer_stack.eff_bus_width(8, w2, 5)
+    assert e2 == pytest.approx(e1 * 2000, rel=1e-6), (
+        f"the grid-derived width stopped scaling with the design: {e1} vs {e2}")
+
+
+def test_the_topology_explorer_is_unit_scale_clean_too(swept):
+    """The control view — pinned, with an honest account of its strength.
+
+    The explorer is a SEPARATE window class, and the reported bug never
+    reached it: it is why the topology view looked right while the main
+    window's detailed view drew canvas-wide bands.
+
+    This assertion CANNOT FAIL TODAY, and that is stated rather than
+    discovered later.  Measured: raising the explorer's `min(..., 4.5)` cap
+    to 100000 leaves both scales identical, because its only width input is
+    `wrapper.input.width`, which the test above pins as unit-independent.  So
+    the explorer is scale-clean by CONSTRUCTION, not by the cap.
+
+    It is kept as the consumer-side half of the pair: it goes live the moment
+    the invariant above stops holding, which is exactly when a silent
+    regression would otherwise reach this view.  A test that cannot fail is
+    worth having only when it says so — an unlabelled one is indistinguishable
+    from coverage.
+    """
+    a, b = swept[1][4], swept[2000][4]
+    assert len(a) > 20, f"only {len(a)} explorer properties collected"
+    assert set(a) == set(b), "the two scales produced different explorer artists"
+    bad = {k: (a[k], b[k]) for k in a if a[k] != b[k]}
+    assert not bad, (
+        f"an explorer screen-space property changed with the unit scale: {bad}")
