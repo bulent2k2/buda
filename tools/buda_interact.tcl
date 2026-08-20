@@ -154,6 +154,9 @@ if {![file exists $flow]} {
 }
 set tag [file tail $flow]
 set auto_ckpt [file rootname $flow].ckpt.bdb
+# The flow's selections sidecar (the explorer writes it; the planner reads
+# it) -- watched by the prompt, and named by the below-plan resume NOTE.
+set sidecar [file rootname $flow].json
 set armed ""
 if {[llength $pos] >= 2} { set armed [file normalize [lindex $pos 1]] }
 set stage_pos ""
@@ -685,8 +688,15 @@ proc _inspect_guard {verb} {
     return 0
 }
 proc _inspect_replan {} {
-    puts "[set ::tag]: `replan` needs `run_planner hier`, which this session\
-          resumed BELOW (the restored plan is the result being inspected) --\
+    # RAISES rather than printing-and-returning: the prompt's `replan` verb
+    # clears its bookkeeping (pins_dirty, the GUI-pin preview reminder)
+    # after the route callback RUNS, and a refusal that returns normally
+    # read as a run — an inspection session's `replan` after an explorer
+    # save cleared the exit warning with no planner anywhere (Codex #804
+    # P2).  The prompt's catch prints this message, so the user sees the
+    # same words either way; only the bookkeeping now knows the truth.
+    error "`replan` needs `run_planner hier`, which this session resumed\
+          BELOW (the restored plan is the result being inspected) --\
           resume at `plan` to re-plan or re-heal"
 }
 
@@ -1218,6 +1228,30 @@ if {$stage eq "build"} {
     # would re-expand already-expanded wrappers.  So pins/edits/replan are
     # guarded at the prompt, and the verdict/explorer/dumps are the point.
     set inspect [expr {$is_hier && $stage in {nuts dnuts}}]
+    if {$stage in {nuts dnuts} && [file isfile $sidecar]} {
+        # Sidecar pins (the explorer's durable form) are applied where the
+        # PLANNER runs, and a below-plan resume never runs it -- the plan
+        # this session restores is the checkpoint's, as persisted.  Worth a
+        # NOTE with the door, not silence: this is exactly the session that
+        # otherwise reads as "my pin was lost".  Worded to stay true when
+        # the checkpoint ALREADY carries the sidecar's choices (a `plan`
+        # resume persisted them earlier) -- the driver cannot tell.
+        set has_sel 0
+        catch {
+            set f [open $sidecar]
+            set d [read $f]
+            close $f
+            if {[string match {*"bundle_hint"*} $d]} { set has_sel 1 }
+        }
+        if {$has_sel} {
+            puts "$tag: NOTE -- a selections sidecar sits beside the flow\
+                  ([file tail $sidecar]); sidecar pins are applied at the\
+                  PLANNER, and a `$stage` resume restores the checkpoint's\
+                  plan as-is.  If its choices are not already in the\
+                  checkpoint, resume with `-s plan` to apply and persist\
+                  them"
+        }
+    }
     set cut -1
     for {set i 0} {$i < [llength $lines]} {incr i} {
         if {[_verb [lindex $lines $i]] in $cut_verbs($stage)} {
@@ -1483,10 +1517,10 @@ if {$ckpt ne "" && !$ckpt_live} {
 
 if {$inspect} {
     set pins_dirty [prompt::run $tag "[file rootname $tag]>" _inspect_replan \
-                        $snap_base $first_bus _inspect_guard]
+                        $snap_base $first_bus _inspect_guard $sidecar]
 } else {
     set pins_dirty [prompt::run $tag "[file rootname $tag]>" replay_tail \
-                        $snap_base $first_bus]
+                        $snap_base $first_bus "" $sidecar]
 }
 if {$pins_dirty} {
     puts "$tag: pins changed since the last route -- re-planning so the\

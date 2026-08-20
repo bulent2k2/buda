@@ -109,13 +109,40 @@ proc prompt::_commands {pat} {
 #             expanded view over the checkpoint's template rows.  Empty
 #             (the default, and the vehicles) = every verb allowed,
 #             behavior unchanged.
-proc prompt::run {tag ps route bdb example {guard ""}} {
+# The sidecar's content stamp ("" = no file): how the prompt NOTICES an
+# explorer pin.  A pin made in the explorer is a PREVIEW by design -- the
+# visualizer's replan deliberately never writes the checkpoint -- and its
+# durable form is the sidecar `.json`, applied only where the PLANNER runs.
+# The prompt cannot see into the blocking `visualize` call, but the sidecar
+# file is right there: content-stamped (crc32, so a same-content re-save is
+# not an event) around every command, a change is reported with the honest
+# choice -- `replan` commits now (and replays the flow's own routing tail,
+# HEALERS included, which on a healing flow is the expensive part), or exit
+# and take the pins later at a `-s plan` resume / rebuild.  Deliberately
+# NOT folded into pins_dirty: a typed `pin` asked THIS session to change
+# the design, so `done` re-plans for it; a GUI pin is made inside a tool
+# whose contract is preview, and silently arming a possibly hour-long heal
+# at `done` would spend what nobody asked to spend.
+proc prompt::_sc_stamp {p} {
+    if {$p eq "" || ![file isfile $p]} { return "" }
+    if {[catch {
+        set f [open $p rb]
+        set d [read $f]
+        close $f
+        format %u [zlib crc32 $d]
+    } v]} { return "unreadable" }
+    return $v
+}
+
+proc prompt::run {tag ps route bdb example {guard ""} {sidecar ""}} {
     variable pin_lines {}
     # `pins_dirty` keeps the checkpoint COHERENT — a pin applied after the
     # route would leave the saved metal belonging to the candidate it
     # replaced, so the caller re-plans when this comes back 1.
     set pins_dirty 0
     set edit_pending {}
+    set gui_pins 0
+    set sc_stamp [prompt::_sc_stamp $sidecar]
     puts "\n$tag: pin/edit prompt -- `topos $example` to look, `pin $example\
           <N>` to choose (1-based), `replan` to apply, `done` to save and\
           exit.  `help` lists the verbs; anything else goes to the engine."
@@ -168,7 +195,17 @@ proc prompt::run {tag ps route bdb example {guard ""}} {
                 topos   { buda::dump_topologies {*}[lrange $line 1 end] }
                 explore { buda::visualize_topologies {*}[lrange $line 1 end] }
                 show    { buda::visualize }
-                replan  { $route ; set pins_dirty 0 }
+                replan  {
+                    # A replan runs the flow's own tail: run_planner applies
+                    # the sidecar (and persists), so a pending GUI pin is
+                    # committed by exactly this -- clear the reminder.  A
+                    # route that RAISES skips the clears (the catch below
+                    # prints it), so a failed re-plan keeps the reminder.
+                    $route
+                    set pins_dirty 0
+                    set gui_pins 0
+                    set sc_stamp [prompt::_sc_stamp $sidecar]
+                }
                 save    {
                     # The same coherence rule `done` enforces, at the same
                     # moment it matters: a snapshot taken between a pin and
@@ -183,6 +220,24 @@ proc prompt::run {tag ps route bdb example {guard ""}} {
                               re-planning so the snapshot stays coherent"
                         $route
                         set pins_dirty 0
+                        # That re-plan IS a planner run: it applied the
+                        # sidecar and persisted, so a pending GUI preview
+                        # was committed by it — clearing here keeps the
+                        # NOTE below from calling the snapshot PRE-pin
+                        # right after the pin went in (Codex #804 P2).  A
+                        # route that RAISES skips this with the rest.
+                        set gui_pins 0
+                        set sc_stamp [prompt::_sc_stamp $sidecar]
+                    }
+                    if {$gui_pins} {
+                        # Explorer pins are previews the snapshot will NOT
+                        # hold -- said before the write, with the remedy,
+                        # never spent silently (a `replan` here could be the
+                        # flow's whole healer budget).
+                        puts "$tag: NOTE -- explorer selection(s) are\
+                              previews: this snapshot holds the PRE-pin\
+                              route (`replan` first to include them --\
+                              it replays the flow's tail, healers included)"
                     }
                     buda::save_bdb ${bdb}.sql
                 }
@@ -265,6 +320,53 @@ proc prompt::run {tag ps route bdb example {guard ""}} {
             }
         } err]} {
             puts "$tag: $err"
+        }
+        if {$sidecar ne ""} {
+            set now [prompt::_sc_stamp $sidecar]
+            if {$now ne $sc_stamp} {
+                set sc_stamp $now
+                set gui_pins 1
+                if {$guard ne ""} {
+                    # A guarded (inspection) session cannot commit: its
+                    # route callback refuses, so advertising `replan` here
+                    # would name a door that is closed.  The one door that
+                    # is open is the message.
+                    puts "$tag: the explorer saved selection(s) to\
+                          [file tail $sidecar] -- a PREVIEW this INSPECTION\
+                          session cannot commit (replan is disabled here);\
+                          they apply at a `-s plan` resume."
+                } else {
+                    puts "$tag: the explorer saved selection(s) to\
+                          [file tail $sidecar] -- a PREVIEW: the checkpoint\
+                          keeps its pre-pin route until a re-plan applies\
+                          them.  `replan` commits them now (replays the\
+                          flow's own routing tail, HEALERS included), or\
+                          exit and resume with `-s plan` to apply them\
+                          there."
+                }
+            }
+        }
+    }
+    if {$sidecar ne ""} {
+        # The last command before `done` may itself have been the explorer
+        # session -- one final stamp so its pins are not the silent ones.
+        if {[prompt::_sc_stamp $sidecar] ne $sc_stamp} { set gui_pins 1 }
+        if {$gui_pins && $pins_dirty} {
+            # The typed pin(s) hand back pins_dirty=1 and EVERY caller
+            # re-plans on it (that is what the return value is for) — a
+            # planner run that applies the sidecar and persists, so these
+            # previews ride along rather than being dropped.  Saying "NOT
+            # committed" here, seconds before that re-plan, was the stale
+            # half of Codex #804's P2; if the re-plan fails, the caller
+            # fails the run LOUDLY, which dominates this line either way.
+            puts "$tag: explorer selection(s) in [file tail $sidecar] ride\
+                  the re-plan the typed pin(s) queued -- it applies the\
+                  sidecar and persists"
+        } elseif {$gui_pins} {
+            puts "$tag: NOTE -- explorer selection(s) in\
+                  [file tail $sidecar] were NOT committed to the checkpoint\
+                  (previews; a re-plan applies them).  They still apply at\
+                  a `-s plan` resume or a rebuild."
         }
     }
     return $pins_dirty

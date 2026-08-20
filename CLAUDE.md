@@ -78,7 +78,11 @@ resumes from the auto (or trace-discovered) checkpoint at the DEEPEST stage
 the build trace records, `-s` overriding (and implying `-r` alone), with a
 staleness NOTE when the flow's text changed since the stamped build; a
 session whose pins have nowhere durable to land prints them at exit as
-flow-text paste lines (`select_topology d1 4`).
+flow-text paste lines (`select_topology d1 4`); an EXPLORER pin is a
+sidecar-backed PREVIEW — the prompt watches the sidecar and says so (with
+`replan` as the commit, healers included, never spent silently at `done`),
+and a below-plan `-r` NOTEs a selections sidecar with the `-s plan` remedy,
+since sidecars apply where the planner runs.
 The flow's OUTPUT means what `bin/buda` makes it mean too: `-i` arms
 `buda::log`, so the console gets ONE line per command plus the runtime
 summary and the detail goes to the `<flow_dir>/log/<stem>_flow.log` the CLI
