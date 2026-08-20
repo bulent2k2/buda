@@ -1073,3 +1073,141 @@ def test_the_build_resume_demo_vehicles(tmp_path):
     assert "2 expanded instances" in r.stdout      # the template pin fanned out
     assert "done -- 0 overlaps, 0 unplaced, 0 audit violations" in r.stdout
     assert (demo / "resume_hier_input.bdb.sql").read_bytes() == inp
+
+
+# ── explorer (GUI) pins: previews the session must not lose silently ──────
+# An explorer pin's durable form is the sidecar `.json`, applied only where
+# the PLANNER runs; the visualizer's replan deliberately never writes the
+# checkpoint.  Two honesty pieces guard the seams: the prompt watches the
+# sidecar's content and says PREVIEW (with the cost of committing: `replan`
+# replays the flow's tail, healers included — never spent silently), and a
+# below-plan resume NOTEs a selections sidecar with the `-s plan` remedy.
+
+_SIDECAR = ('{"selections": [{"bundle_hint": "irq", "bundle_id": 6, '
+            '"topo_type": "Z_HVH@x290@y115", "topo_wl": 320, '
+            '"topo_index_hint": 2, "note": "", "seg_layers": [6, 5, 6]}]}')
+
+
+class _Interactive:
+    """A btcl session driven one command at a time — what the piped-stdin
+    `_run` cannot do: the sidecar must change WHILE the prompt waits, the
+    way the explorer changes it, and with everything piped up front the
+    write would race the session's own entry stamp."""
+
+    def __init__(self, cmd, cwd):
+        import os
+        self.p = subprocess.Popen([*map(str, cmd)], stdin=subprocess.PIPE,
+                                  stdout=subprocess.PIPE,
+                                  stderr=subprocess.STDOUT, cwd=cwd,
+                                  env={**os.environ})
+
+    def read_until(self, marker, deadline=300):
+        import os
+        import select
+        import time
+        buf, end, fd = "", time.time() + deadline, self.p.stdout.fileno()
+        while time.time() < end:
+            r, _, _ = select.select([fd], [], [], 1.0)
+            if r:
+                chunk = os.read(fd, 65536).decode("utf-8", "replace")
+                if not chunk:
+                    break
+                buf += chunk
+                if marker in buf:
+                    return buf
+        raise AssertionError(f"never saw {marker!r} in:\n{buf[-2000:]}")
+
+    def send(self, line):
+        self.p.stdin.write((line + "\n").encode())
+        self.p.stdin.flush()
+
+    def finish(self, deadline=300):
+        self.p.stdin.close()
+        self.p.wait(timeout=deadline)
+        return self.p.stdout.read().decode("utf-8", "replace")
+
+
+def _flat_demo(tmp_path):
+    demo = tmp_path / "demo"
+    demo.mkdir()
+    shutil.copytree(_ROOT / "flow" / "tracks", tmp_path / "flow" / "tracks")
+    shutil.copy(_ROOT / "demo" / "resume_flat.buda", demo / "resume_flat.buda")
+    return demo
+
+
+def test_a_gui_pin_is_reported_as_a_preview_and_never_auto_healed(tmp_path):
+    demo = _flat_demo(tmp_path)
+    s = _Interactive([*_BTCL_CMD, "-b", demo / "resume_flat.buda"], tmp_path)
+    s.read_until("resume_flat> ")
+    s.send("topos d0")                      # the entry stamp is now taken
+    s.read_until("resume_flat> ")
+    (demo / "resume_flat.json").write_text(_SIDECAR)   # "the explorer"
+    s.send("topos d0")                      # any command re-stamps
+    out = s.read_until("resume_flat> ")
+    assert "the explorer saved selection(s)" in out
+    assert "PREVIEW" in out and "HEALERS included" in out
+    s.send("done")
+    tail = s.finish()
+    # done must NOT silently spend the flow's tail (healers included) on a
+    # pin the user made in a preview tool — it says what was not committed
+    # and where the pins still apply.
+    assert "were NOT committed to the checkpoint" in tail
+    assert "pins changed since the last route" not in out + tail
+    assert "replay>" not in tail
+    assert s.p.returncode == 0, tail[-2000:]
+
+
+def test_replan_commits_gui_pins_and_a_below_plan_resume_notes_them(tmp_path):
+    demo = _flat_demo(tmp_path)
+    flow = demo / "resume_flat.buda"
+    s = _Interactive([*_BTCL_CMD, "-b", flow], tmp_path)
+    s.read_until("resume_flat> ")
+    s.send("topos d0")
+    s.read_until("resume_flat> ")
+    (demo / "resume_flat.json").write_text(_SIDECAR)
+    s.send("topos d0")
+    s.read_until("PREVIEW")
+    s.send("replan")                        # the explicit commit
+    s.send("done")
+    tail = s.finish()
+    assert s.p.returncode == 0, tail[-2000:]
+    assert "47 net segments placed" in tail      # the pinned route (46 + 1)
+    assert "were NOT committed" not in tail      # reminder cleared by replan
+
+    # The commit persisted: a plain -r restores the pinned route...
+    r = _run(["tclsh", _DRIVER, "--resume", flow], tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "47 net segments placed" in r.stdout
+    # ...and the below-plan NOTE names the sidecar with the -s plan remedy,
+    # worded to stay true whether or not the checkpoint already carries it.
+    assert "sidecar pins are applied at the PLANNER" in r.stdout
+    r = _run(["tclsh", _DRIVER, "--resume", "--stage", "plan", flow],
+             tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "sidecar pins are applied at the PLANNER" not in r.stdout
+
+
+def test_an_uncommitted_sidecar_applies_at_a_plan_resume(tmp_path):
+    # The user-report shape end-to-end (no GUI needed): a sidecar written
+    # AFTER the build (so the checkpoint holds the pre-pin route) is
+    # invisible to a dnuts resume — NOTEd, not silent — and a `-s plan`
+    # resume applies AND persists it, so every later plain -r carries it.
+    demo = _flat_demo(tmp_path)
+    flow = demo / "resume_flat.buda"
+    r = _run(["tclsh", _DRIVER, "--build", flow], tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    (demo / "resume_flat.json").write_text(_SIDECAR)
+
+    r = _run(["tclsh", _DRIVER, "--resume", flow], tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "46 net segments placed" in r.stdout      # pre-pin, restored as-is
+    assert "sidecar pins are applied at the PLANNER" in r.stdout
+
+    r = _run(["tclsh", _DRIVER, "--resume", "--stage", "plan", flow],
+             tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "47 net segments placed" in r.stdout      # applied...
+
+    r = _run(["tclsh", _DRIVER, "--resume", flow], tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "47 net segments placed" in r.stdout      # ...and persisted

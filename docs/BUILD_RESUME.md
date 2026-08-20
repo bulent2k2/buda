@@ -127,6 +127,31 @@ would be a duplicate-construction error), and the intra-tile buses are one
 cell-local **template** — the single `pin b_lohi 2` re-routes *both* tile
 instances.
 
+## Pins made in the visualizer
+
+`explore`/`show` open the topology explorer, and a pin made THERE (`s` on a
+candidate) is a **preview**: the window re-routes what you see, but the
+checkpoint deliberately does not change while you explore.  The pin's
+durable form is the **sidecar** `.json` beside the flow, and a sidecar is
+applied where the *planner* runs.  The session keeps you honest at every
+seam:
+
+* the moment the explorer saves, the prompt says so — a PREVIEW, with the
+  two ways to make it real;
+* `replan` commits it now: the flow's own routing tail re-runs (**healers
+  included** — on a healing flow that is the expensive part, which is why
+  it is never spent silently at `done`), applies the sidecar, and persists;
+* exiting without a replan prints what was **not** committed — the pins
+  still apply at a `-s plan` resume or a rebuild;
+* a later `-r` that lands below the planner (`nuts`/`dnuts`) NOTEs the
+  sidecar with the `-s plan` remedy, since a below-plan resume restores the
+  checkpoint's plan as-is.
+
+A typed `pin` at the prompt is different on purpose: it writes the
+checkpoint at once, and `done` re-plans for it (the same healer-included
+tail) so the checkpoint stays coherent — you asked this session to change
+the design, so the session finishes the job.
+
 ## The rules, in one place
 
 | Flow shape (`-b`'s pre-flight verdict) | What `-b` does |

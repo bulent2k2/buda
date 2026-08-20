@@ -173,6 +173,14 @@ Two things still reach through:
     per-segment layer overrides are **merged onto it** — which changes the
     layers your checkpoint was routed with.
 
+And one thing deliberately does **not** reach through: an ordinary sidecar
+selection is applied where the *planner* runs, so a `btcl -r` that resumes
+below it (`nuts`/`dnuts`) restores the checkpoint's plan untouched — the
+session prints a NOTE naming the sidecar, and `-s plan` is the resume that
+applies (and persists) it.  Likewise a pin made in the explorer *during* a
+`btcl` session is a preview until a re-plan: the prompt says so when the
+explorer saves, and again at exit if it was never committed.
+
 Both announce themselves (`[sidecar] GUI-pinned USER candidate overrides …`,
 `Merged sidecar layer overrides (3) onto … bundle 1`), so a resume tells you
 when a sidecar touched it.
