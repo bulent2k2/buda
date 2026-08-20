@@ -97,12 +97,40 @@ and it exposed that a cap band written for one stack height is wrong on another.
 Note it predates the track-count and healer changes, so its absolute numbers are
 the 8-track healerless ones — the comparison within it still holds.
 
-Baseline endpoints (2026-08-05, x86 reference build; both in the QoR corpus)
+Heal-to-clean refresh (2026-08-20, main @ be5d4e6, x86 4-core, `-j 4`)
+===
+All four `*_heal.buda` vehicles re-run end to end on current main.  Every
+one ends `check_design` **Success**; the two topdown flows reproduce their
+documented final WL **exactly** (2,453,102 / 2,284,720 — decision-identical
+endpoints), and every flow is faster than its 2026-08-10/12 measurement on
+the same core count:
+
+| Flow | endpoint (healer metric) | final abs WL | detailed WL | sec | doc sec |
+|---|---|---|---|---|---|
+| chip3_topdown_heal | **0 opens / 0 ovl** | 2453102 | 47748685 | 979 | 1357 |
+| chip3a_bottomup_heal | **0 opens** (ovl 1) | 2476275 | 47968138 | 1198 | 1767 |
+| chip_stack_topdown_heal | **0 opens / 0 ovl** | 2284720 | 38560931 | 1884 | 1975 |
+| chip_stack_bottomup_heal | **0 opens** (ovl 14, 1 interval) | 2384902 | 38941320 | 1819 | 2022 |
+
+`chip_stack_bottomup_heal`'s header claim (0 opens, Success, 0 unplaced)
+still holds, but it now carries 14 residual abstract overlaps where the
+2026-08-10 session reached 0 — consistent with the `42071c1` QoR cost on
+exactly this vehicle established in the section above (that fix landed
+after the heal scheme was measured).  chip3_topdown_heal reaches 0/0 in
+round 2, so its round-3 negotiate/ripup are no-ops and the last
+`refine_selection 60` is pure WL polish, as documented.
+
+Baseline endpoints (2026-08-20, x86 4-core, serial `-j 1` sweep; both in the QoR corpus)
 ===
 | Flow | overlaps | unplaced | viol_bundles | abstract WL | detailed WL | sec |
 |---|---|---|---|---|---|---|
-| chip_topdown | 4 | 134 | 9 | 2541681 | 49637160 | 126 |
-| chip_bottomup | 54 | 243 | 19 | 2516788 | 48243174 | 96 |
+| chip_topdown | 4 | 134 | 9 | 2536107 | 49477415 | 72 |
+| chip_bottomup | 56 | 231 | 17 | 2512244 | 47858490 | 53 |
+
+(Previous hand-kept row set, 2026-08-05: topdown 4/134/9 absWL 2541681 /
+detWL 49637160 at 126s; bottomup 54/243/19 absWL 2516788 / detWL 48243174
+at 96s — the bottomup triple moved to 56/231/17 under `42071c1`, the tap
+re-extend correctness fix discussed above.)
 
 **`qor/qor_table.md` is the authoritative snapshot**, regenerated nightly
 across the whole corpus.  Prefer it.  This table is a hand-kept convenience

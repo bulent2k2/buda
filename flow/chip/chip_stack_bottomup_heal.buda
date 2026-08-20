@@ -71,6 +71,12 @@
 # endpoint (0 opens, check_design Success, 0 unplaced bits) at 2022s on the
 # 4-core measurement box.  Scoped caps touch ONLY the named buses — the
 # global 'auto' cap stays as-is for everything else.
+# Re-measured 2026-08-20 (main @ be5d4e6, 4-core, -j4): the claim above
+# still holds — 0 opens, check_design Success, 0 unplaced, 1819s — but with
+# 14 residual abstract overlaps + 1 interval violation where the 2026-08-10
+# session reached 0, consistent with 42071c1's measured QoR cost on this
+# vehicle (flow/chip/ReadMe.md); the other three *_heal flows reproduce
+# their documented endpoints exactly (the topdown pair to the exact WL).
 source chip_tracks_mirror.buda
 open_bdb chip_stack.bdb.sql
 set_bottom_up big2
