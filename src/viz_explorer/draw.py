@@ -692,7 +692,10 @@ class ExplorerDrawMixin:
             mark = "▸" if getattr(self, '_group_step', False) else ""
             fam_str = (f" · {mark}fam {fam_i + 1}/{n_fam}"
                        + (f" +{k}" if k > 0 else ""))
-        # GROUP-PINNED badge (the 'S' super-candidate pin has no sidecar entry).
+        # GROUP-PINNED badge.  Read off the LIVE `pinned_group` rather than
+        # the sidecar: 'S' persists the family as `group_uids`, but a group
+        # pin also arrives from `select_topology <b> group:<N>` and from a
+        # BDB restore, neither of which writes a sidecar entry.
         gpin = getattr(self.wrapper.input, 'pinned_group', [])
         grp_badge = (f"  ◆ GROUP-PINNED ({len(gpin)})"
                      + (" • member" if self.idx in gpin else "")) if gpin else ""
