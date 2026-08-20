@@ -397,7 +397,45 @@ def audit_restored_ndr(session, bid_to_stamp):
     return voided
 
 
-def ndr_scope_for_net(session, net_name):
+def ndr_scope_index(session):
+    """A reusable index over the declared scope prefixes.
+
+    Longest-prefix-wins written as a scan is O(S) per net, and
+    `translate_def_ndrs` attaches one scope PER NET — so an imported design
+    can have S ≈ N and every per-net resolution becomes quadratic (Codex P2
+    on #808).  Probing the NET's own prefixes instead costs one hash lookup
+    per DISTINCT SCOPE LENGTH, which is bounded by both S and the name
+    length: never worse than the scan, and independent of S once S passes
+    the longest net name.
+
+    Hoist it out of a per-net loop.  Passing `index=None` rebuilds it,
+    which costs the same O(S) the scan used to — so a one-off caller is no
+    worse off than before and needs no change.
+    """
+    scopes = getattr(session, "_ndr_scopes", None) or {}
+    keys = set(scopes)
+    # `*` is a FALLBACK, not a literal prefix, so it is never probed.
+    lengths = sorted({len(p) for p in keys if p != "*"}, reverse=True)
+    return (keys, lengths, "*" in keys)
+
+
+def ndr_scopes_matching(net_name, index):
+    """`(governing_prefix_or_None, [every matching prefix, longest first])`.
+
+    ONE walk answers both questions, deliberately.  The unused-scope report
+    needs "which scopes COULD apply here" and "which one won", and deriving
+    those from two separate walks is precisely how a report starts
+    disagreeing with the thing it reports on.
+    """
+    keys, lengths, has_star = index
+    n = len(net_name)
+    hits = [net_name[:i] for i in lengths if i <= n and net_name[:i] in keys]
+    if hits:
+        return (hits[0], hits)          # lengths descend, so hits[0] is longest
+    return ("*" if has_star else None, [])
+
+
+def ndr_scope_for_net(session, net_name, index=None):
     """The set_ndr SCOPE that governs a net: `(prefix, rule)`, or
     `(None, None)` when no scope applies.
 
@@ -415,14 +453,9 @@ def ndr_scope_for_net(session, net_name):
     scopes = getattr(session, "_ndr_scopes", None)
     if not scopes:
         return (None, None)
-    best_prefix, best_rule, best_len = None, None, -1
-    for prefix, rule in scopes.items():
-        if prefix == "*":
-            if best_len < 0:
-                best_prefix, best_rule, best_len = prefix, rule, 0
-        elif net_name.startswith(prefix) and len(prefix) > best_len:
-            best_prefix, best_rule, best_len = prefix, rule, len(prefix)
-    return (best_prefix, best_rule)
+    prefix, _all = ndr_scopes_matching(
+        net_name, index if index is not None else ndr_scope_index(session))
+    return (prefix, scopes[prefix]) if prefix is not None else (None, None)
 
 
 def ndr_rule_for_net(session, net_name):
@@ -481,17 +514,21 @@ def report_unused_ndr_scopes(session):
     matched, governed, shadow_eg = {}, {}, {}
     for prefix in scopes:
         matched[prefix], governed[prefix] = 0, 0
+    # The index is hoisted, and each net is walked ONCE for both answers.
+    # Scanning every scope per net was O(nets x scopes), and an imported
+    # design has one scope PER NET (`translate_def_ndrs`), so a diagnostic
+    # could have dominated bundling on exactly the designs that need it.
+    index = ndr_scope_index(session)
     for n in nets:
-        gp, _gr = ndr_scope_for_net(session, n)
+        gp, hits = ndr_scopes_matching(n, index)
         if gp is not None:
             governed[gp] = governed.get(gp, 0) + 1
-        for prefix in scopes:
-            if prefix != "*" and n.startswith(prefix):
-                matched[prefix] += 1
-                # Remember ONE net this scope lost, and to whom.  A count
-                # says it is shadowed; the example says by what.
-                if prefix not in shadow_eg and gp is not None and gp != prefix:
-                    shadow_eg[prefix] = (n, gp)
+        for prefix in hits:
+            matched[prefix] += 1
+            # Remember ONE net this scope lost, and to whom.  A count says
+            # it is shadowed; the example says by what.
+            if prefix not in shadow_eg and gp is not None and gp != prefix:
+                shadow_eg[prefix] = (n, gp)
 
     said = session.__dict__.setdefault("_ndr_scope_said", set())
     for prefix in sorted(scopes):

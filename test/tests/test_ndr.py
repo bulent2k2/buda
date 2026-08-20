@@ -1905,3 +1905,55 @@ def test_the_verdict_is_said_once_not_once_per_site():
     silent while a verdict that genuinely changed is not."""
     _s, out = _flow(["def_ndr r width x2", "set_ndr clock_ r"])
     assert out.count("BUDA-1915") == 1, out
+
+
+def test_the_scope_index_resolves_exactly_as_the_scan_it_replaced():
+    """The prefix index exists for speed, so what it must not change is the
+    ANSWER.
+
+    `translate_def_ndrs` attaches one `set_ndr` scope per net, so an
+    imported design can have as many scopes as nets and a per-net scan over
+    all of them is quadratic.  Probing the net's own prefixes instead is
+    O(distinct scope lengths) — but longest-prefix-wins with `*` as a
+    fallback has enough corners (a scope equal to the whole name, two
+    scopes where one is a prefix of the other, `*` present or absent, no
+    scope matching at all) that "obviously equivalent" is not good enough.
+
+    So it is checked against the scan it replaced, on randomized scope sets
+    built FROM the net names, which is what makes the prefixes actually
+    collide rather than miss uninterestingly."""
+    import random
+    from buda_cmds.ndr_cmds import ndr_scope_index, ndr_scopes_matching
+
+    def scan(scopes, net):                     # the pre-index implementation
+        best_p, best_len = None, -1
+        for prefix in scopes:
+            if prefix == "*":
+                if best_len < 0:
+                    best_p, best_len = prefix, 0
+            elif net.startswith(prefix) and len(prefix) > best_len:
+                best_p, best_len = prefix, len(prefix)
+        return best_p
+
+    class _S:
+        pass
+
+    rnd = random.Random(7)
+    checked = 0
+    for _ in range(2000):
+        nets = ["".join(rnd.choice("abc_") for _ in range(rnd.randint(1, 8)))
+                for _ in range(6)]
+        keys = set()
+        for _ in range(rnd.randint(0, 6)):
+            src = rnd.choice(nets)
+            keys.add(src[:rnd.randint(1, len(src))])
+        if rnd.random() < 0.5:
+            keys.add("*")
+        s = _S()
+        s._ndr_scopes = {k: "r" for k in keys}
+        index = ndr_scope_index(s)
+        for n in nets:
+            assert ndr_scopes_matching(n, index)[0] == scan(s._ndr_scopes, n), (
+                n, sorted(keys))
+            checked += 1
+    assert checked > 10000, checked
