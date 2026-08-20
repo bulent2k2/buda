@@ -688,8 +688,15 @@ proc _inspect_guard {verb} {
     return 0
 }
 proc _inspect_replan {} {
-    puts "[set ::tag]: `replan` needs `run_planner hier`, which this session\
-          resumed BELOW (the restored plan is the result being inspected) --\
+    # RAISES rather than printing-and-returning: the prompt's `replan` verb
+    # clears its bookkeeping (pins_dirty, the GUI-pin preview reminder)
+    # after the route callback RUNS, and a refusal that returns normally
+    # read as a run — an inspection session's `replan` after an explorer
+    # save cleared the exit warning with no planner anywhere (Codex #804
+    # P2).  The prompt's catch prints this message, so the user sees the
+    # same words either way; only the bookkeeping now knows the truth.
+    error "`replan` needs `run_planner hier`, which this session resumed\
+          BELOW (the restored plan is the result being inspected) --\
           resume at `plan` to re-plan or re-heal"
 }
 

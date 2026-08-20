@@ -318,12 +318,24 @@ proc prompt::run {tag ps route bdb example {guard ""} {sidecar ""}} {
             if {$now ne $sc_stamp} {
                 set sc_stamp $now
                 set gui_pins 1
-                puts "$tag: the explorer saved selection(s) to\
-                      [file tail $sidecar] -- a PREVIEW: the checkpoint\
-                      keeps its pre-pin route until a re-plan applies\
-                      them.  `replan` commits them now (replays the flow's\
-                      own routing tail, HEALERS included), or exit and\
-                      resume with `-s plan` to apply them there."
+                if {$guard ne ""} {
+                    # A guarded (inspection) session cannot commit: its
+                    # route callback refuses, so advertising `replan` here
+                    # would name a door that is closed.  The one door that
+                    # is open is the message.
+                    puts "$tag: the explorer saved selection(s) to\
+                          [file tail $sidecar] -- a PREVIEW this INSPECTION\
+                          session cannot commit (replan is disabled here);\
+                          they apply at a `-s plan` resume."
+                } else {
+                    puts "$tag: the explorer saved selection(s) to\
+                          [file tail $sidecar] -- a PREVIEW: the checkpoint\
+                          keeps its pre-pin route until a re-plan applies\
+                          them.  `replan` commits them now (replays the\
+                          flow's own routing tail, HEALERS included), or\
+                          exit and resume with `-s plan` to apply them\
+                          there."
+                }
             }
         }
     }

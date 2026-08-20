@@ -1211,3 +1211,39 @@ def test_an_uncommitted_sidecar_applies_at_a_plan_resume(tmp_path):
     r = _run(["tclsh", _DRIVER, "--resume", flow], tmp_path)
     assert r.returncode == 0, r.stdout + r.stderr
     assert "47 net segments placed" in r.stdout      # ...and persisted
+
+
+def test_an_inspection_session_cannot_lose_the_preview_reminder(tmp_path):
+    # Codex #804 P2: in a hier nuts/dnuts (inspection) resume the route
+    # callback REFUSES replan — and a refusal that returned normally read
+    # as a run, clearing the GUI-pin reminder with no planner anywhere.
+    # The refusal raises now, and the PREVIEW message in a guarded session
+    # names the one open door (`-s plan`) instead of the closed one.
+    demo = tmp_path / "demo"
+    demo.mkdir()
+    shutil.copytree(_ROOT / "flow" / "tracks", tmp_path / "flow" / "tracks")
+    for f in ("resume_hier.buda", "resume_hier_input.bdb.sql"):
+        shutil.copy(_ROOT / "demo" / f, demo / f)
+    flow = demo / "resume_hier.buda"
+    r = _run(["tclsh", _DRIVER, "--build", flow], tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+
+    s = _Interactive(["tclsh", _DRIVER, "--resume", flow], tmp_path)
+    out = s.read_until("resume_hier> ")
+    assert "INSPECTION session" in out
+    s.send("topos")
+    s.read_until("resume_hier> ")
+    (demo / "resume_hier.json").write_text(
+        '{"selections": [{"bundle_hint": "b_lohi_t0_0", "bundle_id": 2, '
+        '"topo_type": "X", "topo_wl": 1, "topo_index_hint": 1, '
+        '"seg_layers": []}]}')
+    s.send("topos")
+    out = s.read_until("resume_hier> ")
+    assert "cannot commit (replan is disabled here)" in out
+    assert "HEALERS included" not in out       # the closed door, not offered
+    s.send("replan")                           # refused — must not clear
+    s.send("done")
+    tail = s.finish()
+    assert s.p.returncode == 0, tail[-2000:]
+    assert "resume at `plan` to re-plan" in tail          # the refusal, said
+    assert "were NOT committed to the checkpoint" in tail  # reminder survives
