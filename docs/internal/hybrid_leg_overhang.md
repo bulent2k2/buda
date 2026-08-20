@@ -181,41 +181,61 @@ Rare, but it does reach committed routes. A scan for the shape — a segment wit
 window (not B/C), and nominal metal past its outermost attachment that does not
 cover a bundle block — over the QoR corpus:
 
-> **Sweep still running at time of writing: 25 of 48 flows complete** (the
-> remaining ones are the heavy `chip*` / `rv` / `def` vehicles, and 6 flows are
-> skipped because they call `exit`). Numbers below are partial and will move.
+All 48 flows, 150,755 candidates:
 
 | | |
 |---|---|
-| candidates carrying an uncovered overhang | 129 / 20,744 (0.6%) |
-| bundles whose **selected** topology carries one | 4 / 966 (0.4%) |
-| nominal dangling metal in selected routes | 3,465 units |
+| candidates carrying an uncovered overhang | **1,383 / 150,755 (0.92%)** |
+| bundles whose **selected** topology carries one | **5 / 6,261 (0.08%)** |
+| nominal dangling metal in selected routes | **4,181 units** |
 
-Concentrated rather than spread: `bigHalf` (3 selected bundles, 3,415 units) and
-`rnr/mix` (1 bundle, 50 units).
+Present at candidate level almost everywhere — every `chip*` vehicle carries
+145–173 of them — but it rarely wins selection. Which is itself suggestive:
+defect 1 over-prices exactly these candidates, so part of the reason the selected
+rate is two orders of magnitude below the candidate rate may be that the antenna
+prices them out of contention. That is a hypothesis, not a measurement.
 
-The detector agrees with the engine's own per-bit audit where both can see the
-shape. `bigHalf`'s final `check_design` reports **56 per-bit ANTENNA findings /
-1,226 units** across exactly the three bundles the detector flags (b7 seg3 — 20
-bits, b16 seg3 — 28 bits, b19 seg4 — 8 bits), plus one separate #514 tap-overhang
-on b16 seg2. So this is not a `bus_005` curiosity: a corpus flow ships it.
+The five committed instances:
 
-Note also that the two other affected `bigHalf` bundles are **not** `TRUNK+MST`
-hybrids (b7's selected candidate is a plain `TRUNK_H@y2120`), so the generation
-half of the fix — option (a) below — would not reach them, while option (b)
-would.
+| flow | bundle | selected candidate | overhang |
+|---|---|---|---|
+| `big_data_test/bigHalf` | b7  | `TRUNK_H@y2120`     | seg3, 2000 |
+| `big_data_test/bigHalf` | b19 | `TRUNK_H+MST@y3995` | seg4, 1400 |
+| `big_data_test/bigHalf` | b16 | `TRUNK_H@y4730`     | seg3, 15 |
+| `rnr/mix2_fast_on_aligned_sql` | b61 | `BITRUNK_H`   | seg0, 716 |
+| `rnr/mix` | b80 | `TRUNK_V+MST@x1450` | seg2, 50 |
+
+**Nominal overhang is necessary for defects 1–3 but not sufficient for defect 4.**
+Cross-checking each against the engine's own per-bit audit:
+
+- `bigHalf` → **56 per-bit ANTENNA findings / 1,226 units** on exactly
+  **b7 seg3 (20 bits), b16 seg3 (28), b19 seg4 (8)** — segment-for-segment
+  agreement with the scan, plus a separate #514 tap-overhang on b16 seg2.
+- `rnr/mix` → **3 findings on b80 seg2** — again an exact match.
+- `rnr/mix2_fast_on_aligned_sql` → **zero**. The nominal overhang is real (716
+  units, and it is still charged and still ranked on), but its junction does not
+  end up mid-span after placement, so the bits snap normally.
+
+So four of the five committed instances carry the per-bit consequence and one
+does not. Two of the five are `TRUNK+MST` hybrids; the rest are plain `TRUNK_H`
+and a `BITRUNK_H`, which matters for the choice of fix below.
 
 ## Options
 
 Two independent fixes; they address different rows of the table.
 
-**(a) Re-run the trim on the assembled tree** (fixes 1, 2, 3). Call
-`trim_shared_leg_overlaps` on `tree.segments` after the stubs and legs are
-merged, before `annotate_endpoints`. Cheap and local. It must stay **opt-in on
-the existing `set_trim_mst_legs` knob** for the reason already documented for
-that knob: the cut re-sorts the WL-ordered pool, so it moves selection well
-beyond the trimmed bundle, and it renumbers candidate indices, invalidating
-`select_topology` pins taken from a non-opted-in run.
+**(a) Re-run the trim on the assembled tree** (fixes 1, 2, 3 — for the hybrid
+path only). Call `trim_shared_leg_overlaps` on `tree.segments` after the stubs
+and legs are merged, before `annotate_endpoints`. Cheap and local. It must stay
+**opt-in on the existing `set_trim_mst_legs` knob** for the reason already
+documented for that knob: the cut re-sorts the WL-ordered pool, so it moves
+selection well beyond the trimmed bundle, and it renumbers candidate indices,
+invalidating `select_topology` pins taken from a non-opted-in run.
+
+Note its reach is narrower than the problem: only 2 of the 5 committed instances
+are `TRUNK+MST`. The plain-`TRUNK_H` and `BITRUNK_H` cases come from other
+generators and would need their own equivalent — which is the same lesson
+`set_trim_mst_legs` and `set_trim_trunk_stubs` already teach, now a third time.
 
 **(b) Re-derive `is_endpoint` against the placed span** (fixes 4, generally).
 After `tighten_spans_to_reach`, a conn whose position equals the placed
@@ -225,6 +245,17 @@ per-bit dangling metal for *every* shape that produces this pattern, not just
 this one. It is also the more honest one — the abstract repair and the per-bit
 label currently disagree about the same wire.
 
-Recommendation: (b) first, on its own, and measure; it is a correctness fix with
-no selection-space movement. (a) is a QoR change and needs the full corpus
-treatment the sibling trim knobs got.
+Recommendation: **(b) first, on its own, and measure.** It is a correctness fix
+with no selection-space movement, it is generator-agnostic (it would cover all
+four of the committed instances that carry per-bit dangling metal, whatever shape
+produced them), and it removes the disagreement between the abstract repair and
+the per-bit label rather than papering over it. (a) is a QoR change, reaches only
+the hybrid subset, and needs the full corpus treatment the sibling trim knobs
+got.
+
+Worth stating plainly: **neither fixes defect 1 in general.** The WL estimate is
+computed on nominal geometry, and NUTS's contraction — which is what makes the
+estimate wrong — happens long after selection. Any candidate whose realized
+length differs from its nominal one is mis-ranked by the same mechanism; that is
+the territory `kWLSpread` already occupies, and the overhang is a case where the
+gap is not a realization risk but a certainty.
