@@ -15,14 +15,14 @@
 # that item: the same DEF, finally handed the technology that describes it.
 # ─────────────────────────────────────────────────────────────────────────
 
-# The two files below are fetched from upstream and deliberately NOT checked
+# The three files below are fetched from upstream and deliberately NOT checked
 # in (12 MB of somebody else's netlist, under somebody else's licence — see
 # ReadMe.md).  Stated as a PRECONDITION rather than left to the importer:
 # `import_def_lef` fails perfectly well on a LEF it cannot open, but its
 # complaint is about a path, and the half a fresh clone needs is where the
 # file comes from.  Declared up here, the run stops on line one with the
 # remedy instead of after the setup that precedes the read.
-require_file ariane.v fakeram45_256x16.lef hint Fetch them first:  python3 flow/ariane133/fetch.py   (~12 MB, checksum-pinned; see flow/ariane133/ReadMe.md)
+require_file ariane.v fakeram45_256x16.lef NangateOpenCellLibrary.tech.lef hint Fetch them first:  python3 flow/ariane133/fetch.py   (~12 MB, checksum-pinned; see flow/ariane133/ReadMe.md)
 
 open_bdb ariane133.bdb
 

@@ -15,14 +15,14 @@
 # that item: the same DEF, finally handed the technology that describes it.
 # ─────────────────────────────────────────────────────────────────────────
 
-# The two files below are fetched from upstream and deliberately NOT checked
+# The three files below are fetched from upstream and deliberately NOT checked
 # in (12 MB of somebody else's netlist, under somebody else's licence — see
 # ReadMe.md).  Stated as a PRECONDITION rather than left to the importer:
 # `import_def_lef` fails perfectly well on a LEF it cannot open, but its
 # complaint is about a path, and the half a fresh clone needs is where the
 # file comes from.  Declared up here, the run stops on line one with the
 # remedy instead of after the setup that precedes the read.
-require_file ariane.v fakeram45_256x16.lef hint Fetch them first:  python3 flow/ariane133/fetch.py   (~12 MB, checksum-pinned; see flow/ariane133/ReadMe.md)
+require_file ariane.v fakeram45_256x16.lef NangateOpenCellLibrary.tech.lef hint Fetch them first:  python3 flow/ariane133/fetch.py   (~12 MB, checksum-pinned; see flow/ariane133/ReadMe.md)
 
 open_bdb ariane133.bdb
 
@@ -75,6 +75,16 @@ def_layer 7 metal7 H LOW 30
 def_layer 8 metal8 V LOW 30
 def_layer 9 metal9 H TOP 30
 def_layer 10 metal10 V TOP 30
+
+# Real wire WIDTHS from the technology LEF (interchange item 14), exactly as
+# in ariane133.buda — the heal twin had drifted and modelled one full-pitch
+# signal slot per layer.  The def_layer lines above keep each layer's
+# IDENTITY; this supplies PITCH/WIDTH, and the DEF's TRACKS below supplies
+# the positions.  Measured on the heal endpoint: byte-identical route
+# (same overlaps/unplaced/violations and WL to the unit).  The three
+# BUDA-1616 pitch-disagreement WARNINGs (metal7/8/10) are expected — the
+# DEF's grid wins, which is the one the design was built on.
+import_lef_tech NangateOpenCellLibrary.tech.lef
 
 import_def_lef ../../demo/ariane/ariane.def fakeram45_256x16.lef
 import_verilog ariane.v
