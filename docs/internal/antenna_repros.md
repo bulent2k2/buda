@@ -98,6 +98,65 @@ of the block.
 **Status.** UNREACHABLE — kept as the negative result. Ends dirty on purpose;
 not in the QoR corpus.
 
+### The question it frames: should a crossing vouch for a bit at all?
+
+`detect_bit_antennas` accepts three kinds of attachment — a **via** (the bit
+meets another segment's same bit), a **tap** (the segment lands on a block
+face), and a **crossing** (the bit's wire merely flies OVER a connected block).
+The first two are electrical. The third is geometry: `seg_attachment` says so in
+passing, calling a pass-through a joint "which carries no conn record".
+
+Two ways of getting a FALSE crossing credit are closed — this entry's vehicle
+showed a bus wider than the block it crosses is not a placeable state, and entry
+4 moved the test from the nominal segment to the bit. What was never asked is
+whether a TRUE crossing should confer credit in the first place.
+
+**Measured** (`tools/scan_crossing_credit.py`), per placed bit-wire, by which
+kinds vouch for it — counting only bits the audit ELIGIBLY examines:
+
+```
+flow                          bits   eligible  sole=crossing  sole=tap  sole=via     mixed
+rnr/mix                      3,132      2,924              0         0       308     2,616
+rnr/mix2_topdown_refine      3,284      3,064              0         0       445     2,619
+big_data_test/big            8,672      8,208              0         0       112     8,096
+big_data_test/big2           8,308      7,872              0         0        72     7,800
+rv/soc_conv_div              2,014      1,302              0        44       254     1,004
+total                       25,501     23,461              0        44     1,205    22,212
+```
+
+**`sole=crossing` is 0.** No bit in 23,461 eligible ones depends on a crossing
+to vouch for it, so on this corpus the question is **academic**: withdrawing
+crossing credit would change no verdict anywhere. That is not a defence of the
+rule — it is the statement that the rule is currently inert, which is a
+different and more useful thing to know.
+
+**The eligibility gate is the whole measurement, and the first version of this
+scan omitted it.** `detect_bit_antennas` returns immediately for a topology with
+fewer than two segments ("no junctions to be dangling FROM") and for a bundle
+with no emitted vias. A bit it skips is UNEXAMINED, not vouched-for, and no
+credit can be load-bearing there — withdrawing it could not produce a finding.
+
+Without that gate the scan reported **192** load-bearing bits and this section
+claimed crossing credit was preventing 192 false findings. Every one of those
+192 was a single-segment `ABUT` candidate — precisely the `n < 2` case, the bits
+the audit never looks at. The number was an artifact of the instrument and is
+**withdrawn** (Codex on #807). Note what it cost to catch: the wrong figure came
+with a plausible mechanism attached (an ABUT wire can have no via and no tap, so
+a crossing "must" be what vouches for it), and a story that good is exactly what
+stops a number being re-checked.
+
+**What is still true about those ABUT bits**, measured separately: each is
+crossed by *exactly two* blocks, the abutting pair, and with both counted lead
+and trail are **0.0** — the wire lies entirely inside the two blocks it
+connects. So there is nothing there to report even if the audit did look, which
+is consistent with the `n < 2` gate being right rather than a gap.
+
+What stays open is narrower than the question sounded, and narrower again after
+the correction: no design here exercises a crossing that vouches for an
+ELIGIBLE bit at all, let alone one whose metal extends past it. If one appears,
+`sole=crossing` is where it will show up.
+appears, `sole=crossing` is where it will show up.
+
 ---
 
 ## 4. Crossing credited at the nominal segment, not at the bit
@@ -632,7 +691,7 @@ healers would keep.
 |---|---|---|
 | `detect_antennas` (`ANTENNA`, structural) | attachment *positions* on the bus-level `ConnSeg` graph | a segment attached at ≥2 points whose individual BITS are not |
 | tap-overhang (#514) | a terminal piece over a block the segment **taps** | a piece past the last junction that taps nothing (entry 5a) — and 5b, where BOTH legs tap the block and neither piece is terminal, so no audit ever saw it and only the geometry scan did |
-| `detect_bit_antennas` (per bit) | per-bit vias + served taps + crossings the bit really makes | whether a *crossing* should vouch for a bit at all — the open question entry 3's vehicle exists to frame |
+| `detect_bit_antennas` (per bit) | per-bit vias + served taps + crossings the bit really makes | nothing known. Whether a *crossing* should vouch at all was entry 3's open question; measured, crossing credit is load-bearing for **0** eligible bits, so the rule is currently inert (`tools/scan_crossing_credit.py`) |
 | `check_dnuts` block coverage | per-bit coverage of connected blocks | nothing here; it is the check that keeps the retractions honest |
 
 Note that entry 6 was **not** a checker gap — the per-bit audit reported it in

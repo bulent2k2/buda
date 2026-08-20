@@ -333,6 +333,17 @@ void bind_routing(py::module_& m) {
           py::arg("topo"), py::arg("edge_id"),
           py::arg("h_layer"), py::arg("v_layer"), py::arg("fp"));
 
+    // The tap-membership predicate the PLACER and BOTH audits read
+    // (adjust_bit_spans, check_dnuts, detect_bit_antennas).  Exposed so a
+    // measurement of what vouches for a bit can ask the engine instead of
+    // re-deriving it in Python — the mistake that produced four wrong answers
+    // and a withdrawn table in the phantom-charge work (Codex #754).  The
+    // tapered/untapered fallbacks here are subtle (a MISSING key serves every
+    // bit, a PRESENT-but-empty one serves none), which is exactly the kind of
+    // rule a re-implementation gets wrong quietly.
+    m.def("seg_busterm_serves_bit", &seg_busterm_serves_bit,
+          py::arg("topo"), py::arg("seg_idx"), py::arg("block"), py::arg("bit"));
+
     // Analysis-cache instrumentation (Phase B, topo_conn_unification.md):
     // cumulative (computes, hits) of the content-fingerprint-validated
     // ConnTopology analysis cache, plus a reset.  Test/diagnostic only.
