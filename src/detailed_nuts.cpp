@@ -268,8 +268,23 @@ DetailedNUTSResult DetailedNUTSEngine::run(
     // Measured on flow/antenna_culled_partner.buda: seg 1's bits go from
     // [183.5,710] to [183.5,183.5], detailed WL 2922 -> 807, exactly matching
     // the starved control.  On flow/rv/soc: 64 dangling findings -> 0.
-    if (result.num_keepout_bits > 0) adjust_bit_spans(bus_segs, result);
+    //
+    // Charged to its OWN bucket, after the cull's (Codex P2 on #802).  `charge`
+    // accumulates the time since the PREVIOUS call, so leaving this before
+    // charge("keepout_cull") billed the re-adjustment to the cull — silently
+    // over-reporting keepout_cull and under-reporting span work on exactly the
+    // designs where it fires, which is the opposite of what per-pass profiling
+    // is for.  A separate bucket rather than folding it into "bit_spans"
+    // because it is a NEW cost: folding it in would make it unmeasurable, and
+    // both consumers (ripup's _rr_t_add_passes, the bottom-up merge in
+    // nutsflow) iterate the map generically, so a new key just flows through.
+    // Charged inside the branch so a design that never culls does not carry a
+    // spurious zero entry.
     charge("keepout_cull");
+    if (result.num_keepout_bits > 0) {
+        adjust_bit_spans(bus_segs, result);
+        charge("bit_spans_after_cull");
+    }
     // After the cull, so the metric covers exactly the bits the heal's
     // accept will compare: the misalignment jog across pair-align partners
     // (see the field's comment in the header).
