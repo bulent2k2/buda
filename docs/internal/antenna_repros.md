@@ -25,11 +25,12 @@ here is asserted from reading the code alone — every measurement is from a run
 | 3 | bus wider than the block it crosses | `flow/antenna_wide_bus_passthru.buda` | UNREACHABLE |
 | 4 | crossing credited at the nominal seg | `flow/rnr/mix2_topdown_refine.buda` | FIXED #695 |
 | 5 | a duplicated leg off one block | `flow/mst_shared_leg_prefix.buda` + `flow/mst_shared_leg_suffix.buda` | **5a+5b FIXED opt-in** (#708 + the mirror) · **5c reclassified + fixed opt-in** |
-| 6 | a culled partner strands a segment | `flow/antenna_culled_partner.buda` + `flow/antenna_starved_partner.buda` | **OPEN — cause found** |
-| 7 | `rv/soc` 1.25M units mid-flow | `flow/rv/soc.buda` | **OPEN — same cause as 6** |
+| 6 | a culled partner strands a segment | `flow/antenna_culled_partner.buda` + `flow/antenna_starved_partner.buda` | **FIXED** — re-adjust after the cull |
+| 7 | `rv/soc` 1.25M units mid-flow | `flow/rv/soc.buda` | **FIXED with 6** |
 
-Entries 6 and 7 are the live ones, and they are **one defect** — a
-DetailedNUTS pass-ordering problem, isolated to a 4-bit vehicle in entry 6. 5 is
+Nothing here is open any more. Entries 6 and 7 were **one defect** — a
+DetailedNUTS pass-ordering problem, isolated to a 4-bit vehicle in entry 6 and
+fixed there. 5 is
 a *class* of three members sharing one geometry: 5a and 5b are two sides of one
 shape, both fixed behind one opt-in, and 5c turns out to be neither an antenna
 nor (mostly) a redundancy —
@@ -555,12 +556,44 @@ tell which path it tested.
 **The audit is not the problem.** `check_design dnuts` reports every one of
 those bits. It is the **placer** that leaves the metal.
 
-**Status.** OPEN, cause identified, not fixed here — the fix is an engine change
-(retract after the cull, or cull before adjusting) and the choice between those
-is the owner's. Both vehicles are pinned by
-`test_bit_antenna_audit.py::test_a_partner_lost_to_the_CULL_strands_its_neighbour`
-and `…::test_a_partner_STARVED_before_span_adjustment_retracts_it_instead`, so
-whichever way it is fixed, the pair is what must not regress.
+**Status. FIXED** — `adjust_bit_spans` is re-run once the cull's survivors are
+known, so #678's stale-end rule fires where it previously could not:
+
+```
+seg 1 bits   [183.5,710] -> [183.5,183.5]
+detailed WL  2922 -> 807          exactly the starved control's
+```
+
+**Of the two candidate repairs, only one was sound.** Culling BEFORE adjusting
+is the tempting one — it makes the culled path identical to the starved path by
+construction — but the cull deliberately tests the **adjusted** span, which is
+the only span that is real. Judging bits on spans they do not end up with would
+under-cull and trade dangling metal for illegal wire, the worse of the two. So
+the cull stays where it is and the adjustment runs again after it.
+
+One pass suffices and no re-cull is needed: the re-run can only **shorten** (a
+bit retracts when a partner is GONE, and the partner set only shrank), so it
+cannot walk a bit into a keepout it did not already cross. `num_keepout_bits` is
+untouched, which matters MORE now, not less — both paths now produce the same
+retracted geometry, so that counter is the only thing telling them apart.
+
+**On real designs** (QoR corpus vs `origin/main`): 0 better, 0 worse, 48
+unchanged on the gate metric, abstract WL +0, and detailed WL **−317,449
+(−0.04%)** concentrated in **7 chip-scale flows** — every delta negative, which
+is the expected sign since retraction can only shorten:
+
+```
+chip/chip_stack_bottomup   37,323,998 -> 37,203,712   -120,286  (-0.32%)
+chip/chip_stack_topdown    39,303,618 -> 39,214,164    -89,454  (-0.23%)
+chip/chip_bottomup         47,894,804 -> 47,858,490    -36,314  (-0.08%)
+chip/chip3a_bottomup       48,147,818 -> 48,113,210    -34,608  (-0.07%)
+chip/chip_topdown          49,498,986 -> 49,477,415    -21,571  (-0.04%)
+chip/chip_bottomup_caps    47,791,518 -> 47,776,950    -14,568  (-0.03%)
+chip3_topdown              49,059,249 -> 49,058,601       -648  (-0.00%)
+```
+
+So the shape was not confined to the vehicles: it was quietly costing real
+metal at chip scale.
 
 ---
 
@@ -584,12 +617,12 @@ that dangles. (The earlier reading of this entry — that rv/soc must have some
 *other* cause because the isolated vehicle came out clean — was wrong: that
 vehicle was on the *starved* path and never reached the cull at all.)
 
-**Status.** OPEN, but MID-FLOW ONLY — the healers re-pin and it does not survive
-to the endpoint, which `test/tests/test_bit_antenna_audit.py` pins from both
-sides (it must fire mid-flow, and must be gone at the end). So it costs nothing
-in the shipped route today; it is a latent shape that a design without those
-healers would keep. Fix entry 6 and this goes with it — the 4-bit vehicle is the
-one to develop against.
+**Status. FIXED with entry 6**, as predicted — the 64 findings are now **0**,
+with the cull still removing 98 bits and the flow still ending clean. It was
+always MID-FLOW ONLY (the healers re-pinned away from it before the endpoint,
+which `test_bit_antenna_audit.py` pins from both sides), so this cost nothing in
+the shipped route; what it cost was a latent shape any design without those
+healers would keep.
 
 ---
 
@@ -602,10 +635,21 @@ one to develop against.
 | `detect_bit_antennas` (per bit) | per-bit vias + served taps + crossings the bit really makes | whether a *crossing* should vouch for a bit at all — the open question entry 3's vehicle exists to frame |
 | `check_dnuts` block coverage | per-bit coverage of connected blocks | nothing here; it is the check that keeps the retractions honest |
 
-Note that entry 6 is **not** a checker gap — the per-bit audit reports it in
-full. It is the placer emitting metal the audit then correctly complains about,
-which is the healthier of the two failure modes and the reason it is measurable
-at all.
+Note that entry 6 was **not** a checker gap — the per-bit audit reported it in
+full. It was the placer emitting metal the audit then correctly complained
+about, which is the healthier of the two failure modes and the reason it was
+measurable at all.
+
+**A trap that fixing it sprang, worth knowing before the next one.** Two of the
+three guards that failed were not testing the defect — they were testing what
+the audit SAYS when it fires (grouping per (bundle, segment), each bit's own
+magnitude), using the defect as their fixture. They were the **only** coverage
+of the reporter's positive path in the tree; everything else asserts ABSENCE.
+Fixing the placer would have silently deleted them, and a green suite would have
+said nothing was lost. The reporter's fixture is now REBUILT rather than
+harvested — the overhang is put back by hand onto solved geometry, which is
+exactly what the placer used to emit — so the next placer fix cannot take that
+coverage with it. Before fixing a defect, check what is using it as a fixture.
 
 Three things to check first on any new instance:
 
