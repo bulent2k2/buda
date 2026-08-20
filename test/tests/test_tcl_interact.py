@@ -1247,3 +1247,49 @@ def test_an_inspection_session_cannot_lose_the_preview_reminder(tmp_path):
     assert s.p.returncode == 0, tail[-2000:]
     assert "resume at `plan` to re-plan" in tail          # the refusal, said
     assert "were NOT committed to the checkpoint" in tail  # reminder survives
+
+
+def test_a_typed_pin_replan_also_commits_the_gui_preview(tmp_path):
+    # Codex #804 P2, the second half: with an explorer preview pending AND a
+    # typed pin, the dirty-pin re-plan (at `save`, or the caller's at exit)
+    # IS a planner run — it applies the sidecar and persists — so the
+    # messages must not keep calling the preview uncommitted.  Before the
+    # fix, `save` claimed the snapshot held the PRE-pin route right after
+    # the pin went in, and the exit note said "NOT committed" seconds
+    # before the caller's re-plan committed it.
+    demo = _flat_demo(tmp_path)
+    s = _Interactive([*_BTCL_CMD, "-b", demo / "resume_flat.buda"], tmp_path)
+    s.read_until("resume_flat> ")
+    s.send("topos d0")
+    s.read_until("resume_flat> ")
+    (demo / "resume_flat.json").write_text(_SIDECAR)   # "the explorer"
+    s.send("topos d0")
+    out = s.read_until("resume_flat> ")
+    assert "PREVIEW" in out
+
+    s.send("pin d1 4")                       # typed pin: pins_dirty
+    s.read_until("resume_flat> ")
+    s.send("save")                           # dirty re-plan runs first...
+    out = s.read_until("resume_flat> ")
+    assert "wrote snapshot" in out
+    assert "PRE-pin" not in out              # ...so this claim would be false
+
+    # A SECOND explorer save after that commit, plus another typed pin: the
+    # exit note must say the preview rides the pending re-plan, not that it
+    # was dropped.
+    (demo / "resume_flat.json").write_text(
+        _SIDECAR.replace('"note": ""', '"note": "x"'))
+    s.send("pin d0 2")
+    s.read_until("resume_flat> ")
+    s.send("done")
+    tail = s.finish()
+    assert "NOT committed" not in tail, tail
+    assert "ride" in tail and "applies the" in tail
+
+    # The commit is real: a plain -r restores the sidecar's choice as the
+    # PINNED selection.
+    r = _run([*_BTCL_CMD, "-r", demo / "resume_flat.buda"], tmp_path,
+             stdin="topos irq\ndone\n")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "PINNED" in r.stdout and "Z_HVH" in r.stdout
+    assert "done -- 0 overlaps, 0 unplaced, 0 audit violations" in r.stdout

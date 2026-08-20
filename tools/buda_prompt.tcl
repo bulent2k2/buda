@@ -220,6 +220,14 @@ proc prompt::run {tag ps route bdb example {guard ""} {sidecar ""}} {
                               re-planning so the snapshot stays coherent"
                         $route
                         set pins_dirty 0
+                        # That re-plan IS a planner run: it applied the
+                        # sidecar and persisted, so a pending GUI preview
+                        # was committed by it — clearing here keeps the
+                        # NOTE below from calling the snapshot PRE-pin
+                        # right after the pin went in (Codex #804 P2).  A
+                        # route that RAISES skips this with the rest.
+                        set gui_pins 0
+                        set sc_stamp [prompt::_sc_stamp $sidecar]
                     }
                     if {$gui_pins} {
                         # Explorer pins are previews the snapshot will NOT
@@ -343,7 +351,18 @@ proc prompt::run {tag ps route bdb example {guard ""} {sidecar ""}} {
         # The last command before `done` may itself have been the explorer
         # session -- one final stamp so its pins are not the silent ones.
         if {[prompt::_sc_stamp $sidecar] ne $sc_stamp} { set gui_pins 1 }
-        if {$gui_pins} {
+        if {$gui_pins && $pins_dirty} {
+            # The typed pin(s) hand back pins_dirty=1 and EVERY caller
+            # re-plans on it (that is what the return value is for) — a
+            # planner run that applies the sidecar and persists, so these
+            # previews ride along rather than being dropped.  Saying "NOT
+            # committed" here, seconds before that re-plan, was the stale
+            # half of Codex #804's P2; if the re-plan fails, the caller
+            # fails the run LOUDLY, which dominates this line either way.
+            puts "$tag: explorer selection(s) in [file tail $sidecar] ride\
+                  the re-plan the typed pin(s) queued -- it applies the\
+                  sidecar and persists"
+        } elseif {$gui_pins} {
             puts "$tag: NOTE -- explorer selection(s) in\
                   [file tail $sidecar] were NOT committed to the checkpoint\
                   (previews; a re-plan applies them).  They still apply at\
