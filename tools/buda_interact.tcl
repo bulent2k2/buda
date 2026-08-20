@@ -148,8 +148,18 @@ if {[llength $pos] < 1 || [llength $pos] > 3} {
     exit 2
 }
 set flow [file normalize [lindex $pos 0]]
+# The engine's own `source` suffix rule (cmd_source), applied at the
+# launcher seam: `btcl -r resume_flat` means resume_flat.buda when that
+# file exists and nothing is literally named `resume_flat`.  Only the
+# fallback direction — a suffixless name never passes as-is, so the
+# "-i/-b/-r take a .buda flow" contract is unchanged for everything else.
+if {![string match *.buda $flow] && ![file isfile $flow]
+        && [file isfile $flow.buda]} {
+    append flow .buda
+}
 if {![file exists $flow]} {
-    puts stderr "buda_interact: no such flow: $flow"
+    set also [expr {[string match *.buda $flow] ? "" : " (nor $flow.buda)"}]
+    puts stderr "buda_interact: no such flow: $flow$also"
     exit 2
 }
 set tag [file tail $flow]

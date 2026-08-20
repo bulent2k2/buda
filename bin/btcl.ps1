@@ -138,7 +138,10 @@ if ($rest.Count -gt 0 -and $rest[0] -like '-*') {
 # refused rather than half-worked (it can source tools/buda_prompt.tcl itself).
 # Same contract as bin/btcl, where the rationale is documented in full.
 if ($interactive) {
-    if ($rest.Count -gt 0 -and $rest[0] -like '*.buda') {
+    # Same suffix rule as bin/btcl: a bare name whose `.buda` twin exists
+    # passes through; the driver appends the suffix.
+    if ($rest.Count -gt 0 -and ($rest[0] -like '*.buda' -or
+            (Test-Path -LiteralPath "$($rest[0]).buda" -PathType Leaf))) {
         $driver = Join-Path $ProjectRoot 'tools/buda_interact.tcl'
         tclsh $driver @modeArgs @rest
         exit $LASTEXITCODE

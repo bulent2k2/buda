@@ -142,7 +142,14 @@ fi
 if [ "$INTERACTIVE" = 1 ]; then
   case "$1" in
     *.buda) exec tclsh "$PROJECT_ROOT/tools/buda_interact.tcl" ${MODE_ARGS[@]+"${MODE_ARGS[@]}"} "$@" ;;
-    *)      echo "btcl: -i/-b/-r take a .buda flow (a Tcl flow can source" \
+    # The engine's own `source` suffix rule, at the launcher seam:
+    # `btcl -r resume_flat` means resume_flat.buda when that file exists
+    # (the driver appends the suffix; a name matching neither spelling, or
+    # a Tcl flow, keeps the refusal below).
+    *)      if [ -n "$1" ] && [ -f "$1.buda" ]; then
+              exec tclsh "$PROJECT_ROOT/tools/buda_interact.tcl" ${MODE_ARGS[@]+"${MODE_ARGS[@]}"} "$@"
+            fi
+            echo "btcl: -i/-b/-r take a .buda flow (a Tcl flow can source" \
                  "tools/buda_prompt.tcl itself)" >&2; exit 2 ;;
   esac
 fi

@@ -21,10 +21,14 @@ btcl -r demo/resume_flat.buda           # resume at the deepest stage
 btcl -r -s plan demo/resume_flat.buda   # re-enter at the planner instead
 ```
 
+The `.buda` suffix may be omitted (`btcl -r resume_flat`) — the same rule
+the engine's `source` applies: the bare name means `<name>.buda` when that
+file exists and nothing is literally so named.
+
 Both sessions end at the shared **pin/edit prompt**: `topos <bus>` to look
 at a bundle's candidates, `pin <bus> <N>` to choose one (1-based), `replan`
-to apply, `done` to save and exit (`help` lists the verbs; anything else
-goes to the engine).  A pin writes through to the checkpoint at once, so
+to apply, `done` to save and exit (`help` — or `?` — lists the verbs;
+anything else goes to the engine).  A pin writes through to the checkpoint at once, so
 the next `-b` rerun or `-r` resume keeps it.
 
 Two things to know before the walkthroughs:
