@@ -835,3 +835,104 @@ def test_a_clean_import_says_nothing_about_dropped_keepouts(tmp_path):
     for."""
     _s, out = _run(tmp_path, lef=_STRAP_LEF, deff=_STRAP_DEF)
     assert "BUDA-1615" not in out, out
+
+
+# ── obstruction decided by GEOMETRY, not by provenance ─────────────────────
+#
+# Two faults with one cause: the importer answered questions about
+# obstruction from where the obstruction CAME FROM rather than from where it
+# IS.  An unplaced instance's OBS was skipped without a word, and every
+# keepout except a macro's own OBS was stamped `inside_block=false` whatever
+# its geometry said.
+
+def test_an_unplaced_macros_lost_obstruction_is_censused(tmp_path):
+    """An UNPLACED instance's OBS is nowhere, so nothing can be emitted — but
+    it must still be SAID.
+
+    The halo three lines above it in the importer is counted for every halo,
+    placed or not, on the stated principle that the census answers "what did
+    the file say that we do not model?".  An unplaced macro's obstruction
+    answers that just as much, and skipping it silently meant a floorplan DEF
+    with unplaced macros blocked less metal than its macros describe with
+    nothing in the report saying so.
+
+    Counted in RECTS because that is the quantity lost: one real SRAM macro
+    carries 99 of them, and "1 instance" understates it by two orders of
+    magnitude."""
+    unplaced = _STRAP_DEF.replace("- i0 m + PLACED ( 1000 2000 ) N ;",
+                                  "- i0 m + UNPLACED ;")
+    s, out = _run(tmp_path, lef=_STRAP_LEF, deff=unplaced)
+    # Nothing emitted — the obstruction genuinely has no position.
+    assert not [z for z in s.fp.get_keepout_zones()
+                if z.bbox.x1 == 2 and z.bbox.y1 == 3]
+    # …and the one OBS rect _STRAP_LEF declares is reported as lost.
+    assert "COMPONENTS.OBS_UNPLACED:1" in out, out
+
+
+def test_a_placed_macros_obstruction_is_not_censused_as_lost(tmp_path):
+    """The false-positive twin.  A census that fires on a healthy import is
+    one a methodology learns to ignore, which costs it the case it exists
+    for."""
+    _s, out = _run(tmp_path, lef=_STRAP_LEF, deff=_STRAP_DEF)
+    assert "OBS_UNPLACED" not in out, out
+
+
+def _zone_at(s, net, want):
+    for z in s.fp.get_keepout_zones():
+        b = z.bbox
+        if z.net == net and (b.x1, b.y1, b.x2, b.y2) == want:
+            return z
+    raise AssertionError(f"no {net} zone at {want} among "
+                         f"{[(z.net, (z.bbox.x1, z.bbox.y1, z.bbox.x2, z.bbox.y2)) for z in s.fp.get_keepout_zones()]}")
+
+
+def test_a_strap_over_a_macro_is_measured_inside_it(tmp_path):
+    """`set_keepout_loci outside` asks whether a keepout lies wholly inside a
+    block.  Every strap answered NO regardless of geometry, because the
+    importer hardcoded the flag — so on a real PDN, whose macro grids are
+    drawn OVER the macros, `outside` suppressed the loci of none of them.
+
+    `i0` is the 10x4 um macro `m` placed at (1,2), so it occupies
+    [1,11] x [2,6].  A metal2 stripe from x=3 to x=9 at y=3, 1 um wide, is
+    [2.5,9.5] x [2.5,3.5] — wholly within it."""
+    deff = _STRAP_DEF.replace(
+        "  - VDD ( * VDD ) + ROUTED metal2 2000 + SHAPE STRIPE ( 50000 10000 ) ( * 90000 )\n"
+        "      + USE POWER ;",
+        "  - VDD ( * VDD ) + ROUTED metal2 1000 + SHAPE STRIPE ( 3000 3000 ) ( 9000 * )\n"
+        "      + USE POWER ;")
+    s, _out = _run(tmp_path, lef=_STRAP_LEF, deff=deff)
+    assert _zone_at(s, "VDD", (2, 2, 10, 4)).inside_block is True
+    # The die-crossing VSS strap is the control: it is genuinely outside.
+    assert _zone_at(s, "VSS", (9, 49, 91, 51)).inside_block is False
+
+
+def test_a_strap_that_pokes_past_its_macro_is_not_inside(tmp_path):
+    """Why this has to be MEASURED and cannot be inferred from provenance.
+
+    pdngen declares its macro grids with a halo (`-halo {0.1 0.1 0.1 0.1}`),
+    so a macro-local strap is BUILT to extend a little past the macro it
+    belongs to — and that overhanging edge is exactly the one whose Hanan
+    locus is useful.  Same shape as LEF not requiring an `OBS` rect to sit
+    inside `SIZE`, which is why the OBS path measures it too.
+
+    Same stripe as above but starting at x=0.5, so it crosses `i0`'s left
+    edge at x=1."""
+    deff = _STRAP_DEF.replace(
+        "  - VDD ( * VDD ) + ROUTED metal2 2000 + SHAPE STRIPE ( 50000 10000 ) ( * 90000 )\n"
+        "      + USE POWER ;",
+        "  - VDD ( * VDD ) + ROUTED metal2 1000 + SHAPE STRIPE ( 500 3000 ) ( 9000 * )\n"
+        "      + USE POWER ;")
+    s, _out = _run(tmp_path, lef=_STRAP_LEF, deff=deff)
+    assert _zone_at(s, "VDD", (0, 2, 10, 4)).inside_block is False
+
+
+def test_a_layer_blockage_over_a_macro_is_measured_too(tmp_path):
+    """The third construct with the same hardcoded answer.  A blockage drawn
+    over a macro is as much inside a block as that macro's own OBS, and
+    leaving one `false` hardcoded beside a measured one recreates the very
+    inconsistency this fixes."""
+    deff = _STRAP_DEF.replace(
+        "  - LAYER metal2 RECT ( 20000 20000 ) ( 30000 30000 ) ;",
+        "  - LAYER metal2 RECT ( 2000 3000 ) ( 9000 5000 ) ;")
+    s, _out = _run(tmp_path, lef=_STRAP_LEF, deff=deff)
+    assert _zone_at(s, "", (2, 3, 9, 5)).inside_block is True

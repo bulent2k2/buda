@@ -267,6 +267,14 @@ def cmd_import_def_lef(session, cmd, args, cmd_line):
                            f"and were sized 0.5 x 0.5 um: {shown}{more}")
             print("         Continuing because `allow_missing_footprints` was "
                   "given — the geometry of those instances is fiction.")
+            # The SIZE is the half everyone thinks of, and the obstruction is
+            # the half that bites later: no MACRO means no `OBS` either, so
+            # every instance of these cells blocks nothing at all.  A router
+            # planning over metal it cannot see reads as a clean result, so
+            # the second cost of this waiver is worth stating where it is
+            # granted rather than leaving it to be discovered.
+            print("         Their macros' OBS obstruction is missing with "
+                  "them, so those instances block no metal.")
         else:
             buda_diag.emit("BUDA-1601",
                            f"{n_bad} cell(s) in the DEF have no LEF "
