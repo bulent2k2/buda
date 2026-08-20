@@ -734,6 +734,19 @@ positions **by design** (a trunk may cross a block over-the-cell), which is
 why it is opt-in and not a free win — the block's own edges were never a
 promised replacement. Worth knowing when reading the flag's name.
 
+One component kind is absent from the test on the other side: a **die-port
+boundary component** (`PINS`, `is_port`) is synthesized *after* the
+`COMPONENTS` stream, so it is not among the extents containment is measured
+against. On the DEFs here that changes nothing — a port is pin-sized and no
+strap or blockage fits inside one — but that is an observation about these
+designs, **not a guarantee**: a port's bbox is the union of all its `RECT`
+shapes, so a DEF declaring a large pad-like pin can enclose a narrow strap or
+blockage, which then keeps its loci under `set_keepout_loci outside`. The
+error is one-directional — a keepout is never wrongly *suppressed*, only
+never suppressed — so it costs grid rather than candidate positions, and it
+fails in the safe direction. Recorded rather than left to be rediscovered,
+since nothing in the code says so.
+
 **What does not** — each counted in the unmodelled census rather than applied,
 so "not imported" is reported rather than silent:
 
