@@ -1,0 +1,98 @@
+# REPRO: a declared `set_ndr` SCOPE that governs no net, and says so.
+#
+# `docs/internal/opens_ndr.md` §2's residual — "a SCOPE that matches no net is
+# a different silence and is still unreported" — plus the second shape found
+# while building it, in one run.
+#
+# ── The condition ─────────────────────────────────────────────────────────
+#
+# `set_ndr` takes a net-name PREFIX.  A typo attaches a perfectly good rule to
+# nothing at all: the rule is declared, accepted, persisted and reported by
+# `dump_ndr`, and the design routes ungoverned while every command says
+# success.  Nothing looked at scopes from the other end — the governed-bundle
+# count says how many bundles a rule reached, never that a SCOPE reached zero.
+#
+# ── The shapes ────────────────────────────────────────────────────────────
+#
+#   scope      matches   governs   verdict
+#   ---------  --------  --------  ------------------------------------------
+#   algn       0 nets    0         BUDA-1915 (WARNING) — the typo (`align`)
+#   bus_       8 nets    0         BUDA-1916 (INFO) — shadowed by bus_hi_/bus_lo_
+#   bus_hi     4 nets    4         silent — it governs
+#   bus_lo     4 nets    4         silent — it governs
+#   align      4 nets    4         silent — the control
+#   *          all       0         silent — EXEMPT, see below
+#
+# `align` is the control and the reason the run is evidence about the scopes
+# rather than about the vehicle: it is the same declaration form as `algn`,
+# one character apart, and it says nothing.
+#
+# `bus_` is the shape a rule-level check cannot see.  Every scope here names
+# the SAME rule `em`, and `em` governs 12 bundles — so "is the rule used?"
+# answers yes while the `bus_` declaration does nothing whatsoever.  Which
+# DECLARATION did the work is a different question from what governs a net,
+# which is why the report resolves the winning PREFIX and not just the rule.
+#
+# `*` is the documented false alarm, and it is why this needed thinking about
+# before it needed coding.  `*` is the global default, outranked by any real
+# prefix BY CONSTRUCTION, so a design whose every net matches a longer prefix
+# leaves it legitimately unused.  Warning about that fires on correct designs
+# — and a diagnostic that cries on a correct design is one a methodology
+# learns to filter, taking the case it exists for with it.  Here `*` governs
+# nothing and is silent.
+#
+# ── What to do about it ───────────────────────────────────────────────────
+#
+# A REPORT, not a refusal: whether a scope bites is a property of the netlist,
+# so refusing would reject designs that route today.  1915 is a WARNING (a
+# scope naming nothing cannot be deliberate); 1916 is an INFO (a layered set
+# of scopes can shadow one on purpose), and it names an example shadowing
+# prefix, since once you know a scope is outranked the only question left is
+# by what.
+
+add_block a1 0    0    200  200
+add_block b1 0    600  200  800
+add_block a2 600  0    800  200
+add_block b2 600  600  800  800
+add_block a3 1200 0    1400 200
+add_block b3 1200 600  1400 800
+
+# Vertically aligned pairs, so each bus is a straight V run.
+add_bus align[4]  a1.p b1.q
+add_bus bus_hi[4] a2.p b2.q
+add_bus bus_lo[4] a3.p b3.q
+
+def_layer 3 M3 H 20
+def_layer 4 M4 V 20
+def_layer 5 M5 H TOP 20
+def_layer 6 M6 V TOP 20
+
+def_track_pattern 3 0 VDD 2 1 (_ 1 1)x12 GND 2 1
+def_track_pattern 4 0 VDD 2 1 (_ 1 1)x12 GND 2 1
+def_track_pattern 5 0 VDD 2 1 (_ 1 1)x12 GND 2 1
+def_track_pattern 6 0 VDD 2 1 (_ 1 1)x12 GND 2 1
+
+# One rule for every scope, on purpose: it is what makes the `bus_` case
+# unreachable from the rule's side.  A MULTIPLIER rule, so it is active on
+# every layer and no BUDA-1913/1914 verdict shares the output.
+def_ndr em width x2
+
+set_ndr align   em
+set_ndr algn    em
+set_ndr bus_    em
+set_ndr bus_hi  em
+set_ndr bus_lo  em
+set_ndr *       em
+
+# The verdicts print HERE — at bundling, before a planner pass is spent.
+run_bundler STRICT
+dump_ndr
+
+generate_topologies
+set_track_pitch 3
+run_planner 1
+run_nuts
+run_detailed_nuts
+
+check_design
+report_wirelength

@@ -294,12 +294,41 @@ rule is the conservative MAXIMUM: the fallback over-charges, never under.
   the same layers and staying silent, which is what makes the run evidence
   about the rules rather than about the vehicle.
 
-  **Residual:** a SCOPE that matches no net is a different silence and is
-  still unreported — `set_ndr` takes a prefix, so a typo attaches a perfectly
-  good rule to nothing. It needs its own condition and id, and the obvious
-  form has a false-alarm mode worth thinking about first: `*` is a
-  deliberate default that a design whose every bus matches a longer prefix
-  leaves legitimately unused.
+  ~~**Residual:** a SCOPE that matches no net is a different silence and is
+  still unreported.~~ **RESOLVED 2026-08-20.** `set_ndr` takes a prefix, so a
+  typo attached a perfectly good rule to nothing while every command reported
+  success. Two verdicts, because two mistakes end in "governs nothing" and
+  the remedy differs:
+
+  * **BUDA-1915** (WARNING) — the prefix matches no net at all. That cannot
+    be deliberate.
+  * **BUDA-1916** (INFO) — it matches nets but a longer prefix wins on every
+    one. Live and outranked, which layered scopes can produce on purpose, so
+    it is an INFO and it names an example shadower.
+
+  The second verdict was not in the original filing and is the shape a
+  rule-level check structurally cannot see: when both scopes name the same
+  rule, "is the rule used?" answers YES while the shadowed declaration does
+  nothing whatsoever. That is why the resolver now returns the winning
+  PREFIX and not only the rule — `ndr_scope_for_net`, with
+  `ndr_rule_for_net` delegating to it, so the report and the thing that
+  actually governs cannot drift apart.
+
+  The false-alarm mode the filing flagged is handled by EXEMPTING `*` from
+  the shadow verdict: it is the global default, outranked by any real prefix
+  by construction, so a design whose every net matches a longer prefix
+  leaves it legitimately unused. It is pinned as a test, because a
+  diagnostic that fires on a correct design is one a methodology learns to
+  filter — taking the case it exists for with it.
+
+  Emitted at bundling (before a planner pass is spent) and again before
+  detailed NUTS, since `load_pipeline` restores bundles without re-bundling
+  and a resumed session would otherwise never hear it; deduped by verdict.
+  Unlike the no-op verdict this needs no grid and no resolved layer masks —
+  it is a question about net names — so it has no deferral. Vehicle:
+  [`flow/ndr_unused_scope.buda`](../../flow/ndr_unused_scope.buda), whose
+  `align` control is the same declaration form as the typo'd `algn`, one
+  character apart, and says nothing.
 
 Vehicle: [`flow/ndr_abs_um.buda`](../../flow/ndr_abs_um.buda) — its `vert_`
 bus exists for exactly this: a governed bus routing VERTICALLY, so its
