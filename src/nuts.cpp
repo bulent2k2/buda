@@ -500,6 +500,7 @@ static void prune_unreachable_partner_windows(
         if (it == rev_conn_map.end()) continue;
 
         double lo = ts.interval_lo, hi = ts.interval_hi;
+        bool doomed = false;
         for (const auto& f : it->second) {
             auto pit = by_key.find({f.src_bid, f.src_si});
             if (pit == by_key.end()) continue;
@@ -537,16 +538,17 @@ static void prune_unreachable_partner_windows(
                 // cannot slide clear, so it crosses wherever ts goes.  Nothing
                 // to prune — no seat helps — and the exhausted-window path is
                 // the honest reporter for it.
-                else ++n_doomed;
+                else doomed = true;
             }
         }
+        if (doomed) ++n_doomed;      // once per SEGMENT, not per (partner, zone)
         if (lo == ts.interval_lo && hi == ts.interval_hi) continue;
         // An EMPTY pruned window means every seat dooms a partner.  Leave the
         // interval alone rather than inventing one: NUTS then exhausts the
         // window and says so ("placed ON a keepout"), which is the truth.
         // Silently narrowing to nothing would replace a reported conflict with
         // an unreported one.
-        if (hi - lo < ts.width) { ++n_doomed; continue; }
+        if (hi - lo < ts.width) { if (!doomed) ++n_doomed; continue; }
         bounds[key] = { lo, hi };
     }
 
@@ -1165,11 +1167,17 @@ static NutsContext build_context(const std::vector<BundleWrapper>& bundles,
     if (prep) {
         apply_interval_constraints(segments, ctx.slide_map, ctx.trunk_set,
                                    ctx.net_pull_map, only_layer);
+        relax_boundary_intervals(segments, ctx.pull_map, ctx.net_pull_map,
+                                 ctx.busterm_set, only_layer);
+        // AFTER the relax, deliberately: relax widens an interval OUTWARD by a
+        // width so the bus centre can reach a preferred coordinate, which would
+        // hand back exactly the band the prune removed.  A partner's reach is a
+        // hard physical constraint and a preference accommodation is not, so the
+        // prune goes last — and before set_pull_targets, which clamps each pull
+        // target into the interval it is given.
         prune_unreachable_partner_windows(segments, ctx.rev_conn_map, floorplan,
                                           ctx.n_reach_pruned, ctx.n_reach_doomed,
                                           only_layer);
-        relax_boundary_intervals(segments, ctx.pull_map, ctx.net_pull_map,
-                                 ctx.busterm_set, only_layer);
         set_pull_targets(segments, ctx.pull_map, ctx.net_pull_map);
     }
     for (auto& ts : segments)
