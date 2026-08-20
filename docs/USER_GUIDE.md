@@ -77,21 +77,111 @@ BUDA commands depend on each other. If you skip a setup step, the engine may use
 
 ---
 
-## 3. Sidecar Selections (`.json` files)
+## 3. Keeping Your Choices Between Runs
 
-When you run BUDA, it automatically looks for a "sidecar" JSON file with the same name as your script (e.g., `quickstart.json` for `quickstart.buda`).
+A run throws away everything it computed unless you tell it not to.  There are
+two mechanisms for keeping a choice — most importantly, which topology a bundle
+should use — and they are **not** alternatives to each other: they are written
+by different things, they hold different amounts, and where both apply they are
+resolved in a defined order (§3.3).
 
-*   **Persistence**: This file stores manual topology selections you've made in the visualizer.
-*   **Stability**: If you run `run_planner`, it will prioritize the "pinned" selections found in this file over its own calculated defaults. 
-*   **Reproducibility**: You can share your design by providing both the `.buda` script and the `.json` sidecar.
+**Start here:** if you are iterating on a design across sessions, use a
+**checkpoint** (§3.1).  The **sidecar** (§3.2) is what makes a pin you made
+*in the visualizer* survive; you rarely create one on purpose.
 
-If the engine finds a conflict (e.g., you changed the floorplan and the pinned topology no longer exists), it will print a warning and fall back to the best available candidate.
+| | checkpoint BDB | sidecar `.json` |
+|---|---|---|
+| written by | every pipeline stage, whenever a BDB is open | the topology explorer only (`s` / `S` / `x`) |
+| holds | the whole pipeline — bundles, candidates, the plan, the routing — plus pins | pins, group pins, forced per-segment layers, hand-built (`USER`) candidates |
+| takes effect on | both paths — every bundle a sidecar has not already pinned | mainly a **rebuild**; on a resume only the two cases in §3.3 |
+| needs | a BDB — `open_bdb`, or `btcl -b` arming one for you | nothing; works on a plain `buda flow.buda` |
+| lets you skip | the rebuild | nothing — the flow re-runs from the top |
 
-For iterating on a design *across sessions* — build once with a checkpoint,
-then resume at the planner (or just re-inspect the routed result) without
-rebuilding — see [Build & Resume Sessions](BUILD_RESUME.md): `btcl -b
-<flow>.buda` / `btcl -r <flow>.buda`, with a flat and a hier demo vehicle
-(`demo/resume_flat.buda`, `demo/resume_hier.buda`).
+### 3.1 Checkpoints — the way to iterate across sessions
+
+Build once with a checkpoint armed, then resume at the stage you want to change
+and re-decide from there, instead of recomputing everything above it:
+
+```bash
+btcl -b demo/resume_flat.buda           # build; checkpoint auto-armed
+btcl -r demo/resume_flat.buda           # resume at the deepest recorded stage
+btcl -r -s plan demo/resume_flat.buda   # re-enter at the planner instead
+```
+
+Both sessions end at a prompt where `topos <bus>` shows a bundle's candidates,
+`pin <bus> <N>` chooses one, `replan` applies it and `done` saves.  A pin
+written here goes into the checkpoint, so the next `-b` rebuild or `-r` resume
+keeps it.
+
+This is strictly more than the sidecar ever carried: a sidecar remembers *which
+candidate you liked*, while a checkpoint remembers the candidates themselves,
+the plan, and the routing — which is why a resume can skip straight to the
+planner.  Full walkthroughs, including the hierarchical flow, are in
+[Build & Resume Sessions](BUILD_RESUME.md); the demo vehicles are
+`demo/resume_flat.buda` and `demo/resume_hier.buda`.
+
+### 3.2 Sidecars — how a visualizer pin survives
+
+BUDA looks for a JSON file named after your script (`quickstart.json` for
+`quickstart.buda`).  Nothing in a batch run writes one: it is created and
+updated by the **topology explorer**, when you press `s` to pin the candidate
+you are looking at, `S` to pin its whole nominal-locus family, or `x` to
+unpin.  Alongside the pin it keeps the things only the GUI can produce —
+per-segment layer overrides, and the op-log of a topology you hand-built with
+edit mode, so that candidate can be rebuilt on the next run and the pin still
+has something to point at.
+
+On the next run the pins are re-applied after generation and before planning,
+so the planner scores the topology you chose.  Because candidate lists renumber
+whenever generation changes, a selection is resolved by stable content
+identity first (`topo_uid`), then by type and wirelength, and only then by the
+remembered index — that last one warns, because it is the only step that can
+land on a different topology than you chose.  If none of them resolves (you
+moved a block and the topology no longer exists) it warns and leaves the bundle
+to the planner, rather than pinning something adjacent.
+
+A sidecar is still the *only* persistence for a flow that opens no BDB, and it
+is plain diffable text you can commit next to the script — so it remains the
+lightest way to share "this design, routed the way I chose it".
+
+### 3.3 When both exist
+
+The two meet whenever a flow has a checkpoint *and* a `.json` beside it.
+Neither simply beats the other: it is decided **per bundle**, and the path
+decides how.
+
+**Rebuilding** (the flow re-bundles and regenerates).  The sidecar is applied
+first; then the checkpoint's durable pins are re-attached to every bundle the
+sidecar did *not* pin, matched by content identity so renumbered candidate
+lists cannot land the pin on a neighbour:
+
+```text
+[BDB] bundle 1: durable pin restored -> topo 4 (Z_HVH@x400@y245)
+```
+
+So a checkpoint pin is *not* discarded by a rebuild — it survives everywhere
+the sidecar is silent.  Where the sidecar does have an entry, it wins.
+
+**Resuming** (`load_pipeline`).  The restored pin is already on the bundle when
+the sidecar is consulted, so an ordinary sidecar selection does not move it.
+Two things still reach through:
+
+*   a hand-built (`USER`) candidate the sidecar resolves by content identity
+    **overrides** the restored pin — it has to, since no script or checkpoint
+    pin can name a topology that only the GUI could produce;
+*   when the sidecar names the *same* candidate as the restored pin, its
+    per-segment layer overrides are **merged onto it** — which changes the
+    layers your checkpoint was routed with.
+
+Both announce themselves (`[sidecar] GUI-pinned USER candidate overrides …`,
+`Merged sidecar layer overrides (3) onto … bundle 1`), so a resume tells you
+when a sidecar touched it.
+
+**The one silent case** is the rebuild override: the sidecar reports the pin it
+made, but nothing says a checkpoint pin was passed over for it.  A stale
+`.json` — left by a visualizer session weeks ago — will quietly outvote the pin
+you made at the `btcl` prompt last night.  Once you have moved to checkpoints,
+**delete the sidecar** so it cannot.
 
 ---
 
