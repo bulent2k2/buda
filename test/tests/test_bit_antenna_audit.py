@@ -120,45 +120,77 @@ def rv_verbose():
 
 # ------------------------------------------------------------ it must FIRE
 
-def test_reports_the_keepout_culled_stub_pair(rv_strict):
-    """flow/rv/soc: two Z_VHV bundles whose seg 2 lands on a keepout, so DNUTS
-    culls all 32 of its bits.  Seg 1 then keeps 19,600 units of metal aimed at
-    a junction that no longer exists — dangling by construction, and invisible
-    to every bus-level check because seg 1 is still attached at its other end.
+def _with_overhang_restored(session, seg_idx=1, reach=710.0):
+    """Put back the metal the entry-6 fix now retracts.
 
-    Reported in the SUMMARY form every per-bit kind uses, since the finding
-    carries its bit index: one line per (bundle, segment) group naming how many
-    bits it covers.  ALL 32 are dangling — seg 2 was culled entirely, so no bit
-    of seg 1 has the junction it was aiming at.
+    The reporter's POSITIVE path — grouping per (bundle, segment), naming each
+    bit and its own magnitude — had exactly one fixture in the tree: the
+    dangling metal rv/soc produced mid-flow.  Fixing the placer deleted it, and
+    with it the only test of what the audit SAYS when it does fire.
 
-    That count is the point.  Before the finding carried its bit, the reporter
-    read the whole group as ONE non-bit violation and printed a single bit's
-    message: two lines and a total of 2, where the truth is 2 x 32 bits, each
-    19,600 units — 1,254,400 units of dangling metal reported as "2".
+    So the fixture is rebuilt here instead of harvested from a defect: seg 1's
+    bits are stretched back out to where seg 2 used to be, which is precisely
+    the geometry the placer used to emit.  That decouples the reporter from the
+    placer, so the next placer fix cannot silently take this coverage with it —
+    which is what happened the first time.
     """
-    hits = _findings_in_run(rv_strict)
-    assert len(hits) == 2, hits
-    assert all("Seg 1: 32 bit(s)" in h for h in hits), hits
+    segs = session.detailed_result.net_segments
+    for n in segs:
+        if n.seg_idx == seg_idx:
+            n.span_hi = reach
+    session.detailed_result.net_segments = segs
+    return session
 
 
-def test_the_finding_names_its_bit_and_its_magnitude_verbatim(rv_verbose):
+def test_the_reporter_groups_bits_and_names_their_magnitude():
+    """What the audit says when it fires, on rebuilt geometry.
+
+    Summary form is one line per (bundle, segment) naming how many bits it
+    covers.  That count is the point: before the finding carried its bit index,
+    the reporter read a whole group as ONE non-bit violation and printed a
+    single bit's message — on rv/soc that turned 2 x 32 bits of 19,600 units
+    into a reported "2".
+    """
+    s = _with_overhang_restored(
+        _session(_ROOT / "flow/antenna_culled_partner.buda"))
+    hits = _findings(s)
+    assert len(hits) == 1, hits
+    assert "Seg 1: 4 bit(s)" in hits[0], hits
+
+
+def test_the_finding_names_its_bit_and_its_magnitude_verbatim():
     """The per-bit detail the summary line collapses.
 
-    The magnitude is the measurement the audit exists to make, and it must
-    survive the summary's collapsing: one message per affected bit, each naming
-    its own bit and its own 19,600 units.  64 = 2 bundles x 32 bits, the same
-    population the summary line above reports as two groups of 32 — asserting
-    both is what keeps the grouped count honest against the per-bit truth.
+    One message per affected bit, each naming its own bit and its own overhang.
+    Asserting both forms is what keeps the grouped count honest against the
+    per-bit truth.
 
-    Every bit of seg 1 dangles by the same amount because they all aim at the
-    same culled junction; they differ only in which track they sit on, which is
-    why the reach coordinate varies from line to line and the overhang does not.
+    The magnitudes are the REBUILT fixture's, not the historical placer's: this
+    stretches every bit to one coordinate, while the placer stretched each to
+    its own partner's track (so the old numbers were 526.5 + 529.5 x 3).  They
+    differ per bit here because the bits start at different span_lo, which is
+    what makes them a real test of per-bit reporting rather than a constant.
     """
-    v = _findings_in_run(rv_verbose)
-    assert len(v) == 64, len(v)
-    assert sum("Seg 1 bit 0 " in h for h in v) == 2, v[:2]
-    assert all("19600" in h.replace(",", "") for h in v), v[:2]
-    assert len({h.split("Bundle ")[1].split(":")[0] for h in v}) == 2, v[:2]
+    s = _with_overhang_restored(
+        _session(_ROOT / "flow/antenna_culled_partner.buda", verbose=True))
+    v = _findings(s)
+    assert len(v) == 4, v
+    assert sum("Seg 1 bit 0 " in h for h in v) == 1, v
+    overhangs = sorted(round(float(h.split("0 + ")[1].split(" of")[0]), 2) for h in v)
+    assert overhangs == [522.0, 523.5, 525.0, 526.5], overhangs
+
+
+def test_rv_soc_no_longer_dangles_mid_flow(rv_verbose):
+    """Entry 7 — the same defect at scale, and it went with entry 6.
+
+    Measured before the fix: 64 findings, 2 bundles x 32 bits x 19,600 units =
+    1,254,400 units of dangling metal immediately after the first
+    `run_detailed_nuts`.  It never reached the endpoint (the healers re-pinned
+    away from it, which `test_the_flow_still_ends_clean` holds), so this was
+    always latent rather than shipped — but a design without those healers kept
+    it.
+    """
+    assert _findings_in_run(rv_verbose) == []
 
 
 def test_the_flow_still_ends_clean(rv_strict):
@@ -217,38 +249,58 @@ def test_pass_through_and_tap_reach_stay_on_the_wire():
         assert s_lo <= r_lo <= s_hi and s_lo <= r_hi <= s_hi, h
 
 
-def test_a_partner_lost_to_the_CULL_strands_its_neighbour():
-    """rv/soc's mechanism, isolated — and it is an OPEN defect.
+def test_a_partner_lost_to_the_CULL_retracts_its_neighbour_too():
+    """Entry 6, FIXED — this guard used to pin the defect.
 
     DetailedNUTS runs `place_by_layer` -> `adjust_bit_spans` ->
     `cull_keepout_crossers`.  The middle pass extends each bit to reach its
-    partner's track; the last one deletes bits whose FINAL span still crosses a
-    keepout.  A partner removed by that cull is removed AFTER the neighbour was
-    stretched to meet it, so the neighbour keeps metal aimed at a wire that no
-    longer exists.  #678's stale-end rule cannot help — it lives inside
-    `adjust_bit_spans`, one pass too early.
+    partner's track; the last deletes bits whose FINAL span still crosses a
+    keepout.  A partner removed by that cull was removed AFTER the neighbour
+    was stretched to meet it, so the neighbour kept metal aimed at a wire that
+    no longer existed — #678's stale-end rule could not help, living inside
+    `adjust_bit_spans` one pass too early.
 
-    `num_keepout_bits` is what proves the cull actually ran.  `num_unplaced` is
-    4 either way (see the starved twin below), so asserting on it alone would
-    let this guard pass while testing the wrong path entirely.
+    The fix re-runs `adjust_bit_spans` once the survivors are known, so that
+    same rule fires.  Measured here: seg 1 went from [183.5,710] to
+    [183.5,183.5], detailed WL 2922 -> 807.
 
-    The AUDIT is fine here — it reports every bit.  It is the PLACER that
-    leaves the metal, which is why this is filed as open rather than fixed.
+    `num_keepout_bits` is still what proves the CULL was the path taken.
+    `num_unplaced` is 4 either way (see the starved twin below), so asserting
+    on it alone would let this guard pass while testing the wrong path — and
+    that matters more now, not less: both paths now produce the same retracted
+    geometry, so the counter is the ONLY thing telling them apart.
     """
     s = _session(_ROOT / "flow/antenna_culled_partner.buda", verbose=True)
     assert s.detailed_result.num_keepout_bits == 4, "the post-adjustment cull must be the path"
+    assert s.detailed_result.num_unplaced == 4
 
-    hits = _findings_in_run(s)
-    assert len(hits) == 4, hits
-    assert all("Seg 1 bit" in h for h in hits), hits
-    overhangs = sorted(round(float(h.split("0 + ")[1].split(" of")[0]), 2) for h in hits)
-    assert overhangs == [526.5, 529.5, 529.5, 529.5], overhangs
+    assert _findings_in_run(s) == [], "the neighbour must no longer dangle"
 
-    # Seg 1's bits keep their full span out to where seg 2 used to be.
+    # Seg 1's bits retract to their own via instead of reaching for seg 2.
     seg1 = [n for n in s.detailed_result.net_segments if n.seg_idx == 1]
     assert len(seg1) == 4, seg1
-    assert all(n.span_hi - n.span_lo > 500 for n in seg1), \
+    assert all(n.span_hi - n.span_lo == 0 for n in seg1), \
         [(n.bit_index, n.span_lo, n.span_hi) for n in seg1]
+
+
+def test_the_culled_and_starved_paths_now_agree():
+    """The pair's whole point, stated as one assertion.
+
+    Same design, same pin, one number different in the keepout — one loses its
+    partner at placement ADMISSION, the other to the post-adjustment CULL.  The
+    outcome used to depend on which; it must not any more.
+    """
+    culled = _session(_ROOT / "flow/antenna_culled_partner.buda")
+    starved = _session(_ROOT / "flow/antenna_starved_partner.buda")
+
+    def spans(sess):
+        return sorted((n.seg_idx, n.bit_index, n.span_lo, n.span_hi)
+                      for n in sess.detailed_result.net_segments)
+
+    assert spans(culled) == spans(starved)
+    # ...but by DIFFERENT routes, which the counter still records.
+    assert culled.detailed_result.num_keepout_bits == 4
+    assert starved.detailed_result.num_keepout_bits == 0
 
 
 def test_a_partner_STARVED_before_span_adjustment_retracts_it_instead():

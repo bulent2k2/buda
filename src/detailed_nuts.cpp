@@ -244,6 +244,31 @@ DetailedNUTSResult DetailedNUTSEngine::run(
     // the placement-time sampling could not rule out.  Counted as unplaced,
     // so the opens feed the stage-b healing machinery.
     cull_keepout_crossers(result);
+    // RE-ADJUST after the cull (antenna_repros entry 6).  adjust_bit_spans
+    // extends each bit to reach its partner's track; the cull then deletes
+    // bits whose FINAL span crosses a keepout — so a partner removed HERE is
+    // removed after its neighbour was already stretched to meet it, and the
+    // neighbour keeps metal aimed at a wire that no longer exists.  #678's
+    // stale-end rule cannot help: it lives INSIDE adjust_bit_spans, one pass
+    // too early.  Running it again once the survivors are known lets that same
+    // rule fire, and the neighbour retracts to its own via.
+    //
+    // Why re-adjust rather than cull EARLIER, the other obvious repair: the
+    // cull deliberately tests the ADJUSTED span, which is the only span that
+    // is real.  Culling before adjustment would judge bits on spans they do
+    // not end up with and under-cull — trading dangling metal for illegal
+    // wire, which is the worse of the two.
+    //
+    // One pass suffices and no re-cull is needed: the re-run can only shorten
+    // (a bit retracts when a partner is GONE; the partner set only shrank), so
+    // it cannot walk a bit into a keepout it did not already cross.
+    // num_keepout_bits is set by the cull and left alone here, so the culled
+    // and starved paths stay distinguishable — which is what the guards assert.
+    //
+    // Measured on flow/antenna_culled_partner.buda: seg 1's bits go from
+    // [183.5,710] to [183.5,183.5], detailed WL 2922 -> 807, exactly matching
+    // the starved control.  On flow/rv/soc: 64 dangling findings -> 0.
+    if (result.num_keepout_bits > 0) adjust_bit_spans(bus_segs, result);
     charge("keepout_cull");
     // After the cull, so the metric covers exactly the bits the heal's
     // accept will compare: the misalignment jog across pair-align partners
