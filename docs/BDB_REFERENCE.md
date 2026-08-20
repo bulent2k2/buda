@@ -734,6 +734,14 @@ positions **by design** (a trunk may cross a block over-the-cell), which is
 why it is opt-in and not a free win — the block's own edges were never a
 promised replacement. Worth knowing when reading the flag's name.
 
+One component kind is absent from the test on the other side: a **die-port
+boundary component** (`PINS`, `is_port`) is synthesized *after* the
+`COMPONENTS` stream, so it is not among the extents containment is measured
+against. Immaterial in practice — a port is a pin-sized rect and no strap or
+blockage fits inside one — but recorded rather than left for someone to
+rediscover, since it is an asymmetry between "placed component" and "what the
+containment test sees" and nothing in the code says so.
+
 **What does not** — each counted in the unmodelled census rather than applied,
 so "not imported" is reported rather than silent:
 

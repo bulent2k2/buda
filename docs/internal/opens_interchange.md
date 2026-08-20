@@ -1132,6 +1132,28 @@ Every one of the 685 was defeated by the same three tokens. What landed:
    not here. Censusing these as `unread_wire` would bury the wires that
    really were lost under a 10:1 majority of things that are not wires.
 
+**Not represented, and NOT for that reason: a via placement's ENCLOSURE
+metal.**  A via draws metal on both layers it joins, and its extent lives in
+the DEF's `VIAS` section, which this reader does not resolve — so the 6781
+via placements in the goldens, and the **113,969** in `flow/ariane133`'s PDN,
+block nothing at all.  Filed apart from the three below because the reason is
+different in the way that decides whether to build it: those have no
+generator output to build against, while this one has 113,969 instances of
+its input sitting in the tree.  It is unbuilt, not evidence-starved.
+
+*What it costs today.* Every measurement of what a PDN blocks is a **lower
+bound on the obstruction** — stated as such in
+[specialnets_scope.md](specialnets_scope.md), where the caveat also records
+that this does NOT make the five-unit WL delta a bound in either direction
+(more obstruction can move the planner onto a different topology).  The grid
+conclusion is unaffected: more keepouts can only add loci.
+
+*Where to start:* parse `VIAS` into per-via-name rect sets in `def_io`, then
+give `read_specialnet`'s via-placement branch (`DefSpecialWire` with one
+point) those rects at its coordinate, translated per the via's own frame.
+The census key `via_placement` already counts exactly the population that
+would gain geometry, so the before/after is measurable on day one.
+
 **Still not represented, deliberately: a via MID-path, `RECT` and `POLYGON`
 special wires.** All three are legal DEF; none appears in any generator
 output available here, so an implementation would be built against no
@@ -1145,13 +1167,24 @@ The goldens are 100–200 µm parser vehicles, so this needed a real PDN on
 `flow/ariane133`: the pdngen run in
 [openroad_pdn_recipe.md](openroad_pdn_recipe.md) produced one, spliced into
 the DEF as `SPECIALNET:6673` keepouts (controlled — same netlist as baseline).
-The finding was not a QoR delta but a **grid explosion**: the 6673 straps are
-die-crossing and lie *outside* every block, so `set_keepout_loci outside`
-(item 12, a block-*interior* rule) cannot reach them, and their thin-axis
-edges took the Hanan grid ~6,327 → ~3.2M cells and stalled the planner (killed
-at 16 min) — item 12 re-opened in a new direction. **Fixed by
-`set_keepout_loci stripes`** (§8.1): a thin+long strap (aspect ≥ 8) keeps only
-its long-axis loci. With `outside stripes` the design routes in ~30 s at 0
+The finding was not a QoR delta but a **grid explosion**: `set_keepout_loci
+outside` (item 12, a block-*interior* rule) suppressed the loci of none of the
+6673, and their thin-axis edges took the Hanan grid ~6,327 → ~3.2M cells and
+stalled the planner (killed at 16 min) — item 12 re-opened in a new direction.
+**Fixed by `set_keepout_loci stripes`** (§8.1): a thin+long strap (aspect ≥ 8)
+keeps only its long-axis loci.
+
+*Why `outside` reached none of them was two reasons, not one* — corrected
+2026-08-19/20, after this paragraph first said simply "they are die-crossing
+and lie outside every block".  Only ONE of `pdn.tcl`'s three grids is
+die-spanning (`grid`: M1 followpins + M4/M7); `macro_r0` (M5+M6) and
+`macro_r90` (M6) are `-macro` grids drawn OVER the 133 SRAMs, which ARE
+blocks.  `outside` missed those for a different reason than geometry — the
+importer stamped every strap keepout `inside_block=false` unconditionally,
+where a macro `OBS` had its containment measured — and that half is now
+**fixed**: straps and `LAYER` blockages measure containment like `OBS`
+(#800).  `stripes` remains the remedy for the core grid, which no containment
+test can help with because those straps genuinely are outside everything. With `outside stripes` the design routes in ~30 s at 0
 overlaps and abstract WL within 5 units of the no-PDN baseline — so the
 enforced PDN keepouts, once they stop exploding the grid, barely perturb this
 design's route (its signal metal lives on M8–M10). Pinned by
