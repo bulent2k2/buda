@@ -42,7 +42,7 @@ namespace eval prompt {
         {show     ""             "open the main viewer on the routed design"}
         {save     ""             "write the .sql snapshot now (re-plans first if pins changed)"}
         {commands "?glob?"       "list the ENGINE's commands (optionally filtered)"}
-        {help     ""             "this list"}
+        {help     ""             "this list (also: ?)"}
         {done     ""             "re-plan if pins changed, save, and exit (also: exit, quit)"}
     }
     # The flow-text form of every pin/unpin (and committed edit
@@ -241,7 +241,7 @@ proc prompt::run {tag ps route bdb example {guard ""} {sidecar ""}} {
                     }
                     buda::save_bdb ${bdb}.sql
                 }
-                help    { prompt::_help $tag }
+                help - ? { prompt::_help $tag }
                 commands { prompt::_commands [lindex $line 1] }
                 default {
                     # Raw pass-through — but only for a command the ENGINE's

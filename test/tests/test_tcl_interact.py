@@ -1293,3 +1293,42 @@ def test_a_typed_pin_replan_also_commits_the_gui_preview(tmp_path):
     assert r.returncode == 0, r.stdout + r.stderr
     assert "PINNED" in r.stdout and "Z_HVH" in r.stdout
     assert "done -- 0 overlaps, 0 unplaced, 0 audit violations" in r.stdout
+
+
+def test_the_buda_suffix_is_inferred_and_question_mark_is_help(tmp_path):
+    # `btcl -r resume_flat` refused while resume_flat.buda sat right there —
+    # the launcher seam not applying the suffix rule the engine's own
+    # `source` has (cmd_source's .buda fallback).  Inference is the
+    # FALLBACK direction only: a bare name passes exactly when nothing is
+    # literally so named and `<name>.buda` exists, so a Tcl flow or a typo
+    # keeps the refusal.  And `?` at the prompt is `help`.
+    demo = _flat_demo(tmp_path)
+    r = _run([*_BTCL_CMD, "-b", demo / "resume_flat"], tmp_path,
+             stdin="?\ndone\n")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "-b arming checkpoint" in r.stdout
+    assert "this list (also: ?)" in r.stdout           # `?` reached help
+    assert "done -- 0 overlaps, 0 unplaced, 0 audit violations" in r.stdout
+
+    r = _run([*_BTCL_CMD, "-r", demo / "resume_flat"], tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "deepest recorded stage `dnuts`" in r.stdout
+    assert "done -- 0 overlaps, 0 unplaced, 0 audit violations" in r.stdout
+
+    # Neither spelling exists -> the wrapper's refusal, unchanged.
+    r = _run([*_BTCL_CMD, "-r", demo / "nothere"], tmp_path)
+    assert r.returncode == 2
+    assert "take a .buda flow" in r.stderr
+    # BOTH spellings exist -> refusal too: inference is the fallback
+    # direction only, and passing the bare name through would make the
+    # driver run the suffixless FILE as the flow (Codex #805 P1).
+    (demo / "resume_flat").write_text('puts "not a flow"\n')
+    r = _run([*_BTCL_CMD, "-r", demo / "resume_flat"], tmp_path)
+    assert r.returncode == 2
+    assert "take a .buda flow" in r.stderr
+    (demo / "resume_flat").unlink()
+    # A Tcl flow is still not an interact operand.
+    (demo / "x.tcl").write_text("puts hi\n")
+    r = _run([*_BTCL_CMD, "-i", demo / "x.tcl"], tmp_path)
+    assert r.returncode == 2
+    assert "take a .buda flow" in r.stderr
