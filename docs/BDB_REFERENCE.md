@@ -723,6 +723,17 @@ with a halo, so those straps are built to extend slightly past the macro they
 belong to, and the one that pokes out is the one whose edge is a useful locus
 — the same reason `OBS` has never been allowed to assume it.
 
+**What "inside a block" means here**, precisely: inside a **placed
+component** of the design. That is measured at import time, and which
+components a flow later projects into the `Floorplan` is not known then —
+`add_blocks_from_bdb <depth> [deepest|skip|error]` runs afterwards and may
+load only some depths. So on a flow that projects a subset, the flag is
+answered against a superset of the blocks. It does not make a suppressed
+locus unsound: `set_keepout_loci outside` removes reachable candidate
+positions **by design** (a trunk may cross a block over-the-cell), which is
+why it is opt-in and not a free win — the block's own edges were never a
+promised replacement. Worth knowing when reading the flag's name.
+
 **What does not** — each counted in the unmodelled census rather than applied,
 so "not imported" is reported rather than silent:
 
