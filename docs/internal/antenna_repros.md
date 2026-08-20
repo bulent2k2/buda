@@ -112,36 +112,49 @@ showed a bus wider than the block it crosses is not a placeable state, and entry
 whether a TRUE crossing should confer credit in the first place.
 
 **Measured** (`tools/scan_crossing_credit.py`), per placed bit-wire, by which
-kinds vouch for it:
+kinds vouch for it — counting only bits the audit ELIGIBLY examines:
 
 ```
-flow                          bits   sole=crossing  sole=tap  sole=via    mixed   none
-rnr/mix                      3,132               0       208       308    2,616      0
-rnr/mix2_topdown_refine      3,284               0       220       445    2,619      0
-big_data_test/big            8,672               0       268       112    8,292      0
-big_data_test/big2           8,308             192        48        72    7,996      0
-rv/soc_conv_div              2,014               0       302       254    1,458      0
-total                       25,501             192     1,046     1,205   23,058      0
+flow                          bits   eligible  sole=crossing  sole=tap  sole=via     mixed
+rnr/mix                      3,132      2,924              0         0       308     2,616
+rnr/mix2_topdown_refine      3,284      3,064              0         0       445     2,619
+big_data_test/big            8,672      8,208              0         0       112     8,096
+big_data_test/big2           8,308      7,872              0         0        72     7,800
+rv/soc_conv_div              2,014      1,302              0        44       254     1,004
+total                       25,501     23,461              0        44     1,205    22,212
 ```
 
-`sole=crossing` is the population that matters: bits where the credit is
-LOAD-BEARING, so removing it turns them into findings. It is **192**, all in one
-design — and all of them are **single-segment `ABUT` candidates**
-(`ABUT_H@y5825`, `ABUT_V@x625`, `ABUT_V@x3822`, `ABUT_V@x1770`).
+**`sole=crossing` is 0.** No bit in 23,461 eligible ones depends on a crossing
+to vouch for it, so on this corpus the question is **academic**: withdrawing
+crossing credit would change no verdict anywhere. That is not a defence of the
+rule — it is the statement that the rule is currently inert, which is a
+different and more useful thing to know.
 
-**That resolves it, and in favour of keeping the credit.** An ABUT candidate is
-the shared-edge rescue for two blocks meeting on a full edge: ONE segment
-straddling the boundary. It can have no via (there is no second segment) and no
-tap (it crosses the edge rather than landing on a face), so a crossing is the
-only thing that *could* vouch for it — not an accident of this corpus but
-inherent to the shape. And the credit is correct: each of the 192 is crossed by
-**exactly two** blocks, the abutting pair, and with both counted **lead and
-trail are 0.0** — the wire lies entirely within the two blocks it connects, with
-no metal beyond. Withdrawing crossing credit would manufacture 192 false
-ANTENNA findings and report nothing true.
+**The eligibility gate is the whole measurement, and the first version of this
+scan omitted it.** `detect_bit_antennas` returns immediately for a topology with
+fewer than two segments ("no junctions to be dangling FROM") and for a bundle
+with no emitted vias. A bit it skips is UNEXAMINED, not vouched-for, and no
+credit can be load-bearing there — withdrawing it could not produce a finding.
 
-What stays open is narrower than the question sounded: no design here exercises
-a crossing that vouches for a bit whose metal actually extends past it. If one
+Without that gate the scan reported **192** load-bearing bits and this section
+claimed crossing credit was preventing 192 false findings. Every one of those
+192 was a single-segment `ABUT` candidate — precisely the `n < 2` case, the bits
+the audit never looks at. The number was an artifact of the instrument and is
+**withdrawn** (Codex on #807). Note what it cost to catch: the wrong figure came
+with a plausible mechanism attached (an ABUT wire can have no via and no tap, so
+a crossing "must" be what vouches for it), and a story that good is exactly what
+stops a number being re-checked.
+
+**What is still true about those ABUT bits**, measured separately: each is
+crossed by *exactly two* blocks, the abutting pair, and with both counted lead
+and trail are **0.0** — the wire lies entirely inside the two blocks it
+connects. So there is nothing there to report even if the audit did look, which
+is consistent with the `n < 2` gate being right rather than a gap.
+
+What stays open is narrower than the question sounded, and narrower again after
+the correction: no design here exercises a crossing that vouches for an
+ELIGIBLE bit at all, let alone one whose metal extends past it. If one appears,
+`sole=crossing` is where it will show up.
 appears, `sole=crossing` is where it will show up.
 
 ---
@@ -678,7 +691,7 @@ healers would keep.
 |---|---|---|
 | `detect_antennas` (`ANTENNA`, structural) | attachment *positions* on the bus-level `ConnSeg` graph | a segment attached at ≥2 points whose individual BITS are not |
 | tap-overhang (#514) | a terminal piece over a block the segment **taps** | a piece past the last junction that taps nothing (entry 5a) — and 5b, where BOTH legs tap the block and neither piece is terminal, so no audit ever saw it and only the geometry scan did |
-| `detect_bit_antennas` (per bit) | per-bit vias + served taps + crossings the bit really makes | nothing known. Whether a *crossing* should vouch at all was entry 3's open question; measured, the credit is load-bearing for 192 bits, all single-segment ABUT candidates where it is the ONLY possible attachment and is correct (`tools/scan_crossing_credit.py`) |
+| `detect_bit_antennas` (per bit) | per-bit vias + served taps + crossings the bit really makes | nothing known. Whether a *crossing* should vouch at all was entry 3's open question; measured, crossing credit is load-bearing for **0** eligible bits, so the rule is currently inert (`tools/scan_crossing_credit.py`) |
 | `check_dnuts` block coverage | per-bit coverage of connected blocks | nothing here; it is the check that keeps the retractions honest |
 
 Note that entry 6 was **not** a checker gap — the per-bit audit reported it in

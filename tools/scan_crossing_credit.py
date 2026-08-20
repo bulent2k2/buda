@@ -39,11 +39,20 @@ those, the credit is load-bearing — remove it and they become findings.  If th
 set is empty the question is academic and can be recorded as such; if it is
 not, its members are what to look at.
 
-    sole=crossing   no via, no served tap, >=1 crossing   <- THE POPULATION
+    eligible        the audit actually examines this bit at all
+    sole=crossing   eligible, no via, no served tap, >=1 crossing  <- POPULATION
     sole=tap        no via, >=1 served tap, no crossing      (for scale)
     sole=via        >=1 via, nothing else                    (for scale)
     mixed           more than one kind
     none            nothing vouches — already reportable
+
+Only ELIGIBLE bits can be in the population.  `detect_bit_antennas` returns
+immediately for a topology with fewer than 2 segments ("no junctions to be
+dangling FROM") and for a bundle with no emitted vias, so a bit it skips is
+UNEXAMINED rather than vouched-for, and no credit can be load-bearing there.
+Omitting that gate is not a detail: the first version of this scan did, and
+every one of its 192 hits was a single-segment ABUT candidate — the n < 2 case
+exactly — so the whole result was an artifact (Codex on #807).
 
 Tap membership is asked of the ENGINE (`buda.seg_busterm_serves_bit`), not
 re-derived: its tapered/untapered fallbacks are subtle (a MISSING key serves
@@ -110,7 +119,9 @@ def classify(session):
         return out
 
     vias = set()
+    bundles_with_vias = set()
     for v in detailed.net_vias:
+        bundles_with_vias.add(v.bundle_id)
         for si in (v.from_seg, v.to_seg):
             if si >= 0:
                 vias.add((v.bundle_id, si, v.bit_index))
@@ -129,6 +140,27 @@ def classify(session):
         topo = topos.get(ns.bundle_id)
         if topo is None or ns.seg_idx >= len(topo.segments):
             continue
+        # ELIGIBILITY — mirror detect_bit_antennas' own two early returns, or
+        # the tally counts bits the audit never examines (Codex on #807).
+        #
+        #     if (n < 2) return;        no junctions to be dangling FROM
+        #     if (!has_vias) return;    junctions never materialized
+        #
+        # A bit the audit skips is neither vouched nor unvouched, it is
+        # UNEXAMINED — and crossing credit cannot be load-bearing for it,
+        # because withdrawing the credit could not produce a finding there.
+        # Counting them was the first version's error, and it manufactured the
+        # entire result: all 192 "sole=crossing" bits were single-segment ABUT
+        # candidates, i.e. exactly the n < 2 case.
+        if len(topo.segments) < 2:
+            out["ineligible(1 seg)"] += 1
+            out["bits"] += 1
+            continue
+        if ns.bundle_id not in bundles_with_vias:
+            out["ineligible(no vias)"] += 1
+            out["bits"] += 1
+            continue
+
         sg = topo.segments[ns.seg_idx]
         horiz = sg.start.y == sg.end.y
         fp = fps.get(ns.bundle_id) or session.fp
@@ -183,7 +215,8 @@ def classify(session):
 
 def main():
     flows = sys.argv[1:] or DEFAULT_FLOWS
-    cols = ["bits", "sole=crossing", "sole=tap", "sole=via", "mixed", "none"]
+    cols = ["bits", "eligible", "sole=crossing", "sole=tap", "sole=via",
+            "mixed", "none"]
     print(f"{'flow':<40}" + "".join(f"{c:>15}" for c in cols))
     print("-" * (40 + 15 * len(cols)))
     tot, failed = Counter(), []
@@ -195,6 +228,7 @@ def main():
             print(f"{name:<40}{'FAILED — not counted':>30}  ({e})")
             failed.append(name)
             continue
+        c["eligible"] = c["bits"] - c["ineligible(1 seg)"] - c["ineligible(no vias)"]
         print(f"{name:<40}" + "".join(f"{c[k]:>15,}" for k in cols))
         tot.update(c)
     print("-" * (40 + 15 * len(cols)))
