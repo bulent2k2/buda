@@ -27,10 +27,17 @@ here is asserted from reading the code alone — every measurement is from a run
 | 5 | a duplicated leg off one block | `flow/mst_shared_leg_prefix.buda` + `flow/mst_shared_leg_suffix.buda` | **5a+5b FIXED opt-in** (#708 + the mirror) · **5c reclassified + fixed opt-in** |
 | 6 | a culled partner strands a segment | `flow/antenna_culled_partner.buda` + `flow/antenna_starved_partner.buda` | **FIXED** — re-adjust after the cull |
 | 7 | `rv/soc` 1.25M units mid-flow | `flow/rv/soc.buda` | **FIXED with 6** |
+| 8 | a seat its partner cannot reach | `flow/keepout_blocks_partner_reach.buda` | **FIXED** — partner-reach seat pruning |
 
 Nothing here is open any more. Entries 6 and 7 were **one defect** — a
 DetailedNUTS pass-ordering problem, isolated to a 4-bit vehicle in entry 6 and
-fixed there. 5 is
+fixed there.  Entry 8 is entry 6's **sibling and its opposite**: the same
+geometry and the same cull, but the keepout is declared UP FRONT rather than
+after `run_planner`, so nothing is mis-ordered — the placer simply walks into
+it, because NUTS applies keepouts only on a segment's OWN layer and this one is
+on the partner's.  Fixed in NUTS (`prune_unreachable_partner_windows`) rather
+than in DNUTS, which is the difference between the two: entry 6 is about WHEN a
+pass runs, entry 8 about WHAT the placer is allowed to know. 5 is
 a *class* of three members sharing one geometry: 5a and 5b are two sides of one
 shape, both fixed behind one opt-in, and 5c turns out to be neither an antenna
 nor (mostly) a redundancy —

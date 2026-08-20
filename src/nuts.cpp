@@ -546,6 +546,13 @@ static void prune_unreachable_partner_windows(
     // another bundle's fixed occupancy): pruning against obstacles the cull does
     // not apply would make the two disagree about what is legal, and occupancy
     // is a placement, not a property of the design.
+    // Study knob (the BUDA_MST_LEG_TRIM / BUDA_TRUNK_STUB_TRIM pattern): skip
+    // the pass so a before/after can be measured on ONE binary, with no build
+    // difference between the two sides to argue about.  Not a supported
+    // option -- there is no `.buda` command for it, because a seat that dooms
+    // its partner is a defect and not a policy.
+    static const bool disabled = (getenv("BUDA_NO_REACH_PRUNE") != nullptr);
+    if (disabled) return;
     const auto& zones = floorplan.get_keepout_zones();
     if (zones.empty()) return;        // the common case: nothing declared
 

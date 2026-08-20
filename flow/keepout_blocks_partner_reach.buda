@@ -1,61 +1,66 @@
 # ============================================================
 # flow/keepout_blocks_partner_reach.buda
 #
-# A trunk placed where its PARTNER cannot reach it.  THIS IS AN
-# OPEN DEFECT.  Sibling of flow/antenna_culled_partner.buda —
-# same geometry, same cull, DIFFERENT cause:
+# A trunk placed where its PARTNER cannot reach it.  The
+# REGRESSION VEHICLE for prune_unreachable_partner_windows
+# (nuts.cpp) — it was an open defect when it was written, and
+# the fix landed against it.  Sibling of
+# flow/antenna_culled_partner.buda: same geometry, same cull,
+# DIFFERENT cause —
 #
 #   antenna_culled_partner  keepout declared AFTER run_planner,
 #                           so the pass ORDER strands metal
+#                           (STILL OPEN)
 #   this vehicle            keepout declared UP FRONT, and the
-#                           PLACER still walks into it
+#                           PLACER walked into it  (FIXED)
 #
 # NUTS places each segment against keepouts ON ITS OWN LAYER.
 # The trunk here is H on M4; the keepout is on M5.  So the trunk
-# sees no obstacle, takes the middle of its window, and the V
-# stub that has to climb from it into `rcv` is left with no
-# legal position at all.
+# saw no obstacle, took the middle of its window, and the V stub
+# that has to climb from it into `rcv` was left with no legal
+# position at all.
 #
-# What the engine itself reports about that window:
+# What the engine reports about that window:
 #
 #   seg1  H M4  along[190,710] perp=525  slide=[220..580]=360
 #         pull=none(0)  opt=[200..600]  anchors=2/2
 #
 # `pull=none(0)` and a flat optimum spanning the whole window:
 # moving the trunk trades one V stub's length for the other's,
-# so EVERY position costs the same wirelength.  The placer takes
+# so EVERY position costs the same wirelength.  The placer took
 # the centre — exactly 400 — and 400 is inside the keepout's
-# y-band (380..450).  Only perp >= 450 keeps the partner clear,
-# so about a third of the window is legal and the default lands
-# in the other two thirds.  The candidate's own nominal (525) is
-# legal; the placer moves off it for no gain.
+# y-band (380..450).  Only perp >= 450 keeps the partner clear.
 #
-# MEASURED (this vehicle, three ways):
+# MEASURED (this vehicle, four ways):
 #
-#   as written, no healer      4 bits unplaced, 4 violations
-#   + ripup_reroute            clean, detailed WL 4297
-#   trunk slid to [460,580]    clean, detailed WL 3715
+#   before the fix, no healer   4 bits unplaced, 4 violations
+#   before the fix + ripup      clean, detailed WL 4297
+#   trunk hand-slid to [460,580] clean, detailed WL 3715
+#   WITH the fix, no healer     clean, detailed WL 3715
 #
-# The healer rescues it in one move — by RE-PINNING to a detour
+# So the healer did rescue it — by RE-PINNING to a detour
 # topology (V at perp=20, around the outside), not by nudging
 # the trunk.  That is +15.7% detailed WL to buy back what a
-# 60-unit slide inside a WL-FLAT window would have given free.
+# 50-unit slide inside a WL-FLAT window gives for nothing, and
+# it is the expensive answer the prune exists to avoid needing.
 #
-# The engine is not silent.  run_nuts says:
+# The prune narrows the seat window to [450..544] (544, not
+# 580, because apply_interval_constraints' trunk margin already
+# took 10% of the span) and NUTS then seats the trunk clear on
+# its own.  It is conservative by construction: a zone only
+# dooms a partner when the partner cannot SLIDE CLEAR of it, so
+# the pass removes provably-dead positions or removes nothing.
 #
-#   junction infeasible: bundle 1 seg 0 cannot reach seg 1
-#   WARNING: 1 segment(s) placed ON a keepout (window exhausted)
-#
-# So the information exists at placement time.  What is missing
-# is using it: nothing consults a partner's keepouts when
-# choosing among positions the segment's own layer allows.
-#
-# The vehicle ends DIRTY on purpose (4 unplaced bits): that IS
-# the defect.  Do not add it to the QoR corpus.
+# The vehicle now ends CLEAN, and that is the assertion.  Its
+# guard is test/tests/test_partner_reach_prune.py, which pins
+# the BOUNDARY in both directions — a guard asserting only
+# "clean" would pass just as well if the prune threw the whole
+# window away.  Do not add it to the QoR corpus (the corpus
+# measures routing quality across designs; this measures one
+# boundary, and the test is where that belongs).
 #
 # Run:  bin/buda flow/keepout_blocks_partner_reach.buda --no-viz
 # ============================================================
-
 def_layer 4 M4 H TOP 33.33
 def_layer 5 M5 V TOP 33.33
 def_track_pattern 4 0  POWER 2 1  (SIGNAL 1 0.5)x4  GROUND 2 1  (SIGNAL 1 0.5)x4
