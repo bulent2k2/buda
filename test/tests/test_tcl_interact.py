@@ -1319,6 +1319,14 @@ def test_the_buda_suffix_is_inferred_and_question_mark_is_help(tmp_path):
     r = _run([*_BTCL_CMD, "-r", demo / "nothere"], tmp_path)
     assert r.returncode == 2
     assert "take a .buda flow" in r.stderr
+    # BOTH spellings exist -> refusal too: inference is the fallback
+    # direction only, and passing the bare name through would make the
+    # driver run the suffixless FILE as the flow (Codex #805 P1).
+    (demo / "resume_flat").write_text('puts "not a flow"\n')
+    r = _run([*_BTCL_CMD, "-r", demo / "resume_flat"], tmp_path)
+    assert r.returncode == 2
+    assert "take a .buda flow" in r.stderr
+    (demo / "resume_flat").unlink()
     # A Tcl flow is still not an interact operand.
     (demo / "x.tcl").write_text("puts hi\n")
     r = _run([*_BTCL_CMD, "-i", demo / "x.tcl"], tmp_path)
