@@ -710,8 +710,29 @@ feeds DetailedNUTS).
 | DEF construct | one keepout per | carries |
 |---|---|---|
 | macro `OBS` (from the component's LEF `MACRO`, for a **placed** instance — see below) | rect | `inside_block` — whether the rect lies within that instance's placed extent. **Measured, not assumed**: LEF does not require an `OBS` rect to sit inside `SIZE`, and one that pokes out is exactly the one whose edge is a useful Hanan locus. |
-| `BLOCKAGES` … `LAYER <layer>` | rect | — |
-| `SPECIALNETS` routed metal (power straps) | polyline segment | the strap's **net**. This is what lets the NDR rail predicates tell a `VDD`/`GND` rail from anonymous obstruction; a LEF states a wire's width and never says which tracks the power grid takes, so on an imported design the rails are in `SPECIALNETS` and nowhere else. |
+| `BLOCKAGES` … `LAYER <layer>` | rect | `inside_block` — measured, as above |
+| `SPECIALNETS` routed metal (power straps) | polyline segment | `inside_block` — measured, as above — and the strap's **net**. The net is what lets the NDR rail predicates tell a `VDD`/`GND` rail from anonymous obstruction; a LEF states a wire's width and never says which tracks the power grid takes, so on an imported design the rails are in `SPECIALNETS` and nowhere else. |
+
+`inside_block` is **measured for all three**, against the placed extents of
+the design's own components. It was once hardcoded `false` for everything but
+`OBS`, which made `set_keepout_loci outside` answer its own question from the
+flag rather than from the geometry — so a PDN's macro-local straps, drawn
+*over* the macros by pdngen's `-macro` grids, had the loci of none of them
+suppressed. Measuring it is not optional cleanliness: a macro grid is declared
+with a halo, so those straps are built to extend slightly past the macro they
+belong to, and the one that pokes out is the one whose edge is a useful locus
+— the same reason `OBS` has never been allowed to assume it.
+
+**What "inside a block" means here**, precisely: inside a **placed
+component** of the design. That is measured at import time, and which
+components a flow later projects into the `Floorplan` is not known then —
+`add_blocks_from_bdb <depth> [deepest|skip|error]` runs afterwards and may
+load only some depths. So on a flow that projects a subset, the flag is
+answered against a superset of the blocks. It does not make a suppressed
+locus unsound: `set_keepout_loci outside` removes reachable candidate
+positions **by design** (a trunk may cross a block over-the-cell), which is
+why it is opt-in and not a free win — the block's own edges were never a
+promised replacement. Worth knowing when reading the flag's name.
 
 **What does not** — each counted in the unmodelled census rather than applied,
 so "not imported" is reported rather than silent:
@@ -721,6 +742,7 @@ so "not imported" is reported rather than silent:
 | component `+ HALO` | `COMPONENTS.HALO` | A halo keeps other **cells** away — placement information, carrying no layer. Mapping it onto every routing layer forbids routing the DEF left routable. `+ ROUTEHALO` is the routing construct, and that is the one BUDA ignores; the two were once the wrong way round (recorded, with the measured 195 → 0 track overlaps on `flow/ariane133`, in [opens_interchange.md](internal/opens_interchange.md) item 13). |
 | `BLOCKAGES … + PLACEMENT` | `BLOCKAGES.PLACEMENT` | Says where **cells** may go, and carries no layer. |
 | `BLOCKAGES … + PARTIAL <density>` | `BLOCKAGES.PARTIAL` | A density **cap**, not a prohibition. |
+| macro `OBS` of an **`UNPLACED`** instance | `COMPONENTS.OBS_UNPLACED` | The obstruction is nowhere, so nothing can be emitted. Counted in **rects** — the quantity lost — because one `fakeram45_256x16` carries 99 of them and an instance count would understate it by two orders of magnitude. |
 
 The census is reported as `BUDA-1603` (`[DEF] unmodelled construct(s): …`).
 
@@ -730,19 +752,23 @@ and names the nets when straps were read — for example
 **rectangles**, not nets or straps: a polyline strap of N points becomes N−1
 rectangles.
 
-**Four ways obstruction does not arrive**, and two of them are silent.
+**Four ways obstruction does not arrive**, and none of them is silent.
 
 *Before a keepout is ever formed* — these apply to macro `OBS`, so the table
 above is what happens for a **placed** instance whose cell is in the LEF:
 
 - The instance is **`UNPLACED`**. Its `OBS` is nowhere, so it is skipped —
-  and, unlike the halo beside it (counted for every halo, placed or not), it
-  is **not** censused. A floorplan DEF that leaves instances unplaced blocks
-  less metal than its macros describe, with nothing in the report saying so.
+  and censused as `COMPONENTS.OBS_UNPLACED`, for the same reason the halo
+  beside it is counted for every halo, placed or not. This was silent until
+  2026-08-19: a floorplan DEF that leaves instances unplaced blocked less
+  metal than its macros describe, with nothing in the report saying so.
 - The cell has **no LEF `MACRO`**, so there is no `OBS` to read. Reachable
   only under `allow_missing_footprints`, since a missing footprint is
-  otherwise a hard error — worth knowing as a second cost of that option:
-  you lose the cell's obstruction along with its size.
+  otherwise a hard error. The waiver names the cells (`BUDA-1606`) and now
+  states this second cost explicitly: their instances block no metal at all.
+  The `SIZE` is the half everyone expects to lose; the obstruction is the
+  half that bites later, since a router planning over metal it cannot see
+  reads as a clean result.
 
 *When the keepout is installed* — these are reported:
 

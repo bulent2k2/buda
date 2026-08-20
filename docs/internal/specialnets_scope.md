@@ -204,16 +204,27 @@ signal metal lives on M8–M10.
 The core grid's straps genuinely lie outside every block, so for those the
 reason is geometric and `outside` is the wrong instrument by construction.
 The two `-macro` grids are drawn OVER the 133 SRAMs, which ARE blocks — and
-`outside` misses those for a different reason: the importer builds every
+`outside` missed those for a different reason: the importer built every
 strap keepout with `inside_block=false` **unconditionally**
 (`src/bdb.cpp`, the `special_wires` loop), where a macro `OBS` has its
-containment MEASURED against the instance's placed extent.  So the flag says
-"outside" whatever the geometry says.
+containment MEASURED against the instance's placed extent.  So the flag said
+"outside" whatever the geometry said.
 
-That matters for where a follow-up goes.  `stripes` is the remedy for the
+**FIXED 2026-08-19.**  Straps and `LAYER` blockages now have containment
+measured exactly as `OBS` has — against the placed extents of the design's
+own components, indexed on the lower-left corner so a gate-level DEF's
+components x a PDN's stripes is not a quadratic scan.  `BLOCKAGES` is
+included because leaving one hardcoded `false` beside a measured one would
+recreate the inconsistency.  Byte-identical on the tree: the only flows
+declaring `set_keepout_loci` are `flow/ariane133`'s, and `demo/ariane/
+ariane.def` carries neither strap geometry nor `BLOCKAGES`, while the two
+DEFs that do (`flow/def/chip.def`, `flow/rv/soc.def`) run under the default
+`all`, where `inside_block` is not consulted.
+
+That mattered for where the follow-up went.  `stripes` is the remedy for the
 core grid and is what made this design routable; for the macro-local straps
-the honest fix is to measure containment as `OBS` already does — and it must
-be MEASURED rather than inferred from provenance, because both macro grids
+the fix was to measure containment as `OBS` already does — and it had to be
+MEASURED rather than inferred from provenance, because both macro grids
 are declared with `-halo {0.1 0.1 0.1 0.1}`, so a macro-grid strap is
 built to extend slightly PAST the macro it belongs to.  That is the same
 shape as LEF not requiring an `OBS` rect to sit inside `SIZE`: the rect that

@@ -25,6 +25,7 @@
 #include <sstream>
 #include <regex>
 #include <algorithm>
+#include <limits>
 #include <cmath>
 #include <map>
 #include <unordered_map>
@@ -1556,6 +1557,22 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
     // keepouts (see the COMPONENTS sink below); folded into the unmodelled
     // census beside BLOCKAGES.PLACEMENT, which it is the same kind of thing as.
     int halo_unmodelled = 0;
+    // Macro OBS rects belonging to an UNPLACED instance.  Its obstruction is
+    // nowhere, so there is nothing to emit — but the HALO above is counted
+    // for every halo, placed or not, on the principle that the census answers
+    // "what did the file say that we do not model?", and an unplaced macro's
+    // OBS answers it just as much.  Skipping it in SILENCE meant a floorplan
+    // DEF with unplaced macros blocked less metal than its macros describe
+    // with nothing in the report saying so.  Counted in RECTS, because that
+    // is the quantity of obstruction lost: one fakeram45_256x16 carries 99.
+    int obs_unplaced_rects = 0;
+    // Placed component extents in layout units, accumulated as COMPONENTS
+    // streams past, for the containment tests below.  The components cannot
+    // be walked a second time (item 5's streaming rule is what removed the
+    // BLOCKAGES section's second walk), so what a later section needs of them
+    // has to be kept here.
+    struct PlacedExtent { double x1, y1, x2, y2; };
+    std::vector<PlacedExtent> placed_extents;
     bool units_latched = false;
     auto latch_units = [&](const DefDesign& d) {
         if (units_latched) return;
@@ -1618,6 +1635,7 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
         sqlite3_step(s_comp); sqlite3_reset(s_comp);
         ++stats.imported_components;
         if (c.placed) ++stats.placed_components;
+        if (has_pos) placed_extents.push_back({x1, y1, x1 + w, y1 + h});
 
         // HALO (Phase 3c).  This block used to read "a keep-clear margin the
         // placer honoured and the router must too", and emitted a keepout
@@ -1668,8 +1686,14 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
         // extent is [0, w] x [0, h] after rotation, with the lower-left at
         // the DEF placement point (the convention the component bbox above
         // already uses), so the transform maps the macro's own box onto it.
-        const LefMacro* mac = has_pos ? lef.find_macro(c.cell) : nullptr;
-        if (mac && !mac->obs.empty()) {
+        const LefMacro* mac = lef.find_macro(c.cell);
+        if (mac && !mac->obs.empty() && !has_pos) {
+            // Nowhere to put it, so nothing is emitted — but it IS counted,
+            // for the reason the halo above is (see obs_unplaced_rects).
+            for (const auto& o : mac->obs)
+                obs_unplaced_rects += (int)o.rects.size();
+        }
+        if (mac && !mac->obs.empty() && has_pos) {
             const double mw = um_to_lu(mac->w), mh = um_to_lu(mac->h);
             const std::string o8 = c.orient.empty() ? "N" : c.orient;
             auto xform = [&](double x, double y, double& ox, double& oy) {
@@ -1976,16 +2000,89 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
     //   * `+ PARTIAL <density>` is a DENSITY CAP, not a prohibition.  A hard
     //     keepout over-blocks it in the same direction, so it is recorded
     //     rather than approximated.
+    // ── does this obstruction lie wholly inside a placed component? ──────
+    // A macro OBS rect has this MEASURED against its own instance; every
+    // other keepout the importer builds used to hardcode `false`, so
+    // `set_keepout_loci outside` — which asks exactly this question — was
+    // answered by the flag rather than by the geometry.  On a real PDN that
+    // is a whole class of straps: pdngen's `-macro` grids are drawn OVER the
+    // macros, and `outside` suppressed the loci of none of them
+    // (specialnets_scope.md).  Measured for the same reason OBS is, and with
+    // the same lesson behind it: a macro grid is declared with a halo, so
+    // those straps are BUILT to extend a little past the macro they belong
+    // to, and the one that pokes out is the one whose edge IS a useful
+    // Hanan locus.  Provenance cannot answer it; only geometry can.
+    //
+    // INDEXED rather than scanned.  A gate-level DEF has tens of thousands of
+    // placed components and a real PDN tens of thousands of stripes, and that
+    // product is the shape that already cost this importer once (net
+    // resolution, 7.97s -> 0.58s).  A component containing a rect necessarily
+    // contains that rect's LOWER-LEFT corner, so bucketing components by the
+    // cells they overlap and probing only the corner's bucket is EXACT, not
+    // approximate — and the final test is the full containment test, so
+    // clamping an out-of-range probe into the grid cannot yield a false
+    // positive either.
+    // Sized to the design rather than fixed: sqrt(N) keeps the buckets ~O(1)
+    // while a small DEF does not pay for a large empty grid on every import.
+    const int KGRID = placed_extents.empty() ? 1 : std::min(128,
+        std::max(1, int(std::sqrt(double(placed_extents.size())) + 0.5)));
+    std::vector<std::vector<int>> kgrid;
+    double kgx0 = 0, kgy0 = 0, kgsx = 1, kgsy = 1;
+    if (!placed_extents.empty()) {
+        double gx1 = -std::numeric_limits<double>::max();
+        double gy1 = -std::numeric_limits<double>::max();
+        kgx0 = kgy0 = std::numeric_limits<double>::max();
+        for (const auto& e : placed_extents) {
+            kgx0 = std::min(kgx0, e.x1); kgy0 = std::min(kgy0, e.y1);
+            gx1  = std::max(gx1,  e.x2); gy1  = std::max(gy1,  e.y2);
+        }
+        kgsx = (gx1 - kgx0) / KGRID; kgsy = (gy1 - kgy0) / KGRID;
+        if (!(kgsx > 0)) kgsx = 1;            // a single zero-area component
+        if (!(kgsy > 0)) kgsy = 1;
+        kgrid.assign(size_t(KGRID) * KGRID, {});
+        for (size_t i = 0; i < placed_extents.size(); ++i) {
+            const auto& e = placed_extents[i];
+            auto cell = [KGRID](double v, double lo, double step) {
+                const double t = (v - lo) / step;
+                return t < 0 ? 0 : (t > KGRID - 1 ? KGRID - 1 : int(t));
+            };
+            const int cx0 = cell(e.x1, kgx0, kgsx), cx1 = cell(e.x2, kgx0, kgsx);
+            const int cy0 = cell(e.y1, kgy0, kgsy), cy1 = cell(e.y2, kgy0, kgsy);
+            for (int cy = cy0; cy <= cy1; ++cy)
+                for (int cx = cx0; cx <= cx1; ++cx)
+                    kgrid[size_t(cy) * KGRID + cx].push_back(int(i));
+        }
+    }
+    auto inside_a_block = [&](double ax1, double ay1, double ax2, double ay2) {
+        if (kgrid.empty()) return false;
+        auto cell = [KGRID](double v, double lo, double step) {
+            const double t = (v - lo) / step;
+            return t < 0 ? 0 : (t > KGRID - 1 ? KGRID - 1 : int(t));
+        };
+        const int cx = cell(ax1, kgx0, kgsx), cy = cell(ay1, kgy0, kgsy);
+        for (int idx : kgrid[size_t(cy) * KGRID + cx]) {
+            const auto& e = placed_extents[size_t(idx)];
+            if (ax1 >= e.x1 && ay1 >= e.y1 && ax2 <= e.x2 && ay2 <= e.y2)
+                return true;
+        }
+        return false;
+    };
+
     int skipped_placement = 0, skipped_partial = 0;
     for (const auto& b : def.blockages) {
         if (b.is_placement) { skipped_placement += (int)b.rects.size(); continue; }
         if (b.has_density)  { skipped_partial   += (int)b.rects.size(); continue; }
-        for (const auto& r : b.rects)
+        for (const auto& r : b.rects) {
+            const double bx1 = dbu_to_lu(r.x1), by1 = dbu_to_lu(r.y1);
+            const double bx2 = dbu_to_lu(r.x2), by2 = dbu_to_lu(r.y2);
             // Same as the OBS case: a LAYER blockage has no net behind it.
-            stats.keepouts.push_back({b.layer, dbu_to_lu(r.x1), dbu_to_lu(r.y1),
-                                      dbu_to_lu(r.x2), dbu_to_lu(r.y2),
-                                      "BLOCKAGES", /*inside_block=*/false,
+            // Containment MEASURED, for the reason above — a blockage drawn
+            // over a macro is as much inside a block as that macro's own OBS,
+            // and answering it from provenance is what this fixes.
+            stats.keepouts.push_back({b.layer, bx1, by1, bx2, by2, "BLOCKAGES",
+                                      inside_a_block(bx1, by1, bx2, by2),
                                       /*net=*/{}});
+        }
     }
     // (both counts are folded into the unmodelled census below.  Macro OBS
     // keepouts are collected in the COMPONENTS pass above — item 5's first
@@ -2003,10 +2100,12 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
             // rail predicates need in order to see imported power geometry
             // the way they already see a track pattern's rails
             // (specialnets_scope.md §5(a), and (b) is what consumes it).
-            stats.keepouts.push_back({w.layer,
-                                      std::min(ax,bx)-hw, std::min(ay,by)-hw,
-                                      std::max(ax,bx)+hw, std::max(ay,by)+hw,
-                                      "SPECIALNET " + w.net, false, w.net});
+            const double sx1 = std::min(ax,bx)-hw, sy1 = std::min(ay,by)-hw;
+            const double sx2 = std::max(ax,bx)+hw, sy2 = std::max(ay,by)+hw;
+            stats.keepouts.push_back({w.layer, sx1, sy1, sx2, sy2,
+                                      "SPECIALNET " + w.net,
+                                      inside_a_block(sx1, sy1, sx2, sy2),
+                                      w.net});
         }
     }
 
@@ -2056,6 +2155,10 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
         // A placement halo is placement information we do not model, exactly
         // like the two above — not a routing keepout we chose to drop.
         if (halo_unmodelled)   counts["COMPONENTS.HALO"]     += halo_unmodelled;
+        // Obstruction an UNPLACED instance would have contributed.  Same
+        // reason as the halo: read from the file, not modelled, so it is
+        // said rather than skipped in silence.  In RECTS.
+        if (obs_unplaced_rects) counts["COMPONENTS.OBS_UNPLACED"] += obs_unplaced_rects;
         std::vector<std::pair<std::string,int>> rows(counts.begin(), counts.end());
         std::sort(rows.begin(), rows.end(), [](const auto& a, const auto& b) {
             if (a.second != b.second) return a.second > b.second;
