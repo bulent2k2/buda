@@ -111,13 +111,18 @@ def _explorer(sess):
 
     It is the view that looked CORRECT on the DBU-scale design while the main
     window's detailed view was drawing canvas-wide bands, so it is the natural
-    control -- and a control is worth pinning, because "it happened to be
-    right" and "it is kept right" are different claims.  Its widths survive
-    the unit scale by SATURATION rather than by being scale-free: `viz_lw` is
-    `min(3.0 + log2(1 + width) * 1.5, 4.5)`, and both scales land on the 4.5
-    cap.  That is a real property and a fragile one -- raise or drop the cap
-    and the layout-unit `width` underneath is exposed again -- which is
-    exactly what a guard is for.
+    control.
+
+    Its widths look as though they survive by SATURATION -- `viz_lw` is
+    `min(3.0 + log2(1 + width) * 1.5, 4.5)` and both scales land on the cap --
+    but that reading is WRONG, and it is worth recording as wrong because it
+    is the plausible one.  Measured: raising the cap to 100000 leaves both
+    scales identical.  The cap is not what saves it; `wrapper.input.width` is
+    unit-independent to begin with (12.0 at both scales), which is what
+    `test_a_points_width_input_stays_unit_independent` pins.
+
+    So this helper feeds a control, not a bug-finder.  See that test and the
+    explorer test below for which of the two can actually fail.
     """
     start = next((i for i, w in enumerate(sess.bundles) if w.input.candidates), 0)
     ex = buda_viz.TopologyExplorer(sess.fp, sess.bundles,
