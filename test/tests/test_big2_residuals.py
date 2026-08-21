@@ -159,6 +159,11 @@ def test_low_layer_abutment_stub_dnuts_open_repro(tmp_path, monkeypatch):
 
     with contextlib.redirect_stdout(io.StringIO()):
         s.do_command("run_nuts")
+        # The final cull heal now engages on ADMISSION strands too (its
+        # entry gate was culled-bits-only), and this pinned shape is
+        # exactly that class — hold the heal off so the un-healed
+        # mechanism stays observable, which is this repro's subject.
+        s._final_cull_heal_in_dnuts = False
         s.do_command("run_detailed_nuts")
 
     # Abstract NUTS thinks everything is fine...
@@ -170,6 +175,16 @@ def test_low_layer_abutment_stub_dnuts_open_repro(tmp_path, monkeypatch):
     open_bids = {w.input.original_bundle.id for w in s.bundles}
     placed_bids = {n.bundle_id for n in s.detailed_result.net_segments}
     assert not (open_bids & placed_bids), "no bit of either bus should place"
+
+    # ...and the heal, left ON, clears exactly this shape: a 0-track seat
+    # is measured-stranded with a span-pool shortfall, so the escalation
+    # moves the stubs to TOP under the componentwise accept.
+    with contextlib.redirect_stdout(io.StringIO()):
+        s._final_cull_heal_in_dnuts = True
+        healed = s._final_cull_heal()
+    assert healed >= 1
+    assert s.detailed_result.num_unplaced == 0
+    assert s.nuts_result.num_overlaps == 0
 
 
 @pytest.mark.mid
