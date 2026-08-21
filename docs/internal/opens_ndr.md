@@ -8,7 +8,9 @@ command/GUI surface), [`ndr_architecture.md`](ndr_architecture.md)
 (implementers, as-built) — and the user-facing command reference is
 [`../script_reference/ndr.md`](../script_reference/ndr.md).
 
-Snapshot index — last verified against `main`: **2026-08-14**, after the
+Snapshot index — last verified against `main`: **2026-08-21**, after §2's
+unused-SCOPE residual was closed (BUDA-1915 / BUDA-1916, so a `set_ndr`
+prefix that governs nothing now says so), after the
 no-op verdict below acquired a voice (BUDA-1913 / BUDA-1914 — the residual it
 reports is unchanged, only the silence around it is gone), and after R1
 (absolute width/spacing) landed in full — declaration, persistence AND
@@ -21,9 +23,27 @@ working implementation and a vehicle, and the feature is usable end to end —
 and R6 each carry a residual limit below now that their headline gaps are
 closed. What follows is that residue.
 
-**None of these is blocking.** Each is a bounded piece of work waiting for a
-design that needs it, and the current behaviour in each case is conservative
-(costs capacity, never produces an illegal route) or loudly reported.
+**None of these is blocking.** Each waits for a design that needs it, and the
+current behaviour in each case is conservative (costs capacity, never
+produces an illegal route) or loudly reported.  They are **not** equally
+bounded, though, which is what the ordering below is for.
+
+### What is left, in the order it is worth doing (2026-08-21)
+
+Ranked by what the work actually costs, which is not the order the sections
+appear in and — for §1 — not what its one-line residual suggests.
+
+| | open | cost | gate |
+|---|---|---|---|
+| 1 | ~~§2's unused-SCOPE report~~ | small | **DONE 2026-08-20** — BUDA-1915/1916 |
+| 2 | §1's shield bonding past `layer ± 1` | **medium-high**, and see below | a design with a rail two layers out |
+| 3 | §3's per-net mixed-rule bundles (R8) | large | a design that demonstrably needs it |
+
+The gap between how §1's residual READS and what it costs is the reason this
+table exists.  "Adjacent layers only … out of scope here" reads like a
+bounded extension — raise a limit from ±1 to ±2 — and it is not one.  The
+detail is under §1; the short form is that it moves bonding out of the
+emission pass it deliberately lives in and into a placement decision.
 
 ---
 
@@ -72,7 +92,41 @@ and a stored 1 still means what it always meant.
   which needs the intermediate layer's own track reserved — a placement
   decision, not an output one, and out of scope here.
 
-*Where to start:* `emit_shield_bond_vias` in `detailed_nuts.cpp`.
+**What lifting it actually costs** (2026-08-21, written down because the
+sentence above reads like a bounded extension and is not one).
+
+The clause "a placement decision, not an output one" is the whole of it, and
+it is a CATEGORY crossing rather than a loop bound. Bonding is deliberately
+an **emission** pass today: it runs inside the engine's via pass, it is
+idempotent and free-standing, and the bottom-up path RE-DERIVES each copied
+instance's straps from its own coordinates rather than transforming the
+reference's — because copy eligibility is proved on the ROUTED layer's track
+pools, which says nothing about the adjacent layer's rails, so a sibling
+under a different override there must get the honest answer (possibly
+`NDR_BOND`). None of that machinery consumes tracks. Reserving one on an
+intermediate layer puts bonding inside DNUTS admission and the reservation
+bookkeeping — which is the machinery that decides whether bits strand.
+
+So it is not "extend `layer ± 1` to `± 2`". It is three questions that have
+to be answered first, and each can move a route:
+
+1. Does a strap **consume a signal track** on the intermediate layer, or
+   ride one already spoken for? A reservation competes with the bits.
+2. What happens when it **cannot get one**? Today's `NDR_BOND` says the
+   shield is floating metal and the design continues; a placement-stage
+   refusal is a different contract.
+3. Does the reservation change what the **seat census and the cull-risk
+   predictor** see? Both count real supply in a placed window, so a
+   consumed track is not invisible to them.
+
+Consequence for sequencing: it can move routing outcomes on **any** design
+declaring `bond`, so it wants a real case behind it rather than a vehicle
+authored to justify it. The one thing it is NOT is a quick win, and the
+residual's phrasing invites reading it as one.
+
+*Where to start:* `emit_shield_bond_vias` in `detailed_nuts.cpp` — but read
+the three questions above before that file, because the answer to (1)
+decides whether the work belongs there at all.
 
 ## 2. Absolute (µm) width and spacing values (R1 — LANDED)
 
