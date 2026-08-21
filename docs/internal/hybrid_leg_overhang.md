@@ -1,6 +1,6 @@
 # A TRUNK+MST leg that overhangs a trunk stub
 
-**Status:** analysis only — nothing changed in the engine.
+**Status:** option (b) LANDED behind `set_placed_endpoints` (default off, measured 3 better / 0 worse). Options (a) and the defect-1 residue are still open.
 **Repro:** `flow/big_data_test/bigHalf_sel_bundle_only.buda` (bundle 67 / `bus_005`,
 candidate 18 `TRUNK_H+MST@y1700`), with `bigHalf_sel_bundle_trimmed.buda` as its
 control — same design, same topology, `seg2` cut back to its last attachment:
@@ -18,7 +18,8 @@ python3 tools/show_stale_endpoints.py \
 segment and flags each junction whose label disagrees with the geometry; the
 violation counts it quotes are `check_dnuts`'s own, so it cannot report a
 different number from the flow.
-**Date:** 2026-08-20.
+
+**Date:** 2026-08-20; option (b) built and measured 2026-08-21.
 
 ## The short version
 
@@ -275,3 +276,83 @@ estimate wrong — happens long after selection. Any candidate whose realized
 length differs from its nominal one is mis-ranked by the same mechanism; that is
 the territory `kWLSpread` already occupies, and the overhang is a case where the
 gap is not a realization risk but a certainty.
+
+---
+
+## As built (2026-08-21): `set_placed_endpoints`
+
+Option (b) landed, default **off**, as a `.buda` token
+(`set_placed_endpoints [on|off]`) with `BUDA_DNUTS_PLACED_ENDPOINTS=1` as the
+corpus-sweep seed. The change is 20 lines inside `make_bus_segments`, the one
+stage-4 → stage-9 handoff.
+
+**Only the stage-9 descriptor moves.** `BusSegmentConn::is_endpoint` is rebuilt
+on every call; `ConnSeg::is_endpoint` — cached on the `Topology`, shared with
+generation, the planner and the topo-stage audit — stays nominal. The struct
+already mixed the two: `bs.span_lo/span_hi` are copied from the placed
+`TrackSegment` twenty lines above the loop that copied the nominal label.
+
+A **module flag**, not a `make_bus_segments` parameter: that function is called
+from the CLI, from `trial_sweep`, and from every healer re-solve, so a
+parameter would let one caller drift and make a trial's verdict disagree with
+the commit's.
+
+### Promote only — the half that was measured and rejected
+
+The first prototype was symmetric: promote mid→endpoint *and* demote
+endpoint→mid when placement moved the span end past a nominal endpoint. That
+was added for tidiness, not from evidence, and it is wrong. Clearing
+`has_ep_*` makes that end eligible for the tapered retraction to `pres_*`
+(`detailed_nuts.cpp`), which cuts the wire short of a partner it still has to
+meet — the later `cover` pass does not save it.
+
+```
+# symmetric rule, big_3bundles_sel_pure_mst_topo:
+Bundle 1: Seg 9<->10: 12 bit(s) — segment disconnected
+Bundle 1: Seg 8: 12 bit(s) — dangling metal past its own attachments
+```
+
+A real open, strictly worse than the dangling metal it removes. Corpus-wide:
+**1 better, 14 worse**, detailed WL **up** 23,233. Only the promotion is
+justified by the diagnosis — a junction sitting on the placed end *is* that
+end, and snapping there can only shorten a bit back to a via it already owns.
+
+### Measured
+
+| | overlaps/unplaced/viol_bundles | abstract WL | detailed WL |
+|---|---|---|---|
+| knob off vs `main` | 0 better, 0 worse, 48 unchanged | +0 | +0 |
+| knob off vs on | **3 better, 0 worse, 45 unchanged** | +0 | **−1,114** |
+
+`bigHalf` 0/0/3 → 0/0/1, `rnr/mix` 0/0/1 → 0/0/0,
+`chip/chip_stack_bottomup` 83/221/21 → 83/221/20. Exactly three flows move and
+every other flow is identical on all five numbers; abstract WL is unchanged by
+construction, which is itself a check that the fix did not leak upstream.
+
+`bigHalf` goes 3 → 1 rather than 3 → 0 because one of its three bundles also
+carries the separate #514 tap-overhang on `b16 seg2`, which this does not
+claim to touch.
+
+Runtime is **not** quoted: `qor_corpus.py` runs flows in parallel, so its
+per-flow seconds are contended. A runtime claim needs `tools/runtime_ab.py`.
+
+### Toward the flip
+
+The case for default-on is that this is a correctness fix measuring
+3-better/0-worse with no selection-space movement. Before flipping:
+
+- `tools/runtime_ab.py` on the chip vehicles — the parallel sweep hinted at a
+  gain but cannot support the claim.
+- A hier/bottom-up check specifically: a locked template's bits are COPIED to
+  siblings, so a label change on the reference must not desynchronise copies.
+  `chip_stack_bottomup` improving is encouraging, not proof.
+- Decide whether `viol_bundles` improving on three flows is worth changing
+  every existing flow's detailed output at all — the corpus gate says yes, but
+  the flip is a methodology call, as with the `metal` default study.
+
+Regression tests: `test/tests/test_placed_endpoints.py` (10 tests) — the
+defect reproduces with the knob off, clears with it on, the junction really is
+the placed end, the label flips only with the knob, a nominal endpoint is
+**never** demoted (with the premise asserted, so the test cannot pass
+vacuously), the flow the symmetric rule broke gains no violation kind, and the
+command's default/parse behaviour.

@@ -320,6 +320,20 @@ private:
 // shield emission — reads an already-per-layer spec.  Without it the spec's
 // stored quantization (the conservative maximum over the rule's layers) is
 // carried through unchanged: over-charging, never under.
+// ── Placed-endpoint re-derivation (`set_placed_endpoints`) ───────────────────
+//
+// OFF by default = byte-identical.  When on, make_bus_segments decides a SEG
+// connection's endpoint-ness from the PLACED geometry instead of the nominal
+// ConnSeg label, so a junction that NUTS contracted a span onto is recognised
+// as that span's end and each bit snaps to its own via.  See
+// docs/internal/hybrid_leg_overhang.md.
+//
+// Precedence: the `.buda` token wins over `BUDA_DNUTS_PLACED_ENDPOINTS=1`,
+// which wins over the compiled default (off) -- the same order the generation
+// study knobs use.
+void dnuts_set_placed_endpoints(bool v);
+bool dnuts_placed_endpoints();
+
 std::vector<BusSegment> make_bus_segments(
     const std::vector<BundleWrapper>& bundles,
     const NUTSResult& nuts_result,

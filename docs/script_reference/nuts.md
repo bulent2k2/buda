@@ -225,6 +225,50 @@ real flows.
 
 ---
 
+### `set_placed_endpoints`
+
+```
+set_placed_endpoints [on|off]
+```
+
+Decide a segment's **endpoint** connections from the **placed** geometry rather
+than the nominal label. Default **off** — a flow that never calls it is
+byte-identical. With no argument, prints the current state.
+
+**The defect it fixes.** `is_endpoint` is derived once, at generation, from
+nominal coordinates (`at_pos == along_lo || along_hi`). NUTS then moves the
+ends — `tighten_spans_to_reach` contracts a span back to its outermost junction
+— and nothing re-derives the label. DetailedNUTS reads it as its **only** gate
+on per-bit snapping: an endpoint conn pulls each bit's end onto its own partner
+bit's track, a mid-span conn merely asks the span to keep covering. A junction
+that was interior at nominal and *is* the placed end therefore leaves every bit
+stretched to one shared abstract end — dangling metal past each bit's own via,
+reported only by the last `check_design` and by nothing before it.
+
+**What changes.** Only the value written into the stage-9 descriptor
+(`BusSegmentConn`), which is rebuilt on every `make_bus_segments` call. The
+nominal analysis (`ConnSeg`) is cached on the `Topology` and shared with
+generation, the planner and the topo-stage audit — it stays nominal.
+
+**Promotes only** (mid → endpoint). The symmetric rule — also demoting a
+nominal endpoint that placement moved the span end past — was implemented and
+measured, and is **wrong**: clearing the endpoint flag makes that end eligible
+for the tapered retraction, cutting a wire short of a partner it still has to
+meet. It produced real `SEG_OPEN`s and measured 14 flows worse against 1, with
+detailed wirelength up.
+
+**Measured** (48-flow QoR corpus, off vs on): **3 better, 0 worse, 45
+unchanged**; abstract WL unchanged (+0 — the change is stage-9 only), detailed
+WL −1,114. `bigHalf` 0/0/3 → 0/0/1, `rnr/mix` 0/0/1 → 0/0/0,
+`chip/chip_stack_bottomup` 83/221/21 → 83/221/20.
+
+Study override `BUDA_DNUTS_PLACED_ENDPOINTS=1` seeds the default so a corpus
+can be A/B'd without editing every flow; an explicit token always wins.
+
+Repro and analysis: [hybrid_leg_overhang.md](../internal/hybrid_leg_overhang.md).
+
+---
+
 ### `set_dead_span_escalate`
 
 ```

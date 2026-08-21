@@ -27,7 +27,7 @@ The per-command documentation lives in one page per pipeline stage under
 | [Bundler](script_reference/bundling.md) | 1 | `run_bundler` · `run_hier_bundler` · `dump_hbundles` |
 | [Topology generator](script_reference/topologies.md) | 2 | `generate_topologies[_for_bundle]` · `generate_more_topologies` · TopoEdit session (`edit_topology` … `edit_commit`) · `generate_hier_topologies` · `generate_topologies_for_hbundle` · `set_prune_dominated` · `set_dedup_loci` · `set_drop_dangling` · `set_trim_mst_legs` · `set_trim_trunk_stubs` |
 | [Planner](script_reference/planner.md) | 3, 4c | `set_planner_param` · `run_planner` (+ `hier`, `post_nuts`) · `select_topology` · `select_topologies` · `unpin_topology` · `dump_pins` |
-| [Track assignment (NUTS)](script_reference/nuts.md) | 4, 9 | `run_nuts` · `run_nuts_on_layer` · `run_detailed_nuts` · `set_pair_align_heal` · `ripup_reroute` · `negotiate_congestion` · `refine_selection` |
+| [Track assignment (NUTS)](script_reference/nuts.md) | 4, 9 | `run_nuts` · `run_nuts_on_layer` · `run_detailed_nuts` · `set_pair_align_heal` · `set_placed_endpoints` · `ripup_reroute` · `negotiate_congestion` · `refine_selection` |
 | [Routing grid](script_reference/routing_grid.md) | 8 | `def_track_pattern` · `add_grid_override` · `report_overhead` |
 | [Non-default rules (NDR)](script_reference/ndr.md) | setup | `def_ndr` · `set_ndr` · `dump_ndr` — per-net width / spacing / shielding, with the demand model and the worked vehicles |
 | [Verification & visualisation](script_reference/verify_viz.md) | verify / — | `check_design` · `dump_topologies` · `visualize` · `visualize_topologies` · `emit_guides` · `export_def_blockages` · `dump_messages` |
@@ -78,6 +78,7 @@ Commands run in the following order. Later stages depend on earlier ones.
 | 8 | `add_grid_override` | Override the track pattern for a specific floorplan region on a layer |
 | 8 | `report_overhead` | Compare `def_layer` overhead% against the track pattern; print corrected `def_layer` commands for any mismatch |
 | 9 | `run_detailed_nuts` | Snap each bus segment's bits to concrete signal-track positions |
+| 9 setup | `set_placed_endpoints` | Decide a segment's endpoint connections from the PLACED geometry instead of the nominal label, so a junction NUTS contracted a span onto snaps each bit to its own via instead of holding every bit at the shared abstract end (default off; promotes only) |
 | 9 setup | `set_pair_align_heal` | Opt-in measured-accept pairwise-overlap alignment at `run_detailed_nuts`: re-solve with same-net stub pairs sharing one track window, keeping it only when opens/overlaps do not rise and detailed WL strictly drops (default off) |
 | 3↔4/9 | `ripup_reroute` | Feedback-driven rip-up & re-route: read the **actual** NUTS overlaps / DNUTS opens and re-route contending bundles to clear them |
 | 3↔4/9 | `negotiate_congestion` | Measured-congestion negotiation: inject the **actual** overlaps/opens as band demand and re-plan the offending bundles unpinned against the corrected prices (the cheaper first pass; `ripup_reroute` finishes the residual) |
