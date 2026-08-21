@@ -155,6 +155,11 @@ MESSAGES = {
                            "the rule it names governs nothing."),
     "BUDA-1916": (INFO,    "A set_ndr scope is outranked by a longer prefix "
                            "on every net it matches, so it governs nothing."),
+    "BUDA-1917": (WARNING, "A second open_bdb replaced an already-open "
+                           "file-backed BDB, so persistence splits across "
+                           "two files: rows persisted before this line stay "
+                           "in the previous file, and everything from here "
+                           "on lands in the new one."),
 }
 
 # Ids that were ISSUED and whose fault no longer exists.
