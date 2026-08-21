@@ -24,7 +24,13 @@
 # remedy instead of after the setup that precedes the read.
 require_file ariane.v fakeram45_256x16.lef NangateOpenCellLibrary.tech.lef hint Fetch them first:  python3 flow/ariane133/fetch.py   (~12 MB, checksum-pinned; see flow/ariane133/ReadMe.md)
 
-open_bdb ariane133.bdb
+# Its OWN checkpoint, not the baseline flow's: both flows sharing one
+# ariane133.bdb meant a parallel corpus sweep could run them concurrently
+# on one file, and SQLite's one-writer fails the loser LOUDLY ("database is
+# locked" — measured in the sweep that added these rows).  Distinct files
+# make the pair safe under any scheduler, and each flow's pins/checkpoint
+# survive the other's rerun.
+open_bdb ariane133_heal.bdb
 
 # The DEF is 2000 DBU/um and we want the placement EXACTLY, not rounded onto
 # a micron grid — a 57.57 um macro is not 58 um, and the die ports are 0.07.
