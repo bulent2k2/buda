@@ -1,7 +1,23 @@
 # A TRUNK+MST leg that overhangs a trunk stub
 
 **Status:** analysis only — nothing changed in the engine.
-**Repro:** `flow/big_data_test/bigHalf_sel_bundle_only.buda` (bundle 67 / `bus_005`, candidate 18 `TRUNK_H+MST@y1700`).
+**Repro:** `flow/big_data_test/bigHalf_sel_bundle_only.buda` (bundle 67 / `bus_005`,
+candidate 18 `TRUNK_H+MST@y1700`), with `bigHalf_sel_bundle_trimmed.buda` as its
+control — same design, same topology, `seg2` cut back to its last attachment:
+
+```bash
+bin/buda --no-viz flow/big_data_test/bigHalf_sel_bundle_only.buda      # 23 violations
+bin/buda --no-viz flow/big_data_test/bigHalf_sel_bundle_trimmed.buda   # Success
+
+# and WHY, per segment and per bit:
+python3 tools/show_stale_endpoints.py \
+    flow/big_data_test/bigHalf_sel_bundle_only.buda bus_005
+```
+
+`tools/show_stale_endpoints.py` prints nominal span beside placed span for every
+segment and flags each junction whose label disagrees with the geometry; the
+violation counts it quotes are `check_dnuts`'s own, so it cannot report a
+different number from the flow.
 **Date:** 2026-08-20.
 
 ## The short version
