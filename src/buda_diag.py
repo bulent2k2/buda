@@ -151,6 +151,10 @@ MESSAGES = {
     "BUDA-1914": (INFO,    "An NDR rule quantizes to no constraint on SOME "
                            "of the layers it can reach, so its metal there "
                            "is governed in name only."),
+    "BUDA-1915": (WARNING, "A set_ndr scope matches no net in the design, so "
+                           "the rule it names governs nothing."),
+    "BUDA-1916": (INFO,    "A set_ndr scope is outranked by a longer prefix "
+                           "on every net it matches, so it governs nothing."),
 }
 
 # Ids that were ISSUED and whose fault no longer exists.

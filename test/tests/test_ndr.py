@@ -1832,3 +1832,128 @@ def test_absolute_rule_audit_does_not_flag_a_coarse_layer_bit():
     viols = ndr_cmds.audit_ndr_dnuts(s, gov)
     assert [v.message for v in viols
             if v.kind.name == "NDR_WIDTH"] == []
+
+
+# ── a set_ndr SCOPE that governs nothing (opens_ndr §2 residual) ───────────
+#
+# `set_ndr` takes a net-name PREFIX, so a typo attaches a good rule to
+# nothing and the design routes ungoverned while every command reports
+# success.  Two verdicts, because two mistakes end in "governs nothing" and
+# the remedy differs — and one deliberate exemption, which is the guard that
+# matters most here.
+
+def _verdicts(out):
+    return [l for l in out.splitlines()
+            if l.startswith(("BUDA-1915", "BUDA-1916"))]
+
+
+def test_a_scope_matching_no_net_is_reported():
+    """The headline fault: a prefix naming nothing.  It cannot be
+    deliberate, so it is a WARNING, and it names the prefix — the whole
+    point is to send someone to the typo."""
+    _s, out = _flow(["def_ndr r width x2", "set_ndr clock_ r"])
+    v = _verdicts(out)
+    assert len(v) == 1, v
+    assert v[0].startswith("BUDA-1915: WARNING:")
+    assert "'clock_'" in v[0] and "matches no net" in v[0]
+
+
+def test_a_shadowed_scope_is_reported_with_the_prefix_that_took_it():
+    """The shape a rule-level check cannot see.  Both scopes name the SAME
+    rule, so "is the rule used?" answers yes while the `c` declaration does
+    nothing at all — which is why the report resolves the winning PREFIX
+    and not just the rule.
+
+    INFO, not WARNING: a layered set of scopes can shadow one on purpose.
+    It names an example shadower, because once you know a scope is
+    outranked, by what is the only question left."""
+    _s, out = _flow(["def_ndr r width x2",
+                     "set_ndr c r",          # matches clk_0..3, wins on none
+                     "set_ndr clk_ r"])      # …because this is longer
+    v = _verdicts(out)
+    assert len(v) == 1, v
+    assert v[0].startswith("BUDA-1916: INFO:")
+    assert "'c'" in v[0] and "'clk_'" in v[0]
+
+
+def test_a_scope_that_governs_says_nothing():
+    """The false-positive guard.  A diagnostic that fires on a correct
+    design is one a methodology learns to filter out, taking the case it
+    exists for with it."""
+    _s, out = _flow(["def_ndr r width x2", "set_ndr clk_ r"])
+    assert _verdicts(out) == []
+
+
+def test_the_global_default_is_exempt_when_every_net_has_a_longer_prefix():
+    """The documented false alarm, and the reason this needed thinking
+    about before it needed coding.
+
+    `*` is the global default and is outranked by any real prefix BY
+    CONSTRUCTION, so a design whose every net matches a longer prefix
+    leaves it legitimately unused.  Here `clk_` and `data` cover all twelve
+    nets, so `*` governs zero — and must still be silent."""
+    _s, out = _flow(["def_ndr r width x2",
+                     "set_ndr * r", "set_ndr clk_ r", "set_ndr data r"])
+    assert _verdicts(out) == []
+
+
+def test_the_verdict_is_said_once_not_once_per_site():
+    """It is emitted at bundling AND before detailed NUTS — the second
+    because `load_pipeline` restores bundles without re-bundling, so a
+    resumed session never reaches the first.  A flow that runs both must
+    still hear it once; the memo is keyed on the verdict, so a repeat is
+    silent while a verdict that genuinely changed is not."""
+    _s, out = _flow(["def_ndr r width x2", "set_ndr clock_ r"])
+    assert out.count("BUDA-1915") == 1, out
+
+
+def test_the_scope_index_resolves_exactly_as_the_scan_it_replaced():
+    """The prefix index exists for speed, so what it must not change is the
+    ANSWER.
+
+    `translate_def_ndrs` attaches one `set_ndr` scope per net, so an
+    imported design can have as many scopes as nets and a per-net scan over
+    all of them is quadratic.  Probing the net's own prefixes instead is
+    O(distinct scope lengths) — but longest-prefix-wins with `*` as a
+    fallback has enough corners (a scope equal to the whole name, two
+    scopes where one is a prefix of the other, `*` present or absent, no
+    scope matching at all) that "obviously equivalent" is not good enough.
+
+    So it is checked against the scan it replaced, on randomized scope sets
+    built FROM the net names, which is what makes the prefixes actually
+    collide rather than miss uninterestingly."""
+    import random
+    from buda_cmds.ndr_cmds import ndr_scope_index, ndr_scopes_matching
+
+    def scan(scopes, net):                     # the pre-index implementation
+        best_p, best_len = None, -1
+        for prefix in scopes:
+            if prefix == "*":
+                if best_len < 0:
+                    best_p, best_len = prefix, 0
+            elif net.startswith(prefix) and len(prefix) > best_len:
+                best_p, best_len = prefix, len(prefix)
+        return best_p
+
+    class _S:
+        pass
+
+    rnd = random.Random(7)
+    checked = 0
+    for _ in range(2000):
+        nets = ["".join(rnd.choice("abc_") for _ in range(rnd.randint(1, 8)))
+                for _ in range(6)]
+        keys = set()
+        for _ in range(rnd.randint(0, 6)):
+            src = rnd.choice(nets)
+            keys.add(src[:rnd.randint(1, len(src))])
+        if rnd.random() < 0.5:
+            keys.add("*")
+        s = _S()
+        s._ndr_scopes = {k: "r" for k in keys}
+        index = ndr_scope_index(s)
+        for n in nets:
+            assert ndr_scopes_matching(n, index)[0] == scan(s._ndr_scopes, n), (
+                n, sorted(keys))
+            checked += 1
+    assert checked > 10000, checked

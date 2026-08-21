@@ -397,21 +397,170 @@ def audit_restored_ndr(session, bid_to_stamp):
     return voided
 
 
-def ndr_rule_for_net(session, net_name):
-    """Resolved rule name for a net (longest matching set_ndr prefix; '*'
-    is the global default), or None for the default rule.  Mirrors
-    set_bundling's longest-prefix-wins semantics."""
+def ndr_scope_index(session):
+    """A reusable index over the declared scope prefixes.
+
+    Longest-prefix-wins written as a scan is O(S) per net, and
+    `translate_def_ndrs` attaches one scope PER NET — so an imported design
+    can have S ≈ N and every per-net resolution becomes quadratic (Codex P2
+    on #808).  Probing the NET's own prefixes instead costs one hash lookup
+    per DISTINCT SCOPE LENGTH, which is bounded by both S and the name
+    length: never worse than the scan, and independent of S once S passes
+    the longest net name.
+
+    Hoist it out of a per-net loop.  Passing `index=None` rebuilds it,
+    which costs the same O(S) the scan used to — so a one-off caller is no
+    worse off than before and needs no change.
+    """
+    scopes = getattr(session, "_ndr_scopes", None) or {}
+    keys = set(scopes)
+    # `*` is a FALLBACK, not a literal prefix, so it is never probed.
+    lengths = sorted({len(p) for p in keys if p != "*"}, reverse=True)
+    return (keys, lengths, "*" in keys)
+
+
+def ndr_scopes_matching(net_name, index):
+    """`(governing_prefix_or_None, [every matching prefix, longest first])`.
+
+    ONE walk answers both questions, deliberately.  The unused-scope report
+    needs "which scopes COULD apply here" and "which one won", and deriving
+    those from two separate walks is precisely how a report starts
+    disagreeing with the thing it reports on.
+    """
+    keys, lengths, has_star = index
+    n = len(net_name)
+    hits = [net_name[:i] for i in lengths if i <= n and net_name[:i] in keys]
+    if hits:
+        return (hits[0], hits)          # lengths descend, so hits[0] is longest
+    return ("*" if has_star else None, [])
+
+
+def ndr_scope_for_net(session, net_name, index=None):
+    """The set_ndr SCOPE that governs a net: `(prefix, rule)`, or
+    `(None, None)` when no scope applies.
+
+    Longest matching prefix wins; `*` is the global default, outranked by
+    any real prefix.  Mirrors set_bundling's longest-prefix-wins semantics.
+
+    The PREFIX is returned, not only the rule, because two scopes may name
+    the same rule and "which declaration did the work" is a different
+    question from "what governs this net" — it is the one an unused-scope
+    report has to answer.  Single-sourced here rather than re-derived
+    beside the report: a second walk of the same scope table would be free
+    to disagree with the one that actually governs, which is the drift this
+    codebase spends its R4 rule preventing.
+    """
     scopes = getattr(session, "_ndr_scopes", None)
     if not scopes:
-        return None
-    best, best_len = None, -1
-    for prefix, rule in scopes.items():
+        return (None, None)
+    prefix, _all = ndr_scopes_matching(
+        net_name, index if index is not None else ndr_scope_index(session))
+    return (prefix, scopes[prefix]) if prefix is not None else (None, None)
+
+
+def ndr_rule_for_net(session, net_name):
+    """Resolved rule name for a net, or None for the default rule."""
+    return ndr_scope_for_net(session, net_name)[1]
+
+
+def report_unused_ndr_scopes(session):
+    """A declared `set_ndr` scope that governs NO net.
+
+    `set_ndr` takes a net-name PREFIX, so a typo attaches a perfectly good
+    rule to nothing at all and the design routes ungoverned while every
+    command reports success — the rule was declared, accepted, and
+    persisted; only the attachment silently missed.  Nothing looked at
+    scopes from the other end until now: `dump_ndr` lists what was
+    declared, and the governed-bundle count says how many bundles a rule
+    reached, but a scope that reached zero is indistinguishable from one
+    that was never meant to fire.
+
+    TWO verdicts, because two different mistakes end in "governs nothing"
+    and the remedy differs:
+
+    * **BUDA-1915** — the prefix matches no net in the design.  That cannot
+      be deliberate: a scope naming nothing is a typo or a stale name, and
+      it is a WARNING.
+    * **BUDA-1916** — the prefix DOES match nets, but a longer prefix wins
+      on every one of them.  The declaration is live and outranked, which a
+      layered set of scopes can produce on purpose, so it is an INFO.  It
+      names an example shadowing prefix, because "which longer prefix took
+      it" is the whole question once you know the scope is being shadowed.
+
+    `*` is EXEMPT from the second verdict, and deliberately so: it is the
+    global default, outranked by any real prefix by construction, so a
+    design whose every bus matches a longer prefix leaves it legitimately
+    unused.  Warning about that would fire on correct designs, which is how
+    a diagnostic teaches a methodology to filter it out — and the case it
+    exists for goes with it.  A `*` scope cannot reach the first verdict at
+    all (it matches every net there is).
+
+    Report-only.  Whether a scope bites is a property of the netlist, and
+    a design that routes today must keep routing.
+    """
+    scopes = getattr(session, "_ndr_scopes", None)
+    if not scopes:
+        return
+    nets = []
+    for w in getattr(session, "bundles", None) or ():
+        nets.extend(w.input.original_bundle.get_net_names())
+    if not nets:
+        # No bundles yet (or a design with no nets): a scope cannot be
+        # judged against a netlist that is not there, and reporting one
+        # unused here would fire on every flow that declares its scopes
+        # before its nets — which is the documented order.
+        return
+
+    matched, governed, shadow_eg = {}, {}, {}
+    for prefix in scopes:
+        matched[prefix], governed[prefix] = 0, 0
+    # The index is hoisted, and each net is walked ONCE for both answers.
+    # Scanning every scope per net was O(nets x scopes), and an imported
+    # design has one scope PER NET (`translate_def_ndrs`), so a diagnostic
+    # could have dominated bundling on exactly the designs that need it.
+    index = ndr_scope_index(session)
+    for n in nets:
+        gp, hits = ndr_scopes_matching(n, index)
+        if gp is not None:
+            governed[gp] = governed.get(gp, 0) + 1
+        for prefix in hits:
+            matched[prefix] += 1
+            # Remember ONE net this scope lost, and to whom.  A count says
+            # it is shadowed; the example says by what.
+            if prefix not in shadow_eg and gp is not None and gp != prefix:
+                shadow_eg[prefix] = (n, gp)
+
+    said = session.__dict__.setdefault("_ndr_scope_said", set())
+    for prefix in sorted(scopes):
+        if governed.get(prefix):
+            continue                      # it governs something: silent
         if prefix == "*":
-            if best_len < 0:
-                best, best_len = rule, 0
-        elif net_name.startswith(prefix) and len(prefix) > best_len:
-            best, best_len = rule, len(prefix)
-    return best
+            continue                      # see the docstring
+        rule = scopes[prefix]
+        if matched[prefix] == 0:
+            verdict = ("1915", prefix, rule)
+            if verdict in said:
+                continue
+            said.add(verdict)
+            buda_diag.emit(
+                "BUDA-1915",
+                f"set_ndr scope '{prefix}' -> rule '{rule}' matches no net "
+                f"of the {len(nets)} in this design, so '{rule}' governs "
+                f"nothing here — check the prefix against the net names "
+                f"(dump_ndr lists the scopes)")
+        else:
+            eg = shadow_eg.get(prefix)
+            verdict = ("1916", prefix, rule, eg[1] if eg else "")
+            if verdict in said:
+                continue
+            said.add(verdict)
+            by = (f" (e.g. '{eg[1]}' takes '{eg[0]}')" if eg else "")
+            buda_diag.emit(
+                "BUDA-1916",
+                f"set_ndr scope '{prefix}' -> rule '{rule}' matches "
+                f"{matched[prefix]} net(s) but a longer prefix wins on "
+                f"every one{by}, so '{rule}' governs nothing through this "
+                f"scope — longest prefix wins")
 
 
 def _spec_of(session, rule_name):
@@ -1472,6 +1621,11 @@ def apply_ndr_specs(session):
     if n_gov:
         print(f"[NDR] {n_gov} bundle(s) governed by declared rules")
     report_noop_ndr_rules(session)
+    # The other end of the same question.  `report_noop_ndr_rules` asks
+    # whether a rule that GOVERNS a bundle constrains anything; this asks
+    # whether a declared scope governs a bundle at all.  Both are silences
+    # that read as success, and neither is visible from the other.
+    report_unused_ndr_scopes(session)
 
 
 def _noop_arithmetic(session, spec, lid, w, resolved):
@@ -1685,6 +1839,10 @@ def validate_ndr_realizability(session):
     # required to exist.  Deduped by verdict, so a flow already told stays
     # quiet.
     report_noop_ndr_rules(session, force=True)
+    # `load_pipeline` restores bundles WITHOUT re-bundling, so a resumed
+    # session never runs `apply_ndr_scopes` and would never hear the scope
+    # verdict.  Deduped by verdict, so a flow already told stays quiet.
+    report_unused_ndr_scopes(session)
     grid = session.routing_grid
     checked = set()
     for w in session.bundles:
