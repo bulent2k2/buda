@@ -130,6 +130,7 @@ updating this table, which is exactly the drift the guard now prevents):
 | BUDA-1914 | INFO | an NDR rule quantizes to no constraint on SOME of the layers it can reach, so its metal there is governed in name only |
 | BUDA-1915 | WARNING | a `set_ndr` scope matches no net in the design, so the rule it names governs nothing |
 | BUDA-1916 | INFO | a `set_ndr` scope is outranked by a longer prefix on every net it matches, so it governs nothing |
+| BUDA-1917 | WARNING | a second `open_bdb` replaced an already-open file-backed BDB, so persistence splits across two files: rows persisted before this line stay in the previous file, and everything from here on lands in the new one |
 
 **Retired ids.**  An id may never be reused and never changes meaning, so one
 whose fault has been fixed is recorded as *spent* rather than deleted — a

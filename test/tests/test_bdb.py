@@ -784,3 +784,48 @@ def check_session_net_pin_count(context, count, net):
         f"Net {net!r}: expected {count} pins, got {len(pins)}: "
         + str([(p.comp_id, p.pin_name) for p in pins])
     )
+
+
+# ── BUDA-1917: a second open_bdb replaces an already-open file-backed BDB ──
+
+def _open_bdb_output(tmp_path, commands):
+    s = BudaSession()
+    s.no_viz = True
+    buf = io.StringIO()
+    import contextlib
+    with contextlib.redirect_stdout(buf):
+        for c in commands:
+            s.do_command(c)
+    return buf.getvalue()
+
+
+def test_second_open_bdb_warns_at_the_moment_it_replaces(tmp_path):
+    """Persistence splits across two files the moment a flow's own open_bdb
+    supersedes an earlier one — the `btcl -i <flow> <ckpt>` shape, where the
+    driver arms <ckpt> BEFORE the flow and the only notice was a banner
+    after the whole flow had run.  BUDA-1917 says so AT the replacing line,
+    naming both files."""
+    a, b = str(tmp_path / "a.bdb"), str(tmp_path / "b.bdb")
+    out = _open_bdb_output(tmp_path, [f"open_bdb {a}", f"open_bdb {b}"])
+    lines = [l for l in out.splitlines() if "BUDA-1917" in l]
+    assert len(lines) == 1
+    assert a in lines[0] and b in lines[0]
+
+
+def test_first_open_and_same_file_reopen_stay_silent(tmp_path):
+    """A first open has nothing to split from, and re-opening the SAME file
+    is a refresh, not a split — neither may warn."""
+    a = str(tmp_path / "a.bdb")
+    out = _open_bdb_output(tmp_path, [f"open_bdb {a}", f"open_bdb {a}"])
+    assert "BUDA-1917" not in out
+
+
+def test_replacing_a_file_bdb_with_memory_warns_too(tmp_path):
+    """A `:memory:` open after a file-backed one abandons the durable file
+    just the same (the shape btcl -b's preflight refuses); a :memory:
+    PREDECESSOR held nothing durable, so the reverse direction is silent."""
+    a = str(tmp_path / "a.bdb")
+    out = _open_bdb_output(tmp_path, [f"open_bdb {a}", "open_bdb :memory:"])
+    assert out.count("BUDA-1917") == 1
+    out = _open_bdb_output(tmp_path, ["open_bdb :memory:", f"open_bdb {a}"])
+    assert "BUDA-1917" not in out

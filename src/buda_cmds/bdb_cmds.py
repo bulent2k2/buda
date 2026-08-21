@@ -141,6 +141,18 @@ def cmd_open_bdb(session, cmd, args, cmd_line):
         print("open_bdb: 'writeback' applies only to a serialized *.sql "
               "fixture; a binary BDB is opened read-write and persists "
               "directly — ignoring.")
+    # A DIFFERENT file-backed BDB is already open: from here on persistence
+    # lands in the new file and the old one holds only what ran before this
+    # line.  Say so AT THE MOMENT it happens — the case that bit was
+    # `btcl -i <flow> <ckpt>`: the driver arms <ckpt> BEFORE the flow, the
+    # flow's own open_bdb quietly supersedes it, and the only notice was a
+    # banner after the whole flow had run, easy to lose among its siblings
+    # (the "too many bdbs" question).  Same path re-opened = a refresh, not
+    # a split; a :memory: predecessor held nothing durable to point at.
+    prev = getattr(session, "_bdb_open_path", None)
+    if (session.bdb is not None and prev not in (None, ':memory:')
+            and prev != bdb_path):
+        buda_diag.emit("BUDA-1917", f"{prev} -> {bdb_path}")
     # The file the live connection holds open (temp binary for a .sql
     # fixture) — save_bdb's save-as guard refuses to back up onto it.
     session._bdb_open_path = bdb_path
