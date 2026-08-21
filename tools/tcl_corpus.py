@@ -84,6 +84,14 @@ def run_one(flow, timeout=1800):
         tail = (p.stderr or p.stdout or "").strip().splitlines()[-3:]
         return {"flow": flow, "err": f"rc={p.returncode}: " + " | ".join(tail)[:200]}
     row = json.loads(m.group(1))
+    # The bridge's `buda::query` spells "never computed" as -1 (deliberately
+    # not 0); the qor schema spells a stage that did not run as None.
+    # Translate at the boundary — without this a DNUTS-less flow's -1 ranks
+    # BETTER than the Python sweep's None for the identical run (measured on
+    # flow/ariane133/ariane133.buda while it was a corpus candidate).
+    for k in ("overlaps", "unplaced", "viol_bundles"):
+        if row.get(k) == -1:
+            row[k] = None
     row["sec"] = round(time.time() - t0, 1)
     return row
 

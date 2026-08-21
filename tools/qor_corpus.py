@@ -109,7 +109,8 @@ for p in (os.path.join(_ROOT, "src"), os.path.join(_ROOT, "build"), _HERE):
         sys.path.insert(0, p)
 
 # The `.buda` line rules, shared with the engine (src/buda_script.py).
-from buda_script import sole_path_arg                        # noqa: E402
+from buda_script import (sole_path_arg, split_quoted_args,   # noqa: E402
+                         strip_inline_comment)
 
 # A REPORTED regression exits with this code; every other failure keeps the
 # conventional 1.  The distinction exists because a caller that can ACT on a
@@ -213,6 +214,22 @@ CORPUS = [
     # path, whose per-bit taper the QoR triple is sensitive to.  The only
     # entry here that costs real time (~23s); the rest are rounding error.
     "flow/rv/soc_conv_div.buda",
+    # The real-45nm vehicle (5576 nets, 133 SRAM macros, 13k OBS keepouts, a
+    # fetched tech LEF, the full healer chain, ~76s) — the ONLY row whose
+    # inputs are FETCHED (flow/ariane133/fetch.py), stated by
+    # `require_file`: with the inputs absent both sides err identically and
+    # the compare says NOT COMPARABLE rather than guessing; `--vs` carries
+    # the working tree's fetched copies into the baseline worktree so a
+    # fetched checkout gets a real measurement.  Two corpus escapes happened
+    # HERE while it had no row: PR #780's 3.3s -> 113s planner blow-up
+    # (runtime, which the blow-up advisory below now flags) and the
+    # cull-heal admission-strand gap (#812 — a QoR row would have shown the
+    # 4 stranded bits move).  The heal twin, not ariane133.buda: the
+    # baseline flow stops before run_detailed_nuts, which this corpus's
+    # criterion requires (and it adds zero token coverage over the twin —
+    # measured).  It opens its own ariane133_heal.bdb so the pair can never
+    # collide on one SQLite file under a parallel sweep.
+    "flow/ariane133/ariane133_heal.buda",
 ]
 
 
@@ -548,6 +565,57 @@ def baseline_worktree(rev):
     return wt, commit
 
 
+def _materialize_fetched_inputs(wt, flows):
+    """Copy each flow's declared-but-gitignored input files into the baseline
+    worktree, so a `--vs` can actually measure a flow whose inputs are FETCHED.
+
+    A flow states its input precondition with `require_file` (paths resolved
+    against the flow's own directory), and a fetched input — ariane133's
+    netlist and LEFs — is deliberately not checked in, so `git worktree add`
+    cannot supply it: the baseline side errored on line one and the compare
+    printed NOT COMPARABLE for a flow the working tree measures fine.  The
+    flow's own declaration is the single source of what to carry over: parse
+    its top-level `require_file` lines (the engine's quote-aware tokenizer,
+    paths up to the `hint` keyword) and copy whichever of those files exist
+    here.  Top-level only — no corpus flow declares its inputs from behind a
+    `source`.  A file TRACKED at the baseline commit is the baseline's own
+    and is never touched; an untracked one is ours from a previous
+    materialization, and a STALE copy is refreshed rather than kept — the
+    worktree is CACHED by commit, so an input replaced here while the same
+    baseline stays selected would otherwise silently attribute an input-data
+    difference to the code change (Codex P2 on #813).
+    """
+    import filecmp
+    copied = 0
+    for flow in flows:
+        src_flow = Path(_ROOT) / flow
+        if not src_flow.is_file():
+            continue
+        for raw in src_flow.read_text(errors="replace").splitlines():
+            line = strip_inline_comment(raw).strip()
+            if not line.startswith("require_file"):
+                continue
+            for tok in split_quoted_args(line):
+                if tok == "hint":
+                    break
+                src = (src_flow.parent / tok).resolve()
+                dst = wt / Path(flow).parent / tok
+                if not src.is_file():
+                    continue
+                if dst.exists():
+                    rel = (Path(flow).parent / tok).as_posix()
+                    tracked = _sh(["git", "ls-files", "--error-unmatch",
+                                   rel], wt, check=False).returncode == 0
+                    if tracked or filecmp.cmp(src, dst, shallow=False):
+                        continue
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src, dst)
+                copied += 1
+    if copied:
+        print(f"[--vs] materialized {copied} fetched input file(s) "
+              f"into the baseline worktree")
+
+
 def _rev_count(spec):
     """`git rev-list --count <spec>`, or None when the spec does not resolve."""
     r = _sh(["git", "rev-list", "--count", spec], _ROOT, check=False)
@@ -711,6 +779,11 @@ def cmd_vs(rev, out, jobs, flows=None, build=True):
     """
     wt, commit = baseline_worktree(rev)
     print(f"[--vs] baseline {rev} = {commit[:12]} in {wt}")
+    # A flow with FETCHED inputs (require_file + fetch.py) errors in a bare
+    # worktree; carry the working tree's copies over so the baseline can
+    # measure it too.  Reads OUR corpus/flows — a flow only the baseline's
+    # CORPUS names errs there exactly as before.
+    _materialize_fetched_inputs(wt, flows or CORPUS)
     # BEFORE the builds: the two sweeps cost tens of minutes, and a baseline
     # advisory read afterwards has already let you act on a wrong number.
     for line in baseline_advisories(rev, commit):
@@ -820,6 +893,27 @@ def _runtime_report(paired):
             break
         print(f"  {f.replace('flow/', ''):<46} "
               f"{b['sec']:>6.1f}s -> {m['sec']:>6.1f}s  {ds:+.1f}s")
+    # The BLOW-UP advisory: everything above is labelled too noisy to cost a
+    # small change, and that label taught readers to skip the whole section —
+    # which is how a 34x planner regression (PR #780: `run_planner hier 2`
+    # at 3.3s -> 113s on flow/ariane133) would have scrolled past even with
+    # the flow in the corpus.  A >=3x AND >=10s mover is a different KIND of
+    # signal: no measured host-noise case comes within an order of magnitude
+    # of it (the doc's worst false reading is a few percent), so it gets its
+    # own unmissable block.  Still advisory, not a gate — a deliberate
+    # capacity change (a new obstruction model, a heavier audit) can be a
+    # legitimate 3x, and the nightly's promote_baseline must stay free to
+    # accept it; the block exists so accepting one is a DECISION.
+    for f, b, m in movers:
+        if m["sec"] >= 3 * b["sec"] and m["sec"] - b["sec"] >= 10.0:
+            # max() guards a sub-0.1s base (a ratio against ~0 is not a
+            # number worth printing precisely, but the blow-up is real).
+            print(f"\n  RUNTIME BLOW-UP (advisory): "
+                  f"{f.replace('flow/', '')} "
+                  f"{b['sec']:.1f}s -> {m['sec']:.1f}s "
+                  f"({m['sec'] / max(b['sec'], 0.1):.0f}x) — far beyond "
+                  f"single-run noise; bisect before accepting this as a "
+                  f"baseline.")
 
 
 def _wirelength_report(paired):

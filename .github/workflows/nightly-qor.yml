@@ -72,6 +72,14 @@ jobs:
           python -m pip install --upgrade pip
           pip install pybind11 matplotlib
 
+      - name: Fetch corpus inputs
+        # flow/ariane133/ariane133_heal.buda is the one corpus row whose
+        # inputs are FETCHED (digest-pinned, ~12 MB) and gitignored, so a
+        # fresh runner must fetch before the sweep — the row errs otherwise
+        # and the err gate below rejects the whole sweep (Codex P1 on #813).
+        # Stdlib-only, idempotent, and loud on a digest mismatch.
+        run: python3 flow/ariane133/fetch.py
+
       - name: Restore previous baseline
         id: baseline
         uses: actions/cache/restore@v5

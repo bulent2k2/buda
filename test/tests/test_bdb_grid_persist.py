@@ -185,8 +185,9 @@ def test_the_restored_width_model_does_not_depend_on_declaration_order(
     LATER — so with `open_bdb` before `def_layer` they went nowhere and the
     session kept the overhead-derived dilution: the coarser model this whole
     change exists to replace, silently, in exactly the ordering the target
-    flow uses (`flow/ariane133/ariane133_heal.buda` opens at line 27 and
-    declares its stack at 68).  Measured then: 40.0 declared, 17.14 restored.
+    flow uses (`flow/ariane133/ariane133_heal.buda` opens its BDB well
+    before declaring its stack).  Measured then: 40.0 declared, 17.14
+    restored.
 
     `def_layer` now picks up a pattern the restore already installed."""
     db = str(tmp_path / "o.bdb")

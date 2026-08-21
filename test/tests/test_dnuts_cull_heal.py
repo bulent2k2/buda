@@ -120,6 +120,30 @@ def test_cull_heal_escalates_and_places_all_bits():
     assert list(s.bundles[0].plan.seg_layers)[h_idx] == 4   # TOP M4
 
 
+def test_admission_strand_engages_heal():
+    """A keepout covering the H stub's WHOLE placed window (span AND
+    midpoint) strands its bits at ADMISSION — "insufficient signal tracks
+    (0)", so `num_keepout_bits` stays 0 and only `num_unplaced` records the
+    loss.  The culled-bits-only entry gate never fired on this class (the
+    ariane133_heal residual: 4 window-exhausted M8 stubs, each ON an SRAM
+    OBS keepout), even though the cull_risk escalation predicate — measured
+    stranding + span-pool shortfall — provably covers a 0-track seat.  The
+    heal must engage on culled OR plain-unplaced bits."""
+    # First pin the CLASS: without the heal this is an admission strand,
+    # not a cull (the counter distinction test_bit_antenna_audit relies on).
+    s0, _ = _build("add_keepout 30 0 70 500 2")
+    _nuts(s0, heal=False)
+    assert s0.detailed_result.num_keepout_bits == 0, "must be the admission path"
+    assert s0.detailed_result.num_unplaced == 8
+
+    s, h_idx = _build("add_keepout 30 0 70 500 2")
+    out = _nuts(s, heal=True)
+    assert "CULL-HEAL" in out
+    assert s.detailed_result.num_unplaced == 0
+    assert s.nuts_result.num_overlaps == 0
+    assert list(s.bundles[0].plan.seg_layers)[h_idx] == 4   # TOP M4
+
+
 def test_cull_heal_noop_without_culls():
     """No keepout — nothing culls, the heal never fires, the stub stays on
     its LOW layer (byte-identical no-op path)."""

@@ -1357,8 +1357,12 @@ class NutsFlowMixin:
         the LOW->TOP escalation).  Run the same tier here, under the same
         accept contract: snapshot, escalate + re-solve NUTS + re-run DNUTS,
         keep only a strictly better (opens, overlaps), restore otherwise.
-        A no-op whenever the detailed result has no keepout-culled bits, and
-        self-guarding everywhere else — the metric can only improve.
+        A no-op whenever the detailed result has no keepout-culled AND no
+        unplaced bits (an ADMISSION strand — "insufficient signal tracks",
+        the 0-track window-exhausted seat — counts only in num_unplaced, so
+        a keepout-bits-only gate missed it: ariane133_heal's 4 residual M8
+        stubs), and self-guarding everywhere else — the metric can only
+        improve.
 
         The accept is COMPONENTWISE — opens strictly down AND overlaps not
         up — not the refold's lexicographic (opens, overlaps): a healered
@@ -1372,8 +1376,21 @@ class NutsFlowMixin:
 
         Honors the dead-span family opt-out (_heal_dead_spans_in_healers)
         plus its own bisect hook (_final_cull_heal_in_dnuts)."""
-        if (self.detailed_result is None or self.nuts_result is None
-                or self.detailed_result.num_keepout_bits <= 0):
+        if self.detailed_result is None or self.nuts_result is None:
+            return 0
+        # Engage on keepout-CULLED bits (admitted, then removed by
+        # cull_keepout_crossers) OR on plain unplaced bits: a segment whose
+        # placed window offers ZERO tracks strands its bits at ADMISSION
+        # ("insufficient signal tracks"), so they count only in num_unplaced
+        # and a keepout-bits-only gate never engages — the ariane133_heal
+        # residual: 4 window-exhausted M8 stubs, each ON an SRAM OBS keepout
+        # with 0 signal tracks, a guaranteed-dead class the escalation below
+        # provably covers (measured stranding + span-pool shortfall are both
+        # true for a 0-track seat).  The candidate map stays the filter — an
+        # unplaced bit whose LOW segment has no pool shortfall escalates
+        # nothing — and the componentwise accept prices any residual risk.
+        if (self.detailed_result.num_keepout_bits <= 0
+                and self.detailed_result.num_unplaced <= 0):
             return 0
         if not getattr(self, '_final_cull_heal_in_dnuts', True):
             return 0
@@ -1434,7 +1451,9 @@ class NutsFlowMixin:
         total = 0
         trials = 0
         for _ in range(max_rounds):
-            if self.detailed_result.num_keepout_bits <= 0 or trials >= 6:
+            if ((self.detailed_result.num_keepout_bits <= 0
+                 and self.detailed_result.num_unplaced <= 0)
+                    or trials >= 6):
                 break
             base = (self.detailed_result.num_unplaced,
                     self.nuts_result.num_overlaps)
