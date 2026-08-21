@@ -59,6 +59,11 @@ def _stage_b_session(fold, keepout=True):
     s = buda_cli.BudaSession()
     s.no_viz = True
     s._heal_dead_spans_in_healers = fold
+    # Subject here is the HEALER FOLD (`_heal_dead_spans('b')`).  The DNUTS
+    # cull heal now engages on admission strands too, which would clear the
+    # dead stage-b state this helper exists to hand the fold — hold it off
+    # so the fold stays observable (test_dnuts_cull_heal.py owns the heal).
+    s._final_cull_heal_in_dnuts = False
     with contextlib.redirect_stdout(io.StringIO()), buda.ostream_redirect():
         for c in _SETUP:
             s.do_command(c)
