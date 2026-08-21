@@ -492,7 +492,8 @@ struct ReachZones {
 };
 
 static std::map<std::pair<int,bool>, ReachZones>
-build_reach_zones(const std::vector<KeepoutZone>& zones)
+build_reach_zones(const std::vector<KeepoutZone>& zones,
+                  const std::set<int>& layers_in_play)
 {
     // Resolved PER ORIENTATION rather than per layer: which axis is the "band"
     // depends on how the partner runs, and doing it once here keeps the inner
@@ -504,7 +505,15 @@ build_reach_zones(const std::vector<KeepoutZone>& zones)
     std::map<std::pair<int,bool>, std::vector<Row>> raw;
     for (const auto& z : zones) {
         const Rect& k = z.bbox;
-        for (int lid : z.layer_ids) {
+        // An EMPTY layer set means EVERY layer -- the convention every other
+        // consumer already reads it by (verify.cpp's zone_applies, nuts_geom's
+        // keepout_occupied, the planner, Floorplan's own crossing tests), and
+        // what `add_keepout_zone(..., [])` produces.  Iterating layer_ids alone
+        // indexed NOTHING for such a zone, so the pass silently ignored exactly
+        // the most restrictive kind of keepout there is (Codex P2 on #810).
+        const std::set<int>& lids = z.layer_ids.empty() ? layers_in_play
+                                                        : z.layer_ids;
+        for (int lid : lids) {
             raw[{lid, true }].push_back({(double)k.y1, (double)k.y2,
                                          (double)k.x1, (double)k.x2});
             raw[{lid, false}].push_back({(double)k.x1, (double)k.x2,
@@ -556,7 +565,30 @@ static void prune_unreachable_partner_windows(
     const auto& zones = floorplan.get_keepout_zones();
     if (zones.empty()) return;        // the common case: nothing declared
 
-    const auto index = build_reach_zones(zones);
+    std::set<int> layers_in_play;
+    for (const auto& ts : segments) layers_in_play.insert(ts.layer);
+    const auto index = build_reach_zones(zones, layers_in_play);
+
+    // Which segments have a SEG junction at each end.  A junction end is NOT
+    // fixed geometry: do_span_adjustments later OVERWRITES span_lo/span_hi with
+    // the placed track of whatever connects there.  So a partner with junctions
+    // at BOTH ends has no stale-free far end to prune from, and treating its
+    // nominal far end as fixed is not merely imprecise -- it is UNSOUND, which
+    // is the one thing this pass may not be (Codex P1 on #810).
+    //
+    // The failure is concrete: a keepout strictly between a trunk partner's two
+    // nominal endpoints makes each end's bound push the OTHER way (the lo seat
+    // forced above the zone, the hi seat below it), so the partner still crosses
+    // AND both windows have been narrowed -- forbidding the legal answer of
+    // moving both endpoints to the SAME side.  rev_conn_map is keyed by the
+    // segment being FOLLOWED, so the ends of a follower are recovered by
+    // inverting it once here.
+    std::map<std::pair<int,int>, std::pair<bool,bool>> junction_ends;  // (lo, hi)
+    for (const auto& [t_key, followers] : rev_conn_map)
+        for (const auto& f : followers) {
+            auto& e = junction_ends[{f.src_bid, f.src_si}];
+            (f.lo_end ? e.first : e.second) = true;
+        }
 
     // Every bound is computed from the PRE-prune intervals and applied after,
     // so the result cannot depend on the order segments are visited in.
@@ -587,7 +619,14 @@ static void prune_unreachable_partner_windows(
 
             // Its FAR end.  The junction with `ts` rides the near end (that end
             // IS ts's track position, which is what makes this segment's seat
-            // decide the partner's span); the other end is fixed geometry.
+            // decide the partner's span).  Usable ONLY when the other end is
+            // fixed geometry -- a block face, or a free end.  If a SEG junction
+            // sits there too, that end moves when ITS partner is placed, and
+            // pruning from the nominal value is unsound (see junction_ends).
+            auto je = junction_ends.find({f.src_bid, f.src_si});
+            if (je != junction_ends.end() &&
+                (f.lo_end ? je->second.second : je->second.first))
+                continue;                       // far end moves: prune nothing
             const double far = f.lo_end ? std::max(p.span_lo, p.span_hi)
                                         : std::min(p.span_lo, p.span_hi);
 
@@ -3166,11 +3205,6 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
     // One full placement of a (possibly dogleg-mutated) bundle set: extract
     // segments, build maps, run the orientation fixpoint, classify cycles, then
     // the repair/corner safety net.  Returned so the dogleg pass can re-place.
-    // Partner-reach pruning counts from the LAST solve — i.e. the state that
-    // was accepted.  Carried out of the lambda because the context dies with
-    // it, and reported once at the tail: the pass runs on every trial solve
-    // too, and a per-solve print would bury a ripup run.
-    int reach_pruned = 0, reach_doomed = 0;
     auto solve = [&](const std::vector<BundleWrapper>& bs,
                      const std::map<int, LayerConstraints>& seed_cons) -> DoglegSolveOut {
         ++n_solves;
@@ -3179,8 +3213,6 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
         result.segments = extract_segments(bs, x_grid, y_grid);
         charge("extract", t0);
         NutsContext ctx = build_context(bs, floorplan_, result.segments);
-        reach_pruned = ctx.n_reach_pruned;
-        reach_doomed = ctx.n_reach_doomed;
         std::map<int, std::vector<TrackSegment*>> by_layer;
         for (auto& ts : result.segments)
             by_layer[ts.layer].push_back(&ts);
@@ -3200,6 +3232,11 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
         // mutual-edge structure.  The 2-cycle filter guarantees the safety-net
         // passes could not have fixed these anyway.
         DoglegSolveOut out;
+        // Stamped on the solve's OWN output: reported once at the tail from
+        // whichever solve was ACCEPTED, since the pass runs on every trial and
+        // a per-solve print would bury a ripup run.
+        out.n_reach_pruned = ctx.n_reach_pruned;
+        out.n_reach_doomed = ctx.n_reach_doomed;
         out.plans = detect_dogleg_plans(result.segments, ctx.rev_conn_map, ctx.trunk_set);
         charge("dogleg_detect", t0);
         // The final adjustments can extend spans of layers packed earlier,
@@ -3309,13 +3346,13 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
         std::cout << "[NUTS] WARNING: " << out.result.num_keepout_conflicts
                   << " segment(s) placed ON a keepout (window exhausted; the "
                   << "bus cannot physically route there — re-pin or re-plan).\n";
-    if (reach_pruned > 0)
-        std::cout << "[NUTS] " << reach_pruned << " seat window(s) pruned to "
+    if (out.n_reach_pruned > 0)
+        std::cout << "[NUTS] " << out.n_reach_pruned << " seat window(s) pruned to "
                   << "what a perpendicular partner can reach (a keepout on the "
                   << "PARTNER's layer, which the segment's own layer never "
                   << "sees).\n";
-    if (reach_doomed > 0)
-        std::cout << "[NUTS] WARNING: " << reach_doomed << " segment(s) have a "
+    if (out.n_reach_doomed > 0)
+        std::cout << "[NUTS] WARNING: " << out.n_reach_doomed << " segment(s) have a "
                   << "perpendicular partner that crosses a keepout wherever "
                   << "they are seated (no seat helps — re-pin or re-plan).\n";
     if (!out.result.unseatable_trunks.empty())
