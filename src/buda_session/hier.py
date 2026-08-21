@@ -492,12 +492,21 @@ class HierMixin:
                       f"not match the sidecar uid (floorplan changed?) — the "
                       f"selection may fall back to type/WL matching")
 
-    def _apply_selections(self):
+    def _apply_selections(self, persist=False):
         """Load the sidecar and apply pinned topologies and layer overrides.
 
         This acts as a baseline load. If a bundle is already pinned (e.g., via
         a `select_topology` script command), the script's choice is respected,
         but any matching layer overrides from the sidecar will still be applied.
+
+        `persist=True` (the `run_planner hier` call site only) refreshes the
+        pre-expansion candidate rows when a pin/layer actually changed — see
+        the comment at the bottom.  The other callers must not: generation
+        runs its own full `_persist_topologies()` right after (persisting
+        here would double the rewrite — Codex #815), the flat planner's
+        output persist stamps `is_pinned` + the layer meta itself, and the
+        explorer's re-run is a PREVIEW whose contract is that the checkpoint
+        changes only on explicit commands.
         """
         path = self._sidecar_path()
         if not path or not os.path.exists(path):
@@ -683,12 +692,13 @@ class HierMixin:
         # select_topology (which calls this same refresh): rewrite the
         # PRE-expansion candidate rows so `is_pinned` + the forced-layer
         # meta land on the TEMPLATE/original bundles — the planner persist
-        # later in run_planner only writes the EXPANDED per-instance view,
-        # so without this a hier plan-resume restored the template unpinned
-        # and re-decided it (the field-reported json-loss gap, BDB half).
-        # Gated on an actual state change, so a re-run whose sidecar is
-        # already applied (replan, a healer's planner pass) pays nothing.
-        if applied_change and self.bdb is not None:
+        # later in run_planner hier only writes the EXPANDED per-instance
+        # view, so without this a hier plan-resume restored the template
+        # unpinned and re-decided it (the field-reported json-loss gap, BDB
+        # half).  Gated on the CALLER (`persist` — only run_planner hier;
+        # see the docstring) and on an actual state change, so a re-run
+        # whose sidecar is already applied pays nothing.
+        if persist and applied_change and self.bdb is not None:
             self._persist_topologies()
 
     def _add_blocks_from_bdb(self, depth: int, mode: str = "deepest"):

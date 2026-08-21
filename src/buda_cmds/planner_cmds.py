@@ -187,7 +187,10 @@ def cmd_run_planner(session, cmd, args, cmd_line):
         session._reset_doglegs()
         # Apply user-pinned selections to template wrappers BEFORE expansion
         # so topology_pinned + pinned_seg_layers propagate to all instances.
-        session._apply_selections()
+        # persist=True: the pre-expansion rows must learn the pin here — the
+        # planner persist below writes only the EXPANDED view, and this is
+        # the one caller where nothing else refreshes the template rows.
+        session._apply_selections(persist=True)
         # Bottom-up cells (set_bottom_up): first give any 90°-rotated
         # instance class its own clone template (candidates generated from
         # the rotated reference's cell-local floorplan), then solve each

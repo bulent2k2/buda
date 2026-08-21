@@ -322,3 +322,81 @@ def test_hier_template_pin_survives_plan_resume(tmp_path, monkeypatch):
         assert w.plan.selected_topology_index == pinned_idx
         assert (w.input.candidates[w.plan.selected_topology_index].type
                 == tt.type)
+
+
+# ---------------------------------------------------------------------------
+# 5. The persist-refresh is caller-scoped (Codex #815 P2 + the preview seam)
+# ---------------------------------------------------------------------------
+
+def test_generation_with_a_sidecar_persists_the_pool_once(tmp_path):
+    # generate_topologies runs its own full _persist_topologies right after
+    # _apply_selections — the internal refresh there would double the whole
+    # candidate rewrite on every sidecar-carrying generation (Codex #815).
+    db = str(tmp_path / "flow.ckpt.bdb")
+    side = str(tmp_path / "flow.json")
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    s.script_path = str(tmp_path / "flow.buda")
+    _quiet(s, *_SETUP, f"open_bdb {db}", "run_bundler", "generate_topologies")
+    w = s.bundles[0]
+    t = w.input.candidates[1]
+    json.dump({"selections": [{
+        "bundle_hint": w.input.original_bundle.get_net_names()[0],
+        "bundle_id": w.input.original_bundle.id,
+        "topo_type": t.type, "topo_wl": t.estimated_wirelength,
+        "topo_uid": buda.topo_uid(t), "topo_index_hint": 1,
+        "note": "", "selected_at": "now",
+    }]}, open(side, "w"))
+
+    calls = []
+    orig = type(s)._persist_topologies
+    type(s)._persist_topologies = lambda self_: (
+        calls.append(1), orig(self_))[1]
+    try:
+        _quiet(s, "generate_topologies")     # sidecar applies a NEW pin here
+    finally:
+        type(s)._persist_topologies = orig
+    assert calls == [1], f"pool persisted {len(calls)}x during generation"
+    # ...and the single persist still made the pin durable.
+    assert s.bundles[0].input.topology_pinned
+    import sqlite3
+    con = sqlite3.connect(db)
+    n = con.execute(
+        "SELECT COUNT(*) FROM topology WHERE is_pinned=1").fetchone()[0]
+    con.close()
+    assert n == 1
+
+
+def test_explorer_rerun_is_still_a_preview(tmp_path):
+    # The explorer's ↺ path calls _apply_selections too — it must NOT write
+    # the pin to the checkpoint: a preview's contract is that the BDB
+    # changes only on explicit commands (replan / run_planner / pin).
+    db = str(tmp_path / "flow.ckpt.bdb")
+    side = str(tmp_path / "flow.json")
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    s.script_path = str(tmp_path / "flow.buda")
+    _quiet(s, *_SETUP, f"open_bdb {db}", "run_bundler", "generate_topologies")
+    w = s.bundles[0]
+    t = w.input.candidates[1]
+    json.dump({"selections": [{
+        "bundle_hint": w.input.original_bundle.get_net_names()[0],
+        "bundle_id": w.input.original_bundle.id,
+        "topo_type": t.type, "topo_wl": t.estimated_wirelength,
+        "topo_uid": buda.topo_uid(t), "topo_index_hint": 1,
+        "note": "", "selected_at": "now",
+    }]}, open(side, "w"))
+
+    _quiet(s, "run_planner 3")               # a first, committed plan
+    _quiet(s, "unpin_topology *")            # durable unpin: BDB rows clear
+    json.dump(json.load(open(side)), open(side, "w"))  # sidecar still there
+
+    with contextlib.redirect_stdout(io.StringIO()):
+        s._rerun_all()                       # the ↺ preview replan
+    assert s.bundles[0].input.topology_pinned    # LIVE state adopted the pin
+    import sqlite3
+    con = sqlite3.connect(db)
+    n = con.execute(
+        "SELECT COUNT(*) FROM topology WHERE is_pinned=1").fetchone()[0]
+    con.close()
+    assert n == 0, "a preview re-run wrote a pin to the checkpoint"
