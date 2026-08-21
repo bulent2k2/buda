@@ -131,6 +131,14 @@ def cmd_open_bdb(session, cmd, args, cmd_line):
     writeback = bool(opts) and opts[0] == "writeback"
     if bdb_path != ':memory:':
         bdb_path = resolve_script_path(session, bdb_path)
+    # The LOGICAL path — what the author named, resolved but NOT yet
+    # materialized.  The BUDA-1917 comparison below must use this one: a
+    # `.sql` fixture materializes to a FRESH temp binary on every open, so
+    # comparing the live connections' paths reads a same-fixture re-open as
+    # a different file and false-fires (Codex P2 on #814) — acutely with
+    # `writeback`, where the first temp flushed to the source and the second
+    # rebuilds from it, so nothing split at all.
+    logical_path = bdb_path
     # A serialized text BDB (e.g. mix.bdb.sql) is materialized into a
     # throwaway temp binary so the pipeline never dirties the checked-in
     # text fixture. With `writeback`, changes are dumped back to the .sql on
@@ -149,10 +157,13 @@ def cmd_open_bdb(session, cmd, args, cmd_line):
     # banner after the whole flow had run, easy to lose among its siblings
     # (the "too many bdbs" question).  Same path re-opened = a refresh, not
     # a split; a :memory: predecessor held nothing durable to point at.
-    prev = getattr(session, "_bdb_open_path", None)
+    # Logical paths on both sides, so the message names the files the
+    # author knows rather than a temp binary.
+    prev = getattr(session, "_bdb_logical_path", None)
     if (session.bdb is not None and prev not in (None, ':memory:')
-            and prev != bdb_path):
-        buda_diag.emit("BUDA-1917", f"{prev} -> {bdb_path}")
+            and prev != logical_path):
+        buda_diag.emit("BUDA-1917", f"{prev} -> {logical_path}")
+    session._bdb_logical_path = logical_path
     # The file the live connection holds open (temp binary for a .sql
     # fixture) — save_bdb's save-as guard refuses to back up onto it.
     session._bdb_open_path = bdb_path

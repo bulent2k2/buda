@@ -829,3 +829,25 @@ def test_replacing_a_file_bdb_with_memory_warns_too(tmp_path):
     assert out.count("BUDA-1917") == 1
     out = _open_bdb_output(tmp_path, ["open_bdb :memory:", f"open_bdb {a}"])
     assert "BUDA-1917" not in out
+
+
+def test_same_sql_fixture_reopen_stays_silent(tmp_path):
+    """A `.sql` fixture materializes to a FRESH temp binary on every open, so
+    a live-connection-path comparison read a same-fixture re-open as a
+    different file and false-fired — acutely with `writeback`, where the
+    first temp flushed to the source and the second rebuilds from it, so
+    nothing split (Codex P2 on #814).  The comparison uses the LOGICAL path;
+    a re-open of the same fixture is silent, a different fixture still warns
+    with the logical names."""
+    fa, fb = tmp_path / "a.bdb.sql", tmp_path / "b.bdb.sql"
+    for f in (fa, fb):
+        # save-as writes the diffable .sql text this test needs as input.
+        _open_bdb_output(tmp_path, [f"open_bdb {tmp_path / 'seed.bdb'}",
+                                    f"save_bdb {f}"])
+    out = _open_bdb_output(tmp_path, [f"open_bdb {fa} writeback",
+                                      f"open_bdb {fa} writeback"])
+    assert "BUDA-1917" not in out
+    out = _open_bdb_output(tmp_path, [f"open_bdb {fa}", f"open_bdb {fb}"])
+    lines = [l for l in out.splitlines() if "BUDA-1917" in l]
+    assert len(lines) == 1
+    assert str(fa) in lines[0] and str(fb) in lines[0]
