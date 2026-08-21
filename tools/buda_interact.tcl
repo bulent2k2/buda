@@ -1453,6 +1453,13 @@ if {$stage eq "build"} {
         exit 1
     }
     puts "$tag: RESUMED $nb bundles from $ckpt"
+    # What HELD: the restored pin inventory, so a resume shows the choices
+    # it carries rather than leaving them to be rediscovered at `topos`.
+    # Unsummarized (the prompt's rule: output meant to be READ) — the
+    # one-line summary showed only the LAST pin, which reads as the only one.
+    _log_off
+    catch {buda::dump_pins}
+    _log_on
     set rc [catch {_replay $stage_lines} err]
     _log_finish
     if {$rc} {

@@ -1332,3 +1332,44 @@ def test_the_buda_suffix_is_inferred_and_question_mark_is_help(tmp_path):
     r = _run([*_BTCL_CMD, "-i", demo / "x.tcl"], tmp_path)
     assert r.returncode == 2
     assert "take a .buda flow" in r.stderr
+
+
+def test_pins_verb_and_the_resume_pin_banner(tmp_path):
+    # `pins` lists the live inventory (the new dump_pins), and a `-r` resume
+    # prints the SAME inventory right after RESUMED — the choices the
+    # checkpoint carries, said up front instead of rediscovered at `topos`.
+    demo = _flat_demo(tmp_path)
+    flow = demo / "resume_flat.buda"
+    r = _run([*_BTCL_CMD, "-b", flow], tmp_path,
+             stdin="pins\npin d1 4\npins\ndone\n")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "dump_pins: no pinned bundles." in r.stdout   # before the pin
+    assert "dump_pins: 1 pinned bundle(s):" in r.stdout  # after it
+    assert "(d1_0) -> topo 4" in r.stdout
+
+    r = _run([*_BTCL_CMD, "-r", flow], tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    resumed = r.stdout.index("RESUMED")
+    banner = r.stdout.index("dump_pins: 1 pinned bundle(s):")
+    assert banner > resumed                              # inventory ON resume
+    assert "(d1_0) -> topo 4" in r.stdout
+
+
+def test_save_takes_a_snapshot_path(tmp_path):
+    # `save <path>` snapshots to the NAMED file (binary or .sql by suffix);
+    # bare `save` keeps the historical default beside the checkpoint.
+    demo = _flat_demo(tmp_path)
+    flow = demo / "resume_flat.buda"
+    snap = tmp_path / "handpicked.bdb.sql"
+    r = _run([*_BTCL_CMD, "-b", flow], tmp_path,
+             stdin=f"pin d1 4\nsave {snap}\ndone\n")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert snap.exists(), "save <path> wrote nothing"
+    assert "CREATE TABLE" in snap.read_text()[:2000]     # a real .sql dump
+    # The snapshot carries the pin: rebuild it and ask.
+    import sqlite3
+    con = sqlite3.connect(":memory:")
+    con.executescript(snap.read_text())
+    assert con.execute(
+        "SELECT COUNT(*) FROM topology WHERE is_pinned=1").fetchone()[0] == 1
+    con.close()

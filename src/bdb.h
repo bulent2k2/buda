@@ -929,6 +929,11 @@ public:
     // Mark one candidate as the selected topology for a bundle (planner choice or
     // pin): sets is_selected=1 for cand_index, 0 for the bundle's other rows.
     void set_topology_selected(const std::string& bundle_id, int cand_index);
+    // Mark cand_index as THE pinned candidate (is_pinned) for a bundle, and
+    // every other row unpinned; -1 = clear all.  The planner-persist twin of
+    // set_topology_selected: a sidecar-applied pin used to persist only as a
+    // SELECTION, so a plan-resume without the sidecar silently re-decided.
+    void set_topology_pinned(const std::string& bundle_id, int cand_index);
     // Set the planner's assigned layer on one topology segment.
     void set_segment_layer(const std::string& bundle_id, int cand_index,
                            int seg_index, int layer);

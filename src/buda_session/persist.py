@@ -500,6 +500,7 @@ class PersistMixin:
                 self._persist_topology_annotations(bid, ci, topo, seen_busterms)
                 n_cands += 1
             self._persist_group_pin(w, bid)
+            self._persist_pinned_layers(w, bid)
         # The durable-pin memo mirrors the table, and this method is the
         # table's only writer — so rebuild the mirror from the wrapper state
         # just serialized.  This is what makes an in-session pin survive an
@@ -537,6 +538,25 @@ class PersistMixin:
         uids = [buda.topo_uid(w.input.candidates[i]) for i in grp
                 if 0 <= i < len(w.input.candidates)]
         self.bdb.meta_set(f"pinned_group:{bid}", json.dumps(uids) if uids else "")
+
+    def _persist_pinned_layers(self, w, bid):
+        """Persist forced per-segment layers (`input.pinned_seg_layers` — an
+        `edit_commit pin` after `edit_set_layer`, or a sidecar layer merge)
+        as BDB meta `pinned_layers:<bid>`.  They had NO durable home: the
+        RESULT layers persist as `topology_segment.assigned_layer`, but the
+        FORCED-ness — "keep these under re-planning" — lived only in the
+        sidecar `.json`, so deleting it silently returned layer choice to
+        the planner on the next plan-resume.  Meta like `pinned_group`
+        (uid-independent, no schema bump); written only for a PINNED wrapper
+        (the planner applies forced layers to whatever is selected, so
+        restoring them unpinned would force a candidate the user never
+        chose), and always written — empty clears a stale entry."""
+        import json
+        pl = list(getattr(w.input, "pinned_seg_layers", []) or [])
+        keep = (pl and any(l != -1 for l in pl)
+                and getattr(w.input, "topology_pinned", False))
+        self.bdb.meta_set(f"pinned_layers:{bid}",
+                          json.dumps(pl) if keep else "")
 
     def _persist_topology_annotations(self, bid, ci, topo, seen_busterms=None):
         """Persist ONE candidate's derived annotations — ALWAYS as a pair:
@@ -994,6 +1014,20 @@ class PersistMixin:
                 w.hier.locked = True
                 w.input.topology_pinned = True
                 w.input.pinned_seg_layers = list(w.plan.seg_layers)
+        # Restore forced per-segment layers (BDB meta, the sidecar-free
+        # durable home) onto a PINNED wrapper — the bottom-up locked path
+        # above already set its own from the plan and is not overridden.
+        if (getattr(w.input, "topology_pinned", False)
+                and not getattr(w.hier, "locked", False)
+                and not list(getattr(w.input, "pinned_seg_layers", []) or [])):
+            rawpl = self.bdb.meta_get(f"pinned_layers:{br.id}", "")
+            if rawpl:
+                try:
+                    pl = [int(x) for x in json.loads(rawpl)]
+                except (ValueError, TypeError):
+                    pl = []
+                if pl:
+                    w.input.pinned_seg_layers = pl
         # Restore a super-candidate group pin (BDB meta, uid-keyed): map the
         # persisted family uids back to the reloaded candidates' indices, so a
         # resumed run_planner still refines within the pinned family.
@@ -1422,7 +1456,9 @@ class PersistMixin:
                 buda.topo_uid(t) for t in w.input.candidates
                 if t.type == "USER" and buda.topo_uid(t) not in inherited))
         return (uid, tuple(w.plan.seg_layers), bool(w.hier.locked), extras,
-                bundle_ndr_stamp(self, w))
+                bundle_ndr_stamp(self, w),
+                bool(getattr(w.input, "topology_pinned", False)),
+                tuple(getattr(w.input, "pinned_seg_layers", []) or ()))
 
     @_batched
     def _persist_planner_output(self, selective=False):
@@ -1512,11 +1548,22 @@ class PersistMixin:
                     self.bdb.clear_expanded_bundle(bid)
                 self._add_expanded_bundle(w, sel, expanded_to_template,
                                           seen_busterms)
+                self._persist_pinned_layers(w, bid)
             else:                                   # normal bundle (flat / cross-block)
                 if bid not in original_ids:         # not persisted yet → persist fully
                     self._persist_normal_bundle(w)
                 ci = self._selected_bdb_cand_index(bid, w, sel)
                 self.bdb.set_topology_selected(bid, ci)
+                # A pin applied AT the planner (a sidecar selection —
+                # _apply_selections runs inside run_planner) used to persist
+                # only as is_selected: below-plan resumes reproduced the
+                # route, but a plan-resume without the sidecar silently
+                # re-decided.  Refresh is_pinned from the wrapper, and give
+                # the forced layers their durable home too.
+                self.bdb.set_topology_pinned(
+                    bid, ci if getattr(w.input, "topology_pinned", False)
+                    else -1)
+                self._persist_pinned_layers(w, bid)
                 self.bdb.reset_assigned_layers(bid)  # drop stale layers from a prior plan
                 self._persist_assigned_layers(bid, ci, w)
             n += 1
@@ -1610,6 +1657,7 @@ class PersistMixin:
         # opened) must be checkpointed on THIS first-persist path too, or a
         # later load_pipeline resumes without the group constraint (Codex).
         self._persist_group_pin(w, bid)
+        self._persist_pinned_layers(w, bid)
 
     def _selected_bdb_cand_index(self, bid, w, sel):
         """BDB cand_index of the wrapper's selected candidate, resolved by

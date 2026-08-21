@@ -4866,6 +4866,13 @@ void BDB::set_topology_selected(const std::string& bundle_id, int cand_index) {
     sqlite3_step(s);
 }
 
+void BDB::set_topology_pinned(const std::string& bundle_id, int cand_index) {
+    Stmt s(_db, "UPDATE topology SET is_pinned=(cand_index=?) WHERE bundle_id=?");
+    sqlite3_bind_int (s, 1, cand_index);
+    sqlite3_bind_text(s, 2, bundle_id.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_step(s);
+}
+
 void BDB::set_segment_layer(const std::string& bundle_id, int cand_index,
                             int seg_index, int layer) {
     Stmt s(_db, "UPDATE topology_segment SET assigned_layer=?"

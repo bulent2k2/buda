@@ -35,12 +35,13 @@ namespace eval prompt {
     # that lies the first time a verb is added.
     variable verbs {
         {topos    "?sel?"        "list a bundle's candidates (1-based `topo` column)"}
+        {pins     ""             "the pin inventory (dump_pins)"}
         {explore  "?sel?"        "open the topology explorer (close it to return)"}
         {pin      "<sel> <N>"    "pin candidate N — 1-based, as the explorer shows it"}
         {unpin    "<sel>"        "drop a pin, letting the planner re-choose"}
         {replan   ""             "re-run the planner and route with the current pins"}
         {show     ""             "open the main viewer on the routed design"}
-        {save     ""             "write the .sql snapshot now (re-plans first if pins changed)"}
+        {save     "?path?"       "write a snapshot now (default: the .sql beside the checkpoint; re-plans first if pins changed)"}
         {commands "?glob?"       "list the ENGINE's commands (optionally filtered)"}
         {help     ""             "this list (also: ?)"}
         {done     ""             "re-plan if pins changed, save, and exit (also: exit, quit)"}
@@ -193,6 +194,7 @@ proc prompt::run {tag ps route bdb example {guard ""} {sidecar ""}} {
                     }
                 }
                 topos   { buda::dump_topologies {*}[lrange $line 1 end] }
+                pins    { buda::dump_pins }
                 explore { buda::visualize_topologies {*}[lrange $line 1 end] }
                 show    { buda::visualize }
                 replan  {
@@ -239,7 +241,13 @@ proc prompt::run {tag ps route bdb example {guard ""} {sidecar ""}} {
                               route (`replan` first to include them --\
                               it replays the flow's tail, healers included)"
                     }
-                    buda::save_bdb ${bdb}.sql
+                    # `save <path>` snapshots to the named file; bare
+                    # `save` keeps the historical default beside the flow.
+                    if {[llength $line] > 1} {
+                        buda::save_bdb [lindex $line 1]
+                    } else {
+                        buda::save_bdb ${bdb}.sql
+                    }
                 }
                 help - ? { prompt::_help $tag }
                 commands { prompt::_commands [lindex $line 1] }

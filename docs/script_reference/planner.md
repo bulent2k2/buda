@@ -372,6 +372,27 @@ unpin_topology 2       # bundle 2 is no longer forced
 run_planner            # may now choose a different candidate for bundle 2
 ```
 
+### `dump_pins`
+
+```
+dump_pins
+```
+
+Print the **pin inventory**: one line per bundle carrying a single pin
+(typed `select_topology`, sidecar-applied, or restored from a checkpoint),
+a `group:` super-candidate pin, or forced per-segment layers — with the
+1-based candidate number, its type, the forced layers by name, and
+bottom-up copies marked.  Read-only.  This is what the `btcl` prompt's
+`pins` verb runs, and what a `btcl -r` resume prints right after `RESUMED`
+so a session starts by saying which choices it carries.
+
+**Example output:**
+```
+dump_pins: 2 pinned bundle(s):
+  bundle 1 (x_tile_0) -> topo 3 (U_VHV@y30) layers[M3 M6 M7]
+  bundle 2 (b_lohi_t0_0) -> topo 2 (U_VHV@y193)
+```
+
 ---
 
 ## Stage 4c — Post-NUTS stub layer reassignment

@@ -504,11 +504,18 @@ class ExplorerNavMixin:
 
 
     def _rerun_and_refresh(self):
-        """Select current topology, re-run NUTS, and refresh the main viz."""
+        """Re-run the pipeline under the EXISTING pins and refresh the viz.
+
+        This used to `_select_current()` first — silently PINNING whatever
+        candidate happened to be displayed, so paging through a bundle to
+        compare and pressing ↺ created a pin nobody asked for (and a
+        sidecar entry that outlived the session).  Pinning is `s`'s job;
+        the note below keeps the old behavior discoverable."""
         if self._rerun_fn is None:
             return
-        # Persist the currently displayed topology as the selection for this bundle.
-        self._select_current()
+        if not self._current_is_selected():
+            print(f"NOTE: displayed candidate {self.idx + 1} is not pinned "
+                  f"-- press `s` to pin it; re-running with existing pins")
         # Visual feedback while running.
         if self._btn_rerun is not None:
             self._btn_rerun.label.set_text('Running…')

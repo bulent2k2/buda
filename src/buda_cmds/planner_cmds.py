@@ -187,7 +187,10 @@ def cmd_run_planner(session, cmd, args, cmd_line):
         session._reset_doglegs()
         # Apply user-pinned selections to template wrappers BEFORE expansion
         # so topology_pinned + pinned_seg_layers propagate to all instances.
-        session._apply_selections()
+        # persist=True: the pre-expansion rows must learn the pin here — the
+        # planner persist below writes only the EXPANDED view, and this is
+        # the one caller where nothing else refreshes the template rows.
+        session._apply_selections(persist=True)
         # Bottom-up cells (set_bottom_up): first give any 90°-rotated
         # instance class its own clone template (candidates generated from
         # the rotated reference's cell-local floorplan), then solve each
@@ -440,7 +443,51 @@ def cmd_unpin_topology(session, cmd, args, cmd_line):
         session._persist_topologies()   # refresh is_pinned in the BDB
 
 
+def cmd_dump_pins(session, cmd, args, cmd_line):
+    # dump_pins — the compact pin inventory: one line per bundle holding a
+    # single pin (typed / sidecar-applied / restored), a group pin, or
+    # forced per-segment layers.  What the prompt's `pins` verb and the
+    # `btcl -r` resume banner read; candidate numbers are 1-based like
+    # everywhere else they are shown or typed.
+    names = session._make_layer_names()
+
+    def _lname(lid):
+        return names.get(lid, f"L{lid}") if lid >= 0 else "-"
+
+    rows = []
+    for w in session.bundles:
+        pinned = getattr(w.input, "topology_pinned", False)
+        grp = list(getattr(w.input, "pinned_group", []) or [])
+        forced = list(getattr(w.input, "pinned_seg_layers", []) or [])
+        if not pinned and not grp and not any(l != -1 for l in forced):
+            continue
+        bid = w.input.original_bundle.id
+        nets = w.input.original_bundle.get_net_names()
+        hint = nets[0] if nets else ""
+        sel = w.plan.selected_topology_index
+        what = ""
+        if grp:
+            what = f"group pin ({len(grp)} member(s))"
+        elif 0 <= sel < len(w.input.candidates):
+            what = f"topo {sel + 1} ({w.input.candidates[sel].type})"
+        else:
+            what = f"topo {sel + 1}"
+        line = f"  bundle {bid} ({hint}) -> {what}"
+        if any(l != -1 for l in forced):
+            line += " layers[" + " ".join(_lname(l) for l in forced) + "]"
+        if getattr(w.hier, "locked", False):
+            line += "  [bottom-up copy]"
+        rows.append(line)
+    if not rows:
+        print("dump_pins: no pinned bundles.")
+        return
+    print(f"dump_pins: {len(rows)} pinned bundle(s):")
+    for r in rows:
+        print(r)
+
+
 COMMANDS = {
+    "dump_pins": cmd_dump_pins,
     "set_planner_param": cmd_set_planner_param,
     "run_planner": cmd_run_planner,
     "select_topology": cmd_select_topology,
