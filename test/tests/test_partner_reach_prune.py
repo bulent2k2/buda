@@ -149,3 +149,63 @@ def test_a_design_with_no_declared_keepout_is_untouched():
             s.do_command(line)
     assert "seat window(s) pruned" not in buf.getvalue()
     assert s.detailed_result.num_unplaced == 0
+
+
+# ---------------------------------------------------------------------------
+# The two fixes that arrived from review, each with the property it protects.
+# ---------------------------------------------------------------------------
+
+def test_a_partner_with_junctions_at_both_ends_is_never_pruned_from():
+    """The soundness rule (Codex P1 on #810), pinned on the flow that broke it.
+
+    A partner's far end is fixed geometry only when nothing else connects
+    there -- `do_span_adjustments` OVERWRITES span_lo/span_hi with the placed
+    track of whatever joins at each end.  With a keepout strictly between such
+    a partner's two nominal endpoints, each end's bound pushes the OTHER way,
+    so the partner still crosses AND both windows have been narrowed --
+    forbidding the legal answer of moving both endpoints to the same side.
+
+    demo/comprehensive_demo.buda is exactly that shape (bundle 10's L4 trunk,
+    whose L5 partner carries junctions at both ends), and an earlier cut of
+    this pass DID prune it -- which is why the assertion is that the pass
+    reports NOTHING there.  The golden pins the resulting placement; this pins
+    the REASON, so a future change that re-prunes it fails here saying why
+    rather than only as an unexplained golden diff.
+    """
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(io.StringIO()):
+        s.do_command(f"source {_ROOT / 'demo' / 'comprehensive_demo.buda'}")
+    out = buf.getvalue()
+    assert "seat window(s) pruned" not in out, \
+        "a coupled two-moving-endpoint partner was pruned from — see Codex P1 on #810"
+
+
+def test_a_keepout_with_an_empty_layer_set_blocks_every_layer():
+    """An empty `layer_ids` means EVERY layer (Codex P2 on #810).
+
+    That is the convention verify.cpp's zone_applies, nuts_geom's
+    keepout_occupied, the planner and Floorplan all read it by, and what
+    `add_keepout_zone(..., [])` produces.  Indexing `z.layer_ids` alone stored
+    no rows for such a zone, so the pass silently ignored the most restrictive
+    keepout there is.
+
+    Built by replaying the vehicle with its `add_keepout` line swapped for the
+    all-layer form: same geometry, same expected outcome, so a divergence is
+    the layer handling and nothing else.
+    """
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(io.StringIO()):
+        for line in _FLOW.read_text().splitlines():
+            line = line.split("#")[0].strip()
+            if not line:
+                continue
+            if line.startswith("add_keepout"):
+                s.fp.add_keepout_zone(600, 380, 900, 450, [])   # [] = all layers
+                continue
+            s.do_command(line)
+    assert "seat window(s) pruned" in buf.getvalue()
+    assert s.detailed_result.num_unplaced == 0
