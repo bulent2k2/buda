@@ -577,10 +577,15 @@ def _materialize_fetched_inputs(wt, flows):
     flow's own declaration is the single source of what to carry over: parse
     its top-level `require_file` lines (the engine's quote-aware tokenizer,
     paths up to the `hint` keyword) and copy whichever of those files exist
-    here and are absent there.  Top-level only — no corpus flow declares its
-    inputs from behind a `source` — and never overwrites: a file the worktree
-    already has (checked in at the baseline commit) is the baseline's own.
+    here.  Top-level only — no corpus flow declares its inputs from behind a
+    `source`.  A file TRACKED at the baseline commit is the baseline's own
+    and is never touched; an untracked one is ours from a previous
+    materialization, and a STALE copy is refreshed rather than kept — the
+    worktree is CACHED by commit, so an input replaced here while the same
+    baseline stays selected would otherwise silently attribute an input-data
+    difference to the code change (Codex P2 on #813).
     """
+    import filecmp
     copied = 0
     for flow in flows:
         src_flow = Path(_ROOT) / flow
@@ -595,10 +600,17 @@ def _materialize_fetched_inputs(wt, flows):
                     break
                 src = (src_flow.parent / tok).resolve()
                 dst = wt / Path(flow).parent / tok
-                if src.is_file() and not dst.exists():
-                    dst.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(src, dst)
-                    copied += 1
+                if not src.is_file():
+                    continue
+                if dst.exists():
+                    rel = (Path(flow).parent / tok).as_posix()
+                    tracked = _sh(["git", "ls-files", "--error-unmatch",
+                                   rel], wt, check=False).returncode == 0
+                    if tracked or filecmp.cmp(src, dst, shallow=False):
+                        continue
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src, dst)
+                copied += 1
     if copied:
         print(f"[--vs] materialized {copied} fetched input file(s) "
               f"into the baseline worktree")
