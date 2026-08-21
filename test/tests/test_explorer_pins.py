@@ -349,13 +349,13 @@ def test_generation_with_a_sidecar_persists_the_pool_once(tmp_path):
     }]}, open(side, "w"))
 
     calls = []
-    orig = type(s)._persist_topologies
-    type(s)._persist_topologies = lambda self_: (
-        calls.append(1), orig(self_))[1]
-    try:
-        _quiet(s, "generate_topologies")     # sidecar applies a NEW pin here
-    finally:
-        type(s)._persist_topologies = orig
+    orig = s._persist_topologies
+    # Instance-level wrap on purpose: assigning onto the CLASS — even to
+    # "restore" — leaves a BudaSession attribute that shadows the mixin
+    # (test_core_does_not_shadow_mixins would rightly fail after this test).
+    s._persist_topologies = lambda: (calls.append(1), orig())[1]
+    _quiet(s, "generate_topologies")         # sidecar applies a NEW pin here
+    del s._persist_topologies
     assert calls == [1], f"pool persisted {len(calls)}x during generation"
     # ...and the single persist still made the pin durable.
     assert s.bundles[0].input.topology_pinned
