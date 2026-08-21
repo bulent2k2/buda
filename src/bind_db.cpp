@@ -636,6 +636,8 @@ void bind_db(py::module_& m) {
              py::arg("bundle_id"), py::arg("cand_index"))
         .def("all_topology_bridges", &BDB::all_topology_bridges,
              py::arg("bundle_id"))
+        .def("set_topology_pinned", &BDB::set_topology_pinned,
+             py::arg("bundle_id"), py::arg("cand_index"))
         .def("set_topology_selected", &BDB::set_topology_selected,
              py::arg("bundle_id"), py::arg("cand_index"))
         .def("set_segment_layer",     &BDB::set_segment_layer,

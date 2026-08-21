@@ -156,6 +156,38 @@ checkpoint at once, and `done` re-plans for it (the same healer-included
 tail) so the checkpoint stays coherent — you asked this session to change
 the design, so the session finishes the job.
 
+The explorer itself keeps you honest too, because `s` is a **toggle**: a
+second press on an already-pinned candidate UNPINS it (as does `x`), and
+that used to happen silently — the only console evidence was one more
+"Saved N selection(s)" line, which is how a session's cell-local pin
+vanished with nobody the wiser.  Now every `s`/`x` says `PINNED bundle N
+-> topo K (type)` or `UNPINNED bundle N` out loud.  The rerun button (↺)
+re-runs the pipeline under the **existing** pins — it no longer pins
+whatever candidate happened to be displayed (paging through a bundle to
+compare and pressing ↺ used to create a pin nobody asked for); it NOTEs
+when the displayed candidate is unpinned, and `s` remains the one way to
+pin.
+
+**Committed GUI pins are durable without the `.json`.**  Once a sidecar
+pin reaches the planner (`replan`, a `-s plan` resume, the flow's own
+`run_planner`), the checkpoint learns the whole choice: `is_pinned` on the
+candidate row — the cell-local TEMPLATE row included, so a hier
+plan-resume re-fans the pin to every instance — and any custom per-segment
+layers as meta (`pinned_layers:<bundle>`).  Deleting or losing the sidecar
+after that no longer costs the pin: `load_pipeline` restores both, and a
+resumed planner keeps the choice and the layers.  Pinning a cell-local
+template in the GUI also says what the commit will do —
+`(cell-local template -- applies to every instance)` — since the preview
+window only ever re-routed the one instance the pin was made on.
+
+Two prompt verbs round this out: **`pins`** prints the live pin inventory
+(one line per pinned bundle — candidate number, type, forced layers,
+bottom-up copies marked), the same inventory a `-r` resume prints right
+after `RESUMED` so a session starts by saying which choices it carries;
+and **`save <path>`** snapshots the current state to a named file
+(`.sql` = diffable text, else binary) — bare `save` keeps writing the
+`.sql` beside the checkpoint.
+
 ## The rules, in one place
 
 | Flow shape (`-b`'s pre-flight verdict) | What `-b` does |

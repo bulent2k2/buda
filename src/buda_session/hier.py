@@ -377,6 +377,10 @@ class HierMixin:
             tr.connected_blocks = json.dumps(list(topo.connected_block_names))
             tr.feedthru_blocks = json.dumps(list(topo.feedthru_blocks))
             tr.is_selected = (ci == sel)
+            # The same rule as the two non-expanded persist sites: without
+            # it every expanded instance restored UNPINNED, so a hier
+            # plan-resume was free to re-decide a committed sidecar pin.
+            tr.is_pinned = bool(w.input.topology_pinned and ci == sel)
             tr.topo_uid = buda.topo_uid(topo)
             tr.source = "user" if topo.type == "USER" else "generated"
             self.bdb.add_topology(tr)
@@ -511,6 +515,7 @@ class HierMixin:
         # below can not resolve and the pin is lost on every re-run.
         self._restore_user_topos(data)
 
+        applied_change = False  # did any wrapper's pin/layers actually move?
         for sel in data.get('selections', []):
             hint = sel['bundle_hint']
             # Hints are written as the bundle's FULL first net name
@@ -635,22 +640,35 @@ class HierMixin:
                     w.plan.selected_topology_index = target_idx
                     w.input.topology_pinned = True
                     n_adopted += 1
+                    applied_change = True
 
+                old_pl = list(getattr(w.input, 'pinned_seg_layers', []) or [])
                 if (sidecar_layers is not None
                         and target_idx == resolved_sidecar_idx
                         and 0 <= target_idx < len(w.input.candidates)
                         and len(sidecar_layers) == len(w.input.candidates[target_idx].segments)):
                     w.input.pinned_seg_layers = list(sidecar_layers)
                     n_layered += 1
+                    if old_pl != list(sidecar_layers):
+                        applied_change = True
                 else:
                     # The sidecar's layer overrides belong to its topology; when the
                     # script pinned a *different* topology they don't apply, so clear
                     # any stale overrides (e.g. left by an earlier baseline apply)
                     # rather than let the planner truncate them onto the new topo.
                     w.input.pinned_seg_layers = []
+                    if old_pl:
+                        applied_change = True
 
             n = len(matching)
             suffix = f" [{n} instances]" if n > 1 else ""
+            # A cell-local TEMPLATE pinned pre-expansion (run_planner hier)
+            # fans out to every instance at expansion — the GUI preview only
+            # ever re-routed the one instance the pin was made on, so say
+            # what the commit does differently.
+            if (n == 1 and first_w.input.original_bundle.cell_context
+                    and not self._hier_expansion_map):
+                suffix = " (cell-local template -- applies to every instance)"
             if n_adopted:
                 msg = (f"Pinned bundle {bid} to topology {resolved_sidecar_idx + 1} "
                        f"({sel['topo_type']}, WL={sel['topo_wl']})")
@@ -660,6 +678,18 @@ class HierMixin:
             elif n_layered:
                 print(f"Merged sidecar layer overrides ({len(sidecar_layers)}) "
                       f"onto script-pinned bundle {bid}{suffix}")
+
+        # A sidecar-applied pin must be as durable as a typed
+        # select_topology (which calls this same refresh): rewrite the
+        # PRE-expansion candidate rows so `is_pinned` + the forced-layer
+        # meta land on the TEMPLATE/original bundles — the planner persist
+        # later in run_planner only writes the EXPANDED per-instance view,
+        # so without this a hier plan-resume restored the template unpinned
+        # and re-decided it (the field-reported json-loss gap, BDB half).
+        # Gated on an actual state change, so a re-run whose sidecar is
+        # already applied (replan, a healer's planner pass) pays nothing.
+        if applied_change and self.bdb is not None:
+            self._persist_topologies()
 
     def _add_blocks_from_bdb(self, depth: int, mode: str = "deepest"):
         """Walk BDB hierarchy and call fp.add_block() for components at `depth`.

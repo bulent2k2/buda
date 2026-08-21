@@ -82,7 +82,23 @@ flow-text paste lines (`select_topology d1 4`); an EXPLORER pin is a
 sidecar-backed PREVIEW — the prompt watches the sidecar and says so (with
 `replan` as the commit, healers included, never spent silently at `done`),
 and a below-plan `-r` NOTEs a selections sidecar with the `-s plan` remedy,
-since sidecars apply where the planner runs.
+since sidecars apply where the planner runs.  The explorer says every pin
+state change out loud (`s` is a TOGGLE — a second press UNPINS, which used
+to be silent and is how a field session's cell-local pin vanished with only
+a save count as evidence; ↺ re-runs under the EXISTING pins instead of
+auto-pinning the displayed candidate), and a COMMITTED GUI pin is durable
+WITHOUT the `.json`: `_apply_selections` refreshes the pre-expansion
+candidate rows (`is_pinned` — the cell-local TEMPLATE row included, so a
+hier plan-resume re-fans the pin to every instance; pinning a template in
+the GUI says "applies to every instance" at the commit), the planner
+persist stamps `is_pinned` on every branch (expanded per-instance rows
+too), forced per-segment layers get a BDB home (meta
+`pinned_layers:<bid>`, in the selective-re-persist fingerprint so a rule
+change is noticed), and `load_pipeline` restores pin + layers with the
+resumed planner keeping both; the prompt's `pins` verb (engine
+`dump_pins`) prints the live inventory — the same one a `-r` resume prints
+right after RESUMED, unsummarized — and `save <path>` snapshots to a named
+file (bare `save` keeps the `.sql` beside the checkpoint).
 The flow's OUTPUT means what `bin/buda` makes it mean too: `-i` arms
 `buda::log`, so the console gets ONE line per command plus the runtime
 summary and the detail goes to the `<flow_dir>/log/<stem>_flow.log` the CLI

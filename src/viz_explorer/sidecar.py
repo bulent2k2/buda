@@ -172,6 +172,11 @@ class ExplorerSidecarMixin:
         # representative as a plain single pin (Codex).
         wrapper.input.pinned_group = []
 
+        # Say WHAT happened, not just that a file was written: the save
+        # count was the only console evidence, and a toggle-unpin (s on a
+        # pinned candidate) read exactly like one more save (#field-report).
+        print(f"PINNED bundle {sel['bundle_id']} -> topo {self.idx + 1} "
+              f"({topo.type})")
         self._selections[hint] = sel
         self._save_sidecar()
         self._draw()
@@ -208,6 +213,15 @@ class ExplorerSidecarMixin:
     def _deselect_current(self):
         hint    = self._bundle_hint()
         old_sel = self._find_selection()
+        if old_sel is not None or getattr(
+                self.wrappers[self.bidx].input, 'pinned_group', []):
+            # LOUD, before the bookkeeping: `s` TOGGLES — a second press on
+            # a pinned candidate unpins it, and the silent form of that is
+            # how a session's local-bundle pin vanished with only a save
+            # count as evidence.
+            print(f"UNPINNED bundle "
+                  f"{self.wrappers[self.bidx].input.original_bundle.id} "
+                  f"(`s` toggles a pinned candidate; `x` also unpins)")
         if old_sel is not None:
             stale_key = next((k for k, v in self._selections.items()
                               if v is old_sel), hint)
