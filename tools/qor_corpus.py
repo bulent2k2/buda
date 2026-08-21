@@ -214,20 +214,21 @@ CORPUS = [
     # path, whose per-bit taper the QoR triple is sensitive to.  The only
     # entry here that costs real time (~23s); the rest are rounding error.
     "flow/rv/soc_conv_div.buda",
-    # The real-45nm vehicle (5576 nets, 133 SRAM macros, 13k OBS keepouts,
-    # a fetched tech LEF) and its healer twin — the ONLY rows whose inputs
-    # are FETCHED (flow/ariane133/fetch.py), stated by `require_file`: with
-    # the inputs absent both sides err identically and the compare says NOT
-    # COMPARABLE rather than guessing; `--vs` carries the working tree's
-    # fetched copies into the baseline worktree so a fetched checkout gets a
-    # real measurement.  Two corpus escapes happened HERE while it had no
-    # row: PR #780's 3.3s -> 113s planner blow-up (runtime, which the
-    # blow-up advisory below now flags) and the cull-heal admission-strand
-    # gap (#812 — a QoR row would have shown the 4 stranded bits move).
-    # The baseline covers the DEF/LEF/Verilog import + OBS obstruction model
-    # (~21s); the heal twin adds the healer chain + BDB persistence on a
-    # real design (~76s).
-    "flow/ariane133/ariane133.buda",
+    # The real-45nm vehicle (5576 nets, 133 SRAM macros, 13k OBS keepouts, a
+    # fetched tech LEF, the full healer chain, ~76s) — the ONLY row whose
+    # inputs are FETCHED (flow/ariane133/fetch.py), stated by
+    # `require_file`: with the inputs absent both sides err identically and
+    # the compare says NOT COMPARABLE rather than guessing; `--vs` carries
+    # the working tree's fetched copies into the baseline worktree so a
+    # fetched checkout gets a real measurement.  Two corpus escapes happened
+    # HERE while it had no row: PR #780's 3.3s -> 113s planner blow-up
+    # (runtime, which the blow-up advisory below now flags) and the
+    # cull-heal admission-strand gap (#812 — a QoR row would have shown the
+    # 4 stranded bits move).  The heal twin, not ariane133.buda: the
+    # baseline flow stops before run_detailed_nuts, which this corpus's
+    # criterion requires (and it adds zero token coverage over the twin —
+    # measured).  It opens its own ariane133_heal.bdb so the pair can never
+    # collide on one SQLite file under a parallel sweep.
     "flow/ariane133/ariane133_heal.buda",
 ]
 
