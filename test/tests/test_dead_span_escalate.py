@@ -94,6 +94,12 @@ def _nuts(s, escalate):
         if escalate:
             s.do_command("set_dead_span_escalate on")
         s.do_command("run_nuts")
+        # Subject here is the ESCALATION KNOB's own semantics.  The DNUTS
+        # cull heal now engages on admission strands too (culled OR plain
+        # unplaced bits), which would heal the "without escalation" baselines
+        # these tests pin — hold it off so the knob stays observable in
+        # isolation (test_dnuts_cull_heal.py owns the heal's coverage).
+        s._final_cull_heal_in_dnuts = False
         s.do_command("run_detailed_nuts")
 
 
