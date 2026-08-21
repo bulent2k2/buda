@@ -60,6 +60,13 @@ struct DoglegPlan {
 struct DoglegSolveOut {
     NUTSResult              result;
     std::vector<DoglegPlan> plans;
+    // Partner-reach window pruning counts for THIS solve.  They ride the
+    // result rather than a caller-side variable because run_dogleg_fallback
+    // may adopt an earlier trial or keep the original -- so "the last solve"
+    // is not "the accepted solve", and a count read from the wrong one would
+    // describe a placement that was thrown away (Codex P2 on #810).
+    int n_reach_pruned = 0;
+    int n_reach_doomed = 0;
 };
 using DoglegSolveFn = std::function<DoglegSolveOut(
     const std::vector<BundleWrapper>&,
