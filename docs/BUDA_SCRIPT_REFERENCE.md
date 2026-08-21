@@ -26,7 +26,7 @@ The per-command documentation lives in one page per pipeline stage under
 | [Setup](script_reference/setup.md) | setup | `def_layer` · `add_block` · `add_keepout` · `add_net` · `add_bus` · `corner_margin` · `detour_channel` · `set_min_stub_length[_dir\|_layer]` · `set_feedthru` · `set_track_pitch` · `set_unit_check` · `import_lef_tech` |
 | [Bundler](script_reference/bundling.md) | 1 | `run_bundler` · `run_hier_bundler` · `dump_hbundles` |
 | [Topology generator](script_reference/topologies.md) | 2 | `generate_topologies[_for_bundle]` · `generate_more_topologies` · TopoEdit session (`edit_topology` … `edit_commit`) · `generate_hier_topologies` · `generate_topologies_for_hbundle` · `set_prune_dominated` · `set_dedup_loci` · `set_drop_dangling` · `set_trim_mst_legs` · `set_trim_trunk_stubs` |
-| [Planner](script_reference/planner.md) | 3, 4c | `set_planner_param` · `run_planner` (+ `hier`, `post_nuts`) · `select_topology` · `select_topologies` · `unpin_topology` |
+| [Planner](script_reference/planner.md) | 3, 4c | `set_planner_param` · `run_planner` (+ `hier`, `post_nuts`) · `select_topology` · `select_topologies` · `unpin_topology` · `dump_pins` |
 | [Track assignment (NUTS)](script_reference/nuts.md) | 4, 9 | `run_nuts` · `run_nuts_on_layer` · `run_detailed_nuts` · `set_pair_align_heal` · `ripup_reroute` · `negotiate_congestion` · `refine_selection` |
 | [Routing grid](script_reference/routing_grid.md) | 8 | `def_track_pattern` · `add_grid_override` · `report_overhead` |
 | [Non-default rules (NDR)](script_reference/ndr.md) | setup | `def_ndr` · `set_ndr` · `dump_ndr` — per-net width / spacing / shielding, with the demand model and the worked vehicles |
@@ -84,6 +84,7 @@ Commands run in the following order. Later stages depend on earlier ones.
 | 3↔4/9 | `refine_selection` | Measured selection WL polish (run after the healers): re-rank selections on the placed result, adopting only moves that keep opens/overlaps parity-or-better and strictly lower realized WL |
 | Verify | `check_design` | Audit the design at topo, nuts, or dnuts stages: connectivity opens, layer directions, keepout crossings (alias: `check_connectivity`) |
 | — | `dump_topologies` | Text dump of per-bundle candidate topologies (inspection) |
+| — | `dump_pins` | The pin inventory: one line per pinned bundle — 1-based candidate, type, forced layers, bottom-up copies marked (what the `btcl` prompt's `pins` verb runs and a `-r` resume prints after `RESUMED`) |
 | — | `visualize` | Open interactive NUTS result viewer |
 | — | `visualize_topologies` | Open topology explorer |
 | — | `source` | Include another `.buda` file |
