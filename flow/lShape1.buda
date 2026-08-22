@@ -21,8 +21,11 @@
 #
 # Honest caveat while exploring: a bridge is generation-only today — it is
 # priced into the candidate's wirelength and persisted, but no downstream
-# stage plans, places, audits or draws it.  See
-# docs/internal/teg_multirect_status.md §1.1 / §2.2.
+# stage plans, places, audits or draws it — and on THIS shape the emitted
+# bridge is itself incomplete: it lies on the union bbox's outer face, which
+# never touches the rect the trunk missed (the tall arm for V trunks, the
+# base for H trunks).  See docs/internal/teg_multirect_status.md §1.1 / §1.3
+# / §2.2.
 
 add_block src 500 150 600 250
 add_block L rect 0 0 100 400 rect 0 0 400 100 teg_mode over

@@ -14,7 +14,10 @@ emit an explicit **bridge segment** over the gap/notch whenever a trunk cannot
 reach every rect.
 
 The one-line honest summary: **both features are generation-complete and
-downstream-thin.**  Multi-rect geometry is threaded deeply through generation,
+downstream-thin** — with one amendment a Codex review of PR #820 caught and
+§1.3 verifies: for the rectilinear (L-shape) branch the generated bridge is
+itself geometrically incomplete, so "generation-complete" holds for the
+shapes, not for the bridge's own connectivity.  Multi-rect geometry is threaded deeply through generation,
 NUTS anchoring and all three verifiers; TEG-over bridges stop at generation +
 persistence and are invisible to the planner, NUTS, DetailedNUTS, every
 verifier, `report_wirelength`, the QoR corpus, and every exporter.  A design
@@ -65,6 +68,32 @@ RESOLVED on this branch (2026-08-22): the comment now states the measured
 behavior, and the unreferenced byte-duplicate `scenario5_lshaped.buda` is
 removed (only `lShape1.buda` was referenced, by the collinear-stub scan
 tools).
+
+### 1.3 The rectilinear bridge does not touch the rect it exists to connect
+(raised by the Codex review on PR #820; verified against the code)
+
+The rectilinear branch (`src/topology.cpp:3090-3100`) emits the bridge as one
+segment along the **union bbox's perp-hi face** — which only touches the
+rects whose extent reaches that face.  On the §1.1 L-shape (tall arm
+`(0,0)-(100,400)`, wide base `(0,0)-(400,100)`):
+
+- `TRUNK_V@x250`: bridge `(400,0)-(400,400)` lies on the base's right edge
+  and never touches the tall arm (x ≤ 100) — yet the tall arm is exactly the
+  rect the trunk missed.
+- The `TRUNK_H` family (y125..y325): bridge `(0,400)-(400,400)` lies on the
+  tall arm's top edge and never touches the base (y ≤ 100) — the rect the
+  trunk missed, mirrored.
+
+In both orientations the un-reached rect touches *nothing* (the branch emits
+no stub either — "no extra stubs" is its design), so under `over` semantics
+the emitted geometry is already open at generation time.  The disjoint-gap
+branch (`:3104-3138`) does not share the defect the same way: there both
+rects get stubs to the trunk, so connectivity holds through the trunk and the
+union-face bridge is redundant metal rather than a missing link.
+Consequence for open 1: carrying bridges downstream (1a) is not sufficient —
+the rectilinear branch needs its bridge routed to actually contact each
+un-spanned rect (or a connecting leg added) first.  The 1(b) audit would
+catch this shape too, which is another reason to land it first.
 
 ## 2. Engine support map
 
@@ -224,7 +253,11 @@ wrong.
    (a) *emission* — carry `bridge_segments` through planner/NUTS/DNUTS as
    real segments (layer assignment, congestion charge, track position,
    per-bit wires + vias), or explicitly refuse `over` designs at
-   `run_planner` until they are;
+   `run_planner` until they are — with the §1.3 prerequisite: the
+   rectilinear branch's bridge must first be routed to actually contact
+   each un-spanned rect (today it lies on the union face and misses the
+   very rect it exists to connect), or emission would faithfully build an
+   open connection;
    (b) *audit* — `check_nuts`/`check_dnuts` must fail a selected candidate
    whose bridge has no placed metal, and `detect_disconnected` must stop
    assuming same-block continuity for `teg_mode over` blocks
