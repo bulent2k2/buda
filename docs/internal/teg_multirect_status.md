@@ -293,9 +293,14 @@ wrong.
     xfail~~ RESOLVED 2026-08-22 (retagged `@landed`, and the conditional
     xfail escape hatches are GONE — a missing expected candidate now fails
     loudly, so a generator regression can no longer hide as xfail;
-    `feature_coverage_plan.md`'s mode-2 list updated to match).  Still
-    open: `docs/internal/teg.md:83` viz pointer; `wishlist-bdb.md:271`
-    superseded line.
+    `feature_coverage_plan.md`'s mode-2 list updated to match);
+    ~~`docs/internal/teg.md:83` viz pointer; `wishlist-bdb.md:271`
+    superseded line~~ RESOLVED 2026-08-22 (teg.md carries a dated status
+    note — the function moved to `viz_common.py`, is kept-as-reference dead
+    code by its owner's own comment, and the promised connectivity gating
+    was unwired, so the dashed box draws unconditionally; the wishlist line
+    is struck with a pointer to the v11 gap-closed note it predated).  Item
+    12 is fully closed.
 13. **Validation gaps in `add_block ... rect`**: no overlap/degeneracy check
     on the rect list (only classified later), and a malformed rect with <4
     coords raises a bare `IndexError` (`src/buda_cmds/setup_cmds.py:67-69`)

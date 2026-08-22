@@ -268,7 +268,11 @@ re-derives them from geometry — an unannotated topology taps *nothing*. So the
 rehydrate path must rebuild the **raw** `Topology` (segments + scalar fields)
 **and restore its `seg_busterms` via `load_seg_busterms`** (persisted since
 Phase 3, schema v9); it does not need slide ranges, `seg_perp`, or trunk info.
-`bridge_segments` remains the one un-persisted `Topology` field (TEG-over gap).
+~~`bridge_segments` remains the one un-persisted `Topology` field (TEG-over
+gap)~~ (superseded 2026-08-22 annotation: persisted since v11 — see the
+**Gap closed (v11)** note above and the ✅ row in the table below; this
+sentence predates it and sat un-struck in the kept-for-reference section,
+where a skimming reader took it at face value).
 
 | Needed by `run_planner` | Persisted? | Source on resume |
 |---|---|---|
