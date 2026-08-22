@@ -1,0 +1,43 @@
+# steering_demo — the runnable companion of docs/STEERING_GUIDE.md.
+#
+# A deliberately small design whose one interesting bundle (`a`, cpu→dsp)
+# generates a rich candidate pool: two L shapes, two Z shapes and four U
+# detours, with a block (`blk`) sitting in the middle of the diagonal so the
+# Z candidates fly over it.  The guide's worked example pins the Z_VHV
+# candidate, drops its two vertical stubs from TOP M5 to LOW M3 in a TopoEdit
+# session, and shows the pin + forced layers persisting across `btcl -i`
+# sessions:
+#
+#   btcl -i flow/steering_demo.buda ckpt.bdb        # build + iterate
+#   btcl -i flow/steering_demo.buda ckpt.bdb plan   # resume at the planner
+#
+# The flow itself is the plain baseline — no pins, no edits — so the steering
+# happens interactively on top, which is the guide's point.
+
+# Layers: one LOW pair + one TOP pair (H/V), with track patterns so the flow
+# reaches detailed NUTS.
+def_layer 2 M2 H 40
+def_layer 3 M3 V 40
+def_layer 4 M4 H TOP 40
+def_layer 5 M5 V TOP 40
+def_track_pattern 2 0 POWER 2 1 (SIGNAL 1 0.5)x4 GROUND 2 1 (SIGNAL 1 0.5)x4
+def_track_pattern 3 0 POWER 2 1 (SIGNAL 1 0.5)x4 GROUND 2 1 (SIGNAL 1 0.5)x4
+def_track_pattern 4 0 POWER 2 1 (SIGNAL 1 0.5)x4 GROUND 2 1 (SIGNAL 1 0.5)x4
+def_track_pattern 5 0 POWER 2 1 (SIGNAL 1 0.5)x4 GROUND 2 1 (SIGNAL 1 0.5)x4
+
+# Floorplan: cpu→mem is a straight shot; cpu→dsp is the diagonal with `blk`
+# in the way — the bundle the guide steers.
+add_block cpu   0   0 200 200
+add_block mem 600   0 800 200
+add_block dsp 600 400 800 600
+add_block blk 300 250 500 450
+
+add_bus d[8] cpu.q mem.d
+add_bus a[8] cpu.a dsp.a
+
+run_bundler STRICT
+generate_topologies
+run_planner 5
+run_nuts
+run_detailed_nuts
+check_design
