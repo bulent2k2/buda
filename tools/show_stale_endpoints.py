@@ -60,11 +60,26 @@ def run_flow(path):
     s.no_viz = True
     s.script_path = os.path.abspath(path)
     buf = io.StringIO()
+    failed = None
     with contextlib.redirect_stdout(buf):
         try:
             s.do_command(f"source {os.path.abspath(path)}")
-        except SystemExit:      # a flow ending in `exit 0`
-            pass
+        except SystemExit as e:
+            # `exit 0` (and a bare `exit`) is how most flows END -- swallow it
+            # and report on the finished session.  Any OTHER code is a FAILED
+            # flow: a missing `require_file` input, an unreadable `source`, a
+            # bad track pattern.  Swallowing those too would analyse a
+            # half-built session and print an endpoint table that looks
+            # perfectly valid, then exit 0 -- a report on a run that died.
+            if e.code not in (None, 0):
+                failed = e.code
+    if failed is not None:
+        # The flow's own diagnosis is in the captured buffer and is the only
+        # thing that says WHY; re-raising from inside the redirect would throw
+        # it away and leave a bare non-zero exit.
+        sys.stdout.write(buf.getvalue())
+        sys.exit(f"\n{path}: flow FAILED (exit {failed}) — no report produced. "
+                 f"The flow's own output is above.")
     return s
 
 

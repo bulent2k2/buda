@@ -244,6 +244,31 @@ def test_buda_command_sets_it():
         assert buda.dnuts_placed_endpoints() is False
 
 
+def test_show_stale_endpoints_refuses_to_report_on_a_failed_flow(tmp_path):
+    """A failed flow must not yield a report (Codex review, PR #818).
+
+    `run_flow` swallows SystemExit because `exit 0` is how most flows END --
+    but a flow can also die non-zero (a missing `require_file` input, an
+    unreadable `source`, a bad track pattern).  Swallowing those too would
+    analyse a half-built session and print an endpoint table that looks
+    perfectly valid, then exit 0: a report on a run that never finished.
+    """
+    import subprocess
+    import sys as _sys
+    flow = tmp_path / "fails.buda"
+    flow.write_text("require_file /definitely/not/here.v hint fetch it first\n")
+    r = subprocess.run(
+        [_sys.executable, str(_ROOT / "tools/show_stale_endpoints.py"), str(flow)],
+        cwd=_ROOT, capture_output=True, text=True, timeout=300)
+    assert r.returncode != 0, "a failed flow must not exit 0"
+    out = r.stdout + r.stderr
+    assert "flow FAILED" in out
+    # the flow's OWN diagnosis is what says why -- it must survive the capture
+    assert "fetch it first" in out
+    # and nothing that looks like a result may be printed
+    assert "STALE MID" not in out and "ANTENNA" not in out
+
+
 def test_buda_command_rejects_junk():
     s = buda_cli.BudaSession()
     s.no_viz = True
