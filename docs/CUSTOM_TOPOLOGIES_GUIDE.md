@@ -1,4 +1,4 @@
-# Steering Guide — pins, group pins, and topology edits
+# Customizing Topologies — pins, group pins, and hand edits
 
 How to take manual control of BUDA's routing decisions: inspect the candidates
 the tool generated, **pin** the one you want, **edit** a candidate's geometry or
@@ -204,25 +204,34 @@ check_design                  # 6. verify (LAYER_DIR etc. still audit)
 
 Pins and committed edits are only as durable as the store behind them:
 
-- **File-backed BDB open** (`open_bdb design.bdb` in the flow, or
-  `btcl -i flow.buda ckpt.bdb` to arm one from the command line): pins,
-  USER candidates, and forced layers persist; the next session restores them
-  via `load_pipeline` — or simply re-running the flow (a rebuild re-attaches
-  pins to the regenerated pool by content uid).
+- **File-backed BDB open** (`open_bdb design.bdb` in the flow, or a checkpoint
+  armed by the launcher): pins, USER candidates, and forced layers persist;
+  the next session restores them via `load_pipeline` — or simply re-running
+  the flow (a rebuild re-attaches pins to the regenerated pool by content uid).
 - **No BDB**: pins die with the session, and the tool says so honestly.
 
-The fast iteration loop is `btcl -i`:
+The fast iteration loop is **`btcl -b` / `btcl -r`** (build / resume — the
+short, no-filenames-to-invent spellings; the full workflow guide is
+[BUILD_RESUME.md](BUILD_RESUME.md)):
 
 ```
-btcl -i flow/my.buda ckpt.bdb          # run the flow, then the prompt
-btcl -i flow/my.buda ckpt.bdb plan     # resume AT the planner from the checkpoint
+btcl -b flow/my.buda            # BUILD: run the flow with a checkpoint
+                                #   auto-armed (<flow_dir>/<stem>.ckpt.bdb),
+                                #   then the pin/edit prompt
+btcl -r flow/my.buda            # RESUME at the deepest stage the build recorded
+btcl -r -s plan flow/my.buda    # …or re-enter at the planner — the stage for
+                                #   trying a different pin
 ```
+
+(The general form underneath is `btcl -i flow.buda [ckpt.bdb [stage]]` — an
+explicit checkpoint path and stage; `-b`/`-r` are the ergonomic spellings of
+the same machinery.)
 
 At the prompt: `topos <sel>` · `pins` · `explore <sel>` · `pin <sel> <N>` ·
 `unpin <sel>` · `replan` · `done` (re-plans if pins changed, saves, exits).
 Any engine command passes through verbatim — including the whole
 `edit_topology … edit_commit pin` sequence — and the scripted form
-(`echo "pin d1 4\ndone" | btcl -i …`) is the same code path.
+(`echo "pin d1 4\ndone" | btcl -b …`) is the same code path.
 
 Two rules of that world:
 
@@ -248,26 +257,30 @@ buda::run_planner 5
 
 ---
 
-## Worked example — end to end on `flow/steering_demo.buda`
+## Worked example — end to end on `demo/custom_topo.buda`
 
 Everything above, on a real (checked-in) vehicle. The flow is a small design
 whose interesting bundle — `a[8]`, cpu→dsp — has a block (`blk`) sitting in
 the middle of its diagonal, so generation produces a rich pool: two L shapes,
 two Z shapes, four U detours. The flow itself is the plain baseline (no pins),
-so all the steering happens interactively on top. Every transcript below is
-the tool's real output.
+so all the customizing happens interactively on top. Every transcript below
+is the tool's real output.
 
 ```bash
-btcl -i flow/steering_demo.buda ckpt.bdb     # run the flow, get the prompt
+btcl -b demo/custom_topo.buda      # BUILD session: run the flow, get the prompt
 ```
 
-The trailing `ckpt.bdb` arms a file-backed checkpoint **before** the flow, so
-everything we pin persists.
+```
+custom_topo.buda: -b arming checkpoint …/demo/custom_topo.ckpt.bdb
+```
+
+`-b` arms an auto-named checkpoint **before** the flow, so everything we pin
+persists — no filename to invent.
 
 ### 1. Inspect the pool
 
 ```
-steering_demo> topos a_0
+custom_topo> topos a_0
 ── bundle 1  nets=8 (a_0…)  width=12.0  sel=1  cands=8
    topo type                  wl        wl[lo..hi] segs pass  mslide  notes
       1 L_HV@x600@y200       600       [600..1000]    2    0     200  *SEL
@@ -285,8 +298,9 @@ the Z through the middle channel — candidate **4**, same nominal wirelength.
 ### 2. Pin it and re-plan
 
 ```
-steering_demo> pin a_0 4
-steering_demo> replan
+custom_topo> pin a_0 4
+Pinned bundle 1 (a_0) to topology 4
+custom_topo> replan
 [Planner] Bundle 1 (12 units wide) -> topo 4 of 8: Z_VHV@y300@x200 [pinned]  [V→M5 H→M4 V→M5]  overflow=0
 …
   check_design    Success: no violations found.
@@ -298,7 +312,7 @@ the pin leaves open — layers, and NUTS's slide within the windows.
 ### 3. Look inside the selection — `--conn`
 
 ```
-steering_demo> dump_topologies a_0 --conn
+custom_topo> dump_topologies a_0 --conn
    conn detail — topo 4: Z_VHV@y300@x200
      seg0  V M5  along[200,300] perp=200  slide=[0..200]    pull=→hi(1)
         busterms: cpu@face=200(mid)
@@ -318,18 +332,18 @@ keep M5's capacity for long wires.
 ### 4. Force the stub layers in an edit session
 
 ```
-steering_demo> edit_topology 1                  ← numeric bundle ID (not a_0!)
+custom_topo> edit_topology 1                  ← numeric bundle ID (not a_0!)
 [edit] session opened on bundle 1: copy of candidate 4 (Z_VHV@y300@x200) (3 segment(s)).
-steering_demo> edit_set_layer 0 3
+custom_topo> edit_set_layer 0 3
 [edit] seg 0 layer -> 3
-steering_demo> edit_set_layer 2 3
+custom_topo> edit_set_layer 2 3
 [edit] seg 2 layer -> 3
-steering_demo> edit_commit pin
+custom_topo> edit_commit pin
 [edit] committed as candidate 9 of bundle 1 (type USER, WL=600, uid 682f9025…).
 [BDB] op-log provenance stored (2 op(s)) — dump_user_ops 1 shows it.
   Pinned bundle 1 to it.
   Pinned 3 segment layer(s) from the session's edit_set_layer edits.
-steering_demo> replan
+custom_topo> replan
 …
   run_detailed_nuts    [DetailedNUTS] 32 net segments placed, 0 bits unplaced.
   check_design         Success: no violations found.
@@ -344,24 +358,28 @@ so `dump_user_ops 1` can replay how it was built. `--conn` now shows
 ### 5. Save, quit, and prove it persisted
 
 ```
-steering_demo> done
-steering_demo.buda: done -- 0 overlaps, 0 unplaced, 0 audit violations
+custom_topo> done
+custom_topo.buda: done -- 0 overlaps, 0 unplaced, 0 audit violations
 ```
 
 A **new** session, resuming at the planner from the checkpoint:
 
 ```bash
-btcl -i flow/steering_demo.buda ckpt.bdb plan
+btcl -r -s plan demo/custom_topo.buda
 ```
 
 ```
-steering_demo> topos a_0
+custom_topo.buda: -r resuming from …/demo/custom_topo.ckpt.bdb
+```
+
+```
+custom_topo> topos a_0
 ── bundle 1  nets=8 (a_0…)  width=12.0  sel=9 PINNED  cands=9
    topo type                  wl        wl[lo..hi] segs pass  mslide  notes
       …
       4 Z_VHV@y300@x200      600       [600..1160]    3    0     160  dup
       9 USER                 600       [600..1160]    3    0     160  *SEL,dup
-steering_demo> pins
+custom_topo> pins
 dump_pins: 1 pinned bundle(s):
   bundle 1 (a_0) -> topo 9 (USER) layers[M3 M4 M3]
 ```
@@ -436,7 +454,8 @@ same thing through every door.
   TopoEdit session reference, `generate_more_topologies` (accrete candidates
   instead of editing), and the pool-shaping knobs.
 - [KEY_BINDINGS.md](KEY_BINDINGS.md) — the explorer's pin/edit keys.
-- [TCL_FRONT_END.md](TCL_FRONT_END.md) — the bridge, `btcl -i`, checkpoints and
+- [BUILD_RESUME.md](BUILD_RESUME.md) — the `btcl -b` / `btcl -r` workflow guide.
+- [TCL_FRONT_END.md](TCL_FRONT_END.md) — the bridge, the full `-i` machinery, and
   stage resumes.
 - [BDB_REFERENCE.md](BDB_REFERENCE.md) — what persists, and how
   `load_pipeline` restores it.

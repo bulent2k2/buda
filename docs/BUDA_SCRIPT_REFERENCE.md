@@ -36,10 +36,11 @@ Script control (paths and quoting, `source`, `require_file`, `exit`, comments), 
 script skeleton, and the BDB command quick reference stay on this page, below —
 after the pipeline overview that follows.
 
-New to pinning and hand-editing topologies? Start with the
-[Steering Guide](STEERING_GUIDE.md) — a beginner's how-to for
+New to pinning and hand-editing topologies? Start with
+[Customizing Topologies](CUSTOM_TOPOLOGIES_GUIDE.md) — a beginner's how-to for
 `select_topology` / group pins / the TopoEdit session, with the best-known
-methods and the pitfalls (1-based candidates vs 0-based segments,
+methods, a worked example on `demo/custom_topo.buda` (through `btcl -b` /
+`btcl -r`), and the pitfalls (1-based candidates vs 0-based segments,
 `edit_commit pin`, persistence across sessions).
 
 ---

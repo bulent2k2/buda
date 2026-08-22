@@ -1,4 +1,4 @@
-# steering_demo — the runnable companion of docs/STEERING_GUIDE.md.
+# custom_topo — the runnable companion of docs/CUSTOM_TOPOLOGIES_GUIDE.md.
 #
 # A deliberately small design whose one interesting bundle (`a`, cpu→dsp)
 # generates a rich candidate pool: two L shapes, two Z shapes and four U
@@ -8,11 +8,13 @@
 # session, and shows the pin + forced layers persisting across `btcl -i`
 # sessions:
 #
-#   btcl -i flow/steering_demo.buda ckpt.bdb        # build + iterate
-#   btcl -i flow/steering_demo.buda ckpt.bdb plan   # resume at the planner
+#   btcl -i demo/custom_topo.buda ckpt.bdb        # build + iterate
+#   btcl -i demo/custom_topo.buda ckpt.bdb plan   # resume at the planner
 #
-# The flow itself is the plain baseline — no pins, no edits — so the steering
-# happens interactively on top, which is the guide's point.
+# The flow itself is the plain baseline — no pins, no edits — so the
+# customizing happens interactively on top, which is the guide's point.
+# Deliberately no `visualize` (like the resume_* demos): under `btcl -i` a
+# window would block the prompt.
 
 # Layers: one LOW pair + one TOP pair (H/V), with track patterns so the flow
 # reaches detailed NUTS.

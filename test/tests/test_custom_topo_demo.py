@@ -12,13 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""docs/STEERING_GUIDE.md's worked example, pinned so the transcripts cannot rot.
+"""docs/CUSTOM_TOPOLOGIES_GUIDE.md's worked example, pinned so the transcripts cannot rot.
 
-flow/steering_demo.buda is the guide's runnable companion.  The guide walks a
+demo/custom_topo.buda is the guide's runnable companion.  The guide walks a
 reader through: inspect the pool, pin candidate 4 (Z_VHV), drop the two stub
 layers to M3 in a TopoEdit session, `edit_commit pin`, re-plan clean, and prove
 the pin + forced layers survive a session boundary.  These tests hold each of
-those claims against the real tool, in the same shapes the guide prints.
+those claims against the real tool, in the same shapes the guide prints —
+through the same `btcl -b` / `btcl -r -s plan` doors the guide walks.
 """
 import os
 import shutil
@@ -32,7 +33,7 @@ from wrapper_select import wrapper_command, wrapper_missing_reason
 from subprocess_env import buda_env
 
 _ROOT = Path(__file__).parents[2]
-_FLOW = _ROOT / "flow" / "steering_demo.buda"
+_FLOW = _ROOT / "demo" / "custom_topo.buda"
 
 _BTCL_CMD = wrapper_command(_ROOT, "btcl")
 
@@ -56,7 +57,7 @@ _btcl_required = pytest.mark.skipif(bool(_BTCL_MISSING),
 def _flow_copy(tmp_path):
     """The flow is self-contained (no source/require_file), so a copy runs
     anywhere — and keeps each test's flow log out of the repo's flow/log/."""
-    dst = tmp_path / "steering_demo.buda"
+    dst = tmp_path / "custom_topo.buda"
     shutil.copy(_FLOW, dst)
     return dst
 
@@ -77,14 +78,14 @@ def test_baseline_flow_runs_clean(tmp_path):
 
 
 @pytest.mark.mid
-def test_scripted_steering_tail_pins_and_forces_layers(tmp_path):
+def test_scripted_customizing_tail_pins_and_forces_layers(tmp_path):
     """The guide's 'same thing as a plain script' section: pin candidate 4,
     re-layer the stubs in an edit session, commit-with-pin, re-plan — clean,
     with the commit reporting the forced layers."""
     flow = _flow_copy(tmp_path)
     steer = tmp_path / "steer.buda"
     steer.write_text(
-        "source steering_demo.buda\n"
+        "source custom_topo.buda\n"
         "select_topology a_0 4\n"
         "run_planner 5\n"
         "edit_topology 1\n"
@@ -112,15 +113,17 @@ def test_scripted_steering_tail_pins_and_forces_layers(tmp_path):
 @pytest.mark.mid
 @_btcl_required
 def test_pin_and_forced_layers_survive_a_session_boundary(tmp_path):
-    """The guide's money property: session 1 pins + edits + saves through the
-    armed checkpoint; session 2 (a plan-stage resume) restores the USER
-    candidate still pinned, with the forced layers (`layers[M3 M4 M3]`)."""
+    """The guide's money property: session 1 (`btcl -b`) pins + edits + saves
+    through the auto-armed checkpoint; session 2 (`btcl -r -s plan`) restores
+    the USER candidate still pinned, with the forced layers
+    (`layers[M3 M4 M3]`)."""
     flow = _flow_copy(tmp_path)
-    ckpt = tmp_path / "ckpt.bdb"
     env = {**os.environ, "MPLBACKEND": "Agg"}
 
+    # `-b` arms the auto-named checkpoint beside the flow copy — in tmp_path,
+    # so nothing lands in the repo's demo/.
     s1 = subprocess.run(
-        [*_BTCL_CMD, "-i", str(flow), str(ckpt)],
+        [*_BTCL_CMD, "-b", str(flow)],
         input=("pin a_0 4\n"
                "edit_topology 1\n"
                "edit_set_layer 0 3\n"
@@ -131,11 +134,12 @@ def test_pin_and_forced_layers_survive_a_session_boundary(tmp_path):
         capture_output=True, text=True, env=env, timeout=300)
     out1 = (s1.stdout or "") + (s1.stderr or "")
     assert s1.returncode == 0, (s1.returncode, out1[-1200:])
+    assert "-b arming checkpoint" in out1, out1[-1200:]
     assert "Pinned 3 segment layer(s)" in out1, out1[-1200:]
     assert "0 overlaps, 0 unplaced, 0 audit violations" in out1, out1[-1200:]
 
     s2 = subprocess.run(
-        [*_BTCL_CMD, "-i", str(flow), str(ckpt), "plan"],
+        [*_BTCL_CMD, "-r", "-s", "plan", str(flow)],
         input="pins\ndone\n",
         capture_output=True, text=True, env=env, timeout=300)
     out2 = (s2.stdout or "") + (s2.stderr or "")
