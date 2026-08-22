@@ -1,26 +1,28 @@
-# Scenario 5 — L-shaped block with over-the-block teg_mode
+# L-shaped block with over-the-block teg_mode (busterm_over_the_block.feature
+# scenario 5's manual companion).
 #
 # Geometry:
 #   L-block: tall arm (0,0)-(100,400)  +  wide base (0,0)-(400,100)
 #   Notch region: x=100–400, y=100–400
 #   src block:    (500,150)-(600,250)
 #
-# What to look for in the topology explorer:
-#   • All V-trunk candidates land at Hanan-grid x values: 0, 100, 400, 500, 600
-#     and at midpoints: x=50, x=250, x=450, x=550.
-#     x=300 is NOT a Hanan-grid coordinate — that is why the BDD test
-#     "TRUNK_V@x300 has a bridge segment" is xfail.
-#   • For any V trunk (e.g. TRUNK_V@x250), x=250 is inside the wide base's
-#     x range [0,400], so block L is connected "Direct" — no H stub needed
-#     and no bridge is generated (trunk_inside_any = true in C++ logic).
-#   • The OVER mode bridge would only fire when the trunk falls in an
-#     axis-aligned GAP between rects in X.  The L-shape's notch is a
-#     diagonal notch, not a simple X-direction gap, so the OVER logic
-#     never triggers.
+# The OVER logic DOES trigger here.  This header long claimed the opposite
+# ("the L-shape's notch is a diagonal notch … the OVER logic never triggers",
+# with TRUNK_V@x250 connecting Direct) — that described the pre-rectilinear
+# generator and had gone stale: the rectilinear partial-span bridge
+# (rects_are_rectilinear + the trunk crossing some but not all rects,
+# topology.cpp) emits a bridge on the union bbox's outer face.  Measured on
+# main @ 8a95e98e: 7 of the 18 candidates carry a bridge over L —
+# TRUNK_V@x250/x400 bridge at the union RIGHT face ((400,0)-(400,400)), the
+# TRUNK_H family (y125..y325) at the union TOP face ((0,400)-(400,400)).
+# The @landed BDD scenario "L-shaped block …" in busterm_over_the_block.feature
+# pins the same behavior.  (An old note here pointed at a "TRUNK_V@x300 …
+# xfail" BDD test; no such scenario exists any more.)
 #
-# To extend the implementation to handle L-shapes, you would need to detect
-# cases where the trunk is inside one rect but NOT inside another rect of
-# the same block, and generate a bridge to connect the unreachable rect.
+# Honest caveat while exploring: a bridge is generation-only today — it is
+# priced into the candidate's wirelength and persisted, but no downstream
+# stage plans, places, audits or draws it.  See
+# docs/internal/teg_multirect_status.md §1.1 / §2.2.
 
 add_block src 500 150 600 250
 add_block L rect 0 0 100 400 rect 0 0 400 100 teg_mode over

@@ -55,12 +55,16 @@ placement-dependent, and nothing re-evaluates it either way.
 ### 1.2 The L-shape flow's "never triggers" comment is false  (stale doc)
 
 `flow/lShape1.buda:16-19` (and its byte-duplicate
-`flow/scenario5_lshaped.buda`) claims "the OVER logic never triggers" on the
+`flow/scenario5_lshaped.buda`) claimed "the OVER logic never triggers" on the
 L-shape and that `TRUNK_V@x250` connects Direct with no bridge.  Measured on
 this commit: **7 of 18** generated candidates carry bridges, including
-`TRUNK_V@x250` itself (bridge `(400,0)-(400,400)`).  The comment predates the
+`TRUNK_V@x250` itself (bridge `(400,0)-(400,400)`).  The comment predated the
 rectilinear partial-span bridge (`src/topology.cpp:3085-3100`); the `@landed`
 feature scenario (`busterm_over_the_block.feature:163`) is the correct record.
+RESOLVED on this branch (2026-08-22): the comment now states the measured
+behavior, and the unreferenced byte-duplicate `scenario5_lshaped.buda` is
+removed (only `lShape1.buda` was referenced, by the collinear-stub scan
+tools).
 
 ## 2. Engine support map
 
@@ -169,12 +173,14 @@ wrong.
   suppression, per-block override), 1 **xfail**: thru-before-over adjusted-WL
   ranking (`test_busterm_over_the_block.py:81` — "`Topology.adjusted_wl` and
   per-topology `teg_mode` attribute not yet in the C++ API").
-  `multi_rect_block.feature` is tagged `@future` with an "all scenarios
+  `multi_rect_block.feature` was tagged `@future` with an "all scenarios
   xfail" header — **stale**: its 7 scenarios pass today
   (`docs/internal/test/suite_analysis.md:312` agrees), the xfail in
-  `test_multi_rect_block.py:42` is conditional and never fires, and the dead
+  `test_multi_rect_block.py:42` was conditional and never fired, and the dead
   fallback `conftest.py:315` ("multi-rect add_block not yet in C++ API")
-  survives.  Nothing guards that a `@future` file actually xfails, which is
+  survived.  RESOLVED on this branch 2026-08-22: retagged `@landed`, both
+  xfail escape hatches removed (a missing candidate now fails loudly).
+  Nothing guards that a `@future` file actually xfails, which is
   how the label went stale.  Neither feature appears in
   `feature_coverage_plan.md`'s arc→feature map; the plan's Phase-2 item
   (hier `teg_mode over` coverage, `:101`) is unbuilt.
@@ -192,7 +198,8 @@ wrong.
   bridge-count half of the sort key on an all-single-rect fixture (always 0).
   All cited suites pass on this commit (19 + 13 passed, 1 xfailed, measured).
 - **Flows / QoR:** 7 vehicles (`flow/teg1`, `poly1`, `lShape1`,
-  `scenario5_lshaped` (duplicate), `tShape1`, `cShape1`, `demo/talk2`).  All
+  `scenario5_lshaped` (duplicate, deleted 2026-08-22), `tShape1`, `cShape1`,
+  `demo/talk2`).  All
   TEG-over vehicles stop at `run_nuts`; the only multi-rect flow reaching
   DetailedNUTS is `demo/talk2.buda` (thru, no bridge) and **no test runs
   it**.  **None of the 7 is in the QoR corpus** (49 flows) — no regression
@@ -278,12 +285,17 @@ wrong.
 
 ### Minor
 
-12. **Stale artifacts to fix** (each a one-liner): `flow/lShape1.buda` /
-    `flow/scenario5_lshaped.buda` "never triggers" comment (§1.2 — false;
-    also: two byte-identical flows, keep one); `multi_rect_block.feature`
-    `@future` tag + xfail header (scenarios pass); `test_multi_rect_block.py:21`
-    docstring and `conftest.py:315` dead xfail; `docs/internal/teg.md:83`
-    viz pointer; `wishlist-bdb.md:271` superseded line.
+12. **Stale artifacts to fix**: ~~`flow/lShape1.buda` /
+    `flow/scenario5_lshaped.buda` "never triggers" comment~~ RESOLVED
+    2026-08-22 (comment corrected to the measured behavior, unreferenced
+    duplicate deleted); ~~`multi_rect_block.feature` `@future` tag + xfail
+    header; `test_multi_rect_block.py` docstring; `conftest.py` dead
+    xfail~~ RESOLVED 2026-08-22 (retagged `@landed`, and the conditional
+    xfail escape hatches are GONE — a missing expected candidate now fails
+    loudly, so a generator regression can no longer hide as xfail;
+    `feature_coverage_plan.md`'s mode-2 list updated to match).  Still
+    open: `docs/internal/teg.md:83` viz pointer; `wishlist-bdb.md:271`
+    superseded line.
 13. **Validation gaps in `add_block ... rect`**: no overlap/degeneracy check
     on the rect list (only classified later), and a malformed rect with <4
     coords raises a bare `IndexError` (`src/buda_cmds/setup_cmds.py:67-69`)
