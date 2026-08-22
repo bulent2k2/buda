@@ -86,19 +86,48 @@ BDB::~BDB() {
     sqlite3_close(_db);
 }
 
+// The first meaningful line of a SQL string, for error labels: leading
+// whitespace skipped (DDL literals open with a newline, which made the label
+// empty), capped so a wide statement stays one readable parenthetical.
+static std::string sql_snippet(const std::string& sql) {
+    auto b = sql.find_first_not_of(" \t\r\n");
+    if (b == std::string::npos) return "";
+    auto e = sql.find_first_of(";\n", b);     // one statement, one line
+    std::string head = sql.substr(b, e == std::string::npos ? e : e - b);
+    if (head.size() > 80) { head.resize(80); head += "..."; }
+    return head;
+}
+
 void BDB::_exec(const char* sql) {
-    char* err = nullptr;
-    if (sqlite3_exec(_db, sql, nullptr, nullptr, &err) != SQLITE_OK) {
-        std::string msg = err ? err : "unknown error";
-        sqlite3_free(err);
-        // Name the statement: "FOREIGN KEY constraint failed" alone gives the
-        // reader nothing to act on (step_checked's prepared-statement twin
-        // has carried an op tag all along; _exec was the anonymous one).
-        std::string head(sql);
-        if (auto nl = head.find('\n'); nl != std::string::npos)
-            head.resize(nl);
-        if (head.size() > 80) { head.resize(80); head += "..."; }
-        throw std::runtime_error("BDB SQL error: " + msg + " (in: " + head + ")");
+    // Statement-by-statement over sqlite's tail pointer, NOT sqlite3_exec:
+    // an error must name the statement that FAILED.  "FOREIGN KEY constraint
+    // failed" alone gives the reader nothing to act on (step_checked's
+    // prepared-statement twin has carried an op tag all along; _exec was the
+    // anonymous one), and labeling with the head of the whole input blames
+    // an earlier, successful statement in every multi-statement batch —
+    // precisely the case where identifying the operation matters (Codex #819).
+    const char* p = sql;
+    while (p && *p) {
+        sqlite3_stmt* st = nullptr;
+        const char* tail = nullptr;
+        if (sqlite3_prepare_v2(_db, p, -1, &st, &tail) != SQLITE_OK) {
+            std::string msg = sqlite3_errmsg(_db);
+            throw std::runtime_error("BDB SQL error: " + msg +
+                                     " (in: " + sql_snippet(p) + ")");
+        }
+        if (!st) { p = tail; continue; }     // whitespace / comment-only tail
+        int rc = sqlite3_step(st);
+        while (rc == SQLITE_ROW) rc = sqlite3_step(st);   // discard rows, as
+                                                          // sqlite3_exec(NULL cb) did
+        const char* ssql = sqlite3_sql(st);               // THIS statement's text
+        std::string stmt = ssql ? ssql : "";
+        sqlite3_finalize(st);
+        if (rc != SQLITE_DONE) {
+            std::string msg = sqlite3_errmsg(_db);
+            throw std::runtime_error("BDB SQL error: " + msg +
+                                     " (in: " + sql_snippet(stmt) + ")");
+        }
+        p = tail;
     }
 }
 

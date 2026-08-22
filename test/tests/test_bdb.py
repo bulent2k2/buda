@@ -851,3 +851,20 @@ def test_same_sql_fixture_reopen_stays_silent(tmp_path):
     lines = [l for l in out.splitlines() if "BUDA-1917" in l]
     assert len(lines) == 1
     assert str(fa) in lines[0] and str(fb) in lines[0]
+
+
+def test_exec_error_names_the_failing_substatement(tmp_path):
+    # _exec walks the batch statement-by-statement (Codex #819): the error
+    # label must be the substatement that FAILED — labeling with the head of
+    # the whole input blamed an earlier, successful DELETE, and a DDL
+    # literal opening with a newline labeled as "(in: )".  net_via is the
+    # SECOND statement of clear_bundles' route-table batch.
+    p = str(tmp_path / "x.bdb")
+    db = buda.BDB(p)
+    import sqlite3
+    con = sqlite3.connect(p)
+    con.execute("DROP TABLE net_via")
+    con.commit()
+    con.close()
+    with pytest.raises(RuntimeError, match=r"\(in: DELETE FROM net_via\)"):
+        db.clear_bundles(False)
