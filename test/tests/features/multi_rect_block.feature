@@ -5,10 +5,12 @@
 # CLI spelling of the same feature is
 # `add_block <name> rect <x1> <y1> <x2> <y2> [rect ...] [teg_mode thru|over]`.)
 # These scenarios pin best-fit rect selection, per-rect Hanan contributions and
-# stub geometry; `teg_mode over` bridge emission (`Topology::bridge_segments`)
-# is specced in busterm_over_the_block.feature.  A missing expected candidate
+# stub geometry; the `teg_mode over` connection metal (per-rect gap stubs /
+# rectilinear connector legs, ordinary segments since open 1(a) — the former
+# `Topology::bridge_segments` bridge is legacy-load only) is specced in
+# busterm_over_the_block.feature.  A missing expected candidate
 # is a FAILURE, not an xfail — see _cand_ct in test_multi_rect_block.py.
-# Downstream-stage status (bridges are generation-only today) is appraised in
+# Downstream-stage status is appraised in
 # docs/internal/teg_multirect_status.md.
 Feature: Multi-rect blocks and equivalent busterms
   As a chip planner

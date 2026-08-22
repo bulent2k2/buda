@@ -79,16 +79,22 @@ def _session(orient):
 
 
 def _pin_gap_candidate(s, pref):
-    """Pin a bridged gap-trunk candidate (trunk in the 100..300 gap)."""
+    """Pin a gap-trunk candidate (trunk in the 100..300 gap).
+
+    Since the open 1(a) emission redesign the gap shape carries NO bridge —
+    the per-rect stubs ARE the connection — so the gap candidate is
+    identified by its trunk locus alone."""
     w = s.bundles[0]
     for i, c in enumerate(w.input.candidates):
-        if c.type.startswith(pref) and dict(c.bridge_segments):
+        if c.type.startswith(pref):
             v = int(c.type.split(pref[-2:])[1].split("+")[0])
             if 100 < v < 300:
+                assert not dict(c.bridge_segments), \
+                    "generation must no longer emit bridge_segments"
                 with contextlib.redirect_stdout(io.StringIO()):
                     s.do_command(f"select_topology 1 {i + 1}")
                 return c
-    raise AssertionError("no gap-trunk bridged candidate found")
+    raise AssertionError("no gap-trunk candidate found")
 
 
 @pytest.mark.parametrize("orient", ["H", "V"])

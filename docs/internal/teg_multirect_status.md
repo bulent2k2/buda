@@ -23,11 +23,20 @@ persistence and are invisible to the planner, NUTS, DetailedNUTS, every
 verifier, `report_wirelength`, the QoR corpus, and every exporter.  A design
 that selects a bridged candidate routes **without the bridge** and audits
 clean (§1.1) — which makes `teg_mode over`, today, a candidate-pricing
-annotation rather than a routing feature.
+annotation rather than a routing feature.  *(2026-08-22: no longer — the 1(b)
+TEG_OPEN audit and the 1(a) emission redesign landed; the trunk generator's
+OVER connection metal is ordinary segments now and bridges are legacy-load
+only.  See open 1 and §2.2.)*
 
 ## 1. Two measurements that anchor this appraisal
 
 ### 1.1 A selected bridge is never built, and no audit notices  (CRITICAL)
+
+> **RESOLVED 2026-08-22** in two landings: the 1(b) TEG_OPEN audit (PR #821)
+> made the miss LOUD, and open 1(a) (this branch) removed the miss — the
+> §1.1 vehicle's `TRUNK_V@x250` now generates a real connector leg to the
+> tall arm instead of a bridge, routes 3 TrackSegments / 12 bit-wires, and
+> audits clean.  The measurement below is kept as the pre-change record.
 
 Pin a bridged candidate on the `flow/lShape1.buda` geometry (4-bit bus,
 `TRUNK_V@x250`, bridge over `L` at `(400,0)-(400,400)`), then run
@@ -71,6 +80,13 @@ tools).
 
 ### 1.3 The rectilinear bridge does not touch the rect it exists to connect
 (raised by the Codex review on PR #820; verified against the code)
+
+> **RESOLVED 2026-08-22 with open 1(a)**: the union-face bridge is no longer
+> emitted by either branch — the rectilinear branch emits a perpendicular
+> connector leg per un-spanned rect (contacting the rect AND T-junctioning
+> the trunk), the disjoint-gap branch emits per-rect stubs joined through the
+> trunk (its floating bridge simply dropped).  The analysis below is kept as
+> the pre-change record.
 
 The rectilinear branch (`src/topology.cpp:3090-3100`) emits the bridge as one
 segment along the **union bbox's perp-hi face** — which only touches the
@@ -166,26 +182,28 @@ catch this shape too, which is another reason to land it first.
 
 ### 2.2 TEG-over bridges — lifecycle table
 
+> **2026-08-22, open 1(a) landed:** generation no longer emits bridges — the
+> TEG-over connection metal is ORDINARY segments (per-rect gap stubs joined
+> through the trunk; a perpendicular connector leg per un-spanned rect of a
+> rectilinear block), so every downstream stage handles it as it handles any
+> stub.  The table below therefore describes the **legacy-load path only**: a
+> candidate restored from a pre-change checkpoint still carries
+> `bridge_segments`, priced/hashed/transformed as recorded, placed by nothing,
+> and reported by TEG_OPEN.
+
 | Stage | Status |
 |---|---|
-| Generation (trunk H/V: gap-stub pair + bridge; rectilinear partial-span bridge; suppression when trunk lands in a rect / rects adjacent) | **implemented** (`src/topology.cpp:3007-3138`) — but ONLY the trunk generator emits bridges; MST/BITRUNK/2-pin never do |
-| Nominal WL + segment-count tie-break | counted (`src/topology.cpp:1325-1332`, `:1352-1357`) |
-| `topo_uid` fingerprint, hier offset/rotate | hashed + transformed (`src/topology_analysis.cpp:116-119`, `src/topology.cpp:70-75`) |
-| BDB persistence + `load_pipeline` restore | **implemented, v11** (`topology_bridge_segment`, `src/bdb.cpp:236-249`, `src/buda_session/persist.py:569-594`, `:917-968`) |
-| ConnTopology analysis | ignored |
-| Congestion planner (layer, congestion charge) | **absent** |
-| NUTS (track position) | **absent** |
-| DetailedNUTS (per-bit wires, vias) | **absent** |
-| check_topo / check_nuts / check_dnuts | **absent** |
-| `report_wirelength` / QoR metrics | **absent** (sums placed segments only) |
-| Viz | web JSON serializes bridges (`src/web/serialize.py:225-239`) but **no renderer draws them**, matplotlib included |
-| GDS / DEF / `emit_guides` export | **absent** |
-| `edit_topology` ops | **absent** (no bridge create/delete/inspect; `erase_segment` ignores them) |
-
-So the bridge's full life is: emitted, priced into the candidate sort,
-persisted, restored — and then dropped on the floor at `run_planner`.
-Asymmetrically, the WL pricing *demotes* bridged candidates for metal the
-router will never build.
+| Generation | **no longer emits bridges** (open 1(a), 2026-08-22): the trunk generator's OVER branches emit real per-rect gap stubs / rectilinear connector legs via `emit_tap_segment` (`src/topology.cpp`, `add_trunk`); MST/BITRUNK/2-pin still emit no TEG connection metal |
+| Nominal WL + segment-count tie-break | restored bridges still counted (`src/topology.cpp` `wirelength()`/`annotate_and_sort`) so a restored pool keeps its recorded order |
+| `topo_uid` fingerprint, hier offset/rotate | hashed + transformed (`src/topology_analysis.cpp:116-119`, `src/topology.cpp:70-75`) — a restored candidate keeps its recorded identity |
+| BDB persistence + `load_pipeline` restore | **kept, v11** (`topology_bridge_segment`): generation persists zero rows; pre-change checkpoints restore theirs (`test_bdb_resume_gaps.py`) |
+| ConnTopology analysis | ignores restored bridges (they join nothing — which TEG_OPEN reports) |
+| Congestion planner / NUTS / DetailedNUTS | consume the NEW connection metal as ordinary segments; restored bridges **never placed** |
+| check_topo / check_nuts / check_dnuts | new metal audited like any segment; a restored unrealized bridge → **TEG_OPEN** ("declared bridge is unrealized") |
+| `report_wirelength` / QoR metrics | new metal counted (it is placed segments); restored bridges not (never placed) |
+| Viz | new metal drawn like any segment; restored bridges: web JSON serializes them (`src/web/serialize.py:225-239`) but no renderer draws them |
+| GDS / DEF / `emit_guides` export | new metal exported (placed rows); restored bridges absent |
+| `edit_topology` ops | no bridge create/delete/inspect (nothing creates them any more; `erase_segment` ignores restored ones) |
 
 `thru` mode is silent **by design** and consistently so: only the nearest
 rect is connected, `detect_feedthru_relay` skips multi-rect blocks
@@ -250,14 +268,46 @@ wrong.
 
 1. **TEG-over bridges are never routed, and their absence is invisible**
    (§1.1).  Two halves, both needed:
-   (a) *emission* — carry `bridge_segments` through planner/NUTS/DNUTS as
-   real segments (layer assignment, congestion charge, track position,
-   per-bit wires + vias), or explicitly refuse `over` designs at
-   `run_planner` until they are — with the §1.3 prerequisite: the
-   rectilinear branch's bridge must first be routed to actually contact
-   each un-spanned rect (today it lies on the union face and misses the
-   very rect it exists to connect), or emission would faithfully build an
-   open connection;
+   (a) *emission* — ~~carry `bridge_segments` through planner/NUTS/DNUTS as
+   real segments~~ **LANDED 2026-08-22**, and NOT by carrying the side-map:
+   generation now emits the TEG-over connection metal as **ordinary
+   topology segments** through the same `emit_tap_segment` machinery every
+   stub uses, so planner/NUTS/DNUTS/audits/`report_wl`/persistence/viz all
+   consume it with zero downstream change.  The §1.3 geometry defect is
+   fixed in the same stroke — the union-face bridge is not emitted at all:
+   the *rectilinear* branch emits one perpendicular **connector leg** per
+   un-spanned rect, from the trunk to that rect's nearest perp face at the
+   rect's along-centre (tap on the rect face + T-junction on the spine —
+   §1.1's `TRUNK_V@x250` now carries an H leg (100,200)–(250,200) instead
+   of the floating `(400,0)-(400,400)` bridge); the *disjoint-gap* branch
+   emits one stub per rect (near side from its perp-hi face, far side to
+   its perp-lo face — the 2-rect case reproduces the old near/far pair
+   exactly), the rects joined THROUGH the trunk.  The spine pre-extension
+   mirrors the new emission and no longer skips `stub_suppressed` OVER
+   blocks (their gap stubs are emitted regardless — the C4-01 pool-loss
+   fix, open 11).  Measured on the §1.1 vehicle: pinned `TRUNK_V@x250`
+   routes 3 TrackSegments / 12 bit-wires / 0 unplaced, `check_design`
+   clean of TEG_OPEN at nuts AND dnuts, abstract WL 500 with the leg's
+   100+50 metal counted (`test_teg_open.py::
+   test_bridge_reliant_shape_now_routes_real_leg_and_audits_clean` — the
+   §1.1 repro flipped from firing to clean).  `Topology::bridge_segments`
+   is now **legacy-load only**: empty at generation, the v11 table /
+   restore / WL+tie-break pricing / `topo_uid` hash / hier transforms all
+   stay so a pre-change checkpoint restores its recorded content — and its
+   still-unrealized bridge is reported by TEG_OPEN ("declared bridge is
+   unrealized"), never routed silently.  Non-OVER designs are byte-identical
+   (every new path is gated on `teg_mode == OVER` + multi-rect; corpus
+   0 better / 0 worse, WL +0).  Residuals, all pre-existing and now LOUD
+   via TEG_OPEN rather than silent: a trunk Direct inside ONE disjoint
+   rect emits no metal for the other rects (the documented "OVER activates
+   only for gap/partial-span trunks" scope, pinned by
+   `test_unreached_rect_still_fires_teg_open_end_to_end`); a one-sided
+   approach (all rects on the same side of the trunk) still falls back to
+   the single best-rect stub; MST/BITRUNK still emit no TEG connection
+   metal (multi-rect branch blocks stay on the legacy un-completed path).
+   The 1(a) stubs/legs follow the FACE→trunk emission orientation the
+   gap-stub retraction fix (#823, see (b)) established — a trunk-end
+   busterm seed costs NUTS its face anchor and the stub retracts;
    (b) *audit* — ~~`check_nuts`/`check_dnuts` must fail a selected candidate
    whose bridge has no placed metal~~ **LANDED 2026-08-22** as **`TEG_OPEN`**
    (`detect_teg_open`, `src/verify.cpp`): at both placed stages, every rect
@@ -301,8 +351,8 @@ wrong.
    paragraph), `test_teg_open.py`'s gap test carries the flipped clean
    expectation its comment promised, and
    `test_teg_gap_stub_annotation.py` pins the root cause directly.  Still
-   open here: 1(a), and open 2's corpus vehicle to pin the kind end-to-end
-   in QoR.
+   open here: open 2's corpus vehicle to pin the kind end-to-end in QoR
+   (1(a) landed 2026-08-22 — see (a)).
 
 ### High
 
@@ -316,15 +366,16 @@ wrong.
    (`src/congestion_planner.cpp:738-784` vs `:363-383`) — a LOW segment in a
    routable notch is escalated to TOP.  A QoR distortion on exactly the
    designs the feature exists for.
-4. **Candidate ranking prices bridges the router never builds** — nominal WL
-   includes bridge length (`src/topology.cpp:1325-1332`) while the realized
-   route omits it, so bridged candidates are demoted against a cost that is
-   currently fictional; and the documented thru-before-over *adjusted*-WL
-   ranking is the standing xfail (`topologies.md:76` vs
-   `test_busterm_over_the_block.py:81`).  Resolve in whichever direction
-   open 1 goes: either the metal becomes real (pricing is then correct — add
-   the missing `adjusted_wl`/`teg_mode` API and un-xfail) or the doc claim
-   must be retracted.
+4. **Candidate ranking prices bridges the router never builds** — ~~nominal
+   WL includes bridge length while the realized route omits it~~ the pricing
+   half is DISCHARGED by open 1(a) (2026-08-22): the connection metal is
+   ordinary segments, so `estimated_wirelength` equals the segment sum and
+   priced metal IS built metal (pinned by `test_topo_keepout_mst.py::
+   test_trunk_teg_over_metal_is_ordinary_segments_and_wl_honest`; restored
+   pre-change candidates keep their recorded bridge pricing).  Still open:
+   the documented thru-before-over *adjusted*-WL ranking remains the
+   standing xfail (`test_busterm_over_the_block.py` — `Topology.adjusted_wl`
+   / per-topology `teg_mode` API still absent).
 
 ### Medium
 
@@ -350,11 +401,12 @@ wrong.
     no bridge affordance; `_rects_disconnected` is dead code while the
     dashed union box draws unconditionally.  A user cannot *see* the wire
     that §1.1 shows is also never built.
-11. **Known generation pool bug (OPEN, audit C4-01)**: stub-suppressed
+11. ~~**Known generation pool bug (OPEN, audit C4-01)**: stub-suppressed
     TEG-over blocks skip the spine pre-extension, so gap-stub pairs float
-    off-spine and the candidate is dropped — pool loss on TEG flows
-    (`docs/internal/wishlist-topo.md:1314-1325`; also queued in
-    `work_menu_2026-08-06.md`).
+    off-spine and the candidate is dropped~~ RESOLVED 2026-08-22 with open
+    1(a): the rewritten pre-pass mirrors the emission exactly and no longer
+    skips `stub_suppressed` OVER blocks (see the updated wishlist-topo
+    entry).
 
 ### Minor
 

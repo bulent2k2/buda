@@ -152,16 +152,26 @@ gap between rects (or a vertical trunk falls in the horizontal gap):
 
 | Mode | Behaviour |
 |---|---|
-| `thru` (default) | The topology connects only the **nearest** rect (lowest stub length). The block's internal routing is assumed to join any disconnected portions. No bridge segment is generated. |
-| `over` — disjoint rects | When the trunk falls in the gap between two rects, **both** rects are connected with stubs (one up, one down) and an explicit **bridge segment** is generated along the outer face of the union bounding box. The bridge physically joins the two sides over the notch. |
-| `over` — rectilinear rects | When the trunk is inside some rects but not all (partial span), a bridge segment is generated along the outer face of the union bounding box to annotate that an explicit over-the-block wire is needed. Stubs are only generated for rects that the trunk does not directly hit. |
+| `thru` (default) | The topology connects only the **nearest** rect (lowest stub length). The block's internal routing is assumed to join any disconnected portions. No extra connection metal is generated. |
+| `over` — disjoint rects | When the trunk falls in the gap between rects, **every** rect is connected with its own stub to the trunk (near side from its gap-facing face, far side likewise, each at the rect's centre); the rects are physically joined **through the trunk** — each stub T-junctions the spine. |
+| `over` — rectilinear rects | When the trunk is inside some rects but not all (partial span), each un-spanned rect gets a perpendicular **connector leg** from the trunk to the rect's nearest face at the rect's centre. Stubs/legs are only generated for rects that the trunk does not directly cross. |
 
-The bridge segment is stored in the topology's `bridge_segments` map (keyed by
-block name) rather than in the main segment list, so callers can distinguish
-routing wires from bridge annotations.
+All of this connection metal is **ordinary topology segments**, so the
+planner assigns it a layer, NUTS/DetailedNUTS place it, `check_design`
+audits it and `report_wirelength` counts it, like any stub.  (Historical
+note: it used to be a "bridge segment" along the union bbox's outer face,
+kept in the topology's `bridge_segments` map outside the main segment list —
+which nothing downstream ever placed, so the routed net was silently open at
+the un-reached rect; `bridge_segments` now stays empty at generation and is
+only restored from pre-change checkpoints, where the `TEG_OPEN` audit
+reports the unrealized bridge.)
 
-Over-the-block mode **does not** generate a bridge when:
-- The trunk lands inside a rect (direct connection; no gap crossing).
+Over-the-block mode does **not** generate extra connection metal when:
+- The trunk crosses every rect (rectilinear all-span: direct connection, no
+  un-spanned portion).
+- The trunk lands inside one rect of a **disjoint** TEG (direct connection to
+  that rect only — the other rects get no metal from this candidate; the
+  placed-stage `TEG_OPEN` audit reports them if such a candidate is routed).
 - The two rects are adjacent (touching edges, no gap).
 
 **Examples:**

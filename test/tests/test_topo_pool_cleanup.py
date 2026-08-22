@@ -235,7 +235,13 @@ def test_dedup_excludes_bridged_candidates():
     """TEG-over bridge wires live OUTSIDE ConnTopology.segs(), so a bridged
     candidate must never participate in the locus dedup — else two candidates
     with the same skeleton but different bridge wires would collide and the
-    bridged one could be dropped (Codex #389).  Mirrors the WL-prune exclusion."""
+    bridged one could be dropped (Codex #389).  Mirrors the WL-prune exclusion.
+
+    Since open 1(a) GENERATION emits no bridges (the TEG connection metal is
+    ordinary segments now, asserted below), so the only bridged candidates are
+    those restored from pre-change checkpoints (topology_bridge_segment, v11)
+    — emulated here by stamping a restored-style bridge onto a generated
+    candidate, exactly what load_pipeline does."""
     s = buda_cli.BudaSession(); s.no_viz = True
     _run(s,
          "source flow/tracks/tracks4top.buda",
@@ -246,10 +252,18 @@ def test_dedup_excludes_bridged_candidates():
          "add_bus b[8] src.p dst.p,relay.p",
          "run_bundler", "generate_topologies")
     cands = s.bundles[0].input.candidates
-    bridged = [c for c in cands if c.bridge_segments]
-    assert bridged, "expected TEG-over bridge candidates in this scenario"
-    for c in bridged:
-        assert s._topo_loci_canon(c, s.fp) is None   # never a dedup key
+    assert cands, "TEG scenario generated no candidates"
+    assert all(not c.bridge_segments for c in cands), \
+        "generation must no longer emit bridge_segments"
+    c = cands[0]
+    assert s._topo_loci_canon(c, s.fp) is not None, \
+        "control: the un-bridged candidate participates in dedup"
+    sg = buda.Segment()
+    sg.start = buda.Point(1500, 11700)
+    sg.end = buda.Point(3000, 11700)
+    sg.layer_hint = 4
+    c.bridge_segments = {"relay": sg}       # the load_pipeline restore shape
+    assert s._topo_loci_canon(c, s.fp) is None   # never a dedup key
 
 
 def test_both_knobs_compose():
