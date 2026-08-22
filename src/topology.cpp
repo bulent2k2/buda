@@ -3124,10 +3124,22 @@ void TopologyGenerator::add_trunk(const Axis& axis, bool suppress_stubs,
                     int a_near = axis.along_center(best_near);
                     int a_far  = axis.along_center(best_far);
 
+                    // Both stubs are emitted FACE → trunk, like every other stub
+                    // (the normal single stub below and MST taps alike), because
+                    // emit_tap_segment seeds the busterm on the START endpoint.
+                    // The far stub used to be emitted trunk → face, which put the
+                    // seed on the TRUNK end: derive_conn_segs then dedupes BUSTERM
+                    // conns per block, so the bogus trunk-end tap (face_coord =
+                    // locus) shadowed the real face-end annotation, and — with the
+                    // tapped-endpoint short-circuit suppressing the trunk-end
+                    // junction record — NUTS had no face anchor at all and
+                    // RETRACTED the stub's span to the trunk (measured: span
+                    // [150,158] against a face at 300; BUSTERM_FACE + ANTENNA +
+                    // TEG_OPEN on the placed result, both orientations).
                     // Stub from near rect's far face → trunk.
                     emit_tap_segment(t, axis.mkseg(a_near, axis.perp_hi(best_near), a_near, locus, stub_layer), &blocks[i]);
-                    // Stub from trunk → far rect's near face.
-                    emit_tap_segment(t, axis.mkseg(a_far, locus, a_far, axis.perp_lo(best_far), stub_layer), &blocks[i]);
+                    // Stub from far rect's near face → trunk.
+                    emit_tap_segment(t, axis.mkseg(a_far, axis.perp_lo(best_far), a_far, locus, stub_layer), &blocks[i]);
 
                     // Bridge segment at union_bbox outer (perp-hi) face.
                     const Rect& ub = blocks[i].orig_bbox;
