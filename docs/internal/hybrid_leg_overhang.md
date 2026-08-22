@@ -283,8 +283,11 @@ gap is not a realization risk but a certainty.
 
 Option (b) landed, default **off**, as a `.buda` token
 (`set_placed_endpoints [on|off]`) with `BUDA_DNUTS_PLACED_ENDPOINTS=1` as the
-corpus-sweep seed. The change is 20 lines inside `make_bus_segments`, the one
-stage-4 → stage-9 handoff.
+corpus-sweep seed. *(That was the state at #818; since the flip below the
+study side is `=0` — `=1` is a no-op.)*
+
+The change is 20 lines inside `make_bus_segments`, the one stage-4 → stage-9
+handoff.
 
 **Only the stage-9 descriptor moves.** `BusSegmentConn::is_endpoint` is rebuilt
 on every call; `ConnSeg::is_endpoint` — cached on the `Topology`, shared with

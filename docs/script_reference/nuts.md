@@ -269,8 +269,19 @@ stacking them adds nothing. That matters because the trim is opt-in precisely
 because it re-sorts the WL-ordered candidate pool and renumbers indices — this
 reaches the same metal with no selection movement at all.
 
-Study override `BUDA_DNUTS_PLACED_ENDPOINTS=1` seeds the default so a corpus
-can be A/B'd without editing every flow; an explicit token always wins.
+**Study override.** `BUDA_DNUTS_PLACED_ENDPOINTS` seeds the default so a corpus
+can be A/B'd without editing every flow; an explicit token always wins. Since
+the flip, the **off** side is the one that needs the variable:
+
+```bash
+BUDA_DNUTS_PLACED_ENDPOINTS=0 tools/qor_corpus.py --out off.json   # pre-flip
+                              tools/qor_corpus.py --out on.json    # default
+tools/qor_corpus.py --compare off.json on.json
+```
+
+`=1` is now a no-op, so `=1` versus *unset* compares two **on** runs and reports
+no difference — which reads as "the flip changes nothing" rather than as a
+mis-run experiment. Only `=0` changes anything.
 
 Repro and analysis: [hybrid_leg_overhang.md](../internal/hybrid_leg_overhang.md).
 

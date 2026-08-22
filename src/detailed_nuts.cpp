@@ -1620,9 +1620,10 @@ std::vector<BusSegment> make_bus_segments(
                     c.is_endpoint = conn.is_endpoint;
                     const double mid = 0.5 * (cs.along_lo + cs.along_hi);
                     c.lo_end      = (c.at_pos <= mid);
-                    // PROTOTYPE (opt-in, BUDA_DNUTS_PLACED_ENDPOINTS): decide
-                    // endpoint-ness from the PLACED geometry instead of the
-                    // nominal analysis.
+                    // `set_placed_endpoints` (ON by default since the flip;
+                    // BUDA_DNUTS_PLACED_ENDPOINTS=0 for the pre-flip reading):
+                    // decide endpoint-ness from the PLACED geometry instead of
+                    // the nominal analysis.
                     //
                     // `is_endpoint`/`lo_end` above come from the ConnSeg, which
                     // is nominal and derived once at generation
