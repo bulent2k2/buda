@@ -1058,6 +1058,8 @@ class ReportsMixin:
         "NET_DRIVER_OPEN": "net endpoint block not attached to the topology",
         "BIT_SHORT":    "different bits (nets) share a track with overlapping spans",
         "ANTENNA":      "dangling metal past its own attachments",
+        "TEG_OPEN":     "an OVER block's rect touched by no placed metal "
+                        "(declared TEG bridge unrealized)",
         "NDR_WIDTH":    "governed bit narrower than its rule's width",
         "NDR_SPACING":  "foreign wire inside a rule's reserved run (clearance violated)",
         "NDR_SHIELD":   "shield wires missing or misplaced vs the rule's arrangement",

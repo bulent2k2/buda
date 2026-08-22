@@ -258,11 +258,42 @@ wrong.
    each un-spanned rect (today it lies on the union face and misses the
    very rect it exists to connect), or emission would faithfully build an
    open connection;
-   (b) *audit* — `check_nuts`/`check_dnuts` must fail a selected candidate
-   whose bridge has no placed metal, and `detect_disconnected` must stop
-   assuming same-block continuity for `teg_mode over` blocks
-   (`src/verify.cpp:203-209`).  (b) alone converts the silent hole into a
-   loud one and is much cheaper — the right first landing.
+   (b) *audit* — ~~`check_nuts`/`check_dnuts` must fail a selected candidate
+   whose bridge has no placed metal~~ **LANDED 2026-08-22** as **`TEG_OPEN`**
+   (`detect_teg_open`, `src/verify.cpp`): at both placed stages, every rect
+   of an OVER block must be touched by the bundle's placed metal — a
+   per-rect, inclusive contact predicate rather than a bridge-presence
+   check, so it subsumes "bridge unrealized" AND stays failing under a
+   §1.3-shaped emission (a bridge on the union face away from the rect does
+   not discharge it), and passes the moment real metal reaches every rect
+   however 1(a) chooses to put it there.  Two review refinements (Codex P1s
+   on #821, both verified and landed with it): the dnuts audit runs PER BIT
+   — each bit is its own net, so bit 0 touching rect A and bit 1 touching
+   rect B connects neither, and NDR shield wires (a rail net) are excluded
+   from contact — and contact alone is not the verdict: all rects must sit
+   in ONE connected component of the group's placed metal (SEG junctions +
+   same-rect contact + other blocks' taps), since two islands each touching
+   a different rect pass the touch test while `island_roots` unions
+   same-BLOCK taps and so cannot see the split.  A bit touching no rect at
+   all is exempt (tapered away), with an all-bits-miss fallback so the
+   original missing-bridge shape still reports.  THRU stays exempt by
+   design;
+   `check_topo` deliberately does NOT carry the kind (it feeds generation
+   gates, dogleg trials and healer metrics — a reporting audit must not
+   shrink candidate pools), which also means `detect_disconnected`'s
+   same-block union is left alone: the topo-stage structural graph is
+   consumed by behavior, and the placed-stage TEG_OPEN already reports what
+   the union hides.  The §1.1 repro now audits
+   `Bundle 1: OVER block 'L': rect#0 (0,0)-(100,400) touched by no placed
+   metal … declared bridge is unrealized (dnuts)` where it reported Success.
+   Building its tests measured a bonus finding: the disjoint-gap stub pair
+   does not survive placement in EITHER orientation (NUTS retracts the far
+   stub to the trunk — span [150,158] against a face at 300, the
+   wishlist-topo "gap-stub pair at rect CENTRES" family), so the gap shape
+   currently fires TEG_OPEN alongside BUSTERM_FACE/ANTENNA;
+   `test_teg_open.py` pins that composite and flips to a clean expectation
+   when the gap-stub placement is fixed.  Still open here: 1(a), and open
+   2's corpus vehicle to pin the kind end-to-end in QoR.
 
 ### High
 

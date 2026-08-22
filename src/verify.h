@@ -63,6 +63,22 @@ enum class ViolationKind {
                   // (issue #482).  Structural, so one detector serves the
                   // placed stages; generation's own knob for candidate-level
                   // dangles is `set_drop_dangling`
+    TEG_OPEN,     // a `teg_mode over` multi-rect block has a rect touched by
+                  // NO placed metal of the bundle.  OVER declares the rects
+                  // NOT internally connected, so every rect needs external
+                  // attachment (a tap, a crossing, or realized bridge metal)
+                  // — but bridges are generation-only today (never planned or
+                  // placed), so a selected bridged candidate routed with the
+                  // bridge dropped audited CLEAN while the net was open at
+                  // the un-bridged rect.  Placed-stage audit (nuts/dnuts)
+                  // only: check_topo feeds generation gates and healer
+                  // metrics, which must not start dropping candidates over
+                  // this.  Contact is per-rect and inclusive (a face landing
+                  // or an edge-lying bridge counts), the same reading the
+                  // §1.3 bridge-geometry defect needs: a bridge on the union
+                  // face that never touches the un-spanned rect does not
+                  // discharge it.  See docs/internal/teg_multirect_status.md
+                  // §1.1/§1.3, open 1(b)
     DISCONNECTED, // the topology's wire graph splits into 2+ islands: SEG
                   // junctions + same-tapped-block continuity (a through-block
                   // joint is either a declared feedthru or flagged separately
