@@ -1373,3 +1373,29 @@ def test_save_takes_a_snapshot_path(tmp_path):
     assert con.execute(
         "SELECT COUNT(*) FROM topology WHERE is_pinned=1").fetchone()[0] == 1
     con.close()
+
+
+def test_hier_build_rerun_reuses_the_checkpoint(tmp_path):
+    # The field-reported FK failure: a second `-b` on the hier demo REUSES
+    # the materialized checkpoint, which still holds the previous session's
+    # candidate pool — so derive_busterms' clear_busterms hit the
+    # topology_seg_busterm -> busterm(id) FK ('tb:' rows) and the rebuild
+    # died with a bare "FOREIGN KEY constraint failed".  The clear now keeps
+    # exactly the still-referenced 'tb:' rows; a pin from the first build
+    # re-attaches to the rebuilt pool like the flat reuse path.
+    demo = tmp_path / "demo"
+    demo.mkdir()
+    shutil.copytree(_ROOT / "flow" / "tracks", tmp_path / "flow" / "tracks")
+    for f in ("resume_hier.buda", "resume_hier_input.bdb.sql"):
+        shutil.copy(_ROOT / "demo" / f, demo / f)
+    flow = demo / "resume_hier.buda"
+
+    r = _run([*_BTCL_CMD, "-b", flow], tmp_path, stdin="pin b_lohi 2\ndone\n")
+    assert r.returncode == 0, r.stdout + r.stderr
+
+    r = _run([*_BTCL_CMD, "-b", flow], tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "reusing the checkpoint" in r.stdout
+    assert "FOREIGN KEY" not in r.stdout + r.stderr
+    assert "[pinned]" in _log(flow), "the template pin fell out of the rerun"
+    assert "done -- 0 overlaps, 0 unplaced, 0 audit violations" in r.stdout
