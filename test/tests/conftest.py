@@ -309,10 +309,7 @@ def add_block_two_rects(ctx, name, x1a, y1a, x2a, y2a, x1b, y1b, x2b, y2b):
         (int(x1a), int(y1a), int(x2a), int(y2a)),
         (int(x1b), int(y1b), int(x2b), int(y2b)),
     ]
-    try:
-        ctx['fp'].add_block_rects(name, rects)
-    except AttributeError:
-        pytest.xfail('multi-rect add_block not yet in C++ API')
+    ctx['fp'].add_block_rects(name, rects)
     ctx.setdefault('block_names', []).append(name)
     ctx['block_rects'][name] = rects
 

@@ -1,12 +1,15 @@
-@future
-# STATUS: spec ahead of implementation (all scenarios xfail — see
-# test_multi_rect_block.py). Written against an imagined `add_block_rects` command
-# that did NOT ship. The feature that landed uses the inline multi-rect syntax
-# `add_block <name> rect <x1> <y1> <x2> <y2> [rect ...] [teg_mode thru|over]`: the
-# topology generator picks the best-fit rect per trunk position, and `teg_mode over`
-# emits an explicit bridge segment over a notch (`Topology::bridge_segments`) — see
-# busterm_over_the_block.feature (LANDED) for the shipped behavior. Realigning these
-# scenarios to the `add_block ... rect` API is a documented follow-up.
+@landed
+# STATUS: landed (retagged 2026-08-22 — the @future tag and its "all scenarios
+# xfail" header had gone stale: all 7 scenarios PASS, and had for some time, via
+# the shipped `Floorplan.add_block_rects` Python API the step defs drive.  The
+# CLI spelling of the same feature is
+# `add_block <name> rect <x1> <y1> <x2> <y2> [rect ...] [teg_mode thru|over]`.)
+# These scenarios pin best-fit rect selection, per-rect Hanan contributions and
+# stub geometry; `teg_mode over` bridge emission (`Topology::bridge_segments`)
+# is specced in busterm_over_the_block.feature.  A missing expected candidate
+# is a FAILURE, not an xfail — see _cand_ct in test_multi_rect_block.py.
+# Downstream-stage status (bridges are generation-only today) is appraised in
+# docs/internal/teg_multirect_status.md.
 Feature: Multi-rect blocks and equivalent busterms
   As a chip planner
   I want blocks to expose multiple candidate connection rectangles
@@ -20,8 +23,7 @@ Feature: Multi-rect blocks and equivalent busterms
   #   x            — busterm connection point
   #   *            — T-junction or bend
   #
-  # For all scenarios the multi-rect API is required.
-  # These tests xfail until add_block_rects is implemented in C++.
+  # All scenarios drive the shipped multi-rect API (Floorplan.add_block_rects).
 
   # ---------------------------------------------------------------------------
   # H trunk: pick the rect whose y-range straddles the trunk (Direct)

@@ -16,11 +16,11 @@
 pytest-bdd step definitions for features/multi_rect_block.feature.
 
 Tests multi-rect block support: equivalent busterms, rectilinear block shapes,
-correct best-rect selection, Hanan grid contributions, and stub geometry.
-
-All scenarios xfail until add_block_rects is implemented in C++.
+correct best-rect selection, Hanan grid contributions, and stub geometry —
+against the shipped Floorplan.add_block_rects API (@landed since 2026-08-22;
+the "xfail until implemented" era is over, so a missing expected candidate
+fails loudly rather than xfailing).
 """
-import pytest
 import buda
 from pytest_bdd import scenarios, given, when, then, parsers
 from conftest import (
@@ -36,13 +36,17 @@ scenarios('features/multi_rect_block.feature')
 # ---------------------------------------------------------------------------
 
 def _cand_ct(ctx, type_str):
-    """Return ConnTopology for the candidate matching type_str, or xfail."""
+    """Return ConnTopology for the candidate matching type_str.
+
+    A missing candidate is a hard FAILURE: this feature is @landed, so a
+    generator regression must not hide behind the historical xfail.
+    """
     cand = _find_candidate(ctx['candidates'], type_str)
-    if cand is None:
-        pytest.xfail(
-            f'No candidate of type {type_str!r}; '
-            'multi-rect block support not yet in C++'
-        )
+    assert cand is not None, (
+        f'No candidate of type {type_str!r} — the multi-rect generator '
+        f'stopped emitting an expected shape (pool: '
+        f'{sorted({c.type for c in ctx["candidates"]})})'
+    )
     ct = buda.ConnTopology()
     ct.build(cand, ctx['fp'])
     return ct

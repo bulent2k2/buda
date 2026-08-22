@@ -23,8 +23,14 @@ is invisible in the spec layer.
 2. **Design-ahead specs reality diverged from** — written against an imagined
    API that never shipped, now permanently `xfail`: `feedthru.feature`
    (`pass_through_count` API; shipped as `set_feedthru` / `topo.feedthru_blocks`),
-   `multi_rect_block.feature` (`add_block_rects`), `hierarchy_depth_planning.feature`
-   ("API design, not yet implemented").
+   `hierarchy_depth_planning.feature` ("API design, not yet implemented").
+   `multi_rect_block.feature` used to be listed here, and the listing itself
+   went stale the OTHER way: `Floorplan.add_block_rects` shipped, its 7
+   scenarios pass, and the conditional xfail never fired — retagged `@landed`
+   2026-08-22 with the xfail escape hatch removed (a missing candidate now
+   fails loudly).  Nothing guards that a `@future` file actually xfails,
+   which is how the label survived; see
+   docs/internal/teg_multirect_status.md §3.
 3. **Orphaned / disabled** — never bound to a step file, so never run:
    `bundler_hierarchy`, `large_fanout_mst`, `layer_assignment`, and
    `topology_generation` (its `scenarios(...)` line is commented out).

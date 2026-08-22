@@ -80,7 +80,17 @@ use two separate add_block definitions.
   show the shape clearly; the dashed box is only needed when there's a gap
   between them. I'll add a connectivity check.
   
-See [`def _rects_disconnected(rects_raw)`](../../src/buda_viz.py)
+See [`def _rects_disconnected(rects_raw)`](../../src/viz_common.py)
+
+> [2026-08-22 status note: the pointer above used to name `src/buda_viz.py`;
+> the viz module split moved the function to `src/viz_common.py`, where it is
+> now dead code kept deliberately as reference (its own comment: "Bulent: no
+> longer used. But keep as ref.").  The connectivity gating this transcript
+> promises was unwired at some point: `_draw_block` (`src/viz_common.py`)
+> draws the dashed grouping box for every multi-rect block unconditionally,
+> touching/overlapping rects included.  Re-wiring it is a one-line change if
+> the conditional box is still wanted; the wider bridges-drawn-by-nobody gap
+> is open 10 in docs/internal/teg_multirect_status.md §4.]
 
 ※ recap: Added multi-rect block support end to end: CLI syntax, C++ API, and 
   visualization. The viz now draws individual rects with a dashed grouping box 
