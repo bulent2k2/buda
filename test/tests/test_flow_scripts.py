@@ -1195,6 +1195,84 @@ def test_ndr_absolute_shared_cell_bottom_up():
     assert "no violations" in out and "NDR_" not in out, out
 
 
+def run_demo_script(name: str) -> tuple[str, int]:
+    """Run a demo/ script with --no-viz; return (combined output, returncode).
+
+    The DEMO twin of run_script — demo vehicles are user-facing and were
+    previously run by no test at all."""
+    env = buda_env(_ROOT)
+    r = subprocess.run(
+        [sys.executable, str(CLI), "--no-viz", str(DEMO / name)],
+        capture_output=True, text=True, env=env,
+    )
+    return r.stderr + "\n" + _flow_log_text(DEMO / name), r.returncode
+
+
+def test_talk2_multirect_thru_full_pipeline():
+    """demo/talk2.buda — the deepest multi-rect vehicle (three rectilinear
+    blocks, default `thru` TEG mode) and the ONLY multi-rect flow reaching
+    run_detailed_nuts; it was run by no test until teg_multirect_status.md
+    open 2.  The sidecar (demo/talk2.json) pins TRUNK_H@y650; every stage
+    audit is clean — `thru` means the block's own routing joins its rects,
+    so no TEG_OPEN may fire here (the OVER twin is flow/teg_over_audit.buda,
+    expected dirty)."""
+    out, rc = run_demo_script("talk2.buda")
+    assert_clean(out, rc, "demo/talk2.buda")
+    assert "Bundler created 1 hbundles." in out
+    assert re.search(r"\[Planner\] Bundle 1 .*TRUNK_H@y650 \[pinned\]", out), \
+        "sidecar pin (talk2.json) must be honored"
+    segs, viols, ovlps = nuts_summary(out)
+    assert segs  == 3
+    assert viols == 0
+    assert ovlps == 0
+    dm = re.search(
+        r"\[DetailedNUTS\] (\d+) net segments placed, (\d+) bits unplaced", out)
+    assert dm, "DetailedNUTS summary not found"
+    assert int(dm.group(1)) == 24    # 3 segs × 8 bits
+    assert int(dm.group(2)) == 0
+    # topo (×2), nuts, dnuts all clean — TEG_OPEN must not fire on thru.
+    assert out.count("Success: no violations found.") == 4
+    assert "TEG" not in out
+
+
+def test_teg_over_audit_flow_pins_teg_open():
+    """flow/teg_over_audit.buda (teg_multirect_status.md open 2): the §1.1
+    repro as a checked-in corpus vehicle — a pinned bridge-reliant candidate
+    on a `teg_mode over` block, routed through DNUTS.  EXPECTED DIRTY: the
+    bridge is generation-only, so the tall arm is unreached and check_design
+    must report TEG_OPEN at both placed stages (the open 1(b) audit).
+
+    This test is also the flow's pin-fragility guard: `select_topology 1 13`
+    is a hard index, so a re-sorted pool that lands a different shape there
+    fails HERE (the planner line names the expected candidate) instead of
+    silently auditing a different route.  When open 1(a) emission makes the
+    bridge real metal, the TEG_OPEN expectations below flip to clean — that
+    flip is the fix's proof, mirror-imaging test_teg_open.py."""
+    out, rc = run_script("teg_over_audit.buda")
+    # Report-only audit: the flow exits 0 while dirty (--strict-check gates).
+    assert rc == 0, f"teg_over_audit.buda: non-zero exit {rc}\n{out}"
+    assert re.search(
+        r"\[Planner\] Bundle 1 .*TRUNK_V@x250 \[pinned\]", out), (
+        "index 13 no longer pins the bridged TRUNK_V@x250 — the candidate "
+        "pool was re-sorted; update the flow's select_topology index "
+        f"(see the flow header):\n{out}")
+    # The route itself is geometrically fine — the violation is semantic.
+    segs, viols, ovlps = nuts_summary(out)
+    assert (segs, viols, ovlps) == (2, 0, 0)
+    dm = re.search(
+        r"\[DetailedNUTS\] (\d+) net segments placed, (\d+) bits unplaced", out)
+    assert dm, "DetailedNUTS summary not found"
+    assert (int(dm.group(1)), int(dm.group(2))) == (8, 0)
+    # The point of the vehicle: TEG_OPEN at BOTH placed stages, naming the
+    # unreached rect (nuts) and the per-bit count (dnuts).
+    assert "OVER block 'L': rect#0 (0,0)-(100,400) touched by no placed metal" \
+        in out, out
+    assert "(nuts)" in out, out
+    assert "4 bit(s) — an OVER block's rect touched by no placed metal" in out, out
+    assert "Success: no violations found." not in out, \
+        "the vehicle must stay dirty until open 1(a) emission lands"
+
+
 def test_ndr_bottom_up_composition():
     """flow/ndr_bottom_up.buda (requirement R13): a governed cell template
     marked set_bottom_up is solved once and COPIED to every instance,

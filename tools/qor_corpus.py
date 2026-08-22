@@ -230,6 +230,15 @@ CORPUS = [
     # measured).  It opens its own ariane133_heal.bdb so the pair can never
     # collide on one SQLite file under a parallel sweep.
     "flow/ariane133/ariane133_heal.buda",
+    # TEG-over end-to-end guard (teg_multirect_status.md open 2): the §1.1
+    # repro as a corpus row — a pinned bridge-reliant candidate on an OVER
+    # multi-rect block, routed to DNUTS.  EXPECTED DIRTY: bridges are
+    # generation-only, so the route is built without its bridge and the
+    # TEG_OPEN audit (open 1(b), PR #821) reports it — viol_bundles = 1 is
+    # the pinned value.  The row exists so the audit's verdict is
+    # QoR-guarded end to end; when open 1(a) emission lands, this flips to
+    # 0/0/0 and the diff is the desired LOUD signal.  ~0.1s.
+    "flow/teg_over_audit.buda",
 ]
 
 
