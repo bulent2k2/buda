@@ -331,6 +331,36 @@ def test_a_partner_STARVED_before_span_adjustment_retracts_it_instead():
 _REFINE = _ROOT / "flow/rnr/mix2_topdown_refine.buda"
 
 
+@contextlib.contextmanager
+def _pre_placed_endpoints():
+    """Run with `set_placed_endpoints` OFF — the pre-flip DNUTS reading.
+
+    The two tests below are the audit's own regression tests (#695), and their
+    vehicle is bundle 35 seg 5 of `mix2_topdown_refine`: a junction that is
+    mid-span at NOMINAL and becomes the placed end, so its bits keep the shared
+    abstract end.  `set_placed_endpoints` — default ON since the flip — removes
+    exactly that metal at stage 9, which makes the finding disappear and the
+    `set_trim_mst_legs` saving on this wire go to zero (805,553 -> 805,536
+    either way; the two fixes are redundant HERE).
+
+    The audit is unaffected and still finds the shape; there is simply nothing
+    left for it to find in the default configuration.  So these tests pin the
+    OLD reading deliberately, to keep exercising the checker on the geometry
+    that justified it.  Whatever later removes the CAUSE must not be able to
+    silently retire the DETECTOR.
+
+    The flag is process-global (one module flag so every make_bus_segments
+    caller agrees), so it is restored on the way out — a leak would change
+    every later test in the same worker.
+    """
+    prev = buda.dnuts_placed_endpoints()
+    buda.dnuts_set_placed_endpoints(False)
+    try:
+        yield
+    finally:
+        buda.dnuts_set_placed_endpoints(prev)
+
+
 def _session_without_the_trim(flow):
     """Run `flow` with its `set_trim_mst_legs on` line removed.
 
@@ -385,8 +415,13 @@ def test_a_crossing_is_judged_at_the_bit_not_at_the_nominal_segment():
     the finding is recovered by stripping that one line.  This is the audit's
     own regression test (#695) and it must keep working on the shape that
     justified it, whatever generation later does about the cause.
+
+    Pinned to the PRE-FLIP DNUTS reading: `set_placed_endpoints` (default on)
+    removes this same metal at stage 9, so in the default configuration there
+    is nothing left for the audit to find here.  See `_pre_placed_endpoints`.
     """
-    hits = _findings_in_run(_session_without_the_trim(_REFINE))
+    with _pre_placed_endpoints():
+        hits = _findings_in_run(_session_without_the_trim(_REFINE))
     assert len(hits) == 3, hits
     assert all("Seg 5 bit" in h for h in hits), hits
     overhangs = sorted(float(h.split("0 + ")[1].split(" of")[0]) for h in hits)
@@ -412,11 +447,17 @@ def test_the_flow_opts_in_and_that_metal_is_gone_at_the_source():
     Asserting both is the point.  A trim that silenced the audit without
     removing wire, or removed wire elsewhere while leaving this, passes either
     assertion on its own.
-    """
-    trimmed = _session(_REFINE, verbose=True)
-    assert _findings_in_run(trimmed) == [], "the trim should remove the metal"
-    assert trimmed.detailed_result.num_unplaced == 0
 
-    base = _session_without_the_trim(_REFINE)
+    BOTH sides run pre-flip.  `set_placed_endpoints` (default on) removes the
+    same 17 units at stage 9, so with it the trim saves nothing here and the
+    two sides are equal -- that redundancy is real and documented, but it is
+    not what THIS test is about, which is that the trim removes the wire.
+    """
+    with _pre_placed_endpoints():
+        trimmed = _session(_REFINE, verbose=True)
+        assert _findings_in_run(trimmed) == [], "the trim should remove the metal"
+        assert trimmed.detailed_result.num_unplaced == 0
+
+        base = _session_without_the_trim(_REFINE)
     assert _detailed_wl(base) - _detailed_wl(trimmed) == pytest.approx(17, abs=1), \
         (_detailed_wl(base), _detailed_wl(trimmed))

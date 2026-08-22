@@ -78,7 +78,7 @@ Commands run in the following order. Later stages depend on earlier ones.
 | 8 | `add_grid_override` | Override the track pattern for a specific floorplan region on a layer |
 | 8 | `report_overhead` | Compare `def_layer` overhead% against the track pattern; print corrected `def_layer` commands for any mismatch |
 | 9 | `run_detailed_nuts` | Snap each bus segment's bits to concrete signal-track positions |
-| 9 setup | `set_placed_endpoints` | Decide a segment's endpoint connections from the PLACED geometry instead of the nominal label, so a junction NUTS contracted a span onto snaps each bit to its own via instead of holding every bit at the shared abstract end (default off; promotes only) |
+| 9 setup | `set_placed_endpoints` | Decide a segment's endpoint connections from the PLACED geometry instead of the nominal label, so a junction NUTS contracted a span onto snaps each bit to its own via instead of holding every bit at the shared abstract end (default **on**; `off` restores the pre-flip reading; promotes only) |
 | 9 setup | `set_pair_align_heal` | Opt-in measured-accept pairwise-overlap alignment at `run_detailed_nuts`: re-solve with same-net stub pairs sharing one track window, keeping it only when opens/overlaps do not rise and detailed WL strictly drops (default off) |
 | 3↔4/9 | `ripup_reroute` | Feedback-driven rip-up & re-route: read the **actual** NUTS overlaps / DNUTS opens and re-route contending bundles to clear them |
 | 3↔4/9 | `negotiate_congestion` | Measured-congestion negotiation: inject the **actual** overlaps/opens as band demand and re-plan the offending bundles unpinned against the corrected prices (the cheaper first pass; `ripup_reroute` finishes the residual) |

@@ -356,3 +356,72 @@ the placed end, the label flips only with the knob, a nominal endpoint is
 **never** demoted (with the premise asserted, so the test cannot pass
 vacuously), the flow the symmetric rule broke gains no violation kind, and the
 command's default/parse behaviour.
+
+---
+
+## The flip (2026-08-22): `set_placed_endpoints` defaults ON
+
+Every axis the as-built section listed as a prerequisite was measured, and the
+experiment also turned up an argument that was not anticipated.
+
+### Corpus, with the flip compiled in, vs `origin/main`
+
+| | |
+|---|---|
+| QoR (49 flows) | **3 better, 0 worse, 46 unchanged** |
+| abstract WL | **+0** — no selection movement at all |
+| detailed WL | **−1,114** |
+
+`bigHalf` 0/0/3 → 0/0/1 · `rnr/mix` 0/0/1 → 0/0/0 ·
+`chip/chip_stack_bottomup` 83/221/21 → 83/221/20.
+
+### Runtime — the prerequisite `qor_corpus` could not answer
+
+`tools/runtime_ab.py --base origin/main -n 3`, on the three flows that actually
+change (an unchanged flow does identical work and cannot inform this):
+
+| flow | base | flip | Δ |
+|---|---|---|---|
+| `bigHalf` | 18.76s | 18.43s | −1.8% |
+| `chip_stack_bottomup` | 83.93s | 81.64s | −2.7% |
+| `rnr/mix` | 4.75s | 4.69s | −1.3% |
+
+All three faster, none worse. Note `bigHalf` at 18.76s here against the ~60s
+`qor_corpus.py` reported for it — that 3× gap is the contention which made the
+sweep's timings useless, and is why its total swung −8.2% → +9.2% across two
+runs of a change that touches no placement.
+
+### It subsumes `set_trim_mst_legs` on the one wire where both apply
+
+`mix2_topdown_refine` bundle 35 seg 5, detailed WL:
+
+| | no trim | with `set_trim_mst_legs` |
+|---|---|---|
+| flip off | 805,553 | 805,536 |
+| flip **on** | **805,536** | 805,536 |
+
+The same 17 units, and stacking adds nothing. This is a real argument for the
+flip rather than a curiosity: `set_trim_mst_legs` is opt-in *precisely because*
+it re-sorts the WL-ordered candidate pool and renumbers indices, so it moves
+selection well beyond the bundle it fixes. The label fix reaches the same metal
+with abstract WL +0 across all 49 flows — the cheaper route to the same wire.
+
+### What the flip cost, and what was deliberately NOT done about it
+
+Full suite under the flip: **3566 passed, 3 failed**. One was this feature's own
+`test_default_is_off` (inverted here). The other two are the **#695 bit-antenna
+audit** regression tests, whose vehicle is that same `mix2_topdown_refine`
+bundle 35 seg 5 — the flip removes the defect they were written to observe, so
+the audit finds nothing and the trim saves nothing.
+
+The audit is **not** broken: with the flip off, all 12 tests in that file pass.
+So the two are pinned to the pre-flip reading (`_pre_placed_endpoints`) rather
+than retired or re-baselined. Whatever removes the CAUSE must not be able to
+silently retire the DETECTOR — that is the same failure the ANTENNA audit was
+built to prevent, one level up.
+
+### Still open
+
+Defect 1 (the mis-ranked WL estimate) and option (a) are untouched. The estimate
+is computed on nominal geometry and the contraction that invalidates it happens
+after selection, so no stage-9 fix can reach it.

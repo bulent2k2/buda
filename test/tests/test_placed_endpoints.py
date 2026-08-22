@@ -222,14 +222,20 @@ def test_no_new_opens_on_the_flow_the_symmetric_rule_broke(tmp_path):
 
 # ── default and precedence ─────────────────────────────────────────────────
 
-def test_default_is_off():
-    """Off by default = byte-identical, which is what lets this land before the
-    flip is argued.  (The env seed is read once at first access, so this asserts
-    the compiled default only when BUDA_DNUTS_PLACED_ENDPOINTS is unset.)"""
+def test_default_is_on():
+    """ON by default since the flip (docs/internal/hybrid_leg_overhang.md).
+
+    Measured for the flip, 49-flow corpus vs main: 3 better / 0 worse / 46
+    unchanged, abstract WL +0 -- no selection movement at all -- detailed WL
+    -1,114, runtime -1.3%..-2.7% on the three flows that change.
+
+    (The env seed is read once at first access, so this asserts the compiled
+    default only when BUDA_DNUTS_PLACED_ENDPOINTS is unset.)
+    """
     import os
-    if os.environ.get("BUDA_DNUTS_PLACED_ENDPOINTS") == "1":
+    if os.environ.get("BUDA_DNUTS_PLACED_ENDPOINTS") is not None:
         pytest.skip("env override active")
-    assert buda.dnuts_placed_endpoints() is False
+    assert buda.dnuts_placed_endpoints() is True
 
 
 def test_buda_command_sets_it():

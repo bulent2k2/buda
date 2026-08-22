@@ -232,8 +232,8 @@ set_placed_endpoints [on|off]
 ```
 
 Decide a segment's **endpoint** connections from the **placed** geometry rather
-than the nominal label. Default **off** — a flow that never calls it is
-byte-identical. With no argument, prints the current state.
+than the nominal label. Default **on** since the flip study below; `off` restores
+the pre-flip reading for one flow. With no argument, prints the current state.
 
 **The defect it fixes.** `is_endpoint` is derived once, at generation, from
 nominal coordinates (`at_pos == along_lo || along_hi`). NUTS then moves the
@@ -257,10 +257,17 @@ for the tapered retraction, cutting a wire short of a partner it still has to
 meet. It produced real `SEG_OPEN`s and measured 14 flows worse against 1, with
 detailed wirelength up.
 
-**Measured** (48-flow QoR corpus, off vs on): **3 better, 0 worse, 45
-unchanged**; abstract WL unchanged (+0 — the change is stage-9 only), detailed
-WL −1,114. `bigHalf` 0/0/3 → 0/0/1, `rnr/mix` 0/0/1 → 0/0/0,
-`chip/chip_stack_bottomup` 83/221/21 → 83/221/20.
+**Measured** (49-flow QoR corpus, vs `main`): **3 better, 0 worse, 46
+unchanged**; abstract WL unchanged (+0 — the change is stage-9 only, so it moves
+no selection), detailed WL −1,114. `bigHalf` 0/0/3 → 0/0/1, `rnr/mix` 0/0/1 →
+0/0/0, `chip/chip_stack_bottomup` 83/221/21 → 83/221/20. Runtime on those three
+(`runtime_ab`, median of 3): −1.8% / −1.3% / −2.7%, none worse.
+
+It also **subsumes `set_trim_mst_legs` on the one wire where both apply**
+(`mix2_topdown_refine` bundle 35 seg 5): 805,553 → 805,536 either way, and
+stacking them adds nothing. That matters because the trim is opt-in precisely
+because it re-sorts the WL-ordered candidate pool and renumbers indices — this
+reaches the same metal with no selection movement at all.
 
 Study override `BUDA_DNUTS_PLACED_ENDPOINTS=1` seeds the default so a corpus
 can be A/B'd without editing every flow; an explicit token always wins.
