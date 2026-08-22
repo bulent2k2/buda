@@ -266,7 +266,18 @@ wrong.
    check, so it subsumes "bridge unrealized" AND stays failing under a
    §1.3-shaped emission (a bridge on the union face away from the rect does
    not discharge it), and passes the moment real metal reaches every rect
-   however 1(a) chooses to put it there.  THRU stays exempt by design;
+   however 1(a) chooses to put it there.  Two review refinements (Codex P1s
+   on #821, both verified and landed with it): the dnuts audit runs PER BIT
+   — each bit is its own net, so bit 0 touching rect A and bit 1 touching
+   rect B connects neither, and NDR shield wires (a rail net) are excluded
+   from contact — and contact alone is not the verdict: all rects must sit
+   in ONE connected component of the group's placed metal (SEG junctions +
+   same-rect contact + other blocks' taps), since two islands each touching
+   a different rect pass the touch test while `island_roots` unions
+   same-BLOCK taps and so cannot see the split.  A bit touching no rect at
+   all is exempt (tapered away), with an all-bits-miss fallback so the
+   original missing-bridge shape still reports.  THRU stays exempt by
+   design;
    `check_topo` deliberately does NOT carry the kind (it feeds generation
    gates, dogleg trials and healer metrics — a reporting audit must not
    shrink candidate pools), which also means `detect_disconnected`'s

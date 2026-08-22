@@ -622,22 +622,50 @@ static void detect_disconnected(const std::vector<ConnSeg>& segs,
 //
 // TEG_OPEN (docs/internal/teg_multirect_status.md open 1(b)): a `teg_mode
 // over` multi-rect block declares its rects NOT internally connected, so
-// every rect needs external attachment by this bundle's PLACED metal.  The
-// coverage/disconnected checks cannot see this — block coverage is satisfied
-// by any one rect and detect_disconnected unions all same-block taps as
-// internally continuous, which is exactly the assumption OVER revokes.  The
-// canonical miss: a selected candidate's declared bridge (the wire meant to
-// connect the rects) is placed by NOTHING downstream of generation, so the
-// route ships without it and audited clean.  Contact is per rect and
-// INCLUSIVE (a stub landing on the face or a bridge lying on the rect's edge
-// counts; one lying on the union face AWAY from the rect does not — the §1.3
-// bridge-geometry defect stays visible).  Placed-stage only: check_topo
-// feeds generation gates, dogleg trials and healer metrics, which must not
-// start dropping candidates over a reporting audit.  THRU blocks are exempt
-// by design (internal equivalence is their declared meaning).
-struct TegMetal { bool horiz; double perp, a_lo, a_hi; };
+// every rect needs external attachment by this bundle's PLACED metal — and
+// the attachments must be JOINED by that metal.  The coverage/disconnected
+// checks cannot see either half: block coverage is satisfied by any one
+// rect, and detect_disconnected unions all same-block taps as internally
+// continuous, which is exactly the assumption OVER revokes.  The canonical
+// miss: a selected candidate's declared bridge (the wire meant to connect
+// the rects) is placed by NOTHING downstream of generation, so the route
+// ships without it and audited clean.
+//
+// The audit runs per METAL GROUP — at dnuts one group per BIT (each bit is
+// its own net, so bit 0 touching rect A and bit 1 touching rect B connects
+// neither; NDR shield wires are excluded — they carry a rail net, not the
+// bit — both Codex P1s on #821), at nuts one bundle-level group (bits do
+// not exist yet).  A bit touching NO rect of the block is exempt (a tapered
+// fan-in/out bit whose net does not terminate there), but if EVERY group
+// misses the block entirely that is the original missing-bridge shape and
+// is reported.  Per group, two verdicts:
+//   1. an untouched rect (contact is INCLUSIVE per rect — a stub landing on
+//      the face or a bridge lying on the rect's edge counts; one lying on
+//      the union face AWAY from the rect does not, so the §1.3
+//      bridge-geometry defect stays visible);
+//   2. rects all touched but NOT in one connected component of the group's
+//      placed metal — components joined by SEG junctions, contact with the
+//      SAME rect, and taps of OTHER blocks (their internal continuity is
+//      not in question); two islands each touching a different rect pass
+//      the contact test while the rects stay electrically apart, and
+//      island_roots cannot see it (it unions same-BLOCK taps).
+// Placed-stage only: check_topo feeds generation gates, dogleg trials and
+// healer metrics, which must not start dropping candidates over a reporting
+// audit.  THRU blocks are exempt by design (internal equivalence is their
+// declared meaning).
+struct TegMetal { int seg_idx; bool horiz; double perp, a_lo, a_hi; };
 
-static void detect_teg_open(const std::vector<TegMetal>& metal,
+static bool teg_touches(const TegMetal& m, const Rect& r) {
+    const double p1 = m.horiz ? r.y1 : r.x1;
+    const double p2 = m.horiz ? r.y2 : r.x2;
+    const double a1 = m.horiz ? r.x1 : r.y1;
+    const double a2 = m.horiz ? r.x2 : r.y2;
+    return m.perp >= p1 && m.perp <= p2 && m.a_lo <= a2 && m.a_hi >= a1;
+}
+
+// groups: label (-1 = bundle-level, else bit index) → that net's placed metal.
+static void detect_teg_open(const std::map<int, std::vector<TegMetal>>& groups,
+                            const std::vector<ConnSeg>& segs,
                             const Topology& topo, const Floorplan& fp,
                             int bundle_id, const char* stage,
                             ConnResult& result)
@@ -646,40 +674,121 @@ static void detect_teg_open(const std::vector<TegMetal>& metal,
         if (fp.get_block_teg_mode(bname) != TegMode::OVER) continue;
         auto rects = fp.get_block_rects(bname);
         if (rects.size() < 2) continue;
-        std::vector<size_t> open_rects;
-        for (size_t ri = 0; ri < rects.size(); ++ri) {
-            const Rect& r = rects[ri];
-            bool touched = false;
-            for (const auto& m : metal) {
-                const double p1 = m.horiz ? r.y1 : r.x1;
-                const double p2 = m.horiz ? r.y2 : r.x2;
-                const double a1 = m.horiz ? r.x1 : r.y1;
-                const double a2 = m.horiz ? r.x2 : r.y2;
-                if (m.perp >= p1 && m.perp <= p2 && m.a_lo <= a2 && m.a_hi >= a1) {
-                    touched = true;
-                    break;
+
+        bool any_group_touched = false;
+        int  first_label = groups.empty() ? -1 : groups.begin()->first;
+        for (const auto& [label, metal] : groups) {
+            const int nm = (int)metal.size();
+            const int nr = (int)rects.size();
+            // rect contact per metal piece (inclusive).
+            std::vector<std::vector<int>> touch(nr);
+            for (int mi = 0; mi < nm; ++mi)
+                for (int ri = 0; ri < nr; ++ri)
+                    if (teg_touches(metal[mi], rects[ri]))
+                        touch[ri].push_back(mi);
+            std::vector<size_t> open_rects;
+            for (int ri = 0; ri < nr; ++ri)
+                if (touch[ri].empty()) open_rects.push_back(ri);
+            if ((int)open_rects.size() == nr) continue;  // group misses the
+            any_group_touched = true;                    // block: tapered away
+            std::ostringstream where;
+            if (label >= 0) where << " for bit " << label;
+
+            if (!open_rects.empty()) {
+                ConnViolation v;
+                v.kind = ViolationKind::TEG_OPEN;
+                v.bundle_id = bundle_id;
+                v.bit_index = label;
+                v.block_name = bname;
+                std::ostringstream msg;
+                msg << "OVER block '" << bname << "': ";
+                for (size_t k = 0; k < open_rects.size(); ++k) {
+                    const Rect& r = rects[open_rects[k]];
+                    msg << (k ? ", " : "") << "rect#" << open_rects[k]
+                        << " (" << r.x1 << "," << r.y1 << ")-(" << r.x2 << "," << r.y2 << ")";
+                }
+                msg << " touched by no placed metal" << where.str()
+                    << " — teg_mode over means the block does not connect its "
+                    << "rects internally, and the declared bridge is "
+                    << (topo.bridge_segments.count(bname) ? "unrealized" : "absent")
+                    << " (" << stage << ")";
+                v.message = msg.str();
+                result.violations.push_back(std::move(v));
+                continue;  // contact verdict subsumes connectivity for this group
+            }
+
+            // 2. All rects touched: they must be JOINED by this group's metal.
+            //    Union-find over metal pieces + one node per rect; junctions
+            //    from the structural SEG conns, same-rect contact through the
+            //    rect node, other blocks' taps through a per-block node.
+            const int N = nm + nr;                 // metal .. rects
+            std::vector<int> parent(N);
+            for (int i = 0; i < N; ++i) parent[i] = i;
+            std::function<int(int)> find = [&](int x) {
+                while (parent[x] != x) { parent[x] = parent[parent[x]]; x = parent[x]; }
+                return x;
+            };
+            auto join = [&](int a, int b) { parent[find(a)] = find(b); };
+
+            std::map<int, int> by_seg;             // seg_idx → metal index
+            for (int mi = 0; mi < nm; ++mi) by_seg[metal[mi].seg_idx] = mi;
+            std::map<std::string, int> other_block_node;
+            for (int mi = 0; mi < nm; ++mi) {
+                int si = metal[mi].seg_idx;
+                if (si < 0 || si >= (int)segs.size()) continue;
+                for (const auto& conn : segs[si].conns) {
+                    if (conn.kind == SegConn::SEG) {
+                        auto it = by_seg.find(conn.seg_idx);
+                        if (it != by_seg.end()) join(mi, it->second);
+                    } else if (conn.block_name != bname) {
+                        auto [it, ins] = other_block_node.emplace(
+                            conn.block_name, -1);
+                        if (ins) it->second = mi;   // first tap seeds the node
+                        else join(mi, it->second);
+                    }
                 }
             }
-            if (!touched) open_rects.push_back(ri);
+            for (int ri = 0; ri < nr; ++ri)
+                for (int mi : touch[ri]) join(nm + ri, mi);
+
+            std::set<int> rect_comps;
+            for (int ri = 0; ri < nr; ++ri) rect_comps.insert(find(nm + ri));
+            if (rect_comps.size() > 1) {
+                ConnViolation v;
+                v.kind = ViolationKind::TEG_OPEN;
+                v.bundle_id = bundle_id;
+                v.bit_index = label;
+                v.block_name = bname;
+                std::ostringstream msg;
+                msg << "OVER block '" << bname << "': every rect is touched"
+                    << where.str() << " but the contacts split into "
+                    << rect_comps.size() << " metal islands — joining them "
+                    << "relies on the block's interior, which teg_mode over "
+                    << "revokes (" << stage << ")";
+                v.message = msg.str();
+                result.violations.push_back(std::move(v));
+            }
         }
-        if (open_rects.empty()) continue;
-        ConnViolation v;
-        v.kind = ViolationKind::TEG_OPEN;
-        v.bundle_id = bundle_id;
-        v.block_name = bname;
-        std::ostringstream msg;
-        msg << "OVER block '" << bname << "': ";
-        for (size_t k = 0; k < open_rects.size(); ++k) {
-            const Rect& r = rects[open_rects[k]];
-            msg << (k ? ", " : "") << "rect#" << open_rects[k]
-                << " (" << r.x1 << "," << r.y1 << ")-(" << r.x2 << "," << r.y2 << ")";
+
+        if (!any_group_touched && !groups.empty()) {
+            // No bit (or the bundle) reaches the block at all — the original
+            // missing-bridge shape, reported once at the group granularity
+            // the stage has.
+            ConnViolation v;
+            v.kind = ViolationKind::TEG_OPEN;
+            v.bundle_id = bundle_id;
+            v.bit_index = first_label;
+            v.block_name = bname;
+            std::ostringstream msg;
+            msg << "OVER block '" << bname << "': no rect touched by any "
+                << "placed metal of the bundle — teg_mode over means the "
+                << "block does not connect its rects internally, and the "
+                << "declared bridge is "
+                << (topo.bridge_segments.count(bname) ? "unrealized" : "absent")
+                << " (" << stage << ")";
+            v.message = msg.str();
+            result.violations.push_back(std::move(v));
         }
-        msg << " touched by no placed metal — teg_mode over means the block "
-            << "does not connect its rects internally, and the declared bridge is "
-            << (topo.bridge_segments.count(bname) ? "unrealized" : "absent")
-            << " (" << stage << ")";
-        v.message = msg.str();
-        result.violations.push_back(std::move(v));
     }
 }
 
@@ -1069,19 +1178,20 @@ ConnResult check_nuts(const ConnTopology& ct, const NUTSResult& nuts,
     // Dangling wires (structural; see detect_antennas — issue #482).
     detect_antennas(segs, topo, fp, bundle_id, "nuts", result);
 
-    // TEG_OPEN: every rect of an OVER block must be touched by placed metal
-    // (see detect_teg_open — the missing-bridge audit).
+    // TEG_OPEN: every rect of an OVER block must be touched — and joined —
+    // by placed metal (see detect_teg_open — the missing-bridge audit).
+    // One bundle-level group: bits do not exist at this stage.
     {
-        std::vector<TegMetal> metal;
+        std::map<int, std::vector<TegMetal>> groups;
+        auto& metal = groups[-1];
         for (const auto& [si, tsp] : ts_map) {
-            (void)si;
             const TrackSegment& ts = *tsp;
             if (!ts.placed) continue;
-            metal.push_back({ts.horiz, ts.track_position,
+            metal.push_back({si, ts.horiz, ts.track_position,
                              std::min(ts.span_lo, ts.span_hi),
                              std::max(ts.span_lo, ts.span_hi)});
         }
-        detect_teg_open(metal, topo, fp, bundle_id, "nuts", result);
+        detect_teg_open(groups, segs, topo, fp, bundle_id, "nuts", result);
     }
 
     return result;
@@ -1376,21 +1486,24 @@ ConnResult check_dnuts(const ConnTopology& ct, const DetailedNUTSResult& dnuts,
     // Per-BIT dangling metal, which the structural pass above cannot see.
     detect_bit_antennas(ct.segs(), dnuts, topo, fp, layers, bundle_id, result);
 
-    // TEG_OPEN: every rect of an OVER block must be touched by placed metal
-    // (see detect_teg_open — the missing-bridge audit).  Any placed bit's
-    // wire counts as contact; orientation comes from the segment (all bits
+    // TEG_OPEN: every rect of an OVER block must be touched — and joined —
+    // by placed metal (see detect_teg_open — the missing-bridge audit).
+    // Grouped per BIT: each bit is its own net, so another bit's wire is not
+    // contact (Codex P1 on #821); NDR shield wires carry a rail net and are
+    // excluded the same way.  Orientation comes from the segment (all bits
     // of a segment share it), matching the layer-dir check above.
     {
-        std::vector<TegMetal> metal;
+        std::map<int, std::vector<TegMetal>> groups;
         for (const auto& [key, nsp] : ns_map) {
-            int si = key.first;
-            if (si < 0 || si >= n) continue;
+            int si = key.first, bit = key.second;
+            if (si < 0 || si >= n || bit < 0) continue;
             const NetSegment& ns = *nsp;
-            metal.push_back({segs[si].horiz, ns.track_position,
-                             std::min(ns.span_lo, ns.span_hi),
-                             std::max(ns.span_lo, ns.span_hi)});
+            if (ns.is_shield) continue;
+            groups[bit].push_back({si, segs[si].horiz, ns.track_position,
+                                   std::min(ns.span_lo, ns.span_hi),
+                                   std::max(ns.span_lo, ns.span_hi)});
         }
-        detect_teg_open(metal, topo, fp, bundle_id, "dnuts", result);
+        detect_teg_open(groups, segs, topo, fp, bundle_id, "dnuts", result);
     }
 
     // BIT_SHORT: two DIFFERENT bits of this bundle are two different NETS,

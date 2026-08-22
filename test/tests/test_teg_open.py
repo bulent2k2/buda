@@ -97,10 +97,11 @@ def test_missing_bridge_is_teg_open_at_nuts_and_dnuts():
     with contextlib.redirect_stdout(io.StringIO()):
         s.do_command("run_detailed_nuts")
     verdict, out = _check(s, "dnuts")
-    assert verdict["by_kind"].get("TEG_OPEN", 0) >= 1, out
-    assert "(dnuts)" in out
-    # The message names the defect precisely: a DECLARED bridge, unrealized.
-    assert "unrealized" in out
+    # Per-bit audit (Codex P1 on #821): each of the 4 bits is its own net and
+    # each individually fails to reach the tall arm, so 4 violations, which
+    # the summary collapses into one per-block group line.
+    assert verdict["by_kind"].get("TEG_OPEN", 0) == 4, out
+    assert "Block 'L'" in out
 
 
 def test_thru_block_is_exempt_by_design():
@@ -156,8 +157,7 @@ def test_gap_stub_retraction_fires_teg_open_alongside_face_kinds():
     verdict, out = _check(s, "dnuts")
     assert verdict["by_kind"].get("TEG_OPEN", 0) >= 1, out
     assert verdict["by_kind"].get("BUSTERM_FACE", 0) >= 1, out
-    # The far rect is the unreached one, named in the message.
-    assert "rect#0 (0,300)-(200,400)" in out
+    assert "Block 'T'" in out
 
 
 def test_all_span_trunk_touches_every_rect_no_teg_open():
@@ -203,3 +203,125 @@ def test_check_topo_does_not_carry_teg_open():
     res = buda.check_topo(ct, cand, s.fp, 1)
     kinds = {v.kind for v in res.violations}
     assert buda.ViolationKind.TEG_OPEN not in kinds
+
+
+# ── the two Codex P1 refinements (#821 review) ────────────────────────────────
+
+def _lshape_fp_over():
+    fp = buda.Floorplan()
+    fp.add_block_rects("L", [(0, 0, 100, 400),      # tall arm
+                             (0, 0, 400, 100)])     # wide base
+    fp.set_block_teg_mode("L", buda.TegMode.OVER)
+    fp.add_block("src", 500, 150, 600, 250)
+    return fp
+
+
+def _lshape_candidate(fp):
+    g = buda.TopologyGenerator(fp)
+    g.set_layer_ids(4, 5)
+    cands = g.generate_candidates("src", ["L"])
+    topo = cands[0]
+    ct = buda.ConnTopology()
+    ct.build(topo, fp)
+    return topo, ct
+
+
+def _layers():
+    ls = buda.LayerStack()
+    ls.add_layer(4, "M4", buda.LayerDir.HORIZONTAL, buda.LayerType.TOP)
+    ls.add_layer(5, "M5", buda.LayerDir.VERTICAL,   buda.LayerType.TOP)
+    return ls
+
+
+def _h_seg_indices(ct):
+    return [i for i, cs in enumerate(ct.segs()) if cs.horiz]
+
+
+def _wire(si, bit, y, x_lo, x_hi):
+    ns = buda.NetSegment()
+    ns.bundle_id = 1
+    ns.seg_idx = si
+    ns.bit_index = bit
+    ns.layer = 4
+    ns.track_position = float(y)
+    ns.span_lo, ns.span_hi = float(x_lo), float(x_hi)
+    ns.width = 1.0
+    return ns
+
+
+def test_per_bit_metal_is_not_pooled():
+    # Codex P1 (#821): bit 0's wire touches only the base (y=50, x from 150 —
+    # right of the arm) and bit 1's only the arm (y=150 — above the base).
+    # Pooled metal touches both rects and would audit clean; per-bit each net
+    # misses a rect, so BOTH bits must fire.
+    fp = _lshape_fp_over()
+    topo, ct = _lshape_candidate(fp)
+    h = _h_seg_indices(ct)
+    assert h, "need an H segment to host the fabricated wires"
+    dnuts = buda.DetailedNUTSResult()
+    dnuts.net_segments = [
+        _wire(h[0], 0, 50, 150, 500),    # base only (arm is x<=100)
+        _wire(h[0], 1, 150, 50, 500),    # arm only (base is y<=100)
+    ]
+    res = buda.check_dnuts(ct, dnuts, topo, fp, _layers(), 1, 2)
+    teg = [v for v in res.violations if v.kind == buda.ViolationKind.TEG_OPEN]
+    assert {v.bit_index for v in teg} == {0, 1}, [v.message for v in teg]
+
+
+def test_touched_but_split_islands_fire_teg_open():
+    # Codex P1 (#821): one bit, two wires on segments that are NOT joined by
+    # any placed metal of the bit (their structural junction runs through a
+    # third segment whose wire is absent) — every rect is touched, but the
+    # contacts sit in different metal islands, so joining them would rely on
+    # the block interior OVER revokes.  island_roots cannot see this (it
+    # unions same-BLOCK taps); the audit must.
+    fp = _lshape_fp_over()
+    # Search the pool for a candidate holding two H segments with NO direct
+    # SEG conn (a Z / V-trunk shape: two H stubs joined only through the V
+    # trunk) — the trunk's wire is then left out of the group, so the two
+    # stub wires are genuine islands.
+    g = buda.TopologyGenerator(fp)
+    g.set_layer_ids(4, 5)
+    topo = ct = None
+    h = []
+    for cand in g.generate_candidates("src", ["L"]):
+        c = buda.ConnTopology()
+        c.build(cand, fp)
+        hh = [i for i, cs in enumerate(c.segs()) if cs.horiz]
+        for a in range(len(hh)):
+            for b in range(a + 1, len(hh)):
+                direct = any(cn.kind == buda.SegConnKind.SEG and
+                             cn.seg_idx == hh[b]
+                             for cn in c.segs()[hh[a]].conns)
+                if not direct:
+                    topo, ct, h = cand, c, [hh[a], hh[b]]
+                    break
+            if topo is not None:
+                break
+        if topo is not None:
+            break
+    assert topo is not None, "no candidate with two unjoined H segments"
+    si2 = h[1]
+    dnuts = buda.DetailedNUTSResult()
+    dnuts.net_segments = [
+        _wire(h[0], 0, 150, 50, 300),    # island A: arm only
+        _wire(si2, 0, 50, 150, 500),     # island B: base only
+    ]
+    res = buda.check_dnuts(ct, dnuts, topo, fp, _layers(), 1, 1)
+    teg = [v for v in res.violations if v.kind == buda.ViolationKind.TEG_OPEN]
+    assert teg and any("islands" in v.message for v in teg), \
+        [v.message for v in teg]
+
+
+def test_joined_contacts_audit_clean():
+    # Control for the island verdict: ONE wire touching both rects (an H wire
+    # at y=50 from x=50 crosses arm and base alike) is one island — no
+    # TEG_OPEN, whatever else the fabricated placement violates.
+    fp = _lshape_fp_over()
+    topo, ct = _lshape_candidate(fp)
+    h = _h_seg_indices(ct)
+    dnuts = buda.DetailedNUTSResult()
+    dnuts.net_segments = [_wire(h[0], 0, 50, 50, 500)]
+    res = buda.check_dnuts(ct, dnuts, topo, fp, _layers(), 1, 1)
+    teg = [v for v in res.violations if v.kind == buda.ViolationKind.TEG_OPEN]
+    assert not teg, [v.message for v in teg]
