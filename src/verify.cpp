@@ -618,6 +618,71 @@ static void detect_disconnected(const std::vector<ConnSeg>& segs,
     result.violations.push_back(std::move(v));
 }
 
+// ── detect_teg_open ───────────────────────────────────────────────────────────
+//
+// TEG_OPEN (docs/internal/teg_multirect_status.md open 1(b)): a `teg_mode
+// over` multi-rect block declares its rects NOT internally connected, so
+// every rect needs external attachment by this bundle's PLACED metal.  The
+// coverage/disconnected checks cannot see this — block coverage is satisfied
+// by any one rect and detect_disconnected unions all same-block taps as
+// internally continuous, which is exactly the assumption OVER revokes.  The
+// canonical miss: a selected candidate's declared bridge (the wire meant to
+// connect the rects) is placed by NOTHING downstream of generation, so the
+// route ships without it and audited clean.  Contact is per rect and
+// INCLUSIVE (a stub landing on the face or a bridge lying on the rect's edge
+// counts; one lying on the union face AWAY from the rect does not — the §1.3
+// bridge-geometry defect stays visible).  Placed-stage only: check_topo
+// feeds generation gates, dogleg trials and healer metrics, which must not
+// start dropping candidates over a reporting audit.  THRU blocks are exempt
+// by design (internal equivalence is their declared meaning).
+struct TegMetal { bool horiz; double perp, a_lo, a_hi; };
+
+static void detect_teg_open(const std::vector<TegMetal>& metal,
+                            const Topology& topo, const Floorplan& fp,
+                            int bundle_id, const char* stage,
+                            ConnResult& result)
+{
+    for (const auto& bname : topo.connected_block_names) {
+        if (fp.get_block_teg_mode(bname) != TegMode::OVER) continue;
+        auto rects = fp.get_block_rects(bname);
+        if (rects.size() < 2) continue;
+        std::vector<size_t> open_rects;
+        for (size_t ri = 0; ri < rects.size(); ++ri) {
+            const Rect& r = rects[ri];
+            bool touched = false;
+            for (const auto& m : metal) {
+                const double p1 = m.horiz ? r.y1 : r.x1;
+                const double p2 = m.horiz ? r.y2 : r.x2;
+                const double a1 = m.horiz ? r.x1 : r.y1;
+                const double a2 = m.horiz ? r.x2 : r.y2;
+                if (m.perp >= p1 && m.perp <= p2 && m.a_lo <= a2 && m.a_hi >= a1) {
+                    touched = true;
+                    break;
+                }
+            }
+            if (!touched) open_rects.push_back(ri);
+        }
+        if (open_rects.empty()) continue;
+        ConnViolation v;
+        v.kind = ViolationKind::TEG_OPEN;
+        v.bundle_id = bundle_id;
+        v.block_name = bname;
+        std::ostringstream msg;
+        msg << "OVER block '" << bname << "': ";
+        for (size_t k = 0; k < open_rects.size(); ++k) {
+            const Rect& r = rects[open_rects[k]];
+            msg << (k ? ", " : "") << "rect#" << open_rects[k]
+                << " (" << r.x1 << "," << r.y1 << ")-(" << r.x2 << "," << r.y2 << ")";
+        }
+        msg << " touched by no placed metal — teg_mode over means the block "
+            << "does not connect its rects internally, and the declared bridge is "
+            << (topo.bridge_segments.count(bname) ? "unrealized" : "absent")
+            << " (" << stage << ")";
+        v.message = msg.str();
+        result.violations.push_back(std::move(v));
+    }
+}
+
 bool disconnected_islands_bridged(const ConnTopology& ct, const Topology& topo,
                                   const Floorplan& fp)
 {
@@ -1004,6 +1069,21 @@ ConnResult check_nuts(const ConnTopology& ct, const NUTSResult& nuts,
     // Dangling wires (structural; see detect_antennas — issue #482).
     detect_antennas(segs, topo, fp, bundle_id, "nuts", result);
 
+    // TEG_OPEN: every rect of an OVER block must be touched by placed metal
+    // (see detect_teg_open — the missing-bridge audit).
+    {
+        std::vector<TegMetal> metal;
+        for (const auto& [si, tsp] : ts_map) {
+            (void)si;
+            const TrackSegment& ts = *tsp;
+            if (!ts.placed) continue;
+            metal.push_back({ts.horiz, ts.track_position,
+                             std::min(ts.span_lo, ts.span_hi),
+                             std::max(ts.span_lo, ts.span_hi)});
+        }
+        detect_teg_open(metal, topo, fp, bundle_id, "nuts", result);
+    }
+
     return result;
 }
 
@@ -1295,6 +1375,23 @@ ConnResult check_dnuts(const ConnTopology& ct, const DetailedNUTSResult& dnuts,
 
     // Per-BIT dangling metal, which the structural pass above cannot see.
     detect_bit_antennas(ct.segs(), dnuts, topo, fp, layers, bundle_id, result);
+
+    // TEG_OPEN: every rect of an OVER block must be touched by placed metal
+    // (see detect_teg_open — the missing-bridge audit).  Any placed bit's
+    // wire counts as contact; orientation comes from the segment (all bits
+    // of a segment share it), matching the layer-dir check above.
+    {
+        std::vector<TegMetal> metal;
+        for (const auto& [key, nsp] : ns_map) {
+            int si = key.first;
+            if (si < 0 || si >= n) continue;
+            const NetSegment& ns = *nsp;
+            metal.push_back({segs[si].horiz, ns.track_position,
+                             std::min(ns.span_lo, ns.span_hi),
+                             std::max(ns.span_lo, ns.span_hi)});
+        }
+        detect_teg_open(metal, topo, fp, bundle_id, "dnuts", result);
+    }
 
     // BIT_SHORT: two DIFFERENT bits of this bundle are two different NETS,
     // so their wires sharing a layer + track with overlapping (or touching —
