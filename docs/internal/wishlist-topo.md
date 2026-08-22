@@ -569,6 +569,29 @@ root + gated:
   `att[]`, so an extreme TEG block's stub pair floated off a too-short trunk —
   the spine span now extends to the gap-stub positions.
 
+  *Gap-stub RETRACTION (2026-08-22, RESOLVED — the second bug in the same
+  emission):* even with the spine pre-extended, the FAR gap stub did not
+  survive placement in either orientation (NUTS retracted it to the trunk —
+  span [150,158] against a face at 300, BUSTERM_FACE at nuts and
+  BUSTERM_FACE + ANTENNA + TEG_OPEN at dnuts).  Root cause: the far stub was
+  emitted trunk → face while `emit_tap_segment` seeds the busterm on the
+  START endpoint, so its tap annotation landed on the TRUNK end.  Two
+  single-source rules then compounded it: `derive_conn_segs` dedupes BUSTERM
+  conns per block, so the bogus trunk-end tap (`face_coord` = the locus)
+  shadowed the correct face-end annotation `annotate_endpoints` filled into
+  the `.second` slot; and `annotate_seg_conns` skips a busterm-tapped
+  endpoint, suppressing the far stub's own trunk-junction record (the SEG
+  conn it kept came only from the spine's reciprocal — the pre-extended
+  spine endpoint happening to coincide with the stub).  With no face anchor,
+  NUTS's span adjustment retracted the free end to the trunk.  Fixed by
+  emitting the far stub face → trunk like every other stub (the near gap
+  stub and the normal `att[i]` stub already were); measured clean at nuts
+  AND dnuts in both orientations, non-TEG flows byte-identical (the branch
+  requires an OVER multi-rect gap trunk, which no corpus flow has).  Guards:
+  `test_teg_gap_stub_annotation.py` (annotation + placed reach, both
+  orientations) and `test_teg_open.py`'s gap test, flipped to the clean
+  expectation its comment promised.
+
 Default-off measured bit-identical: fast+mid 100% green (1485 passed),
 topo goldens untouched.  Guards: `test_topo_hanan_loci_degenerate.py`
 (repro fixtures for all three classes + the default-off superset property);

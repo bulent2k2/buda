@@ -115,21 +115,23 @@ def test_thru_block_is_exempt_by_design():
     assert verdict["by_kind"].get("TEG_OPEN", 0) == 0, out
 
 
-def test_gap_stub_retraction_fires_teg_open_alongside_face_kinds():
-    # The disjoint-gap OVER branch stubs BOTH rects to the trunk, so IF the
-    # stubs placed as generated, connectivity would hold through the trunk
-    # and the audit would pass (its union-face bridge is redundant metal, not
-    # a missing link — teg_multirect_status.md §1.3, last paragraph).
+def test_gap_stub_places_clean_after_retraction_fix():
+    # The disjoint-gap OVER branch stubs BOTH rects to the trunk, so when the
+    # stubs place as generated, connectivity holds through the trunk and the
+    # audit passes (its union-face bridge is redundant metal, not a missing
+    # link — teg_multirect_status.md §1.3, last paragraph).
     #
-    # Measured while building this test: they do NOT place as generated — in
-    # BOTH orientations NUTS retracts the far gap-stub to the trunk (span
-    # [150,158] against a face at 300; the wishlist-topo "gap-stub pair
-    # emitted at rect CENTRES" bug family), so the placed route genuinely is
-    # open at the far rect.  The audit must say so, corroborating the
-    # geometric kinds that already fire (BUSTERM_FACE, and ANTENNA at dnuts)
-    # with the semantic verdict they lack: WHICH rect of the OVER block ended
-    # up unreached.  When the gap-stub placement is fixed, this test's
-    # expectation flips to TEG_OPEN == 0 — that flip is the fix's proof.
+    # They used to NOT place as generated: the far gap-stub was emitted
+    # trunk → face, so emit_tap_segment seeded its busterm on the TRUNK end;
+    # derive_conn_segs' per-block BUSTERM dedup let that bogus tap shadow the
+    # real face-end annotation, and NUTS — left with no face anchor —
+    # retracted the stub to the trunk (span [150,158] against a face at 300,
+    # both orientations), firing BUSTERM_FACE + ANTENNA + TEG_OPEN here.
+    # FIXED (claude/teg-gap-stub-fix): the far stub is emitted face → trunk
+    # like every other stub, so this test now pins the clean expectation —
+    # the flip its earlier comment promised as the fix's proof.  The direct
+    # annotation/placement regression is
+    # test_teg_gap_stub_annotation.py (both orientations).
     s = _session([
         "add_block T rect 0 300 200 400 rect 0 0 200 100 teg_mode over",
         "add_block src 400 150 500 250",
@@ -155,9 +157,8 @@ def test_gap_stub_retraction_fires_teg_open_alongside_face_kinds():
         with contextlib.redirect_stdout(io.StringIO()):
             s.do_command(cmd)
     verdict, out = _check(s, "dnuts")
-    assert verdict["by_kind"].get("TEG_OPEN", 0) >= 1, out
-    assert verdict["by_kind"].get("BUSTERM_FACE", 0) >= 1, out
-    assert "Block 'T'" in out
+    assert verdict["by_kind"].get("TEG_OPEN", 0) == 0, out
+    assert verdict["by_kind"].get("BUSTERM_FACE", 0) == 0, out
 
 
 def test_all_span_trunk_touches_every_rect_no_teg_open():

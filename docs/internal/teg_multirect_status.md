@@ -287,13 +287,22 @@ wrong.
    `Bundle 1: OVER block 'L': rect#0 (0,0)-(100,400) touched by no placed
    metal … declared bridge is unrealized (dnuts)` where it reported Success.
    Building its tests measured a bonus finding: the disjoint-gap stub pair
-   does not survive placement in EITHER orientation (NUTS retracts the far
+   did not survive placement in EITHER orientation (NUTS retracted the far
    stub to the trunk — span [150,158] against a face at 300, the
-   wishlist-topo "gap-stub pair at rect CENTRES" family), so the gap shape
-   currently fires TEG_OPEN alongside BUSTERM_FACE/ANTENNA;
-   `test_teg_open.py` pins that composite and flips to a clean expectation
-   when the gap-stub placement is fixed.  Still open here: 1(a), and open
-   2's corpus vehicle to pin the kind end-to-end in QoR.
+   wishlist-topo "gap-stub pair at rect CENTRES" family).  RESOLVED
+   (2026-08-22, branch `claude/teg-gap-stub-fix`): the far gap stub was
+   emitted trunk → face while `emit_tap_segment` seeds the busterm on the
+   START endpoint, so its tap annotation sat on the TRUNK end —
+   `derive_conn_segs`' per-block BUSTERM dedup let it shadow the real
+   face-end annotation and NUTS, with no face anchor, retracted the stub.
+   Emitting it face → trunk (like every other stub) places both gap stubs to
+   their faces: the gap vehicle now audits CLEAN at nuts and dnuts in both
+   orientations (connectivity holds through the trunk, per §1.3's last
+   paragraph), `test_teg_open.py`'s gap test carries the flipped clean
+   expectation its comment promised, and
+   `test_teg_gap_stub_annotation.py` pins the root cause directly.  Still
+   open here: 1(a), and open 2's corpus vehicle to pin the kind end-to-end
+   in QoR.
 
 ### High
 
