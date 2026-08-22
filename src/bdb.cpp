@@ -91,7 +91,14 @@ void BDB::_exec(const char* sql) {
     if (sqlite3_exec(_db, sql, nullptr, nullptr, &err) != SQLITE_OK) {
         std::string msg = err ? err : "unknown error";
         sqlite3_free(err);
-        throw std::runtime_error(std::string("BDB SQL error: ") + msg);
+        // Name the statement: "FOREIGN KEY constraint failed" alone gives the
+        // reader nothing to act on (step_checked's prepared-statement twin
+        // has carried an op tag all along; _exec was the anonymous one).
+        std::string head(sql);
+        if (auto nl = head.find('\n'); nl != std::string::npos)
+            head.resize(nl);
+        if (head.size() > 80) { head.resize(80); head += "..."; }
+        throw std::runtime_error("BDB SQL error: " + msg + " (in: " + head + ")");
     }
 }
 
@@ -3939,7 +3946,21 @@ void BDB::add_busterm(const BustermRow& bt) {
 }
 
 void BDB::clear_busterms() {
-    _exec("DELETE FROM busterm");
+    // Two kinds of rows share this table: the HIERARCHY interface rows this
+    // clear exists to re-derive (BustermGen / derive_busterms), and the
+    // routing-time 'tb:<name>:<hash>' rows the topology persist writes and
+    // upserts (_persist_topology_annotations) — the rows
+    // topology_seg_busterm.busterm_id references.  A blanket DELETE tripped
+    // that FK on every hier `-b` RERUN: the reused checkpoint still holds the
+    // previous session's candidate pool, so re-running derive_busterms died
+    // with a bare "FOREIGN KEY constraint failed" before the re-bundle ever
+    // got to refresh those rows.  Keep exactly the still-referenced 'tb:'
+    // rows (a kept USER candidate's links must stay restorable), and drop
+    // orphaned 'tb:' rows with the hierarchy rows.
+    _exec("DELETE FROM busterm"
+          " WHERE id NOT LIKE 'tb:%'"
+          "    OR id NOT IN (SELECT busterm_id FROM topology_seg_busterm"
+          "                  WHERE busterm_id IS NOT NULL)");
 }
 
 std::vector<ComponentRow> BDB::components_at_depth(int depth) const {

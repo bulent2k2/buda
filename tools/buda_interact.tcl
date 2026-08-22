@@ -633,6 +633,7 @@ proc _fail_line {text} {
         set t [string trim $ln]
         if {[string match {x *} $ln]
             || [string match -nocase {Error*} $t]
+            || [regexp {^[A-Za-z_]+(Error|Exception): } $t]
             || [regexp {^BUDA-[0-9]+: (ERROR|FATAL):} $t]} {
             return $t
         }
