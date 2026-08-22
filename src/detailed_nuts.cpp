@@ -1484,10 +1484,19 @@ void DetailedNUTSEngine::emit_bit_vias(
 // read so a whole corpus can be A/B'd without editing every flow (the
 // default-flip study harness, as for the generation knobs); a later
 // dnuts_set_placed_endpoints() -- i.e. the `.buda` token -- always wins.
+// DEFAULT ON since the flip study (docs/internal/hybrid_leg_overhang.md).  The
+// env override works in BOTH directions -- `=0` turns it off -- so the A/B
+// stays runnable on one build, and `set_placed_endpoints off` is the per-flow
+// escape hatch for anything that wants the pre-flip reading.
+//
+// Measured for the flip, 49-flow corpus vs main: 3 better / 0 worse / 46
+// unchanged, abstract WL +0 (no selection movement at all), detailed WL
+// -1,114; runtime -1.3%..-2.7% on the three flows that change, none worse.
+static constexpr bool kPlacedEndpointsDefault = true;
 static bool& dnuts_placed_endpoints_flag() {
     static bool v = [] {
         const char* e = std::getenv("BUDA_DNUTS_PLACED_ENDPOINTS");
-        return e && std::string(e) == "1";
+        return e ? (std::string(e) == "1") : kPlacedEndpointsDefault;
     }();
     return v;
 }
@@ -1611,9 +1620,10 @@ std::vector<BusSegment> make_bus_segments(
                     c.is_endpoint = conn.is_endpoint;
                     const double mid = 0.5 * (cs.along_lo + cs.along_hi);
                     c.lo_end      = (c.at_pos <= mid);
-                    // PROTOTYPE (opt-in, BUDA_DNUTS_PLACED_ENDPOINTS): decide
-                    // endpoint-ness from the PLACED geometry instead of the
-                    // nominal analysis.
+                    // `set_placed_endpoints` (ON by default since the flip;
+                    // BUDA_DNUTS_PLACED_ENDPOINTS=0 for the pre-flip reading):
+                    // decide endpoint-ness from the PLACED geometry instead of
+                    // the nominal analysis.
                     //
                     // `is_endpoint`/`lo_end` above come from the ConnSeg, which
                     // is nominal and derived once at generation

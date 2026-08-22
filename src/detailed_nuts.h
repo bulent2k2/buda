@@ -322,15 +322,17 @@ private:
 // carried through unchanged: over-charging, never under.
 // ── Placed-endpoint re-derivation (`set_placed_endpoints`) ───────────────────
 //
-// OFF by default = byte-identical.  When on, make_bus_segments decides a SEG
+// ON by default since the flip study.  make_bus_segments decides a SEG
 // connection's endpoint-ness from the PLACED geometry instead of the nominal
 // ConnSeg label, so a junction that NUTS contracted a span onto is recognised
 // as that span's end and each bit snaps to its own via.  See
 // docs/internal/hybrid_leg_overhang.md.
 //
-// Precedence: the `.buda` token wins over `BUDA_DNUTS_PLACED_ENDPOINTS=1`,
-// which wins over the compiled default (off) -- the same order the generation
-// study knobs use.
+// Precedence: the `.buda` token (`set_placed_endpoints off` for the pre-flip
+// reading) wins over `BUDA_DNUTS_PLACED_ENDPOINTS`, which wins over the
+// compiled default (on) -- the same order the generation study knobs use.
+// Since the flip the env's useful value is `=0`: `=1` is a no-op, so an A/B
+// run as `=1` versus unset compares two ON runs and reports no difference.
 void dnuts_set_placed_endpoints(bool v);
 bool dnuts_placed_endpoints();
 
