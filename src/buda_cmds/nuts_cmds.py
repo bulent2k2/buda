@@ -422,7 +422,35 @@ def cmd_set_pair_align_heal(session, cmd, args, cmd_line):
     session._pair_align_heal = (val == "on")
 
 
+def cmd_set_placed_endpoints(session, cmd, args, cmd_line):
+    # Usage: set_placed_endpoints [on|off]
+    # Decide a DNUTS segment's endpoint connections from the PLACED geometry
+    # instead of the NOMINAL label.  Off by default = byte-identical.
+    #
+    # `is_endpoint` is derived once at generation from nominal coordinates,
+    # but NUTS then moves the ends -- tighten_spans_to_reach contracts a span
+    # back to its outermost junction -- and the label is never re-derived.
+    # DetailedNUTS reads it as its only gate on per-bit snapping, so a
+    # junction that IS the placed end but was interior at nominal leaves every
+    # bit stretched to one shared abstract end instead of following its own
+    # via.  See docs/internal/hybrid_leg_overhang.md.
+    #
+    # PROMOTES ONLY (mid -> endpoint).  The symmetric rule was measured and
+    # rejected: demoting a nominal endpoint that placement moved past opens
+    # real SEG_OPENs (14 flows worse, detailed WL up).
+    if not args:
+        state = "on" if buda.dnuts_placed_endpoints() else "off"
+        print(f"placed_endpoints is {state}")
+        return
+    val = args[0].lower()
+    if val not in ("on", "off"):
+        print(f"Error: set_placed_endpoints expects on|off, got {args[0]!r}")
+        return
+    buda.dnuts_set_placed_endpoints(val == "on")
+
+
 COMMANDS = {
+    "set_placed_endpoints": cmd_set_placed_endpoints,
     "run_nuts": cmd_run_nuts,
     "run_detailed_nuts": cmd_run_detailed_nuts,
     "ripup_reroute": cmd_ripup_reroute,

@@ -1480,6 +1480,20 @@ void DetailedNUTSEngine::emit_bit_vias(
     }
 }
 
+// Placed-endpoint re-derivation flag.  Seeded from the environment at first
+// read so a whole corpus can be A/B'd without editing every flow (the
+// default-flip study harness, as for the generation knobs); a later
+// dnuts_set_placed_endpoints() -- i.e. the `.buda` token -- always wins.
+static bool& dnuts_placed_endpoints_flag() {
+    static bool v = [] {
+        const char* e = std::getenv("BUDA_DNUTS_PLACED_ENDPOINTS");
+        return e && std::string(e) == "1";
+    }();
+    return v;
+}
+void dnuts_set_placed_endpoints(bool v) { dnuts_placed_endpoints_flag() = v; }
+bool dnuts_placed_endpoints()           { return dnuts_placed_endpoints_flag(); }
+
 std::vector<BusSegment> make_bus_segments(
     const std::vector<BundleWrapper>& bundles,
     const NUTSResult& nuts_result,
@@ -1491,6 +1505,23 @@ std::vector<BusSegment> make_bus_segments(
     // SELECTED topology's cached analysis — the same derivation the abstract
     // solve's build_nuts_maps used, so stage 9 sees the junctions stage 4
     // placed with (this loop is the former Python handoff, verbatim).
+    // Opt-in placed-endpoint re-derivation (see the conn loop below).  A
+    // module flag rather than a parameter BY DESIGN: make_bus_segments is the
+    // one stage-4 -> stage-9 handoff and is called from the CLI, from
+    // trial_sweep, and from every healer re-solve, so a parameter would let one
+    // caller drift and make a trial's verdict disagree with the commit's.
+    const bool placed_endpoints = dnuts_placed_endpoints();
+    // tighten_spans_to_reach sets an end EXACTLY to a partner's
+    // track_position, so coincidence is bit-exact when the contraction binds;
+    // the epsilon is only against accumulated float noise from the passes that
+    // may have moved it afterwards, deliberately far below one track pitch so
+    // a genuinely interior junction can never be mistaken for an end.
+    constexpr double kEndTol = 1e-9;
+    std::map<std::pair<int, int>, const TrackSegment*> placed_by_key;
+    if (placed_endpoints)
+        for (const auto& t : nuts_result.segments)
+            placed_by_key[{t.bundle_id, t.seg_idx}] = &t;
+
     std::map<int, int>                  bid_to_nbits;
     std::map<int, std::vector<ConnSeg>> bid_to_cs;
     // Selected topology per bundle, for the shared busterm-tap membership
@@ -1580,6 +1611,62 @@ std::vector<BusSegment> make_bus_segments(
                     c.is_endpoint = conn.is_endpoint;
                     const double mid = 0.5 * (cs.along_lo + cs.along_hi);
                     c.lo_end      = (c.at_pos <= mid);
+                    // PROTOTYPE (opt-in, BUDA_DNUTS_PLACED_ENDPOINTS): decide
+                    // endpoint-ness from the PLACED geometry instead of the
+                    // nominal analysis.
+                    //
+                    // `is_endpoint`/`lo_end` above come from the ConnSeg, which
+                    // is nominal and derived once at generation
+                    // (topology_analysis.cpp: at_pos == along_lo || along_hi).
+                    // bs.span_lo/hi two dozen lines up came from the PLACED
+                    // TrackSegment.  NUTS moves those ends in between --
+                    // tighten_spans_to_reach contracts a span back to its
+                    // outermost junction -- so a junction that was interior at
+                    // nominal can BE the placed end, and the stale label is the
+                    // only gate on per-bit snapping below: mid-span conns never
+                    // gate the ends, so every bit keeps the shared abstract end
+                    // instead of following its own via.
+                    //
+                    // The junction's position along THIS segment is the
+                    // partner's track_position -- exactly what
+                    // tighten_spans_to_reach measured its rmin/rmax against.
+                    // Compare against span_lo/span_hi AS STORED (not min/max):
+                    // those keep nominal endpoint identity and may be inverted
+                    // when placement swaps the two ends, and `lo_end` means
+                    // "the end held in span_lo", not "the lower coordinate".
+                    //
+                    // PROMOTE ONLY (mid -> endpoint).  The symmetric rule --
+                    // also DEMOTING a nominal endpoint that placement moved the
+                    // end past -- was implemented and MEASURED, and it is wrong:
+                    // clearing has_ep_* makes that end eligible for the tapered
+                    // retraction to pres_* below, which cuts the wire short of a
+                    // partner it still has to meet.  On
+                    // big_3bundles_sel_pure_mst_topo it opened bundle 1
+                    // seg 9<->10 for 12 bits (SEG_OPEN -- a real disconnect,
+                    // strictly worse than the dangling metal this removes) and
+                    // corpus-wide it cost 14 flows against 1, with detailed WL
+                    // UP.  Only the promotion is justified: a junction sitting
+                    // on the placed end IS that end, and snapping there can only
+                    // shorten a bit to a via it already owns.
+                    //
+                    // Nothing here touches ConnSeg: the nominal analysis is
+                    // cached on the Topology and shared with generation, the
+                    // planner and the topo-stage audit, and must stay nominal.
+                    if (placed_endpoints && !c.is_endpoint) {
+                        auto pit = placed_by_key.find({ts.bundle_id, conn.seg_idx});
+                        if (pit != placed_by_key.end() && pit->second->placed) {
+                            const double pos = pit->second->track_position;
+                            const double dlo = std::abs(pos - bs.span_lo);
+                            const double dhi = std::abs(pos - bs.span_hi);
+                            if (std::min(dlo, dhi) <= kEndTol) {
+                                c.is_endpoint = true;
+                                c.lo_end      = (dlo <= dhi);
+                            }
+                        }
+                        // An UNPLACED partner keeps the nominal label: there is
+                        // no placed position to judge against, and guessing
+                        // would be worse than the stale answer.
+                    }
                     bs.connections.push_back(c);
                 } else {  // BUSTERM: keep the block-face tap reachable per-bit
                     bs.busterm_faces.push_back((double)conn.face_coord);

@@ -1,0 +1,21 @@
+source ../tracks/tracks4top.buda
+source tc3a_flat_5x.buda
+run_bundler
+generate_topologies_for_bundle bus_005
+check_design topo all
+# visualize_topologies
+run_planner signal_tracks
+# has some antenna only in topo view
+# also test topos 14, 15 (same family, by at y1875 and y2050
+select_topology bus_005 18  # TRUNK_H+MST@y1700
+run_nuts
+check_design nuts
+negotiate_congestion
+ripup_reroute 30
+check_design nuts
+run_detailed_nuts
+check_design
+negotiate_congestion
+ripup_reroute 30
+check_design
+report_wirelength

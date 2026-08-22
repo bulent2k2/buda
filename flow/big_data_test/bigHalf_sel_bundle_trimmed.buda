@@ -1,0 +1,46 @@
+# The CONTROL for bigHalf_sel_bundle_only.buda.
+#
+# Same design, same bundle, same topology -- the ONLY difference is that seg2's
+# span is cut back to its last real attachment (y=1700, its junction with seg0)
+# instead of running on to y=2770, where it attaches to nothing and merely
+# retraces seg1 one layer up.
+#
+# Run the pair and diff the last check_design:
+#     bin/buda --no-viz flow/big_data_test/bigHalf_sel_bundle_only.buda
+#     bin/buda --no-viz flow/big_data_test/bigHalf_sel_bundle_trimmed.buda
+#
+#   only    -> Total: 23 violation(s) ... Bundle 67: Seg 2: 23 bit(s)
+#   trimmed -> Success: no violations found.
+#
+# and see WHY with:
+#     python3 tools/show_stale_endpoints.py \
+#         flow/big_data_test/bigHalf_sel_bundle_only.buda bus_005
+#
+# Note what does NOT change: abstract WL is 7932 either way, because NUTS
+# already contracts seg2's PLACED span to [428,1754].  The engine routes the
+# right wire and then labels its end wrong.  See
+# docs/internal/hybrid_leg_overhang.md.
+source ../tracks/tracks4top.buda
+source tc3a_flat_5x.buda
+run_bundler
+generate_topologies_for_bundle bus_005
+check_design topo all
+run_planner signal_tracks
+# candidate 18 is TRUNK_H+MST@y1700; open it, trim seg2, commit as a USER
+# candidate and pin that instead of `select_topology bus_005 18`.
+edit_topology 67 18
+edit_set_span 2 500 1700
+edit_status
+edit_commit pin
+run_planner signal_tracks
+run_nuts
+check_design nuts
+negotiate_congestion
+ripup_reroute 30
+check_design nuts
+run_detailed_nuts
+check_design
+negotiate_congestion
+ripup_reroute 30
+check_design
+report_wirelength

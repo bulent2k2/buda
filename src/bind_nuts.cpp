@@ -511,6 +511,16 @@ void bind_nuts(py::module_& m) {
           py::arg("bit_order") = "LO_HI",
           py::arg("layers")    = nullptr);
 
+    // Placed-endpoint re-derivation (`set_placed_endpoints`).  A module flag,
+    // not a make_bus_segments parameter: every healer re-solve and trial_sweep
+    // goes through that one handoff, and a parameter would let a caller drift.
+    m.def("dnuts_set_placed_endpoints", &dnuts_set_placed_endpoints,
+          py::arg("on"),
+          "Decide DNUTS endpoint conns from PLACED geometry, not the nominal "
+          "label (off by default = byte-identical)");
+    m.def("dnuts_placed_endpoints", &dnuts_placed_endpoints,
+          "Current placed-endpoint setting");
+
     // ── Test support: overlap-delta exactness probes (corner-pass work) ──
     // The repair/repack accept guards replaced their per-move full
     // find_overlaps recounts with overlap_delta_vs; these two hooks let the
