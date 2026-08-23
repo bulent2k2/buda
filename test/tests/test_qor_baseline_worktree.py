@@ -309,6 +309,23 @@ def test_clean_baselines_keeps_the_requested_number(tmp_path, monkeypatch):
     assert qc.cached_baselines() == []
 
 
+def _clean_tracked_probe():
+    """A tracked file with no uncommitted modification, for the probe above."""
+    import subprocess
+    dirty = set()
+    out = subprocess.run(["git", "status", "--porcelain"], cwd=_ROOT,
+                         capture_output=True, text=True).stdout
+    for ln in out.splitlines():
+        if len(ln) > 3:
+            dirty.add(ln[3:].strip())
+    for cand in ("tools/qor_corpus.py", "tools/qor_table.py",
+                 "tools/qor_corpus.py", "pytest.ini", "CMakeLists.txt"):
+        if cand not in dirty and (_ROOT / cand).is_file():
+            return _ROOT / cand
+    import pytest as _pt
+    _pt.skip("no clean tracked file available to probe with")
+
+
 def test_the_tree_snapshot_ignores_another_workers_temp_file():
     """A parallel worker's untracked file must not read as "the tree moved".
 
@@ -328,7 +345,15 @@ def test_the_tree_snapshot_ignores_another_workers_temp_file():
             "porcelain is shared mutable state across xdist workers")
         # ...and the guard still SEES what it exists to catch: a tracked file
         # modified under it.
-        tracked = _ROOT / "tools" / "qor_corpus.py"
+        #
+        # The probe must be a file that is CURRENTLY CLEAN.  A hardcoded one
+        # (this was `tools/qor_corpus.py`) makes the test fail for anyone with
+        # uncommitted edits to it: porcelain already lists the path, so
+        # appending does not move the snapshot and the assertion below reads as
+        # a regression in the filter.  Measured while editing that very file --
+        # a spurious red that costs a diagnosis, which is the same
+        # cries-wolf failure docs/internal/measurement_hazards.md is about.
+        tracked = _clean_tracked_probe()
         orig = tracked.read_text()
         tracked.write_text(orig + "\n# probe\n")
         try:

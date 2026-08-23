@@ -59,6 +59,7 @@ import contextlib
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -70,6 +71,7 @@ for _p in (os.path.join(_ROOT, "src"), os.path.join(_ROOT, "build"), _HERE):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
+import measure_guard      # noqa: E402 — stale-build / drift guards
 import qor_corpus as qc  # noqa: E402 — after sys.path setup (reuse corpus/audit/WL)
 
 # Curated one-line annotations for the DIRTY-table vehicles (why they carry a
@@ -319,6 +321,22 @@ def render(rows, stamp, serial=None):
     return "\n".join(parts)
 
 
+def _stamp_commit_of(path):
+    """The short commit recorded in an existing snapshot's header, or ''.
+
+    The header reads `# QoR corpus snapshot — <date> (main @ <sha>)`; anything
+    that does not match returns '' and the drift advisory simply stays quiet,
+    which is the right failure for a purely advisory read.
+    """
+    try:
+        with open(path) as fh:
+            head = fh.readline()
+    except OSError:
+        return ""
+    m = re.search(r"@\s*([0-9a-f]{7,40})", head)
+    return m.group(1) if m else ""
+
+
 def main():
     ap = argparse.ArgumentParser(
         description="Run the corpus and dump the two-table QoR + wirelength "
@@ -345,6 +363,7 @@ def main():
                          "recorded as an `err` row and rendered as `ERR: ...` in "
                          "place of its metrics, which a caller that only checks "
                          "the exit status would publish as if it were data.")
+    measure_guard.add_build_flag(ap)
     ap.add_argument("--diff", nargs=2, metavar=("OLD", "NEW"),
                     help="compare two --json files ignoring per-run timing and "
                          "report whether the QoR actually moved; prints "
@@ -352,6 +371,8 @@ def main():
                          "when set.  Runs NO flows.")
     args = ap.parse_args()
 
+    # --diff reads two JSONs and runs no flows, so it is exempt from the
+    # freshness gate; everything below it sweeps.
     if args.diff:
         old_p, new_p = args.diff
         try:
@@ -388,6 +409,13 @@ def main():
             with open(gh_out, "a") as fh:
                 fh.write(f"changed={'true' if changed else 'false'}\n")
         return
+
+    measure_guard.ALLOW_STALE = args.allow_stale_build
+    # Regenerating replaces a snapshot generated at some EARLIER commit, and the
+    # resulting diff carries every change in between -- not only this branch's.
+    # Name the span so those rows are not read as this branch's work.
+    if args.out and os.path.exists(args.out):
+        measure_guard.describe_drift(_stamp_commit_of(args.out))
 
     os.chdir(_ROOT)                                 # flow paths are repo-root-relative
     flows = args.flows or qc.CORPUS

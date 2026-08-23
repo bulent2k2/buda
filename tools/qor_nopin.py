@@ -59,6 +59,7 @@ for _p in (os.path.join(_ROOT, "src"), os.path.join(_ROOT, "build"), _HERE):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
+import measure_guard
 import qor_corpus as qc  # noqa: E402 — after sys.path setup (reuse its corpus/audit/compare)
 
 _PIN_CMDS = ("select_topology", "select_topologies")
@@ -151,11 +152,13 @@ def main():
     ap.add_argument("--compare", nargs=2, metavar=("BASE", "BRANCH"),
                     help="diff two result JSONs (from earlier --out runs) on "
                          "QoR + runtime; exits non-zero if any flow regressed")
+    measure_guard.add_build_flag(ap)
     ap.add_argument("-j", "--jobs", type=int, default=qc.default_jobs(),
                     metavar="N",
                     help="worker processes for the sweep (default: CPU count "
                          "= %(default)s; 1 = serial, timing-faithful sec)")
     args = ap.parse_args()
+    measure_guard.ALLOW_STALE = args.allow_stale_build
 
     if args.compare:
         sys.exit(1 if qc.cmd_compare(*args.compare) else 0)   # identical diff/guard
