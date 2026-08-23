@@ -154,7 +154,11 @@ log emits the same form, so a GUI edit is replayable as script text.)
 Two commit rules worth memorizing:
 
 - **A not-ok verdict is a WARNING, not a rejection** — your candidate stays in
-  the pool and visible to `check_design`, like generation's never-strand rule.
+  the pool, like generation's never-strand rule. But note what the audit
+  covers: plain `check_design` checks only the **selected** candidate, so
+  after a **bare** commit (no `pin`) your unselected USER candidate is audited
+  only by `check_design all` — run that if you commit without pinning. A
+  `pin` commit makes it the selection, so the ordinary audit covers it.
 - With a BDB open the commit also stores the **op-log provenance** (the exact
   `edit_*` lines applied, on which base candidate); `dump_user_ops <bundle_id>`
   prints it back as a replayable script.
@@ -228,7 +232,8 @@ explicit checkpoint path and stage; `-b`/`-r` are the ergonomic spellings of
 the same machinery.)
 
 At the prompt: `topos <sel>` · `pins` · `explore <sel>` · `pin <sel> <N>` ·
-`unpin <sel>` · `replan` · `done` (re-plans if pins changed, saves, exits).
+`unpin <sel>` · `replan` · `done` (re-plans if **typed** pins changed, saves,
+exits — a GUI pin from `explore` needs an explicit `replan`; see below).
 Any engine command passes through verbatim — including the whole
 `edit_topology … edit_commit pin` sequence — and the scripted form
 (`echo "pin d1 4\ndone" | btcl -b …`) is the same code path.
@@ -236,8 +241,12 @@ Any engine command passes through verbatim — including the whole
 Two rules of that world:
 
 - **An explorer pin is a preview.** A pin made inside `explore`'s GUI does not
-  write the checkpoint until you `replan` (or `done`, which re-plans for you
-  when pins changed).
+  write the checkpoint until a planner runs, and `done` deliberately does
+  **not** re-plan for it — its auto-replan covers only pins **typed** at the
+  prompt (`pin`/`unpin`), because silently arming a possibly hour-long heal
+  for a GUI preview would spend what nobody asked to spend. The prompt
+  notices the GUI pin (sidecar change) and says so: type `replan` to commit
+  it now, or exit and take it at a later `-r -s plan` resume or rebuild.
 - **Inspection sessions refuse pins.** A hier `nuts`/`dnuts` stage resume is a
   post-expansion *read-only look* at a routed result; pins/edits/`replan` are
   guarded there (their persist would clobber the checkpoint's template rows).
