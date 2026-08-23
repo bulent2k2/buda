@@ -75,8 +75,34 @@ def _newest_native_source():
     return newest
 
 
+# Every extension layout this repo supports.  A glob that misses one does not
+# degrade gracefully -- it reports "no build" on a machine that has a perfectly
+# good one, and with a fail-closed gate that is a CI outage on a platform the
+# author cannot run (Codex #829 P1: MSVC emits build/Release/*.pyd and the
+# Cygwin build names its extensions *.dll, so a build/*.so glob found nothing
+# after a SUCCESSFUL build, and every test calling qor_corpus.sweep would have
+# exited 2).  Kept in one list because bin/activate.ps1 and bin/bb.ps1 already
+# know these paths and drifting from them is how the next platform breaks.
+_BUILD_DIRS = ("build", "build/Release", "build/Debug", "build/RelWithDebInfo")
+_EXT_SUFFIXES = ("*.so", "*.pyd", "*.dll")
+
+
+def _extension_candidates():
+    for d in _BUILD_DIRS:
+        base = _ROOT / d
+        if not base.is_dir():
+            continue
+        for pat in _EXT_SUFFIXES:
+            for p in base.glob(pat):
+                # buda_core is a shared LIBRARY, not a Python extension, but it
+                # is a build product on the same cadence, so it answers the
+                # "did a build run" question just as well.
+                if p.is_file():
+                    yield p
+
+
 def _newest_extension():
-    """(mtime, path) of the most recently linked extension module.
+    """(mtime, path) of the most recently linked build artifact.
 
     NEWEST, not oldest.  The question is "did a build run after the last source
     edit", and only the newest artifact answers it: `buda` and `buda_db` are
@@ -88,10 +114,7 @@ def _newest_extension():
     that cries wolf is one people learn to pass --allow-stale-build to, which
     would leave the real hazard unguarded.
     """
-    build = _ROOT / "build"
-    if not build.is_dir():
-        return (None, None)
-    mods = list(build.glob("*.so")) + list(build.glob("*.pyd"))
+    mods = list(_extension_candidates())
     if not mods:
         return (None, None)
     newest = max(mods, key=lambda p: p.stat().st_mtime)
@@ -122,12 +145,19 @@ def check_build_fresh(strict=True, stream=sys.stderr):
     src_m, src_p = _newest_native_source()
     so_m, so_p = _newest_extension()
     if so_m is None:
-        msg = ("[measure] no built extension in build/ — run `bin/bb` first; "
-               "a sweep needs the engine it is measuring.")
-        print(msg, file=stream)
-        if strict:
-            sys.exit(2)
-        return False
+        # FAIL OPEN, deliberately, and never fatally.  "I found no build" has
+        # two causes that look identical from here: there really is none (the
+        # flows will then fail loudly on their own, which is a better error
+        # than this one), or the layout is one this list does not know about.
+        # The second is the author's bug, and making it fatal turns that bug
+        # into a CI outage on a platform the author cannot run -- exactly what
+        # #829 P1 caught before it shipped.  A guard must degrade to SILENCE
+        # when it cannot tell, and refuse only when it has actually measured a
+        # problem.
+        print("[measure] note: no build artifact found under "
+              f"{', '.join(_BUILD_DIRS)} — skipping the freshness check.",
+              file=stream)
+        return True
     if src_m <= so_m:
         return True
 

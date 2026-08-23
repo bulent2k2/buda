@@ -112,13 +112,49 @@ def test_judged_by_the_NEWEST_extension_not_the_oldest(fake_tree):
     assert buf.getvalue() == ""
 
 
-def test_no_build_at_all_refuses(fake_tree):
+def test_no_build_found_fails_OPEN(fake_tree):
+    """It must NOT refuse when it cannot find a build (Codex #829 P1).
+
+    "I found no build" has two causes that look identical from here: there
+    really is none (the flows then fail loudly on their own, a better error
+    than this one), or the layout is one `_BUILD_DIRS`/`_EXT_SUFFIXES` does not
+    know about.  The second is the guard author's bug, and making it fatal
+    turns that bug into a CI outage on a platform they cannot run -- which is
+    exactly what MSVC (`build/Release/*.pyd`) and Cygwin (`*.dll`) would have
+    been.
+    """
     root, src, so = fake_tree
     so.unlink()
     buf = io.StringIO()
+    assert mg.check_build_fresh(strict=True, stream=buf) is True
+    assert "skipping the freshness check" in buf.getvalue()
+
+
+@pytest.mark.parametrize("layout,name", [
+    ("build", "buda.cpython-313-darwin.so"),      # POSIX / Ninja
+    ("build/Release", "buda.cp313-win_amd64.pyd"),  # MSVC multi-config
+    ("build", "buda.dll"),                          # Cygwin
+])
+def test_every_supported_build_layout_is_found(fake_tree, layout, name):
+    """A layout the probe misses reports "no build" on a machine that has one."""
+    root, src, _ = fake_tree
+    for p in (root / "build").rglob("*"):
+        if p.is_file():
+            p.unlink()
+    d = root / layout
+    d.mkdir(parents=True, exist_ok=True)
+    art = d / name
+    art.write_bytes(b"\0")
+    _touch(src, 1000); _touch(art, 2000)
+    buf = io.StringIO()
+    assert mg.check_build_fresh(strict=True, stream=buf) is True, buf.getvalue()
+    assert buf.getvalue() == "", "a found, fresh build must say nothing"
+    # and it is still judged: an older artifact in that layout must refuse
+    _touch(art, 500)
+    buf2 = io.StringIO()
     with pytest.raises(SystemExit):
-        mg.check_build_fresh(strict=True, stream=buf)
-    assert "no built extension" in buf.getvalue()
+        mg.check_build_fresh(strict=True, stream=buf2)
+    assert "STALE BUILD" in buf2.getvalue()
 
 
 # ── identical-run advisory ──────────────────────────────────────────────────

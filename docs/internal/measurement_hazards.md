@@ -67,8 +67,18 @@ isolation sweep, a full suite — was against the stale binary.
 **Now guarded** — `check_build_fresh` refuses when the newest compiled source
 is newer than the newest built extension. `--allow-stale-build` overrides.
 
-Two things it deliberately does *not* do:
+Three things it deliberately does *not* do:
 
+- **It never refuses because it found no build.** "I found no build" has two
+  causes that look identical from here: there really is none (the flows then
+  fail loudly on their own, a better error than this one), or the layout is one
+  `_BUILD_DIRS`/`_EXT_SUFFIXES` does not know about — the guard author's bug.
+  Making the second fatal turns that bug into a CI outage on a platform the
+  author cannot run: the first cut globbed `build/*.so` only, so on MSVC
+  (`build/Release/*.pyd`) and Cygwin (`*.dll`) it found nothing after a
+  *successful* build and every test calling `qor_corpus.sweep` would have
+  exited 2 (#829 P1). **A guard must degrade to silence when it cannot tell,
+  and refuse only when it has actually measured a problem.**
 - **Python edits never trip it.** The Python layer is imported from source, so
   a `.py` change is live. Only `.cpp/.h/.c` and `CMakeLists.txt` count.
 - **It judges by the NEWEST extension, not the oldest.** `buda` and `buda_db`
@@ -96,6 +106,16 @@ experiment did nothing"* are the same output.
 
 This one is the catch-all. Whatever made the comparison degenerate — the same
 commit twice, a no-op override, one build serving both sides — arrives here.
+
+### The guard's own advice must be true
+
+`check_build_fresh` tells the user to pass `--allow-stale-build`. That is only
+useful if every CLI reaching the gate accepts it — and `tools/qor_nopin.py`
+also calls `qc.sweep` while registering no such flag, so its users were told to
+pass an option it would reject (#829 P2). The flag is registered from one place
+(`add_build_flag`) and every sweeping CLI calls it; a new one that forgets will
+tell its users to do something impossible, so that is the thing to check when
+adding a harness.
 
 ## Using the guards
 
