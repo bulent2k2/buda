@@ -180,6 +180,19 @@ template in the GUI also says what the commit will do —
 `(cell-local template -- applies to every instance)` — since the preview
 window only ever re-routed the one instance the pin was made on.
 
+**The `.json` cleans itself up once absorbed.**  Every commit point
+(`replan`, `save`'s re-plan, the exit re-plan) retires the sidecar entries
+the checkpoint now verifiably carries — the pinned row matches by content
+uid, the forced layers match the stored meta — so a committed session ends
+with no stale `.json` waiting to resurrect an old choice on the next
+rebuild.  Retirement is selective on purpose: an entry only the sidecar
+can replay on a rebuild — a hand-built (`USER`) candidate's op-log, a
+`group_uids` super-candidate pin, or an entry carrying a note — is kept,
+and the file is deleted only when it empties (a mixed sidecar is rewritten
+with just the kept entries, and the session says which).  A session with
+no durable checkpoint (`btcl -i` without one, a `:memory:` BDB) never
+retires — there the json *is* the persistence.
+
 Two prompt verbs round this out: **`pins`** prints the live pin inventory
 (one line per pinned bundle — candidate number, type, forced layers,
 bottom-up copies marked), the same inventory a `-r` resume prints right

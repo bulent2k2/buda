@@ -400,3 +400,67 @@ def test_explorer_rerun_is_still_a_preview(tmp_path):
         "SELECT COUNT(*) FROM topology WHERE is_pinned=1").fetchone()[0]
     con.close()
     assert n == 0, "a preview re-run wrote a pin to the checkpoint"
+
+
+# ---------------------------------------------------------------------------
+# 6. retire_sidecar durability edges (Codex #826)
+# ---------------------------------------------------------------------------
+
+def _sql_fixture(tmp_path):
+    # A serialized .sql input carrying nothing (the flow declares the design).
+    s = _fresh(f"open_bdb {tmp_path / 'seed.bdb'}")
+    _quiet(s, f"save_bdb {tmp_path / 'in.bdb.sql'}")
+    del s
+    return tmp_path / "in.bdb.sql"
+
+
+def _pin_via_sidecar(s, side):
+    w = s.bundles[0]
+    t = w.input.candidates[1]
+    json.dump({"selections": [{
+        "bundle_hint": w.input.original_bundle.get_net_names()[0],
+        "bundle_id": w.input.original_bundle.id,
+        "topo_type": t.type, "topo_wl": t.estimated_wirelength,
+        "topo_uid": buda.topo_uid(t), "topo_index_hint": 1,
+        "note": "", "selected_at": "now",
+    }]}, open(side, "w"))
+
+
+def test_retire_flushes_writeback_first(tmp_path):
+    # `open_bdb x.sql writeback`: the DURABLE copy is the .sql, written only
+    # at save/exit — retiring at a mid-session commit must flush it first,
+    # or an interruption before exit leaves neither store holding the pin.
+    sql = _sql_fixture(tmp_path)
+    side = str(tmp_path / "flow.json")
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    s.script_path = str(tmp_path / "flow.buda")
+    _quiet(s, f"open_bdb {sql} writeback", *_SETUP, *_BUNDLE)
+    _pin_via_sidecar(s, side)
+    _quiet(s, "run_planner 3")
+    out = _quiet(s, "retire_sidecar")
+    assert "durable in the checkpoint" in out
+    assert not os.path.exists(side)
+    # The .sql source ALREADY holds the pin — before any save/exit.
+    import sqlite3
+    con = sqlite3.connect(":memory:")
+    con.executescript(sql.read_text())
+    assert con.execute(
+        "SELECT COUNT(*) FROM topology WHERE is_pinned=1").fetchone()[0] == 1
+    con.close()
+
+
+def test_retire_never_touches_a_throwaway_materialization(tmp_path):
+    # Without `writeback` the materialization dies with the session: the
+    # json is the only persistence, so retire must no-op.
+    sql = _sql_fixture(tmp_path)
+    side = str(tmp_path / "flow.json")
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    s.script_path = str(tmp_path / "flow.buda")
+    _quiet(s, f"open_bdb {sql}", *_SETUP, *_BUNDLE)
+    _pin_via_sidecar(s, side)
+    _quiet(s, "run_planner 3")
+    out = _quiet(s, "retire_sidecar")
+    assert "durable" not in out
+    assert os.path.exists(side), "retire deleted the only persistence"

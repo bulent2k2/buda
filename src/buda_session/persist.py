@@ -398,8 +398,29 @@ class PersistMixin:
                 if buda.topo_uid(cand) == uid:
                     w.input.topology_pinned = True
                     w.plan.selected_topology_index = ci
+                    # The REBUILD door of the forced-layer restore (#815
+                    # covered only load_pipeline): without this, a `-b`
+                    # rerun re-attached the pin but the planner re-chose
+                    # the layers, and the persist right after ERASED the
+                    # meta (the rebuilt wrapper carries none, and empty
+                    # clears a stale entry) — one json-less rerun silently
+                    # downgraded a committed layer choice to pin-only,
+                    # unrecoverably.  Same-uid candidate = same segment
+                    # count by construction; guarded anyway.
+                    import json as _json
+                    lmsg = ""
+                    rawpl = self.bdb.meta_get(f"pinned_layers:{bid}", "")
+                    if rawpl and not list(
+                            getattr(w.input, 'pinned_seg_layers', []) or []):
+                        try:
+                            pl = [int(x) for x in _json.loads(rawpl)]
+                        except (ValueError, TypeError):
+                            pl = []
+                        if pl and len(pl) == len(cand.segments):
+                            w.input.pinned_seg_layers = pl
+                            lmsg = f" with {len(pl)} forced layer(s)"
                     print(f"[BDB] bundle {bid}: durable pin restored -> "
-                          f"topo {ci + 1} ({cand.type})")
+                          f"topo {ci + 1} ({cand.type}){lmsg}")
                     break
             else:
                 print(f"Warning: bundle {bid}: durable pin (uid {uid}) "

@@ -1545,6 +1545,11 @@ if {$pins_dirty} {
           checkpoint stays coherent"
     if {[catch {replay_tail} err]} {
         puts stderr "$tag: $err"
+    } else {
+        # The exit re-plan is a commit like the prompt's `replan`: retire
+        # the sidecar entries it made durable (engine-gated; see
+        # retire_sidecar).
+        catch {buda::retire_sidecar}
     }
 }
 # Pins (and committed edits) made at THIS prompt with nowhere durable to
