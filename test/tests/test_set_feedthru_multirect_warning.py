@@ -86,6 +86,63 @@ def test_no_warning_for_single_rect_blocks():
     assert s.fp.get_feedthru("solo", 4)
 
 
+def test_wildcard_before_block_declaration_warns_at_add_block():
+    # Codex P2 on #834: `set_feedthru * * on` declared BEFORE any block
+    # exists warned about nothing, so a later-declared multi-rect block
+    # inherited the enabled policy silently — the exact ignored-intent case
+    # the warning exists for, surviving a perfectly valid command order.
+    # The add_block side now warns when an active setting resolves feedthru
+    # ON for the new multi-rect block.
+    s = _session(["def_layer 4 M4 H TOP 0", "set_feedthru * * on"])
+    out = _do(s, "add_block L rect 200 0 300 400 rect 200 0 600 100")
+    assert out.count("BUDA-1908") == 1, out
+    line = next(l for l in out.splitlines() if "BUDA-1908" in l)
+    assert "WARNING" in line and "'L'" in line and "single-rect only" in line
+    # A single-rect block under the same active wildcard stays silent.
+    out2 = _do(s, "add_block solo 0 0 100 100")
+    assert "BUDA-1908" not in out2, out2
+
+
+def test_per_layer_enable_before_block_declaration_warns_too():
+    s = _session(["def_layer 4 M4 H TOP 0", "set_feedthru * M4 on"])
+    out = _do(s, "add_block L rect 200 0 300 400 rect 200 0 600 100")
+    assert out.count("BUDA-1908") == 1, out
+
+
+def test_inactive_or_disabled_settings_stay_silent_at_add_block():
+    # No feedthru declared at all: the add_block side must add nothing
+    # (byte-identity where the feature is unused).
+    s = _session(["def_layer 4 M4 H TOP 0"])
+    out = _do(s, "add_block L rect 200 0 300 400 rect 200 0 600 100")
+    assert "BUDA-1908" not in out, out
+    # Declared but resolving OFF for the new block: silent too.
+    s2 = _session(["def_layer 4 M4 H TOP 0", "set_feedthru * M4 off"])
+    out2 = _do(s2, "add_block L rect 200 0 300 400 rect 200 0 600 100")
+    assert "BUDA-1908" not in out2, out2
+
+
+def test_both_sites_share_one_memo_no_double_fire():
+    # Order A: wildcard first -> the add_block site warns; a later explicit
+    # set_feedthru naming the SAME block says nothing new (one memoized
+    # mechanism, said once per block).
+    s = _session(["def_layer 4 M4 H TOP 0", "set_feedthru * * on"])
+    out = _do(s, "add_block L rect 200 0 300 400 rect 200 0 600 100")
+    assert out.count("BUDA-1908") == 1, out
+    out2 = _do(s, "set_feedthru L * on")
+    assert "BUDA-1908" not in out2, out2
+    # A NEW multi-rect block under the still-active wildcard is a fresh
+    # verdict and warns once for itself.
+    out3 = _do(s, "add_block T rect 700 300 900 400 rect 700 0 900 100")
+    assert out3.count("BUDA-1908") == 1 and "'T'" in out3, out3
+    # Order B: block first, warned at set_feedthru declaration; repeating
+    # the declaration for the same block stays quiet.
+    s2 = _session(_SETUP)
+    outb = _do(s2, "set_feedthru L * on")
+    assert outb.count("BUDA-1908") == 1, outb
+    outb2 = _do(s2, "set_feedthru L * on")
+    assert "BUDA-1908" not in outb2, outb2
+
+
 def test_off_is_not_warned():
     # A multi-rect block never relays regardless of the flag, so disabling
     # feedthru for one changes nothing AND the outcome matches the intent —

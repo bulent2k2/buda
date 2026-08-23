@@ -153,6 +153,33 @@ def test_main_viewer_nuts_view_draws_the_bridge_too():
     assert _bridge_lines(v._legacy_bridge_artists)
 
 
+def test_reroute_redraw_does_not_accumulate_bridge_artists():
+    # Codex P2 on #834: the reroute path (`_redraw_nuts_tracks`) removes
+    # registry artists — the bridge LINES — but the LABEL annotations are
+    # not registered, so resetting the list alone orphaned the old text and
+    # every interactive reroute of a restored legacy checkpoint stacked a
+    # duplicate stale label (the Codex #484 endpoint-label shape).
+    # `_clear_legacy_bridges` now detaches lines AND labels before redraw.
+    s = _lshape_session()
+    _inject_bridge_everywhere(s)
+    v = buda_viz.BudaVisualizer(s.fp, s.bundles, layer_stack=s.layers)
+    v.draw_nuts_tracks(s.nuts_result)
+
+    def on_axes():
+        lines = [a for a in v.ax.lines if a.get_gid() == 'legacy_bridge']
+        labels = [t for t in v.ax.texts if t.get_gid() == 'legacy_bridge']
+        return len(lines), len(labels)
+
+    first = on_axes()
+    assert first == (1, 1), first
+    # Two interactive reroutes: the axes must hold exactly one line and one
+    # label after each, never an accumulation.
+    v._redraw_nuts_tracks(s.nuts_result)
+    assert on_axes() == first
+    v._redraw_nuts_tracks(s.nuts_result)
+    assert on_axes() == first
+
+
 def test_main_viewer_draws_none_without_bridges():
     s = _lshape_session()
     v = buda_viz.BudaVisualizer(s.fp, s.bundles, layer_stack=s.layers)

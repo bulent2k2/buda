@@ -608,12 +608,26 @@ class VizAbstractDrawMixin:
             except Exception: pass
         self._endpoint_label_artists = []
 
+    def _clear_legacy_bridges(self):
+        """Detach any existing legacy-bridge overlay artists, then reset the
+        list.  The bridge LINES are in the highlight registry and the reroute
+        cleanup (`_redraw_nuts_tracks`) removes them, but the LABEL
+        annotations are not — resetting the list alone would orphan the old
+        text on the axes, so every interactive reroute of a restored legacy
+        checkpoint accumulated a duplicate stale label (the Codex #484
+        endpoint-label shape again; `_clear_endpoint_labels` is the idiom).
+        Removing an already-removed line is a swallowed no-op."""
+        for a in getattr(self, '_legacy_bridge_artists', ()):
+            try: a.remove()
+            except Exception: pass
+        self._legacy_bridge_artists = []
+
     def draw_buses(self):
         """Draw topology segments without NUTS track assignment."""
         self._busterm_artists = []
         self._clear_endpoint_labels()
         self._vias_conns_artists = []
-        self._legacy_bridge_artists = []
+        self._clear_legacy_bridges()
         layer_specs = {k: {'color': v} for k, v in _LAYER_COLOR.items()}
         for i, wrapper in enumerate(self.bundles):
             bid      = wrapper.input.original_bundle.id
@@ -674,7 +688,7 @@ class VizAbstractDrawMixin:
         self._busterm_artists = []
         self._clear_endpoint_labels()
         self._vias_conns_artists = []
-        self._legacy_bridge_artists = []
+        self._clear_legacy_bridges()
         self._nuts_result = nuts_result   # saved for overlap panel in show()
         layer_specs = {k: {'color': v} for k, v in _LAYER_COLOR.items()}
         ts_map = {(ts.bundle_id, ts.seg_idx): ts for ts in nuts_result.segments}

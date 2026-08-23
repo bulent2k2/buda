@@ -445,7 +445,13 @@ wrong.
    for the single-rect blocks it names.  `off` is deliberately not warned:
    a multi-rect block never relays regardless of the flag, so disabling it
    changes nothing AND the outcome matches the intent.  The engine gate
-   itself is unchanged (still skips multi-rect).  Tests:
+   itself is unchanged (still skips multi-rect).  BOTH declaration orders
+   are covered (Codex P2 on #834 caught the reverse): a wildcard/per-layer
+   enable declared BEFORE the block exists warns at the multi-rect
+   `add_block` instead — the add_block site reads the same most-specific
+   `get_feedthru` resolution the engine uses — and the two sites share one
+   session-level per-block memo (`_warn_feedthru_multirect`), so the same
+   block never warns twice whichever order the flow declares in.  Tests:
    `test_set_feedthru_multirect_warning.py`.
 8. ~~**BITRUNK is bbox-only** (`src/topology.cpp:4401`, `:4467-4473`): the
    datapath trees neither select rects nor bridge.  Acceptable as a scoping
@@ -479,7 +485,11 @@ wrong.
     by definition) as a dashed, off-palette, labeled "unrealized bridge
     (legacy checkpoint)" overlay — ONE shared helper,
     `viz_common.draw_legacy_bridges`, main-viewer lines registered so
-    click-to-highlight covers them; a bridge-less topology draws zero extra
+    click-to-highlight covers them; the label annotations, which the
+    reroute cleanup's registry sweep cannot see, are detached by
+    `_clear_legacy_bridges` before every redraw (the Codex #484
+    endpoint-label idiom; Codex P2 on #834 caught the accumulation); a
+    bridge-less topology draws zero extra
     artists, so every live design's viz is unchanged (this supersedes the
     §2.2 table's "restored bridges … no renderer draws them" Viz row for
     the two matplotlib renderers; the web client still draws none).  Tests:
