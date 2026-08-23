@@ -98,7 +98,17 @@ change is noticed), and `load_pipeline` restores pin + layers with the
 resumed planner keeping both; the prompt's `pins` verb (engine
 `dump_pins`) prints the live inventory — the same one a `-r` resume prints
 right after RESUMED, unsummarized — and `save <path>` snapshots to a named
-file (bare `save` keeps the `.sql` beside the checkpoint).
+file (bare `save` keeps the `.sql` beside the checkpoint).  The forced-layer
+restore covers BOTH doors — `load_pipeline` (resume) and `_apply_bdb_pins`
+(rebuild: a `-b` rerun used to re-attach the pin but let the planner
+re-choose the layers, and the persist right after ERASED the meta) — and
+every commit point (`replan`, `save`'s re-plan, the exit re-plan) runs
+engine `retire_sidecar`: sidecar entries verifiably durable in the
+checkpoint (pin row by uid + layer meta) are removed from the `.json`,
+entries only the sidecar can replay on a rebuild (USER op-logs,
+`group_uids`, notes) are kept, the file is deleted only when it empties,
+and a session without a DURABLE BDB never retires (there the json is the
+only persistence).
 The flow's OUTPUT means what `bin/buda` makes it mean too: `-i` arms
 `buda::log`, so the console gets ONE line per command plus the runtime
 summary and the detail goes to the `<flow_dir>/log/<stem>_flow.log` the CLI

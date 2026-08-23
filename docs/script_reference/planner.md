@@ -393,6 +393,29 @@ dump_pins: 2 pinned bundle(s):
   bundle 2 (b_lohi_t0_0) -> topo 2 (U_VHV@y193)
 ```
 
+### `retire_sidecar`
+
+```
+retire_sidecar
+```
+
+Clean up the explorer's selections sidecar (`<flow>.json`) once its content
+is **durable in the BDB**: an entry is retired only when the open checkpoint
+verifiably carries it — a pinned topology row matching the entry's
+`topo_uid`, and (for forced layers) a matching `pinned_layers:<bundle>`
+meta.  Entries only the sidecar can replay on a **rebuild** are kept: a
+hand-built `USER` candidate's op-log (`user_topo`), a `group_uids`
+super-candidate pin, or an entry carrying a note.  The file is deleted only
+when it empties; a mixed sidecar is rewritten holding just the kept
+entries.  Silent no-op without a *durable* BDB (`:memory:` and throwaway
+`.sql` materializations never retire — there the json is the only
+persistence), or when nothing is absorbed.
+
+This is what the `btcl` prompt runs after every commit point (`replan`,
+`save`'s re-plan, the exit re-plan), so a committed session leaves no stale
+`.json` to resurrect an old choice on the next rebuild.  Callable from a
+script too, after a `run_planner` that applied the sidecar.
+
 ---
 
 ## Stage 4c — Post-NUTS stub layer reassignment

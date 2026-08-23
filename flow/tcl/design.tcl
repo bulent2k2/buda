@@ -165,6 +165,7 @@ if {$pins_dirty} {
     puts "design.tcl: pins changed since the last route -- re-planning so the\
           checkpoint stays coherent"
     route
+    catch {buda::retire_sidecar}
 }
 
 # The working `.bdb` has been written in place all along; the snapshot is the

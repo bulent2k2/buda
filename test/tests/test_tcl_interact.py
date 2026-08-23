@@ -1399,3 +1399,105 @@ def test_hier_build_rerun_reuses_the_checkpoint(tmp_path):
     assert "FOREIGN KEY" not in r.stdout + r.stderr
     assert "[pinned]" in _log(flow), "the template pin fell out of the rerun"
     assert "done -- 0 overlaps, 0 unplaced, 0 audit violations" in r.stdout
+
+
+def test_replan_retires_the_absorbed_sidecar_and_layers_survive_rebuild(tmp_path):
+    # The GUI-pin lifecycle, end to end: a sidecar pin WITH forced layers is
+    # committed by `replan` -> the entry is RETIRED from the json (it is now
+    # durable in the checkpoint), while an entry the BDB cannot replay on a
+    # rebuild (a group pin) is KEPT; then a `-b` rerun with the json gone
+    # restores the pin AND the forced layers from the checkpoint alone --
+    # the rebuild door of the #815 restore (_apply_bdb_pins used to re-attach
+    # the pin only, and the persist right after ERASED the layer meta).
+    demo = tmp_path / "demo"
+    demo.mkdir()
+    shutil.copytree(_ROOT / "flow" / "tracks", tmp_path / "flow" / "tracks")
+    for f in ("resume_hier.buda", "resume_hier_input.bdb.sql"):
+        shutil.copy(_ROOT / "demo" / f, demo / f)
+    flow = demo / "resume_hier.buda"
+
+    # Probe the design in-process for the real content uid of the candidate
+    # the sidecar pins (hardcoding it would rot with any generator change).
+    import json as _json
+    import subprocess as _sp
+    import sys as _sys
+    probe = _sp.run(
+        [_sys.executable, "-c", (
+            "import sys, os, contextlib, io, json\n"
+            f"sys.path[:0] = [{str(_ROOT / 'build')!r}, {str(_ROOT / 'src')!r}]\n"
+            "import matplotlib; matplotlib.use('Agg')\n"
+            f"os.environ['BUDA_BDB_MATERIALIZE_TO'] = {str(tmp_path / 'probe.bdb')!r}\n"
+            "import buda, buda_cli\n"
+            "s = buda_cli.BudaSession()\n"
+            f"s.script_path = {str(flow)!r}\n"
+            "with contextlib.redirect_stdout(io.StringIO()):\n"
+            f"    for c in ['source ' + {str(_ROOT / 'flow' / 'tracks' / 'tracks.buda')!r},\n"
+            f"              'open_bdb ' + {str(demo / 'resume_hier_input.bdb.sql')!r},\n"
+            "              'corner_margin dx 5 dy 5', 'set_min_stub_length 2',\n"
+            "              'derive_busterms 1', 'add_blocks_from_bdb 0',\n"
+            "              'add_blocks_from_bdb 1 skip', 'run_hier_bundler',\n"
+            "              'generate_hier_topologies']:\n"
+            "        s.do_command(c)\n"
+            "w = {x.input.original_bundle.id: x for x in s.bundles}[1]\n"
+            "t = w.input.candidates[2]\n"
+            "print(json.dumps({'uid': buda.topo_uid(t), 'type': t.type,\n"
+            "                  'wl': t.estimated_wirelength,\n"
+            "                  'hint': w.input.original_bundle.get_net_names()[0]}))\n"
+        )], capture_output=True, text=True)
+    assert probe.returncode == 0, probe.stdout + probe.stderr
+    cand = _json.loads(probe.stdout.strip().splitlines()[-1])
+    (tmp_path / "probe.bdb").unlink(missing_ok=True)
+
+    side = demo / "resume_hier.json"
+    side.write_text(_json.dumps({"selections": [
+        {"bundle_hint": cand["hint"], "bundle_id": 1,
+         "topo_type": cand["type"], "topo_wl": cand["wl"],
+         "topo_uid": cand["uid"], "topo_index_hint": 2, "note": "",
+         "selected_at": "now", "seg_layers": [3, 6, 7]},
+        {"bundle_hint": "nonexistent_bus_0", "bundle_id": 99,
+         "topo_type": "X", "topo_wl": 1, "topo_uid": "deadbeefdeadbeef",
+         "topo_index_hint": 0, "note": "", "selected_at": "now",
+         "group_uids": ["deadbeefdeadbeef"]},
+    ]}))
+
+    r = _run([*_BTCL_CMD, "-b", flow], tmp_path, stdin="replan\ndone\n")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "retire_sidecar: 1 selection(s) now durable" in r.stdout
+    assert "1 kept" in r.stdout
+    kept = _json.loads(side.read_text())["selections"]
+    assert len(kept) == 1 and kept[0].get("group_uids"), \
+        "the group entry must survive retirement"
+
+    # The json GONE: the checkpoint alone must restore pin + layers on the
+    # -b rerun (the rebuild path, not load_pipeline).
+    side.unlink()
+    r = _run([*_BTCL_CMD, "-b", flow], tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "reusing the checkpoint" in r.stdout
+    assert "with 3 forced layer(s)" in _log(flow) + r.stdout, \
+        "rebuild lost the forced layers"
+    import sqlite3
+    con = sqlite3.connect(str(demo / "resume_hier.ckpt.bdb"))
+    meta = con.execute(
+        "SELECT value FROM meta WHERE key='pinned_layers:1'").fetchone()
+    layers = con.execute(
+        "SELECT assigned_layer FROM topology_segment WHERE bundle_id='1' "
+        "AND cand_index=(SELECT cand_index FROM topology WHERE "
+        "bundle_id='1' AND is_selected=1) ORDER BY seg_index").fetchall()
+    con.close()
+    assert meta and _json.loads(meta[0]) == [3, 6, 7], \
+        "the layer meta was erased by the rebuild"
+    assert [l[0] for l in layers] == [3, 6, 7], "the route lost the layers"
+
+
+def test_an_ephemeral_session_never_retires_the_sidecar(tmp_path):
+    # `btcl -i` with no checkpoint: the json is the ONLY persistence, so a
+    # replan must not retire it (the engine gates on a DURABLE BDB).
+    demo = _flat_demo(tmp_path)
+    flow = demo / "resume_flat.buda"
+    side = demo / "resume_flat.json"
+    side.write_text(_SIDECAR)
+    r = _run([*_BTCL_CMD, "-i", flow], tmp_path, stdin="replan\ndone\n")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "retire_sidecar" not in r.stdout
+    assert side.exists(), "an ephemeral session deleted the only persistence"

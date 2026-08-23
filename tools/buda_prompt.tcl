@@ -204,6 +204,12 @@ proc prompt::run {tag ps route bdb example {guard ""} {sidecar ""}} {
                     # route that RAISES skips the clears (the catch below
                     # prints it), so a failed re-plan keeps the reminder.
                     $route
+                    # The sidecar entries this commit made durable are
+                    # retired from the json (the engine keeps what only the
+                    # sidecar can replay, and no-ops without a durable
+                    # BDB); re-stamp AFTER, so the retirement is not read
+                    # as a fresh explorer save.
+                    catch {buda::retire_sidecar}
                     set pins_dirty 0
                     set gui_pins 0
                     set sc_stamp [prompt::_sc_stamp $sidecar]
@@ -228,6 +234,8 @@ proc prompt::run {tag ps route bdb example {guard ""} {sidecar ""}} {
                         # NOTE below from calling the snapshot PRE-pin
                         # right after the pin went in (Codex #804 P2).  A
                         # route that RAISES skips this with the rest.
+                        # Retire what the commit made durable (see replan).
+                        catch {buda::retire_sidecar}
                         set gui_pins 0
                         set sc_stamp [prompt::_sc_stamp $sidecar]
                     }

@@ -486,8 +486,85 @@ def cmd_dump_pins(session, cmd, args, cmd_line):
         print(r)
 
 
+def cmd_retire_sidecar(session, cmd, args, cmd_line):
+    # retire_sidecar — clean up the explorer's `.json` once its content is
+    # DURABLE in the BDB.  Selective by design: an entry is retired only
+    # when the checkpoint verifiably carries it (a pinned row with the
+    # entry's topo_uid, and — for forced layers — a matching
+    # `pinned_layers:<bid>` meta), and NEVER when the entry holds what the
+    # BDB cannot yet replay on a REBUILD: a hand-built USER candidate's
+    # op-log (`user_topo` — regeneration cannot produce the candidate, so
+    # the sidecar replay is what re-creates it), a `group_uids`
+    # super-candidate pin (rebuilds restore groups from the sidecar), or a
+    # user note.  The file is deleted only when it EMPTIES; a mixed sidecar
+    # is rewritten holding just the kept entries.  Silent no-op without a
+    # DURABLE BDB (`:memory:` and a throwaway materialization keep the json
+    # — there it is the only persistence), or when nothing is absorbed.
+    import json
+    path = session._sidecar_path()
+    if not path or not os.path.isfile(path):
+        return
+    if session.bdb is None:
+        return
+    opath = getattr(session, "_bdb_open_path", None)
+    if not opath or opath == ":memory:":
+        return
+    if opath in (getattr(session, "_tmp_bdbs", None) or []) and not (
+            getattr(session, "_bdb_writeback_src", None)
+            and getattr(session, "_bdb_writeback_bin", None) == opath):
+        return                       # throwaway materialization: not durable
+    try:
+        with open(path) as f:
+            data = json.load(f)
+    except Exception as e:
+        print(f"retire_sidecar: could not read {path}: {e}")
+        return
+
+    def _absorbed(sel):
+        uid = sel.get("topo_uid")
+        if not uid or sel.get("user_topo") or sel.get("group_uids") \
+                or sel.get("note"):
+            return False
+        bid = str(sel.get("bundle_id"))
+        try:
+            pinned = [tr for tr in session.bdb.topologies(bid)
+                      if tr.is_pinned]
+        except RuntimeError:
+            return False
+        if not pinned or pinned[0].topo_uid != uid:
+            return False
+        layers = sel.get("seg_layers")
+        if layers:
+            raw = session.bdb.meta_get(f"pinned_layers:{bid}", "")
+            try:
+                stored = [int(x) for x in json.loads(raw)] if raw else []
+            except (ValueError, TypeError):
+                stored = []
+            if stored != [int(x) for x in layers]:
+                return False
+        return True
+
+    entries = data.get("selections", [])
+    keep = [s for s in entries if not _absorbed(s)]
+    n_ret = len(entries) - len(keep)
+    if not n_ret:
+        return
+    if keep:
+        with open(path, "w") as f:
+            json.dump({"selections": keep}, f, indent=2)
+        print(f"retire_sidecar: {n_ret} selection(s) now durable in the "
+              f"checkpoint -- removed from {path} ({len(keep)} kept: "
+              f"hand-built / group / noted entries the rebuild path still "
+              f"reads from the sidecar)")
+    else:
+        os.remove(path)
+        print(f"retire_sidecar: all {n_ret} selection(s) durable in the "
+              f"checkpoint -- removed {path}")
+
+
 COMMANDS = {
     "dump_pins": cmd_dump_pins,
+    "retire_sidecar": cmd_retire_sidecar,
     "set_planner_param": cmd_set_planner_param,
     "run_planner": cmd_run_planner,
     "select_topology": cmd_select_topology,
