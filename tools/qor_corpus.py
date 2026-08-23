@@ -109,6 +109,7 @@ for p in (os.path.join(_ROOT, "src"), os.path.join(_ROOT, "build"), _HERE):
         sys.path.insert(0, p)
 
 # The `.buda` line rules, shared with the engine (src/buda_script.py).
+import measure_guard                            # noqa: E402
 from buda_script import (sole_path_arg, split_quoted_args,   # noqa: E402
                          strip_inline_comment)
 
@@ -449,6 +450,12 @@ def sweep(run_fn, flows, jobs, progress=None):
     rare path): the crashing flow alone gets the err row, its innocent
     neighbors still produce real results, and the sweep always returns one row
     per input flow."""
+    # THE choke point: every sweeping path -- plain, --vs, --candidates
+    # --quantify, and qor_table's snapshot -- comes through here, so the
+    # stale-build gate lives here rather than at each CLI branch (a per-branch
+    # gate had already missed --quantify).  Read-only paths (--compare,
+    # --check, --clean-baselines, --diff) never call sweep and stay exempt.
+    measure_guard.gate()
     if jobs <= 1 or len(flows) <= 1:
         out = []
         for f in flows:
@@ -1027,6 +1034,14 @@ def cmd_compare(base_path, mine_path):
     mine_rows = json.load(open(mine_path))
     base = {r["flow"]: r for r in base_rows}
     mine = {r["flow"]: r for r in mine_rows}
+    # An A/B whose two sides are indistinguishable is the shape EVERY
+    # degenerate comparison takes -- same commit twice, a no-op env override,
+    # one build serving both sides.  Legitimate for a byte-identical change,
+    # so advise rather than fail; the point is that "my change does nothing"
+    # and "my experiment did nothing" must not look the same.
+    measure_guard.warn_if_identical(
+        base_rows, mine_rows,
+        keys=_METRICS + ("abstract_wl", "detailed_wl"), stream=sys.stdout)
     # Rank/format over only the metrics present in BOTH files.  A metric one
     # side never measured (e.g. viol_bundles in a pre-#432 baseline) is dropped
     # from the diff, with a loud note — otherwise its missing KEY would read as
@@ -1437,11 +1452,13 @@ def main():
                     help="with --out: also store each flow's decision-trace "
                     "records in <out>.decisions/ so --compare can diff runs "
                     "decision-wise (wording-independent)")
+    measure_guard.add_build_flag(ap)
     ap.add_argument("-j", "--jobs", type=int, default=default_jobs(),
                     metavar="N",
                     help="worker processes for the sweep (default: CPU count "
                          "= %(default)s; 1 = serial, timing-faithful sec)")
     args = ap.parse_args()
+    measure_guard.ALLOW_STALE = args.allow_stale_build
 
     if args.check:
         sys.exit(1 if cmd_check(args.check) else 0)
