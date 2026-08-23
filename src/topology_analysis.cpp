@@ -325,13 +325,23 @@ void derive_slide_ranges(const Topology& topo, const Floorplan& fp,
             auto bm_it = bmap.find(conn.block_name);
             if (bm_it == bmap.end()) continue;
             Rect face_rect = bm_it->second;
+            BlockCornerMargin cm = fp.get_block_corner_margin(conn.block_name);
             {
                 const auto rects = fp.get_block_rects(conn.block_name);
+                // Which rect(s) does this tap land on?  Generation lands taps
+                // on the MARGIN-INSET rect faces (open 9: Busterm rects are
+                // shrunk per rect like the bbox), so match face_coord against
+                // the inset spelling of each face as well as the physical one
+                // (pre-open-9 candidates — restored checkpoints, margin-free
+                // designs — tap the physical face; zero margin makes the two
+                // spellings identical, so this is byte-identical there).
                 if (!rects.empty()) {
                     if (cs.horiz) {
                         int u_y1 = INT_MAX, u_y2 = INT_MIN;
                         for (const Rect& r : rects) {
-                            if ((r.x1 == conn.face_coord || r.x2 == conn.face_coord)
+                            const Rect rs = r.shrink(cm.dx, cm.dy);
+                            if ((r.x1 == conn.face_coord || r.x2 == conn.face_coord ||
+                                 rs.x1 == conn.face_coord || rs.x2 == conn.face_coord)
                                     && cs.perp_pos >= r.y1 && cs.perp_pos <= r.y2) {
                                 u_y1 = std::min(u_y1, r.y1);
                                 u_y2 = std::max(u_y2, r.y2);
@@ -342,7 +352,9 @@ void derive_slide_ranges(const Topology& topo, const Floorplan& fp,
                     } else {
                         int u_x1 = INT_MAX, u_x2 = INT_MIN;
                         for (const Rect& r : rects) {
-                            if ((r.y1 == conn.face_coord || r.y2 == conn.face_coord)
+                            const Rect rs = r.shrink(cm.dx, cm.dy);
+                            if ((r.y1 == conn.face_coord || r.y2 == conn.face_coord ||
+                                 rs.y1 == conn.face_coord || rs.y2 == conn.face_coord)
                                     && cs.perp_pos >= r.x1 && cs.perp_pos <= r.x2) {
                                 u_x1 = std::min(u_x1, r.x1);
                                 u_x2 = std::max(u_x2, r.x2);
@@ -354,7 +366,6 @@ void derive_slide_ranges(const Topology& topo, const Floorplan& fp,
                 }
             }
 
-            BlockCornerMargin cm = fp.get_block_corner_margin(conn.block_name);
             if (cs.horiz) {
                 int m  = cm.dy;
                 int lo = face_rect.y1 + m;

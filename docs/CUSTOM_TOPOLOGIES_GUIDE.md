@@ -206,8 +206,7 @@ check_design                  # 6. verify (LAYER_DIR etc. still audit)
 
 ## Keeping your choices — sessions and persistence
 
-Pins and committed edits are only as durable as the store behind them — and
-**which door the next session enters through matters**:
+Pins and committed edits are only as durable as the store behind them:
 
 - **File-backed BDB open** (`open_bdb design.bdb` in the flow, or a checkpoint
   armed by the launcher): pins, USER candidates, and forced layers persist.
@@ -216,23 +215,16 @@ Pins and committed edits are only as durable as the store behind them — and
     the forced layers.  This is the door for iterating on customized
     topologies.
   * A **rebuild** (re-running the flow; a `-b` rerun) regenerates the pool
-    and re-attaches a pin to it by content uid, forced layers included.
-    That resolves a pin on a *generated* candidate — but a pin on a
-    hand-edited **USER candidate does not survive a rebuild**: regeneration
-    cannot produce the candidate, so the pin is dropped with a warning
-    (which lands in the flow log under `-b`), and the drop is durable — the
-    rebuild's own persist rewrites the pin state.  The candidate itself is
-    not lost, though: its rows and op-log stay in the checkpoint, and a
-    following **resume** restores it into the pool (unpinned) — so the
-    recovery after an accidental rebuild is `btcl -r -s plan`, find it with
-    `topos`, and re-pin it.  Re-pinning recovers the *shape*; any **forced
-    layers** were dropped with the pin, so re-force them by replaying the
-    stored op-log in an edit session — `dump_user_ops <id>` (from that
-    resumed session; it too reads the live pool) prints the exact
-    `edit_set_layer` lines, and `edit_topology <id> <N>` + those lines +
-    `edit_commit pin` puts everything back.  A GUI **group pin** is
-    likewise rebuild-restored only from its sidecar `.json`; from the BDB
-    alone it is resume-only.
+    and then restores what the checkpoint holds onto it: a hand-edited
+    **USER candidate is re-injected** from its kept rows (`[BDB] bundle N:
+    USER candidate restored into the rebuilt pool`), pins re-attach by
+    content uid — forced layers included — and a **group pin**'s family is
+    re-mapped onto the regenerated candidates.  The one honest limit: a
+    USER candidate whose blocks no longer exist (the *design* changed, not
+    just the session) is skipped with a message naming the missing blocks —
+    its rows and op-log stay in the checkpoint, and `dump_user_ops <id>`
+    (from a resumed session) prints the edit script to rebuild it against
+    the new floorplan.
 - **No BDB**: pins die with the session, and the tool says so honestly.
 
 The fast iteration loop is **`btcl -b` / `btcl -r`** (build / resume — the
@@ -429,10 +421,10 @@ layers** (`layers[M3 M4 M3]`) — the choice outlived the process. (The `dup`
 marks are honest: our USER candidate is geometrically candidate 4 with
 different layers, and the dump says so.)
 
-The resume is the right door on purpose: a **`-b` rerun would NOT keep this
-pin** — a rebuild regenerates the candidate pool, our hand-built candidate 9
-is not in it, and the pin is dropped (see *Keeping your choices* above).
-Iterate on a hand-edited topology through `-r` / `-r -s plan`.
+A `-b` **rerun** keeps it too: the rebuild regenerates the pool and then
+re-injects candidate 9 from the checkpoint (`USER candidate restored into
+the rebuilt pool`), re-attaching the pin and its forced layers — so both
+doors carry the choice forward (see *Keeping your choices* above).
 
 To hand control back at any point: `unpin a_0` (prompt) or
 `unpin_topology a_0` (script) — which also drops the forced layers, so the
@@ -488,15 +480,13 @@ same thing through every door.
 9. **Hier: pin the template, not an instance.** A cell-local pin propagates to
    every occurrence; per-instance divergence is the healers' job
    (`check_template_tracks … independent`), not the pin's.
-10. **A USER-candidate pin survives resumes, not rebuilds.** A rebuild
-    (re-running the flow, a `-b` rerun) regenerates the pool; your
-    hand-built candidate is not in it, so its pin is dropped — the
-    warning lands in the flow log under `-b`.  Iterate with `btcl -r` /
-    `-r -s plan`.  If a rebuild already dropped the pin, the candidate is
-    still in the checkpoint: **resume**, find it with `topos`, re-pin —
-    and re-force any layers by replaying the op-log (`dump_user_ops <id>`,
-    from that resumed session) in an `edit_topology … edit_commit pin`
-    round, since forced layers were dropped with the pin.
+10. **A USER candidate survives a rebuild only while its blocks do.** The
+    rebuild re-injects it from the checkpoint by geometry, so if the
+    *design* changed underneath it (a block renamed or removed) it is
+    skipped with a message naming the missing blocks.  Rebuild it against
+    the new floorplan by replaying its op-log: `dump_user_ops <id>` (from
+    a resumed session) prints the `edit_*` lines for an
+    `edit_topology … edit_commit pin` round.
 
 ---
 

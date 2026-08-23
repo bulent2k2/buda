@@ -46,7 +46,8 @@ Topology offset_topology(const Topology& t, int dx, int dy,
     auto shift_busterm = [&](Busterm& b) {
         b.bbox      = shift_rect(b.bbox);
         b.orig_bbox = shift_rect(b.orig_bbox);
-        for (auto& r : b.rects) r = shift_rect(r);
+        for (auto& r : b.rects)      r = shift_rect(r);
+        for (auto& r : b.orig_rects) r = shift_rect(r);
     };
     // A cell-local block name (no hierarchy separator) is qualified with the
     // instance path so it resolves against the global (instance-coord)
@@ -177,7 +178,8 @@ Topology transform_topology(const Topology& t, const std::string& orient,
     auto xf_busterm = [&](Busterm& b) {
         b.bbox      = xf_rect(b.bbox);
         b.orig_bbox = xf_rect(b.orig_bbox);
-        for (auto& r : b.rects) r = xf_rect(r);
+        for (auto& r : b.rects)      r = xf_rect(r);
+        for (auto& r : b.orig_rects) r = xf_rect(r);
     };
 
     Topology out = t;   // copy type/wirelength/trunk_location/pass_through
@@ -213,13 +215,19 @@ void annotate_topology(Topology& topo, const Floorplan& fp) {
     for (const auto& [name, orig] : fp.get_all_blocks()) {
         // Mirror the generator's busterm construction (generate_2pin/npin mk_bt):
         // carry the corner-margin-shrunk bbox, the full orig_bbox, the individual
-        // rects (so annotate_endpoints checks each rect face, not the union — a
-        // multi-rect block must not be tapped through the gap between its rects),
+        // rects — margin-inset per rect like the bbox (open 9), so
+        // annotate_endpoints checks each rect face, not the union — a
+        // multi-rect block must not be tapped through the gap between its rects —
         // and the teg_mode.
-        auto cm = fp.get_block_corner_margin(name);
-        bts.push_back(Busterm{name, orig.shrink(cm.dx, cm.dy), orig,
-                              fp.get_block_rects(name),
-                              fp.get_block_teg_mode(name)});
+        auto cm   = fp.get_block_corner_margin(name);
+        auto phys = fp.get_block_rects(name);
+        Busterm bt{name, orig.shrink(cm.dx, cm.dy), orig,
+                   shrink_rects(phys, cm), fp.get_block_teg_mode(name)};
+        // Physical spelling kept beside the inset one (PR #835 P2): foreign
+        // geometry — a hand-built or restored segment — may land on either.
+        if ((cm.dx != 0 || cm.dy != 0) && !phys.empty())
+            bt.orig_rects = std::move(phys);
+        bts.push_back(std::move(bt));
     }
     annotate_endpoints(topo, bts);
     // seg_conns must be derived AFTER seg_busterms: a busterm-tapped endpoint is
@@ -1449,7 +1457,17 @@ static void annotate_endpoints(Topology& topo,
         // face-tap of a receiver abutting the same trunk endpoint (blk_01/blk_03).
         // See docs/internal/big2_b25_abutment_tap_dnuts_2026-07.md.
         auto rects_of = [&](const Busterm& bt) -> std::vector<Rect> {
-            if (!bt.rects.empty()) return bt.rects;
+            if (!bt.rects.empty()) {
+                // Mirror the single-rect dual check below: accept BOTH the
+                // inset rects and (under a nonzero margin) their PHYSICAL
+                // spelling, so a hand-built or restored endpoint landing on
+                // the un-inset face of a margined multi-rect block keeps its
+                // tap (PR #835 P2).  orig_rects is empty at zero margin, so
+                // margin-free annotation is unchanged.
+                std::vector<Rect> rs = bt.rects;
+                rs.insert(rs.end(), bt.orig_rects.begin(), bt.orig_rects.end());
+                return rs;
+            }
             return {bt.orig_bbox, bt.bbox};
         };
         auto abuts_rect = [&](const Point& P, const Point& other, const Rect& r) -> bool {
@@ -3350,9 +3368,12 @@ std::vector<Topology> TopologyGenerator::generate_npin(
     auto mk_bt = [&](const std::string& n) {
         auto cm  = floorplan_.get_block_corner_margin(n);
         Rect orig = floorplan_.get_block_bounds(n);
+        auto phys = floorplan_.get_block_rects(n);
         Busterm bt{n, orig.shrink(cm.dx, cm.dy), orig,
-                   floorplan_.get_block_rects(n),
+                   shrink_rects(phys, cm),
                    floorplan_.get_block_teg_mode(n)};
+        if ((cm.dx != 0 || cm.dy != 0) && !phys.empty())
+            bt.orig_rects = std::move(phys);   // both face spellings (P2)
         return bt;
     };
     {
@@ -4906,9 +4927,13 @@ std::vector<Topology> TopologyGenerator::generate_2pin(const std::string& src_na
     auto mk_bt = [&](const std::string& n) {
         auto cm = floorplan_.get_block_corner_margin(n);
         Rect orig = floorplan_.get_block_bounds(n);
-        return Busterm{n, orig.shrink(cm.dx, cm.dy), orig,
-                       floorplan_.get_block_rects(n),
-                       floorplan_.get_block_teg_mode(n)};
+        auto phys = floorplan_.get_block_rects(n);
+        Busterm bt{n, orig.shrink(cm.dx, cm.dy), orig,
+                   shrink_rects(phys, cm),
+                   floorplan_.get_block_teg_mode(n)};
+        if ((cm.dx != 0 || cm.dy != 0) && !phys.empty())
+            bt.orig_rects = std::move(phys);   // both face spellings (P2)
+        return bt;
     };
     Busterm src_bt = mk_bt(src_name);
     Busterm dst_bt = mk_bt(dst_name);

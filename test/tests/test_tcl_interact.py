@@ -1501,3 +1501,25 @@ def test_an_ephemeral_session_never_retires_the_sidecar(tmp_path):
     assert r.returncode == 0, r.stdout + r.stderr
     assert "retire_sidecar" not in r.stdout
     assert side.exists(), "an ephemeral session deleted the only persistence"
+
+
+def test_a_user_pin_survives_the_b_rerun(tmp_path):
+    # The custom-topologies guide's worked example, through the door that
+    # used to drop it (#831 review): build, hand-edit + `edit_commit pin`
+    # at the prompt, then a `-b` RERUN — the USER candidate re-injects from
+    # the checkpoint and the pin + forced layers re-attach.
+    demo = tmp_path / "demo"
+    demo.mkdir()
+    shutil.copy(_ROOT / "demo" / "custom_topo.buda", demo)
+    flow = demo / "custom_topo.buda"
+    r = _run([*_BTCL_CMD, "-b", flow], tmp_path, stdin=(
+        "pin a_0 4\nreplan\nedit_topology 1\nedit_set_layer 0 3\n"
+        "edit_set_layer 2 3\nedit_commit pin\nreplan\ndone\n"))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "Pinned 3 segment layer(s)" in r.stdout
+
+    r = _run([*_BTCL_CMD, "-b", flow], tmp_path, stdin="pins\ndone\n")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "topo 9 (USER) layers[M3 M4 M3]" in r.stdout, \
+        "the -b rerun lost the hand-edited pin"
+    assert "done -- 0 overlaps, 0 unplaced, 0 audit violations" in r.stdout

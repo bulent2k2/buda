@@ -457,6 +457,23 @@ public:
     std::vector<CommittedCharge> committed_charges() const;
     bool charge_log_active() const { return band_span_charge_ > 0; }
 
+    // True if a non-TOP (LOW) segment cannot route on layer_id at the given
+    // perpendicular position because its routed extent — after excluding the
+    // pin-access tails at the two endpoint leaf cells it attaches to — lies over
+    // a leaf cell.  Two cases: a mid-span cell crossing, or a segment wholly
+    // inside one cell.  Either way the bus must route over-the-cell on a TOP
+    // layer, so the LOW layer is infeasible (Gap A).  TOP layers always return
+    // false (they tile cells freely).  perp_pos_override == INT_MIN uses the
+    // segment's nominal perpendicular coordinate.
+    //
+    // Multi-rect blocks are judged PER RECT (teg_multirect_status.md open 3):
+    // capacity is carved per rect via low_layer_keepouts, so the notch between
+    // a multi-rect block's rects is routable and must not be priced as
+    // "crossing the cell".  Public so tests can pin the predicate directly;
+    // valid only after build_congestion_map (which builds the leaf-rect cache).
+    bool   low_seg_obstructed(const Segment& seg, int layer_id,
+                              int perp_pos_override) const;
+
 private:
     // Injected measured-congestion demand: (cut index, band, amount), applied
     // on top of the recharged committed assignments in replan_bundle.
@@ -647,17 +664,6 @@ private:
                grid_ != nullptr && grid_->has_layer(layer_id);
     }
 
-    // True if a non-TOP (LOW) segment cannot route on layer_id at the given
-    // perpendicular position because its routed extent — after excluding the
-    // pin-access tails at the two endpoint leaf cells it attaches to — lies over
-    // a leaf cell.  Two cases: a mid-span cell crossing, or a segment wholly
-    // inside one cell.  Either way the bus must route over-the-cell on a TOP
-    // layer, so the LOW layer is infeasible (Gap A).  TOP layers always return
-    // false (they tile cells freely).  perp_pos_override == INT_MIN uses the
-    // segment's nominal perpendicular coordinate.
-    bool   low_seg_obstructed(const Segment& seg, int layer_id,
-                              int perp_pos_override) const;
-
     // Height rank of a TOP layer among the same-direction TOP layers,
     // ascending by layer id (lowest TOP metal = 0).  Drives the kHeight_
     // short-segment cost: via-stack depth grows with every metal above the
@@ -830,6 +836,12 @@ private:
     // clamp block-attached segments to their endpoint-block faces on non-TOP
     // layers.
     std::vector<std::pair<std::string, Rect>> blocks_cache_;
+    // Per-rect twin of blocks_cache_ for low_seg_obstructed (open 3): each
+    // multi-rect leaf block contributes its individual rects — the notch
+    // between them is routable, matching low_layer_keepouts' per-rect
+    // capacity carving — while a single-rect block contributes its one rect,
+    // in blocks_cache_'s order, so single-rect designs judge identically.
+    std::vector<Rect> leaf_rects_cache_;
 
     // Tunable cost coefficients.
     double kCong_             = 1.0;

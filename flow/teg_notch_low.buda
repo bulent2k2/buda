@@ -1,0 +1,47 @@
+# Planner per-rect LOW routability on a multi-rect block's notch
+# (teg_multirect_status.md open 3).
+#
+# Geometry: L is a multi-rect `thru` block — tall arm (0,0)-(100,400) +
+# base (0,0)-(400,100); the notch x=100-400, y=100-400 is OPEN ground, and
+# cut CAPACITY is carved per rect (low_layer_keepouts), so LOW routing in
+# the notch is physically fine.  A and B sit INSIDE the notch (and inside
+# L's union bbox), and the d[4] bus between them is a short vertical hop a
+# LOW layer should carry: M5's span_min 300 penalizes the 50-unit stub on
+# TOP, so the honest choice is M3.
+#
+# Before the per-rect fix, `low_seg_obstructed` judged the UNION bbox: both
+# segment endpoints lay "inside the cell" (the union), the whole hop was
+# priced 9999 on every LOW layer, and the planner escalated it to TOP (M5)
+# — the split-brain this flow pins (capacity said routable, the obstruction
+# predicate said crossing).  After the fix the hop routes on M3.
+# test_planner_notch_low.py asserts the M3 assignment and clean audits.
+
+def_layer 2 M2 H 50
+def_layer 3 M3 V 50
+def_layer 4 M4 H TOP 50 span_min 300
+def_layer 5 M5 V TOP 50 span_min 300
+
+def_track_pattern 2 0 VDD 2 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1
+def_track_pattern 3 0 VDD 2 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1
+def_track_pattern 4 0 VDD 2 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1
+def_track_pattern 5 0 VDD 2 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1
+
+add_block L rect 0 0 100 400 rect 0 0 400 100
+add_block A 150 150 250 250
+add_block B 150 300 250 400
+
+add_bus d[4] A.o B.i
+
+run_bundler STRICT
+generate_topologies
+# Make the span-mismatch term decisive: the 50-unit hop pays 2.5 on TOP
+# (span_min 300, kSpan 0.01) vs base_cost_non_top's span-scaled ~0.5 on LOW,
+# so an unobstructed M3 wins and an obstructed one (the union-bbox bug)
+# escalates to M5.
+set_planner_param kSpan 0.01
+run_planner
+run_nuts
+check_design nuts
+run_detailed_nuts
+check_design dnuts
+report_wl

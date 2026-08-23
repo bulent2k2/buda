@@ -346,11 +346,25 @@ def test_resumed_planner_persists_selection_at_bdb_cand_index(tmp_path):
             "generate_topologies", "edit_topology 1 new",
             "edit_add_trunk V 20", "edit_add_stub blkA 0",
             "edit_add_stub blkB 0", "edit_commit pin")
-    # Session B: regenerate with a knob that shrinks the pool — the kept
-    # USER row stays at its old ci, leaving a cand_index hole.
+    # Session B: regenerate with a knob that shrinks the pool.  (The kept
+    # USER row used to stay parked at its old ci, creating the hole for
+    # free; the rebuild door now RE-INJECTS it into the pool, so the table
+    # comes out contiguous.)  Holes still exist in the field — any
+    # pre-re-inject checkpoint carries them — so manufacture one the way
+    # such a checkpoint holds it: move the USER row (and its child rows)
+    # to a high cand_index.
     session("add_bus d[4] blkA.p blkB.q", "run_bundler STRICT",
             "generate_topologies center_mode")
     con = sqlite3.connect(str(bdb))
+    con.execute("PRAGMA foreign_keys=OFF")
+    old_ci = con.execute("SELECT cand_index FROM topology"
+                         " WHERE bundle_id='1' AND source='user'"
+                         ).fetchone()[0]
+    for tbl in ("topology", "topology_segment", "topology_seg_busterm",
+                "topology_seg_conn", "topology_bridge_segment"):
+        con.execute(f"UPDATE {tbl} SET cand_index=10"
+                    f" WHERE bundle_id='1' AND cand_index=?", (old_ci,))
+    con.commit()
     cis = [r[0] for r in con.execute(
         "SELECT cand_index FROM topology WHERE bundle_id='1' ORDER BY 1")]
     con.close()

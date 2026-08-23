@@ -388,11 +388,30 @@ wrong.
    (`test_talk2_multirect_thru_full_pipeline`: sidecar pin honored, 3
    segs / 24 bit-wires / clean at all four audits, and no TEG_OPEN — the
    thru-exemption control beside the OVER vehicle).
-3. **Planner split-brain on multi-rect**: `low_seg_obstructed` judges the
+3. ~~**Planner split-brain on multi-rect**: `low_seg_obstructed` judges the
    union bbox while cut capacity is per-rect
    (`src/congestion_planner.cpp:738-784` vs `:363-383`) — a LOW segment in a
    routable notch is escalated to TOP.  A QoR distortion on exactly the
-   designs the feature exists for.
+   designs the feature exists for.~~  **RESOLVED 2026-08-23**: the predicate
+   now judges the SAME per-rect geometry capacity is carved from — a per-rect
+   twin of the block cache (`leaf_rects_cache_`, built beside `blocks_cache_`
+   at cut-rebuild) feeds every sub-question (endpoint pin-access containment,
+   wholly-inside-one-cell, mid-span crossing), so the notch between a
+   multi-rect block's rects is routable to BOTH halves of the planner.  A
+   single-rect block contributes its one rect in the same order, so
+   single-rect designs judge byte-identically (fast tier green; spot-run
+   comprehensive_demo / rnr/mix / rv/soc pre-vs-post: identical modulo
+   timing lines).  Measured vehicle `flow/teg_notch_low.buda` (an A→B hop
+   inside the L-block's notch, wholly inside its union bbox, TOP span_min
+   making LOW the honest choice): before, both endpoints read "inside the
+   cell" per the union and the hop escalated to M5; after, it routes on M3
+   with clean nuts+dnuts audits.  Unit + e2e tests in
+   `test_planner_notch_low.py` (the predicate is now public and bound to
+   Python for exactly this).  The checked-in multi-rect flows did NOT move —
+   lShape1/tShape1/cShape1/teg_over_audit declare only TOP layers (the
+   predicate short-circuits), and demo/talk2's routes never put a LOW
+   segment where the union and the rects disagree (measured: logs identical
+   modulo timing).
 4. **Candidate ranking prices bridges the router never builds** — ~~nominal
    WL includes bridge length while the realized route omits it~~ the pricing
    half is DISCHARGED by open 1(a) (2026-08-22): the connection metal is
@@ -521,8 +540,52 @@ wrong.
    test_bitrunk_on_over_block_fires_teg_open_end_to_end`.  On a `thru`
    block the open-5 BUDA-1907 census covers the same blind spot as a
    report.
-9. **`corner_margin` is inert for individual rects** (`src/topology.cpp:
-   3296-3300`) — silently, on the faces multi-rect routing actually lands on.
+9. ~~**`corner_margin` is inert for individual rects** (`src/topology.cpp:
+   3296-3300`) — silently, on the faces multi-rect routing actually lands
+   on.~~  **RESOLVED 2026-08-23**: each rect is now inset exactly as the
+   union bbox is, at Busterm construction (`shrink_rects`, topology.h —
+   `Rect::shrink`'s per-axis guard applied PER RECT, so a rect too thin for
+   the margin keeps that axis at full extent while its siblings still
+   inset), at all four construction sites (generate_2pin / generate_npin /
+   annotate_topology / topo_edit's edit_add_stub) — so generation, the
+   per-bundle Hanan grid, `best_rect` faces, stubs and taps all see the
+   inset rects the way a single-rect block sees its inset bbox.
+   `derive_slide_ranges`' tap→rect attribution (an EQUALITY match of
+   `face_coord` against rect faces) accepts the inset spelling of each face
+   too, so the per-rect slide narrowing keeps working — and still matches
+   the physical spelling, so restored pre-change candidates narrow as
+   before.  Zero margin is the identity: margin-free designs are
+   byte-identical (fast tier green; flow/lShape1 and flow/teg_over_audit
+   measured unchanged).  The task-brief premise that no checked-in flow
+   declares a margin on a multi-rect block was FALSE — `flow/teg1.buda`,
+   `flow/poly1.buda` and `demo/talk2.buda` all declare a global
+   `corner_margin dx 20 dy 10` over rect-declared blocks, previously inert
+   there — so those three MOVE, as the margin doing its declared job:
+   teg1/poly1 trunk loci snap to inset rect edges (`TRUNK_H@y100`→`y90`,
+   stub intervals shift by the margins; same warning counts, clean as
+   before), and talk2's pinned `TRUNK_H@y650` re-prices 1100→1160 WL (taps
+   on inset faces), so `demo/talk2.json` was re-recorded to the new
+   WL/index (the sidecar's content match had fallen back to a wrong
+   index-hint candidate) — its exact-count test passes unchanged (3 segs /
+   24 bit-wires / 4× clean).  One documented semantic note: margins now
+   participate in the OVER gap/adjacency classification
+   (`rects_are_rectilinear` and the gap tests read the inset rects), so a
+   margin can turn a thin overlap into a gap — the emitted join metal is
+   the honest consequence of declaring those faces unusable.  Tests:
+   `test_multirect_corner_margin.py` (inset taps + carried rects, no-margin
+   physical faces unchanged, the per-rect per-axis guard).  Review follow-up
+   (PR #835 P2, confirmed by repro): `annotate_endpoints`' multi-rect branch
+   examined ONLY `Busterm::rects` (now inset) — unlike its single-rect
+   branch, which checks BOTH `orig_bbox` and the inset `bbox` — so a
+   hand-built (TopoEdit/USER) or restored endpoint landing on the PHYSICAL
+   face of a margined multi-rect block lost its tap and the block read
+   open.  Fixed by carrying the physical spelling on the Busterm
+   (`orig_rects`, the multi-rect twin of `orig_bbox`, populated only when a
+   nonzero margin makes it differ; hier offset/transform move it in step)
+   and having `rects_of` accept both spellings, exactly mirroring the
+   single-rect dual check; zero margin keeps `orig_rects` empty, so
+   margin-free annotation is unchanged.  Pinned by the three
+   `test_annotate_*` tests in the same file.
 10. ~~**Bridges are drawn by nobody** — web JSON serializes them, no client
     renders them, the matplotlib viewer ignores them, and the explorer has
     no bridge affordance; `_rects_disconnected` is dead code while the

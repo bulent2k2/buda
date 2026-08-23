@@ -109,7 +109,14 @@ checkpoint (pin row by uid + layer meta) are removed from the `.json`,
 entries only the sidecar can replay on a rebuild (USER op-logs,
 `group_uids`, notes) are kept, the file is deleted only when it empties,
 and a session without a DURABLE BDB never retires (there the json is the
-only persistence).
+only persistence).  A REBUILD re-attaches everything the checkpoint holds:
+kept USER rows re-inject into the regenerated pool at the generation tail
+(`_reinject_bdb_user_topos`, through the same `_topo_from_rows` restore
+load_pipeline uses, uid preserved — regeneration cannot produce a
+hand-edited candidate, so a `-b` rerun used to drop its pin durably) and
+`_apply_bdb_pins` maps a `pinned_group` family onto the regenerated pool
+(the meta was load_pipeline-only); the honest limit is a USER candidate
+whose blocks left the design — skipped LOUD, rebuilt via `dump_user_ops`.
 The flow's OUTPUT means what `bin/buda` makes it mean too: `-i` arms
 `buda::log`, so the console gets ONE line per command plus the runtime
 summary and the detail goes to the `<flow_dir>/log/<stem>_flow.log` the CLI
@@ -468,7 +475,7 @@ A relay that is *not* one of these clean 2-stub cases (≥3 stubs, a collinear p
 
 **Layer hints:** L-shape horizontal segment gets hint=3 (M3), vertical gets hint=4 (M4). All candidates use the same convention; the bundle planner may override.
 
-**Corner margins:** At Busterm construction time, each block's bounding box is inset by its `BlockCornerMargin{dx, dy}` via `Rect::shrink(dx, dy)`. All shape functions (L/Z/U/UU/trunk) operate on the shrunken bbox directly — no per-function margin threading. The Hanan grid is built from the shrunken bboxes, so stub and trunk positions automatically land within the margin zone. `dy` applies to vertical faces (left/right, constrains Y); `dx` to horizontal faces (top/bottom, constrains X). Guard: if `2*margin >= face_extent`, the shrink is skipped for that axis.
+**Corner margins:** At Busterm construction time, each block's bounding box is inset by its `BlockCornerMargin{dx, dy}` via `Rect::shrink(dx, dy)`. All shape functions (L/Z/U/UU/trunk) operate on the shrunken bbox directly — no per-function margin threading. The Hanan grid is built from the shrunken bboxes, so stub and trunk positions automatically land within the margin zone. `dy` applies to vertical faces (left/right, constrains Y); `dx` to horizontal faces (top/bottom, constrains X). Guard: if `2*margin >= face_extent`, the shrink is skipped for that axis. A **multi-rect** block's individual rects are inset the same way, per rect with the same per-axis guard (`shrink_rects`, teg_multirect_status.md open 9 — the margin was silently inert on exactly the faces multi-rect routing lands on), so `best_rect` faces, stubs, taps and the per-bundle Hanan grid all honor the margin; zero margin is the identity (byte-identical).
 
 **TEG mode (`teg_mode thru|over`):** Multi-rect blocks carry a `TegMode` flag set via `add_block … teg_mode over|thru`.  OVER declares the rects NOT internally connected, so every rect the trunk misses needs its own real metal — emitted as **ordinary topology segments** (open 1(a), 2026-08-22), so the planner, NUTS, DetailedNUTS, the audits and `report_wl` all route and count it.
 - **`thru` (default):** Each trunk connects to the nearest rect only. A split connection (trunk in the gap between rects) is left externally disconnected — the block's internal routing joins the sides.
