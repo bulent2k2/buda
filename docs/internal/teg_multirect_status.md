@@ -388,11 +388,30 @@ wrong.
    (`test_talk2_multirect_thru_full_pipeline`: sidecar pin honored, 3
    segs / 24 bit-wires / clean at all four audits, and no TEG_OPEN — the
    thru-exemption control beside the OVER vehicle).
-3. **Planner split-brain on multi-rect**: `low_seg_obstructed` judges the
+3. ~~**Planner split-brain on multi-rect**: `low_seg_obstructed` judges the
    union bbox while cut capacity is per-rect
    (`src/congestion_planner.cpp:738-784` vs `:363-383`) — a LOW segment in a
    routable notch is escalated to TOP.  A QoR distortion on exactly the
-   designs the feature exists for.
+   designs the feature exists for.~~  **RESOLVED 2026-08-23**: the predicate
+   now judges the SAME per-rect geometry capacity is carved from — a per-rect
+   twin of the block cache (`leaf_rects_cache_`, built beside `blocks_cache_`
+   at cut-rebuild) feeds every sub-question (endpoint pin-access containment,
+   wholly-inside-one-cell, mid-span crossing), so the notch between a
+   multi-rect block's rects is routable to BOTH halves of the planner.  A
+   single-rect block contributes its one rect in the same order, so
+   single-rect designs judge byte-identically (fast tier green; spot-run
+   comprehensive_demo / rnr/mix / rv/soc pre-vs-post: identical modulo
+   timing lines).  Measured vehicle `flow/teg_notch_low.buda` (an A→B hop
+   inside the L-block's notch, wholly inside its union bbox, TOP span_min
+   making LOW the honest choice): before, both endpoints read "inside the
+   cell" per the union and the hop escalated to M5; after, it routes on M3
+   with clean nuts+dnuts audits.  Unit + e2e tests in
+   `test_planner_notch_low.py` (the predicate is now public and bound to
+   Python for exactly this).  The checked-in multi-rect flows did NOT move —
+   lShape1/tShape1/cShape1/teg_over_audit declare only TOP layers (the
+   predicate short-circuits), and demo/talk2's routes never put a LOW
+   segment where the union and the rects disagree (measured: logs identical
+   modulo timing).
 4. **Candidate ranking prices bridges the router never builds** — ~~nominal
    WL includes bridge length while the realized route omits it~~ the pricing
    half is DISCHARGED by open 1(a) (2026-08-22): the connection metal is
