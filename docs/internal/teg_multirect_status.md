@@ -306,11 +306,25 @@ wrong.
 
 ### High
 
-2. **No end-to-end or QoR guard exists for either feature.**  Add at least
+2. ~~**No end-to-end or QoR guard exists for either feature.**  Add at least
    one TEG-over flow that runs `run_detailed_nuts` + `check_design` to the
    corpus (and wire `demo/talk2.buda` into `test_flow_scripts.py`).  Until
    open 1(b) lands this flow will pass vacuously; land them together so the
-   flow pins the new violation kind.
+   flow pins the new violation kind.~~  **LANDED 2026-08-22** (with 1(b)
+   already in): `flow/teg_over_audit.buda` — the §1.1 repro as a full
+   pipeline flow (pinned bridge-reliant `TRUNK_V@x250`, `select_topology 1
+   13`; a hard index, so the pin-fragility guard is
+   `test_flow_scripts.py::test_teg_over_audit_flow_pins_teg_open`, which
+   asserts the planner line names that candidate AND that `check_design`
+   reports TEG_OPEN at both placed stages) — EXPECTED DIRTY, corpus row
+   `(0, 0, 1)` at abstract WL 166 / detailed WL 672, added to
+   `qor_corpus.py`'s CORPUS so the audit verdict is QoR-guarded; a 1(a)
+   emission flips it to 0/0/0 and the diff is the desired loud signal.
+   `demo/talk2.buda` (the deepest multi-rect flow, `thru`, previously run
+   by no test) is wired into `test_flow_scripts.py`
+   (`test_talk2_multirect_thru_full_pipeline`: sidecar pin honored, 3
+   segs / 24 bit-wires / clean at all four audits, and no TEG_OPEN — the
+   thru-exemption control beside the OVER vehicle).
 3. **Planner split-brain on multi-rect**: `low_seg_obstructed` judges the
    union bbox while cut capacity is per-rect
    (`src/congestion_planner.cpp:738-784` vs `:363-383`) — a LOW segment in a

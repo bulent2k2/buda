@@ -1,0 +1,56 @@
+# TEG-over end-to-end QoR vehicle (teg_multirect_status.md open 2).
+#
+# The §1.1 repro geometry as a full-pipeline flow: pin a BRIDGE-RELIANT
+# candidate on the L-shaped `teg_mode over` block, route it through
+# planner -> NUTS -> DetailedNUTS, and audit.  Bridges are generation-only
+# today (nothing downstream of generation consumes Topology::bridge_segments),
+# so the selected route is built WITHOUT its bridge and the tall arm — the
+# rect the trunk missed — is touched by no placed metal.
+#
+# This flow is EXPECTED DIRTY: check_design must report TEG_OPEN (the open
+# 1(b) audit, PR #821) at both placed stages.  That is the point — the corpus
+# row records viol_bundles = 1, pinning the audit end to end until open 1(a)
+# emission makes the bridge real metal (at which point this flow flips clean
+# and the corpus row moves LOUDLY, which is the desired signal).
+#
+# Candidate pin: `select_topology 1 13` is a hard 1-based index —
+# TRUNK_V@x250, the WL-sorted pool's first gap-trunk with a bridge over L at
+# (400,0)-(400,400) (pool measured on main @ bc154c33: 18 candidates, 7
+# bridged; indices 8 and 13-18 carry bridges).  A hard index is fragile by
+# nature, but there is no pin-by-type selector; the guards are:
+#   * an index past the pool is a hard error (the flow exits non-zero), and
+#   * test_flow_scripts.py::test_teg_over_audit_flow_pins_teg_open asserts
+#     the planner line shows `TRUNK_V@x250 [pinned]` AND that check_design
+#     reports TEG_OPEN — so a re-sorted pool that lands a different shape on
+#     index 13 fails the test loudly instead of silently auditing a
+#     different candidate.
+#
+# Geometry (shared with test/tests/test_teg_open.py):
+#   L block: tall arm (0,0)-(100,400) + wide base (0,0)-(400,100), OVER
+#   src:     (500,150)-(600,250)
+#   The V trunk at x250 sits in the notch: it crosses the base only, so the
+#   tall arm is reachable only through the declared bridge.
+
+add_block src 500 150 600 250
+add_block L rect 0 0 100 400 rect 0 0 400 100 teg_mode over
+
+def_layer 4 M4 H TOP 0
+def_layer 5 M5 V TOP 0
+
+add_bus d[4] src.tx L.rx
+
+run_bundler STRICT
+generate_topologies
+
+def_track_pattern 4 0 (SIGNAL 2 2)x8
+def_track_pattern 5 0 (SIGNAL 2 2)x8
+
+# The bridge-reliant candidate (see header): TRUNK_V@x250 + bridge over L.
+select_topology 1 13
+
+run_planner
+run_nuts
+check_design
+run_detailed_nuts
+check_design
+report_wl
