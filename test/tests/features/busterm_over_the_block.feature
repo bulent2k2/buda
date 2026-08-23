@@ -277,14 +277,19 @@ Feature: Over-the-Block vs Thru-the-Block TEG Routing Modes
     And in the TRUNK_H@y200 candidate "C" has exactly 1 V stub
     And the TRUNK_H@y200 candidate has no bridge segment for "B"
 
-  Scenario: Over-the-block bridge topology has higher adjusted wirelength than thru
-    # The bridge segment adds explicit wirelength. With the same underlying trunk,
-    # the over-the-block topology costs more than the thru-the-block one.
-    # The topology sorter must rank thru-the-block before over-the-block
-    # (lower wirelength wins, all else equal).
+  Scenario: Over-the-block connection metal is real priced wirelength, so over ranks after thru
+    # Post-emission (teg_multirect_status.md open 1(a)) there is no separate
+    # "adjusted wirelength": the OVER connection metal is ordinary segments
+    # priced in estimated_wirelength, so thru-vs-over ranking is plain WL
+    # ranking of genuinely different metal.  teg_mode is a property of the
+    # BLOCK, so one pool cannot hold both modes — the comparison is two
+    # pools on the same geometry.  Measured: the same-locus TRUNK_H@y200
+    # candidate is wl=200 / 2 segments under thru (one stub to the nearest
+    # rect) and wl=360 / 3 segments under over (both rects stubbed to the
+    # trunk), so the over twin sorts strictly later in its WL-sorted pool
+    # (rank 12 -> 18 of 22 measured).
     #
     Given a block "A" at (0,150)-(100,250)
-    And a block "B" with rects (200,0)-(280,100) and (220,300)-(300,400)
-    And both "thru" and "over" teg_mode candidates are generated for "B"
-    When I rank the TRUNK_H@y200 candidates by adjusted wirelength
-    Then the thru-the-block candidate ranks before the over-the-block candidate
+    When I generate candidate pools from "A" for block "B" with rects (200,0)-(280,100) and (220,300)-(300,400) under both teg modes
+    Then the same-locus TRUNK_H@y200 candidate has strictly higher estimated wirelength under over than under thru
+    And the TRUNK_H@y200 candidate ranks strictly later in the over pool than in the thru pool
