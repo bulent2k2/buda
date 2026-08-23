@@ -608,11 +608,26 @@ class VizAbstractDrawMixin:
             except Exception: pass
         self._endpoint_label_artists = []
 
+    def _clear_legacy_bridges(self):
+        """Detach any existing legacy-bridge overlay artists, then reset the
+        list.  The bridge LINES are in the highlight registry and the reroute
+        cleanup (`_redraw_nuts_tracks`) removes them, but the LABEL
+        annotations are not — resetting the list alone would orphan the old
+        text on the axes, so every interactive reroute of a restored legacy
+        checkpoint accumulated a duplicate stale label (the Codex #484
+        endpoint-label shape again; `_clear_endpoint_labels` is the idiom).
+        Removing an already-removed line is a swallowed no-op."""
+        for a in getattr(self, '_legacy_bridge_artists', ()):
+            try: a.remove()
+            except Exception: pass
+        self._legacy_bridge_artists = []
+
     def draw_buses(self):
         """Draw topology segments without NUTS track assignment."""
         self._busterm_artists = []
         self._clear_endpoint_labels()
         self._vias_conns_artists = []
+        self._clear_legacy_bridges()
         layer_specs = {k: {'color': v} for k, v in _LAYER_COLOR.items()}
         for i, wrapper in enumerate(self.bundles):
             bid      = wrapper.input.original_bundle.id
@@ -649,6 +664,23 @@ class VizAbstractDrawMixin:
             drv, rcvs = self._busterm_positions(topo, ct, offset=offset)
             bidir = wrapper.input.original_bundle.reason.startswith("BIDIR:")
             self._draw_terminals(bid, drv, rcvs, viz_lw, alpha, bidir=bidir)
+            self._draw_legacy_bridges(bid, topo, offset=offset, zorder=30 + i)
+
+
+    def _draw_legacy_bridges(self, bid, topo, offset=0.0, zorder=30):
+        """Dashed 'unrealized bridge (legacy checkpoint)' overlay for a
+        candidate restored from a pre-emission checkpoint
+        (teg_multirect_status.md open 10(a)) — the wire TEG_OPEN names as
+        "declared bridge is unrealized", previously drawn by nobody.  Lines
+        are registered so click-to-highlight dims/brightens them with the
+        bundle; a generated candidate carries no bridges and this is a
+        no-op.  Shared geometry/idiom: viz_common.draw_legacy_bridges (the
+        explorer draws through the same helper)."""
+        lines, labels = draw_legacy_bridges(self.ax, topo,
+                                            offset=offset, zorder=zorder)
+        for ln in lines:
+            self._register(bid, ln, alpha=0.9, lw=2.0)
+        self._legacy_bridge_artists.extend(lines + labels)
 
 
     def draw_nuts_tracks(self, nuts_result):
@@ -656,6 +688,7 @@ class VizAbstractDrawMixin:
         self._busterm_artists = []
         self._clear_endpoint_labels()
         self._vias_conns_artists = []
+        self._clear_legacy_bridges()
         self._nuts_result = nuts_result   # saved for overlap panel in show()
         layer_specs = {k: {'color': v} for k, v in _LAYER_COLOR.items()}
         ts_map = {(ts.bundle_id, ts.seg_idx): ts for ts in nuts_result.segments}
@@ -751,6 +784,10 @@ class VizAbstractDrawMixin:
             drv, rcvs = self._busterm_positions(topo, ct, ts_map=ts_map, bid=bid)
             bidir = wrapper.input.original_bundle.reason.startswith("BIDIR:")
             self._draw_terminals(bid, drv, rcvs, viz_lw, seg_alpha, bidir=bidir)
+            # A restored legacy bridge is UNPLACED by definition, so it is
+            # drawn at its recorded nominal coordinates in this view too —
+            # unrealized metal beside the placed tracks (open 10(a)).
+            self._draw_legacy_bridges(bid, topo, zorder=30 + i)
 
         # Emit one footprint PatchCollection + one dashed-bound LineCollection
         # per (bundle, layer, colour) group.

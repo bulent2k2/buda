@@ -142,6 +142,14 @@ MESSAGES = {
     "BUDA-1904": (WARNING, "A restored fan-in bundle has no per-bit "
                            "endpoints, so it resumes untapered — wider "
                            "than the design that was checkpointed."),
+    "BUDA-1907": (INFO,    "A teg_mode thru multi-rect block has rects no "
+                           "placed metal of the bundle touches, so the route "
+                           "relies on the block's internal routing to join "
+                           "them (report only — thru declares them "
+                           "internally connected)."),
+    "BUDA-1908": (WARNING, "set_feedthru names a multi-rect block, but "
+                           "feedthru is single-rect only, so the declaration "
+                           "has no effect for that block."),
     "BUDA-1912": (WARNING, "An NDR rule's stored per-layer values are not "
                            "readable and were dropped, so the rule restores "
                            "layer-independent."),

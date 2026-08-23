@@ -502,6 +502,43 @@ def test_connector_leg_respects_min_stub_length():
     assert not any(t.startswith("TRUNK_V@x250") for t in types_at(200))  # 150 < 200
 
 
+def test_bitrunk_on_over_block_fires_teg_open_end_to_end():
+    # BITRUNK is bbox-only BY SCOPING (teg_multirect_status.md open 8): the
+    # datapath trees work entirely on orig_bbox — no rect selection, no TEG
+    # connection metal.  This pins the guarantee that makes the scoping safe
+    # to accept: where the bbox-only shape actually bites — an OVER block
+    # whose rect the BITRUNK's union-bbox metal never reaches — the routed
+    # result is LOUD, not silent: TEG_OPEN fires at both placed stages.
+    # Geometry: 4 endpoint blocks (the legacy BITRUNK_H floor), the OVER
+    # receiver's second rect at x 900..1000 lies beyond the rungs' along-span
+    # (pin centers reach x=750) and its union-center stub lands in the gap,
+    # so no placed metal of the bundle touches rect#1.
+    s = _session([
+        "add_block src 0 0 100 100",
+        "add_block r1 300 300 400 400",
+        "add_block r2 rect 500 0 600 100 rect 900 0 1000 100 teg_mode over",
+        "add_block r3 300 600 400 700",
+        "def_layer 4 M4 H TOP 0",
+        "def_layer 5 M5 V TOP 0",
+        "add_bus d[4] src.tx r1.a,r2.b,r3.c",
+        "run_bundler STRICT",
+        "generate_topologies",
+    ] + _TRACKS)
+    w = s.bundles[0]
+    pin = next(i for i, c in enumerate(w.input.candidates)
+               if c.type.startswith("BITRUNK_H"))
+    for cmd in (f"select_topology 1 {pin + 1}", "run_planner", "run_nuts"):
+        with contextlib.redirect_stdout(io.StringIO()):
+            s.do_command(cmd)
+    verdict, out = _check(s, "nuts")
+    assert verdict["by_kind"].get("TEG_OPEN", 0) >= 1, out
+    assert "rect#1 (900,0)-(1000,100)" in out, out
+    with contextlib.redirect_stdout(io.StringIO()):
+        s.do_command("run_detailed_nuts")
+    verdict, out = _check(s, "dnuts")
+    assert verdict["by_kind"].get("TEG_OPEN", 0) >= 1, out
+
+
 def test_joined_contacts_audit_clean():
     # Control for the island verdict: ONE wire touching both rects (an H wire
     # at y=50 from x=50 crosses arm and base alike) is one island — no

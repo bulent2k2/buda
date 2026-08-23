@@ -654,6 +654,13 @@ class ExplorerDrawMixin:
         self._draw_ndr_ghosts(ax, cs_list, _draw_perp, _draw_lo, _draw_hi,
                               _resolved_lid)
 
+        # LEGACY-LOAD TEG bridges (open 10(a)): a candidate restored from a
+        # pre-emission checkpoint still carries bridge_segments — unrealized
+        # metal TEG_OPEN names — drawn dashed + labeled so it can be SEEN;
+        # every generated candidate has none and this draws nothing.
+        _bl, _bt = vc.draw_legacy_bridges(ax, topo, zorder=13)
+        self._legacy_bridge_artists = _bl + _bt
+
         # Update title with layer info (Compacted: M4x5 M5x3)
         counts = {}
         for lid in actual_lids:

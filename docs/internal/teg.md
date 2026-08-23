@@ -90,7 +90,11 @@ See [`def _rects_disconnected(rects_raw)`](../../src/viz_common.py)
 > draws the dashed grouping box for every multi-rect block unconditionally,
 > touching/overlapping rects included.  Re-wiring it is a one-line change if
 > the conditional box is still wanted; the wider bridges-drawn-by-nobody gap
-> is open 10 in docs/internal/teg_multirect_status.md §4.]
+> was open 10 in docs/internal/teg_multirect_status.md §4 — RESOLVED
+> 2026-08-23: legacy-load bridges (the only kind left since the 1(a)
+> emission made OVER connection metal ordinary segments) are drawn by the
+> explorer and the main viewer as a dashed "unrealized bridge (legacy
+> checkpoint)" overlay (`viz_common.draw_legacy_bridges`).]
 
 ※ recap: Added multi-rect block support end to end: CLI syntax, C++ API, and 
   visualization. The viz now draws individual rects with a dashed grouping box 

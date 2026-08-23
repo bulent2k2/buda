@@ -21,6 +21,7 @@ in this module's COMMANDS dict; the buda_cmds package assembles the
 full registry that buda_cli.do_command dispatches through.
 """
 import buda
+import buda_diag
 import sys
 import re
 
@@ -40,6 +41,25 @@ _BLOCK_COORD_WHY = ("A block's corners define Hanan grid lines, which every "
                     "later stage snaps to.")
 _KEEPOUT_COORD_WHY = ("Truncating would SHRINK the zone, leaving routing that "
                       "looks legal over blocked ground.")
+
+
+def _warn_feedthru_multirect(session, names, detail):
+    """BUDA-1908, the ONE emission mechanism (teg_multirect_status.md open
+    7): feedthru is single-rect only in the engine, so an ENABLED feedthru
+    resolving onto a multi-rect block is an intent the engine drops — and
+    the declarations can arrive in either order: `set_feedthru` naming an
+    existing multi-rect block, or a multi-rect `add_block` landing under an
+    already-active wildcard/per-layer setting.  Both sites call here, and
+    the session-level per-block memo is what keeps the two from
+    double-firing for the same block (`set_feedthru * * on` before the
+    block warns at add_block; a later explicit `set_feedthru L * on` for
+    the already-warned block stays quiet)."""
+    said = session.__dict__.setdefault("_feedthru_mr_warned", set())
+    fresh = sorted(n for n in set(names) if n not in said)
+    if not fresh:
+        return
+    said.update(fresh)
+    buda_diag.emit("BUDA-1908", detail(fresh))
 
 
 def cmd_add_block(session, cmd, args, cmd_line):
@@ -79,6 +99,28 @@ def cmd_add_block(session, cmd, args, cmd_line):
                 teg_mode = buda.TegMode.OVER if args[i].lower() == "over" else buda.TegMode.THRU
                 i += 1
         session.fp.add_block_rects(name, rects, teg_mode)
+        # The reverse declaration order of the set_feedthru-time warning
+        # (Codex P2 on #834): `set_feedthru * * on` (or a per-layer enable)
+        # declared BEFORE this block exists warned about nothing, yet the
+        # new multi-rect block inherits the enabled policy — which the
+        # engine's single-rect-only gate then silently drops.  Warn here
+        # when a currently-active setting resolves feedthru ON for this
+        # block on any declared layer (a brand-new block has no per-block
+        # rule, so this reads the wildcard/per-layer/global resolution);
+        # with no layers declared yet, the global default decides.  Shared
+        # memo with the set_feedthru site, so the same block never warns
+        # twice.  (No feedthru declared anywhere => get_feedthru resolves
+        # the global default False on every layer and this stays silent.)
+        if len(rects) > 1:
+            lids = set(session._layer_name_map.values()) or {-1}
+            if any(session.fp.get_feedthru(name, lid) for lid in lids):
+                _warn_feedthru_multirect(
+                    session, [name],
+                    lambda fresh: (
+                        f"add_block: feedthru is enabled for "
+                        f"'{fresh[0]}' by an earlier set_feedthru setting, "
+                        f"but feedthru is single-rect only — it has no "
+                        f"effect for this multi-rect block"))
         x1 = min(r[0] for r in rects); y1 = min(r[1] for r in rects)
         x2 = max(r[2] for r in rects); y2 = max(r[3] for r in rects)
         rest = list(args[i:])
@@ -259,6 +301,29 @@ def cmd_set_feedthru(session, cmd, args, cmd_line):
                         layer_ids.append(session._layer_name_map[t])
                     else:
                         print(f"Warning: unknown layer '{t}' in set_feedthru")
+            # Feedthru is single-rect only in the engine (the trunk
+            # generator's "MVP: single-rect only" gate skips multi-rect
+            # blocks with no report — teg_multirect_status.md open 7), so a
+            # declaration ENABLING it for a multi-rect block states an intent
+            # the engine drops.  Say so at declaration time, once, naming
+            # every affected block; the declaration still takes effect for
+            # every other block it names.  `off` is not warned: a multi-rect
+            # block never relays regardless of the flag, so disabling it
+            # changes nothing AND the outcome matches the intent.
+            if val:
+                if blocks_wild:
+                    cands = [n for n, _ in session.fp.get_all_blocks()]
+                else:
+                    cands = block_names
+                multi = [n for n in cands
+                         if len(session.fp.get_block_rects(n)) > 1]
+                if multi:
+                    _warn_feedthru_multirect(
+                        session, multi,
+                        lambda fresh: (
+                            f"set_feedthru: feedthru is single-rect only — "
+                            f"the declaration has no effect for multi-rect "
+                            f"block(s): {', '.join(fresh)}"))
             if blocks_wild and layers_wild:
                 session.fp.set_feedthru(val)
             elif blocks_wild:

@@ -35,6 +35,7 @@ __all__ = [
     "_pan_axes", "_PAN_STEP", "_UNCONSTRAINED",
     "collect_candidate_bundles", "_get_nterms", "busterm_counts",
     "snap_endpoint_extents",
+    "LEGACY_BRIDGE_COLOR", "draw_legacy_bridges",
 ]
 
 
@@ -137,6 +138,48 @@ def _draw_blocks(ax, fp, ui_state: ViewState, highlight_names=None):
             name_artists.append(txt)
     return patch_artists, name_artists
 
+
+
+#: Legacy-load TEG bridge overlay colour (open 10(a)) — deliberately not a
+#: layer colour: the wire is UNREALIZED metal, not a routed segment.
+LEGACY_BRIDGE_COLOR = '#cc3344'
+
+
+def draw_legacy_bridges(ax, topo, *, offset=0.0, zorder=13):
+    """Dashed 'unrealized bridge (legacy checkpoint)' overlay
+    (teg_multirect_status.md open 10(a)).
+
+    `Topology.bridge_segments` is non-empty ONLY on a candidate restored from
+    a pre-emission checkpoint — since open 1(a) generation emits the TEG-over
+    connection metal as ordinary segments, so a live pool carries no bridges.
+    A restored bridge is UNREALIZED metal: placed by nothing, and reported by
+    TEG_OPEN as "declared bridge is unrealized".  This draws the wire that
+    message names — dashed, off-palette, labeled — so the user can SEE it;
+    an empty map (every generated candidate) draws nothing.
+
+    Returns `(lines, labels)` so callers that keep an artist registry (the
+    main viewer's `_register`) can register the lines and leave the labels
+    as plain annotations.
+    """
+    lines, labels = [], []
+    bridges = dict(topo.bridge_segments)
+    for bname in sorted(bridges):
+        seg = bridges[bname]
+        sx, sy = seg.start.x + offset, seg.start.y + offset
+        ex, ey = seg.end.x + offset, seg.end.y + offset
+        line, = ax.plot([sx, ex], [sy, ey],
+                        color=LEGACY_BRIDGE_COLOR, linewidth=2.0,
+                        linestyle='--', dashes=(6, 3), alpha=0.9,
+                        solid_capstyle='butt', zorder=zorder,
+                        gid='legacy_bridge')
+        txt = ax.annotate(
+            f"unrealized bridge (legacy checkpoint): {bname}",
+            xy=((sx + ex) / 2.0, (sy + ey) / 2.0),
+            fontsize=7, color=LEGACY_BRIDGE_COLOR, ha='center', va='bottom',
+            zorder=zorder + 1, gid='legacy_bridge')
+        lines.append(line)
+        labels.append(txt)
+    return lines, labels
 
 
 # Bulent: no longer used. But keep as ref.
