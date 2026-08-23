@@ -70,8 +70,8 @@ dump_pins                          # the current pin inventory
 
 > **BKM — pin by name, not by ID.** Bundle IDs are assigned at bundling and
 > shift when the netlist or bundling strategy changes; a net-name prefix
-> (`bus_033`) survives both. The one place a numeric ID is *required* is
-> `edit_topology`.
+> (`bus_033`) survives both. The places a numeric ID is *required* are
+> `edit_topology` and `dump_user_ops`.
 
 ---
 
@@ -206,12 +206,33 @@ check_design                  # 6. verify (LAYER_DIR etc. still audit)
 
 ## Keeping your choices — sessions and persistence
 
-Pins and committed edits are only as durable as the store behind them:
+Pins and committed edits are only as durable as the store behind them — and
+**which door the next session enters through matters**:
 
 - **File-backed BDB open** (`open_bdb design.bdb` in the flow, or a checkpoint
-  armed by the launcher): pins, USER candidates, and forced layers persist;
-  the next session restores them via `load_pipeline` — or simply re-running
-  the flow (a rebuild re-attaches pins to the regenerated pool by content uid).
+  armed by the launcher): pins, USER candidates, and forced layers persist.
+  * A **resume** (`btcl -r`, i.e. `load_pipeline`) restores everything: the
+    candidate pool as persisted — USER candidates included — the pin, and
+    the forced layers.  This is the door for iterating on customized
+    topologies.
+  * A **rebuild** (re-running the flow; a `-b` rerun) regenerates the pool
+    and re-attaches a pin to it by content uid, forced layers included.
+    That resolves a pin on a *generated* candidate — but a pin on a
+    hand-edited **USER candidate does not survive a rebuild**: regeneration
+    cannot produce the candidate, so the pin is dropped with a warning
+    (which lands in the flow log under `-b`), and the drop is durable — the
+    rebuild's own persist rewrites the pin state.  The candidate itself is
+    not lost, though: its rows and op-log stay in the checkpoint, and a
+    following **resume** restores it into the pool (unpinned) — so the
+    recovery after an accidental rebuild is `btcl -r -s plan`, find it with
+    `topos`, and re-pin it.  Re-pinning recovers the *shape*; any **forced
+    layers** were dropped with the pin, so re-force them by replaying the
+    stored op-log in an edit session — `dump_user_ops <id>` (from that
+    resumed session; it too reads the live pool) prints the exact
+    `edit_set_layer` lines, and `edit_topology <id> <N>` + those lines +
+    `edit_commit pin` puts everything back.  A GUI **group pin** is
+    likewise rebuild-restored only from its sidecar `.json`; from the BDB
+    alone it is resume-only.
 - **No BDB**: pins die with the session, and the tool says so honestly.
 
 The fast iteration loop is **`btcl -b` / `btcl -r`** (build / resume — the
@@ -247,6 +268,10 @@ Two rules of that world:
   for a GUI preview would spend what nobody asked to spend. The prompt
   notices the GUI pin (sidecar change) and says so: type `replan` to commit
   it now, or exit and take it at a later `-r -s plan` resume or rebuild.
+  Once committed, the sidecar cleans itself up: entries the checkpoint now
+  verifiably carries are retired from the `.json` (entries only the sidecar
+  can replay on a rebuild — hand-built candidates, group pins — are kept),
+  so there is no stale file to resurrect an old choice later.
 - **Inspection sessions refuse pins.** A hier `nuts`/`dnuts` stage resume is a
   post-expansion *read-only look* at a routed result; pins/edits/`replan` are
   guarded there (their persist would clobber the checkpoint's template rows).
@@ -378,8 +403,14 @@ btcl -r -s plan demo/custom_topo.buda
 ```
 
 ```
-custom_topo.buda: -r resuming from …/demo/custom_topo.ckpt.bdb
+custom_topo.buda: RESUMED 2 bundles from …/demo/custom_topo.ckpt.bdb
+dump_pins: 1 pinned bundle(s):
+  bundle 1 (a_0) -> topo 9 (USER) layers[M3 M4 M3]
 ```
+
+The resume says up front which choices it carries — the pin inventory prints
+right after `RESUMED` (the same list the `pins` verb shows on demand). And in
+the pool:
 
 ```
 custom_topo> topos a_0
@@ -397,6 +428,11 @@ The USER candidate is back in the pool, still pinned, **with its forced
 layers** (`layers[M3 M4 M3]`) — the choice outlived the process. (The `dup`
 marks are honest: our USER candidate is geometrically candidate 4 with
 different layers, and the dump says so.)
+
+The resume is the right door on purpose: a **`-b` rerun would NOT keep this
+pin** — a rebuild regenerates the candidate pool, our hand-built candidate 9
+is not in it, and the pin is dropped (see *Keeping your choices* above).
+Iterate on a hand-edited topology through `-r` / `-r -s plan`.
 
 To hand control back at any point: `unpin a_0` (prompt) or
 `unpin_topology a_0` (script) — which also drops the forced layers, so the
@@ -444,13 +480,23 @@ same thing through every door.
    are remapped by content uid.)
 6. **Bundle IDs shift between netlist/bundling changes** — pin by net-name
    prefix; the audit's `Bundle N:` number is valid for *this* run.
-7. **`edit_topology` wants the numeric bundle ID** — the one place a net-name
-   hint doesn't work; get the ID from `dump_topologies <prefix>`.
+7. **`edit_topology` (and `dump_user_ops`) want the numeric bundle ID** —
+   net-name hints don't work there; get the ID from
+   `dump_topologies <prefix>`.
 8. **One edit session at a time** — `edit_commit` or `edit_abort` before
    opening the next.
 9. **Hier: pin the template, not an instance.** A cell-local pin propagates to
    every occurrence; per-instance divergence is the healers' job
    (`check_template_tracks … independent`), not the pin's.
+10. **A USER-candidate pin survives resumes, not rebuilds.** A rebuild
+    (re-running the flow, a `-b` rerun) regenerates the pool; your
+    hand-built candidate is not in it, so its pin is dropped — the
+    warning lands in the flow log under `-b`.  Iterate with `btcl -r` /
+    `-r -s plan`.  If a rebuild already dropped the pin, the candidate is
+    still in the checkpoint: **resume**, find it with `topos`, re-pin —
+    and re-force any layers by replaying the op-log (`dump_user_ops <id>`,
+    from that resumed session) in an `edit_topology … edit_commit pin`
+    round, since forced layers were dropped with the pin.
 
 ---
 

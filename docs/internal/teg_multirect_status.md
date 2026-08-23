@@ -399,10 +399,35 @@ wrong.
    ordinary segments, so `estimated_wirelength` equals the segment sum and
    priced metal IS built metal (pinned by `test_topo_keepout_mst.py::
    test_trunk_teg_over_metal_is_ordinary_segments_and_wl_honest`; restored
-   pre-change candidates keep their recorded bridge pricing).  Still open:
+   pre-change candidates keep their recorded bridge pricing).  ~~Still open:
    the documented thru-before-over *adjusted*-WL ranking remains the
-   standing xfail (`test_busterm_over_the_block.py` — `Topology.adjusted_wl`
-   / per-topology `teg_mode` API still absent).
+   standing xfail~~ **SETTLED 2026-08-23, and by retiring the concept rather
+   than building it**: post-emission a separate `adjusted_wl` is not a
+   meaningful quantity — the OVER connection metal is ordinary segments
+   priced in `estimated_wirelength`, so thru-vs-over ranking is plain WL
+   ranking of genuinely different metal, and `teg_mode` is a property of
+   the BLOCK, so one pool structurally cannot hold both modes (the phantom
+   per-topology `teg_mode` attribute the xfail waited on has no
+   post-emission referent).  Measured on the feature's own gap geometry
+   (thru pool vs over pool, same trunk locus `TRUNK_H@y200`): thru wl=200 /
+   2 segs at rank 12 of 22, over wl=360 / 3 segs (both rects stubbed) at
+   rank 18 of 22 — and on the §1.1 L-shape (`TRUNK_V@x250`): thru wl=300 /
+   2 segs at rank 5, over wl=500 / 3 segs (the leg is real priced metal) at
+   rank 10.  The xfail scenario is REWRITTEN as `@landed` asserting the
+   measured SAME-LOCUS-TWIN property (two pools on one geometry; over twin
+   strictly higher WL, its extra metal strictly more real segments —
+   `test_busterm_over_the_block.py`, 9/9 passing, zero xfail).  The ranks
+   above are recorded as observations, deliberately NOT asserted: the two
+   pools are different candidate populations (every OVER-affected member
+   shifts, not just the twin), so a cross-pool ordinal is confounded — the
+   WL-sorted-pool consequence "thru before over, all else equal" follows
+   from the WL comparison, which is what the test pins (Codex P2 on
+   PR #832, verified).  Also,
+   `docs/script_reference/topologies.md`'s TRUNK rows no longer claim a
+   `bridge_segments` carry (its TEG paragraph already described the
+   post-emission mechanism — real wirelength, no "adjusted" figure).  §3's
+   "1 xfail" line and suite_analysis Group 4's mention of this file are
+   superseded by this entry.  Item 4 is fully closed.
 
 ### Medium
 
@@ -430,11 +455,39 @@ wrong.
    `test_teg_thru_census.py` (fires naming the rects; memoized; silent when
    every rect is reached; OVER gets TEG_OPEN, never the census; single-rect
    silent; id in `dump_messages`).
-6. **Multi-rect never reaches the hier flow**: `derive_busterms` writes
-   empty rects (`src/busterm.cpp:172`), every BDB→Floorplan projection is
-   `add_block(bbox)`, and `tools/buda2bdb.py` collapses with a warning.
-   Decide whether hier multi-rect is in scope; if not, document the boundary
-   where users will hit it (resume sessions silently losing rect geometry).
+6. ~~**Multi-rect never reaches the hier flow**~~ **RESOLVED-AS-BOUNDED
+   2026-08-23, with the suspected resume loss MEASURED AND REFUTED.**  The
+   hier half is a boundary by construction, not a defect: a BDB *component*
+   holds ONE bbox, so multi-rect cannot be DECLARED as a hier-design input —
+   `derive_busterms` writes empty rects (`src/busterm.cpp:172`), every
+   BDB→Floorplan projection is `add_block(bbox)`, and `tools/buda2bdb.py`
+   collapses to the union bbox; its warning now also NAMES the dropped
+   trailing modifiers, `teg_mode` included (it said only "collapsed" while
+   silently eating `teg_mode over` — the one modifier whose loss turns an
+   electrically-open block into a clean-auditing one; pinned by
+   `test_buda2bdb.py::test_multirect_collapse_warning_names_dropped_modifiers`).
+   The boundary is documented where users hit it: `docs/BDB_REFERENCE.md`
+   (busterm `rects`/`teg_mode` are a routing-time persist artifact — the
+   `tb:` rows — not a hier-design input) and `docs/BUDA2BDB.md`.
+   The RESUME half of this entry (and §2.1's "a resumed or hier session
+   therefore loses per-rect geometry unless the setup script re-declares
+   it") was measured 2026-08-23 and is FALSE for the flat resume — nothing
+   is lost, with no code change needed, because the machinery already
+   re-declares: the `BUDA_RECORD` trace carries
+   `add_block L rect … teg_mode over` VERBATIM (measured on
+   `flow/teg_over_audit.buda` + an armed checkpoint), a flat stage-resume
+   replays that setup wholesale before `load_pipeline`, so the resumed
+   floorplan holds both rects + `TegMode.OVER`; restored candidates keep
+   busterm rects+teg through the `topology_seg_busterm` bridge; the resumed
+   tail reproduces the routed endpoint exactly (same 12 bit-wires /
+   detailed WL 1996 / both audits Success); and — the seam that would have
+   been silent — `detect_teg_open` reads rects+teg off the session
+   FLOORPLAN, and a resumed dirty checkpoint (trunk-Direct-inside-one-rect)
+   still FIRES `TEG_OPEN` identically.  Both halves pinned by
+   `test_teg_resume.py` (clean endpoint equality + audit-stays-armed).
+   Read §2.1's resume sentence as superseded by this entry.  What remains
+   genuinely absent is unchanged and lives in items 8/17: no import path
+   and no hier declaration produces a multi-rect block.
 7. ~~**`set_feedthru` on a multi-rect block is silently ignored**
    (`src/topology.cpp:3056`).  Warn at declaration — the user stated an
    intent the engine drops.~~  RESOLVED 2026-08-23: **BUDA-1908** (WARNING,

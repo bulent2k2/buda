@@ -165,7 +165,16 @@ def _parse_add_block(args: list, parsed: ParsedScript) -> None:
         if not xs:
             _warn(f"add_block {name}: malformed rect form — ignored")
             return
-        _warn(f"add_block {name}: multi-rect collapsed to union bbox")
+        # Name what the collapse drops: a BDB component holds ONE bbox, so
+        # the rect list is lost by construction — and so is any trailing
+        # modifier (teg_mode over most consequentially: the OVER declaration
+        # is what makes the connection metal real, and dropping it silently
+        # would turn an electrically-open block into a clean-auditing one).
+        dropped = args[i:]
+        msg = f"add_block {name}: multi-rect collapsed to union bbox"
+        if dropped:
+            msg += f"; modifiers dropped ({' '.join(dropped)})"
+        _warn(msg)
         parsed.blocks[name] = (min(xs), min(ys), max(xs), max(ys))
         return
     try:

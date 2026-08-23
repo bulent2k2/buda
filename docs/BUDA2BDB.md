@@ -64,8 +64,12 @@ python3 tools/buda2bdb.py core_flat.buda cells.bdb.sql -cell core
 All other commands (`def_layer`, `def_track_pattern`, `run_*`, `visualize`,
 `corner_margin`, …) are **ignored with a warning** — only placement and
 connectivity are translated.  Multi-rect `add_block <name> rect …` is collapsed
-to the union bounding box (with a warning); `container` / `teg_mode` /
-`corner_margin` block modifiers are dropped.
+to the union bounding box — a BDB component holds ONE bbox, so the collapse is
+by construction (the hier/BDB multi-rect boundary,
+`docs/internal/teg_multirect_status.md` open 6) — and the warning names both
+the collapse and every dropped trailing modifier, `teg_mode` included (an
+OVER declaration lost silently would turn an electrically-open block into a
+clean-auditing one); `container` / `corner_margin` are dropped the same way.
 
 ---
 
@@ -145,5 +149,5 @@ Notes on fidelity:
 |---|---|
 | No external ports | Cell `cell_pin` ports are not inferred; all nets are internal |
 | No routing tech | `def_layer` / `def_track_pattern` and run/verify commands are ignored |
-| Multi-rect blocks | Collapsed to the union bbox |
+| Multi-rect blocks | Collapsed to the union bbox (by construction — one bbox per BDB component); the warning names the dropped modifiers, `teg_mode` included |
 | Global net names | `net.name` is unique BDB-wide; the replace step clears the cell's old nets to avoid collisions |

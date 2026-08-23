@@ -51,8 +51,8 @@ destination block names are derived automatically from the netlist.
 
 | Type string | Description |
 |---|---|
-| `TRUNK_H@y{trunk}` | H spine + V stubs to each receiver. Optimised with pass-through snapping and extreme-stub slide. Loci sampled at the in-bbox Hanan channel midpoints AND on the Hanan lines themselves (the post-flip default; `no_hanan_loci` restores midpoint-only sampling). For receivers with `teg_mode over`, may carry a `bridge_segments` entry (see below). |
-| `TRUNK_V@x{trunk}` | V spine + H stubs. Symmetric. Same locus sampling and bridge logic apply. |
+| `TRUNK_H@y{trunk}` | H spine + V stubs to each receiver. Optimised with pass-through snapping and extreme-stub slide. Loci sampled at the in-bbox Hanan channel midpoints AND on the Hanan lines themselves (the post-flip default; `no_hanan_loci` restores midpoint-only sampling). For receivers with `teg_mode over`, carries the per-rect connection metal as ordinary segments (see below). |
+| `TRUNK_V@x{trunk}` | V spine + H stubs. Symmetric. Same locus sampling and TEG-over connection metal apply. |
 | `TRUNK_H+MST@y{trunk}` | TRUNK_H hybrid: adds MST inter-branch edges between the branch blocks (those with explicit stubs) on top of the spine, shortening inter-block paths. Generated for 3+ blocks. Type string is `TRUNK_H+MST@y{trunk}`. |
 | `TRUNK_V+MST@x{trunk}` | TRUNK_V hybrid with MST inter-branch edges. Symmetric. |
 | `TRUNK_H_OOB@y{trunk}` | H spine outside the pin bounding box + V stubs (detour equivalent of U-shape). |
