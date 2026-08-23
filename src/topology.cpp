@@ -213,12 +213,13 @@ void annotate_topology(Topology& topo, const Floorplan& fp) {
     for (const auto& [name, orig] : fp.get_all_blocks()) {
         // Mirror the generator's busterm construction (generate_2pin/npin mk_bt):
         // carry the corner-margin-shrunk bbox, the full orig_bbox, the individual
-        // rects (so annotate_endpoints checks each rect face, not the union — a
-        // multi-rect block must not be tapped through the gap between its rects),
+        // rects — margin-inset per rect like the bbox (open 9), so
+        // annotate_endpoints checks each rect face, not the union — a
+        // multi-rect block must not be tapped through the gap between its rects —
         // and the teg_mode.
         auto cm = fp.get_block_corner_margin(name);
         bts.push_back(Busterm{name, orig.shrink(cm.dx, cm.dy), orig,
-                              fp.get_block_rects(name),
+                              shrink_rects(fp.get_block_rects(name), cm),
                               fp.get_block_teg_mode(name)});
     }
     annotate_endpoints(topo, bts);
@@ -3351,7 +3352,7 @@ std::vector<Topology> TopologyGenerator::generate_npin(
         auto cm  = floorplan_.get_block_corner_margin(n);
         Rect orig = floorplan_.get_block_bounds(n);
         Busterm bt{n, orig.shrink(cm.dx, cm.dy), orig,
-                   floorplan_.get_block_rects(n),
+                   shrink_rects(floorplan_.get_block_rects(n), cm),
                    floorplan_.get_block_teg_mode(n)};
         return bt;
     };
@@ -4907,7 +4908,7 @@ std::vector<Topology> TopologyGenerator::generate_2pin(const std::string& src_na
         auto cm = floorplan_.get_block_corner_margin(n);
         Rect orig = floorplan_.get_block_bounds(n);
         return Busterm{n, orig.shrink(cm.dx, cm.dy), orig,
-                       floorplan_.get_block_rects(n),
+                       shrink_rects(floorplan_.get_block_rects(n), cm),
                        floorplan_.get_block_teg_mode(n)};
     };
     Busterm src_bt = mk_bt(src_name);

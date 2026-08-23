@@ -144,7 +144,9 @@ struct Busterm {
     Rect              bbox;       // possibly margin-inset (union of all rects)
     Rect              orig_bbox;  // always the full physical extent (union)
     // Non-empty for multi-rect blocks: each element is one candidate connection
-    // rectangle (unshrunk).  Empty = single-rect block (use orig_bbox as before).
+    // rectangle, margin-inset per rect like `bbox` (open 9 — a declared corner
+    // margin was silently inert on exactly the faces multi-rect routing lands
+    // on).  Empty = single-rect block (use orig_bbox as before).
     std::vector<Rect> rects;
     TegMode           teg_mode = TegMode::THRU;
 };
@@ -472,6 +474,22 @@ struct BlockCornerMargin {
     int dx = 0;
     int dy = 0;
 };
+
+// Corner-margin inset for a multi-rect block's rect list
+// (teg_multirect_status.md open 9): EACH rect is inset exactly as the union
+// bbox is at Busterm construction — Rect::shrink carries the per-axis guard,
+// so a rect too thin for the margin keeps that axis at full extent, per rect.
+// A zero margin is the identity, so margin-free designs are byte-identical.
+// Used by every Busterm construction site that seeds `rects` (generate_2pin /
+// generate_npin / annotate_topology / topo_edit's edit_add_stub), so
+// generation, the per-bundle Hanan grid, best_rect faces and taps all see the
+// inset rects the way a single-rect block sees its inset bbox.
+inline std::vector<Rect> shrink_rects(std::vector<Rect> rects,
+                                      const BlockCornerMargin& cm) {
+    if (cm.dx == 0 && cm.dy == 0) return rects;
+    for (auto& r : rects) r = r.shrink(cm.dx, cm.dy);
+    return rects;
+}
 
 struct MinStubLength {
     int global = 20;

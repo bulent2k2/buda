@@ -192,13 +192,14 @@ EditVerdict edit_add_stub(Topology& topo, const Floorplan& fp,
     topo.segments.push_back(s);
 
     // Seed the tap exactly like the generators do: margin-inset bbox +
-    // full extent + multi-rect + TEG, at the block-side endpoint (start).
+    // full extent + multi-rect (margin-inset per rect, open 9) + TEG, at the
+    // block-side endpoint (start).
     Busterm bt;
     bt.block_name = block;
     BlockCornerMargin cm = fp.get_block_corner_margin(block);
     bt.bbox      = bb.shrink(cm.dx, cm.dy);
     bt.orig_bbox = bb;
-    bt.rects     = fp.get_block_rects(block);
+    bt.rects     = shrink_rects(fp.get_block_rects(block), cm);
     bt.teg_mode  = fp.get_block_teg_mode(block);
     topo.seg_busterms[idx].first = bt;
 

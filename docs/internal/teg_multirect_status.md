@@ -440,8 +440,40 @@ wrong.
 8. **BITRUNK is bbox-only** (`src/topology.cpp:4401`, `:4467-4473`): the
    datapath trees neither select rects nor bridge.  Acceptable as a scoping
    decision, but undocumented.
-9. **`corner_margin` is inert for individual rects** (`src/topology.cpp:
-   3296-3300`) — silently, on the faces multi-rect routing actually lands on.
+9. ~~**`corner_margin` is inert for individual rects** (`src/topology.cpp:
+   3296-3300`) — silently, on the faces multi-rect routing actually lands
+   on.~~  **RESOLVED 2026-08-23**: each rect is now inset exactly as the
+   union bbox is, at Busterm construction (`shrink_rects`, topology.h —
+   `Rect::shrink`'s per-axis guard applied PER RECT, so a rect too thin for
+   the margin keeps that axis at full extent while its siblings still
+   inset), at all four construction sites (generate_2pin / generate_npin /
+   annotate_topology / topo_edit's edit_add_stub) — so generation, the
+   per-bundle Hanan grid, `best_rect` faces, stubs and taps all see the
+   inset rects the way a single-rect block sees its inset bbox.
+   `derive_slide_ranges`' tap→rect attribution (an EQUALITY match of
+   `face_coord` against rect faces) accepts the inset spelling of each face
+   too, so the per-rect slide narrowing keeps working — and still matches
+   the physical spelling, so restored pre-change candidates narrow as
+   before.  Zero margin is the identity: margin-free designs are
+   byte-identical (fast tier green; flow/lShape1 and flow/teg_over_audit
+   measured unchanged).  The task-brief premise that no checked-in flow
+   declares a margin on a multi-rect block was FALSE — `flow/teg1.buda`,
+   `flow/poly1.buda` and `demo/talk2.buda` all declare a global
+   `corner_margin dx 20 dy 10` over rect-declared blocks, previously inert
+   there — so those three MOVE, as the margin doing its declared job:
+   teg1/poly1 trunk loci snap to inset rect edges (`TRUNK_H@y100`→`y90`,
+   stub intervals shift by the margins; same warning counts, clean as
+   before), and talk2's pinned `TRUNK_H@y650` re-prices 1100→1160 WL (taps
+   on inset faces), so `demo/talk2.json` was re-recorded to the new
+   WL/index (the sidecar's content match had fallen back to a wrong
+   index-hint candidate) — its exact-count test passes unchanged (3 segs /
+   24 bit-wires / 4× clean).  One documented semantic note: margins now
+   participate in the OVER gap/adjacency classification
+   (`rects_are_rectilinear` and the gap tests read the inset rects), so a
+   margin can turn a thin overlap into a gap — the emitted join metal is
+   the honest consequence of declaring those faces unusable.  Tests:
+   `test_multirect_corner_margin.py` (inset taps + carried rects, no-margin
+   physical faces unchanged, the per-rect per-axis guard).
 10. **Bridges are drawn by nobody** — web JSON serializes them, no client
     renders them, the matplotlib viewer ignores them, and the explorer has
     no bridge affordance; `_rects_disconnected` is dead code while the

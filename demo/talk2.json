@@ -4,9 +4,9 @@
       "bundle_hint": "bus_0",
       "bundle_id": 1,
       "topo_type": "TRUNK_H@y650",
-      "topo_wl": 1100,
-      "topo_index_hint": 15,
-      "note": "",
+      "topo_wl": 1160,
+      "topo_index_hint": 28,
+      "note": "re-recorded 2026-08-23: corner_margin now insets multi-rect rects (open 9), so the pinned TRUNK_H@y650 taps the inset faces (WL 1100 -> 1160)",
       "selected_at": "2026-06-05T01:08:58"
     }
   ]
