@@ -221,11 +221,18 @@ Pins and committed edits are only as durable as the store behind them — and
     hand-edited **USER candidate does not survive a rebuild**: regeneration
     cannot produce the candidate, so the pin is dropped with a warning
     (which lands in the flow log under `-b`), and the drop is durable — the
-    rebuild's own persist rewrites the pin state.  The USER candidate's
-    rows and its op-log stay in the BDB (`dump_user_ops <id>` prints the
-    replayable edit script), but re-attaching is manual.  A GUI **group
-    pin** is likewise rebuild-restored only from its sidecar `.json`; from
-    the BDB alone it is resume-only.
+    rebuild's own persist rewrites the pin state.  The candidate itself is
+    not lost, though: its rows and op-log stay in the checkpoint, and a
+    following **resume** restores it into the pool (unpinned) — so the
+    recovery after an accidental rebuild is `btcl -r -s plan`, find it with
+    `topos`, and re-pin it.  Re-pinning recovers the *shape*; any **forced
+    layers** were dropped with the pin, so re-force them by replaying the
+    stored op-log in an edit session — `dump_user_ops <id>` (from that
+    resumed session; it too reads the live pool) prints the exact
+    `edit_set_layer` lines, and `edit_topology <id> <N>` + those lines +
+    `edit_commit pin` puts everything back.  A GUI **group pin** is
+    likewise rebuild-restored only from its sidecar `.json`; from the BDB
+    alone it is resume-only.
 - **No BDB**: pins die with the session, and the tool says so honestly.
 
 The fast iteration loop is **`btcl -b` / `btcl -r`** (build / resume — the
@@ -485,8 +492,11 @@ same thing through every door.
     (re-running the flow, a `-b` rerun) regenerates the pool; your
     hand-built candidate is not in it, so its pin is dropped — the
     warning lands in the flow log under `-b`.  Iterate with `btcl -r` /
-    `-r -s plan`; if you must rebuild, `dump_user_ops <id>` prints the
-    edit script to re-create and re-pin it.
+    `-r -s plan`.  If a rebuild already dropped the pin, the candidate is
+    still in the checkpoint: **resume**, find it with `topos`, re-pin —
+    and re-force any layers by replaying the op-log (`dump_user_ops <id>`,
+    from that resumed session) in an `edit_topology … edit_commit pin`
+    round, since forced layers were dropped with the pin.
 
 ---
 
