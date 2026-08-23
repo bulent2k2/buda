@@ -28,11 +28,15 @@ All 9 scenarios test currently-implemented behaviour and must PASS.
 Scenario 9 (thru-before-over ranking) asserts the MEASURED post-emission
   property: teg_mode is a property of the BLOCK (one pool cannot mix modes),
   and the OVER connection metal is real segments priced in
-  estimated_wirelength — so the same-locus over candidate carries strictly
-  more WL than its thru twin and sorts strictly later in its own WL-sorted
-  pool.  (It was xfail while it asserted a phantom `Topology.adjusted_wl` /
-  per-topology teg_mode API; post-emission no separate "adjusted" figure
-  exists — priced metal IS built metal.)
+  estimated_wirelength — so the same-locus over twin carries strictly more
+  WL than its thru twin, and the extra metal is real segments.  Pools are
+  WL-sorted, so that is what "thru ranks before over, all else equal"
+  means; a cross-pool ORDINAL comparison is deliberately not asserted —
+  the two pools are different candidate populations, so an ordinal would
+  be confounded by the other OVER-affected members.  (The scenario was
+  xfail while it asserted a phantom `Topology.adjusted_wl` / per-topology
+  teg_mode API; post-emission no separate "adjusted" figure exists —
+  priced metal IS built metal.)
 """
 import pytest
 import buda
@@ -443,6 +447,14 @@ def then_exactly_one_vstub(ctx, trunk_key, block):
 # Then — measured ranking assertions (scenario 9)
 # ---------------------------------------------------------------------------
 
+def _mode_twins(ctx, trunk_key):
+    _, thru_c = _locus_candidate(ctx['mode_pools']['thru'], trunk_key)
+    _, over_c = _locus_candidate(ctx['mode_pools']['over'], trunk_key)
+    assert thru_c is not None, f'{trunk_key!r} missing from thru pool'
+    assert over_c is not None, f'{trunk_key!r} missing from over pool'
+    return thru_c, over_c
+
+
 @then(parsers.re(
     r'the same-locus (?P<trunk_key>\S+) candidate has strictly higher '
     r'estimated wirelength under over than under thru'
@@ -450,34 +462,27 @@ def then_exactly_one_vstub(ctx, trunk_key, block):
 def then_over_twin_wl_higher(ctx, trunk_key):
     # The connection metal (both gap stubs to the trunk here) is ordinary
     # segments, so it shows up as real estimated_wirelength — the property
-    # the retired "adjusted_wl" concept was a placeholder for.
-    _, thru_c = _locus_candidate(ctx['mode_pools']['thru'], trunk_key)
-    _, over_c = _locus_candidate(ctx['mode_pools']['over'], trunk_key)
-    assert thru_c is not None, f'{trunk_key!r} missing from thru pool'
-    assert over_c is not None, f'{trunk_key!r} missing from over pool'
+    # the retired "adjusted_wl" concept was a placeholder for.  Pools are
+    # WL-sorted, so this is what makes the over twin sort later among
+    # otherwise-equal competitors; a cross-pool ordinal is NOT compared
+    # (the two pools are different populations — see the feature comment).
+    thru_c, over_c = _mode_twins(ctx, trunk_key)
     assert over_c.estimated_wirelength > thru_c.estimated_wirelength, (
         f'over twin must carry MORE priced metal: '
         f'thru wl={thru_c.estimated_wirelength}, over wl={over_c.estimated_wirelength}'
     )
-    assert len(over_c.segments) > len(thru_c.segments), (
-        f'the extra metal must be real segments: '
-        f'thru segs={len(thru_c.segments)}, over segs={len(over_c.segments)}'
-    )
 
 
 @then(parsers.re(
-    r'the (?P<trunk_key>\S+) candidate ranks strictly later in the over pool '
-    r'than in the thru pool'
+    r'the over twin of (?P<trunk_key>\S+) carries its extra wirelength '
+    r'as real segments'
 ))
-def then_over_twin_ranks_later(ctx, trunk_key):
-    # Pools are WL-sorted, so the over twin's real extra metal demotes it —
-    # the "thru ranks before over" intent, asserted on measured pools
-    # (measured rank 12 -> 18 of 22 on this geometry).
-    thru_rank, thru_c = _locus_candidate(ctx['mode_pools']['thru'], trunk_key)
-    over_rank, over_c = _locus_candidate(ctx['mode_pools']['over'], trunk_key)
-    assert thru_c is not None and over_c is not None, \
-        f'{trunk_key!r} missing from a pool (thru={thru_c}, over={over_c})'
-    assert over_rank > thru_rank, (
-        f'over twin must sort strictly later in its WL-sorted pool: '
-        f'thru rank={thru_rank}, over rank={over_rank}'
+def then_over_twin_extra_metal_is_segments(ctx, trunk_key):
+    # The extra WL is not an annotation on the side (the retired bridge was
+    # exactly that) — it is more Topology.segments, which is what the
+    # planner routes and the audits walk.
+    thru_c, over_c = _mode_twins(ctx, trunk_key)
+    assert len(over_c.segments) > len(thru_c.segments), (
+        f'the extra metal must be real segments: '
+        f'thru segs={len(thru_c.segments)}, over segs={len(over_c.segments)}'
     )

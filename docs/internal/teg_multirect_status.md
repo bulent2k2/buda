@@ -413,10 +413,16 @@ wrong.
    2 segs at rank 12 of 22, over wl=360 / 3 segs (both rects stubbed) at
    rank 18 of 22 — and on the §1.1 L-shape (`TRUNK_V@x250`): thru wl=300 /
    2 segs at rank 5, over wl=500 / 3 segs (the leg is real priced metal) at
-   rank 10.  The xfail scenario is REWRITTEN as `@landed` asserting exactly
-   that measured property (two pools on one geometry; over twin strictly
-   higher WL, strictly more segments, strictly later rank in its WL-sorted
-   pool — `test_busterm_over_the_block.py`, 9/9 passing, zero xfail), and
+   rank 10.  The xfail scenario is REWRITTEN as `@landed` asserting the
+   measured SAME-LOCUS-TWIN property (two pools on one geometry; over twin
+   strictly higher WL, its extra metal strictly more real segments —
+   `test_busterm_over_the_block.py`, 9/9 passing, zero xfail).  The ranks
+   above are recorded as observations, deliberately NOT asserted: the two
+   pools are different candidate populations (every OVER-affected member
+   shifts, not just the twin), so a cross-pool ordinal is confounded — the
+   WL-sorted-pool consequence "thru before over, all else equal" follows
+   from the WL comparison, which is what the test pins (Codex P2 on
+   PR #832, verified).  Also,
    `docs/script_reference/topologies.md`'s TRUNK rows no longer claim a
    `bridge_segments` carry (its TEG paragraph already described the
    post-emission mechanism — real wirelength, no "adjusted" figure).  §3's

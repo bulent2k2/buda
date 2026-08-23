@@ -232,9 +232,11 @@ never acted on.  All eight scenarios are blocked.
 — thru-before-over "adjusted-WL" ranking — was SETTLED by retiring the
 concept, not building it.  Post-emission the OVER connection metal is real
 segments priced in `estimated_wirelength`, so the scenario now asserts the
-measured property — same-locus over twin strictly higher WL / later rank in
-its WL-sorted pool — and passes; 9/9, zero xfail.  See
-teg_multirect_status.md open 4.)*
+measured same-locus-twin property — over twin strictly higher WL, its extra
+metal strictly more real segments (a cross-pool rank ordinal is deliberately
+not asserted: the two pools are different populations, so it would be
+confounded) — and passes; 9/9, zero xfail.  See teg_multirect_status.md
+open 4.)*
 
 The `Topology` struct lacks an `adjusted_wl` field (wirelength discounted by
 a per-scenario factor for topologies that benefit from block pass-through).
