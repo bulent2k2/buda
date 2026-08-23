@@ -406,6 +406,102 @@ def test_touched_but_split_islands_fire_teg_open():
         [v.message for v in teg]
 
 
+# ── the two Codex P1/P2 findings on the 1(a) emission (#828 review) ───────────
+
+def test_spine_slide_stays_inside_crossed_rect_despite_leg_tap():
+    # Codex P1 (#828): the connector leg's BUSTERM tap on the un-spanned rect
+    # used to mark the whole OVER block explicitly connected, and
+    # tighten_passthrough skips explicitly-connected blocks — so the spine
+    # crossing the OTHER rect purely by pass-through lost its clamp and NUTS
+    # could slide it beyond that rect's far face (measured slide [240,380]
+    # against a base ending at x=300): a routed TEG_OPEN under congestion.
+    # OVER blocks are now explicitly connected PER RECT: the tapped arm frees
+    # nothing about the crossed base, whose coverer stays clamped to its
+    # extent.  Vehicle: an L shifted off the die edge so the V spine crosses
+    # the base FULLY (both spine endpoints beyond it — no face tap on the
+    # base, unlike the §1.1 vehicle where the spine endpoint taps the base
+    # top face and masks the skip).
+    fp = buda.Floorplan()
+    fp.add_block_rects("L", [(0, 200, 100, 700),      # tall arm (tapped by leg)
+                             (0, 200, 300, 300)])     # base band (crossed only)
+    fp.set_block_teg_mode("L", buda.TegMode.OVER)
+    fp.add_block("src", 400, 500, 500, 600)
+    fp.add_block("dn", 120, 0, 220, 60)
+    g = buda.TopologyGenerator(fp)
+    g.set_layer_ids(4, 5)
+    cand = next(c for c in g.generate_candidates("src", ["L", "dn"])
+                if c.type.startswith("TRUNK_V@x260"))
+    ct = buda.ConnTopology()
+    ct.build(cand, fp)
+    spine = ct.segs()[0]
+    assert not spine.horiz and spine.perp_pos == 260
+    # The base's x-extent is [0, 300]; unclamped the window reached 380.
+    assert spine.perp_hi <= 300, (spine.perp_lo, spine.perp_hi)
+    # The leg keeps its own freedom (clamping is per untapped rect, not per
+    # block): it slides along the arm's y-extent through its tap window.
+    leg = next(cs for i, cs in enumerate(ct.segs())
+               if cs.horiz and any(bt is not None and bt.block_name == "L"
+                                   for bt in cand.seg_busterms.get(i, (None, None))))
+    assert leg.perp_hi > 300, (leg.perp_lo, leg.perp_hi)
+
+
+def test_spine_seat_interval_clamped_at_placement():
+    # Placement-level half of the P1 pin: route the same through-crossing
+    # shape and assert the spine's NUTS seat INTERVAL — the hard bound the
+    # placer obeys under ANY congestion (placing outside it is counted as a
+    # violation) — ends at the crossed base's far face, and the audit is
+    # clean.  Before the per-rect fix the seat window extended to x=380.
+    s = _session([
+        "add_block L rect 0 200 100 700 rect 0 200 300 300 teg_mode over",
+        "add_block src 400 500 500 600",
+        "add_block dn 120 0 220 60",
+        "def_layer 4 M4 H TOP 0",
+        "def_layer 5 M5 V TOP 0",
+        "add_bus d[4] src.tx L.rx,dn.rx",
+        "run_bundler STRICT",
+        "generate_topologies",
+    ] + _TRACKS)
+    w = s.bundles[0]
+    pin = next(i for i, c in enumerate(w.input.candidates)
+               if c.type.startswith("TRUNK_V@x260"))
+    for cmd in (f"select_topology 1 {pin + 1}", "run_planner", "run_nuts"):
+        with contextlib.redirect_stdout(io.StringIO()):
+            s.do_command(cmd)
+    spine = next(t for t in s.nuts_result.segments
+                 if t.bundle_id == 1 and t.seg_idx == 0)
+    assert not spine.horiz
+    assert spine.interval_hi <= 300, (spine.interval_lo, spine.interval_hi)
+    assert 0 <= spine.track_position <= 300
+    verdict, out = _check(s, "nuts")
+    assert verdict["by_kind"].get("TEG_OPEN", 0) == 0, out
+
+
+def test_connector_leg_respects_min_stub_length():
+    # Codex P2 (#828): the min-stub-length floor was only checked for
+    # has_stub entries, so the direct/partial-span connector-leg path
+    # bypassed it — a locus lying less than the floor outside an un-spanned
+    # rect emitted an illegally short leg no ordinary stub may have.  The
+    # floor now applies to each leg with the ordinary stub path's exact
+    # convention: a too-short leg SKIPS the trunk locus.  On the §1.1
+    # L-shape the notch trunk's leg is 150 units (x=100 arm face -> x=250
+    # trunk), so a floor of 100 keeps the candidate and a floor of 200
+    # rejects it (while looser trunks survive the floor on their own stubs).
+    def types_at(min_stub):
+        fp = buda.Floorplan()
+        fp.add_block_rects("L", [(0, 0, 100, 400), (0, 0, 400, 100)])
+        fp.set_block_teg_mode("L", buda.TegMode.OVER)
+        fp.add_block("src", 500, 150, 600, 250)
+        if min_stub is not None:
+            fp.set_min_stub_length(min_stub)
+        g = buda.TopologyGenerator(fp)
+        g.set_layer_ids(4, 5)
+        return [c.type for c in g.generate_candidates("src", ["L"])]
+
+    assert any(t.startswith("TRUNK_V@x250") for t in types_at(None))   # 150 >= 20
+    assert any(t.startswith("TRUNK_V@x250") for t in types_at(100))    # 150 >= 100
+    assert not any(t.startswith("TRUNK_V@x250") for t in types_at(200))  # 150 < 200
+
+
 def test_joined_contacts_audit_clean():
     # Control for the island verdict: ONE wire touching both rects (an H wire
     # at y=50 from x=50 crosses arm and base alike) is one island — no

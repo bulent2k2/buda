@@ -495,6 +495,57 @@ void tighten_passthrough(const Topology& topo, const Floorplan& fp,
             if (conn.kind == SegConn::BUSTERM)
                 explicitly_connected.insert(conn.block_name);
 
+    // A TEG-over block is explicitly connected PER RECT, not per block: OVER
+    // revokes internal continuity, so a tap on one rect says nothing about the
+    // others, and a rect covered only by pass-through still needs its coverer
+    // clamped.  Without this, the 1(a) connector leg's tap on the un-spanned
+    // rect marked the whole block explicitly connected and freed the spine to
+    // slide OFF the rect it crosses — under congestion NUTS could seat it
+    // beyond the crossed rect's far face while the leg still reached the other
+    // rect: a routed TEG_OPEN (Codex P1 on the 1(a) emission).  For each OVER
+    // multi-rect block with at least one UNTAPPED rect, drop the block-level
+    // skip and restrict the clamp below to its untapped rects (a tap's rect is
+    // attributed from the conn's endpoint: along = face_coord, perp = the
+    // segment's perp_pos — inclusive containment).  A fully-tapped OVER block
+    // keeps the historical block-level skip; non-OVER blocks are untouched.
+    std::map<std::string, std::vector<Rect>> over_untapped;
+    for (const auto& bname : topo.connected_block_names) {
+        if (!explicitly_connected.count(bname)) continue;   // no taps: the
+        if (over_untapped.count(bname)) continue;           // normal path clamps
+        if (fp.get_block_teg_mode(bname) != TegMode::OVER) continue;
+        auto rects = fp.get_block_rects(bname);
+        if (rects.size() < 2) continue;
+        std::vector<Rect> untapped;
+        for (const Rect& r : rects) {
+            bool tapped = false;
+            for (const auto& s : segs) {
+                for (const auto& conn : s.conns) {
+                    if (conn.kind != SegConn::BUSTERM || conn.block_name != bname)
+                        continue;
+                    const int px = s.horiz ? conn.face_coord : s.perp_pos;
+                    const int py = s.horiz ? s.perp_pos : conn.face_coord;
+                    if (px >= r.x1 && px <= r.x2 && py >= r.y1 && py <= r.y2) {
+                        tapped = true;
+                        break;
+                    }
+                }
+                if (tapped) break;
+            }
+            if (!tapped) untapped.push_back(r);
+        }
+        if (!untapped.empty()) {
+            explicitly_connected.erase(bname);
+            over_untapped[bname] = std::move(untapped);
+        }
+    }
+    auto rects_of_block = [&](const std::string& bname) {
+        auto it = over_untapped.find(bname);
+        if (it != over_untapped.end()) return it->second;
+        auto rects = fp.get_block_rects(bname);
+        if (rects.empty()) rects.push_back(fp.get_block_bounds(bname));
+        return rects;
+    };
+
     // A segment "covers" a pass-through block when it spans one of the block's
     // rects.  Two grades, by where the segment's perp_pos lands relative to the
     // rect face:
@@ -528,8 +579,7 @@ void tighten_passthrough(const Topology& topo, const Floorplan& fp,
     std::map<std::string, bool> has_strict_cover;
     for (const auto& bname : topo.connected_block_names) {
         if (explicitly_connected.count(bname)) continue;
-        auto rects = fp.get_block_rects(bname);
-        if (rects.empty()) rects.push_back(fp.get_block_bounds(bname));
+        auto rects = rects_of_block(bname);
         bool strict = false;
         for (const auto& s : segs) {
             for (const Rect& r : rects)
@@ -543,8 +593,7 @@ void tighten_passthrough(const Topology& topo, const Floorplan& fp,
         for (const auto& bname : topo.connected_block_names) {
             if (explicitly_connected.count(bname)) continue;
 
-            auto rects = fp.get_block_rects(bname);
-            if (rects.empty()) rects.push_back(fp.get_block_bounds(bname));
+            auto rects = rects_of_block(bname);
 
             // Union perp span and along span of every rect this segment spans
             // (INCLUSIVE of the boundary face — unchanged from the original; the

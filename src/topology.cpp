@@ -3026,10 +3026,24 @@ void TopologyGenerator::add_trunk(const Axis& axis, bool suppress_stubs,
         const auto& rects = blocks[i].rects;
         if (!has_stub[i]) {
             // Rectilinear pass-through: a connector leg is emitted at each
-            // un-spanned rect's along-centre (see the emission loop).
+            // un-spanned rect's along-centre (see the emission loop).  Enforce
+            // the minimum stub length on each leg exactly as the ordinary stub
+            // path does at the top of this function (a too-short stub SKIPS the
+            // trunk) — the legs are stubs on the stub layer/direction, and the
+            // early check only sees has_stub[] entries, so a locus lying less
+            // than the floor outside an un-spanned rect would otherwise emit an
+            // illegally short leg no ordinary stub is allowed to have (Codex P2
+            // on the 1(a) emission).
             if (!rects_are_rectilinear(rects)) continue;
+            const int min_leg = use_busterm_
+                ? floorplan_.get_min_stub_length(
+                      axis.along_horiz ? 1 /*VERTICAL*/ : 0 /*HORIZONTAL*/, stub_layer)
+                : 0;
             for (const auto& r : rects) {
                 if (locus >= axis.perp_lo(r) && locus <= axis.perp_hi(r)) continue;
+                int leg_len = (axis.perp_hi(r) < locus) ? locus - axis.perp_hi(r)
+                                                        : axis.perp_lo(r) - locus;
+                if (leg_len < min_leg) return;         // skip this trunk
                 int a = axis.along_center(r);
                 a_lo = std::min(a_lo, a);
                 a_hi = std::max(a_hi, a);
