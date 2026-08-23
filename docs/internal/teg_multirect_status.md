@@ -406,28 +406,91 @@ wrong.
 
 ### Medium
 
-5. **`thru` mode has no census.**  An externally-split TEG block is silent
+5. ~~**`thru` mode has no census.**  An externally-split TEG block is silent
    by design; add an INFO-level report (message-id catalogue) naming the
    rects left to internal routing, so a wrong `thru` assumption is
-   discoverable without reading the topology dump.
+   discoverable without reading the topology dump.~~  RESOLVED 2026-08-23:
+   **BUDA-1907** (INFO, catalogued) — at `check_design`'s placed stages,
+   each audited bundle's thru multi-rect blocks report which rects are
+   touched by no placed metal of the bundle, i.e. left to the block's
+   internal routing.  Computed INSIDE `detect_teg_open` (`src/verify.cpp`)
+   by the SAME `teg_touches` contact scan the OVER verdict uses — one
+   predicate, a report-only sink (`ConnResult::thru_census`) instead of a
+   violation — unioned over every metal group and reported only when the
+   bundle reaches the block at all (a block with no contact anywhere is a
+   coverage problem, not a thru-assumption one).  Surfaced by
+   `_check_design` with a BUDA-1913/1914-style verdict-keyed memo (bundle,
+   block, untouched-rect set — stage in the message, not the key), so the
+   dnuts repeat of an unchanged nuts verdict stays quiet while a placement
+   that moved a stub off a rect reports again.  NEVER a violation: the
+   audit verdict, `by_kind`, `--strict-check` and the QoR triple are all
+   unchanged, and INFO is counted by neither diag counter, so existing flow
+   logs' counts hold.  Fires on `demo/talk2.buda` (blk2 rect#1 / blk3
+   rect#0 — real thru reliance, previously invisible).  Tests:
+   `test_teg_thru_census.py` (fires naming the rects; memoized; silent when
+   every rect is reached; OVER gets TEG_OPEN, never the census; single-rect
+   silent; id in `dump_messages`).
 6. **Multi-rect never reaches the hier flow**: `derive_busterms` writes
    empty rects (`src/busterm.cpp:172`), every BDB→Floorplan projection is
    `add_block(bbox)`, and `tools/buda2bdb.py` collapses with a warning.
    Decide whether hier multi-rect is in scope; if not, document the boundary
    where users will hit it (resume sessions silently losing rect geometry).
-7. **`set_feedthru` on a multi-rect block is silently ignored**
+7. ~~**`set_feedthru` on a multi-rect block is silently ignored**
    (`src/topology.cpp:3056`).  Warn at declaration — the user stated an
-   intent the engine drops.
-8. **BITRUNK is bbox-only** (`src/topology.cpp:4401`, `:4467-4473`): the
+   intent the engine drops.~~  RESOLVED 2026-08-23: **BUDA-1908** (WARNING,
+   catalogued) at DECLARATION time in the CLI handler
+   (`src/buda_cmds/setup_cmds.py`): a `set_feedthru … on` naming a
+   multi-rect block — directly or via `*` — warns ONCE per command,
+   listing every affected block, while the declaration still takes effect
+   for the single-rect blocks it names.  `off` is deliberately not warned:
+   a multi-rect block never relays regardless of the flag, so disabling it
+   changes nothing AND the outcome matches the intent.  The engine gate
+   itself is unchanged (still skips multi-rect).  Tests:
+   `test_set_feedthru_multirect_warning.py`.
+8. ~~**BITRUNK is bbox-only** (`src/topology.cpp:4401`, `:4467-4473`): the
    datapath trees neither select rects nor bridge.  Acceptable as a scoping
-   decision, but undocumented.
+   decision, but undocumented.~~  RESOLVED-AS-DOCUMENTED 2026-08-23: the
+   scoping stands and is now stated where users read
+   (`docs/script_reference/topologies.md` — the BITRUNK table + the
+   `multi_trunk` option row — and CLAUDE.md's `generate_topologies` row).
+   The claim that makes it acceptable was VERIFIED by experiment rather
+   than assumed: a legacy `BITRUNK_H` on an OVER multi-rect design routed
+   end to end (4 endpoint blocks, the OVER receiver's second rect beyond
+   the rungs' along-span, its union-center stub landing in the gap) fires
+   **TEG_OPEN** at both placed stages naming the unreached rect — loud,
+   not silent — pinned by `test_teg_open.py::
+   test_bitrunk_on_over_block_fires_teg_open_end_to_end`.  On a `thru`
+   block the open-5 BUDA-1907 census covers the same blind spot as a
+   report.
 9. **`corner_margin` is inert for individual rects** (`src/topology.cpp:
    3296-3300`) — silently, on the faces multi-rect routing actually lands on.
-10. **Bridges are drawn by nobody** — web JSON serializes them, no client
+10. ~~**Bridges are drawn by nobody** — web JSON serializes them, no client
     renders them, the matplotlib viewer ignores them, and the explorer has
     no bridge affordance; `_rects_disconnected` is dead code while the
     dashed union box draws unconditionally.  A user cannot *see* the wire
-    that §1.1 shows is also never built.
+    that §1.1 shows is also never built.~~  Mostly EVAPORATED by the 1(a)
+    emission (OVER connection metal is ordinary segments, drawn everywhere
+    like any stub), and the remnant RESOLVED 2026-08-23: a **legacy-load**
+    bridge (`Topology::bridge_segments`, non-empty only on a candidate
+    restored from a pre-emission checkpoint — the case whose TEG_OPEN
+    message says "declared bridge is unrealized" about a wire nobody drew)
+    is now rendered by the matplotlib explorer AND the main viewer (abstract
+    and NUTS views, at its recorded nominal coordinates since it is unplaced
+    by definition) as a dashed, off-palette, labeled "unrealized bridge
+    (legacy checkpoint)" overlay — ONE shared helper,
+    `viz_common.draw_legacy_bridges`, main-viewer lines registered so
+    click-to-highlight covers them; a bridge-less topology draws zero extra
+    artists, so every live design's viz is unchanged (this supersedes the
+    §2.2 table's "restored bridges … no renderer draws them" Viz row for
+    the two matplotlib renderers; the web client still draws none).  Tests:
+    `test_viz_legacy_bridge.py` (headless Agg: injected `bridge_segments`
+    draws + registers, bridge-less draws none).  What remains AS the
+    owner's deliberate state, text now precise post-emission:
+    `_rects_disconnected` (`src/viz_common.py`) is kept-as-reference dead
+    code by its owner's own comment, and the dashed union box draws
+    unconditionally — neither is re-wired.  The explorer still has no
+    bridge-specific affordance beyond the overlay (nothing creates bridges
+    any more, so none is owed).
 11. ~~**Known generation pool bug (OPEN, audit C4-01)**: stub-suppressed
     TEG-over blocks skip the spine pre-extension, so gap-stub pairs float
     off-spine and the candidate is dropped~~ RESOLVED 2026-08-22 with open

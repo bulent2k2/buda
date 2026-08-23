@@ -671,9 +671,50 @@ static void detect_teg_open(const std::map<int, std::vector<TegMetal>>& groups,
                             ConnResult& result)
 {
     for (const auto& bname : topo.connected_block_names) {
-        if (fp.get_block_teg_mode(bname) != TegMode::OVER) continue;
         auto rects = fp.get_block_rects(bname);
         if (rects.size() < 2) continue;
+        if (fp.get_block_teg_mode(bname) != TegMode::OVER) {
+            // THRU census (open 5, report-only — never a violation): which
+            // rects does the route leave to the block's internal routing?
+            // Same inclusive contact predicate as the OVER verdict below
+            // (`teg_touches`), unioned over every metal group: a rect any
+            // bit reaches is externally attached, the rest rely on the
+            // block's declared internal equivalence.  Reported only when
+            // the bundle's metal reaches the block at all — a block with no
+            // contact anywhere is a coverage problem (BUSTERM_OPEN), not a
+            // thru-assumption one.
+            const int nr = (int)rects.size();
+            std::vector<char> touched(nr, 0);
+            bool any = false;
+            for (const auto& [label, metal] : groups) {
+                (void)label;
+                for (const auto& m : metal)
+                    for (int ri = 0; ri < nr; ++ri)
+                        if (!touched[ri] && teg_touches(m, rects[ri])) {
+                            touched[ri] = 1;
+                            any = true;
+                        }
+            }
+            if (!any) continue;
+            TegThruCensusEntry e;
+            e.bundle_id  = bundle_id;
+            e.block_name = bname;
+            e.n_rects    = nr;
+            std::ostringstream det;
+            for (int ri = 0; ri < nr; ++ri) {
+                if (touched[ri]) continue;
+                const Rect& r = rects[ri];
+                det << (e.n_untouched ? ", " : "") << "rect#" << ri
+                    << " (" << r.x1 << "," << r.y1 << ")-("
+                    << r.x2 << "," << r.y2 << ")";
+                ++e.n_untouched;
+            }
+            if (e.n_untouched) {
+                e.detail = det.str();
+                result.thru_census.push_back(std::move(e));
+            }
+            continue;
+        }
 
         bool any_group_touched = false;
         int  first_label = groups.empty() ? -1 : groups.begin()->first;

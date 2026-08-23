@@ -99,8 +99,29 @@ struct ConnViolation {
     std::string   message;
 };
 
+// Report-only census of a `teg_mode thru` multi-rect block's rects left to
+// the block's INTERNAL routing (touched by no placed metal of the bundle) —
+// teg_multirect_status.md open 5.  THRU means "internally connected", so an
+// untouched rect is NOT a violation: it is the declared meaning.  But when
+// that assumption is wrong there is nothing to discover it by short of
+// reading the topology dump, so the placed-stage audit says which rects the
+// route relies on the block to join — computed by the SAME contact scan
+// (`teg_touches`) the OVER audit's TEG_OPEN verdict uses, so the two
+// readings of "touched" cannot drift.  Surfaced by the CLI as an INFO
+// diagnostic (BUDA-1907), verdict-memoized so repeats stay quiet.
+struct TegThruCensusEntry {
+    int         bundle_id = -1;
+    std::string block_name;
+    int         n_rects     = 0;   // rects the block declares
+    int         n_untouched = 0;   // rects no placed metal of the bundle touches
+    std::string detail;            // "rect#i (x1,y1)-(x2,y2), ..." — the untouched ones
+};
+
 struct ConnResult {
     std::vector<ConnViolation> violations;
+    // Placed-stage THRU-block census (see TegThruCensusEntry) — report-only,
+    // never part of the ok() verdict.
+    std::vector<TegThruCensusEntry> thru_census;
     bool ok() const { return violations.empty(); }
 };
 

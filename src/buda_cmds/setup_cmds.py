@@ -21,6 +21,7 @@ in this module's COMMANDS dict; the buda_cmds package assembles the
 full registry that buda_cli.do_command dispatches through.
 """
 import buda
+import buda_diag
 import sys
 import re
 
@@ -259,6 +260,28 @@ def cmd_set_feedthru(session, cmd, args, cmd_line):
                         layer_ids.append(session._layer_name_map[t])
                     else:
                         print(f"Warning: unknown layer '{t}' in set_feedthru")
+            # Feedthru is single-rect only in the engine (the trunk
+            # generator's "MVP: single-rect only" gate skips multi-rect
+            # blocks with no report — teg_multirect_status.md open 7), so a
+            # declaration ENABLING it for a multi-rect block states an intent
+            # the engine drops.  Say so at declaration time, once, naming
+            # every affected block; the declaration still takes effect for
+            # every other block it names.  `off` is not warned: a multi-rect
+            # block never relays regardless of the flag, so disabling it
+            # changes nothing AND the outcome matches the intent.
+            if val:
+                if blocks_wild:
+                    cands = [n for n, _ in session.fp.get_all_blocks()]
+                else:
+                    cands = block_names
+                multi = [n for n in cands
+                         if len(session.fp.get_block_rects(n)) > 1]
+                if multi:
+                    buda_diag.emit(
+                        "BUDA-1908",
+                        f"set_feedthru: feedthru is single-rect only — the "
+                        f"declaration has no effect for multi-rect "
+                        f"block(s): {', '.join(sorted(multi))}")
             if blocks_wild and layers_wild:
                 session.fp.set_feedthru(val)
             elif blocks_wild:

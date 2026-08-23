@@ -865,6 +865,7 @@ class ReportsMixin:
 
         total = 0
         collected = []   # (prefix, violation) — aggregated below unless --verbose-conn
+        thru_census = []  # TegThruCensusEntry — placed-stage THRU report (open 5)
         tug_bundles = 0  # realization-risk advisory (NOT violations); nuts/dnuts only
         tug_pairs = 0
         ndr_index = None  # shared detailed-row index, built on first governed bundle
@@ -955,6 +956,9 @@ class ReportsMixin:
                                            zone_fp=self.fp)
 
                 violations = list(res.violations)
+                # THRU-block census rows (nuts/dnuts only — check_topo never
+                # fills them): report-only, surfaced after the verdict below.
+                thru_census.extend(getattr(res, "thru_census", ()) or ())
                 violations += self._net_driver_fidelity(w, topo)
                 # R9 typed NDR audit (dnuts stage, governed bundles only —
                 # no rules = no calls = byte-identical output): under-width
@@ -1000,6 +1004,32 @@ class ReportsMixin:
             print(f"  Advisory: {tug_pairs} tug-of-war realization-risk pair(s) "
                   f"on {tug_bundles} bundle(s) — opposite-pull riders stretch an "
                   f"interior trunk; see 'dump_topologies --problems'.")
+
+        # THRU-block census (teg_multirect_status.md open 5): which rects of a
+        # `teg_mode thru` multi-rect block are left to the block's internal
+        # routing — INFO, never a violation (thru DECLARES the rects
+        # internally connected; this makes the assumption discoverable when
+        # it is wrong).  Verdict-keyed memo in the BUDA-1913/1914 style: a
+        # repeat of the same verdict (same bundle, block, untouched-rect set)
+        # says nothing — the nuts- and dnuts-stage audits usually agree — but
+        # a verdict that genuinely CHANGED (placement moved a stub off a
+        # rect) is reported rather than suppressed by a key already seen.
+        # The stage is in the message, deliberately not in the key.
+        if thru_census:
+            said = self.__dict__.setdefault("_teg_thru_census_said", set())
+            for e in thru_census:
+                verdict = (e.bundle_id, e.block_name, e.detail)
+                if verdict in said:
+                    continue
+                said.add(verdict)
+                buda_diag.emit(
+                    "BUDA-1907",
+                    f"Bundle {e.bundle_id}: teg_mode thru block "
+                    f"'{e.block_name}': {e.n_untouched} of {e.n_rects} "
+                    f"rect(s) touched by no placed metal of the bundle — "
+                    f"{e.detail} — left to the block's internal routing "
+                    f"(thru declares the rects internally connected; report "
+                    f"only, not a violation) ({stage})")
 
         # LAYER_CAP / LAYER_SHARE advisory (hier_layer_caps.md Phase 4,
         # defense-in-depth): in-effect layers vs each governed bundle's band

@@ -124,6 +124,8 @@ updating this table, which is exactly the drift the guard now prevents):
 | BUDA-1903 | WARNING | a `visualize` command opened no window (INFO when the suppression was asked for: `--no-viz` / `buda::start -viz 0`) |
 | BUDA-1904 | WARNING | a restored fan-in bundle has no per-bit endpoints (pre-v27 checkpoint), so it resumes untapered and wider than what was saved |
 | BUDA-1905 | FATAL | an input file a `require_file` declared is missing, so the run stopped before the command that would have read it |
+| BUDA-1907 | INFO | a `teg_mode thru` multi-rect block has rects no placed metal of the bundle touches — the route relies on the block's internal routing to join them (report only; thru declares them internally connected) |
+| BUDA-1908 | WARNING | `set_feedthru` names a multi-rect block, but feedthru is single-rect only, so the declaration has no effect for that block |
 | BUDA-1906 | FATAL | a command raised an engine error and the run stopped (the traceback is in the flow log; `BUDA_TRACEBACK=1` prints it) |
 | BUDA-1912 | WARNING | an NDR rule's stored per-layer values are not readable and were dropped, so the rule restores layer-independent |
 | BUDA-1913 | WARNING | an NDR rule quantizes to no constraint on EVERY layer it can reach, so the buses it governs route exactly as ungoverned ones |

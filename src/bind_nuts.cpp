@@ -682,9 +682,20 @@ void bind_nuts(py::module_& m) {
         .def_readwrite("block_name", &ConnViolation::block_name)
         .def_readwrite("message",    &ConnViolation::message);
 
+    // Report-only THRU-block census (teg_multirect_status.md open 5): rects
+    // a `teg_mode thru` multi-rect block is left to join internally.  Never
+    // part of ok() — the CLI surfaces it as BUDA-1907 (INFO).
+    py::class_<TegThruCensusEntry>(m, "TegThruCensusEntry")
+        .def_readwrite("bundle_id",   &TegThruCensusEntry::bundle_id)
+        .def_readwrite("block_name",  &TegThruCensusEntry::block_name)
+        .def_readwrite("n_rects",     &TegThruCensusEntry::n_rects)
+        .def_readwrite("n_untouched", &TegThruCensusEntry::n_untouched)
+        .def_readwrite("detail",      &TegThruCensusEntry::detail);
+
     py::class_<ConnResult>(m, "ConnResult")
-        .def_readwrite("violations", &ConnResult::violations)
-        .def("ok",                   &ConnResult::ok);
+        .def_readwrite("violations",  &ConnResult::violations)
+        .def_readwrite("thru_census", &ConnResult::thru_census)
+        .def("ok",                    &ConnResult::ok);
 
     m.def("check_topo",  &check_topo,
           py::arg("ct"), py::arg("topo"), py::arg("fp"), py::arg("bundle_id"));
