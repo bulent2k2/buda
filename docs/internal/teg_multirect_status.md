@@ -370,6 +370,14 @@ wrong.
    `(0, 0, 1)` at abstract WL 166 / detailed WL 672, added to
    `qor_corpus.py`'s CORPUS so the audit verdict is QoR-guarded; a 1(a)
    emission flips it to 0/0/0 and the diff is the desired loud signal.
+   *(That flip happened the same day 1(a) merged into this branch: the
+   emission re-sorted the pool — the leg's real WL replaced the priced
+   bridge — so the pin moved to `select_topology 1 10` (still
+   `TRUNK_V@x250`, now trunk + stub + leg), the guard test became
+   `test_teg_over_audit_flow_routes_clean` asserting 3 segs / 12 bit-wires
+   / both audits Success / no TEG_OPEN, and the committed qor_table row
+   `(0,0,1)` is stale until the nightly refresh re-measures it — the
+   designed mechanism, blessed in PR #824's body.)*
    `demo/talk2.buda` (the deepest multi-rect flow, `thru`, previously run
    by no test) is wired into `test_flow_scripts.py`
    (`test_talk2_multirect_thru_full_pipeline`: sidecar pin honored, 3

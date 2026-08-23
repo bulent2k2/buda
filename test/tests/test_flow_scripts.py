@@ -1235,42 +1235,40 @@ def test_talk2_multirect_thru_full_pipeline():
     assert "TEG" not in out
 
 
-def test_teg_over_audit_flow_pins_teg_open():
+def test_teg_over_audit_flow_routes_clean():
     """flow/teg_over_audit.buda (teg_multirect_status.md open 2): the §1.1
-    repro as a checked-in corpus vehicle — a pinned bridge-reliant candidate
-    on a `teg_mode over` block, routed through DNUTS.  EXPECTED DIRTY: the
-    bridge is generation-only, so the tall arm is unreached and check_design
-    must report TEG_OPEN at both placed stages (the open 1(b) audit).
+    geometry as a checked-in corpus vehicle — the formerly-bridge-reliant
+    TRUNK_V@x250 pinned on a `teg_mode over` block, routed through DNUTS.
 
-    This test is also the flow's pin-fragility guard: `select_topology 1 13`
-    is a hard index, so a re-sorted pool that lands a different shape there
-    fails HERE (the planner line names the expected candidate) instead of
-    silently auditing a different route.  When open 1(a) emission makes the
-    bridge real metal, the TEG_OPEN expectations below flip to clean — that
-    flip is the fix's proof, mirror-imaging test_teg_open.py."""
+    EXPECTED CLEAN since open 1(a) emission: the trunk generator emits a real
+    connector leg to the tall arm (ordinary segments; bridges are legacy-load
+    only), so the route carries 3 segments / 12 bit-wires and both audits
+    report Success.  This is the flip the vehicle merged to detect (it merged
+    EXPECTED DIRTY with TEG_OPEN pinned at both stages, corpus row 1 viol) —
+    and it now guards emission the other way: if the leg regresses, TEG_OPEN
+    fires, the Success assertions fail HERE, and the corpus row moves.
+
+    Also the flow's pin-fragility guard: `select_topology 1 10` is a hard
+    index, so a re-sorted pool that lands a different shape there fails
+    HERE (the planner line names the expected candidate) instead of silently
+    auditing a different route."""
     out, rc = run_script("teg_over_audit.buda")
-    # Report-only audit: the flow exits 0 while dirty (--strict-check gates).
     assert rc == 0, f"teg_over_audit.buda: non-zero exit {rc}\n{out}"
     assert re.search(
         r"\[Planner\] Bundle 1 .*TRUNK_V@x250 \[pinned\]", out), (
-        "index 13 no longer pins the bridged TRUNK_V@x250 — the candidate "
-        "pool was re-sorted; update the flow's select_topology index "
+        "index 10 no longer pins TRUNK_V@x250 — the candidate pool was "
+        "re-sorted; update the flow's select_topology index "
         f"(see the flow header):\n{out}")
-    # The route itself is geometrically fine — the violation is semantic.
+    # trunk + stub + connector leg, all placed cleanly.
     segs, viols, ovlps = nuts_summary(out)
-    assert (segs, viols, ovlps) == (2, 0, 0)
+    assert (segs, viols, ovlps) == (3, 0, 0)
     dm = re.search(
         r"\[DetailedNUTS\] (\d+) net segments placed, (\d+) bits unplaced", out)
     assert dm, "DetailedNUTS summary not found"
-    assert (int(dm.group(1)), int(dm.group(2))) == (8, 0)
-    # The point of the vehicle: TEG_OPEN at BOTH placed stages, naming the
-    # unreached rect (nuts) and the per-bit count (dnuts).
-    assert "OVER block 'L': rect#0 (0,0)-(100,400) touched by no placed metal" \
-        in out, out
-    assert "(nuts)" in out, out
-    assert "4 bit(s) — an OVER block's rect touched by no placed metal" in out, out
-    assert "Success: no violations found." not in out, \
-        "the vehicle must stay dirty until open 1(a) emission lands"
+    assert (int(dm.group(1)), int(dm.group(2))) == (12, 0)
+    # The point of the vehicle, post-emission: BOTH audits clean, no TEG_OPEN.
+    assert out.count("Success: no violations found.") == 2, out
+    assert "TEG_OPEN" not in out, out
 
 
 def test_ndr_bottom_up_composition():
