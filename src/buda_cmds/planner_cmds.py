@@ -509,10 +509,23 @@ def cmd_retire_sidecar(session, cmd, args, cmd_line):
     opath = getattr(session, "_bdb_open_path", None)
     if not opath or opath == ":memory:":
         return
-    if opath in (getattr(session, "_tmp_bdbs", None) or []) and not (
-            getattr(session, "_bdb_writeback_src", None)
-            and getattr(session, "_bdb_writeback_bin", None) == opath):
-        return                       # throwaway materialization: not durable
+    if opath in (getattr(session, "_tmp_bdbs", None) or []):
+        if not (getattr(session, "_bdb_writeback_src", None)
+                and getattr(session, "_bdb_writeback_bin", None) == opath):
+            return                   # throwaway materialization: not durable
+        # Writeback-armed: the DURABLE copy is the `.sql` source, and it has
+        # NOT been written yet at a mid-session commit (`_write_bdb_sql`
+        # runs at save / exit).  Flush first and retire only on success —
+        # otherwise an interruption between here and exit would have
+        # deleted the only `.json` copy while the durable file still lacked
+        # the pins (Codex #826).
+        try:
+            if not session._write_bdb_sql():
+                return
+        except Exception as e:
+            print(f"retire_sidecar: writeback flush failed ({e}) -- "
+                  f"keeping {path}")
+            return
     try:
         with open(path) as f:
             data = json.load(f)
