@@ -156,7 +156,7 @@ struct Busterm {
     // (TopoEdit/USER) or restored segment ending on the physical face of a
     // margined multi-rect block must not lose its tap (PR #835 P2).  Declared
     // last so the 5-field aggregate initializations stay valid.
-    std::vector<Rect> orig_rects;
+    std::vector<Rect> orig_rects = {};
 };
 // Per-segment busterm annotation: .first = busterm at segment start endpoint,
 // .second = busterm at segment end endpoint.  nullopt means the endpoint is an
