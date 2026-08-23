@@ -393,6 +393,29 @@ class PersistMixin:
                     continue
                 uid = rows[0].topo_uid if rows else None
             if uid is None:
+                # No single pin — a GROUP pin may still be durable: the
+                # pinned_group meta was load_pipeline-only, so a rebuild
+                # silently dropped a super-candidate pin the same way it
+                # dropped USER pins (the generation persist then erased the
+                # meta).  Map the family uids onto the regenerated pool,
+                # exactly as the load side does.
+                raw = self.bdb.meta_get(f"pinned_group:{bid}", "")
+                if raw:
+                    import json as _json
+                    try:
+                        guids = set(_json.loads(raw))
+                    except (ValueError, TypeError):
+                        guids = set()
+                    members = [i for i, t in enumerate(w.input.candidates)
+                               if buda.topo_uid(t) in guids] if guids else []
+                    if members:
+                        w.input.pinned_group = members
+                        print(f"[BDB] bundle {bid}: durable group pin "
+                              f"restored ({len(members)} of {len(guids)} "
+                              f"family member(s) in the rebuilt pool)")
+                    elif guids:
+                        print(f"Warning: bundle {bid}: durable group pin "
+                              f"matches no regenerated candidate — dropped")
                 continue
             for ci, cand in enumerate(w.input.candidates):
                 if buda.topo_uid(cand) == uid:
@@ -425,6 +448,58 @@ class PersistMixin:
             else:
                 print(f"Warning: bundle {bid}: durable pin (uid {uid}) "
                       f"matches no regenerated candidate — pin dropped")
+
+    def _reinject_bdb_user_topos(self):
+        """The REBUILD door of USER-candidate durability: re-inject kept
+        `source='user'` topology rows into the regenerated candidate pool.
+
+        Regeneration cannot produce a hand-edited candidate, so before this
+        a rebuild (a `-b` rerun, any re-run of the flow) silently orphaned
+        it: the row survived the keep_user wipe, but `_apply_bdb_pins` found
+        no matching uid in the pool and DROPPED the pin — durably, since the
+        generation persist rewrites the pin state (the custom-topologies
+        guide's worked example was the reproduction).  Restoring the row
+        through `_topo_from_rows` — the same code load_pipeline uses — puts
+        the candidate back (uid preserved by the v14 round-trip contract),
+        so the pin, the forced-layer meta, and a group pin re-attach through
+        the machinery that already exists.  A candidate whose blocks no
+        longer resolve in its frame (the design changed) is skipped LOUD;
+        a uid already in the pool (the flow itself re-ran the edits, or the
+        sidecar replayed them) is skipped silently."""
+        if self.bdb is None or not self.bundles:
+            return
+        resolver = self._make_topo_fp_resolver()
+        for w in self.bundles:
+            bid = str(w.input.original_bundle.id)
+            try:
+                rows = [tr for tr in self.bdb.topologies(bid)
+                        if tr.source == "user"]
+            except RuntimeError:
+                continue
+            if not rows:
+                continue
+            pool_uids = {buda.topo_uid(t) for t in w.input.candidates}
+            fp = resolver(w) or self.fp
+            bridges_by_ci = {}
+            for brg in self.bdb.all_topology_bridges(bid):
+                bridges_by_ci.setdefault(brg.cand_index, []).append(brg)
+            added = list(w.input.candidates)
+            for tr in rows:
+                if tr.topo_uid and tr.topo_uid in pool_uids:
+                    continue
+                t, bad = self._topo_from_rows(bid, tr, fp, bridges_by_ci)
+                if bad:
+                    print(f"  [BDB] bundle {bid}: kept USER candidate "
+                          f"{tr.topo_uid} references missing block(s) "
+                          f"{sorted(set(bad))} — not restored into the "
+                          f"rebuilt pool")
+                    continue
+                added.append(t)
+                print(f"[BDB] bundle {bid}: USER candidate restored into "
+                      f"the rebuilt pool as topo {len(added)} "
+                      f"(uid {tr.topo_uid})")
+            if len(added) != len(w.input.candidates):
+                w.input.candidates = added
 
     @_batched
     def _persist_topologies(self):
@@ -858,6 +933,77 @@ class PersistMixin:
         return (n_ns, n_nv)
 
 
+    def _topo_from_rows(self, bundle_id, tr, fp, bridges_by_ci):
+        """Rebuild ONE candidate Topology from its persisted rows — the
+        per-candidate body of `_restore_wrapper`'s loop, extracted so the
+        rebuild-door USER re-inject (`_reinject_bdb_user_topos`) restores a
+        kept candidate through the SAME code as load_pipeline.  Returns
+        (topology, bad_block_names); the seg-busterm links are restored only
+        when every referenced block resolves in `fp` (the caller decides
+        what a miss means)."""
+        import json
+        t = buda.Topology()
+        t.type = tr.type
+        t.estimated_wirelength = tr.wirelength
+        t.trunk_location = tr.trunk_location
+        t.pass_through_count = tr.pass_through_count
+        t.connected_block_names = (json.loads(tr.connected_blocks)
+                                   if tr.connected_blocks else [])
+        t.feedthru_blocks = (json.loads(tr.feedthru_blocks)
+                             if tr.feedthru_blocks else [])
+        segs = []
+        for sr in self.bdb.topology_segments(bundle_id, tr.cand_index):
+            sg = buda.Segment()
+            sg.start = buda.Point(int(sr.x1), int(sr.y1))
+            sg.end = buda.Point(int(sr.x2), int(sr.y2))
+            sg.layer_hint = sr.layer_hint
+            sg.is_jog = sr.is_jog
+            sg.edge_id = sr.edge_id       # MST-edge identity (v14)
+            sg.perp_clamp_lo = sr.perp_clamp_lo   # overlap-U slide clamp (v16)
+            sg.perp_clamp_hi = sr.perp_clamp_hi
+            segs.append(sg)
+        t.segments = segs        # reassign whole vector (pybind copies)
+        bad = [n for n in t.connected_block_names
+               if not fp.has_block(n)]
+        if not bad:
+            # Restore the authoritative seg_busterms annotation from the
+            # persisted topology_seg_busterm links — LOGICALLY, never
+            # re-derived from geometry (single-source-of-topo-truth
+            # Phase 3: annotate_topology would just re-guess what the
+            # links record exactly).
+            # (also re-derives seg_conns — Phase 4's junction records —
+            # inside the helper, so EVERY reload path gets a fully
+            # annotated topology, not just load_pipeline; Phase 5 will
+            # persist them logically like the busterm links.)
+            buda.load_seg_busterms(self.bdb, bundle_id, tr.cand_index, t)
+        # TEG-over bridges (v11): the explicit segment over a multi-rect
+        # block's notch, kept OUTSIDE t.segments (bridge_segments map).
+        # Only a PRE-CHANGE checkpoint holds rows (generation emits
+        # ordinary connector segments now — open 1(a)); restoring them
+        # keeps the candidate's recorded content, and a restored
+        # bridge-reliant route is reported by the TEG_OPEN audit
+        # ("declared bridge is unrealized").
+        bridges = {}
+        for brg in bridges_by_ci.get(tr.cand_index, ()):
+            sg = buda.Segment()
+            sg.start = buda.Point(int(brg.x1), int(brg.y1))
+            sg.end = buda.Point(int(brg.x2), int(brg.y2))
+            sg.layer_hint = brg.layer_hint
+            sg.is_jog = brg.is_jog
+            bridges[brg.block_name] = sg
+        if bridges:
+            t.bridge_segments = bridges
+        # v14 uid integrity: topo_uid is recomputable from the persisted
+        # rows alone, so a reloaded candidate must reproduce it exactly
+        # (uid(generated) == uid(reloaded) — Phase E1's round-trip
+        # contract). Pre-v14 checkpoints carry no uid and backfill
+        # silently; a mismatch on a v14 checkpoint flags a lossy reload.
+        if tr.topo_uid and not bad and buda.topo_uid(t) != tr.topo_uid:
+            print(f"  Warning: bundle {bundle_id} cand {tr.cand_index}: "
+                  f"reloaded topo_uid {buda.topo_uid(t)} != persisted "
+                  f"{tr.topo_uid} (lossy checkpoint?)")
+        return t, bad
+
     def _restore_wrapper(self, br, h_layer_ids, v_layer_ids, missing_blocks,
                          fp=None, fp_env=None):
         """Rebuild ONE BundleWrapper from its persisted rows (bundle +
@@ -942,68 +1088,9 @@ class PersistMixin:
         for brg in self.bdb.all_topology_bridges(br.id):
             bridges_by_ci.setdefault(brg.cand_index, []).append(brg)
         for tr in topos:
-            t = buda.Topology()
-            t.type = tr.type
-            t.estimated_wirelength = tr.wirelength
-            t.trunk_location = tr.trunk_location
-            t.pass_through_count = tr.pass_through_count
-            t.connected_block_names = (json.loads(tr.connected_blocks)
-                                       if tr.connected_blocks else [])
-            t.feedthru_blocks = (json.loads(tr.feedthru_blocks)
-                                 if tr.feedthru_blocks else [])
-            segs = []
-            for sr in self.bdb.topology_segments(br.id, tr.cand_index):
-                sg = buda.Segment()
-                sg.start = buda.Point(int(sr.x1), int(sr.y1))
-                sg.end = buda.Point(int(sr.x2), int(sr.y2))
-                sg.layer_hint = sr.layer_hint
-                sg.is_jog = sr.is_jog
-                sg.edge_id = sr.edge_id       # MST-edge identity (v14)
-                sg.perp_clamp_lo = sr.perp_clamp_lo   # overlap-U slide clamp (v16)
-                sg.perp_clamp_hi = sr.perp_clamp_hi
-                segs.append(sg)
-            t.segments = segs        # reassign whole vector (pybind copies)
-            bad = [n for n in t.connected_block_names
-                   if not fp.has_block(n)]
+            t, bad = self._topo_from_rows(br.id, tr, fp, bridges_by_ci)
             if bad:
                 missing_blocks.update(bad)
-            else:
-                # Restore the authoritative seg_busterms annotation from the
-                # persisted topology_seg_busterm links — LOGICALLY, never
-                # re-derived from geometry (single-source-of-topo-truth
-                # Phase 3: annotate_topology would just re-guess what the
-                # links record exactly).
-                # (also re-derives seg_conns — Phase 4's junction records —
-                # inside the helper, so EVERY reload path gets a fully
-                # annotated topology, not just load_pipeline; Phase 5 will
-                # persist them logically like the busterm links.)
-                buda.load_seg_busterms(self.bdb, br.id, tr.cand_index, t)
-            # TEG-over bridges (v11): the explicit segment over a multi-rect
-            # block's notch, kept OUTSIDE t.segments (bridge_segments map).
-            # Only a PRE-CHANGE checkpoint holds rows (generation emits
-            # ordinary connector segments now — open 1(a)); restoring them
-            # keeps the candidate's recorded content, and a restored
-            # bridge-reliant route is reported by the TEG_OPEN audit
-            # ("declared bridge is unrealized").
-            bridges = {}
-            for brg in bridges_by_ci.get(tr.cand_index, ()):
-                sg = buda.Segment()
-                sg.start = buda.Point(int(brg.x1), int(brg.y1))
-                sg.end = buda.Point(int(brg.x2), int(brg.y2))
-                sg.layer_hint = brg.layer_hint
-                sg.is_jog = brg.is_jog
-                bridges[brg.block_name] = sg
-            if bridges:
-                t.bridge_segments = bridges
-            # v14 uid integrity: topo_uid is recomputable from the persisted
-            # rows alone, so a reloaded candidate must reproduce it exactly
-            # (uid(generated) == uid(reloaded) — Phase E1's round-trip
-            # contract). Pre-v14 checkpoints carry no uid and backfill
-            # silently; a mismatch on a v14 checkpoint flags a lossy reload.
-            if tr.topo_uid and not bad and buda.topo_uid(t) != tr.topo_uid:
-                print(f"  Warning: bundle {br.id} cand {tr.cand_index}: "
-                      f"reloaded topo_uid {buda.topo_uid(t)} != persisted "
-                      f"{tr.topo_uid} (lossy checkpoint?)")
             if tr.is_selected:
                 sel = len(cands)     # compact index of this candidate
                 sel_ci = tr.cand_index

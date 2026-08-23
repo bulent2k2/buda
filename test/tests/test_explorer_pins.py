@@ -464,3 +464,68 @@ def test_retire_never_touches_a_throwaway_materialization(tmp_path):
     out = _quiet(s, "retire_sidecar")
     assert "durable" not in out
     assert os.path.exists(side), "retire deleted the only persistence"
+
+
+# ---------------------------------------------------------------------------
+# 7. Rebuild durability: USER candidates re-inject; group pins re-attach
+# ---------------------------------------------------------------------------
+
+def test_user_pin_survives_rebuild(tmp_path):
+    # The asymmetry flagged in the guide review (#831): regeneration cannot
+    # produce a hand-edited candidate, so a rebuild dropped its pin durably.
+    # The generation tail now re-injects kept USER rows into the pool
+    # (through the same row-restore load_pipeline uses, uid preserved), so
+    # the pin AND the forced layers re-attach like any generated candidate.
+    db = str(tmp_path / "flow.ckpt.bdb")
+    s1 = buda_cli.BudaSession()
+    s1.no_viz = True
+    s1.script_path = str(tmp_path / "flow.buda")
+    _quiet(s1, *_SETUP, f"open_bdb {db}", *_BUNDLE,
+           "edit_topology 1 2", "edit_set_layer 0 6", "edit_commit pin",
+           "run_planner 3")
+    w1 = s1.bundles[0]
+    user_uid = buda.topo_uid(
+        w1.input.candidates[w1.plan.selected_topology_index])
+    forced = list(w1.input.pinned_seg_layers)
+    assert forced and any(l != -1 for l in forced)
+    del s1
+
+    # A REBUILD (no load_pipeline): the flow re-runs from the top.
+    s2 = buda_cli.BudaSession()
+    s2.no_viz = True
+    s2.script_path = str(tmp_path / "flow.buda")
+    out = _quiet(s2, *_SETUP, f"open_bdb {db}", *_BUNDLE)
+    assert "USER candidate restored into the rebuilt pool" in out
+    assert "durable pin restored" in out
+    w2 = s2.bundles[0]
+    sel = w2.plan.selected_topology_index
+    assert w2.input.topology_pinned
+    assert buda.topo_uid(w2.input.candidates[sel]) == user_uid
+    assert w2.input.candidates[sel].type == "USER"
+    assert list(w2.input.pinned_seg_layers) == forced, \
+        "forced layers did not re-attach to the re-injected USER candidate"
+    _quiet(s2, "run_planner 3")
+    sel2 = s2.bundles[0].plan.selected_topology_index
+    assert buda.topo_uid(s2.bundles[0].input.candidates[sel2]) == user_uid, \
+        "the planner re-decided the re-injected USER pin"
+
+
+def test_rebuild_skips_a_user_candidate_whose_blocks_vanished(tmp_path):
+    # The honest limit: a kept USER row whose blocks no longer resolve (the
+    # design changed) is skipped LOUD, never restored as garbage geometry.
+    db = str(tmp_path / "flow.ckpt.bdb")
+    s1 = buda_cli.BudaSession()
+    s1.no_viz = True
+    s1.script_path = str(tmp_path / "flow.buda")
+    _quiet(s1, *_SETUP, f"open_bdb {db}", *_BUNDLE,
+           "edit_topology 1 2", "edit_commit pin", "run_planner 3")
+    del s1
+
+    setup_renamed = [c.replace("add_block A ", "add_block A2 ")
+                     .replace("A.p", "A2.p") for c in _SETUP]
+    s2 = buda_cli.BudaSession()
+    s2.no_viz = True
+    s2.script_path = str(tmp_path / "flow.buda")
+    out = _quiet(s2, *setup_renamed, f"open_bdb {db}", *_BUNDLE)
+    assert "references missing block(s)" in out
+    assert "USER candidate restored" not in out

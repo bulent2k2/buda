@@ -266,3 +266,30 @@ def test_sidecar_group_pin_survives_reopen_and_resave(tmp_path):
     s2.script_path = str(tmp_path / "flow.buda")
     _quiet(s2, *_SETUP, *_BUNDLE)
     assert s2.bundles[0].input.pinned_group
+
+
+@pytest.mark.mid
+def test_group_pin_survives_rebuild(tmp_path):
+    # The rebuild door (guide review #831): pinned_group meta was
+    # load_pipeline-only, so a re-run of the flow silently dropped a
+    # super-candidate pin (and the generation persist erased the meta).
+    # _apply_bdb_pins now maps the family uids onto the regenerated pool.
+    db = str(tmp_path / "grpreb.bdb")
+    s1 = _fresh(*_SETUP, f"open_bdb {db}", *_BUNDLE)
+    w1 = s1.bundles[0]
+    fam = _family(s1, w1)
+    _quiet(s1, f"select_topology 1 group:{fam[0] + 1}")
+    fam_uids = {buda.topo_uid(w1.input.candidates[i]) for i in fam}
+    del s1
+
+    # REBUILD: bundler + generation re-run against the same BDB.
+    s2 = _fresh(*_SETUP, f"open_bdb {db}", *_BUNDLE)
+    w2 = s2.bundles[0]
+    assert w2.input.pinned_group, "group pin dropped by the rebuild"
+    restored = {buda.topo_uid(w2.input.candidates[i])
+                for i in w2.input.pinned_group}
+    assert restored == fam_uids
+    _quiet(s2, "run_planner 3")
+    sel_uid = buda.topo_uid(
+        w2.input.candidates[w2.plan.selected_topology_index])
+    assert sel_uid in fam_uids                    # planner stayed in family

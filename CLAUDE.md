@@ -109,7 +109,14 @@ checkpoint (pin row by uid + layer meta) are removed from the `.json`,
 entries only the sidecar can replay on a rebuild (USER op-logs,
 `group_uids`, notes) are kept, the file is deleted only when it empties,
 and a session without a DURABLE BDB never retires (there the json is the
-only persistence).
+only persistence).  A REBUILD re-attaches everything the checkpoint holds:
+kept USER rows re-inject into the regenerated pool at the generation tail
+(`_reinject_bdb_user_topos`, through the same `_topo_from_rows` restore
+load_pipeline uses, uid preserved — regeneration cannot produce a
+hand-edited candidate, so a `-b` rerun used to drop its pin durably) and
+`_apply_bdb_pins` maps a `pinned_group` family onto the regenerated pool
+(the meta was load_pipeline-only); the honest limit is a USER candidate
+whose blocks left the design — skipped LOUD, rebuilt via `dump_user_ops`.
 The flow's OUTPUT means what `bin/buda` makes it mean too: `-i` arms
 `buda::log`, so the console gets ONE line per command plus the runtime
 summary and the detail goes to the `<flow_dir>/log/<stem>_flow.log` the CLI
