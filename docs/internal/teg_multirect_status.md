@@ -473,7 +473,19 @@ wrong.
    margin can turn a thin overlap into a gap — the emitted join metal is
    the honest consequence of declaring those faces unusable.  Tests:
    `test_multirect_corner_margin.py` (inset taps + carried rects, no-margin
-   physical faces unchanged, the per-rect per-axis guard).
+   physical faces unchanged, the per-rect per-axis guard).  Review follow-up
+   (PR #835 P2, confirmed by repro): `annotate_endpoints`' multi-rect branch
+   examined ONLY `Busterm::rects` (now inset) — unlike its single-rect
+   branch, which checks BOTH `orig_bbox` and the inset `bbox` — so a
+   hand-built (TopoEdit/USER) or restored endpoint landing on the PHYSICAL
+   face of a margined multi-rect block lost its tap and the block read
+   open.  Fixed by carrying the physical spelling on the Busterm
+   (`orig_rects`, the multi-rect twin of `orig_bbox`, populated only when a
+   nonzero margin makes it differ; hier offset/transform move it in step)
+   and having `rects_of` accept both spellings, exactly mirroring the
+   single-rect dual check; zero margin keeps `orig_rects` empty, so
+   margin-free annotation is unchanged.  Pinned by the three
+   `test_annotate_*` tests in the same file.
 10. **Bridges are drawn by nobody** — web JSON serializes them, no client
     renders them, the matplotlib viewer ignores them, and the explorer has
     no bridge affordance; `_rects_disconnected` is dead code while the

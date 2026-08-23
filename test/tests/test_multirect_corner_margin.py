@@ -91,6 +91,60 @@ def test_no_margin_taps_physical_faces_unchanged():
     assert 200 in ys, f"physical bottom-face tap missing: {sorted(ys)}"
 
 
+def _annotate_stub(fp, y):
+    """Hand-built USER stub rising from open ground to (50, y) — the shape
+    TopoEdit or a restored checkpoint hands annotate_topology."""
+    t = buda.Topology()
+    t.type = "USER"
+    s = buda.Segment()
+    s.start = buda.Point(50, y)
+    s.end = buda.Point(50, 50)
+    t.segments = [s]
+    buda.annotate_topology(t, fp)
+    eps = t.seg_busterms.get(0)
+    return None if eps is None else (eps[0].block_name if eps[0] else None)
+
+
+def _margined_fp():
+    fp = buda.Floorplan()
+    fp.add_block_rects("T", [(0, 200, 100, 300), (300, 200, 400, 300)])
+    fp.add_block("S", 150, 0, 250, 50)
+    fp.set_global_corner_margin(20, 10)
+    return fp
+
+
+def test_annotate_accepts_physical_face_spelling():
+    """PR #835 P2: annotate_endpoints' multi-rect branch used to check ONLY
+    the inset rects — unlike its single-rect branch, which checks BOTH
+    orig_bbox and the inset bbox — so a hand-built (TopoEdit/USER) or
+    restored endpoint landing on the PHYSICAL face of a margined multi-rect
+    block lost its tap and the block read open.  Both spellings must tap."""
+    fp = _margined_fp()
+    assert _annotate_stub(fp, 200) == "T", \
+        "physical-face endpoint lost its tap (P2 regressed)"
+
+
+def test_annotate_accepts_inset_face_spelling():
+    fp = _margined_fp()
+    assert _annotate_stub(fp, 210) == "T"
+    # A coordinate on neither spelling still does not tap.
+    assert _annotate_stub(fp, 195) is None
+
+
+def test_annotate_zero_margin_identity():
+    """No margin: orig_rects stays empty (the guard in the construction
+    sites) and the physical face taps exactly as before open 9."""
+    fp = buda.Floorplan()
+    fp.add_block_rects("T", [(0, 200, 100, 300), (300, 200, 400, 300)])
+    fp.add_block("S", 150, 0, 250, 50)
+    assert _annotate_stub(fp, 200) == "T"
+    assert _annotate_stub(fp, 195) is None
+    # And the carried Busterms advertise no second spelling.
+    _, cands = _gen(None)
+    for _, bt in _taps_on_T(cands):
+        assert len(bt.orig_rects) == 0
+
+
 def test_per_axis_guard_applies_per_rect():
     """A rect too thin for the margin keeps THAT axis at full extent (the
     same 2*margin >= face_extent guard the union shrink has), per rect: the

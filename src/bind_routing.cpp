@@ -246,7 +246,8 @@ void bind_routing(py::module_& m) {
         .def_readwrite("bbox",       &Busterm::bbox)
         .def_readwrite("orig_bbox",  &Busterm::orig_bbox)
         .def_readwrite("rects",      &Busterm::rects)
-        .def_readwrite("teg_mode",   &Busterm::teg_mode);
+        .def_readwrite("teg_mode",   &Busterm::teg_mode)
+        .def_readwrite("orig_rects", &Busterm::orig_rects);
 
     py::class_<Topology>(m, "Topology")
         .def(py::init<>())

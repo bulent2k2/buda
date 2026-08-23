@@ -149,6 +149,14 @@ struct Busterm {
     // on).  Empty = single-rect block (use orig_bbox as before).
     std::vector<Rect> rects;
     TegMode           teg_mode = TegMode::THRU;
+    // The PHYSICAL (un-inset) rects, the multi-rect twin of orig_bbox beside
+    // the inset `bbox`: populated (only when a nonzero margin makes it differ
+    // from `rects`) so annotate_endpoints can accept BOTH face spellings the
+    // way its single-rect branch checks {orig_bbox, bbox} — a hand-built
+    // (TopoEdit/USER) or restored segment ending on the physical face of a
+    // margined multi-rect block must not lose its tap (PR #835 P2).  Declared
+    // last so the 5-field aggregate initializations stay valid.
+    std::vector<Rect> orig_rects;
 };
 // Per-segment busterm annotation: .first = busterm at segment start endpoint,
 // .second = busterm at segment end endpoint.  nullopt means the endpoint is an

@@ -199,7 +199,12 @@ EditVerdict edit_add_stub(Topology& topo, const Floorplan& fp,
     BlockCornerMargin cm = fp.get_block_corner_margin(block);
     bt.bbox      = bb.shrink(cm.dx, cm.dy);
     bt.orig_bbox = bb;
-    bt.rects     = shrink_rects(fp.get_block_rects(block), cm);
+    {
+        auto phys = fp.get_block_rects(block);
+        bt.rects  = shrink_rects(phys, cm);
+        if ((cm.dx != 0 || cm.dy != 0) && !phys.empty())
+            bt.orig_rects = std::move(phys);   // both face spellings (P2)
+    }
     bt.teg_mode  = fp.get_block_teg_mode(block);
     topo.seg_busterms[idx].first = bt;
 
