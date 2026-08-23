@@ -277,14 +277,25 @@ Feature: Over-the-Block vs Thru-the-Block TEG Routing Modes
     And in the TRUNK_H@y200 candidate "C" has exactly 1 V stub
     And the TRUNK_H@y200 candidate has no bridge segment for "B"
 
-  Scenario: Over-the-block bridge topology has higher adjusted wirelength than thru
-    # The bridge segment adds explicit wirelength. With the same underlying trunk,
-    # the over-the-block topology costs more than the thru-the-block one.
-    # The topology sorter must rank thru-the-block before over-the-block
-    # (lower wirelength wins, all else equal).
+  Scenario: Over-the-block connection metal is real priced wirelength, so over ranks after thru
+    # Post-emission (teg_multirect_status.md open 1(a)) there is no separate
+    # "adjusted wirelength": the OVER connection metal is ordinary segments
+    # priced in estimated_wirelength, so thru-vs-over ranking is plain WL
+    # ranking of genuinely different metal.  teg_mode is a property of the
+    # BLOCK, so one pool cannot hold both modes — the comparison is two
+    # pools on the same geometry, and the asserted property is the
+    # SAME-LOCUS TWINS': the over twin carries strictly more priced WL, and
+    # the extra metal is real segments.  Measured: TRUNK_H@y200 is wl=200 /
+    # 2 segments under thru (one stub to the nearest rect) and wl=360 /
+    # 3 segments under over (both rects stubbed to the trunk).  Pools are
+    # WL-sorted, so among otherwise-equal competitors the higher-WL twin
+    # sorts later — that is what "thru ranks before over, all else equal"
+    # means; a cross-pool ORDINAL comparison is deliberately NOT asserted,
+    # because the two pools are different candidate populations (the other
+    # OVER-affected members shift too) and the ordinal would be confounded
+    # by them.
     #
     Given a block "A" at (0,150)-(100,250)
-    And a block "B" with rects (200,0)-(280,100) and (220,300)-(300,400)
-    And both "thru" and "over" teg_mode candidates are generated for "B"
-    When I rank the TRUNK_H@y200 candidates by adjusted wirelength
-    Then the thru-the-block candidate ranks before the over-the-block candidate
+    When I generate candidate pools from "A" for block "B" with rects (200,0)-(280,100) and (220,300)-(300,400) under both teg modes
+    Then the same-locus TRUNK_H@y200 candidate has strictly higher estimated wirelength under over than under thru
+    And the over twin of TRUNK_H@y200 carries its extra wirelength as real segments

@@ -378,6 +378,21 @@ annotation from the link rows + `BDB::busterm(id)` alone (no floorplan). C++ API
 `topology_seg_busterms(bundle_id, cand_index)`, `busterm(id)` (fetches a single
 row incl. `tb:` — `all_busterms()` returns hier-derived rows only).
 
+> **Multi-rect boundary** (teg_multirect_status.md open 6): the busterm
+> `rects` + `teg_mode` columns are a **routing-time persist artifact** — the
+> `tb:` rows above, written by the flat pipeline so a restored candidate's
+> taps keep their multi-rect/TEG identity — **not a hier-design input**.  A
+> BDB *component* holds ONE bbox, `derive_busterms` writes empty `rects`, and
+> every BDB→Floorplan projection calls `add_block(bbox)`, so a multi-rect
+> block cannot be DECLARED through the hier flow (`tools/buda2bdb.py`
+> collapses the rect form to the union bbox and names the dropped modifiers,
+> `teg_mode` included).  The flat script's `add_block … rect … teg_mode` is
+> the one door — and a flat stage-resume keeps it: the recorded trace
+> replays that line verbatim before `load_pipeline`, so the resumed
+> floorplan re-declares rects + mode and the `TEG_OPEN` audit (which reads
+> them off the floorplan) stays armed (measured 2026-08-23; pinned by
+> `test_teg_resume.py`).
+
 **Planner-output persistence.** `run_planner` records its decision: it marks the
 selected candidate (`topology.is_selected`, via `set_topology_selected`) and the
 per-segment assigned layers (`topology_segment.assigned_layer`, via

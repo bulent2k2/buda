@@ -85,7 +85,7 @@ each decorated with `@pytest.mark.slow`.
 | `test_keepout_zone.py` | 4 | Keepout zone placement and Hanan grid injection |
 | `test_topo_keepout_mst.py` | 21 | Keepout-edge injection into MST trunk generation |
 | `test_multi_rect_block.py` | 7 | TEG multi-rect block topologies (thru/over modes) |
-| `test_busterm_over_the_block.py` | 9 | TEG bridge segments; over-the-block stub connectivity |
+| `test_busterm_over_the_block.py` | 9 | TEG over/thru connection metal; measured thru-before-over WL ranking |
 | `test_multicast_topology.py` | 8 | One-to-many (multicast) trunk+branch topologies |
 | `test_unified_topology.py` | 14 | Unified topology generation across hierarchy levels |
 | `test_hier_topology.py` | ~10 | Hier topology candidate generation per cell type |
@@ -224,18 +224,26 @@ never acted on.  All eight scenarios are blocked.
 ### Group 4 — `adjusted_wl` / `discount_factor` candidate ranking (7 + 4 scenarios)
 
 **Files:** `test_topology_flexibility.py` (7 scenarios, 4 xfail);
-           `test_pull_preference.py` (10 scenarios, 2 with `_XFAIL_RANK`);
-           `test_busterm_over_the_block.py` (9 scenarios, 1 xfail)
+           `test_pull_preference.py` (10 scenarios, 2 with `_XFAIL_RANK`)
 
-**Reason:** `adjusted_wl not yet in C++ API` / `adjusted_wl / pull_balance ranking not yet in C++ API` / `Topology.adjusted_wl and per-topology teg_mode attribute not yet in C++ API`
+**Reason:** `adjusted_wl not yet in C++ API` / `adjusted_wl / pull_balance ranking not yet in C++ API`
+
+*(`test_busterm_over_the_block.py` left this group 2026-08-23: its one xfail
+— thru-before-over "adjusted-WL" ranking — was SETTLED by retiring the
+concept, not building it.  Post-emission the OVER connection metal is real
+segments priced in `estimated_wirelength`, so the scenario now asserts the
+measured same-locus-twin property — over twin strictly higher WL, its extra
+metal strictly more real segments (a cross-pool rank ordinal is deliberately
+not asserted: the two pools are different populations, so it would be
+confounded) — and passes; 9/9, zero xfail.  See teg_multirect_status.md
+open 4.)*
 
 The `Topology` struct lacks an `adjusted_wl` field (wirelength discounted by
 a per-scenario factor for topologies that benefit from block pass-through).
 Without it, the planner cannot rank candidates using the three-key sort
 `(adjusted_wl, min_slide, pull_balance)`.  Affected scenarios test:
 topology candidate ranking by discounted wirelength, `discount_factor`
-persistence, the `zero-slide` candidate preference, and TEG-mode persistence
-on a `Topology` object.
+persistence, and the `zero-slide` candidate preference.
 
 Some step implementations call `pytest.xfail()` directly when the
 `adjusted_wl` attribute is absent at runtime.  Two `pytest.skip()` calls guard

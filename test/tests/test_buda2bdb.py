@@ -92,6 +92,24 @@ def test_no_set_die_uses_bbox_and_shifts(tmp_path):
     assert (comps["blk/q"].x1, comps["blk/q"].y1) == (200, 200)
 
 
+def test_multirect_collapse_warning_names_dropped_modifiers(tmp_path, capsys):
+    # A BDB component holds ONE bbox, so the multi-rect collapse is by
+    # construction (teg_multirect_status.md open 6 — the hier/BDB boundary);
+    # what must NOT be silent is the dropped teg_mode: OVER is the
+    # declaration that makes the connection metal real, so losing it
+    # unannounced turns an electrically-open block into a clean-auditing
+    # one.  The warning must name the collapse AND the dropped modifiers.
+    script = _write(tmp_path, "mr.buda",
+                    "add_block L rect 0 0 100 400 rect 0 0 400 100 teg_mode over\n"
+                    "add_block src 500 150 600 250\n"
+                    "add_net d src.tx L.rx\n")
+    parsed = buda2bdb.parse_script(script)
+    err = capsys.readouterr().err
+    assert parsed.blocks["L"] == (0, 0, 400, 400)  # union bbox
+    assert "multi-rect collapsed to union bbox" in err
+    assert "teg_mode over" in err, f"dropped modifiers not named: {err!r}"
+
+
 def test_add_bus_expands_to_nets(tmp_path):
     script = _write(tmp_path, "bus.buda",
                     "set_die 500 500\n"

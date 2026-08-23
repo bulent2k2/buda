@@ -24,9 +24,19 @@ scenarios assert real stub/leg geometry and the ABSENCE of the former
 union-face bridge (Topology.bridge_segments stays empty at generation; it
 survives only on candidates restored from pre-change checkpoints).
 
-Scenarios 1–7 test currently-implemented behaviour and must PASS.
-Scenario 8 (adjusted-wirelength ranking) is xfail: Topology.adjusted_wl and
-  per-topology teg_mode attribute are not yet in the C++ API.
+All 9 scenarios test currently-implemented behaviour and must PASS.
+Scenario 9 (thru-before-over ranking) asserts the MEASURED post-emission
+  property: teg_mode is a property of the BLOCK (one pool cannot mix modes),
+  and the OVER connection metal is real segments priced in
+  estimated_wirelength — so the same-locus over twin carries strictly more
+  WL than its thru twin, and the extra metal is real segments.  Pools are
+  WL-sorted, so that is what "thru ranks before over, all else equal"
+  means; a cross-pool ORDINAL comparison is deliberately not asserted —
+  the two pools are different candidate populations, so an ordinal would
+  be confounded by the other OVER-affected members.  (The scenario was
+  xfail while it asserted a phantom `Topology.adjusted_wl` / per-topology
+  teg_mode API; post-emission no separate "adjusted" figure exists —
+  priced metal IS built metal.)
 """
 import pytest
 import buda
@@ -85,13 +95,10 @@ def test_global_teg_mode_overridden_per_block():
     pass
 
 
-@pytest.mark.xfail(
-    strict=False,
-    reason='Topology.adjusted_wl and per-topology teg_mode attribute not yet in C++ API',
-)
 @scenario('features/busterm_over_the_block.feature',
-          'Over-the-block bridge topology has higher adjusted wirelength than thru')
-def test_overtheblock_bridge_topology_has_higher_adjusted_wirelength_than_thru():
+          'Over-the-block connection metal is real priced wirelength, '
+          'so over ranks after thru')
+def test_overtheblock_connection_metal_ranks_after_thru():
     pass
 
 
@@ -121,20 +128,40 @@ def given_multi_rect_block_with_teg(ctx, name, rx1, ry1, rx2, ry2,
     ]
 
 
-@given(parsers.parse('both "thru" and "over" teg_mode candidates are generated for "{block}"'))
-def given_both_teg_modes(ctx, block):
-    ctx['both_teg_modes_block'] = block
-
-
 # ---------------------------------------------------------------------------
-# When — wirelength ranking (scenario 8 only; scenario 8 is xfail)
+# When — two pools on the same geometry, one per teg mode (scenario 9)
 # ---------------------------------------------------------------------------
 
-@when(parsers.re(r'I rank the (?P<trunk_key>\S+) candidates by adjusted wirelength'))
-def when_rank_candidates(ctx, trunk_key):
-    cands = [c for c in ctx['candidates']
-             if c.type == trunk_key or c.type.startswith(trunk_key)]
-    ctx['ranked_candidates'] = sorted(cands, key=lambda c: c.adjusted_wl)
+@when(parsers.re(
+    r'I generate candidate pools from "(?P<src>[^"]+)" for block "(?P<name>[^"]+)" '
+    r'with rects \((?P<rx1>\d+),(?P<ry1>\d+)\)-\((?P<rx2>\d+),(?P<ry2>\d+)\) and '
+    r'\((?P<sx1>\d+),(?P<sy1>\d+)\)-\((?P<sx2>\d+),(?P<sy2>\d+)\) under both teg modes'
+))
+def when_generate_both_mode_pools(ctx, src, name, rx1, ry1, rx2, ry2,
+                                  sx1, sy1, sx2, sy2):
+    # teg_mode is a property of the BLOCK, so one pool cannot hold both
+    # modes: build the pool twice on the same geometry, once per mode.
+    src_bb = ctx['fp'].get_block_bounds(src)
+    rects = [(int(rx1), int(ry1), int(rx2), int(ry2)),
+             (int(sx1), int(sy1), int(sx2), int(sy2))]
+    pools = {}
+    for mode_name, mode in (('thru', buda.TegMode.THRU),
+                            ('over', buda.TegMode.OVER)):
+        fp = buda.Floorplan()
+        fp.add_block(src, src_bb.x1, src_bb.y1, src_bb.x2, src_bb.y2)
+        fp.add_block_rects(name, rects, teg_mode=mode)
+        g = buda.TopologyGenerator(fp)
+        g.set_layer_ids(ctx['layer_h'], ctx['layer_v'])
+        pools[mode_name] = g.generate_candidates(src, [name])
+    ctx['mode_pools'] = pools
+
+
+def _locus_candidate(pool, trunk_key):
+    """Return (1-based rank, candidate) of the first trunk_key match."""
+    for i, c in enumerate(pool):
+        if c.type == trunk_key or c.type.startswith(trunk_key):
+            return i + 1, c
+    return None, None
 
 
 # ---------------------------------------------------------------------------
@@ -417,17 +444,45 @@ def then_exactly_one_vstub(ctx, trunk_key, block):
 
 
 # ---------------------------------------------------------------------------
-# Then — ranking assertion (scenario 8, xfail)
+# Then — measured ranking assertions (scenario 9)
 # ---------------------------------------------------------------------------
 
-@then('the thru-the-block candidate ranks before the over-the-block candidate')
-def then_thru_ranks_before_over(ctx):
-    ranked = ctx.get('ranked_candidates', [])
-    assert len(ranked) >= 2, 'Need at least 2 ranked candidates'
-    teg_modes = [getattr(c, 'teg_mode', None) for c in ranked]
-    thru_idx = next((i for i, m in enumerate(teg_modes) if m == 'thru'), None)
-    over_idx  = next((i for i, m in enumerate(teg_modes) if m == 'over'), None)
-    assert thru_idx is not None and over_idx is not None, \
-        f'Expected both thru and over candidates; got modes: {teg_modes}'
-    assert thru_idx < over_idx, \
-        f'thru (idx {thru_idx}) must rank before over (idx {over_idx})'
+def _mode_twins(ctx, trunk_key):
+    _, thru_c = _locus_candidate(ctx['mode_pools']['thru'], trunk_key)
+    _, over_c = _locus_candidate(ctx['mode_pools']['over'], trunk_key)
+    assert thru_c is not None, f'{trunk_key!r} missing from thru pool'
+    assert over_c is not None, f'{trunk_key!r} missing from over pool'
+    return thru_c, over_c
+
+
+@then(parsers.re(
+    r'the same-locus (?P<trunk_key>\S+) candidate has strictly higher '
+    r'estimated wirelength under over than under thru'
+))
+def then_over_twin_wl_higher(ctx, trunk_key):
+    # The connection metal (both gap stubs to the trunk here) is ordinary
+    # segments, so it shows up as real estimated_wirelength — the property
+    # the retired "adjusted_wl" concept was a placeholder for.  Pools are
+    # WL-sorted, so this is what makes the over twin sort later among
+    # otherwise-equal competitors; a cross-pool ordinal is NOT compared
+    # (the two pools are different populations — see the feature comment).
+    thru_c, over_c = _mode_twins(ctx, trunk_key)
+    assert over_c.estimated_wirelength > thru_c.estimated_wirelength, (
+        f'over twin must carry MORE priced metal: '
+        f'thru wl={thru_c.estimated_wirelength}, over wl={over_c.estimated_wirelength}'
+    )
+
+
+@then(parsers.re(
+    r'the over twin of (?P<trunk_key>\S+) carries its extra wirelength '
+    r'as real segments'
+))
+def then_over_twin_extra_metal_is_segments(ctx, trunk_key):
+    # The extra WL is not an annotation on the side (the retired bridge was
+    # exactly that) — it is more Topology.segments, which is what the
+    # planner routes and the audits walk.
+    thru_c, over_c = _mode_twins(ctx, trunk_key)
+    assert len(over_c.segments) > len(thru_c.segments), (
+        f'the extra metal must be real segments: '
+        f'thru segs={len(thru_c.segments)}, over segs={len(over_c.segments)}'
+    )
