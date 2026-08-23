@@ -529,3 +529,31 @@ def test_rebuild_skips_a_user_candidate_whose_blocks_vanished(tmp_path):
     out = _quiet(s2, *setup_renamed, f"open_bdb {db}", *_BUNDLE)
     assert "references missing block(s)" in out
     assert "USER candidate restored" not in out
+
+
+def test_rebuild_never_injects_into_a_different_bus(tmp_path):
+    # Codex #833 P1: bundle ids shift when the netlist changes, so a kept
+    # USER row whose BLOCKS still exist could land in a different bus's
+    # pool and re-attach its old pin there.  The re-inject verifies the
+    # bundle's net membership (snapshotted pre-clear) before trusting the
+    # id: same blocks + different bus -> skipped LOUD, no pin.
+    db = str(tmp_path / "flow.ckpt.bdb")
+    s1 = buda_cli.BudaSession()
+    s1.no_viz = True
+    s1.script_path = str(tmp_path / "flow.buda")
+    _quiet(s1, *_SETUP, f"open_bdb {db}", *_BUNDLE,
+           "edit_topology 1 2", "edit_commit pin", "run_planner 3")
+    del s1
+
+    # Same blocks, DIFFERENT bus under the same bundle id.
+    setup_other = [c.replace("add_bus dbus[8]", "add_bus ebus[8]")
+                   for c in _SETUP]
+    s2 = buda_cli.BudaSession()
+    s2.no_viz = True
+    s2.script_path = str(tmp_path / "flow.buda")
+    out = _quiet(s2, *setup_other, f"open_bdb {db}", *_BUNDLE)
+    assert "net membership changed" in out, out
+    assert "USER candidate restored" not in out
+    w2 = s2.bundles[0]
+    assert not w2.input.topology_pinned
+    assert all(t.type != "USER" for t in w2.input.candidates)

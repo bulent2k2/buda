@@ -202,11 +202,22 @@ class PersistMixin:
         if getattr(self, '_bdb_pin_snap_for', None) != id(self.bdb):
             self._bdb_pin_snap_for = id(self.bdb)
             self._bdb_pin_memo = {}
+            # And, for bundles carrying USER rows, their NET MEMBERSHIP as
+            # the rows' session knew it — the identity the re-inject
+            # (_reinject_bdb_user_topos) verifies before trusting a bare
+            # bundle id: ids shift when the netlist or strategy changes, and
+            # by re-inject time the clear below has rewritten bundle_net to
+            # the CURRENT bundling, so this pre-clear read is the one place
+            # the old membership can be captured (Codex #833 P1).
+            self._bdb_user_nets_memo = {}
             for _row in self.bdb.all_bundles():
-                _pinned = [tr.topo_uid for tr in self.bdb.topologies(_row.id)
-                           if tr.is_pinned]
+                _trs = self.bdb.topologies(_row.id)
+                _pinned = [tr.topo_uid for tr in _trs if tr.is_pinned]
                 if _pinned:
                     self._bdb_pin_memo[_row.id] = _pinned[0]
+                if any(tr.source == "user" for tr in _trs):
+                    self._bdb_user_nets_memo[_row.id] = tuple(
+                        self.bdb.bundle_nets(_row.id))
         # Membership of FK-kept bundles must survive too (audit P3-04):
         # clear_bundles(keep_user) preserves a bundle row still referenced
         # by a kept USER topology, but wipes ALL bundle_net/bundle_busterm
@@ -469,6 +480,7 @@ class PersistMixin:
         if self.bdb is None or not self.bundles:
             return
         resolver = self._make_topo_fp_resolver()
+        nets_memo = getattr(self, "_bdb_user_nets_memo", None) or {}
         for w in self.bundles:
             bid = str(w.input.original_bundle.id)
             try:
@@ -477,6 +489,20 @@ class PersistMixin:
             except RuntimeError:
                 continue
             if not rows:
+                continue
+            # Bundle IDENTITY before trusting a bare id (Codex #833 P1):
+            # ids shift when the netlist or bundling strategy changes, so a
+            # kept USER row whose blocks happen to still exist could land in
+            # a DIFFERENT bus's pool and re-attach its old pin there.  The
+            # membership the rows were committed under is snapshotted
+            # pre-clear (_bdb_user_nets_memo); a mismatch skips LOUD.
+            expect = nets_memo.get(bid)
+            current = sorted(w.input.original_bundle.get_net_names())
+            if expect is not None and sorted(expect) != current:
+                print(f"  [BDB] bundle {bid}: net membership changed since "
+                      f"its USER candidate was committed (this id is a "
+                      f"different bus now) — not restored into the rebuilt "
+                      f"pool")
                 continue
             pool_uids = {buda.topo_uid(t) for t in w.input.candidates}
             fp = resolver(w) or self.fp
@@ -609,8 +635,14 @@ class PersistMixin:
         # forward, because dropping it would lose a pin merely because a
         # rebundle's persist ran before that bundle's pool was regenerated.
         old_memo = getattr(self, '_bdb_pin_memo', None) or {}
+        old_nets = getattr(self, '_bdb_user_nets_memo', None) or {}
         self._bdb_pin_snap_for = id(self.bdb)
         self._bdb_pin_memo = {}
+        # The user-nets identity memo follows the same mirror discipline:
+        # rebuilt from the wrapper state just serialized (a wrapper whose
+        # pool holds a USER candidate records its CURRENT membership), with
+        # the same empty-pool carry-forward asymmetry as the pin memo.
+        self._bdb_user_nets_memo = {}
         for w in wrappers:
             bid = str(w.input.original_bundle.id)
             if getattr(w.input, 'topology_pinned', False):
@@ -620,6 +652,11 @@ class PersistMixin:
                         buda.topo_uid(w.input.candidates[sel])
             elif not w.input.candidates and bid in old_memo:
                 self._bdb_pin_memo[bid] = old_memo[bid]
+            if any(t.type == "USER" for t in w.input.candidates):
+                self._bdb_user_nets_memo[bid] = tuple(
+                    w.input.original_bundle.get_net_names())
+            elif not w.input.candidates and bid in old_nets:
+                self._bdb_user_nets_memo[bid] = old_nets[bid]
         return n_cands
 
     def _persist_group_pin(self, w, bid):

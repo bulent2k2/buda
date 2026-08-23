@@ -839,8 +839,10 @@ def cmd_generate_topologies_for_hbundle(session, cmd, args, cmd_line):
     if memo_tokens:
         _record_gen_knob_memo(session, [target_w], memo_tokens)
     print(f"generate_topologies_for_hbundle: bundle {bid} — {n} candidates")
-    # Whole-table rewrite below: re-attach durable pins first (see
-    # generate_topologies_for_bundle).
+    # Whole-table rewrite below: kept USER rows re-inject, then durable
+    # pins re-attach (see generate_topologies_for_bundle — this per-hbundle
+    # door was missed, Codex #833 P2).
+    session._reinject_bdb_user_topos()
     session._apply_bdb_pins()
     if session._persist_topologies():
         print("[BDB] re-persisted candidate topologies to the open BDB.")
