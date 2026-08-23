@@ -101,9 +101,11 @@ def test_user_source_persisted(tmp_path):
 
 
 def test_cross_session_repersist_keeps_user_row(tmp_path):
-    """Session 2 re-persists WITHOUT load_pipeline: the keep_user wipe must
-    spare the user row (renumbered to the tail), and session 3's
-    load_pipeline restores the candidate."""
+    """Session 2 re-persists WITHOUT load_pipeline: the rebuild door now
+    RE-INJECTS the kept user row into the regenerated pool (through the same
+    row-restore load_pipeline uses), so the candidate is LIVE in session 2 —
+    not merely parked in the table for a later load — and session 3's
+    load_pipeline restores it like any candidate."""
     path = str(tmp_path / "x.bdb")
     s1 = _session(path)
     bid = s1.bundles[0].input.original_bundle.id
@@ -115,14 +117,13 @@ def test_cross_session_repersist_keeps_user_row(tmp_path):
     s2.no_viz = True
     out = _out(s2, f"open_bdb {path}", *_SETUP,
                "add_bus d[8] A.p B.q", "run_bundler", "generate_topologies")
-    assert "kept user candidate" in out, out
+    assert "USER candidate restored into the rebuilt pool" in out, out
+    assert user_uid in [buda.topo_uid(c)
+                        for c in s2.bundles[0].input.candidates]
     rows = s2.bdb.topologies(str(bid))
     user_rows = [r for r in rows if r.source == "user"]
     assert len(user_rows) == 1
     assert user_rows[0].topo_uid == user_uid
-    # Renumbered past the fresh block: index unique and >= generated count.
-    gen_n = sum(1 for r in rows if r.source != "user")
-    assert user_rows[0].cand_index >= gen_n
     del s2
 
     s3 = buda_cli.BudaSession()
@@ -194,7 +195,13 @@ def test_cross_session_keep_survives_index_collision(tmp_path):
     generated candidates than session 1 had): the renumber path must move it
     out of the way, or the add_topology upsert overwrites the hand-committed
     candidate — exactly the P1 the plain-keep test could not catch (its user
-    row sat past the fresh block)."""
+    row sat past the fresh block).
+
+    With the rebuild door now RE-INJECTING resolvable user rows into the
+    pool, the renumber path is reached by the one row it still owns: a user
+    candidate whose blocks left the design (skipped LOUD by the re-inject),
+    arranged here by renaming block B — the fresh pool then covers the kept
+    row's old index and the collision must still renumber it intact."""
     path = str(tmp_path / "c.bdb")
     s1 = _session(path)
     bid = s1.bundles[0].input.original_bundle.id
@@ -206,12 +213,16 @@ def test_cross_session_keep_survives_index_collision(tmp_path):
 
     s2 = buda_cli.BudaSession()
     s2.no_viz = True
-    # double_detour adds UU candidates (8 -> 13 here), pushing session 2's
-    # fresh block past the kept user row's index (8) — the collision case.
-    out = _out(s2, f"open_bdb {path}", *_SETUP,
+    # Block B renamed -> the kept user candidate cannot re-inject (missing
+    # block, said LOUD); double_detour adds UU candidates, pushing session
+    # 2's fresh block past the kept row's index (8) — the collision case.
+    setup2 = tuple(c.replace("add_block B ", "add_block B2 ")
+                   for c in _SETUP)
+    out = _out(s2, f"open_bdb {path}", *setup2,
                "detour_channel A 60",
-               "add_bus d[8] A.p B.q", "run_bundler",
+               "add_bus d[8] A.p B2.q", "run_bundler",
                "generate_topologies double_detour")
+    assert "references missing block(s)" in out, out
     rows = s2.bdb.topologies(str(bid))
     gen_n = sum(1 for r in rows if r.source != "user")
     assert gen_n > user_ci,         f"test premise broken: fresh block ({gen_n}) must cover index {user_ci}"
