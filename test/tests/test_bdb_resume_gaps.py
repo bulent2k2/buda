@@ -40,8 +40,13 @@ from test_bdb_resume import _fresh, _quiet
 
 
 # Pure-TEG block: two disjoint rects with an x-gap; a source above the gap makes
-# the V-trunk candidates fall in it -> an explicit bridge segment on the union
-# bbox's outer face (teg_mode over).
+# the V-trunk candidates fall in it.  Since open 1(a) the gap connection is
+# ordinary per-rect stubs joined through the trunk — generation emits NO
+# bridge_segments — but the v11 `topology_bridge_segment` table and its
+# load_pipeline restore stay: a PRE-CHANGE checkpoint still holds bridge rows,
+# and dropping them on load would silently change the restored candidate's
+# identity (topo_uid hashes bridges) and hide the unrealized bridge from the
+# TEG_OPEN audit's "unrealized vs absent" wording.
 TEG_SETUP = ("source flow/rnr/mix_tracks.buda",
              "add_block T rect 0 0 200 400 rect 500 0 700 400 teg_mode over",
              "add_block src 300 800 400 900",
@@ -55,28 +60,37 @@ def _bridges(w):
             for t in w.input.candidates]
 
 
-def test_bridge_segments_persist(tmp_path):
+def test_generation_persists_no_bridge_rows(tmp_path):
+    # Open 1(a): the TEG connection metal is ordinary segments, so a freshly
+    # generated checkpoint holds ZERO bridge rows (and the in-memory maps are
+    # empty) — the table exists solely for pre-change checkpoints.
     s, _ = _fresh(*TEG_SETUP, f"open_bdb {tmp_path / 't.bdb'}",
                   "run_bundler", "generate_topologies")
     w = s.bundles[0]
-    mem = _bridges(w)
-    assert any(mem), "TEG scenario should produce bridge candidates"
-    for ci, m in enumerate(mem):
-        rows = s.bdb.topology_bridges("1", ci)
-        got = {r.block_name: (r.x1, r.y1, r.x2, r.y2, r.layer_hint, r.is_jog)
-               for r in rows}
-        assert got == m                      # row-for-row, incl. empty (no rows)
+    assert not any(_bridges(w)), "generation must no longer emit bridges"
+    for ci in range(len(w.input.candidates)):
+        assert not s.bdb.topology_bridges("1", ci)
 
 
-def test_bridge_segments_survive_resume(tmp_path):
-    # Checkpoint after topo-gen -> fresh session -> load_pipeline: every
-    # candidate's bridge_segments round-trips (the field load_pipeline used to
-    # silently drop — TEG-over designs now resume losslessly).
+def test_pre_change_bridge_rows_survive_resume(tmp_path):
+    # A PRE-CHANGE checkpoint's bridge rows (emulated by injecting rows the
+    # old generation would have written — add_topology_bridge is the same v11
+    # codec) must still restore into Topology.bridge_segments on
+    # load_pipeline, so the restored candidate keeps its recorded content and
+    # the TEG_OPEN audit can report the bridge as "unrealized".
     db = str(tmp_path / "t.bdb")
     s1, _ = _fresh(*TEG_SETUP, f"open_bdb {db}",
                    "run_bundler", "generate_topologies")
-    mem = _bridges(s1.bundles[0])
-    assert any(mem)
+    n_cands = len(s1.bundles[0].input.candidates)
+    assert n_cands >= 1
+    r = buda.TopoBridgeRow()
+    r.id = "1"
+    r.cand_index = 0
+    r.block_name = "T"
+    r.x1, r.y1, r.x2, r.y2 = 0, 400, 700, 400      # the old union-face shape
+    r.layer_hint = 4
+    r.is_jog = False
+    s1.bdb.add_topology_bridge(r)
     del s1
 
     s2, out = _fresh("source flow/rnr/mix_tracks.buda",
@@ -84,7 +98,9 @@ def test_bridge_segments_survive_resume(tmp_path):
                      "add_block src 300 800 400 900",
                      f"open_bdb {db}", "load_pipeline")
     assert "rehydrated" in out
-    assert _bridges(s2.bundles[0]) == mem
+    mem = _bridges(s2.bundles[0])
+    assert mem[0] == {"T": (0, 400, 700, 400, 4, False)}
+    assert not any(mem[1:])
 
 
 def test_run_nuts_on_layer_repersists(tmp_path):

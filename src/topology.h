@@ -173,7 +173,14 @@ struct Topology {
     // endpoint is a busterm tap or a free end — never a cue to go guessing.
     std::map<std::pair<int,int>, std::vector<int>> seg_conns;
     // Over-the-block bridge segments: block_name → bridge Segment.
-    // Non-empty only when teg_mode=OVER and trunk falls in the gap between rects.
+    // LEGACY-LOAD ONLY: generation no longer emits bridges — the TEG-over
+    // connection metal is ordinary segments (gap stubs / rectilinear connector
+    // legs emitted by add_trunk), so it rides the whole pipeline.  This map is
+    // non-empty only on a candidate restored from a pre-change checkpoint
+    // (topology_bridge_segment, v11); such a bridge is still counted in WL and
+    // the structural tie-break (its recorded pricing), hashed in topo_uid, and
+    // transformed by hier offset/rotate, but it is placed by NOTHING — a
+    // restored bridge-reliant route is caught by the TEG_OPEN audit.
     std::map<std::string, Segment> bridge_segments;
     // All block names this topology must connect (src + all dsts).
     // Set by generate_candidates; used by connectivity verifier to detect

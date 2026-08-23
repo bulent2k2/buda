@@ -63,17 +63,19 @@ destination block names are derived automatically from the netlist.
 | `BITRUNK_HVH@…` | **Requires `multi_trunk`.** Two-level datapath tree: a root H spine feeds perpendicular V branch trunks, each tapping a cluster of x-aligned blocks (a column becomes a multi-tap pass-through trunk). Wins on column-aligned datapaths. |
 | `BITRUNK_VHV@…` | **Requires `multi_trunk`.** Row-oriented mirror: a root V spine feeds H branch trunks tapping y-aligned block rows. |
 
-**Bridge segments (`teg_mode over`):**
+**TEG-over connection metal (`teg_mode over`):**
 
 When a receiver block uses `teg_mode over` and the trunk falls in the gap
-between its rects, the topology carries a **bridge segment** for that block.
-The bridge is a short wire segment placed along the outer face of the block's
-union bounding box (top face for an H-trunk gap; right face for a V-trunk gap).
-It is stored in `topology.bridge_segments[block_name]` — separate from the main
-`topology.segments` list — so the planner and visualizer can distinguish routing
-wires from bridge annotations. Bridge topologies have higher adjusted wirelength
-than their `thru` counterparts (the bridge adds explicit wire) and are therefore
-ranked after `thru` candidates when all else is equal.
+between its rects, the topology carries a stub **per rect** to the trunk (the
+rects are joined through the trunk); when the trunk crosses a rectilinear
+block without spanning every rect, each un-spanned rect gets a perpendicular
+**connector leg** from the trunk to its nearest face.  This metal is ordinary
+`topology.segments` content, routed and audited like any stub, and it adds
+explicit wirelength, so over-the-block topologies rank after their `thru`
+counterparts when all else is equal.  (`topology.bridge_segments` — the former
+union-face bridge annotation nothing downstream placed — stays empty at
+generation and is only restored from pre-change checkpoints, where the
+`TEG_OPEN` audit reports the unrealized bridge.)
 
 **Notes:**
 - Each call targets exactly one bundle. For N bundles, call N times.

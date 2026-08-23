@@ -105,7 +105,8 @@ topology_seg_conn
 topology_bridge_segment
                  bundle_id, cand_index, block_name, x1,y1,x2,y2,
                  layer_hint, is_jog — one TEG-over bridge per
-                 (candidate, multi-rect block) (v11)
+                 (candidate, multi-rect block) (v11; legacy-load
+                 only since open 1(a) — generation writes no rows)
                  PK (bundle_id, cand_index, block_name)
                  FK (bundle_id, cand_index) → topology
 
@@ -628,8 +629,12 @@ the frame, the taper is left underived and reported the same way — guessing a
 mapping could drop a bit's wire.
 
 TEG-over bridge segments
-**are** restored (`topology_bridge_segment`, v11), so TEG-over multi-rect
-designs resume losslessly. `ripup_reroute` and `run_nuts_on_layer` both
+**are** restored (`topology_bridge_segment`, v11), so a candidate keeps its
+recorded content on resume.  Since the open 1(a) emission redesign
+(2026-08-22) generation writes NO bridge rows — the TEG-over connection
+metal is ordinary segments, persisted like any segment — so only a
+pre-change checkpoint holds rows; its restored bridge is still placed by
+nothing and the `TEG_OPEN` audit reports it as unrealized. `ripup_reroute` and `run_nuts_on_layer` both
 **commit** their final routing via the `_checkpoint_routing()` choke point
 (planner output + NUTS + detailed rows), so a checkpoint after either resumes
 from the re-solved routing, not stale rows. The visualizer's interactive

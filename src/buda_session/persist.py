@@ -588,8 +588,11 @@ class PersistMixin:
           the topology's connectivity truth; load_seg_busterms restores both,
           falling back to a geometric derive only for pre-v12 checkpoints), and
         - the TEG-over bridge segments (bridge_segments: block_name -> Segment,
-          v11 — without them a resumed TEG-over multi-rect design silently
-          drops the bridge over the block's notch).
+          v11).  Generation no longer emits bridges (open 1(a): the TEG
+          connection metal is ordinary segments now), so this writes rows only
+          for a candidate that itself came from a pre-change checkpoint — a
+          re-persist must not silently drop the restored bridge, which is part
+          of the candidate's recorded content (topo_uid hashes it).
 
         The single choke point for every topology-persist site: a future site
         that called some but not all of these would silently reintroduce a
@@ -977,6 +980,11 @@ class PersistMixin:
                 buda.load_seg_busterms(self.bdb, br.id, tr.cand_index, t)
             # TEG-over bridges (v11): the explicit segment over a multi-rect
             # block's notch, kept OUTSIDE t.segments (bridge_segments map).
+            # Only a PRE-CHANGE checkpoint holds rows (generation emits
+            # ordinary connector segments now — open 1(a)); restoring them
+            # keeps the candidate's recorded content, and a restored
+            # bridge-reliant route is reported by the TEG_OPEN audit
+            # ("declared bridge is unrealized").
             bridges = {}
             for brg in bridges_by_ci.get(tr.cand_index, ()):
                 sg = buda.Segment()

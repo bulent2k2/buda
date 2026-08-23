@@ -1322,9 +1322,11 @@ static int wirelength(const Topology& t) {
     int wl = 0;
     for (const auto& s : t.segments)
         wl += std::abs(s.end.x - s.start.x) + std::abs(s.end.y - s.start.y);
-    // TEG-OVER bridge wires live outside `segments` but are real routed metal;
-    // count them so WL is honest (otherwise the planner ranks a bridged
-    // candidate as artificially cheap).
+    // TEG-OVER bridge wires live outside `segments`.  Generation no longer
+    // emits them (the connection metal is ordinary segments now — see
+    // add_trunk's OVER branches), but a candidate RESTORED from a pre-change
+    // checkpoint still carries them, and they were priced when it was
+    // generated — keep counting so a restored pool keeps its recorded order.
     for (const auto& [bname, s] : t.bridge_segments) {
         (void)bname;
         wl += std::abs(s.end.x - s.start.x) + std::abs(s.end.y - s.start.y);
@@ -1350,8 +1352,9 @@ static void annotate_and_sort(std::vector<Topology>& v) {
     // because ASCII '+' < '@' (the b44 mis-pick: the planner's equal-score
     // tie-break keeps the LOWEST index, which this sort defines).  The type
     // string stays as the final determinism anchor only.  Bridge segments
-    // (TEG-over) are real wires with a junction each; count them so a bridged
-    // candidate doesn't look structurally simpler than it is.
+    // (TEG-over) appear only on candidates restored from pre-change
+    // checkpoints (generation emits ordinary connector segments now); count
+    // them so a restored pool keeps its recorded order.
     auto nsegs = [](const Topology& t) {
         return t.segments.size() + t.bridge_segments.size();
     };
@@ -3004,34 +3007,61 @@ void TopologyGenerator::add_trunk(const Axis& axis, bool suppress_stubs,
         a_lo = new_lo; a_hi = new_hi;                  // spine spans between the spread stubs
     }
 
-    // TEG-over gap stubs are emitted at their rects' CENTRES (a_near/a_far in the
-    // emission loop below), not at att[i] — but the spine span [a_lo, a_hi] is
-    // computed from att[], which the extreme-attachment pull may have shortened to
-    // the block's near along-face.  When such a block is the spine's extreme
-    // block, the trunk then stops SHORT of the gap-stub pair and the pair floats
-    // off the trunk as a genuinely disconnected island (check_topo DISCONNECTED;
-    // the generation coverage gate would drop the candidate, losing the only
-    // bridged TEG-over option).  Extend the spine span to reach every gap-stub
-    // position, mirroring the emission's best_near/best_far selection exactly.
+    // TEG-over connection metal is emitted at positions derived from the RECTS
+    // (gap stubs at rect centres for a trunk in the gap between rects; a
+    // perpendicular connector leg at each un-spanned rect's centre for a trunk
+    // passing through a rectilinear block), not at att[i] — but the spine span
+    // [a_lo, a_hi] is computed from att[], which the extreme-attachment pull may
+    // have shortened to the block's near along-face.  When such a block is the
+    // spine's extreme block, the trunk then stops SHORT of the connection metal
+    // and it floats off the trunk as a genuinely disconnected island (check_topo
+    // DISCONNECTED; the generation coverage gate would drop the candidate,
+    // losing the only connected TEG-over option).  Extend the spine span to
+    // reach every emitted junction, mirroring the emission loop below exactly —
+    // including stub_suppressed blocks, whose gap stubs the emission emits
+    // regardless (audit C4-01: the old pre-pass skipped them, so their gap-stub
+    // pairs floated off-spine and the candidates were dropped at the gate).
     for (int i = 0; i < n; ++i) {
-        if (stub_suppressed[i] || !has_stub[i]) continue;
         if (blocks[i].teg_mode != TegMode::OVER || blocks[i].rects.size() < 2) continue;
         const auto& rects = blocks[i].rects;
+        if (!has_stub[i]) {
+            // Rectilinear pass-through: a connector leg is emitted at each
+            // un-spanned rect's along-centre (see the emission loop).  Enforce
+            // the minimum stub length on each leg exactly as the ordinary stub
+            // path does at the top of this function (a too-short stub SKIPS the
+            // trunk) — the legs are stubs on the stub layer/direction, and the
+            // early check only sees has_stub[] entries, so a locus lying less
+            // than the floor outside an un-spanned rect would otherwise emit an
+            // illegally short leg no ordinary stub is allowed to have (Codex P2
+            // on the 1(a) emission).
+            if (!rects_are_rectilinear(rects)) continue;
+            const int min_leg = use_busterm_
+                ? floorplan_.get_min_stub_length(
+                      axis.along_horiz ? 1 /*VERTICAL*/ : 0 /*HORIZONTAL*/, stub_layer)
+                : 0;
+            for (const auto& r : rects) {
+                if (locus >= axis.perp_lo(r) && locus <= axis.perp_hi(r)) continue;
+                int leg_len = (axis.perp_hi(r) < locus) ? locus - axis.perp_hi(r)
+                                                        : axis.perp_lo(r) - locus;
+                if (leg_len < min_leg) return;         // skip this trunk
+                int a = axis.along_center(r);
+                a_lo = std::min(a_lo, a);
+                a_hi = std::max(a_hi, a);
+            }
+            continue;
+        }
         bool trunk_inside_any = false;
         for (const auto& r : rects)
             if (locus >= axis.perp_lo(r) && locus <= axis.perp_hi(r)) { trunk_inside_any = true; break; }
         if (trunk_inside_any) continue;
-        Rect best_near = rects[0]; bool has_near = false;
-        Rect best_far  = rects[0]; bool has_far  = false;
+        bool has_near = false, has_far = false;
         for (const auto& r : rects) {
-            if (axis.perp_hi(r) <= locus) {
-                if (!has_near || axis.perp_hi(r) > axis.perp_hi(best_near)) { best_near = r; has_near = true; }
-            } else if (axis.perp_lo(r) >= locus) {
-                if (!has_far || axis.perp_lo(r) < axis.perp_lo(best_far)) { best_far = r; has_far = true; }
-            }
+            if (axis.perp_hi(r) <= locus) has_near = true;
+            else if (axis.perp_lo(r) >= locus) has_far = true;
         }
         if (!has_near || !has_far) continue;           // falls back to the normal att[i] stub
-        for (int a : {axis.along_center(best_near), axis.along_center(best_far)}) {
+        for (const auto& r : rects) {
+            int a = axis.along_center(r);
             a_lo = std::min(a_lo, a);
             a_hi = std::max(a_hi, a);
         }
@@ -3083,26 +3113,49 @@ void TopologyGenerator::add_trunk(const Axis& axis, bool suppress_stubs,
     for (int i = 0; i < n; ++i) {
         if (!has_stub[i]) {
             // Direct: trunk is inside the best rect. For OVER mode on a rectilinear
-            // block (rects with overlapping interiors, e.g. L-shape), check if ALL
-            // rects span the trunk locus. If not, emit a bridge over the outer face
-            // so the parts of the block outside the trunk's perp-range are also
-            // connected.  Pure TEG blocks (disjoint rects) are exempt.
+            // block (rects with overlapping interiors, e.g. L-shape), every rect
+            // the trunk does NOT span needs its own real metal — OVER revokes the
+            // block's internal continuity.  Emit a perpendicular connector leg
+            // from the trunk to each un-spanned rect's nearest perp face at the
+            // rect's along-centre: the leg taps the rect (endpoint on its face)
+            // and T-junctions the spine (the pre-pass above extended the spine to
+            // cover the junction).  This REPLACES the former union-face "bridge"
+            // (Topology::bridge_segments), which lay on the union bbox's perp-hi
+            // face where it touched neither the trunk nor the very rect it
+            // existed to connect, and was consumed by nothing downstream
+            // (teg_multirect_status.md §1.3 / §2.2).  Ordinary segments ride the
+            // whole pipeline — planner, NUTS, DNUTS, audits, report_wl, persist.
+            // Pure TEG blocks (disjoint rects) are exempt as before.
             if (blocks[i].teg_mode == TegMode::OVER && !blocks[i].rects.empty()
                     && rects_are_rectilinear(blocks[i].rects)) {
-                bool all_span = true;
-                for (const auto& r : blocks[i].rects)
-                    if (locus < axis.perp_lo(r) || locus > axis.perp_hi(r)) { all_span = false; break; }
-                if (!all_span) {
-                    const Rect& ub = blocks[i].orig_bbox;
-                    t.bridge_segments[blocks[i].block_name] =
-                        axis.mkseg(axis.along_lo(ub), axis.perp_hi(ub), axis.along_hi(ub), axis.perp_hi(ub), spine_layer);
+                // FACE → trunk orientation, like every stub: emit_tap_segment
+                // seeds the busterm on the START endpoint, and a trunk-end seed
+                // shadows the real face annotation so NUTS loses its face
+                // anchor and retracts the leg (the gap-stub retraction bug,
+                // claude/teg-gap-stub-fix — same machinery, same hazard).
+                for (const auto& r : blocks[i].rects) {
+                    if (locus >= axis.perp_lo(r) && locus <= axis.perp_hi(r)) continue;
+                    int a = axis.along_center(r);
+                    if (axis.perp_hi(r) < locus)          // near side: perp-hi face → trunk
+                        emit_tap_segment(t, axis.mkseg(a, axis.perp_hi(r), a, locus, stub_layer), &blocks[i]);
+                    else                                  // far side: perp-lo face → trunk
+                        emit_tap_segment(t, axis.mkseg(a, axis.perp_lo(r), a, locus, stub_layer), &blocks[i]);
                 }
             }
             continue;
         }
 
-        // Over-the-block: if trunk is in the gap between rects on both sides,
-        // emit two stubs (one per side) and a bridge over the outer face.
+        // Over-the-block: trunk in the gap between rects on both sides — EVERY
+        // rect gets its own stub to the trunk (near side from its perp-hi face,
+        // far side to its perp-lo face, each at the rect's along-centre).  OVER
+        // revokes the block's internal continuity, so each rect needs real
+        // metal, and the rects are joined THROUGH the trunk (each stub
+        // T-junctions the spine — the pre-pass above extended it to cover
+        // them).  The former union-face "bridge" (Topology::bridge_segments)
+        // is gone: it connected to no stub (floating metal on the union bbox's
+        // perp-hi face) and was consumed by nothing downstream, so it demoted
+        // the candidate's WL for wire the router never built while adding no
+        // connectivity (teg_multirect_status.md §1.3 / §2.2).
         if (blocks[i].teg_mode == TegMode::OVER && blocks[i].rects.size() >= 2) {
             const auto& rects = blocks[i].rects;
             bool trunk_inside_any = false;
@@ -3110,21 +3163,13 @@ void TopologyGenerator::add_trunk(const Axis& axis, bool suppress_stubs,
                 if (locus >= axis.perp_lo(r) && locus <= axis.perp_hi(r)) { trunk_inside_any = true; break; }
 
             if (!trunk_inside_any) {
-                // Partition rects into those perp-below and perp-above the trunk.
-                Rect best_near = rects[0]; bool has_near = false;
-                Rect best_far  = rects[0]; bool has_far  = false;
+                bool has_near = false, has_far = false;
                 for (const auto& r : rects) {
-                    if (axis.perp_hi(r) <= locus) {
-                        if (!has_near || axis.perp_hi(r) > axis.perp_hi(best_near)) { best_near = r; has_near = true; }
-                    } else if (axis.perp_lo(r) >= locus) {
-                        if (!has_far || axis.perp_lo(r) < axis.perp_lo(best_far)) { best_far = r; has_far = true; }
-                    }
+                    if (axis.perp_hi(r) <= locus) has_near = true;
+                    else if (axis.perp_lo(r) >= locus) has_far = true;
                 }
                 if (has_near && has_far) {
-                    int a_near = axis.along_center(best_near);
-                    int a_far  = axis.along_center(best_far);
-
-                    // Both stubs are emitted FACE → trunk, like every other stub
+                    // Every stub is emitted FACE → trunk, like every other stub
                     // (the normal single stub below and MST taps alike), because
                     // emit_tap_segment seeds the busterm on the START endpoint.
                     // The far stub used to be emitted trunk → face, which put the
@@ -3136,15 +3181,13 @@ void TopologyGenerator::add_trunk(const Axis& axis, bool suppress_stubs,
                     // RETRACTED the stub's span to the trunk (measured: span
                     // [150,158] against a face at 300; BUSTERM_FACE + ANTENNA +
                     // TEG_OPEN on the placed result, both orientations).
-                    // Stub from near rect's far face → trunk.
-                    emit_tap_segment(t, axis.mkseg(a_near, axis.perp_hi(best_near), a_near, locus, stub_layer), &blocks[i]);
-                    // Stub from far rect's near face → trunk.
-                    emit_tap_segment(t, axis.mkseg(a_far, axis.perp_lo(best_far), a_far, locus, stub_layer), &blocks[i]);
-
-                    // Bridge segment at union_bbox outer (perp-hi) face.
-                    const Rect& ub = blocks[i].orig_bbox;
-                    t.bridge_segments[blocks[i].block_name] =
-                        axis.mkseg(axis.along_lo(ub), axis.perp_hi(ub), axis.along_hi(ub), axis.perp_hi(ub), spine_layer);
+                    for (const auto& r : rects) {
+                        int a = axis.along_center(r);
+                        if (axis.perp_hi(r) <= locus)     // near side: perp-hi face → trunk
+                            emit_tap_segment(t, axis.mkseg(a, axis.perp_hi(r), a, locus, stub_layer), &blocks[i]);
+                        else                              // far side: perp-lo face → trunk
+                            emit_tap_segment(t, axis.mkseg(a, axis.perp_lo(r), a, locus, stub_layer), &blocks[i]);
+                    }
                     continue;
                 }
             }
@@ -4087,8 +4130,10 @@ void TopologyGenerator::add_trunk_mst_candidates(
         // trunk-rooted tree that complete_relay_junctions can wire up safely.
         //
         // Scope to single-rect branch blocks: a multi-rect/TEG-OVER block can own
-        // two V stubs plus a bridge, and dropping those would dangle the bridge.
-        // For those we keep the legacy (un-completed) behaviour, still flagged.
+        // several stubs (per-rect gap stubs joined through the trunk), and
+        // dropping them for an MST edge would detach the rects the stubs exist
+        // to connect.  For those we keep the legacy (un-completed) behaviour,
+        // still flagged.
         bool simple = true;
         for (int idx : branch_idx)
             if (!blocks[idx].rects.empty()) { simple = false; break; }
@@ -4308,7 +4353,7 @@ void TopologyGenerator::add_trunk_mst_candidates(
             results.push_back(std::move(legacy));
         } else if (blocks.size() < 4 && !legacy_dangling) {
             // Completion could not yield a clean tree (e.g. a multi-rect/TEG branch
-            // whose stubs can't be dropped without dangling its bridge, or no
+            // whose per-rect stubs can't be dropped without detaching a rect, or no
             // stub-owning root).  Defer it to the post-loop coverage fallback rather
             // than dropping outright: check_topo flags its relay, but its wirelength
             // is honestly over-counted (full trunk + every edge), so even if it is

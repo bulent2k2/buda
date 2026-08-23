@@ -1,35 +1,35 @@
 # TEG-over end-to-end QoR vehicle (teg_multirect_status.md open 2).
 #
-# The §1.1 repro geometry as a full-pipeline flow: pin a BRIDGE-RELIANT
-# candidate on the L-shaped `teg_mode over` block, route it through
-# planner -> NUTS -> DetailedNUTS, and audit.  Bridges are generation-only
-# today (nothing downstream of generation consumes Topology::bridge_segments),
-# so the selected route is built WITHOUT its bridge and the tall arm — the
-# rect the trunk missed — is touched by no placed metal.
+# The §1.1 geometry as a full-pipeline flow: pin the candidate that FORMERLY
+# relied on a TEG bridge (TRUNK_V@x250 — the V trunk sits in the notch and
+# crosses the base only, so the tall arm needs explicit connection metal),
+# route it through planner -> NUTS -> DetailedNUTS, and audit.
 #
-# This flow is EXPECTED DIRTY: check_design must report TEG_OPEN (the open
-# 1(b) audit, PR #821) at both placed stages.  That is the point — the corpus
-# row records viol_bundles = 1, pinning the audit end to end until open 1(a)
-# emission makes the bridge real metal (at which point this flow flips clean
-# and the corpus row moves LOUDLY, which is the desired signal).
+# HISTORY: this flow merged EXPECTED DIRTY — bridges were generation-only, so
+# the route was built without its bridge and check_design reported TEG_OPEN
+# (the open 1(b) audit, PR #821), corpus row 1 viol.  Open 1(a) then landed:
+# the trunk generator emits a real perpendicular connector leg to each
+# un-spanned rect (ordinary segments; Topology::bridge_segments is
+# legacy-load only), so this flow now runs EXPECTED CLEAN — 3 segments
+# (trunk + stub + leg), 12 bit-wires, both audits Success — and the corpus
+# row guards emission's health: if the leg regresses, TEG_OPEN fires and the
+# row moves LOUDLY.
 #
-# Candidate pin: `select_topology 1 13` is a hard 1-based index —
-# TRUNK_V@x250, the WL-sorted pool's first gap-trunk with a bridge over L at
-# (400,0)-(400,400) (pool measured on main @ bc154c33: 18 candidates, 7
-# bridged; indices 8 and 13-18 carry bridges).  A hard index is fragile by
-# nature, but there is no pin-by-type selector; the guards are:
+# Candidate pin: `select_topology 1 10` is a hard 1-based index —
+# TRUNK_V@x250 in the WL-sorted post-emission pool (18 candidates, none
+# bridged; the leg's real WL re-sorted the pool, which is why the pre-
+# emission pin was 13).  A hard index is fragile by nature, but there is no
+# pin-by-type selector; the guards are:
 #   * an index past the pool is a hard error (the flow exits non-zero), and
-#   * test_flow_scripts.py::test_teg_over_audit_flow_pins_teg_open asserts
-#     the planner line shows `TRUNK_V@x250 [pinned]` AND that check_design
-#     reports TEG_OPEN — so a re-sorted pool that lands a different shape on
-#     index 13 fails the test loudly instead of silently auditing a
+#   * test_flow_scripts.py::test_teg_over_audit_flow_routes_clean asserts
+#     the planner line shows `TRUNK_V@x250 [pinned]` AND both check_design
+#     Success lines — so a re-sorted pool that lands a different shape on
+#     index 10 fails the test loudly instead of silently auditing a
 #     different candidate.
 #
 # Geometry (shared with test/tests/test_teg_open.py):
 #   L block: tall arm (0,0)-(100,400) + wide base (0,0)-(400,100), OVER
 #   src:     (500,150)-(600,250)
-#   The V trunk at x250 sits in the notch: it crosses the base only, so the
-#   tall arm is reachable only through the declared bridge.
 
 add_block src 500 150 600 250
 add_block L rect 0 0 100 400 rect 0 0 400 100 teg_mode over
@@ -45,8 +45,8 @@ generate_topologies
 def_track_pattern 4 0 (SIGNAL 2 2)x8
 def_track_pattern 5 0 (SIGNAL 2 2)x8
 
-# The bridge-reliant candidate (see header): TRUNK_V@x250 + bridge over L.
-select_topology 1 13
+# The formerly-bridge-reliant candidate (see header): TRUNK_V@x250 + leg.
+select_topology 1 10
 
 run_planner
 run_nuts

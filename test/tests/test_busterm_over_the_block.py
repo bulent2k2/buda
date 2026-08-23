@@ -17,6 +17,13 @@ pytest-bdd step definitions for features/busterm_over_the_block.feature.
 
 Over-the-block vs thru-the-block TEG (Terminal Equivalence Group) routing modes.
 
+Since the bridge-emission redesign (teg_multirect_status.md open 1(a)) the
+OVER connection metal is ORDINARY topology segments — gap stubs joined through
+the trunk, and perpendicular connector legs for rectilinear blocks — so these
+scenarios assert real stub/leg geometry and the ABSENCE of the former
+union-face bridge (Topology.bridge_segments stays empty at generation; it
+survives only on candidates restored from pre-change checkpoints).
+
 Scenarios 1–7 test currently-implemented behaviour and must PASS.
 Scenario 8 (adjusted-wirelength ranking) is xfail: Topology.adjusted_wl and
   per-topology teg_mode attribute are not yet in the C++ API.
@@ -43,8 +50,8 @@ def test_thrutheblock__trunk_inside_a_rect_needs_no_stub_direct_connection():
 
 
 @scenario('features/busterm_over_the_block.feature',
-          'Over-the-block — trunk in gap generates bridge over block')
-def test_overtheblock__trunk_in_gap_generates_bridge_over_block():
+          'Over-the-block — trunk in gap stubs both rects, joined through the trunk')
+def test_overtheblock__trunk_in_gap_stubs_both_rects_joined_through_trunk():
     pass
 
 
@@ -61,8 +68,8 @@ def test_overtheblock__lshaped_block_with_v_trunk_beside_notch():
 
 
 @scenario('features/busterm_over_the_block.feature',
-          'Over-the-block — V trunk with horizontal gap (pure TEG, right-face bridge)')
-def test_overtheblock__v_trunk_horizontal_gap_right_face_bridge():
+          'Over-the-block — V trunk with horizontal gap (pure TEG, stubs joined through the trunk)')
+def test_overtheblock__v_trunk_horizontal_gap_stubs_joined_through_trunk():
     pass
 
 
@@ -290,60 +297,58 @@ def then_vstub_up_length(ctx, block, trunk_key, length):
 
 
 @then(parsers.re(
-    r'the (?P<trunk_key>\S+) candidate has a bridge segment for "(?P<block>[^"]+)" at y=(?P<y>\d+)'
+    r'both V stubs of "(?P<block>[^"]+)" in the (?P<trunk_key>\S+) candidate '
+    r'end on the trunk at y=(?P<y>\d+)'
 ))
-def then_bridge_at_y(ctx, trunk_key, block, y):
+def then_vstubs_end_on_trunk(ctx, block, trunk_key, y):
+    # The connectivity claim of the redesign: each gap stub T-junctions the
+    # spine, so the OVER block's rects are joined THROUGH the trunk by real
+    # metal (no side-map bridge involved).
     c = _find_by_trunk(ctx['candidates'], trunk_key)
     assert c is not None, f'Candidate {trunk_key!r} not found'
-    bridge = _bridge_for_block(c, block)
-    assert bridge is not None, f'No bridge for {block!r} in {trunk_key!r}'
-    bridge_y = bridge.start.y  # bridge is horizontal; both endpoints at same y
-    assert bridge_y == int(y), f'Bridge y: expected {y}, got {bridge_y}'
+    stubs = _vstubs_for_block(c, block)
+    assert len(stubs) == 2, f'Expected 2 V stubs, got {len(stubs)}'
+    for i, seg in stubs:
+        assert int(y) in (seg.start.y, seg.end.y), (
+            f'V stub seg {i} of {block!r} does not reach the trunk at y={y}: '
+            f'({seg.start.x},{seg.start.y})-({seg.end.x},{seg.end.y})'
+        )
 
 
-@then(parsers.parse(
-    "the bridge segment spans from B's leftmost rect face to B's rightmost rect face"
-))
-def then_bridge_spans_rects(ctx):
-    c = _find_by_trunk(ctx['candidates'], 'TRUNK_H@y200')
-    assert c is not None, 'TRUNK_H@y200 not found'
-    bridge = _bridge_for_block(c, 'B')
-    assert bridge is not None, 'No bridge for B'
-    rects = ctx['fp'].get_block_rects('B')
-    expected_lo = min(r[0] for r in rects)   # min x1 across all rects
-    expected_hi = max(r[2] for r in rects)   # max x2 across all rects
-    bridge_lo = min(bridge.start.x, bridge.end.x)
-    bridge_hi = max(bridge.start.x, bridge.end.x)
-    assert bridge_lo == expected_lo, f'Bridge lo x: expected {expected_lo}, got {bridge_lo}'
-    assert bridge_hi == expected_hi, f'Bridge hi x: expected {expected_hi}, got {bridge_hi}'
+def _hstubs_for_block(candidate, block_name):
+    """Return (seg_idx, Segment) for every horizontal segment tapping block_name."""
+    result = []
+    for i, seg in enumerate(candidate.segments):
+        if seg.start.y != seg.end.y:  # not horizontal
+            continue
+        bt_pair = candidate.seg_busterms.get(i, (None, None))
+        if any(bt is not None and bt.block_name == block_name for bt in bt_pair):
+            result.append((i, seg))
+    return result
 
 
 @then(parsers.re(
-    r'the (?P<trunk_key>\S+) candidate has a bridge segment for "(?P<block>[^"]+)"$'
+    r'the (?P<trunk_key>\S+) candidate has an H connector leg tapping '
+    r'"(?P<block>[^"]+)" from x=(?P<x_face>\d+) to the trunk at x=(?P<x_trunk>\d+) '
+    r'at y=(?P<y>\d+)'
 ))
-def then_has_bridge(ctx, trunk_key, block):
+def then_h_connector_leg(ctx, trunk_key, block, x_face, x_trunk, y):
+    # The rectilinear-branch redesign: the un-spanned rect is reached by a REAL
+    # perpendicular leg — endpoint on the rect's face, other endpoint
+    # T-junctioning the spine — instead of the former floating union-face
+    # bridge (teg_multirect_status.md §1.3).
     c = _find_by_trunk(ctx['candidates'], trunk_key)
     assert c is not None, f'Candidate {trunk_key!r} not found'
-    assert _bridge_for_block(c, block) is not None, \
-        f'No bridge for {block!r} in {trunk_key!r}'
-
-
-@then(parsers.re(
-    r'the bridge segment runs along the right face of "(?P<block>[^"]+)"\'s union bounding box'
-))
-def then_bridge_along_right(ctx, block):
-    c = _find_by_trunk(ctx['candidates'], 'TRUNK_V@x250')
-    assert c is not None, 'TRUNK_V@x250 not found'
-    bridge = _bridge_for_block(c, block)
-    assert bridge is not None, f'No bridge for {block!r}'
-    rects = ctx['fp'].get_block_rects(block)
-    union_x2 = max(r[2] for r in rects)
-    assert bridge.start.x == union_x2, \
-        f'Bridge x: expected right face of union bbox ({union_x2}), got {bridge.start.x}'
-    assert bridge.start.y != bridge.end.y or bridge.start.x != bridge.end.x, \
-        f'Bridge is degenerate (zero length)'
-    assert bridge.start.x == bridge.end.x, \
-        f'V-trunk bridge should be vertical (same x); got start.x={bridge.start.x}, end.x={bridge.end.x}'
+    legs = _hstubs_for_block(c, block)
+    want = {int(x_face), int(x_trunk)}
+    for i, seg in legs:
+        if seg.start.y == int(y) and {seg.start.x, seg.end.x} == want:
+            return
+    pytest.fail(
+        f'No H connector leg for {block!r} in {trunk_key!r} with '
+        f'x endpoints {sorted(want)} at y={y}; taps found: '
+        f'{[((s.start.x, s.start.y), (s.end.x, s.end.y)) for _, s in legs]}'
+    )
 
 
 @then(parsers.re(
@@ -373,32 +378,42 @@ def then_direct_connection(ctx, block, trunk_key):
 
 
 @then(parsers.re(
-    r'the V-trunk bridge for "(?P<block>[^"]+)" is vertical at x=(?P<x>\d+)'
+    r'in the (?P<trunk_key>\S+) candidate '
+    r'"(?P<block>[^"]+)" has 2 H stubs \(one to each rect\)'
 ))
-def then_v_trunk_bridge_vertical_at_x(ctx, block, x):
-    c = _find_by_trunk(ctx['candidates'], 'TRUNK_V@x250')
-    assert c is not None, 'TRUNK_V@x250 candidate not found'
-    bridge = _bridge_for_block(c, block)
-    assert bridge is not None, f'No bridge segment for {block!r} in TRUNK_V@x250'
-    expected_x = int(x)
-    assert bridge.start.x == expected_x, \
-        f'Bridge start.x: expected {expected_x}, got {bridge.start.x}'
-    assert bridge.end.x == expected_x, \
-        f'Bridge end.x: expected {expected_x}, got {bridge.end.x}'
-    assert bridge.start.y != bridge.end.y, \
-        f'V-trunk bridge should be vertical (start.y != end.y)'
+def then_two_hstubs(ctx, trunk_key, block):
+    c = _find_by_trunk(ctx['candidates'], trunk_key)
+    assert c is not None, f'Candidate {trunk_key!r} not found'
+    stubs = _hstubs_for_block(c, block)
+    assert len(stubs) == 2, \
+        f'Expected 2 H stubs for {block!r} in {trunk_key!r}, got {len(stubs)}'
 
 
 @then(parsers.re(
-    r'in (?P<trunk_key>\S+) "(?P<b1>[^"]+)" has a bridge segment and "(?P<b2>[^"]+)" does not'
+    r'both H stubs of "(?P<block>[^"]+)" in the (?P<trunk_key>\S+) candidate '
+    r'end on the trunk at x=(?P<x>\d+)'
 ))
-def then_b1_has_bridge_b2_does_not(ctx, trunk_key, b1, b2):
+def then_hstubs_end_on_trunk(ctx, block, trunk_key, x):
     c = _find_by_trunk(ctx['candidates'], trunk_key)
     assert c is not None, f'Candidate {trunk_key!r} not found'
-    assert _bridge_for_block(c, b1) is not None, \
-        f'{b1!r} has no bridge in {trunk_key!r}'
-    assert _bridge_for_block(c, b2) is None, \
-        f'{b2!r} should not have a bridge in {trunk_key!r}'
+    stubs = _hstubs_for_block(c, block)
+    assert len(stubs) == 2, f'Expected 2 H stubs, got {len(stubs)}'
+    for i, seg in stubs:
+        assert int(x) in (seg.start.x, seg.end.x), (
+            f'H stub seg {i} of {block!r} does not reach the trunk at x={x}: '
+            f'({seg.start.x},{seg.start.y})-({seg.end.x},{seg.end.y})'
+        )
+
+
+@then(parsers.re(
+    r'in the (?P<trunk_key>\S+) candidate "(?P<block>[^"]+)" has exactly 1 V stub$'
+))
+def then_exactly_one_vstub(ctx, trunk_key, block):
+    c = _find_by_trunk(ctx['candidates'], trunk_key)
+    assert c is not None, f'Candidate {trunk_key!r} not found'
+    stubs = _vstubs_for_block(c, block)
+    assert len(stubs) == 1, \
+        f'Expected exactly 1 V stub for {block!r} in {trunk_key!r}, got {len(stubs)}'
 
 
 # ---------------------------------------------------------------------------

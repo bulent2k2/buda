@@ -231,13 +231,12 @@ CORPUS = [
     # collide on one SQLite file under a parallel sweep.
     "flow/ariane133/ariane133_heal.buda",
     # TEG-over end-to-end guard (teg_multirect_status.md open 2): the §1.1
-    # repro as a corpus row — a pinned bridge-reliant candidate on an OVER
-    # multi-rect block, routed to DNUTS.  EXPECTED DIRTY: bridges are
-    # generation-only, so the route is built without its bridge and the
-    # TEG_OPEN audit (open 1(b), PR #821) reports it — viol_bundles = 1 is
-    # the pinned value.  The row exists so the audit's verdict is
-    # QoR-guarded end to end; when open 1(a) emission lands, this flips to
-    # 0/0/0 and the diff is the desired LOUD signal.  ~0.1s.
+    # geometry as a corpus row — the formerly-bridge-reliant TRUNK_V@x250
+    # pinned on an OVER multi-rect block, routed to DNUTS.  Merged EXPECTED
+    # DIRTY (bridges were generation-only; TEG_OPEN pinned viol_bundles = 1);
+    # open 1(a) emission then made the connection metal real (a connector leg
+    # to the un-spanned rect), so the row is 0/0/0 now and guards emission:
+    # a regressed leg fires TEG_OPEN and moves the row LOUDLY.  ~0.1s.
     "flow/teg_over_audit.buda",
 ]
 

@@ -1334,18 +1334,22 @@ Option 2 (re-derive on load, no schema change) was considered and set aside: the
 persist path is a direct mirror of the existing `edge_id` machinery, so it is the
 lower-risk, self-documenting choice.
 
-## Audit 2026-07: stub_suppressed TEG-over blocks skip the spine pre-extension — OPEN (pool loss, not an open)
+## Audit 2026-07: stub_suppressed TEG-over blocks skip the spine pre-extension — RESOLVED 2026-08-22 (with the open 1(a) bridge-emission redesign)
 
 Finding C4-01 of [audit_2026-07.md](audit_2026-07.md), refuted as a
 correctness bug on HEAD: the trunk generator's TEG-over pre-pass (which
-folds a gap block's near/far stub positions into the spine extent) skips
+folds a gap block's near/far stub positions into the spine extent) skipped
 blocks whose normal stub is `stub_suppressed`, while the emission still
 emits their gap stubs — off-spine, so the candidate's wire graph splits and
-the generation coverage/islands gates (#335) DROP it. Net effect today is a
-lost candidate (pool completeness), not a silent open. Fix shape: extend
-the pre-pass to suppressed TEG-over gap blocks too (their gap stubs are the
-real connection; the suppression logic models only the single-stub form),
-then re-measure the pool on the TEG flows.
+the generation coverage/islands gates (#335) DROP it. Net effect was a
+lost candidate (pool completeness), not a silent open.  RESOLVED as the
+recorded fix shape when the TEG-over emission redesign (teg_multirect_status
+open 1(a)) rewrote the pre-pass to mirror the emission exactly: it now
+iterates every OVER multi-rect block regardless of `stub_suppressed` (the
+emission emits their gap stubs regardless, so the spine must reach them),
+covering all per-rect gap-stub positions AND the rectilinear connector-leg
+junctions the redesign added.  Pre-pass and emission share the same gates
+by construction, so the two cannot drift back apart.
 
 
 ## Default-flip study: `multi_trunk` + `spine_relays` (2026-07-30) — keep BOTH opt-in

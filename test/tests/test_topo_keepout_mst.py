@@ -572,19 +572,22 @@ def test_trunk_mst_wirelength_is_honest():
         )
 
 
-def test_trunk_wirelength_counts_teg_over_bridges():
-    """estimated_wirelength includes TEG-OVER bridge segments (defect 4).
+def test_trunk_teg_over_metal_is_ordinary_segments_and_wl_honest():
+    """TEG-OVER connection metal is ordinary segments, honestly priced.
 
-    A multi-rect block with teg_mode=OVER whose trunk lands in the gap between its
-    rects gets a bridge segment along the union-bbox outer face.  Bridges live in
-    Topology.bridge_segments, NOT in .segments -- but they are real routed metal, so
-    wirelength() must count them; otherwise the planner ranks a bridged candidate as
-    artificially cheap.
-    """
+    Historically a gap trunk emitted a "bridge segment" along the union-bbox
+    outer face, kept in Topology.bridge_segments OUTSIDE .segments, and
+    wirelength() added it separately (defect 4) — while nothing downstream
+    ever placed it.  Open 1(a) replaced the bridge with real per-rect gap
+    stubs in .segments, so: (a) generation emits NO bridge_segments, (b) both
+    rects of the OVER block are tapped by real stub metal, and (c)
+    estimated_wirelength equals the plain segment sum — priced metal IS the
+    metal the router builds.  wirelength() still adds bridge_segments for
+    candidates restored from pre-change checkpoints (see load_pipeline)."""
     fp = buda.Floorplan()
     fp.add_block("A", 0, 0, 100, 100)
-    # Two disjoint rects with a vertical gap; an H-trunk in the gap stubs to both
-    # rects and bridges over the union top.
+    # Two disjoint rects with a vertical gap; an H-trunk in the gap stubs both
+    # rects to the trunk (joined through it).
     fp.add_block_rects("M", [(300, 0, 400, 100), (300, 300, 400, 400)],
                        teg_mode=buda.TegMode.OVER)
     fp.add_block("B", 300, 600, 400, 700)
@@ -592,17 +595,38 @@ def test_trunk_wirelength_counts_teg_over_bridges():
     gen = _make_gen(fp)
     cands = gen.generate_candidates("A", ["M", "B"])
 
-    bridged = [c for c in cands if c.bridge_segments]
-    assert bridged, "expected at least one TEG-OVER candidate with a bridge segment"
-    for c in bridged:
+    assert all(not c.bridge_segments for c in cands), \
+        "generation must no longer emit bridge_segments"
+    # Find a gap trunk (H trunk strictly between M's rects, y in (100, 300)).
+    gap = []
+    for c in cands:
+        if not c.type.startswith("TRUNK_H@y"):
+            continue
+        y = int(c.type.split("@y")[1].split("+")[0])
+        if 100 < y < 300:
+            gap.append((c, y))
+    assert gap, "expected at least one gap-trunk candidate"
+    for c, y in gap:
+        # Both rects tapped by V stubs reaching the trunk.
+        m_stub_faces = set()
+        for i, s in enumerate(c.segments):
+            if s.start.x != s.end.x:
+                continue
+            bts = c.seg_busterms.get(i, (None, None))
+            if any(bt is not None and bt.block_name == "M" for bt in bts):
+                assert y in (s.start.y, s.end.y), \
+                    f"{c.type}: M stub does not reach the trunk"
+                m_stub_faces.add(min(s.start.y, s.end.y) if y == max(s.start.y, s.end.y)
+                                 else max(s.start.y, s.end.y))
+        assert m_stub_faces >= {100, 300}, (
+            f"{c.type}: expected stubs to both rect faces (y=100 top of lower, "
+            f"y=300 bottom of upper), got {sorted(m_stub_faces)}"
+        )
         seg_sum = sum(abs(s.end.x - s.start.x) + abs(s.end.y - s.start.y)
                       for s in c.segments)
-        bridge_sum = sum(abs(s.end.x - s.start.x) + abs(s.end.y - s.start.y)
-                         for s in c.bridge_segments.values())
-        assert bridge_sum > 0, f"{c.type}: bridge present but zero length"
-        assert c.estimated_wirelength == seg_sum + bridge_sum, (
+        assert c.estimated_wirelength == seg_sum, (
             f"{c.type}: estimated_wirelength {c.estimated_wirelength} != "
-            f"segments {seg_sum} + bridges {bridge_sum}"
+            f"segment-length sum {seg_sum}"
         )
 
 
