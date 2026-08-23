@@ -246,7 +246,8 @@ void bind_routing(py::module_& m) {
         .def_readwrite("bbox",       &Busterm::bbox)
         .def_readwrite("orig_bbox",  &Busterm::orig_bbox)
         .def_readwrite("rects",      &Busterm::rects)
-        .def_readwrite("teg_mode",   &Busterm::teg_mode);
+        .def_readwrite("teg_mode",   &Busterm::teg_mode)
+        .def_readwrite("orig_rects", &Busterm::orig_rects);
 
     py::class_<Topology>(m, "Topology")
         .def(py::init<>())
@@ -954,6 +955,12 @@ void bind_routing(py::module_& m) {
              "injected records)")
         .def("recharge_committed",   &CongestionPlanner::recharge_committed,
              py::arg("bundles"))
+        .def("low_seg_obstructed",   &CongestionPlanner::low_seg_obstructed,
+             py::arg("seg"), py::arg("layer_id"),
+             py::arg("perp_pos_override") = INT_MIN,
+             "True when a non-TOP segment's routed extent lies over a leaf "
+             "cell (per-rect for multi-rect blocks — the notch between rects "
+             "is routable).  Valid after build_congestion_map.")
         .def("candidate_costs",      &CongestionPlanner::candidate_costs,
              py::arg("bundles"), py::arg("target_bundle_id"),
              "Read-only debug scorer: planner cost of every candidate of one "

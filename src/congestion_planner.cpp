@@ -336,13 +336,26 @@ void CongestionPlanner::rebuild_cuts_() {
     if (x_grid_.size() < 2 || y_grid_.size() < 2) return;
 
     auto blocks   = floorplan_.get_all_blocks();
-    // Cache LEAF blocks only: every consumer (routed_extent,
-    // low_seg_obstructed) skips hierarchy containers, and the per-iteration
-    // is_container() string-set lookup was a measured chip-scale hotspot —
-    // filter once here instead (same subset, same order: byte-identical).
+    // Cache LEAF blocks only: every consumer (routed_extent, and — via the
+    // per-rect twin leaf_rects_cache_ — low_seg_obstructed) skips hierarchy
+    // containers, and the per-iteration is_container() string-set lookup was
+    // a measured chip-scale hotspot — filter once here instead (same subset,
+    // same order: byte-identical).
     blocks_cache_.clear();
+    leaf_rects_cache_.clear();
     for (const auto& b : blocks)
-        if (!floorplan_.is_container(b.first)) blocks_cache_.push_back(b);
+        if (!floorplan_.is_container(b.first)) {
+            blocks_cache_.push_back(b);
+            // Per-rect twin for low_seg_obstructed (teg_multirect_status.md
+            // open 3): a multi-rect block blocks LOW layers per rect (see
+            // low_layer_keepouts below — the notch between rects is routable),
+            // so the obstruction predicate must judge the same geometry.
+            // Single-rect blocks contribute their one rect in the same order,
+            // so designs without multi-rect blocks judge byte-identically.
+            auto rects = floorplan_.get_block_rects(b.first);
+            if (rects.empty()) leaf_rects_cache_.push_back(b.second);
+            else for (const Rect& r : rects) leaf_rects_cache_.push_back(r);
+        }
     int n_ybands = (int)y_grid_.size() - 1;
     int n_xbands = (int)x_grid_.size() - 1;
 
@@ -746,10 +759,14 @@ bool CongestionPlanner::low_seg_obstructed(const Segment& seg, int layer_id,
     if (lo >= hi) return false;   // zero-length: nothing routed here
 
     // Endpoint leaf cells (at this perp): the ones owning a pin-access tail.
+    // Judged per RECT (leaf_rects_cache_, teg_multirect_status.md open 3): a
+    // multi-rect block carves LOW capacity per rect, so its notch is routable
+    // and each sub-question below — endpoint containment, wholly-inside,
+    // mid-span crossing — must be answered against the individual rects, not
+    // the union bbox.  Single-rect designs see the identical rect list.
     const Rect* lo_cell = nullptr;
     const Rect* hi_cell = nullptr;
-    for (const auto& [name, r] : blocks_cache_) {   // leaf blocks only
-        (void)name;
+    for (const Rect& r : leaf_rects_cache_) {       // leaf blocks only
         int rlo = is_h ? r.x1 : r.y1, rhi = is_h ? r.x2 : r.y2;
         int plo = is_h ? r.y1 : r.x1, phi = is_h ? r.y2 : r.x2;
         if (perp < plo || perp > phi) continue;
@@ -775,8 +792,7 @@ bool CongestionPlanner::low_seg_obstructed(const Segment& seg, int layer_id,
         return lo_cell && hi_cell && lo_cell != hi_cell;
     }
 
-    for (const auto& [name, r] : blocks_cache_) {   // leaf blocks only
-        (void)name;
+    for (const Rect& r : leaf_rects_cache_) {       // leaf blocks only
         int rlo = is_h ? r.x1 : r.y1, rhi = is_h ? r.x2 : r.y2;
         int plo = is_h ? r.y1 : r.x1, phi = is_h ? r.y2 : r.x2;
         if (perp < plo || perp > phi) continue;
