@@ -406,10 +406,16 @@ class ExplorerAnalysisMixin:
         noise when editing one bundle."""
         xs, ys = set(), set()
         for n in self._bundle_busterm_names():
+            # get_block_rects returns 4-TUPLES ([] for single-rect blocks)
+            # while get_block_bounds returns a Rect object — the same split
+            # _crossed_blocks above handles.  Mixing them in one list crashed
+            # the explorer on every multi-rect bundle ('tuple' has no .x1).
             rects = self.fp.get_block_rects(n)
-            if not rects:
-                rects = [self.fp.get_block_bounds(n)]
-            for r in rects:
+            if rects:
+                for (x1, y1, x2, y2) in rects:
+                    xs.update((x1, x2)); ys.update((y1, y2))
+            else:
+                r = self.fp.get_block_bounds(n)
                 xs.update((r.x1, r.x2)); ys.update((r.y1, r.y2))
         for koz in self.fp.get_keepout_zones():
             xs.update((koz.bbox.x1, koz.bbox.x2))

@@ -122,7 +122,12 @@ catch this shape too, which is another reason to land it first.
   rects+teg_mode in the topology fingerprint (`src/topology_analysis.cpp:61-63`);
   hier offset/rotate transforms rects (`src/topology.cpp:49`, `:180`).
 - Viz: every rect drawn + dashed union box (`src/viz_common.py:210-246`); web
-  JSON carries real rects (`src/web/serialize.py:107-124`).
+  JSON carries real rects (`src/web/serialize.py:107-124`).  (This bullet
+  originally over-claimed the explorer half: `_bundle_hanan_grid` treated
+  `get_block_rects`' 4-tuples as Rect objects, so OPENING the explorer on any
+  multi-rect bundle crashed with `'tuple' object has no attribute 'x1'` —
+  found in the field on `lShape1.buda` 2026-08-23, fixed with a headless
+  regression test in `test_explorer_multirect.py`.)
 
 **Partial / inconsistent:**
 
