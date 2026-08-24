@@ -222,6 +222,16 @@ def test_a_shell_metacharacter_in_the_path_is_not_executed(tmp_path):
 
     recipe = next(l for l in out.splitlines() if "or resume: btcl -i" in l)
     cmd = recipe.split("or resume: ", 1)[1].split(") and they hold")[0]
+    # Same split as the sibling test above, and for the same reason (Codex
+    # P1 on #837 caught that only one of the two was gated): the engine
+    # taking the name LITERALLY is asserted everywhere, because that is the
+    # driver's behaviour; handing the printed line to `bash` is what is
+    # POSIX-specific.  `bash` on a native Windows runner is the unusable WSL
+    # stub or absent altogether (docs/WINDOWS_REQ.md), so running it there
+    # tests the stub, not the recipe.
+    if sys.platform == "win32":
+        pytest.skip("the printed recipe is word-split here by a POSIX shell; "
+                    "the literal-filename assertion above still ran")
     # What a shell makes of the printed words — `printf %s\n` per word, so
     # substitution would show up as a changed or extra word.
     words = subprocess.run(
