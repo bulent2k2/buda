@@ -34,15 +34,26 @@ import pytest
 
 from buda_script import split_quoted_args
 from tcl_quote import tcl_path
+from wrapper_select import wrapper_command, wrapper_missing_reason
 
 _ROOT = Path(__file__).resolve().parents[2]
 _DRIVER = _ROOT / "tools" / "buda_interact.tcl"
 
 # mid tier: each test drives a real tclsh + engine subprocess through a whole
 # flow, like the rest of the front-end suite.
+# The PLATFORM's launcher, never `bin/btcl` by path: that one is a bash
+# script, and Windows cannot execute it -- `subprocess` raises `WinError
+# 193: %1 is not a valid Win32 application` before the test does anything
+# (measured, windows-validate run 36: all four tests here).  The `.ps1`
+# twin exists precisely for this, and `test_tcl_interact` already selects
+# it the same way.
+_BTCL_CMD = wrapper_command(_ROOT, "btcl")
+
 pytestmark = [pytest.mark.mid,
               pytest.mark.skipif(shutil.which("tclsh") is None,
-                                 reason="no tclsh on this host")]
+                                 reason="no tclsh on this host"),
+              pytest.mark.skipif(_BTCL_CMD is None,
+                                 reason=wrapper_missing_reason("btcl"))]
 
 _FLOW = """def_layer 4 M4 H TOP 30
 def_layer 5 M5 V TOP 30
@@ -72,7 +83,7 @@ _CASES = [
 
 def _btcl_i(tmp_path, *args, stdin="done\n", timeout=300):
     """Run `btcl -i` in tmp_path and return its combined output."""
-    p = subprocess.run([str(_ROOT / "bin" / "btcl"), "-i", *args],
+    p = subprocess.run([*_BTCL_CMD, "-i", *args],
                        cwd=tmp_path, input=stdin, text=True,
                        capture_output=True, timeout=timeout)
     return p.stdout + p.stderr
@@ -166,6 +177,16 @@ def test_the_printed_resume_recipe_is_a_command_you_can_type(tmp_path):
     assert recipe, out
     cmd = recipe.split("or resume: ", 1)[1].split(") and they hold")[0]
     assert "'" in cmd, f"a spaced path went unquoted in the advice: {cmd}"
+    # The QUOTING above is asserted everywhere -- it is a property of what
+    # the driver PRINTED.  Only running it is POSIX-shell-specific: this
+    # executes the line through `bash`, which is how a user on this platform
+    # would type it.  A Windows user pastes the same line into PowerShell,
+    # whose word-splitting and quoting are different rules; asserting that
+    # here would be testing a shell we never taught the driver to quote for
+    # (windows-validate run 36).
+    if sys.platform == "win32":
+        pytest.skip("the printed recipe is executed here through a POSIX "
+                    "shell; the quoting assertion above still ran")
     p = subprocess.run(["bash", "-c",
                         cmd.replace("btcl", str(_ROOT / "bin" / "btcl"), 1)],
                        cwd=tmp_path, input="done\n", text=True,
@@ -201,6 +222,16 @@ def test_a_shell_metacharacter_in_the_path_is_not_executed(tmp_path):
 
     recipe = next(l for l in out.splitlines() if "or resume: btcl -i" in l)
     cmd = recipe.split("or resume: ", 1)[1].split(") and they hold")[0]
+    # Same split as the sibling test above, and for the same reason (Codex
+    # P1 on #837 caught that only one of the two was gated): the engine
+    # taking the name LITERALLY is asserted everywhere, because that is the
+    # driver's behaviour; handing the printed line to `bash` is what is
+    # POSIX-specific.  `bash` on a native Windows runner is the unusable WSL
+    # stub or absent altogether (docs/WINDOWS_REQ.md), so running it there
+    # tests the stub, not the recipe.
+    if sys.platform == "win32":
+        pytest.skip("the printed recipe is word-split here by a POSIX shell; "
+                    "the literal-filename assertion above still ran")
     # What a shell makes of the printed words — `printf %s\n` per word, so
     # substitution would show up as a changed or extra word.
     words = subprocess.run(

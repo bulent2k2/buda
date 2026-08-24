@@ -251,8 +251,19 @@ proc prompt::run {tag ps route bdb example {guard ""} {sidecar ""}} {
                     }
                     # `save <path>` snapshots to the named file; bare
                     # `save` keeps the historical default beside the flow.
-                    if {[llength $line] > 1} {
-                        buda::save_bdb [lindex $line 1]
+                    #
+                    # The path is the REST OF THE LINE, verbatim -- never
+                    # `[lindex $line 1]`, which parses the line as a Tcl
+                    # LIST and therefore EATS backslashes.  A Windows path
+                    # `C:\Users\me\h.bdb.sql` arrived as `C:Usersme...`
+                    # (the `\r` of `\runneradmin` even becoming a carriage
+                    # return), so the snapshot was written somewhere nobody
+                    # looks while `save` reported success -- measured,
+                    # windows-validate run 37.  Rest-of-line is also the
+                    # rule the engine's own `save_bdb` follows, so a path
+                    # with SPACES works here now for the same reason.
+                    if {[regexp {^\S+\s+(.+)$} $line -> _savepath]} {
+                        buda::save_bdb [string trim $_savepath]
                     } else {
                         buda::save_bdb ${bdb}.sql
                     }

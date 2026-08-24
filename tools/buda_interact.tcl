@@ -698,6 +698,18 @@ proc _inspect_guard {verb} {
     }
     return 0
 }
+# A recorder temp whose delete was refused while the engine held it open
+# (see the `catch` above).  Called immediately after every `buda::stop` that
+# can be reached with one outstanding -- by then the child is gone, so the
+# unlink succeeds.  A second failure is genuinely shrugged off: at that
+# point the file is the OS's problem, and a scratch file must never be the
+# reason a routed session reports failure.
+proc _reap_recorder {} {
+    if {![info exists ::recorder_leftover]} return
+    catch {file delete $::recorder_leftover}
+    unset ::recorder_leftover
+}
+
 proc _inspect_replan {} {
     # RAISES rather than printing-and-returning: the prompt's `replan` verb
     # clears its bookkeeping (pins_dirty, the GUI-pin preview reminder)
@@ -864,6 +876,13 @@ if {$stage eq "build"} {
         }
     }
     close [file tempfile recpath buda_record]
+    # Remembered from the moment it EXISTS.  `_reap_recorder` clears this on
+    # a successful delete, so what survives to any session end is exactly
+    # what still needs deleting -- covering both the Windows case (the
+    # delete below is refused while the engine holds the handle) and the
+    # early exits that never reach the delete at all, which leaked on every
+    # platform (pre-existing; found chasing Codex P2 on #837).
+    set ::recorder_leftover $recpath
     set ::env(BUDA_RECORD) $recpath
     set ::env(BUDA_RECORD_NOTE) "btcl -i $tag"
 
@@ -894,6 +913,7 @@ if {$stage eq "build"} {
             puts stderr "$tag: (another session holding it?  one writer at\
                   a time -- finish or kill it, or arm a different path)"
             catch {buda::stop}
+            _reap_recorder
             exit 1
         }
     }
@@ -907,6 +927,7 @@ if {$stage eq "build"} {
         # encoding and its arrow comes out as `?`.
         puts stderr "$tag: the flow failed: [_fail_line $err]"
         catch {buda::stop}
+        _reap_recorder
         exit 1
     }
     # Read what the recorder learned BEFORE deciding what to do about the
@@ -925,7 +946,24 @@ if {$stage eq "build"} {
         lappend lines $ln
     }
     close $f
-    file delete $recpath
+    # `catch`, because a delete is not always PERMITTED: the engine child
+    # holds this file open for the whole session (`buda_cli._record` opens
+    # it once and never closes it), and Windows refuses to unlink an open
+    # file -- so the delete raised and took the whole `-b`/`-i` session
+    # down with it, after the flow had already routed (measured,
+    # windows-validate run 36: 37 of 44 failures on every native lane; the
+    # cygwin lane passed the same code, POSIX unlink allowing it).  Same
+    # trade, same reason, as the `os.name` branch in
+    # `floorplanner_commands._safe_unlink_lockfile`.
+    #
+    # But a refused delete is REMEMBERED rather than shrugged off: `file
+    # tempfile` makes a NAMED file that nothing reclaims when the other
+    # handle closes, so giving up here leaves one command trace in the
+    # user's TEMP per session, forever (Codex P2 on #837 -- and my "the OS
+    # reclaims it" was wrong: Windows does not reliably sweep %TEMP%).
+    # `_reap_recorder` retries once the engine has stopped and the handle
+    # is gone, which is the moment the delete can actually succeed.
+    if {![catch {file delete $recpath}]} { unset -nocomplain ::recorder_leftover }
     # The scan that feeds _resolve_bdb's map (idempotent; -b already ran
     # it): analyze is about to resolve recorded open_bdb tokens, and only
     # the walk knows which sourced file each one resolved against.
@@ -1565,6 +1603,7 @@ if {[llength $prompt::pin_lines] && !$ckpt_live} {
 }
 if {$replay_failed} {
     catch {buda::stop}
+    _reap_recorder
     puts stderr "$tag: FAILED -- the last replan stopped partway, so the\
           session's state is not the flow's routed result"
     exit 1
@@ -1575,6 +1614,7 @@ if {$replay_failed} {
 # has nothing to verdict, and -1 ("never computed") must not read as dirty.
 if {!$routed} {
     buda::stop
+    _reap_recorder
     puts "$tag: flow did not route (no run_nuts) -- no verdict"
     exit 0
 }
@@ -1582,6 +1622,7 @@ set ov [buda::query overlaps]
 set un [buda::query unplaced]
 set vi [buda::query violations]
 buda::stop
+_reap_recorder
 # The vehicles own their flows and demand all three legs; an arbitrary flow
 # may deliberately stop before detailed NUTS or never audit, and -1 ("never
 # computed") must not read as dirty HERE — but it must not read as clean

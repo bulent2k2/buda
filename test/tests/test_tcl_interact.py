@@ -1096,35 +1096,80 @@ class _Interactive:
 
     def __init__(self, cmd, cwd):
         import os
+        import queue
+        import threading
         self.p = subprocess.Popen([*map(str, cmd)], stdin=subprocess.PIPE,
                                   stdout=subprocess.PIPE,
                                   stderr=subprocess.STDOUT, cwd=cwd,
                                   env={**os.environ})
+        # A reader THREAD, not `select`: on Windows `select` accepts only
+        # SOCKETS, and a pipe fd raises `WinError 10038: an operation was
+        # attempted on something that is not a socket` -- measured on all
+        # four of this class's users (windows-validate run 37, mingw).  A
+        # blocking read on its own thread is the portable shape and needs no
+        # platform branch: the queue below gives the timeout `select` gave.
+        self._q = queue.Queue()
+        self._buf = ""
+        def _pump(fh, q):
+            # `os.read`, not `fh.read(n)`: the buffered form blocks until it
+            # has n bytes or EOF, which would hide a prompt that carries no
+            # trailing newline -- the very thing this class waits for.
+            fd = fh.fileno()
+            try:
+                while True:
+                    chunk = os.read(fd, 65536)
+                    if not chunk:
+                        break
+                    q.put(chunk)
+            except OSError:
+                pass                            # pipe closed under us
+            finally:
+                q.put(None)                     # EOF sentinel
+        self._reader = threading.Thread(
+            target=_pump, args=(self.p.stdout, self._q), daemon=True)
+        self._reader.start()
 
     def read_until(self, marker, deadline=300):
-        import os
-        import select
+        import queue
         import time
-        buf, end, fd = "", time.time() + deadline, self.p.stdout.fileno()
+        end = time.time() + deadline
         while time.time() < end:
-            r, _, _ = select.select([fd], [], [], 1.0)
-            if r:
-                chunk = os.read(fd, 65536).decode("utf-8", "replace")
-                if not chunk:
-                    break
-                buf += chunk
-                if marker in buf:
-                    return buf
-        raise AssertionError(f"never saw {marker!r} in:\n{buf[-2000:]}")
+            try:
+                chunk = self._q.get(timeout=1.0)
+            except queue.Empty:
+                continue
+            if chunk is None:                   # the session ended
+                break
+            self._buf += chunk.decode("utf-8", "replace")
+            if marker in self._buf:
+                out, self._buf = self._buf, ""
+                return out
+        raise AssertionError(f"never saw {marker!r} in:\n{self._buf[-2000:]}")
 
     def send(self, line):
         self.p.stdin.write((line + "\n").encode())
         self.p.stdin.flush()
 
     def finish(self, deadline=300):
+        import queue
         self.p.stdin.close()
         self.p.wait(timeout=deadline)
-        return self.p.stdout.read().decode("utf-8", "replace")
+        self._reader.join(timeout=deadline)
+        # Drain what the pump collected after the last `read_until`; the
+        # thread owns the pipe now, so reading it here would race the pump
+        # and usually come back empty.
+        rest = []
+        while True:
+            try:
+                chunk = self._q.get_nowait()
+            except queue.Empty:
+                break
+            if chunk is None:
+                break
+            rest.append(chunk)
+        out = self._buf + b"".join(rest).decode("utf-8", "replace")
+        self._buf = ""
+        return out
 
 
 def _flat_demo(tmp_path):

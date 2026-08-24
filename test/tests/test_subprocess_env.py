@@ -59,7 +59,14 @@ def test_the_inherited_pythonpath_is_kept_and_comes_last(monkeypatch):
     separator right (measured: doc-validation run 8, windows-validate 19)."""
     monkeypatch.setenv("PYTHONPATH", "/inherited/one")
     parts = buda_env(_ROOT)["PYTHONPATH"].split(os.pathsep)
-    assert parts[-1] == "/inherited/one", parts
+    # Compare against the ANCHORED form, not the literal: `_anchored` (#771)
+    # absolutizes every inherited entry on purpose, and on Windows a rooted
+    # POSIX path acquires the current DRIVE -- `/inherited/one` comes back
+    # `D:\inherited\one`, so the literal held only on POSIX (measured,
+    # windows-validate run 36).  What this test is FOR is the ORDER: the
+    # inherited entry survives and comes last.  `abspath` is what the helper
+    # itself uses, so the two cannot drift.
+    assert parts[-1] == os.path.abspath("/inherited/one"), parts
     assert parts[0] == str(_ROOT / "build"), parts
 
 
