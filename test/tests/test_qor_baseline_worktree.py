@@ -354,13 +354,20 @@ def test_the_tree_snapshot_ignores_another_workers_temp_file():
         # a spurious red that costs a diagnosis, which is the same
         # cries-wolf failure docs/internal/measurement_hazards.md is about.
         tracked = _clean_tracked_probe()
-        orig = tracked.read_text()
-        tracked.write_text(orig + "\n# probe\n")
+        # BYTES, not text: `read_text`/`write_text` translate newlines, so on
+        # Windows the restore writes CRLF where the checkout had LF and the
+        # probe file stays genuinely MODIFIED -- the final assert then fails
+        # having itself dirtied the tree.  It bit only the lane that forces an
+        # LF checkout (measured, windows-validate run 36: mingw alone, msbuild
+        # and ninja clean because their CRLF worktree round-tripped).  A
+        # save/restore must be byte-exact or it is not a restore.
+        orig = tracked.read_bytes()
+        tracked.write_bytes(orig + b"\n# probe\n")
         try:
             assert _tree_state() != before, \
                 "a modified TRACKED file no longer moves the snapshot"
         finally:
-            tracked.write_text(orig)
+            tracked.write_bytes(orig)
     finally:
         os.unlink(stray)
     assert _tree_state() == before

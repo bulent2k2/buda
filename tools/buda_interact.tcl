@@ -925,7 +925,18 @@ if {$stage eq "build"} {
         lappend lines $ln
     }
     close $f
-    file delete $recpath
+    # `catch`, because a delete is not always PERMITTED: the engine child
+    # holds this file open for the whole session (`buda_cli._record` opens
+    # it once and never closes it), and Windows refuses to unlink an open
+    # file -- so the delete raised and took the whole `-b`/`-i` session
+    # down with it, after the flow had already routed (measured,
+    # windows-validate run 36: 37 of 44 failures on every native lane; the
+    # cygwin lane passed the same code, POSIX unlink allowing it).  The
+    # file is a `file tempfile` in TEMP, so the worst case of a failed
+    # delete is one stray scratch file the OS reclaims -- strictly better
+    # than losing the session.  Same trade, same reason, as the `os.name`
+    # branch in `floorplanner_commands._safe_unlink_lockfile`.
+    catch {file delete $recpath}
     # The scan that feeds _resolve_bdb's map (idempotent; -b already ran
     # it): analyze is about to resolve recorded open_bdb tokens, and only
     # the walk knows which sourced file each one resolved against.

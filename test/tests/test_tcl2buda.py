@@ -199,9 +199,21 @@ def test_a_recorded_open_bdb_carries_its_resolved_path(tmp_path):
     # A spaced path quotes with a delimiter the path does not CONTAIN: the
     # grammar has no escape, so a `"` inside a double-quoted token closes
     # it early and the tail re-reads as unknown options (Codex #798 P2).
-    spaced = tmp_path / 'a "quote" dir'
+    # The awkward character is PLATFORM-CHOSEN, and the property is what
+    # survives: a path carrying one quote kind, quoted with the OTHER.  `"`
+    # is not a legal NTFS filename character, so the POSIX spelling could
+    # not even `mkdir` there -- it raised WinError 123 and failed the test
+    # for a reason that had nothing to do with the grammar (measured,
+    # windows-validate run 36).  Mirroring keeps the coverage on both
+    # platforms instead of skipping Windows; same move as the `?`->`#`
+    # substitution in `test_audit2_tools`.
+    if os.name == "nt":
+        quo, delim = "'", '"'          # `'` is legal on NTFS; quote with `"`
+    else:
+        quo, delim = '"', "'"
+    spaced = tmp_path / f"a {quo}quote{quo} dir"
     spaced.mkdir()
-    top.write_text("open_bdb 'a \"quote\" dir/ck.bdb'\nexit\n")
+    top.write_text(f"open_bdb {delim}a {quo}quote{quo} dir/ck.bdb{delim}\nexit\n")
     out2 = tmp_path / "rec2.buda"
     p = subprocess.run(
         [sys.executable, str(_ROOT / "src" / "buda_cli.py"), "--no-viz",
