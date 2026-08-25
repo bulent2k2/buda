@@ -64,6 +64,20 @@ def test_run_dnuts_is_an_alias_of_run_detailed_nuts():
     assert "Error" not in outs[1], outs[1]
 
 
+def test_run_dnuts_error_names_the_canonical_command():
+    # The alias TEACHES the real name: dispatched with its precondition
+    # unmet, the handler's error names `run_detailed_nuts`, not the alias
+    # the user typed.  Pinned precisely because it is fragile in a
+    # plausible direction — an error tidy that echoed the typed spelling
+    # ("run_dnuts requires run_nuts …") would be locally reasonable, would
+    # silently delete the teaching property, and nothing else would fail.
+    # Also a dispatch proof independent of the two-session comparison.
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    out = _capture(s, "run_dnuts")
+    assert "run_detailed_nuts requires run_nuts" in out, out
+
+
 def test_check_connectivity_is_an_alias_of_check_design():
     s = _mini_session()
     new = _capture(s, "check_design nuts")
