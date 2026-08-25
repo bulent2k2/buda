@@ -1401,18 +1401,22 @@ static bool rects_are_rectilinear(const std::vector<Rect>& rects) {
     return false;
 }
 
-// Two rects share boundary metal: inclusive intersection with a positive-length
-// shared edge (a corner-point touch does not count).  Strict interior overlap is
-// the rectilinear case, which keeps its own branch; this is the ADJACENT case —
+// Two rects ABUT: a positive-length shared edge in exactly one axis (corner
+// touch is a point, not metal continuity).  This is the ADJACENT case —
 // "touching edges, no gap" — where the block's shape is physically contiguous,
 // so over-the-block emits no connection metal (the feature's adjacency
 // suppression: busterm_over_the_block.feature, "bridge is omitted when rects
-// are adjacent").
+// are adjacent").  STRICT interior overlap is deliberately NOT an edge: at
+// zero margin an overlapping pair makes the block rectilinear (its own
+// branch, which EMITS a leg to an un-spanned rect), and under a margin that
+// re-classifies a thin overlap as a gap (#835's documented semantic) the
+// join stub is the honest metal — suppressing it would both flip the
+// margin-0 behaviour and leave the route TEG_OPEN.
 static bool rects_touch(const Rect& a, const Rect& b) {
     if (a.x1 > b.x2 || b.x1 > a.x2 || a.y1 > b.y2 || b.y1 > a.y2) return false;
     const int xov = std::min(a.x2, b.x2) - std::max(a.x1, b.x1);
     const int yov = std::min(a.y2, b.y2) - std::max(a.y1, b.y1);
-    return xov > 0 || yov > 0;
+    return (xov > 0) != (yov > 0);
 }
 
 // Per-rect flag "physically continuous with a rect the trunk lands in": seed =
@@ -1427,10 +1431,23 @@ static bool rects_touch(const Rect& a, const Rect& b) {
 // a seed too although it gets no metal of its own (the documented LOUD
 // corner): anything suppressed through it shares its fate, and the TEG_OPEN
 // audit names each unreached rect — loud either way, never silent.
+//
+// TWO GEOMETRY SPELLINGS, deliberately (Codex P2 on #841): the SEEDS read the
+// INSET rects (`rects` — the same band test the emission loop applies, so
+// seed and skip cannot disagree), while the TOUCH EDGES read the PHYSICAL
+// rects (`phys` = Busterm::orig_rects where a nonzero corner margin makes
+// them differ, #835).  A margin marks faces unusable for TAPS; it does not
+// physically separate the rects — insetting each rect independently opens a
+// 2*margin gap between edge-adjacent rects, so an inset touch graph emitted
+// a connector between already-contiguous metal (measured: the margined
+// adjacent pair grew a stub from the lower rect's inset face).  `phys` may be
+// empty (zero margin) — then the inset rects ARE the physical ones.
 static std::vector<char> teg_landing_component(const Axis& axis,
                                                const std::vector<Rect>& rects,
+                                               const std::vector<Rect>& phys,
                                                int locus) {
     const int n = (int)rects.size();
+    const std::vector<Rect>& touch = (phys.size() == rects.size()) ? phys : rects;
     std::vector<char> in(n, 0);
     std::vector<int> work;
     for (int i = 0; i < n; ++i)
@@ -1440,7 +1457,7 @@ static std::vector<char> teg_landing_component(const Axis& axis,
     while (!work.empty()) {
         int i = work.back(); work.pop_back();
         for (int j = 0; j < n; ++j)
-            if (!in[j] && rects_touch(rects[i], rects[j])) {
+            if (!in[j] && rects_touch(touch[i], touch[j])) {
                 in[j] = 1; work.push_back(j);
             }
     }
@@ -3114,7 +3131,9 @@ void TopologyGenerator::add_trunk(const Axis& axis, bool suppress_stubs,
                       axis.along_horiz ? 1 /*VERTICAL*/ : 0 /*HORIZONTAL*/, stub_layer)
                 : 0;
             std::vector<char> landed;
-            if (!recti) landed = teg_landing_component(axis, rects, locus);
+            if (!recti)
+                landed = teg_landing_component(axis, rects,
+                                               blocks[i].orig_rects, locus);
             for (size_t ri = 0; ri < rects.size(); ++ri) {
                 const auto& r = rects[ri];
                 // A rect sharing the trunk's perp band: rectilinear — the
@@ -3222,7 +3241,9 @@ void TopologyGenerator::add_trunk(const Axis& axis, bool suppress_stubs,
                 const auto& rects = blocks[i].rects;
                 const bool recti = rects_are_rectilinear(rects);
                 std::vector<char> landed;
-                if (!recti) landed = teg_landing_component(axis, rects, locus);
+                if (!recti)
+                    landed = teg_landing_component(axis, rects,
+                                                   blocks[i].orig_rects, locus);
                 // FACE → trunk orientation, like every stub: emit_tap_segment
                 // seeds the busterm on the START endpoint, and a trunk-end seed
                 // shadows the real face annotation so NUTS loses its face

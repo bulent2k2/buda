@@ -323,6 +323,19 @@ wrong.
    transitive by construction (a 3-rect touching chain emits nothing while
    a separated 4th rect of the same block still gets its stub —
    `test_adjacent_chain_is_suppressed_and_separated_rect_still_stubbed`).
+   The suppression's touch graph reads the PHYSICAL rects
+   (`Busterm::orig_rects`, the #835 spelling) while band seeds and tap
+   coordinates stay on the INSET rects — touching = physical geometry,
+   tappable = inset geometry: a corner margin marks faces unusable for
+   taps, it does not physically separate the rects, and the first cut read
+   the inset rects for BOTH, so a margined abutting pair grew a connector
+   between already-contiguous metal (Codex P2 on #841, measured and fixed
+   2026-08-25; `rects_touch` is pure abutment — a strict-overlap pair
+   margin-classified as a gap keeps its join stub, #835's documented
+   honest-consequence semantic, and at margin 0 no strict-overlap pair can
+   reach the component so margin-0 output is untouched; pinned by
+   `test_margined_adjacent_chain_keeps_physical_suppression_inset_taps`,
+   which fails on the pre-fix build).
    For (ii) the gap branch simply dropped its rects-on-BOTH-sides gate, so
    a one-sided approach emits the same per-rect face→trunk stubs joined
    through the trunk.  Measured: the (i) repro — trunk inside the lower

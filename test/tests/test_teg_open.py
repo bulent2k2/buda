@@ -243,33 +243,52 @@ def test_one_sided_trunk_now_stubs_every_rect_and_audits_clean():
     assert verdict["by_kind"].get("TEG_OPEN", 0) == 0, out
 
 
-def test_adjacent_chain_is_suppressed_and_separated_rect_still_stubbed():
-    # The Direct-branch suppression rules, at generation: a rect ADJACENT to
-    # the trunk's landing rect (touching edges, positive shared edge — the
-    # feature's adjacency rule) is physically continuous with it and gets no
-    # connection metal, TRANSITIVELY along a chain of touching rects — while
-    # a genuinely separated rect of the same block still gets its stub.
+def _chain_stub_faces(margin):
+    """B-stub far-face y-coords for a trunk inside the chain's bottom rect:
+    3-rect touching chain (bottom = landing) + a separated 4th rect."""
     fp = buda.Floorplan()
-    # 3-rect chain: bottom (landing), middle and top touch in sequence;
-    # 4th rect separated above the chain.
     fp.add_block_rects("B", [(200, 0, 300, 100), (200, 100, 300, 200),
                              (200, 200, 300, 300), (200, 500, 300, 600)])
     fp.set_block_teg_mode("B", buda.TegMode.OVER)
     fp.add_block("A", 0, 0, 100, 100)
+    if margin:
+        fp.set_global_corner_margin(*margin)
     g = buda.TopologyGenerator(fp)
     g.set_layer_ids(4, 5)
     cand = next(c for c in g.generate_candidates("A", ["B"])
                 if c.type.startswith("TRUNK_H@y50"))
-    b_stub_faces = sorted(
+    return sorted(
         y
         for i, seg in enumerate(cand.segments)
         if seg.start.x == seg.end.x
         and any(bt is not None and bt.block_name == "B"
                 for bt in cand.seg_busterms.get(i, (None, None)))
         for y in (seg.start.y, seg.end.y) if y != 50)
+
+
+def test_adjacent_chain_is_suppressed_and_separated_rect_still_stubbed():
+    # The Direct-branch suppression rules, at generation: a rect ADJACENT to
+    # the trunk's landing rect (touching edges, positive shared edge — the
+    # feature's adjacency rule) is physically continuous with it and gets no
+    # connection metal, TRANSITIVELY along a chain of touching rects — while
+    # a genuinely separated rect of the same block still gets its stub.
     # Exactly one stub: from the separated rect's bottom face (y=500) down to
     # the trunk; the touching chain (faces 100/200/300) emits nothing.
-    assert b_stub_faces == [500], b_stub_faces
+    assert _chain_stub_faces(None) == [500]
+
+
+def test_margined_adjacent_chain_keeps_physical_suppression_inset_taps():
+    # Codex P2 on #841, measured before the fix: `corner_margin` insets each
+    # rect INDEPENDENTLY (#835), so the chain's physically-abutting rects no
+    # longer touched in the suppression component's geometry and each grew a
+    # connector to metal it is already continuous with (the margined pair
+    # emitted a stub from the lower rect's inset face).  The touch graph now
+    # reads the PHYSICAL rects (Busterm::orig_rects) — a margin marks faces
+    # unusable for TAPS, it does not physically separate the rects — while
+    # the emitted stub still taps the separated rect's INSET face (y=510),
+    # the #835 semantic for tap coordinates.  The two semantics divide as:
+    # touching = physical geometry, tappable = inset geometry.
+    assert _chain_stub_faces((10, 10)) == [510]
 
 
 def test_same_band_disjoint_sibling_stays_loud_via_teg_open():
