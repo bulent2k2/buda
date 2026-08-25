@@ -12,10 +12,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""`check_design` rename: the command audits connectivity, layer direction,
+"""Command aliases.
+
+`check_design` rename: the command audits connectivity, layer direction,
 and keepout crossings — far more than its original name said.  `check_design`
 is the primary name; `check_connectivity` stays registered as a legacy alias
-so existing user scripts keep working (opens.md quick-win item)."""
+so existing user scripts keep working (opens.md quick-win item).
+
+`run_dnuts`: the dnuts stage is "DNUTS" everywhere the tool speaks
+(`check_design dnuts`, the btcl -i stage argument, log prefixes), so
+`run_dnuts` is what a user reasonably types back — and without the alias
+the unknown-command suggester steered them to `run_nuts`, the one command
+that looks closer by spelling and is WRONG by stage."""
 import io
 import contextlib
 
@@ -39,6 +47,21 @@ def _capture(session, cmd):
     with contextlib.redirect_stdout(buf):
         session.do_command(cmd)
     return buf.getvalue()
+
+
+def test_run_dnuts_is_an_alias_of_run_detailed_nuts():
+    # Two fresh sessions, same design, one solved by each spelling — the
+    # alias must reach the SAME stage (detailed NUTS), not the run_nuts the
+    # old suggester pointed at.
+    outs = []
+    for spelling in ("run_detailed_nuts", "run_dnuts"):
+        s = _mini_session()
+        _capture(s, "def_track_pattern 4 0 POWER 2 1 (SIGNAL 1 0.5)x4")
+        _capture(s, "def_track_pattern 5 0 POWER 2 1 (SIGNAL 1 0.5)x4")
+        outs.append(_capture(s, spelling))
+    assert outs[0] == outs[1]
+    assert "[DetailedNUTS]" in outs[1], outs[1]
+    assert "Error" not in outs[1], outs[1]
 
 
 def test_check_connectivity_is_an_alias_of_check_design():

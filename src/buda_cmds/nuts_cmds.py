@@ -453,6 +453,12 @@ COMMANDS = {
     "set_placed_endpoints": cmd_set_placed_endpoints,
     "run_nuts": cmd_run_nuts,
     "run_detailed_nuts": cmd_run_detailed_nuts,
+    # The dnuts stage is "DNUTS" everywhere the tool SPEAKS (check_design
+    # dnuts, the btcl -i stage argument, log prefixes), so `run_dnuts` is
+    # what a user reasonably types back — and without the alias the
+    # unknown-command suggester steers them to `run_nuts`, the one command
+    # that looks closer by spelling and is WRONG by stage.
+    "run_dnuts": cmd_run_detailed_nuts,
     "ripup_reroute": cmd_ripup_reroute,
     "negotiate_congestion": cmd_negotiate_congestion,
     "refine_selection": cmd_refine_selection,
