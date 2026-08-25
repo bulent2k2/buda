@@ -66,8 +66,8 @@ def test_overtheblock__trunk_in_gap_stubs_both_rects_joined_through_trunk():
 
 
 @scenario('features/busterm_over_the_block.feature',
-          'Over-the-block — trunk inside one rect → no bridge needed')
-def test_overtheblock__trunk_inside_one_rect__no_bridge_needed():
+          'Over-the-block — trunk inside one disjoint rect stubs the other rect')
+def test_overtheblock__trunk_inside_one_disjoint_rect_stubs_the_other_rect():
     pass
 
 

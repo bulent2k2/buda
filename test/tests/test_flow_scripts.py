@@ -1248,16 +1248,19 @@ def test_teg_over_audit_flow_routes_clean():
     and it now guards emission the other way: if the leg regresses, TEG_OPEN
     fires, the Success assertions fail HERE, and the corpus row moves.
 
-    Also the flow's pin-fragility guard: `select_topology 1 10` is a hard
-    index, so a re-sorted pool that lands a different shape there fails
-    HERE (the planner line names the expected candidate) instead of silently
-    auditing a different route."""
+    Also the flow's pin guard: the flow pins by TYPE
+    (`select_topology 1 TRUNK_V@x250` — the selector that survives a
+    re-sorted pool; the open 1 residual (ii) fix re-sorted this pool by
+    giving one-sided V trunks their per-rect stubs, which is what retired
+    the flow's old hard index), and the planner line asserted here names
+    the expected candidate, so a regressed pool fails HERE instead of
+    silently auditing a different route."""
     out, rc = run_script("teg_over_audit.buda")
     assert rc == 0, f"teg_over_audit.buda: non-zero exit {rc}\n{out}"
     assert re.search(
         r"\[Planner\] Bundle 1 .*TRUNK_V@x250 \[pinned\]", out), (
-        "index 10 no longer pins TRUNK_V@x250 — the candidate pool was "
-        "re-sorted; update the flow's select_topology index "
+        "the type pin no longer lands on TRUNK_V@x250 — the pool lost the "
+        "candidate or the pin regressed; update the flow's select_topology "
         f"(see the flow header):\n{out}")
     # trunk + stub + connector leg, all placed cleanly.
     segs, viols, ovlps = nuts_summary(out)
