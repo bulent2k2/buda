@@ -76,7 +76,7 @@ namespace eval ::buda {
     # the engine command).  Listed rather than snapshotted from
     # `info procs`, which would also capture the generated procs if this
     # file were ever sourced twice.  Pinned by the test suite.
-    variable reserved {start stop query output commands stream viz vizfinal
+    variable reserved {start stop query output commands aliases stream viz vizfinal
                        log endreport onprogress async wait running cancel do}
     # Captured HERE, at source time.  Inside a proc `info script` names the
     # script being RUN, not the one the proc was defined in, so resolving the
