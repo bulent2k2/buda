@@ -80,11 +80,24 @@ its pinning test on this date:
    over-the-cell anchoring stub tripped the #514 tap-overhang ANTENNA
    rule — this route carries neither, and #514 stays quiet because there is
    no terminal piece at all, just the spine ending on a tapped face).
-   Direct trunks on disjoint OVER blocks only; which band rects extend is
-   decided by a reached-component test (band rects the natural span
-   intersects, expanded transitively over the PHYSICAL touch graph), so the
-   ADJACENT corner (item 2) is untouched — an adjacent same-band pair still
-   emits nothing and stays TEG_OPEN-loud (control-pinned).  Axis-
+   Direct trunks on OVER multi-rect blocks; which band rects extend is
+   decided PER RECT by a reached-component test — band rects the natural
+   span intersects, expanded transitively over PHYSICAL connectivity
+   (abutment OR strict interior overlap) — so the ADJACENT corner (item 2)
+   is untouched — an adjacent same-band pair still emits nothing and stays
+   TEG_OPEN-loud (control-pinned).  Per-rect rather than gated on the
+   block-level `rects_are_rectilinear` classification, which the first cut
+   was and Codex P2 on #845 caught, measured real: a MIXED rect set (an
+   overlapping pair PLUS a disjoint same-band rect) classified rectilinear,
+   skipped the pass wholesale, and the rectilinear leg branch has no
+   same-band metal either — spine [500,700] against a sibling at 0..100,
+   TEG_OPEN 1/4.  Counting a strict overlap as connected is what keeps a
+   FULLY-connected rectilinear block a provable no-op (every rect joins the
+   reached component) while the mixed set's separated sibling extends;
+   pinned by `test_mixed_rect_set_same_band_sibling_anchors_despite_overlap`
+   (fails pre-fix) with the cross-band leg interaction control beside it
+   (`test_mixed_rect_set_cross_band_rect_keeps_the_rectilinear_leg` — one
+   leg, no double emission).  Axis-
    parameterized, so the V-trunk twin (x-band siblings) is covered by the
    same code (test-pinned, not assumed).  Building it MEASURED the #823
    shadow trap the fix was suspected to have died on: with the sibling

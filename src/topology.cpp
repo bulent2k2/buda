@@ -3202,23 +3202,38 @@ void TopologyGenerator::add_trunk(const Axis& axis, bool suppress_stubs,
     //   Which band rects extend: only those OUTSIDE the component of rects the
     // un-extended spine already reaches — seeded from the band rects the
     // natural span [a_lo, a_hi] intersects, expanded transitively over the
-    // PHYSICAL touch graph (Busterm::orig_rects, the #835 spelling: a corner
-    // margin marks faces unusable for taps, it does not physically separate
-    // the rects).  A band rect ADJACENT to the landing rect is physically
-    // continuous with it — the feature's adjacency suppression (Final-state
-    // item 2, deliberately untouched) — so it must NOT pull the spine to its
-    // face; a band rect the span already crosses is a pass-through contact
-    // and needs no landing.  Extensions are monotone (the span only grows),
-    // so processing order cannot mis-classify a rect: one skipped as crossed
-    // stays crossed, and a nearer sibling's landing subsumed by a farther
-    // one's extension becomes a crossing — contact either way.
+    // PHYSICAL connectivity graph (Busterm::orig_rects, the #835 spelling: a
+    // corner margin marks faces unusable for taps, it does not physically
+    // separate the rects).  Connectivity here is abutment OR strict interior
+    // overlap — unlike the disjoint branch's rects_touch, because this pass
+    // runs on EVERY OVER multi-rect block, MIXED rect sets included (an
+    // overlapping pair PLUS a disjoint same-band rect; Codex P2 on #845:
+    // gating the whole block on rects_are_rectilinear skipped the sibling,
+    // and the rectilinear leg branch has no same-band metal either, so the
+    // mixed set stayed TEG_OPEN).  An overlapping pair is one connected
+    // piece of metal, so counting it connected keeps a FULLY-connected
+    // rectilinear block a provable no-op (every rect joins the reached
+    // component — byte-identical), while the separated sibling of a mixed
+    // set still extends.  A band rect ADJACENT to (or overlapping) the
+    // landing component is physically continuous with it — the feature's
+    // adjacency suppression (Final-state item 2, deliberately untouched) —
+    // so it must NOT pull the spine to its face; a band rect the span
+    // already crosses is a pass-through contact and needs no landing.
+    // Extensions are monotone (the span only grows), so processing order
+    // cannot mis-classify a rect: one skipped as crossed stays crossed, and
+    // a nearer sibling's landing subsumed by a farther one's extension
+    // becomes a crossing — contact either way.
     for (int i = 0; i < n; ++i) {
         if (blocks[i].teg_mode != TegMode::OVER || blocks[i].rects.size() < 2) continue;
         if (has_stub[i]) continue;                       // Direct trunks only
         const auto& rects = blocks[i].rects;
-        if (rects_are_rectilinear(rects)) continue;      // spine crosses the contiguous shape
         const std::vector<Rect>& touch =
             (blocks[i].orig_rects.size() == rects.size()) ? blocks[i].orig_rects : rects;
+        auto connected = [](const Rect& a, const Rect& b) {
+            if (rects_touch(a, b)) return true;          // positive-length abutment
+            return a.x1 < b.x2 && b.x1 < a.x2 &&         // strict interior overlap
+                   a.y1 < b.y2 && b.y1 < a.y2;           // (one rectilinear piece)
+        };
         const int nr = (int)rects.size();
         std::vector<char> reached(nr, 0);
         std::vector<int>  work;
@@ -3232,7 +3247,7 @@ void TopologyGenerator::add_trunk(const Axis& axis, bool suppress_stubs,
         while (!work.empty()) {
             int ri = work.back(); work.pop_back();
             for (int rj = 0; rj < nr; ++rj)
-                if (!reached[rj] && rects_touch(touch[ri], touch[rj])) {
+                if (!reached[rj] && connected(touch[ri], touch[rj])) {
                     reached[rj] = 1; work.push_back(rj);
                 }
         }

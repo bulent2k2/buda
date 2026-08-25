@@ -456,6 +456,59 @@ def test_same_band_margined_lands_on_inset_face_suppression_stays_physical():
     _route_and_check_clean(s)
 
 
+def test_mixed_rect_set_same_band_sibling_anchors_despite_overlap():
+    # Codex P2 on #845, measured before the fix: a MIXED rect set — an
+    # OVERLAPPING pair (base + arm, so rects_are_rectilinear() is true) PLUS
+    # a DISJOINT rect sharing the trunk's perp band — skipped the anchoring
+    # pass entirely (it was gated on the block-level classification), and the
+    # rectilinear branch emits legs only for CROSS-band rects, so the
+    # separated sibling stayed unreached (spine [500,700], TEG_OPEN 1 at
+    # nuts / 4 at dnuts).  The pass now runs on EVERY OVER multi-rect block
+    # and decides reached/contiguous PER RECT (abutment OR strict overlap =
+    # connected), so the sibling anchors while the overlapping component —
+    # one connected piece of metal — never pulls the spine (a FULLY
+    # connected rectilinear block remains a no-op by construction).
+    s = _session([
+        "add_block T rect 300 0 500 100 rect 300 0 350 300 rect 0 0 100 100"
+        " teg_mode over",
+        "add_block src 700 0 800 100",
+        "def_layer 4 M4 H TOP 0",
+        "def_layer 5 M5 V TOP 0",
+        "add_bus d[4] src.tx T.rx",
+        "run_bundler STRICT",
+        "generate_topologies",
+    ] + _TRACKS)
+    c = _pin_same_band_trunk(s)
+    spine = next(seg for seg in c.segments if seg.start.y == seg.end.y)
+    assert min(spine.start.x, spine.end.x) == 100   # lands on the sibling's face
+    _route_and_check_clean(s)
+
+
+def test_mixed_rect_set_cross_band_rect_keeps_the_rectilinear_leg():
+    # The interaction control beside the mixed-set fix: the same overlapping
+    # pair with the separated rect CROSS-band (above the trunk) is served by
+    # the rectilinear branch's perpendicular connector leg, exactly as
+    # before — one V leg tapping the rect's near face (y=200), NO same-band
+    # anchor extension, no double emission for one rect.
+    s = _session([
+        "add_block T rect 300 0 500 100 rect 300 0 350 300 rect 0 200 100 300"
+        " teg_mode over",
+        "add_block src 700 0 800 100",
+        "def_layer 4 M4 H TOP 0",
+        "def_layer 5 M5 V TOP 0",
+        "add_bus d[4] src.tx T.rx",
+        "run_bundler STRICT",
+        "generate_topologies",
+    ] + _TRACKS)
+    c = _pin_same_band_trunk(s)
+    legs = [seg for seg in c.segments if seg.start.x == seg.end.x]
+    assert len(legs) == 1, [(s_.start.x, s_.start.y, s_.end.x, s_.end.y)
+                            for s_ in c.segments]
+    ys = sorted((legs[0].start.y, legs[0].end.y))
+    assert ys[1] == 200, ys                          # taps the rect's near face
+    _route_and_check_clean(s)
+
+
 def test_same_band_adjacent_pair_keeps_the_documented_loud_corner():
     # Limitation 2's control beside the fix: a trunk Direct inside one of two
     # ADJACENT same-band rects emits no connection metal (the rects are
