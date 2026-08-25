@@ -525,6 +525,58 @@ def test_flip_mst_edge_refuses_when_a_stub_t_junctions_a_leg_interior():
         "a junction at the edge's far endpoint survives the flip"
 
 
+def test_mst_teg_attachment_tie_prefers_single_t_stub():
+    """The attachment pass's tie rule, pinned on a hand-built geometry (via
+    the public floorplan overload — the test_planner_notch_low precedent):
+    when a LATER along-overlapping segment offers a single perpendicular
+    T-stub at the SAME total length as an EARLIER segment's two-leg L, the
+    T-stub must win — one segment, no bend, fewer routing constraints; the
+    pass's contract says equal-cost ties prefer it.  The first cut compared
+    with a strict `<`, so the equal-cost later T could never displace the
+    earlier L (Codex P2 on PR #846, measured: the tie emitted the two-leg L
+    (900,50)->(600,50)->(600,150) instead of the single stub).
+
+    The tie rule in full, kept deterministic in segment-index visit order:
+    a T displaces an equal-cost L; an equal-cost same-kind candidate never
+    displaces an earlier one (lower index wins); an equal-cost L never
+    displaces anything."""
+    def seg_at(x1, y1, x2, y2):
+        return _seg(x1, y1, x2, y2, 4, -1)
+
+    fp = buda.Floorplan()
+    fp.add_block_rects("T2", [(500, 150, 600, 250),    # reached rect
+                              (900, 0, 1000, 100)])    # unreached rect
+    fp.set_block_teg_mode("T2", buda.TegMode.OVER)
+
+    # L-offering segment FIRST (cost 300+100=400), equal-cost T-offering
+    # segment SECOND (gap 500-100=400): the tie must yield the single T-stub
+    # from the rect's top face at its along-centre.
+    t = buda.Topology()
+    t.type = "MST_HV"
+    t.segments = [seg_at(500, 150, 700, 150),    # touches rect#0; L offer
+                  seg_at(850, 500, 1050, 500)]   # T offer, same total length
+    buda.add_mst_teg_attachments(t, fp, 4, 5)
+    added = [(s.start.x, s.start.y, s.end.x, s.end.y) for s in t.segments[2:]]
+    assert added == [(950, 100, 950, 500)], (
+        "equal-cost tie must pick the single perpendicular T-stub, got "
+        f"{added}")
+    # Face-seeded tap on the block (the #823 orientation: face at the START).
+    bts = t.seg_busterms.get(2, (None, None))
+    assert bts[0] is not None and bts[0].block_name == "T2"
+
+    # Determinism control: a strictly CHEAPER L must still beat the T — the
+    # tie preference is not a blanket kind preference.
+    t2 = buda.Topology()
+    t2.type = "MST_HV"
+    t2.segments = [seg_at(500, 150, 700, 150),   # L offer, cost 400
+                   seg_at(850, 600, 1050, 600)]  # T offer, gap 500 (dearer)
+    buda.add_mst_teg_attachments(t2, fp, 4, 5)
+    added2 = [(s.start.x, s.start.y, s.end.x, s.end.y) for s in t2.segments[2:]]
+    assert added2 == [(900, 50, 600, 50), (600, 50, 600, 150)], (
+        "a strictly cheaper L must still win over a dearer T-stub, got "
+        f"{added2}")
+
+
 def test_trunk_mst_has_more_segments_than_trunk():
     """TRUNK+MST has more segments than its corresponding plain TRUNK."""
     fp = buda.Floorplan()

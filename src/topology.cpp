@@ -3995,11 +3995,18 @@ static int trim_shared_leg_overlaps(std::vector<Segment>& segs,
 //     interior landing, so the T-junction never coincides with a tapped
 //     endpoint) — the relay-connector shape.
 // The cheapest (total length) attachment wins, floors from the min-stub
-// lengths; ties break to the T-stub, then the lower segment index.  A rect
-// with NO legal attachment (e.g. every target shares its perp band — the
-// same-band shape, whose bare extension NUTS retracts) is left as it was:
-// unreached and LOUD via TEG_OPEN, never silently half-fixed.  Stubs carry
-// edge_id -1, so ripup's per-edge flips never mistake one for an MST leg.
+// lengths.  The EXACT tie rule, evaluated in segment-index visit order so
+// the choice is deterministic for any given segment list (the pool-reorder
+// knobs — trims etc. — mutate geometry BEFORE this pass, so they change the
+// costs, never the rule): an equal-cost T-stub DISPLACES a standing L (one
+// segment, no bend, fewer routing constraints — the single-segment form is
+// strictly the lighter commitment); an equal-cost same-kind candidate never
+// displaces an earlier one (the lower segment index wins); an equal-cost L
+// never displaces anything.  A rect with NO legal attachment (e.g. every
+// target shares its perp band — the same-band shape, whose bare extension
+// NUTS retracts) is left as it was: unreached and LOUD via TEG_OPEN, never
+// silently half-fixed.  Stubs carry edge_id -1, so ripup's per-edge flips
+// never mistake one for an MST leg.
 static bool seg_touches_rect_incl(const Segment& s, const Rect& r) {
     const bool horiz = (s.start.y == s.end.y);
     const int perp = horiz ? s.start.y : s.start.x;
@@ -4082,7 +4089,11 @@ static void add_mst_teg_attachments(Topology& topo,
                     const int a = std::min(std::max(sh ? cx : cy,
                                                     std::max(alo, r_alo)),
                                            std::min(ahi, r_ahi));
-                    if (best_cost < 0 || gap < best_cost) {
+                    // Equal-cost tie: a T-stub displaces a standing L
+                    // (best_kind == 2), never a standing T — see the tie
+                    // rule in the contract comment above.
+                    if (best_cost < 0 || gap < best_cost ||
+                        (gap == best_cost && best_kind == 2)) {
                         best_cost = gap; best_kind = 1;
                         leg1 = sh ? make_seg(a, face, a, perp, v_layer)
                                   : make_seg(face, a, perp, a, h_layer);
@@ -4118,6 +4129,30 @@ static void add_mst_teg_attachments(Topology& topo,
             if (best_kind == 2) emit_tap_segment(topo, leg2, nullptr);
         }
     }
+}
+
+// Floorplan overload (declared in topology.h; bound to Python): build the
+// Busterms exactly as annotate_topology does — inset bbox/rects beside the
+// physical spellings, teg_mode — resolve the min-stub floors from the
+// floorplan, and run the pass.  Exposed for hand-built topologies and the
+// tie-rule regression tests (the test_planner_notch_low precedent: the
+// predicate under test is public so the test asks the engine rather than
+// re-implementing the rule).
+void add_mst_teg_attachments(Topology& topo, const Floorplan& fp,
+                             int h_layer, int v_layer) {
+    std::vector<Busterm> bts;
+    for (const auto& [name, orig] : fp.get_all_blocks()) {
+        auto cm   = fp.get_block_corner_margin(name);
+        auto phys = fp.get_block_rects(name);
+        Busterm bt{name, orig.shrink(cm.dx, cm.dy), orig,
+                   shrink_rects(phys, cm), fp.get_block_teg_mode(name)};
+        if ((cm.dx != 0 || cm.dy != 0) && !phys.empty())
+            bt.orig_rects = std::move(phys);
+        bts.push_back(std::move(bt));
+    }
+    int m_h = fp.get_min_stub_length(0 /*HORIZONTAL*/, h_layer);
+    int m_v = fp.get_min_stub_length(1 /*VERTICAL*/,   v_layer);
+    add_mst_teg_attachments(topo, bts, h_layer, v_layer, m_h, m_v);
 }
 
 void TopologyGenerator::add_mst_candidates(const std::vector<Busterm>& blocks,

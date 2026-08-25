@@ -334,6 +334,17 @@ void bind_routing(py::module_& m) {
           py::arg("topo"), py::arg("edge_id"),
           py::arg("h_layer"), py::arg("v_layer"), py::arg("fp"));
 
+    // MST TEG attachment (Final-state limitation 1): attach an OVER
+    // multi-rect block's unreached rects onto the topology's existing metal
+    // (T-stub, else two-leg L; equal-cost ties prefer the T-stub).  The
+    // floorplan overload, exposed so a hand-built geometry can pin the
+    // selection/tie rule directly instead of steering the whole generator.
+    m.def("add_mst_teg_attachments",
+          static_cast<void (*)(Topology&, const Floorplan&, int, int)>(
+              &add_mst_teg_attachments),
+          py::arg("topo"), py::arg("fp"),
+          py::arg("h_layer"), py::arg("v_layer"));
+
     // The tap-membership predicate the PLACER and BOTH audits read
     // (adjust_bit_spans, check_dnuts, detect_bit_antennas).  Exposed so a
     // measurement of what vouches for a bit can ask the engine instead of

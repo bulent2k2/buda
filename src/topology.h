@@ -400,6 +400,19 @@ void annotate_topology(Topology& topo, const Floorplan& fp);
 // the TopoEdit operations (topo_edit.h).
 void erase_segment(Topology& topo, int idx);
 
+// MST TEG attachment (teg_multirect_status.md Final-state limitation 1):
+// attach every `teg_mode over` multi-rect block's rects that the topology's
+// segments leave unreached — inclusive contact on the PHYSICAL rects,
+// expanded over physical adjacency — with a perpendicular T-stub onto an
+// along-overlapping segment, else a two-leg L onto the nearest segment's
+// span midpoint (cheapest total length wins; equal-cost ties prefer the
+// T-stub — the exact rule is in topology.cpp).  Runs inside
+// add_mst_candidates after complete_relay_junctions; this floorplan overload
+// (Busterms built like annotate_topology's) is exposed for hand-built
+// topologies and the tie-rule regression tests.
+void add_mst_teg_attachments(Topology& topo, const Floorplan& fp,
+                             int h_layer, int v_layer);
+
 // Per-segment bit count for the tapered fan-in width model: the segment's
 // member-bit count when seg_bits carries an entry for it, else the bundle's
 // full bit count (all non-fan-in bundles, and any segment the derivation did
