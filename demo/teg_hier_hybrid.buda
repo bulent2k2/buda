@@ -1,0 +1,87 @@
+# TEG multi-rect blocks beside a REAL hierarchy — the honest hybrid.
+#
+# WHY A HYBRID: a BDB component holds ONE bbox, so multi-rect cannot be
+# DECLARED as a hier-design input — derive_busterms writes empty rects and
+# every BDB->Floorplan projection is add_block(bbox) (see
+# docs/internal/teg_multirect_status.md item 6 "RESOLVED-AS-BOUNDED" and
+# docs/BDB_REFERENCE.md).  And the two bundlers cannot compose in one
+# session either: run_bundler and run_hier_bundler each rebuild
+# session.bundles, so the second clobbers the first.  The supported shape
+# is therefore HIERARCHY-FED FLAT: build the hierarchy in the BDB, project
+# it into the flat floorplan with add_blocks_from_bdb (containers stay
+# transparent envelopes, leaves are the routing targets), hand-declare the
+# multi-rect TEG macros beside the projection, and route everything with
+# the flat pipeline.
+#
+# What to look at in the viewer:
+#   * dsp — an L-shaped teg_mode OVER macro (arm right, base bottom).  The
+#     pinned TRUNK_V@x760 drops into the notch and crosses the base only,
+#     so BUDA emits a REAL horizontal connector leg from the trunk to the
+#     arm (ordinary routed, audited, WL-counted metal — click bundle d).
+#   * phy — a disjoint 2-rect OVER block (two slabs, gap between).  The
+#     pinned TRUNK_H@y630 runs through the gap and BOTH rects get gap
+#     stubs joined through the trunk (click bundle p).
+#   * ioc — a 2-rect THRU block: the trunk reaches the near rect only and
+#     the far rect is deliberately left to the block's internal routing —
+#     the BUDA-1907 census INFO names the untouched rect (report only;
+#     thru DECLARES the rects internally connected).
+#
+# The pins are TYPE specs (select_topology <bus> TRUNK_V@x760), the pin
+# that survives a regenerated / re-sorted candidate pool — a hard index
+# would not.  Endpoint: 7 bus segments, 28 bit-wires, check_design
+# Success at nuts AND dnuts, 0 unplaced.
+
+# ── BDB: a small 2-level hierarchy (2 clusters x 2 PEs) ───────────────
+open_bdb :memory:
+
+add_cell cluster 300 280
+add_cell pe 110 100
+add_inst_to_cell cluster pe0 pe 25 30
+add_inst_to_cell cluster pe1 pe 165 150
+
+add_inst cl_bot cluster - 40 40
+add_inst cl_top cluster - 40 380
+
+# Project into the flat floorplan: depth 0 = the cluster envelopes
+# (auto-marked container once their children load), depth 1 = the PE
+# leaves the buses actually target.
+add_blocks_from_bdb 0
+add_blocks_from_bdb 1 skip
+
+# ── Flat multi-rect TEG macros beside the projected hierarchy ─────────
+# dsp: rectilinear L, OVER — rects NOT internally connected, so a trunk
+#      that misses the arm owes it explicit connection metal.
+add_block dsp rect 900 60 1000 460 rect 620 60 1000 160 teg_mode over
+# phy: two disjoint slabs with a horizontal gap (y 580..660), OVER.
+add_block phy rect 640 480 1000 580 rect 640 660 1000 760 teg_mode over
+# ioc: two disjoint rects, default THRU — internal connectivity declared,
+#      so the untouched rect is a census INFO, never a violation.
+add_block ioc rect 430 60 540 200 rect 430 300 540 440
+
+def_layer 4 M4 H TOP 50
+def_layer 5 M5 V TOP 50
+
+# ── Flat buses: hierarchy leaves -> TEG macros ────────────────────────
+add_bus d[4] cl_bot/pe1.out dsp.in
+add_bus p[4] cl_top/pe1.out phy.in
+add_bus i[4] cl_bot/pe0.out ioc.in
+
+run_bundler STRICT
+generate_topologies
+
+def_track_pattern 4 0 (SIGNAL 2 2)x8
+def_track_pattern 5 0 (SIGNAL 2 2)x8
+
+# Pin the shapes that SHOW the TEG mechanisms (type specs, 1-based-free):
+select_topology d TRUNK_V@x760   # notch trunk -> connector leg to the arm
+select_topology p TRUNK_H@y630   # gap trunk   -> per-rect gap stubs
+select_topology i TRUNK_H@y120   # near-rect only -> BUDA-1907 census fires
+
+run_planner
+run_nuts
+check_design
+run_detailed_nuts
+check_design
+report_wl
+
+visualize
