@@ -342,6 +342,19 @@ def cmd_set_feedthru(session, cmd, args, cmd_line):
             block_names = []
             if not blocks_wild:
                 known = {n for n, _ in session.fp.get_all_blocks()}
+                # A hier flow's generation frames are DERIVED floorplans
+                # (depth projection / cross-level use full component paths,
+                # a cell-local template uses the child's LOCAL name — the
+                # same name in every instance of the cell), so a block a
+                # feedthru declaration legitimately targets need not be in
+                # session.fp at all.  Accept any BDB component by either
+                # spelling; _apply_fp_session_settings replays the
+                # declaration onto every derived frame, where the name
+                # matches the frame that knows it.
+                if getattr(session, "bdb", None) is not None:
+                    for c in session.bdb.all_components():
+                        known.add(c.name)
+                        known.add(c.name.rsplit('/', 1)[-1])
                 for b in blocks_tok.split(","):
                     b = b.strip()
                     if not b:
@@ -397,6 +410,14 @@ def cmd_set_feedthru(session, cmd, args, cmd_line):
                 for n in block_names:
                     for lid in layer_ids:
                         session.fp.set_feedthru_block_layer(n, lid, val)
+            # Record for replay onto derived hier floorplans (in
+            # declaration order, so repeated declarations keep their
+            # last-wins semantics there too).  An all-dropped non-wildcard
+            # list applied nothing above and records nothing.
+            if (blocks_wild or block_names) and (layers_wild or layer_ids):
+                session._feedthru_decls.append(
+                    (None if blocks_wild else list(block_names),
+                     None if layers_wild else list(layer_ids), val))
 
 
 def cmd_detour_channel(session, cmd, args, cmd_line):

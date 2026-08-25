@@ -646,6 +646,20 @@ set_feedthru A M5 off       # carve out one (block, layer) pair
 set_feedthru * * on         # global default on
 ```
 
+**Hier flows.** Declarations apply to the hierarchical pipeline too: every
+derived generation frame (depth projection, cross-level, cell-local) replays
+the session's feedthru declarations, so a hier bundle's trunk splits exactly
+as a flat bundle's would. Block-scoped rules match by the name the frame
+knows — a top-level or depth-frame block by its full component path
+(`t0/mem`), a **cell-local template's child by its LOCAL name** (`m`, not
+`t0/m`): the local-name rule then governs the template's frame, i.e. every
+instance of the cell at once (template semantics, consistent with
+solve-once-copy). The BDB's component names are accepted alongside the flat
+floorplan's, in either spelling, so a cell-local declaration does not warn
+as an unknown block. Worked demo: [`demo/feedthrus.buda`](../../demo/feedthrus.buda)
+— the baseline pass-through, the full precedence ladder, and a cell-local
+relay, each shown in a `dump_topologies --conn` transcript.
+
 ---
 
 ### `set_track_pitch`

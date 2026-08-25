@@ -1,0 +1,139 @@
+# ============================================================
+# demo/feedthrus.buda — feedthru options in a hierarchical flow
+#
+#   bin/buda --no-viz demo/feedthrus.buda     # batch; read the flow log
+#
+# A *feedthru* block is a busterm of a bundle that the trunk would
+# otherwise pass straight over (a legal but silent pass-through, one
+# continuous wire over the cell).  `set_feedthru` declares the block
+# routable-THROUGH instead: the trunk is split at the block's two faces
+# (two BUSTERM landings) and the block's own lower-level routing bridges
+# the gap — the top level lays less metal, and `check_design` accepts
+# the declared relay (an UNdeclared relay is still flagged).
+#
+#   set_feedthru <blocks|*> <layers|*> [on|off]
+#
+# Resolution is most-specific-first:
+#   (block,layer) > (block,*) > (*,layer) > global
+#
+# This demo builds a small 2-level design and walks the options:
+#
+#   die 1000x720
+#   ┌────────────────────────────────────────────────┐
+#   │        ┌mid┐                                   │  top row: src → [mid,dst]
+#   │ [src]  │   │                     [dst]         │  multicast — the tall mid
+#   │        └───┘                                   │  straddles every trunk y
+#   │ ┌tile t0───────┐  ┌tile t1───────┐             │
+#   │ │ [a] [m] [b]  │  │ [a] [m] [b]  │             │  in each tile: a → [m,b]
+#   │ └──────────────┘  └──────────────┘             │  (m full-height, same shape)
+#   └────────────────────────────────────────────────┘
+#
+#   1. baseline           — no declaration: the trunk passes over mid
+#                           (dump shows pass=1 and the longer 1-seg wire)
+#   2. set_feedthru * M5      — (*,layer): every block relays on the H TOP
+#                           layer; mid's candidates split (2 segs, less WL)
+#   3. set_feedthru mid * off — (block,*) beats (*,layer): mid reverts to
+#                           the pass-through even though M5 says relay
+#   4. set_feedthru mid M5    — (block,layer) beats (block,*): mid splits
+#                           again on M5 only (V trunks stay unaffected)
+#   5. set_feedthru m *       — a CELL-LOCAL child by its LOCAL name: the
+#                           rule governs the tile template's frame, so
+#                           BOTH tiles' buses relay through their own m
+#
+# Then the full pipeline (planner hier → NUTS → detailed NUTS) routes the
+# relayed selections clean.  Feedthru state is re-declared per generation
+# — each `set_feedthru` below is followed by a regeneration so the dump
+# shows exactly what that declaration changed.
+#
+# No `visualize` on purpose: run it under `btcl -i` and the prompt comes
+# up on the finished design (`topos`, `pin`, `replan` all work here).
+# ============================================================
+
+open_bdb :memory:
+set_die 1000 720
+
+# ---- cells --------------------------------------------------
+add_cell io_cell    100 100
+add_cell relay_cell 100 300
+add_cell tile_cell  460 140
+add_cell leaf_cell  100 100
+add_cell lmid_cell  100 140
+
+# tile internals: a — m (full tile height) — b
+add_inst_to_cell tile_cell a leaf_cell  20  20
+add_inst_to_cell tile_cell m lmid_cell 180   0
+add_inst_to_cell tile_cell b leaf_cell 340  20
+
+# ---- instances ----------------------------------------------
+add_inst t0 tile_cell -  40  40
+add_inst t1 tile_cell - 540  40
+
+add_inst src io_cell    -  60 480
+add_inst mid relay_cell - 400 400
+add_inst dst io_cell    - 800 480
+
+# ---- buses --------------------------------------------------
+bdb_net_mode on
+add_bus lft_t0[4]  t0/a.out  t0/m.in,t0/b.in
+add_bus lft_t1[4]  t1/a.out  t1/m.in,t1/b.in
+add_bus tft[4]     src.out   mid.in,dst.in
+
+# ---- layer stack + tracks (self-contained) ------------------
+def_layer 3 M3 H 20
+def_layer 4 M4 V 20
+def_layer 5 M5 H TOP 10
+def_layer 6 M6 V TOP 10
+def_track_pattern 3 0  POWER 2 1  (SIGNAL 1 0.5)x4  GROUND 2 1  (SIGNAL 1 0.5)x4
+def_track_pattern 4 0  POWER 2 1  (SIGNAL 1 0.5)x4  GROUND 2 1  (SIGNAL 1 0.5)x4
+def_track_pattern 5 0  POWER 3 1  (SIGNAL 2 1)x4  GROUND 3 1  (SIGNAL 2 1)x4
+def_track_pattern 6 0  POWER 3 1  (SIGNAL 2 1)x4  GROUND 3 1  (SIGNAL 2 1)x4
+
+# ---- hier setup ---------------------------------------------
+derive_busterms
+add_blocks_from_bdb 1
+run_hier_bundler
+
+# ---- 1. baseline: no feedthru anywhere ----------------------
+# The best tft candidate is ONE trunk segment spanning src→dst, with mid
+# counted as a silent pass-through (pass=1).
+generate_hier_topologies
+dump_topologies tft --conn
+
+# ---- 2. (*,layer): every block relays on the H TOP layer ----
+# The same candidate now splits at mid's faces: 2 segments, mid carries
+# two BUSTERM landings, and the external wirelength DROPS (the fed-through
+# span is bridged by mid's own routing, not top-level metal).
+set_feedthru * M5
+generate_hier_topologies
+dump_topologies tft --conn
+
+# ---- 3. (block,*) off beats (*,layer) on --------------------
+# mid opts back out for ALL layers; the M5 wildcard still stands for every
+# other block, but mid's candidates revert to the pass-through.
+set_feedthru mid * off
+generate_hier_topologies
+dump_topologies tft --conn
+
+# ---- 4. (block,layer) on beats (block,*) off ----------------
+# The most specific rule wins: mid relays on M5 only.  A V-layer trunk
+# through mid would still pass over (no M6 rule for mid).
+set_feedthru mid M5
+generate_hier_topologies
+dump_topologies tft --conn
+
+# ---- 5. cell-local: a child by its LOCAL name ---------------
+# The tile buses generate in tile_cell's CELL-LOCAL frame, whose blocks
+# carry local names (a, m, b).  One declaration on `m` governs the frame
+# of every tile instance — template semantics: both lft buses relay.
+set_feedthru m *
+generate_hier_topologies
+dump_topologies lft_t0 --conn
+dump_topologies lft_t1 --conn
+
+# ---- full pipeline on the relayed selections ----------------
+run_planner hier 5
+run_nuts
+check_design nuts
+run_detailed_nuts
+check_design dnuts
+report_wl
