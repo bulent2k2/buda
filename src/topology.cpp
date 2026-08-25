@@ -295,9 +295,31 @@ bool flip_mst_edge(Topology& topo, int edge_id, int h_layer, int v_layer,
     // commit on the corpus, and it cannot produce geometry.  The alternative —
     // re-running the trim after the flip to repair the dependency — preserves
     // the move but can strand something else in turn.
+    //
+    // The anchor is not only the bend: a foreign endpoint T-junctioned
+    // ANYWHERE on either leg's interior (an MST TEG attachment stub — the
+    // limitation-1 fix hangs an OVER rect's stub off an arbitrary tree
+    // segment — or a relay connector) depends on that leg's whole extent, and
+    // the flip moves the extent wholesale.  Same rule, whole-leg scope; the
+    // legs' own far endpoints (p1/p2) survive the flip, so a sibling sharing
+    // one of those is fine.
+    auto on_leg = [&](const Point& q, const Segment& s) {
+        if (s.start.x == s.end.x)
+            return q.x == s.start.x &&
+                   q.y >= std::min(s.start.y, s.end.y) &&
+                   q.y <= std::max(s.start.y, s.end.y);
+        if (s.start.y == s.end.y)
+            return q.y == s.start.y &&
+                   q.x >= std::min(s.start.x, s.end.x) &&
+                   q.x <= std::max(s.start.x, s.end.x);
+        return false;
+    };
     for (const Segment& s : topo.segments) {
         if (s.edge_id == edge_id) continue;          // this edge's own legs move
-        if (eq(s.start, bend) || eq(s.end, bend)) return false;
+        for (const Point& q : {s.start, s.end}) {
+            if (eq(q, p1) || eq(q, p2)) continue;    // far endpoints survive
+            if (on_leg(q, a) || on_leg(q, b)) return false;
+        }
     }
 
     // Rewrite in place: leg a = p1->alt, leg b = alt->p2, layer by direction.  The
@@ -4012,6 +4034,201 @@ static int trim_shared_leg_overlaps(std::vector<Segment>& segs,
     return n_trim;
 }
 
+// ── MST TEG attachment (teg_multirect_status.md open 1 residual (iii) /
+// Final-state limitation 1) ──────────────────────────────────────────────────
+//
+// An MST edge connects each block pair at the closest rect pair, so a
+// `teg_mode over` multi-rect endpoint's OTHER rects can go entirely unreached
+// — OVER revokes the block's internal continuity, so each such rect is an
+// electrically open terminal the placed-stage TEG_OPEN audit reports.  The
+// trunk shapes emit their per-rect connection metal inline (gap stubs /
+// connector legs off the spine); an MST tree has no shared trunk locus to
+// hang that from, so this pass runs AFTER the tree is fully wired
+// (complete_relay_junctions — running earlier would hand the relay machinery
+// a second face landing on the OVER block and its 2-stub OTC extension would
+// rewire what is already connected through the tree) and attaches every rect
+// the finished tree leaves unreached.
+//
+// "Reached" is the audit's own reading: inclusive segment/rect contact (the
+// generation-side spelling of verify.cpp's `teg_touches`) judged on the
+// PHYSICAL rects (`Busterm::orig_rects` — what `fp.get_block_rects` hands the
+// audit), expanded transitively over `rects_touch` exactly like the trunk
+// path's `teg_landing_component`: a rect physically contiguous with a reached
+// rect is one piece of the block's shape (the feature's adjacency
+// suppression), so an ADJACENT pair emits nothing here — and, selected, still
+// reports TEG_OPEN per-rect (the documented limitation-2 corner, unchanged).
+//
+// The attachment itself is ordinary segments through emit_tap_segment, FACE →
+// outward per the #823 rule (a trunk-end busterm seed costs NUTS its face
+// anchor and the stub retracts):
+//   • a single perpendicular T-stub from the rect's locus-facing perp face at
+//     its along-centre (clamped into the shared along-range) onto a tree
+//     segment — the gap-stub shape, when a target's span overlaps the rect;
+//   • else a two-leg L: leg1 from the rect's face at its centre toward the
+//     target's span, leg2 turning onto the target's span MIDPOINT (a strict
+//     interior landing, so the T-junction never coincides with a tapped
+//     endpoint) — the relay-connector shape.
+// The cheapest (total length) attachment wins, floors from the min-stub
+// lengths.  The EXACT tie rule, evaluated in segment-index visit order so
+// the choice is deterministic for any given segment list (the pool-reorder
+// knobs — trims etc. — mutate geometry BEFORE this pass, so they change the
+// costs, never the rule): an equal-cost T-stub DISPLACES a standing L (one
+// segment, no bend, fewer routing constraints — the single-segment form is
+// strictly the lighter commitment); an equal-cost same-kind candidate never
+// displaces an earlier one (the lower segment index wins); an equal-cost L
+// never displaces anything.  A rect with NO legal attachment (e.g. every
+// target shares its perp band — the same-band shape, whose bare extension
+// NUTS retracts) is left as it was: unreached and LOUD via TEG_OPEN, never
+// silently half-fixed.  Stubs carry edge_id -1, so ripup's per-edge flips
+// never mistake one for an MST leg.
+static bool seg_touches_rect_incl(const Segment& s, const Rect& r) {
+    const bool horiz = (s.start.y == s.end.y);
+    const int perp = horiz ? s.start.y : s.start.x;
+    const int alo  = horiz ? std::min(s.start.x, s.end.x)
+                           : std::min(s.start.y, s.end.y);
+    const int ahi  = horiz ? std::max(s.start.x, s.end.x)
+                           : std::max(s.start.y, s.end.y);
+    const int plo  = horiz ? r.y1 : r.x1;
+    const int phi  = horiz ? r.y2 : r.x2;
+    const int blo  = horiz ? r.x1 : r.y1;
+    const int bhi  = horiz ? r.x2 : r.y2;
+    return perp >= plo && perp <= phi && alo <= bhi && ahi >= blo;
+}
+
+static void add_mst_teg_attachments(Topology& topo,
+                                    const std::vector<Busterm>& blocks,
+                                    int h_layer, int v_layer,
+                                    int m_h, int m_v) {
+    for (const Busterm& bt : blocks) {
+        if (bt.teg_mode != TegMode::OVER || bt.rects.size() < 2) continue;
+        const std::vector<Rect>& rects = bt.rects;   // inset (tap) spelling
+        const std::vector<Rect>& phys  =
+            (bt.orig_rects.size() == rects.size()) ? bt.orig_rects : rects;
+        const int nr = (int)rects.size();
+
+        // Contact + physical contiguity, recomputed per rect so an emitted
+        // stub that happens to touch (or chain to) a later rect discharges it.
+        auto reached_now = [&]() {
+            std::vector<char> in(nr, 0);
+            for (int ri = 0; ri < nr; ++ri)
+                for (const Segment& s : topo.segments)
+                    if (seg_touches_rect_incl(s, phys[ri])) { in[ri] = 1; break; }
+            bool grow = true;
+            while (grow) {
+                grow = false;
+                for (int i = 0; i < nr; ++i) {
+                    if (!in[i]) continue;
+                    for (int j = 0; j < nr; ++j)
+                        if (!in[j] && rects_touch(phys[i], phys[j])) {
+                            in[j] = 1; grow = true;
+                        }
+                }
+            }
+            return in;
+        };
+
+        for (int ri = 0; ri < nr; ++ri) {
+            if (reached_now()[ri]) continue;
+            const Rect& r = rects[ri];
+            const int cx = (r.x1 + r.x2) / 2, cy = (r.y1 + r.y2) / 2;
+
+            long best_cost = -1;
+            int  best_kind = 0;                     // 1 = T-stub, 2 = L
+            Segment leg1{}, leg2{};
+            const int n0 = (int)topo.segments.size();
+            for (int sj = 0; sj < n0; ++sj) {
+                const Segment& s = topo.segments[sj];
+                const bool sh = (s.start.y == s.end.y);
+                if (sh == (s.start.x == s.end.x)) continue;   // degenerate
+                const int perp = sh ? s.start.y : s.start.x;
+                const int alo  = sh ? std::min(s.start.x, s.end.x)
+                                    : std::min(s.start.y, s.end.y);
+                const int ahi  = sh ? std::max(s.start.x, s.end.x)
+                                    : std::max(s.start.y, s.end.y);
+                const int r_alo = sh ? r.x1 : r.y1;
+                const int r_ahi = sh ? r.x2 : r.y2;
+                const int r_plo = sh ? r.y1 : r.x1;
+                const int r_phi = sh ? r.y2 : r.x2;
+                const int m_stub = sh ? m_v : m_h;  // ⊥ to the target
+                const int m_leg1 = sh ? m_h : m_v;  // ∥ to the target
+
+                if (std::max(alo, r_alo) <= std::min(ahi, r_ahi)) {
+                    // Along-ranges overlap.  perp inside the rect's band would
+                    // be contact (already reached), so perp is outside: a
+                    // single perpendicular T-stub from the locus-facing face.
+                    if (perp >= r_plo && perp <= r_phi) continue;
+                    const int gap  = (perp > r_phi) ? perp - r_phi : r_plo - perp;
+                    if (gap < std::max(m_stub, 1)) continue;
+                    const int face = (perp > r_phi) ? r_phi : r_plo;
+                    const int a = std::min(std::max(sh ? cx : cy,
+                                                    std::max(alo, r_alo)),
+                                           std::min(ahi, r_ahi));
+                    // Equal-cost tie: a T-stub displaces a standing L
+                    // (best_kind == 2), never a standing T — see the tie
+                    // rule in the contract comment above.
+                    if (best_cost < 0 || gap < best_cost ||
+                        (gap == best_cost && best_kind == 2)) {
+                        best_cost = gap; best_kind = 1;
+                        leg1 = sh ? make_seg(a, face, a, perp, v_layer)
+                                  : make_seg(face, a, perp, a, h_layer);
+                    }
+                } else {
+                    // Disjoint along-ranges: two-leg L onto the target's span
+                    // midpoint.  leg2 must have real length (the target's perp
+                    // off the rect's centre line) and an interior to land on.
+                    const int c_perp = sh ? cy : cx;    // rect centre ⊥ target
+                    if (perp == c_perp || ahi - alo < 2) continue;
+                    const int b = (alo + ahi) / 2;      // bend along the target
+                    const int face_a = (b > r_ahi) ? r_ahi : r_alo;
+                    const int len1 = (b > r_ahi) ? b - r_ahi : r_alo - b;
+                    const int len2 = (perp > c_perp) ? perp - c_perp
+                                                     : c_perp - perp;
+                    if (len1 < std::max(m_leg1, 1) || len2 < std::max(m_stub, 1))
+                        continue;
+                    const long cost = (long)len1 + len2;
+                    if (best_cost < 0 || cost < best_cost) {
+                        best_cost = cost; best_kind = 2;
+                        if (sh) {   // H target: leg1 H from x-face, leg2 V
+                            leg1 = make_seg(face_a, cy, b, cy, h_layer);
+                            leg2 = make_seg(b, cy, b, perp, v_layer);
+                        } else {    // V target: leg1 V from y-face, leg2 H
+                            leg1 = make_seg(cx, face_a, cx, b, v_layer);
+                            leg2 = make_seg(cx, b, perp, b, h_layer);
+                        }
+                    }
+                }
+            }
+            if (best_kind == 0) continue;   // no legal attachment: stays LOUD
+            emit_tap_segment(topo, leg1, &bt);
+            if (best_kind == 2) emit_tap_segment(topo, leg2, nullptr);
+        }
+    }
+}
+
+// Floorplan overload (declared in topology.h; bound to Python): build the
+// Busterms exactly as annotate_topology does — inset bbox/rects beside the
+// physical spellings, teg_mode — resolve the min-stub floors from the
+// floorplan, and run the pass.  Exposed for hand-built topologies and the
+// tie-rule regression tests (the test_planner_notch_low precedent: the
+// predicate under test is public so the test asks the engine rather than
+// re-implementing the rule).
+void add_mst_teg_attachments(Topology& topo, const Floorplan& fp,
+                             int h_layer, int v_layer) {
+    std::vector<Busterm> bts;
+    for (const auto& [name, orig] : fp.get_all_blocks()) {
+        auto cm   = fp.get_block_corner_margin(name);
+        auto phys = fp.get_block_rects(name);
+        Busterm bt{name, orig.shrink(cm.dx, cm.dy), orig,
+                   shrink_rects(phys, cm), fp.get_block_teg_mode(name)};
+        if ((cm.dx != 0 || cm.dy != 0) && !phys.empty())
+            bt.orig_rects = std::move(phys);
+        bts.push_back(std::move(bt));
+    }
+    int m_h = fp.get_min_stub_length(0 /*HORIZONTAL*/, h_layer);
+    int m_v = fp.get_min_stub_length(1 /*VERTICAL*/,   v_layer);
+    add_mst_teg_attachments(topo, bts, h_layer, v_layer, m_h, m_v);
+}
+
 void TopologyGenerator::add_mst_candidates(const std::vector<Busterm>& blocks,
                                            std::vector<Topology>& results) {
     // MST topologies model daisy-chain connections (each block connects to its
@@ -4096,6 +4313,11 @@ void TopologyGenerator::add_mst_candidates(const std::vector<Busterm>& blocks,
             // connectors it appends, so it must run after the baseline annotation.
             annotate_endpoints(mst, blocks);
             complete_relay_junctions(mst, blocks, floorplan_, h_layer_, v_layer_, allow_spine_relays_);
+            // TEG-over attachment: reach every OVER multi-rect endpoint's
+            // still-unreached rects on the FINISHED tree (see the pass above —
+            // running before completion would feed the relay machinery a
+            // second face landing it would OTC-rewire).
+            add_mst_teg_attachments(mst, blocks, h_layer_, v_layer_, m_h, m_v);
             if (mst.connected_block_names.empty())
                 for (const auto& b : blocks)
                     mst.connected_block_names.push_back(b.block_name);

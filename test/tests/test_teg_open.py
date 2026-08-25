@@ -537,19 +537,101 @@ def test_same_band_adjacent_pair_keeps_the_documented_loud_corner():
     assert "OVER block 'T'" in out, out
 
 
-def test_mst_on_over_block_fires_teg_open_end_to_end():
-    # Open 1 residual (iii), still open BY SCOPING: MST candidates connect
-    # each edge at the closest rect pair and emit no TEG connection metal
-    # for an OVER block's other rects (per-rect attachment into an arbitrary
-    # tree segment would have to compose with relay completion, the
-    # shared-leg trims and ripup's edge flips — a redesign, documented in
-    # teg_multirect_status.md open 1).  This pins the guarantee that makes
-    # the scoping safe: the routed result is LOUD — TEG_OPEN at both placed
-    # stages naming the unreached rect — never silent.
+_MST_OVER_CMDS = [
+    "add_block src 0 0 100 100",
+    "add_block r1 300 300 400 400",
+    "add_block r2 rect 500 0 600 100 rect 900 0 1000 100 teg_mode over",
+    "add_block r3 300 600 400 700",
+    "def_layer 4 M4 H TOP 0",
+    "def_layer 5 M5 V TOP 0",
+    "add_bus d[4] src.tx r1.a,r2.b,r3.c",
+    "run_bundler STRICT",
+    "generate_topologies",
+]
+
+
+def test_mst_on_over_block_now_attaches_every_rect_and_audits_clean():
+    # Final-state limitation 1, FLIPPED — the flip is the fix's proof.  An
+    # MST edge lands on the closest rect pair only, so the OVER receiver's
+    # far rect (rect#1) used to go unreached — TEG_OPEN at both placed
+    # stages.  `add_mst_teg_attachments` now runs on the FINISHED tree
+    # (after complete_relay_junctions) and attaches every still-unreached
+    # rect with real metal: here a single H T-stub from rect#1's left face
+    # (x=900, tapping r2) onto the r1→r2 edge's V leg — so the routed
+    # result reaches every rect and both audits are clean.
+    s = _session(_MST_OVER_CMDS + _TRACKS)
+    w = s.bundles[0]
+    pin, cand = next((i, c) for i, c in enumerate(w.input.candidates)
+                     if c.type.startswith("MST_"))
+    # The attachment stub: taps r2 from rect#1's face (x=900), edge_id -1 so
+    # ripup's per-edge flips never mistake it for an MST leg.
+    stubs = [seg for i, seg in enumerate(cand.segments)
+             if seg.start.x == 900 and seg.edge_id == -1
+             and any(bt is not None and bt.block_name == "r2"
+                     for bt in cand.seg_busterms.get(i, (None, None)))]
+    assert stubs, "expected the attachment stub from rect#1's face at x=900"
+    n_segs = len(cand.segments)
+    for cmd in (f"select_topology 1 {pin + 1}", "run_planner", "run_nuts"):
+        with contextlib.redirect_stdout(io.StringIO()):
+            s.do_command(cmd)
+    placed = [t for t in s.nuts_result.segments if t.bundle_id == 1]
+    assert len(placed) == n_segs, "every segment incl. the stub must place"
+    verdict, out = _check(s, "nuts")
+    assert verdict["by_kind"].get("TEG_OPEN", 0) == 0, out
+    with contextlib.redirect_stdout(io.StringIO()):
+        s.do_command("run_detailed_nuts")
+    assert s.detailed_result.num_unplaced == 0
+    verdict, out = _check(s, "dnuts")
+    assert verdict["by_kind"].get("TEG_OPEN", 0) == 0, out
+
+
+def test_mst_edge_spanning_the_far_rect_gets_no_redundant_stub():
+    # The control that must NOT change: with a fourth receiver r4 past the
+    # OVER block, the r2→r4 MST edge SPANS rect#1 — pass-through contact IS
+    # attachment — so the attachment pass must emit nothing (a spanned rect
+    # is already reached) and the route still audits clean at both stages.
     s = _session([
         "add_block src 0 0 100 100",
         "add_block r1 300 300 400 400",
         "add_block r2 rect 500 0 600 100 rect 900 0 1000 100 teg_mode over",
+        "add_block r3 300 600 400 700",
+        "add_block r4 1200 0 1300 100",
+        "def_layer 4 M4 H TOP 0",
+        "def_layer 5 M5 V TOP 0",
+        "add_bus d[4] src.tx r1.a,r2.b,r3.c,r4.d",
+        "run_bundler STRICT",
+        "generate_topologies",
+    ] + _TRACKS)
+    w = s.bundles[0]
+    pin, cand = next((i, c) for i, c in enumerate(w.input.candidates)
+                     if c.type.startswith("MST_"))
+    # No attachment metal: every segment belongs to an MST edge or the relay
+    # completion — nothing taps r2 off an edge_id -1 stub at rect#1's faces.
+    extra = [seg for i, seg in enumerate(cand.segments)
+             if seg.edge_id == -1
+             and any(bt is not None and bt.block_name == "r2"
+                     for bt in cand.seg_busterms.get(i, (None, None)))]
+    assert not extra, "spanned rect#1 is already reached — no stub may be added"
+    for cmd in (f"select_topology 1 {pin + 1}", "run_planner", "run_nuts",
+                "run_detailed_nuts"):
+        with contextlib.redirect_stdout(io.StringIO()):
+            s.do_command(cmd)
+    verdict, out = _check(s, "dnuts")
+    assert verdict["by_kind"].get("TEG_OPEN", 0) == 0, out
+
+
+def test_mst_on_adjacent_rect_over_block_stays_loud():
+    # The adjacency rule carries over to the MST attachment pass unchanged
+    # (limitation 2's corner): a rect physically contiguous with a reached
+    # rect — positive-length shared edge, transitive over the PHYSICAL
+    # rects — is one piece of the block's shape, so the pass emits nothing
+    # for it, while the placed TEG_OPEN contact predicate stays per-rect.
+    # A selected MST on such a block therefore still reports TEG_OPEN,
+    # exactly like the trunk Direct inside one of two adjacent rects.
+    s = _session([
+        "add_block src 0 0 100 100",
+        "add_block r1 300 300 400 400",
+        "add_block r2 rect 500 0 600 100 rect 600 0 700 100 teg_mode over",
         "add_block r3 300 600 400 700",
         "def_layer 4 M4 H TOP 0",
         "def_layer 5 M5 V TOP 0",
@@ -558,18 +640,17 @@ def test_mst_on_over_block_fires_teg_open_end_to_end():
         "generate_topologies",
     ] + _TRACKS)
     w = s.bundles[0]
-    pin = next(i for i, c in enumerate(w.input.candidates)
-               if c.type.startswith("MST_"))
+    pin, cand = next((i, c) for i, c in enumerate(w.input.candidates)
+                     if c.type.startswith("MST_"))
+    assert not any(seg.edge_id == -1 and seg.start.x >= 600
+                   for seg in cand.segments), \
+        "adjacent rect must stay suppressed (no attachment metal)"
     for cmd in (f"select_topology 1 {pin + 1}", "run_planner", "run_nuts"):
         with contextlib.redirect_stdout(io.StringIO()):
             s.do_command(cmd)
     verdict, out = _check(s, "nuts")
     assert verdict["by_kind"].get("TEG_OPEN", 0) >= 1, out
-    assert "OVER block 'r2'" in out and "rect#1 (900,0)-(1000,100)" in out, out
-    with contextlib.redirect_stdout(io.StringIO()):
-        s.do_command("run_detailed_nuts")
-    verdict, out = _check(s, "dnuts")
-    assert verdict["by_kind"].get("TEG_OPEN", 0) >= 1, out
+    assert "OVER block 'r2'" in out and "rect#1 (600,0)-(700,100)" in out, out
 
 
 def test_thru_block_is_exempt_by_design():
@@ -667,13 +748,14 @@ def test_all_span_trunk_touches_every_rect_no_teg_open():
 def test_check_topo_does_not_carry_teg_open():
     # The kind is placed-stage only: check_topo feeds generation gates and
     # healer metrics, so it must not report TEG_OPEN even on a candidate that
-    # genuinely leaves a rect unreached (an MST candidate on an OVER block —
-    # the end-to-end firing shape above, residual (iii)); the pool must not
-    # shrink over a reporting audit.
+    # genuinely leaves a rect unreached (an MST candidate on an ADJACENT-rect
+    # OVER block — the attachment pass suppresses contiguous rects, so the
+    # far rect stays untouched and the placed stages fire, see the loud test
+    # above); the pool must not shrink over a reporting audit.
     s = _session([
         "add_block src 0 0 100 100",
         "add_block r1 300 300 400 400",
-        "add_block r2 rect 500 0 600 100 rect 900 0 1000 100 teg_mode over",
+        "add_block r2 rect 500 0 600 100 rect 600 0 700 100 teg_mode over",
         "add_block r3 300 600 400 700",
         "def_layer 4 M4 H TOP 0",
         "def_layer 5 M5 V TOP 0",

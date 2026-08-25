@@ -50,15 +50,30 @@ its pinning test on this date:
 
 **Remaining limitations**
 
-1. **MST candidates on OVER multi-rect blocks emit no TEG connection
-   metal** (and the TRUNK+MST hybrids' multi-rect branch blocks mostly drop
-   at generation as non-simple): an MST edge lands on the closest rect pair
-   only, so an OVER block's other rects go unreached — the legacy path,
-   scoped by open 1 residual (iii) (a fix is a redesign: there is no shared
-   trunk locus to hang per-rect attachment from).  Pinned LOUD end to end:
-   `test_teg_open.py::test_mst_on_over_block_fires_teg_open_end_to_end`
-   (a selected MST_HV on an OVER receiver fires TEG_OPEN at both placed
-   stages naming the unreached rect).
+1. ~~**MST candidates on OVER multi-rect blocks emit no TEG connection
+   metal**: an MST edge lands on the closest rect pair only, so an OVER
+   block's other rects go unreached — the legacy path, scoped by open 1
+   residual (iii) (a fix is a redesign: there is no shared trunk locus to
+   hang per-rect attachment from).~~  **RESOLVED 2026-08-25** — see open 1
+   residual (iii) for the design and measurements: `add_mst_teg_attachments`
+   runs on the FINISHED tree (after `complete_relay_junctions`, the ordering
+   that keeps the relay machinery off the new face landing) and attaches
+   every rect the tree leaves unreached — the audit's own inclusive contact
+   on the PHYSICAL rects, expanded over `rects_touch` contiguity like
+   `teg_landing_component` — with a perpendicular T-stub onto an overlapping
+   tree segment, else a two-leg L onto the nearest segment's span midpoint
+   (face→outward per #823, min-stub floors, `edge_id -1`).  The old firing
+   pin is FLIPPED (`test_teg_open.py::
+   test_mst_on_over_block_now_attaches_every_rect_and_audits_clean`), the
+   spanning-edge control is pinned beside it, and the corner that REMAINS
+   loud is limitation 2's: an ADJACENT rect is suppressed (contiguity) and
+   a selected MST on such a block still reports TEG_OPEN
+   (`test_mst_on_adjacent_rect_over_block_stays_loud`).  The TRUNK+MST
+   hybrids need no attachment pass: their multi-rect branch blocks flunk
+   `simple` onto the legacy hybrid path, which keeps the FULL seed trunk —
+   per-rect OVER connection metal included — under the clean-tree gate.
+   End-to-end vehicle `flow/teg_mst_over.buda` (QoR corpus row, EXPECTED
+   CLEAN).
 2. **The adjacent-rect Direct corner**: a trunk Direct inside one of two
    ADJACENT rects emits no connection metal — the rects are physically
    contiguous, the feature's suppression rule, transitive over the PHYSICAL
@@ -286,7 +301,10 @@ catch this shape too, which is another reason to land it first.
 - Trunk+MST hybrids: a multi-rect branch makes the tree "non-simple", so it
   keeps the legacy un-completed relay shape and is usually dropped as
   `FEEDTHRU_RELAY` (`src/topology.cpp:4077-4082`, `:4680-4685`).  (Still the
-  case — the hybrid half of open 1 residual (iii), Final-state item 1.)
+  case, and since 2026-08-25 recorded as the SUFFICIENT answer rather than a
+  gap: the legacy hybrid keeps the full seed trunk incl. its per-rect OVER
+  connection metal, so residual (iii)'s attachment pass covers standalone
+  MST only — see Final-state item 1.)
 - ~~`topo_edit`: `edit_add_stub`/`edit_add_trunk` seed the tap's rects+teg_mode
   (`src/topo_edit.cpp:196-203`) but compute the face and overlap from the
   union bbox (`:165-185`) — a hand-built stub can land in the notch.~~
@@ -338,7 +356,7 @@ catch this shape too, which is another reason to land it first.
 
 | Stage | Status |
 |---|---|
-| Generation | **no longer emits bridges** (open 1(a), 2026-08-22): the trunk generator's OVER branches emit real per-rect gap stubs / rectilinear connector legs via `emit_tap_segment` (`src/topology.cpp`, `add_trunk`); MST/BITRUNK/2-pin still emit no TEG connection metal |
+| Generation | **no longer emits bridges** (open 1(a), 2026-08-22): the trunk generator's OVER branches emit real per-rect gap stubs / rectilinear connector legs via `emit_tap_segment` (`src/topology.cpp`, `add_trunk`); MST candidates carry attachment stubs since 2026-08-25 (`add_mst_teg_attachments`, residual (iii)); BITRUNK/2-pin still emit no TEG connection metal |
 | Nominal WL + segment-count tie-break | restored bridges still counted (`src/topology.cpp` `wirelength()`/`annotate_and_sort`) so a restored pool keeps its recorded order |
 | `topo_uid` fingerprint, hier offset/rotate | hashed + transformed (`src/topology_analysis.cpp:116-119`, `src/topology.cpp:70-75`) — a restored candidate keeps its recorded identity |
 | BDB persistence + `load_pipeline` restore | **kept, v11** (`topology_bridge_segment`): generation persists zero rows; pre-change checkpoints restore theirs (`test_bdb_resume_gaps.py`) |
@@ -541,7 +559,7 @@ wrong.
    `test_same_band_disjoint_sibling_routes_clean_via_spine_anchoring` and
    the same-band family beside it (the adjacent-pair loud control
    included).
-   What REMAINS is (iii), narrowed and verified LOUD:
+   ~~What REMAINS is (iii), narrowed and verified LOUD:
    **MST candidates (and the TRUNK+MST hybrids' multi-rect branch blocks,
    which mostly drop at generation as non-simple) still emit no TEG
    connection metal** — an MST edge lands on the closest rect pair only,
@@ -550,14 +568,68 @@ wrong.
    per-rect attachment would have to target an arbitrary tree segment and
    compose with `complete_relay_junctions`' relay wiring, the shared-leg
    trims (`set_trim_mst_legs`), and ripup's per-edge L/Z flips (a flip
-   re-routes the very edge a connector would hang from).  Left on the
-   legacy path and pinned LOUD end-to-end:
-   `test_mst_on_over_block_fires_teg_open_end_to_end` (a selected MST_HV
-   on an OVER receiver fires TEG_OPEN at both placed stages naming the
-   unreached rect — 1 bundle-level at nuts, 4 per-bit at dnuts) —
-   `test_teg_resume.py`'s dirty vehicle now rides the same shape, so the
-   resume-armed audit stays pinned too, and BITRUNK's twin pin is open
-   8's `test_bitrunk_on_over_block_fires_teg_open_end_to_end`.
+   re-routes the very edge a connector would hang from).~~
+   **(iii) RESOLVED 2026-08-25** (`add_mst_teg_attachments`,
+   `src/topology.cpp`), and the redesign's composition questions were
+   answered one by one rather than dodged:
+   the pass runs on the FINISHED tree — AFTER `complete_relay_junctions` —
+   because running before it would hand the relay machinery a second face
+   landing on the OVER block and its 2-stub OTC extension would rewire
+   metal that is already connected through the tree.  "Unreached" is the
+   AUDIT's own reading (inclusive contact, the generation spelling of
+   verify's `teg_touches`, judged on the PHYSICAL rects the audit reads),
+   expanded transitively over `rects_touch` exactly like the trunk path's
+   `teg_landing_component` — so a rect an edge SPANS is reached
+   (pass-through contact IS attachment: the r4 control adds no metal), and
+   an ADJACENT rect is suppressed (limitation 2's corner, which a selected
+   candidate still reports per-rect —
+   `test_mst_on_adjacent_rect_over_block_stays_loud`).  The attachment is
+   ordinary segments through `emit_tap_segment`, FACE → outward (#823): a
+   perpendicular T-stub from the rect's locus-facing face at its
+   along-centre onto an along-overlapping tree segment, else a two-leg L
+   turning onto the nearest segment's span MIDPOINT (a strict interior
+   landing, so the junction never coincides with a tapped endpoint);
+   cheapest total length wins, min-stub floors enforced, and a rect with NO
+   legal attachment (every target shares its perp band — the same-band
+   shape whose bare extension NUTS retracts) stays unreached and LOUD.
+   Measured on the firing repro (4 blocks, disjoint OVER receiver): MST_HV
+   10 → 11 segments — one H stub (900,100)→(500,100) tapping rect#1's face
+   onto the r1→r2 edge's V leg — TEG_OPEN at both stages → both audits
+   Success, 44/44 bit-wires placed.  The composition verdicts:
+   `set_trim_mst_legs` runs BEFORE the pass (on the raw edge legs), so the
+   A/B (`BUDA_MST_LEG_TRIM=1`) keeps the stub and the clean endpoint,
+   measured on both orientations; ripup's per-edge flips cannot mistake a
+   stub for an MST leg (`edge_id -1`) and `flip_mst_edge` now refuses to
+   flip a leg carrying a foreign endpoint T-junctioned on its INTERIOR —
+   the whole-leg extension of its bend-anchor guard, since a flip moves the
+   leg wholesale and nothing downstream repairs a stranded junction
+   (`test_topo_keepout_mst.py::
+   test_flip_mst_edge_refuses_when_a_stub_t_junctions_a_leg_interior`,
+   fail-before verified; a junction at the edge's surviving far endpoints
+   p1/p2 does not block the flip); the TRUNK+MST hybrids need no pass of
+   their own — a multi-rect branch block flunks `simple` onto the legacy
+   hybrid path, which keeps the FULL seed trunk incl. its per-rect OVER
+   connection metal (and mostly drops at the clean-tree gate as before);
+   fan-in taper is untouched here (the vehicle's STRICT bundle does not
+   taper, and an attachment stub taps its block like any stub, so
+   `derive_fanin_seg_bits` walks it as ordinary tree metal).  OVER MST
+   pools re-sort (the stub is real priced WL) — the same caveat as every
+   1(a) landing; non-OVER and non-multi-rect designs are byte-identical
+   (the pass gates on `teg_mode == OVER` + ≥2 rects and adds nothing
+   elsewhere; corpus-guarded).  The old firing pin is FLIPPED
+   (`test_mst_on_over_block_now_attaches_every_rect_and_audits_clean`, with
+   the spanning-edge control beside it), the two dirty vehicles that SAT on
+   the MST shape because it was dirty — `test_teg_resume.py`'s
+   resume-armed audit and `test_teg_thru_census.py`'s OVER twin — moved
+   onto the adjacent-rect Direct shape (limitation 2, still loud), and
+   BITRUNK's twin pin is open 8's
+   `test_bitrunk_on_over_block_fires_teg_open_end_to_end`.  End-to-end
+   vehicle `flow/teg_mst_over.buda` (fix + control in one design, both
+   audits Success, QoR corpus row EXPECTED CLEAN).  QoR corpus
+   (`--vs main` @ 6e3ba29d): **0 better / 0 worse / 49 unchanged** of 51,
+   abstract AND detailed WL **+0.00%**, the new row measuring 0/0/0
+   (`ariane133_heal` NOT COMPARABLE — its fetched inputs are absent in the
+   baseline worktree, the harness's documented shape).
    The 1(a) stubs/legs follow the FACE→trunk emission orientation the
    gap-stub retraction fix (#823, see (b)) established — a trunk-end
    busterm seed costs NUTS its face anchor and the stub retracts;

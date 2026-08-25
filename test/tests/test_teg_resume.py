@@ -44,10 +44,12 @@ The two halves that would silently break if the seam regressed:
 * the CLEAN vehicle (flow/teg_over_audit.buda's L-shape, pinned
   TRUNK_V@x250 whose connector leg is real metal) must resume to the SAME
   routed endpoint — same bit-wires, same placed geometry, both audits clean;
-* the DIRTY vehicle (an MST candidate on an OVER block — open 1 residual
-  (iii), the remaining path that emits no TEG connection metal, since the
-  trunk shapes now stub every rect) must still FIRE TEG_OPEN after the
-  resume:
+* the DIRTY vehicle (a trunk Direct inside one of two ADJACENT rects — the
+  limitation-2 corner: the adjacency suppression emits no connection metal,
+  transitively over the PHYSICAL touch graph, while the placed TEG_OPEN
+  contact predicate reads per-rect; the MST shape that used to sit here
+  now attaches every rect, so this is the remaining checked-in
+  missing-metal shape) must still FIRE TEG_OPEN after the resume:
   detect_teg_open reads rects + teg_mode off the session FLOORPLAN
   (src/verify.cpp), so a resume that lost the re-declaration would read
   Success over an electrically open net — exactly the silent shape the audit
@@ -133,7 +135,7 @@ def _flat_setup_from_trace(trace_path, cut_verb):
 
 
 _MULTIRECT_LINE_L = "add_block L rect 0 0 100 400 rect 0 0 400 100 teg_mode over"
-_MULTIRECT_LINE_R2 = ("add_block r2 rect 500 0 600 100 rect 900 0 1000 100 "
+_MULTIRECT_LINE_R2 = ("add_block r2 rect 200 0 300 100 rect 200 100 300 200 "
                       "teg_mode over")
 
 
@@ -222,29 +224,29 @@ def test_flat_resume_keeps_teg_open_audit_armed(tmp_path, monkeypatch):
     flow = [
         f"open_bdb {ckpt}",
         "add_block src 0 0 100 100",
-        "add_block r1 300 300 400 400",
         _MULTIRECT_LINE_R2,
-        "add_block r3 300 600 400 700",
         "def_layer 4 M4 H TOP 0",
         "def_layer 5 M5 V TOP 0",
-        "add_bus d[4] src.tx r1.a,r2.b,r3.c",
+        "add_bus d[4] src.tx r2.b",
         "def_track_pattern 4 0 (SIGNAL 2 2)x8",
         "def_track_pattern 5 0 (SIGNAL 2 2)x8",
     ]
 
-    # ── build session, RECORDED: an MST candidate on the OVER block (open 1
-    #    residual (iii) — edges land on the closest rect pair only, so the
-    #    far rect is untouched by placed metal and TEG_OPEN fires; the trunk
-    #    shapes now emit per-rect connection metal, so the MST path is the
-    #    remaining missing-metal vehicle) ──
+    # ── build session, RECORDED: a trunk Direct inside the LOWER of two
+    #    ADJACENT rects (the limitation-2 corner — adjacency suppression
+    #    emits no connection metal, the per-rect audit still fires; the MST
+    #    shape that used to sit here now attaches every rect, so this is
+    #    the remaining checked-in missing-metal shape) ──
     monkeypatch.setenv("BUDA_RECORD", trace)
     s1 = _session(flow + ["run_bundler STRICT", "generate_topologies"])
     pin = None
     for i, c in enumerate(s1.bundles[0].input.candidates):
-        if c.type.startswith("MST_"):
-            pin = i + 1
-            break
-    assert pin is not None, "no MST candidate found"
+        if c.type.startswith("TRUNK_H@y"):
+            y = int(c.type.split("@y")[1].split("+")[0])
+            if 0 < y < 100:          # Direct inside the lower rect
+                pin = i + 1
+                break
+    assert pin is not None, "no trunk-inside-lower-rect candidate found"
     for cmd in (f"select_topology 1 {pin}", "run_planner", "run_nuts"):
         _run(s1, cmd)
     monkeypatch.delenv("BUDA_RECORD")

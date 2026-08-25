@@ -1274,6 +1274,28 @@ def test_teg_over_audit_flow_routes_clean():
     assert "TEG_OPEN" not in out, out
 
 
+def test_teg_mst_over_flow_routes_clean():
+    """flow/teg_mst_over.buda (teg_multirect_status.md Final-state
+    limitation 1, RESOLVED): the MST-on-OVER firing repro as a checked-in
+    vehicle, EXPECTED CLEAN — bundle 1's MST tree gets the attachment stub
+    to r2's far rect (the fix), bundle 2's r2→r4 edge SPANS that rect so
+    the pass adds nothing (the control that must not change).  Both pinned
+    by TYPE; both audits must report Success with no TEG_OPEN — if the
+    attachment regresses, TEG_OPEN fires and this fails loudly."""
+    out, rc = run_script("teg_mst_over.buda")
+    assert rc == 0, f"teg_mst_over.buda: non-zero exit {rc}\n{out}"
+    assert re.search(r"\[Planner\] Bundle 1 .*MST_HV \[pinned\]", out), out
+    assert re.search(r"\[Planner\] Bundle 2 .*MST_HV \[pinned\]", out), out
+    # 11 segs (bundle 1, incl. the attachment stub) + 11 (bundle 2, no
+    # extra metal on the spanned rect), all placed cleanly.
+    segs, viols, ovlps = nuts_summary(out)
+    assert (segs, viols, ovlps) == (22, 0, 0)
+    dm = re.search(
+        r"\[DetailedNUTS\] (\d+) net segments placed, (\d+) bits unplaced", out)
+    assert dm, "DetailedNUTS summary not found"
+    assert (int(dm.group(1)), int(dm.group(2))) == (88, 0)
+
+
 def test_teg_same_band_flow_routes_clean():
     """flow/teg_same_band.buda (teg_multirect_status.md Final-state item 3,
     resolved): the same-band disjoint sibling repro as a checked-in vehicle —

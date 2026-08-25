@@ -491,6 +491,92 @@ def test_flip_mst_edge_rejects_bend_on_block_corner():
     assert (100, 150) in bends, "unobstructed flip should reach the opposite bend"
 
 
+def test_flip_mst_edge_refuses_when_a_stub_t_junctions_a_leg_interior():
+    """A foreign segment T-junctioned on the INTERIOR of an MST edge's leg
+    depends on that leg's whole extent — the MST TEG attachment stub
+    (Final-state limitation 1's fix) hangs an OVER rect's stub off an
+    arbitrary tree segment — and the flip moves the extent wholesale, so
+    nothing would repair the stranded junction (ripup's `_rr_apply_move`
+    re-derives seg_conns but not geometry).  The bend-anchor guard now
+    covers the whole leg; the legs' far endpoints (p1/p2) survive the flip,
+    so a sibling sharing one of those must NOT block it."""
+    def make_topo(stub):
+        t = buda.Topology()
+        t.type = "MST_HV"
+        t.segments = [_seg(100, 50, 250, 50, 4, 0),     # H leg p1 -> bend
+                      _seg(250, 50, 250, 150, 5, 0),    # V leg bend -> p2
+                      stub]                              # foreign attachment
+        return t
+
+    fp = buda.Floorplan()
+    # Mid-leg T-junction at (180,50) — strictly inside the H leg: refuse.
+    t1 = make_topo(_seg(180, 110, 180, 50, 5, -1))
+    before = [(s.start.x, s.start.y, s.end.x, s.end.y) for s in t1.segments]
+    assert buda.flip_mst_edge(t1, 0, 4, 5, fp) is False, \
+        "flip must refuse when a foreign endpoint sits on a leg's interior"
+    assert before == [(s.start.x, s.start.y, s.end.x, s.end.y)
+                      for s in t1.segments], \
+        "a refused flip must not mutate the geometry"
+
+    # A stub anchored at p1 (100,50) — a far endpoint that SURVIVES the
+    # flip — must not block it.
+    t2 = make_topo(_seg(40, 50, 100, 50, 4, -1))
+    assert buda.flip_mst_edge(t2, 0, 4, 5, fp) is True, \
+        "a junction at the edge's far endpoint survives the flip"
+
+
+def test_mst_teg_attachment_tie_prefers_single_t_stub():
+    """The attachment pass's tie rule, pinned on a hand-built geometry (via
+    the public floorplan overload — the test_planner_notch_low precedent):
+    when a LATER along-overlapping segment offers a single perpendicular
+    T-stub at the SAME total length as an EARLIER segment's two-leg L, the
+    T-stub must win — one segment, no bend, fewer routing constraints; the
+    pass's contract says equal-cost ties prefer it.  The first cut compared
+    with a strict `<`, so the equal-cost later T could never displace the
+    earlier L (Codex P2 on PR #846, measured: the tie emitted the two-leg L
+    (900,50)->(600,50)->(600,150) instead of the single stub).
+
+    The tie rule in full, kept deterministic in segment-index visit order:
+    a T displaces an equal-cost L; an equal-cost same-kind candidate never
+    displaces an earlier one (lower index wins); an equal-cost L never
+    displaces anything."""
+    def seg_at(x1, y1, x2, y2):
+        return _seg(x1, y1, x2, y2, 4, -1)
+
+    fp = buda.Floorplan()
+    fp.add_block_rects("T2", [(500, 150, 600, 250),    # reached rect
+                              (900, 0, 1000, 100)])    # unreached rect
+    fp.set_block_teg_mode("T2", buda.TegMode.OVER)
+
+    # L-offering segment FIRST (cost 300+100=400), equal-cost T-offering
+    # segment SECOND (gap 500-100=400): the tie must yield the single T-stub
+    # from the rect's top face at its along-centre.
+    t = buda.Topology()
+    t.type = "MST_HV"
+    t.segments = [seg_at(500, 150, 700, 150),    # touches rect#0; L offer
+                  seg_at(850, 500, 1050, 500)]   # T offer, same total length
+    buda.add_mst_teg_attachments(t, fp, 4, 5)
+    added = [(s.start.x, s.start.y, s.end.x, s.end.y) for s in t.segments[2:]]
+    assert added == [(950, 100, 950, 500)], (
+        "equal-cost tie must pick the single perpendicular T-stub, got "
+        f"{added}")
+    # Face-seeded tap on the block (the #823 orientation: face at the START).
+    bts = t.seg_busterms.get(2, (None, None))
+    assert bts[0] is not None and bts[0].block_name == "T2"
+
+    # Determinism control: a strictly CHEAPER L must still beat the T — the
+    # tie preference is not a blanket kind preference.
+    t2 = buda.Topology()
+    t2.type = "MST_HV"
+    t2.segments = [seg_at(500, 150, 700, 150),   # L offer, cost 400
+                   seg_at(850, 600, 1050, 600)]  # T offer, gap 500 (dearer)
+    buda.add_mst_teg_attachments(t2, fp, 4, 5)
+    added2 = [(s.start.x, s.start.y, s.end.x, s.end.y) for s in t2.segments[2:]]
+    assert added2 == [(900, 50, 600, 50), (600, 50, 600, 150)], (
+        "a strictly cheaper L must still win over a dearer T-stub, got "
+        f"{added2}")
+
+
 def test_trunk_mst_has_more_segments_than_trunk():
     """TRUNK+MST has more segments than its corresponding plain TRUNK."""
     fp = buda.Floorplan()
