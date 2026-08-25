@@ -649,12 +649,71 @@ wrong.
 14. **`teg_mode` is per-block only** — no global default command exists;
     the feature scenario titled as a global-override test asserts only the
     per-block keyword.  Either add `set_teg_mode` or retitle the scenario.
-15. **Vacuous tie-break test** — give `test_topo_structural_tiebreak.py` a
-    bridged fixture so `len(bridge_segments)` actually varies.
-16. **`topo_edit` stubs from union bbox** (`src/topo_edit.cpp:165-185`) — a
+15. ~~**Vacuous tie-break test** — give `test_topo_structural_tiebreak.py` a
+    bridged fixture so `len(bridge_segments)` actually varies.~~  **RESOLVED
+    2026-08-25 by making the assertion REAL — and the comparator was
+    investigated before choosing that over retiring it.**  Post-1(a) no
+    generation path can produce a nonzero bridge count (nothing in
+    `topology.cpp` populates `bridge_segments`; only the v11 restore and
+    the bindings do), so C++ `annotate_and_sort`'s bridge term is
+    dead-for-generation — but its PYTHON TWIN
+    (`_resort_pool_preserving_selection`, `src/buda_session/edit.py`)
+    carries the same `(wl, segments+bridges, type)` key and runs on every
+    pool ACCRETION (`generate_more_topologies`, the knob-memo replays),
+    where a RESTORED legacy candidate can sit in the pool being re-sorted;
+    §2.2's table promises exactly that ordering ("restored bridges still
+    counted … so a restored pool keeps its recorded order").  Retiring the
+    term would therefore break the restored-pool contract and desync the
+    twins — option (b) rejected.  What landed:
+    `test_restored_bridge_counts_in_the_tie_break`
+    (`test_topo_structural_tiebreak.py`) — a legacy bridged twin built
+    through the bindings (the restore path's own door: `Topology` +
+    `bridge_segments` are read-write bound), same recorded WL and segment
+    count as its bridge-less twin with a type chosen to sort FIRST on the
+    anchor (`AAA_LEGACY`), pushed through the real
+    `generate_more_topologies` re-sort and asserted to land AFTER the twin.
+    Without the bridge term the key degenerates to `(wl, len(segments),
+    type)` and the type anchor would rank the legacy candidate first, so
+    the assertion fails the day the term is dropped from EITHER twin — the
+    key finally varies on `len(bridge_segments)`.  The `_key` helper's
+    stale comment ("bridge segments are real wires") now states the
+    legacy-load-only reality.  §3's "one test is vacuous" line is
+    superseded by this entry.
+16. ~~**`topo_edit` stubs from union bbox** (`src/topo_edit.cpp:165-185`) — a
     hand-built stub can land in the notch; low priority since `edit_status`'s
     verdict would flag most consequences, but the tap-face choice should go
-    through `best_rect` like generation does.
+    through `best_rect` like generation does.~~  **RESOLVED 2026-08-25**:
+    `edit_add_stub` now picks its tap rect through generation's per-rect
+    selection — `best_rect` and `bt_all_rects` are de-static'd out of
+    `topology.cpp` and shared via `topology.h` (reused, not copied; a
+    rect-list `best_rect` overload carries the one cost rule), and the edit
+    session chooses among the rects its FIXED target span can actually
+    reach with a real perpendicular stub — a restriction generation never
+    needs, since its spine is pre-extended to cover every stub — then
+    shortest-stub among those.  The rect view is the Busterm seed's own
+    margin-inset `rects` (post-#835), so a `corner_margin`'d multi-rect
+    block gets its edit stub on the INSET face exactly like a generated
+    tap; a single-rect block contributes exactly ONE candidate (its
+    physical bbox via `bt_all_rects`), so single-rect geometry and all
+    three failure messages are byte-identical (test-pinned; fast tier
+    green, 2600 passed).  Measured on the §1.1 L-shape (H trunk @y500 above
+    the block): pre-fix the stub landed at the UNION overlap centre
+    (200,400) — the notch, over no physical face — and post-fix at (50,400)
+    on the tall arm's real top face with a clean verdict; a trunk span
+    reaching only the base now taps the base at y=100 instead of floating
+    at the union face y=400; and the pure-TEG gap-only-span shape (union
+    overlaps the span, no rect does) REFUSES with the no-overlap message
+    instead of emitting a floating gap stub.  The open's `edit_status`
+    claim was MEASURED and is TRUE for the notch shape: the pre-fix verdict
+    did flag it (`BUSTERM_FACEx1` on the L-shape repro) — loud, but the
+    suggested geometry was still wrong and the session offered no way to
+    land on a real face short of hand-computing coordinates.  The fix is in
+    the C++ engine op, so every door gets it (CLI `edit_add_stub` and the
+    explorer GUI's edit mode alike).  Tests: the open-16 block in
+    `test_edit_commands.py` (notch → real-face fail-before/pass-after,
+    unreachable-rect restriction, gap-only refusal, margin-inset face,
+    single-rect byte-identity incl. failure messages).  Read §2.1's
+    `topo_edit` bullet as superseded by this entry.
 17. **No import path produces multi-rect** (DEF rectilinear macros, GDS) —
     a roadmap item rather than a defect; note it in
     `opens_interchange.md` so it is not rediscovered.
