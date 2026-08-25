@@ -449,15 +449,24 @@ void bind_routing(py::module_& m) {
         .def("add_block",              &Floorplan::add_block)
         .def("add_block_rects", [](Floorplan& fp, const std::string& name,
                                    const std::vector<std::tuple<int,int,int,int>>& rects_py,
-                                   TegMode mode) {
+                                   std::optional<TegMode> mode) {
             std::vector<Rect> rects;
             rects.reserve(rects_py.size());
             for (const auto& [x1,y1,x2,y2] : rects_py)
                 rects.push_back(Rect{x1,y1,x2,y2});
-            fp.add_block_rects(name, rects, mode);
-        }, py::arg("name"), py::arg("rects"), py::arg("teg_mode") = TegMode::THRU)
+            // No explicit mode = the floorplan's `set_teg_mode` global
+            // default, resolved NOW (declaration time, prospective only).
+            // The default default is THRU, so callers omitting the argument
+            // on a floorplan that never set one behave exactly as before.
+            if (mode) fp.add_block_rects(name, rects, *mode);
+            else      fp.add_block_rects(name, rects);
+        }, py::arg("name"), py::arg("rects"),
+           py::arg("teg_mode") = std::nullopt)
         .def("set_block_teg_mode",      &Floorplan::set_block_teg_mode)
         .def("get_block_teg_mode",      &Floorplan::get_block_teg_mode)
+        .def("set_default_teg_mode",    &Floorplan::set_default_teg_mode,
+             py::arg("mode"))
+        .def("default_teg_mode",        &Floorplan::default_teg_mode)
         .def("set_container",           &Floorplan::set_container,
              py::arg("name"), py::arg("is_container") = true)
         .def("is_container",            &Floorplan::is_container)

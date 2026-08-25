@@ -387,6 +387,14 @@ void Floorplan::add_block_rects(const std::string& name, const std::vector<Rect>
     teg_modes_[name]   = mode;
     ++rev_;
 }
+void Floorplan::add_block_rects(const std::string& name,
+                                 const std::vector<Rect>& rects) {
+    // Declaration-time resolution of the `set_teg_mode` global default:
+    // prospective only — a block declared before the default changed keeps
+    // the mode it was declared under (matching add_block's other
+    // declaration-time resolutions).
+    add_block_rects(name, rects, default_teg_mode_);
+}
 void Floorplan::set_block_teg_mode(const std::string& name, TegMode mode) {
     teg_modes_[name] = mode;
     ++rev_;

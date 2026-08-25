@@ -84,12 +84,51 @@ def cmd_add_block(session, cmd, args, cmd_line):
         i = 1
         while i < len(args) and args[i].lower() == "rect":
             n = len(rects) + 1
+            # A truncated rect (`rect 0 0 100` — fewer than 4 coords) used to
+            # raise a bare IndexError naming nothing; name the missing
+            # argument like the fractional-coord path does.
+            have = len(args) - (i + 1)      # coords present after this 'rect'
+            if have < 4:
+                missing = ("x1", "y1", "x2", "y2")[have]
+                print(f"Error: add_block: rect {n} is missing <{missing}> — "
+                      f"each rect takes exactly 4 coordinates "
+                      f"(<x1> <y1> <x2> <y2>).\n  Usage: {_ADD_BLOCK_USAGE}")
+                sys.exit(1)
             rects.append(tuple(
                 _block_coord(f"<{ax}> of rect {n}", args[i + k])
                 for k, ax in enumerate(("x1", "y1", "x2", "y2"), start=1)))
             i += 5
-        # Optional teg_mode keyword after rects
-        teg_mode = buda.TegMode.THRU
+        # Degenerate / duplicate rects are hard errors at declaration (the
+        # engine normalizes coordinate ORDER, so only zero-extent is
+        # degenerate).  Overlapping non-identical rects are deliberately
+        # LEGAL: interior overlap is exactly what classifies a block as
+        # rectilinear (L/C-shape — topology.cpp rects_are_rectilinear), and
+        # edge-adjacent rects drive the adjacency suppression, so only the
+        # genuinely meaningless shapes are refused.
+        seen = {}
+        for n, (rx1, ry1, rx2, ry2) in enumerate(rects, start=1):
+            if rx1 == rx2 or ry1 == ry2:
+                axis = "width (x1 == x2)" if rx1 == rx2 else "height (y1 == y2)"
+                print(f"Error: add_block: rect {n} of block '{name}' is "
+                      f"degenerate — zero {axis}. A rect must have positive "
+                      f"extent on both axes; its edges become block faces "
+                      f"and Hanan lines.\n  Usage: {_ADD_BLOCK_USAGE}")
+                sys.exit(1)
+            key = (min(rx1, rx2), min(ry1, ry2), max(rx1, rx2), max(ry1, ry2))
+            if key in seen:
+                print(f"Error: add_block: rect {n} of block '{name}' "
+                      f"duplicates rect {seen[key]} "
+                      f"({key[0]},{key[1]})-({key[2]},{key[3]}) — a repeated "
+                      f"rect adds no geometry and doubles its stubs/taps; "
+                      f"remove one.\n  Usage: {_ADD_BLOCK_USAGE}")
+                sys.exit(1)
+            seen[key] = n
+        # Optional teg_mode keyword after rects.  Without one the block takes
+        # the `set_teg_mode` global default (per-block keyword wins,
+        # most-specific-first like set_feedthru), resolved at DECLARATION
+        # time — prospective only, so a later set_teg_mode does not re-mode
+        # already-declared blocks.
+        teg_mode = None
         if i < len(args) and args[i].lower() == "teg_mode":
             i += 1
             if i < len(args):
@@ -98,7 +137,10 @@ def cmd_add_block(session, cmd, args, cmd_line):
                                        [args[i].lower()], ("over", "thru"))
                 teg_mode = buda.TegMode.OVER if args[i].lower() == "over" else buda.TegMode.THRU
                 i += 1
-        session.fp.add_block_rects(name, rects, teg_mode)
+        if teg_mode is None:
+            session.fp.add_block_rects(name, rects)   # global default applies
+        else:
+            session.fp.add_block_rects(name, rects, teg_mode)
         # The reverse declaration order of the set_feedthru-time warning
         # (Codex P2 on #834): `set_feedthru * * on` (or a per-layer enable)
         # declared BEFORE this block exists warned about nothing, yet the
@@ -175,6 +217,25 @@ def cmd_add_block(session, cmd, args, cmd_line):
         if "pct_v" in kws and "pct_h" not in kws and "dx" not in kws: cm_dx = cm_dy
         if cm_dx > 0 or cm_dy > 0:
             session.fp.set_block_corner_margin(name, cm_dx, cm_dy)
+
+
+def cmd_set_teg_mode(session, cmd, args, cmd_line):
+    # Global default TEG mode for multi-rect blocks (teg_multirect_status.md
+    # open 14): `set_teg_mode <thru|over>`.  A multi-rect block declared
+    # WITHOUT an explicit per-block `teg_mode` keyword takes this default;
+    # the per-block keyword always wins (most-specific-first, the
+    # set_feedthru convention).  PROSPECTIVE ONLY: the default is resolved at
+    # add_block time — like every other add_block declaration-time
+    # resolution — so a block declared before this command keeps the mode it
+    # was declared under.  Declare it before the blocks it should govern.
+    if len(args) != 1:
+        print(f"Error: set_teg_mode takes exactly one argument.\n"
+              f"  Usage: set_teg_mode <thru|over>")
+        sys.exit(1)
+    reject_unknown_options("set_teg_mode", [args[0].lower()],
+                           ("thru", "over"))
+    session.fp.set_default_teg_mode(
+        buda.TegMode.OVER if args[0].lower() == "over" else buda.TegMode.THRU)
 
 
 def cmd_corner_margin(session, cmd, args, cmd_line):
@@ -898,6 +959,7 @@ COMMANDS = {
     "set_unit_check": cmd_set_unit_check,
     "import_lef_tech": cmd_import_lef_tech,
     "add_block": cmd_add_block,
+    "set_teg_mode": cmd_set_teg_mode,
     "corner_margin": cmd_corner_margin,
     "set_min_stub_length": cmd_set_min_stub_length,
     "set_min_stub_length_dir": cmd_set_min_stub_length_dir,
