@@ -235,6 +235,80 @@ def test_pass_through_block_counts_as_an_attachment():
     assert not _antennas(res), [v.message for v in res.violations]
 
 
+def test_edge_grazing_block_is_not_a_pass_through_attachment():
+    """The pass-through term counts an INTERIOR crossing, not an edge-graze.
+
+    A wire lying ON a block's face (perp == a face coordinate) or touching only
+    a corner is over-the-cell metal that joins nothing THROUGH the block, so it
+    must NOT manufacture a phantom second attachment.  The escape it hid: the
+    `TRUNK_V_OOB+MST` candidate of the lShape1-dnuts repro carried two collinear
+    stub halves grazing the driver block's top face — one real junction each,
+    rescued by the inclusive coverage span and reported CLEAN.  Mirror of
+    `test_pass_through_block_counts_as_an_attachment`, with C's bottom edge
+    flush against the stub's row instead of straddling it: the inclusive span
+    still 'passes through' (pre-fix), the interior test does not (post-fix)."""
+    fp, topo, ct = _gen_z()
+    trunk = next(i for i, cs in enumerate(ct.segs()) if not cs.horiz)
+    tx = ct.segs()[trunk].perp_pos
+    lo, hi = ct.segs()[trunk].along_lo, ct.segs()[trunk].along_hi
+    mid = (lo + hi) // 2
+    # C's BOTTOM edge sits exactly on the stub's row: the stub grazes C's face,
+    # it does not cross C's interior (perp == C.y1).
+    fp.add_block("C", tx + 40, mid, tx + 120, mid + 60)
+    segs = list(topo.segments)
+    segs.append(_seg(tx, mid, tx + 80, mid, LAYER_H))   # runs ALONG C's bottom
+    topo.segments = segs
+    topo.connected_block_names = list(topo.connected_block_names) + ["C"]
+    buda.annotate_seg_conns(topo)
+    ct2 = buda.ConnTopology()
+    ct2.build(topo, fp)
+    added = len(ct2.segs()) - 1
+    cs = ct2.segs()[added]
+    # Preconditions: one real conn, and it grazes C's face (perp ON the edge),
+    # so the inclusive span would have — wrongly — rescued it.
+    assert len(cs.conns) == 1
+    c = fp.get_block_bounds("C")
+    assert cs.perp_pos == c.y1 and cs.along_hi > c.x1
+    res = buda.check_nuts(ct2, _nominal_nuts(ct2), topo, fp, _layers(), 1)
+    ants = _antennas(res)
+    assert [v.seg_idx for v in ants] == [added], [v.message for v in res.violations]
+
+
+def test_internal_seam_of_a_rectilinear_block_is_a_pass_through(monkeypatch):
+    """The interior of a RECTILINEAR block is the interior of its UNION, not of
+    each rect.  Two abutting rects share an edge that is a FACE of each yet
+    INTERIOR to the block — a wire along it is over-the-cell for its whole
+    length, with metal on both sides.  The per-rect strict test alone would
+    (wrongly) flag it as a graze; the seam term restores it (Ben's review on
+    #848).  Same probe and one-junction precondition as the graze test — only
+    C's shape differs: two abutting rects meeting on the stub's row."""
+    fp, topo, ct = _gen_z()
+    trunk = next(i for i, cs in enumerate(ct.segs()) if not cs.horiz)
+    tx = ct.segs()[trunk].perp_pos
+    lo, hi = ct.segs()[trunk].along_lo, ct.segs()[trunk].along_hi
+    mid = (lo + hi) // 2
+    # C is two abutting rects sharing the edge y=mid — the stub runs the seam
+    # (add_block_rects self-creates the block from its rect list).
+    fp.add_block_rects("C", [(tx + 40, mid - 60, tx + 120, mid),
+                             (tx + 40, mid, tx + 120, mid + 60)])
+    segs = list(topo.segments)
+    segs.append(_seg(tx, mid, tx + 80, mid, LAYER_H))            # runs the seam
+    topo.segments = segs
+    topo.connected_block_names = list(topo.connected_block_names) + ["C"]
+    buda.annotate_seg_conns(topo)
+    ct2 = buda.ConnTopology()
+    ct2.build(topo, fp)
+    added = len(ct2.segs()) - 1
+    cs = ct2.segs()[added]
+    rects = fp.get_block_rects("C")
+    # Precondition: two rects abutting on the stub's row (a real internal seam),
+    # and the stub carries the single junction that would make it an antenna.
+    assert len(rects) == 2 and len(cs.conns) == 1
+    assert cs.perp_pos == rects[0][3] == rects[1][1]            # seam coordinate
+    res = buda.check_nuts(ct2, _nominal_nuts(ct2), topo, fp, _layers(), 1)
+    assert not _antennas(res), [v.message for v in res.violations]
+
+
 def test_multiway_junction_conns_count_as_one_point():
     """Codex review on #483 (P2): a segment whose end meets a MULTI-WAY
     junction collects one SegConn per neighbour, all at the same `at_pos`.
@@ -302,6 +376,42 @@ def _antenna_segs(topo, fp):
     with contextlib.redirect_stdout(io.StringIO()), buda.ostream_redirect():
         res = buda.check_nuts(ct, _nominal_nuts(ct), topo, fp, _layers(), 1)
     return len(_antennas(res))
+
+
+@pytest.mark.mid
+def test_lshape_oob_mst_antenna_is_flagged_end_to_end():
+    """The reported escape, end to end: the `TRUNK_V_OOB+MST` candidate of the
+    lShape1-dnuts design routes an out-of-bbox seed-trunk loop whose two
+    collinear stub halves graze the driver block's top face.  Each half has one
+    real junction; the inclusive coverage span credited the graze as a
+    pass-through and `check_design` reported Success on electrically inert
+    metal.  With the interior-crossing pass-through, both halves are flagged
+    ANTENNA at nuts AND dnuts.  Pinned by TYPE (the candidate is not the
+    planner's pick — it must be selected to route it)."""
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    cwd = os.getcwd()
+    os.chdir(_ROOT / "flow")
+    try:
+        with contextlib.redirect_stdout(io.StringIO()), buda.ostream_redirect():
+            for c in ["add_block rect 100 0 700 100",
+                      "add_block l1 rect 0 300 200 600 rect 0 600 300 800",
+                      "add_block l2 rect 500 300 800 400 rect 600 400 800 500",
+                      "source tracks/tracks2top.buda",
+                      "add_bus bus1[8] rect.out l1.in,l2.in",
+                      "run_bundler STRICT", "generate_topologies",
+                      "select_topology bus1 TRUNK_V_OOB+MST@x-80",
+                      "run_planner", "run_nuts", "run_dnuts"]:
+                s.do_command(c)
+    finally:
+        os.chdir(cwd)
+    # The pin routed the OOB+MST loop (dump_pins confirms it interactively);
+    # its two grazing stub halves are the only shape in this design that yields
+    # ANTENNA violations, so the audit verdict alone is a non-vacuous proof.
+    nuts = s._check_design("nuts")
+    dnuts = s._check_design("dnuts")
+    assert nuts["by_kind"].get("ANTENNA", 0) >= 2, nuts
+    assert dnuts["by_kind"].get("ANTENNA", 0) >= 2, dnuts
 
 
 @pytest.mark.mid
