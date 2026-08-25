@@ -189,11 +189,13 @@ Over-the-block mode does **not** generate extra connection metal when:
   adjacent rects still reports the untouched neighbour — a documented loud
   corner.
 - A **disjoint** rect shares the trunk's perpendicular band with the landing
-  rect (rects side by side along the spine): a perpendicular stub has no gap
-  to bridge there, so the rect stays metal-free and the placed-stage
-  `TEG_OPEN` audit reports it if such a candidate is routed (the documented
-  same-band-sibling limitation — see
-  `docs/internal/teg_multirect_status.md`, Final state).
+  rect (rects side by side along the spine): there is no perpendicular gap
+  to bridge, so no *extra* segment is emitted — instead the **spine itself**
+  is the connection metal, its span extended to land exactly on the
+  sibling's facing face as a real busterm landing (spine-end anchoring; the
+  taps land on the margin-inset faces as everywhere else).  The sibling then
+  holds that spine end the way any tapped face holds one, so the route
+  audits clean at the placed stages (vehicle: `flow/teg_same_band.buda`).
 
 **Examples:**
 ```

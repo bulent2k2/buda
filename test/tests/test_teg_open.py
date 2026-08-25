@@ -291,16 +291,44 @@ def test_margined_adjacent_chain_keeps_physical_suppression_inset_taps():
     assert _chain_stub_faces((10, 10)) == [510]
 
 
-def test_same_band_disjoint_sibling_stays_loud_via_teg_open():
-    # The one Direct-branch corner residual (i)'s fix deliberately leaves on
-    # the LOUD path: a DISJOINT sibling sharing the trunk's perp band (two
-    # rects side by side along the spine, trunk inside one).  A perpendicular
-    # stub has no gap to bridge, a bare spine extension is retracted by NUTS
-    # span adjustment (an end with no junction has nothing holding it —
-    # measured), and an over-the-cell anchoring stub trips the #514
-    # tap-overhang ANTENNA rule — so nothing is emitted and the routed
-    # result reports TEG_OPEN, exactly as before the fix (documented in
-    # teg_multirect_status.md open 1).
+def _pin_same_band_trunk(s, prefix="TRUNK_H@y", band=(0, 100)):
+    """Pin the in-band trunk candidate (trunk inside both rects' shared perp
+    band) and return it (1-based select)."""
+    w = s.bundles[0]
+    for i, c in enumerate(w.input.candidates):
+        if c.type.startswith(prefix):
+            v = int(c.type.split("@")[1][1:].split("+")[0])
+            if band[0] < v < band[1]:
+                with contextlib.redirect_stdout(io.StringIO()):
+                    s.do_command(f"select_topology 1 {i + 1}")
+                return c
+    raise AssertionError("no same-band trunk candidate found: "
+                         + str([c.type for c in s.bundles[0].input.candidates]))
+
+
+def _route_and_check_clean(s):
+    for cmd in ("run_planner", "run_nuts"):
+        with contextlib.redirect_stdout(io.StringIO()):
+            s.do_command(cmd)
+    verdict, out = _check(s, "nuts")
+    assert not verdict["by_kind"], out
+    with contextlib.redirect_stdout(io.StringIO()):
+        s.do_command("run_detailed_nuts")
+    verdict, out = _check(s, "dnuts")
+    assert not verdict["by_kind"], out
+    assert s.detailed_result.num_unplaced == 0
+
+
+def test_same_band_disjoint_sibling_routes_clean_via_spine_anchoring():
+    # Final-state item 3, RESOLVED: a DISJOINT sibling sharing the trunk's
+    # perp band (two rects side by side along the spine, trunk inside one) is
+    # reached by SPINE-END ANCHORING — the spine's span is extended to LAND
+    # exactly on the sibling's facing along-face, a real BUSTERM landing
+    # annotate_endpoints tags, so NUTS holds the end via busterm_faces
+    # span_cover the way it holds every face landing (the withdrawn bare
+    # extension had no landing and was retracted; the withdrawn over-the-cell
+    # anchoring stub tripped the #514 tap-overhang ANTENNA rule — this route
+    # carries neither, and both audits are clean of every kind incl. ANTENNA).
     s = _session([
         "add_block T rect 300 0 400 100 rect 0 0 100 100 teg_mode over",
         "add_block src 600 0 700 100",
@@ -310,17 +338,197 @@ def test_same_band_disjoint_sibling_stays_loud_via_teg_open():
         "run_bundler STRICT",
         "generate_topologies",
     ] + _TRACKS)
-    w = s.bundles[0]
-    pinned = None
-    for i, c in enumerate(w.input.candidates):
-        if c.type.startswith("TRUNK_H@y"):
-            y = int(c.type.split("@y")[1].split("+")[0])
-            if 0 < y < 100:          # inside both rects' shared perp band
-                pinned = c
-                with contextlib.redirect_stdout(io.StringIO()):
-                    s.do_command(f"select_topology 1 {i + 1}")
-                break
-    assert pinned is not None, "no same-band trunk candidate found"
+    c = _pin_same_band_trunk(s)
+    # The spine itself is the connection metal: one segment landing on the
+    # sibling's facing face (x=100) at one end and src's face at the other.
+    spine = next(seg for seg in c.segments if seg.start.y == seg.end.y)
+    assert min(spine.start.x, spine.end.x) == 100
+    _route_and_check_clean(s)
+
+
+def test_same_band_sibling_on_far_side_survives_the_per_block_dedup():
+    # The #823 shadow trap, measured while building the fix: with the sibling
+    # BEYOND src the spine lands on block T at BOTH ends (landing rect's face
+    # x=400 + sibling face x=800), and derive_conn_segs' per-BLOCK BUSTERM
+    # dedup dropped the second landing — NUTS then had no face anchor at the
+    # sibling end and RETRACTED the span to src's face ([400,650], TEG_OPEN
+    # at both stages).  The dedup is now per FACE COORD for multi-rect blocks
+    # (single-rect blocks keep the per-block rule byte-identically), so both
+    # anchors hold and the route audits clean.
+    s = _session([
+        "add_block T rect 300 0 400 100 rect 800 0 900 100 teg_mode over",
+        "add_block src 550 0 650 100",
+        "def_layer 4 M4 H TOP 0",
+        "def_layer 5 M5 V TOP 0",
+        "add_bus d[4] src.tx T.rx",
+        "run_bundler STRICT",
+        "generate_topologies",
+    ] + _TRACKS)
+    c = _pin_same_band_trunk(s)
+    spine = next(seg for seg in c.segments if seg.start.y == seg.end.y)
+    xs = sorted((spine.start.x, spine.end.x))
+    assert xs == [400, 800], xs      # landing-rect face .. sibling face
+    _route_and_check_clean(s)
+
+
+def test_same_band_sibling_v_trunk_twin_routes_clean():
+    # The V-trunk twin (x-band siblings): add_trunk is axis-parameterized, so
+    # the anchoring covers both orientations — pinned here, not assumed.
+    s = _session([
+        "add_block T rect 0 300 100 400 rect 0 0 100 100 teg_mode over",
+        "add_block src 0 600 100 700",
+        "def_layer 4 M4 H TOP 0",
+        "def_layer 5 M5 V TOP 0",
+        "add_bus d[4] src.tx T.rx",
+        "run_bundler STRICT",
+        "generate_topologies",
+    ] + _TRACKS)
+    c = _pin_same_band_trunk(s, prefix="TRUNK_V@x")
+    spine = next(seg for seg in c.segments if seg.start.x == seg.end.x)
+    assert min(spine.start.y, spine.end.y) == 100
+    _route_and_check_clean(s)
+
+
+def test_same_band_three_rect_chain_taps_far_sibling_and_crosses_middle():
+    # Three same-band disjoint rects, trunk inside the nearest-to-src one:
+    # the spine extends to the FARTHEST sibling's facing face (x=100) and
+    # crosses the middle sibling on the way (pass-through contact) — one
+    # extension reaches the whole chain, every rect audits reached.
+    s = _session([
+        "add_block T rect 300 0 400 100 rect 150 0 250 100 rect 0 0 100 100"
+        " teg_mode over",
+        "add_block src 600 0 700 100",
+        "def_layer 4 M4 H TOP 0",
+        "def_layer 5 M5 V TOP 0",
+        "add_bus d[4] src.tx T.rx",
+        "run_bundler STRICT",
+        "generate_topologies",
+    ] + _TRACKS)
+    c = _pin_same_band_trunk(s)
+    spine = next(seg for seg in c.segments if seg.start.y == seg.end.y)
+    assert min(spine.start.x, spine.end.x) == 100
+    _route_and_check_clean(s)
+
+
+def test_same_band_extension_is_spine_metal_not_a_stub_under_min_stub_floor():
+    # The min-stub floor governs perpendicular stubs (a too-short stub SKIPS
+    # the trunk).  The same-band connection is collinear SPINE metal — no
+    # stub exists — so a floor larger than the sibling gap (250 > 200) must
+    # not reject the trunk, and the route still lands on the sibling's face.
+    s = _session([
+        "add_block T rect 300 0 400 100 rect 0 0 100 100 teg_mode over",
+        "add_block src 600 0 700 100",
+        "def_layer 4 M4 H TOP 0",
+        "def_layer 5 M5 V TOP 0",
+        "set_min_stub_length 250",
+        "add_bus d[4] src.tx T.rx",
+        "run_bundler STRICT",
+        "generate_topologies",
+    ] + _TRACKS)
+    c = _pin_same_band_trunk(s)
+    spine = next(seg for seg in c.segments if seg.start.y == seg.end.y)
+    assert min(spine.start.x, spine.end.x) == 100
+    _route_and_check_clean(s)
+
+
+def test_same_band_margined_lands_on_inset_face_suppression_stays_physical():
+    # The established margin semantic (#835/#841): tappable = INSET geometry,
+    # touching = PHYSICAL geometry.  Under corner_margin dx 10 dy 10 the
+    # spine lands on the sibling's INSET facing face (x=90), inside the
+    # physical rect (0..100) — the audit's contact predicate reads placed
+    # metal against the physical extent, so the inset landing is contact —
+    # and the anchoring's reached-component still reads the physical touch
+    # graph, so a margin cannot re-classify an adjacent pair as needing an
+    # extension.
+    s = _session([
+        "corner_margin dx 10 dy 10",
+        "add_block T rect 300 0 400 100 rect 0 0 100 100 teg_mode over",
+        "add_block src 600 0 700 100",
+        "def_layer 4 M4 H TOP 0",
+        "def_layer 5 M5 V TOP 0",
+        "add_bus d[4] src.tx T.rx",
+        "run_bundler STRICT",
+        "generate_topologies",
+    ] + _TRACKS)
+    c = _pin_same_band_trunk(s)
+    spine = next(seg for seg in c.segments if seg.start.y == seg.end.y)
+    assert min(spine.start.x, spine.end.x) == 90    # inset face of the sibling
+    _route_and_check_clean(s)
+
+
+def test_mixed_rect_set_same_band_sibling_anchors_despite_overlap():
+    # Codex P2 on #845, measured before the fix: a MIXED rect set — an
+    # OVERLAPPING pair (base + arm, so rects_are_rectilinear() is true) PLUS
+    # a DISJOINT rect sharing the trunk's perp band — skipped the anchoring
+    # pass entirely (it was gated on the block-level classification), and the
+    # rectilinear branch emits legs only for CROSS-band rects, so the
+    # separated sibling stayed unreached (spine [500,700], TEG_OPEN 1 at
+    # nuts / 4 at dnuts).  The pass now runs on EVERY OVER multi-rect block
+    # and decides reached/contiguous PER RECT (abutment OR strict overlap =
+    # connected), so the sibling anchors while the overlapping component —
+    # one connected piece of metal — never pulls the spine (a FULLY
+    # connected rectilinear block remains a no-op by construction).
+    s = _session([
+        "add_block T rect 300 0 500 100 rect 300 0 350 300 rect 0 0 100 100"
+        " teg_mode over",
+        "add_block src 700 0 800 100",
+        "def_layer 4 M4 H TOP 0",
+        "def_layer 5 M5 V TOP 0",
+        "add_bus d[4] src.tx T.rx",
+        "run_bundler STRICT",
+        "generate_topologies",
+    ] + _TRACKS)
+    c = _pin_same_band_trunk(s)
+    spine = next(seg for seg in c.segments if seg.start.y == seg.end.y)
+    assert min(spine.start.x, spine.end.x) == 100   # lands on the sibling's face
+    _route_and_check_clean(s)
+
+
+def test_mixed_rect_set_cross_band_rect_keeps_the_rectilinear_leg():
+    # The interaction control beside the mixed-set fix: the same overlapping
+    # pair with the separated rect CROSS-band (above the trunk) is served by
+    # the rectilinear branch's perpendicular connector leg, exactly as
+    # before — one V leg tapping the rect's near face (y=200), NO same-band
+    # anchor extension, no double emission for one rect.
+    s = _session([
+        "add_block T rect 300 0 500 100 rect 300 0 350 300 rect 0 200 100 300"
+        " teg_mode over",
+        "add_block src 700 0 800 100",
+        "def_layer 4 M4 H TOP 0",
+        "def_layer 5 M5 V TOP 0",
+        "add_bus d[4] src.tx T.rx",
+        "run_bundler STRICT",
+        "generate_topologies",
+    ] + _TRACKS)
+    c = _pin_same_band_trunk(s)
+    legs = [seg for seg in c.segments if seg.start.x == seg.end.x]
+    assert len(legs) == 1, [(s_.start.x, s_.start.y, s_.end.x, s_.end.y)
+                            for s_ in c.segments]
+    ys = sorted((legs[0].start.y, legs[0].end.y))
+    assert ys[1] == 200, ys                          # taps the rect's near face
+    _route_and_check_clean(s)
+
+
+def test_same_band_adjacent_pair_keeps_the_documented_loud_corner():
+    # Limitation 2's control beside the fix: a trunk Direct inside one of two
+    # ADJACENT same-band rects emits no connection metal (the rects are
+    # physically contiguous — the feature's suppression rule) and the spine
+    # is NOT extended to the neighbour's face (the anchoring's
+    # reached-component includes every rect touching the landing rect), while
+    # the per-rect TEG_OPEN contact predicate still reports the un-touched
+    # rect — the documented loud corner, byte-identical to before the fix.
+    s = _session([
+        "add_block T rect 300 0 400 100 rect 200 0 300 100 teg_mode over",
+        "add_block src 600 0 700 100",
+        "def_layer 4 M4 H TOP 0",
+        "def_layer 5 M5 V TOP 0",
+        "add_bus d[4] src.tx T.rx",
+        "run_bundler STRICT",
+        "generate_topologies",
+    ] + _TRACKS)
+    c = _pin_same_band_trunk(s)
+    spine = next(seg for seg in c.segments if seg.start.y == seg.end.y)
+    assert sorted((spine.start.x, spine.end.x)) == [400, 600]   # no extension
     for cmd in ("run_planner", "run_nuts"):
         with contextlib.redirect_stdout(io.StringIO()):
             s.do_command(cmd)
