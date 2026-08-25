@@ -1459,9 +1459,9 @@ static bool rects_touch(const Rect& a, const Rect& b) {
 // rect OUTSIDE it needs its own stub/leg (residual (i) of
 // teg_multirect_status.md open 1: a trunk Direct inside one disjoint rect used
 // to emit nothing at all for the others).  A same-band NON-landing sibling is
-// a seed too although it gets no metal of its own (the documented LOUD
-// corner): anything suppressed through it shares its fate, and the TEG_OPEN
-// audit names each unreached rect — loud either way, never silent.
+// a seed too: the spine-end anchoring pass in add_trunk extends the spine to
+// LAND on its facing face (a real BUSTERM landing), so it IS reached — and a
+// rect suppressed through it is physically continuous with reached metal.
 //
 // TWO GEOMETRY SPELLINGS, deliberately (Codex P2 on #841): the SEEDS read the
 // INSET rects (`rects` — the same band test the emission loop applies, so
@@ -3161,7 +3161,7 @@ void TopologyGenerator::add_trunk(const Axis& axis, bool suppress_stubs,
             //   component (a rect adjacent to the landing rect is physically
             //   continuous with it — the feature's adjacency suppression);
             //   a same-band sibling is reached by the SPINE itself, extended
-            //   through its along-centre.
+            //   to LAND on its facing face (the anchoring pass below).
             const bool recti = rects_are_rectilinear(rects);
             const int min_leg = use_busterm_
                 ? floorplan_.get_min_stub_length(
@@ -3175,14 +3175,13 @@ void TopologyGenerator::add_trunk(const Axis& axis, bool suppress_stubs,
                 const auto& r = rects[ri];
                 // A rect sharing the trunk's perp band: rectilinear — the
                 // spine runs inside the contiguous shape; disjoint — a
-                // SAME-BAND sibling, which stays on the LOUD TEG_OPEN path
-                // (a perpendicular stub has no gap to bridge, a bare spine
-                // extension is RETRACTED by NUTS span adjustment — an end
-                // with no junction has nothing holding it, measured — and an
-                // over-the-cell anchoring stub trips the #514 tap-overhang
-                // ANTENNA rule; the honest fix needs spine-end anchoring
-                // machinery, so the corner is documented in
-                // teg_multirect_status.md open 1 rather than half-fixed).
+                // SAME-BAND sibling, reached by SPINE-END ANCHORING (the
+                // dedicated pass right after this loop): the spine is
+                // extended to LAND on the sibling's facing along-face, a
+                // real BUSTERM landing annotate_endpoints tags, so NUTS
+                // holds the end the way it holds every face landing
+                // (busterm_faces span_cover).  No perpendicular metal is
+                // emitted here — there is no gap to bridge.
                 if (locus >= axis.perp_lo(r) && locus <= axis.perp_hi(r)) continue;
                 if (!recti && landed[ri]) continue;    // contiguous with a landing rect
                 int leg_len = (axis.perp_hi(r) < locus) ? locus - axis.perp_hi(r)
@@ -3206,6 +3205,81 @@ void TopologyGenerator::add_trunk(const Axis& axis, bool suppress_stubs,
             int a = axis.along_center(r);
             a_lo = std::min(a_lo, a);
             a_hi = std::max(a_hi, a);
+        }
+    }
+
+    // SPINE-END ANCHORING for SAME-BAND DISJOINT SIBLINGS (teg_multirect_
+    // status.md Final-state item 3, resolved): a disjoint rect of a Direct
+    // OVER block sharing the trunk's perp band — rects side by side along the
+    // spine, trunk inside one — has no gap a perpendicular stub could bridge,
+    // so the connection metal is the SPINE itself: extend its span to LAND
+    // exactly on the sibling's facing along-face.  The landing is what the
+    // withdrawn fix attempts lacked: annotate_endpoints tags a spine end
+    // abutting a rect face as a real BUSTERM landing, so NUTS holds the end
+    // the way it holds every face landing (busterm_faces span_cover) instead
+    // of retracting a bare junction-less extension, and no over-the-cell
+    // anchoring stub is needed (the #514 tap-overhang trap).  The sibling then
+    // holds its spine end exactly as src's face holds the other end, and the
+    // audit's inclusive per-rect contact predicate sees the face touch.
+    //   Which band rects extend: only those OUTSIDE the component of rects the
+    // un-extended spine already reaches — seeded from the band rects the
+    // natural span [a_lo, a_hi] intersects, expanded transitively over the
+    // PHYSICAL connectivity graph (Busterm::orig_rects, the #835 spelling: a
+    // corner margin marks faces unusable for taps, it does not physically
+    // separate the rects).  Connectivity here is abutment OR strict interior
+    // overlap — unlike the disjoint branch's rects_touch, because this pass
+    // runs on EVERY OVER multi-rect block, MIXED rect sets included (an
+    // overlapping pair PLUS a disjoint same-band rect; Codex P2 on #845:
+    // gating the whole block on rects_are_rectilinear skipped the sibling,
+    // and the rectilinear leg branch has no same-band metal either, so the
+    // mixed set stayed TEG_OPEN).  An overlapping pair is one connected
+    // piece of metal, so counting it connected keeps a FULLY-connected
+    // rectilinear block a provable no-op (every rect joins the reached
+    // component — byte-identical), while the separated sibling of a mixed
+    // set still extends.  A band rect ADJACENT to (or overlapping) the
+    // landing component is physically continuous with it — the feature's
+    // adjacency suppression (Final-state item 2, deliberately untouched) —
+    // so it must NOT pull the spine to its face; a band rect the span
+    // already crosses is a pass-through contact and needs no landing.
+    // Extensions are monotone (the span only grows), so processing order
+    // cannot mis-classify a rect: one skipped as crossed stays crossed, and
+    // a nearer sibling's landing subsumed by a farther one's extension
+    // becomes a crossing — contact either way.
+    for (int i = 0; i < n; ++i) {
+        if (blocks[i].teg_mode != TegMode::OVER || blocks[i].rects.size() < 2) continue;
+        if (has_stub[i]) continue;                       // Direct trunks only
+        const auto& rects = blocks[i].rects;
+        const std::vector<Rect>& touch =
+            (blocks[i].orig_rects.size() == rects.size()) ? blocks[i].orig_rects : rects;
+        auto connected = [](const Rect& a, const Rect& b) {
+            if (rects_touch(a, b)) return true;          // positive-length abutment
+            return a.x1 < b.x2 && b.x1 < a.x2 &&         // strict interior overlap
+                   a.y1 < b.y2 && b.y1 < a.y2;           // (one rectilinear piece)
+        };
+        const int nr = (int)rects.size();
+        std::vector<char> reached(nr, 0);
+        std::vector<int>  work;
+        for (int ri = 0; ri < nr; ++ri) {
+            const Rect& r = rects[ri];
+            if (!(locus >= axis.perp_lo(r) && locus <= axis.perp_hi(r))) continue;
+            if (axis.along_lo(r) <= a_hi && axis.along_hi(r) >= a_lo) {
+                reached[ri] = 1; work.push_back(ri);
+            }
+        }
+        while (!work.empty()) {
+            int ri = work.back(); work.pop_back();
+            for (int rj = 0; rj < nr; ++rj)
+                if (!reached[rj] && connected(touch[ri], touch[rj])) {
+                    reached[rj] = 1; work.push_back(rj);
+                }
+        }
+        for (int ri = 0; ri < nr; ++ri) {
+            const Rect& r = rects[ri];
+            if (reached[ri]) continue;
+            if (!(locus >= axis.perp_lo(r) && locus <= axis.perp_hi(r))) continue;
+            if (axis.along_hi(r) < a_lo)      a_lo = axis.along_hi(r);
+            else if (axis.along_lo(r) > a_hi) a_hi = axis.along_lo(r);
+            // else: an earlier extension grew the span over it — crossed.
         }
     }
 
@@ -3289,9 +3363,9 @@ void TopologyGenerator::add_trunk(const Axis& axis, bool suppress_stubs,
                 for (size_t ri = 0; ri < rects.size(); ++ri) {
                     const auto& r = rects[ri];
                     // Same-band rects: rectilinear — spine inside the shape;
-                    // disjoint — the documented LOUD corner (see the
-                    // pre-pass note: nothing emitted here can survive
-                    // placement/audit without spine-end anchoring).
+                    // disjoint — reached by the spine itself via the
+                    // spine-end anchoring pass (extended to land on the
+                    // sibling's facing face; no perpendicular metal here).
                     if (locus >= axis.perp_lo(r) && locus <= axis.perp_hi(r)) continue;
                     if (!recti && landed[ri]) continue;   // contiguous with a landing rect
                     int a = axis.along_center(r);

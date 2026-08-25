@@ -196,10 +196,21 @@ void derive_conn_segs(const Topology& topo, const Floorplan& fp,
     int n = (int)segs.size();
 
     // Helper: add a SegConn to segs[i] if it isn't already present.
-    auto add_conn = [&](int i, SegConn c) {
+    // BUSTERM dedup is per BLOCK (the #823 shadow rule: a duplicate annotation
+    // must not double-anchor a stub) — EXCEPT on a MULTI-RECT block, where one
+    // segment can hold two REAL landings on different rects' faces (the TEG
+    // spine-end anchoring: a spine landing on the landing rect's face at one
+    // end and a same-band disjoint sibling's face at the other).  Those are
+    // physically distinct anchors NUTS must hold BOTH of (busterm_faces
+    // span_cover), so a multi-rect block dedupes per FACE COORD instead;
+    // single-rect blocks keep the per-block rule byte-identically.
+    auto add_conn = [&](int i, SegConn c, bool multirect_bt = false) {
         for (const auto& x : segs[i].conns) {
             if (x.kind != c.kind) continue;
-            if (c.kind == SegConn::BUSTERM && x.block_name == c.block_name) return;
+            if (c.kind == SegConn::BUSTERM && x.block_name == c.block_name) {
+                if (!multirect_bt || x.face_coord == c.face_coord) return;
+                continue;
+            }
             if (c.kind == SegConn::SEG     && x.seg_idx   == c.seg_idx)    return;
         }
         segs[i].conns.push_back(std::move(c));
@@ -238,7 +249,7 @@ void derive_conn_segs(const Topology& topo, const Floorplan& fp,
                         c.face_coord = ci.horiz ? P.x : P.y;
                         c.seg_idx    = -1;
                         c.at_pos     = ci.horiz ? P.x : P.y;
-                        add_conn(i, std::move(c));
+                        add_conn(i, std::move(c), !opt->rects.empty());
                         found = true;
                     }
                 }
