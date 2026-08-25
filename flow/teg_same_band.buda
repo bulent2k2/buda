@@ -1,0 +1,45 @@
+# TEG same-band disjoint sibling — the spine-end anchoring vehicle
+# (teg_multirect_status.md Final-state item 3, RESOLVED).
+#
+# T's two rects sit SIDE BY SIDE along the trunk axis (both spanning y 0..100,
+# gap x 100..300) and are declared NOT internally connected (`teg_mode over`).
+# The in-band trunk (TRUNK_H@y50) runs from src into the right rect — the left
+# rect is BESIDE the trunk, so the perpendicular-stub machinery has no gap to
+# bridge.  This flow merged EXPECTED CLEAN with the fix: the connection metal
+# is the SPINE itself, its span extended to LAND exactly on the sibling's
+# facing face (x=100) as a real BUSTERM landing, which annotate_endpoints tags
+# and NUTS holds via busterm_faces span_cover — the piece the withdrawn fix
+# attempts lacked (a bare extension had no landing and was retracted; an
+# over-the-cell anchoring stub tripped the #514 tap-overhang ANTENNA rule).
+# Pre-fix, this exact script reported TEG_OPEN at both placed stages
+# (1 bundle-level at nuts, 4 per-bit at dnuts).
+#
+# Candidate pin: by TYPE (`TRUNK_H@y50`), the selector that survives a
+# re-sorted pool; test_flow_scripts.py::test_teg_same_band_flow_routes_clean
+# asserts the planner line names it AND both audits report Success.
+
+add_block T rect 300 0 400 100 rect 0 0 100 100 teg_mode over
+add_block src 600 0 700 100
+
+def_layer 4 M4 H TOP 0
+def_layer 5 M5 V TOP 0
+
+def_track_pattern 4 0 (SIGNAL 2 2)x8
+def_track_pattern 5 0 (SIGNAL 2 2)x8
+
+add_bus d[4] src.tx T.rx
+
+run_bundler STRICT
+generate_topologies
+
+# The same-band trunk: one spine (100,50)-(600,50), no perpendicular metal —
+# the sibling holds one end, src's face the other.
+select_topology 1 TRUNK_H@y50
+
+run_planner
+run_nuts
+check_design
+run_detailed_nuts
+check_design
+report_wl
+visualize

@@ -83,10 +83,11 @@ leg** from the trunk to its nearest face; and when the trunk lands **inside
 one rect of a disjoint block**, every rect outside that landing rect's
 *physical contiguity component* gets a stub too — EXCEPT a disjoint sibling
 sharing the trunk's own perpendicular band (rects side by side along the
-spine): a perpendicular stub has no gap to bridge there, so that rect stays
-metal-free and the placed-stage `TEG_OPEN` audit reports it if such a
-candidate is routed (the documented same-band-sibling limitation — see
-`docs/internal/teg_multirect_status.md`, Final state).  Rects that physically touch
+spine): there is no perpendicular gap to bridge there, so the connection
+metal is the **spine itself** — its span is extended to land exactly on the
+sibling's facing face as a real busterm landing (spine-end anchoring), which
+NUTS holds the way it holds every face landing, and the route audits clean
+(vehicle: `flow/teg_same_band.buda`).  Rects that physically touch
 the landing rect (a positive-length shared edge, transitively along a chain)
 are continuous with it and emit nothing — the adjacency suppression, which
 reads the **physical** rects even under a `corner_margin` (a margin marks

@@ -1274,6 +1274,38 @@ def test_teg_over_audit_flow_routes_clean():
     assert "TEG_OPEN" not in out, out
 
 
+def test_teg_same_band_flow_routes_clean():
+    """flow/teg_same_band.buda (teg_multirect_status.md Final-state item 3,
+    resolved): the same-band disjoint sibling repro as a checked-in vehicle —
+    two OVER rects side by side along the spine, trunk Direct inside one,
+    TRUNK_H@y50 pinned by TYPE.
+
+    EXPECTED CLEAN with spine-end anchoring: the connection metal is the
+    SPINE itself, extended to LAND on the sibling's facing face (x=100) as a
+    real BUSTERM landing NUTS holds — 1 segment / 4 bit-wires, both audits
+    Success.  Pre-fix this exact script fired TEG_OPEN at both placed stages
+    (1 bundle-level at nuts, 4 per-bit at dnuts); if the anchoring regresses
+    — the extension lost, the landing shadowed by the per-block BUSTERM
+    dedup, or the span retracted at NUTS — TEG_OPEN fires and the Success
+    assertions fail HERE."""
+    out, rc = run_script("teg_same_band.buda")
+    assert rc == 0, f"teg_same_band.buda: non-zero exit {rc}\n{out}"
+    assert re.search(
+        r"\[Planner\] Bundle 1 .*TRUNK_H@y50 \[pinned\]", out), (
+        "the type pin no longer lands on TRUNK_H@y50 — the pool lost the "
+        f"candidate or the pin regressed:\n{out}")
+    # ONE spine, no perpendicular metal, placed cleanly.
+    segs, viols, ovlps = nuts_summary(out)
+    assert (segs, viols, ovlps) == (1, 0, 0)
+    dm = re.search(
+        r"\[DetailedNUTS\] (\d+) net segments placed, (\d+) bits unplaced", out)
+    assert dm, "DetailedNUTS summary not found"
+    assert (int(dm.group(1)), int(dm.group(2))) == (4, 0)
+    # The point of the vehicle: BOTH placed audits clean, no TEG_OPEN.
+    assert out.count("Success: no violations found.") == 2, out
+    assert "TEG_OPEN" not in out, out
+
+
 def test_ndr_bottom_up_composition():
     """flow/ndr_bottom_up.buda (requirement R13): a governed cell template
     marked set_bottom_up is solved once and COPIED to every instance,

@@ -68,14 +68,51 @@ its pinning test on this date:
    pinned by `test_teg_open.py::
    test_adjacent_chain_is_suppressed_and_separated_rect_still_stubbed` and
    `test_margined_adjacent_chain_keeps_physical_suppression_inset_taps`.
-3. **The same-band disjoint sibling** — a DISJOINT rect sharing the trunk's
+3. ~~**The same-band disjoint sibling** — a DISJOINT rect sharing the trunk's
    perp band (rects side by side along the spine, trunk inside one) gets no
-   connection metal.  The fix was built and withdrawn: a perpendicular stub
-   has no gap to bridge, a bare spine extension is RETRACTED by NUTS span
-   adjustment (a spine end with no junction has nothing holding it), and an
-   over-the-cell anchoring stub trips the #514 tap-overhang ANTENNA rule —
-   the honest fix needs spine-end anchoring machinery.  Pinned LOUD:
-   `test_teg_open.py::test_same_band_disjoint_sibling_stays_loud_via_teg_open`.
+   connection metal.~~  **RESOLVED 2026-08-25 via SPINE-END ANCHORING**, the
+   machinery the withdrawn attempts said was needed — and the landing is the
+   whole trick: the spine's span is extended to LAND exactly on the
+   sibling's facing along-face, which `annotate_endpoints` tags as a real
+   BUSTERM landing, so NUTS holds the end via `busterm_faces` `span_cover`
+   the way it holds every face landing (the withdrawn BARE extension had no
+   landing and was retracted by `do_span_adjustments`; the withdrawn
+   over-the-cell anchoring stub tripped the #514 tap-overhang ANTENNA
+   rule — this route carries neither, and #514 stays quiet because there is
+   no terminal piece at all, just the spine ending on a tapped face).
+   Direct trunks on disjoint OVER blocks only; which band rects extend is
+   decided by a reached-component test (band rects the natural span
+   intersects, expanded transitively over the PHYSICAL touch graph), so the
+   ADJACENT corner (item 2) is untouched — an adjacent same-band pair still
+   emits nothing and stays TEG_OPEN-loud (control-pinned).  Axis-
+   parameterized, so the V-trunk twin (x-band siblings) is covered by the
+   same code (test-pinned, not assumed).  Building it MEASURED the #823
+   shadow trap the fix was suspected to have died on: with the sibling
+   BEYOND the far endpoint block, the spine lands on the SAME block at BOTH
+   ends (landing rect's face + sibling face) and `derive_conn_segs`' per-
+   BLOCK BUSTERM dedup dropped the second landing — NUTS then retracted the
+   sibling end to the far block's face (span [400,650] against a face at
+   800, TEG_OPEN at both stages).  The dedup is now per FACE COORD for
+   MULTI-RECT blocks only (`add_conn`'s `multirect_bt` flag — two real
+   landings on different rects' faces are physically distinct anchors),
+   while single-rect blocks keep the per-block shadow rule byte-identically.
+   The min-stub floor does not apply (the extension is collinear SPINE
+   metal, not a stub — a floor larger than the sibling gap must not reject
+   the trunk, test-pinned) and the margin semantic is the established one
+   (tappable = inset faces: the spine lands on the sibling's INSET face,
+   inside the physical rect, so the per-rect contact audit sees it;
+   touching = physical rects in the reached-component).  Measured on the
+   repro: `TRUNK_H@y50` now generates ONE spine (100,50)-(600,50) — WL 200
+   → 500, the honest price of reaching the sibling — routes 1 TrackSegment
+   / 4 bit-wires / 0 unplaced with both placed audits clean where it fired
+   TEG_OPEN at both (1 bundle-level at nuts, 4 per-bit at dnuts).  Vehicle:
+   `flow/teg_same_band.buda` (EXPECTED CLEAN, guarded by
+   `test_flow_scripts.py::test_teg_same_band_flow_routes_clean`); unit pins
+   in `test_teg_open.py` — the flipped
+   `test_same_band_disjoint_sibling_routes_clean_via_spine_anchoring`, the
+   far-side dedup shape, the V twin, a 3-rect same-band chain (farthest
+   sibling tapped, middle one crossed as a pass-through), the min-stub-floor
+   edge, the margined variant, and the adjacent-pair loud control.
 4. **BITRUNK trees (legacy and two-level) are bbox-only on multi-rect
    blocks** — no rect selection, no TEG connection metal
    (resolved-as-documented open 8); an unreached OVER rect fires TEG_OPEN,
@@ -471,22 +508,26 @@ wrong.
    50, abstract AND detailed WL +0.00% (`ariane133_heal` NOT COMPARABLE —
    its fetched inputs are absent in the measuring environment, the
    harness's documented shape).
-   Two Direct-branch corners are deliberate and stay LOUD: a trunk Direct
+   One Direct-branch corner is deliberate and stays LOUD: a trunk Direct
    inside one of two ADJACENT rects emits no connection metal (contiguous
    shape, the feature's rule) while the placed TEG_OPEN contact predicate
    is per-rect, so such a route — if selected — still reports TEG_OPEN
-   (pre-existing either way: the shape emitted nothing before too); and a
-   DISJOINT sibling sharing the trunk's perp band (rects side by side
-   along the spine, trunk inside one) also stays metal-free and
-   TEG_OPEN-loud — measured while building the fix: a perpendicular stub
-   has no gap to bridge, a bare spine extension through the sibling is
-   RETRACTED by NUTS span adjustment (a spine end with no junction has
-   nothing holding it), and an over-the-cell anchoring stub trips the
-   #514 tap-overhang ANTENNA rule (the spine, once anchored, crosses the
-   sibling and the stub reads as redundant metal) — the honest fix needs
-   spine-end anchoring machinery, so the corner is documented rather than
-   half-fixed, and pinned by
-   `test_same_band_disjoint_sibling_stays_loud_via_teg_open`.
+   (pre-existing either way: the shape emitted nothing before too).  The
+   OTHER corner — a DISJOINT sibling sharing the trunk's perp band (rects
+   side by side along the spine, trunk inside one) — was documented here
+   with its measured failed attempts (a perpendicular stub has no gap to
+   bridge, a bare spine extension through the sibling is RETRACTED by NUTS
+   span adjustment — a spine end with no junction has nothing holding it —
+   and an over-the-cell anchoring stub trips the #514 tap-overhang ANTENNA
+   rule) until the spine-end anchoring those attempts pointed at was built:
+   **RESOLVED 2026-08-25** — the spine lands on the sibling's facing face
+   as a real BUSTERM landing NUTS holds, with the #823 per-block BUSTERM
+   dedup made per-face for multi-rect blocks so a spine landing on the
+   same block at both ends keeps both anchors.  Full record: Final-state
+   item 3; vehicle `flow/teg_same_band.buda`; pinned by
+   `test_same_band_disjoint_sibling_routes_clean_via_spine_anchoring` and
+   the same-band family beside it (the adjacent-pair loud control
+   included).
    What REMAINS is (iii), narrowed and verified LOUD:
    **MST candidates (and the TRUNK+MST hybrids' multi-rect branch blocks,
    which mostly drop at generation as non-simple) still emit no TEG
