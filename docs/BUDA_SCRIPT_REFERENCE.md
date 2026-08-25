@@ -226,6 +226,10 @@ qr                          # runs run_detailed_nuts
 unalias qr
 ```
 
+A **per-user rc file** for aliases you want across sessions (and
+user-remappable key-bindings) are deferred, with the shape to build and the
+portability reasoning in [`internal/opens_ux.md`](internal/opens_ux.md).
+
 ---
 
 ### `require_file`
