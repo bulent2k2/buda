@@ -1384,7 +1384,8 @@ static void annotate_and_sort(std::vector<Topology>& v) {
 
 // Return all physical rects for a busterm. Empty rects means single-rect
 // (use orig_bbox). This returns the individual rects when present.
-static std::vector<Rect> bt_all_rects(const Busterm& bt) {
+// Non-static: shared with TopoEdit's edit_add_stub (open 16) via topology.h.
+std::vector<Rect> bt_all_rects(const Busterm& bt) {
     return bt.rects.empty() ? std::vector<Rect>{bt.orig_bbox} : bt.rects;
 }
 
@@ -1407,8 +1408,11 @@ static bool rects_are_rectilinear(const std::vector<Rect>& rects) {
 // spine.  Axis-parameterized — `axis.perp_face` selects face_y for an H spine
 // (along_horiz=true, the old best_rect_for_h) and face_x for a V spine (the old
 // best_rect_for_v), so the two transposed helpers collapse into one.
-static Rect best_rect(const Axis& axis, const Busterm& bt, int trunk_locus) {
-    auto rects = bt_all_rects(bt);
+// Non-static + a rect-list overload: TopoEdit's edit_add_stub (open 16) picks
+// the tap rect through the SAME cost rule, restricted to the rects its fixed
+// target segment can actually reach (generation never needs the restriction —
+// its spine is pre-extended to cover every stub).
+Rect best_rect(const Axis& axis, const std::vector<Rect>& rects, int trunk_locus) {
     Rect best = rects[0];
     int  best_cost = std::abs(axis.perp_face(best, trunk_locus) - trunk_locus);
     for (size_t k = 1; k < rects.size(); ++k) {
@@ -1416,6 +1420,9 @@ static Rect best_rect(const Axis& axis, const Busterm& bt, int trunk_locus) {
         if (cost < best_cost) { best_cost = cost; best = rects[k]; }
     }
     return best;
+}
+Rect best_rect(const Axis& axis, const Busterm& bt, int trunk_locus) {
+    return best_rect(axis, bt_all_rects(bt), trunk_locus);
 }
 
 // Emit the trunk spine along `axis` at perpendicular coordinate `locus`, over the

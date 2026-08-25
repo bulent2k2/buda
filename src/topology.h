@@ -499,6 +499,18 @@ inline std::vector<Rect> shrink_rects(std::vector<Rect> rects,
     return rects;
 }
 
+// Multi-rect tap-face selection, shared by the trunk generator and TopoEdit
+// (teg_multirect_status.md open 16 — edit_add_stub aimed a stub at the UNION
+// bbox face, so on a multi-rect block it could land in the notch where no
+// physical face exists; generation's per-rect choice is the one source now).
+// bt_all_rects: the busterm's candidate connection rects — its (margin-inset,
+// open 9) `rects` when multi-rect, else the single physical `orig_bbox`.
+// best_rect: the candidate rect whose perp-axis face is nearest the spine
+// locus, i.e. the shortest stub (defined in topology.cpp).
+std::vector<Rect> bt_all_rects(const Busterm& bt);
+Rect best_rect(const Axis& axis, const std::vector<Rect>& rects, int trunk_locus);
+Rect best_rect(const Axis& axis, const Busterm& bt, int trunk_locus);
+
 struct MinStubLength {
     int global = 20;
     std::map<int, int> per_dir;   // 0=HORIZONTAL, 1=VERTICAL
