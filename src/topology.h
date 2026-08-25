@@ -623,12 +623,24 @@ public:
     // Multi-rect block: stores each rect individually; add_block is called
     // internally with the union bounding box for backward compatibility.
     void add_block_rects(const std::string& name, const std::vector<Rect>& rects,
-                         TegMode mode = TegMode::THRU);
+                         TegMode mode);
+    // No-mode overload: the block takes the CURRENT default_teg_mode() — the
+    // `set_teg_mode` global default, resolved at DECLARATION time (prospective
+    // only, like add_block's other declaration-time resolutions; a later
+    // set_teg_mode does not re-mode already-declared blocks).
+    void add_block_rects(const std::string& name, const std::vector<Rect>& rects);
     // Returns the individual rects for a multi-rect block, or empty for single-rect.
     std::vector<Rect> get_block_rects(const std::string& name) const;
     // TEG mode: controls over-the-block bridge generation for multi-rect blocks.
     void    set_block_teg_mode(const std::string& name, TegMode mode);
     TegMode get_block_teg_mode(const std::string& name) const;
+    // Global default TEG mode (`set_teg_mode <thru|over>`): what a multi-rect
+    // block declared WITHOUT an explicit per-block `teg_mode` keyword gets.
+    // The per-block keyword always wins (most-specific-first, like
+    // set_feedthru).  Starts THRU — flows that never call set_teg_mode are
+    // byte-identical.
+    void    set_default_teg_mode(TegMode mode) { default_teg_mode_ = mode; ++rev_; }
+    TegMode default_teg_mode() const { return default_teg_mode_; }
     // Set corner margin for a previously-added block (absolute units).
     void set_block_corner_margin(const std::string& name, int dx, int dy);
     // Set global corner margin applied to all blocks that have no per-block override.
@@ -719,6 +731,7 @@ private:
     std::map<std::string, std::vector<Rect>> block_rects_;  // only for multi-rect blocks
     std::set<std::string>                containers_;       // hierarchy envelopes (not leaf cells)
     std::map<std::string, TegMode>       teg_modes_;
+    TegMode                              default_teg_mode_ = TegMode::THRU;
     std::map<std::string, BlockCornerMargin> corner_margins_;
     BlockCornerMargin global_corner_margin_{};
     MinStubLength min_stub_len_;

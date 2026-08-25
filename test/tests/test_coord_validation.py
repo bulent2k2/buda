@@ -84,6 +84,67 @@ def test_add_block_multi_rect_names_the_offending_rect():
     assert "rect 2" in _err(out)
 
 
+# ── multi-rect declaration validation (teg_multirect_status.md open 13) ────
+
+def test_add_block_truncated_rect_names_the_missing_argument():
+    # Used to be a bare IndexError traceback naming nothing.
+    _s, code, out = _run("add_block a rect 0 0 100")
+    assert code == 1
+    msg = _err(out)
+    assert "add_block" in msg and "rect 1" in msg and "<y2>" in msg
+
+
+def test_add_block_truncated_second_rect_names_it():
+    _s, code, out = _run("add_block a rect 0 0 100 100 rect 200 0")
+    assert code == 1
+    msg = _err(out)
+    assert "rect 2" in msg and "<x2>" in msg
+
+
+def test_add_block_zero_width_rect_is_a_hard_error():
+    _s, code, out = _run("add_block a rect 0 0 0 100 rect 200 0 300 100")
+    assert code == 1
+    msg = _err(out)
+    assert "rect 1" in msg and "degenerate" in msg and "width" in msg
+
+
+def test_add_block_zero_height_rect_is_a_hard_error():
+    _s, code, out = _run("add_block a rect 0 0 100 100 rect 200 50 300 50")
+    assert code == 1
+    msg = _err(out)
+    assert "rect 2" in msg and "degenerate" in msg and "height" in msg
+
+
+def test_add_block_duplicate_rect_is_a_hard_error():
+    _s, code, out = _run("add_block a rect 0 0 100 100 rect 0 0 100 100")
+    assert code == 1
+    msg = _err(out)
+    assert "rect 2" in msg and "duplicates rect 1" in msg
+
+
+def test_add_block_duplicate_rect_detected_across_coordinate_order():
+    # add_block_rects normalizes coordinate ORDER, so a reversed spelling of
+    # the same rect is the same rect.
+    _s, code, out = _run("add_block a rect 0 0 100 100 rect 100 100 0 0")
+    assert code == 1
+    assert "duplicates rect 1" in _err(out)
+
+
+def test_add_block_overlapping_rects_stay_legal():
+    # Interior overlap is exactly what classifies a rectilinear (L-shape)
+    # block — topology.cpp rects_are_rectilinear — so it must NOT be refused.
+    s, code, out = _run("add_block L rect 0 0 100 400 rect 0 0 400 100")
+    assert code is None, _err(out)
+    assert len(s.fp.get_block_rects("L")) == 2
+
+
+def test_add_block_adjacent_rects_stay_legal():
+    # Edge-touching rects drive the OVER adjacency suppression; also legal.
+    s, code, out = _run("add_block b rect 0 0 100 100 rect 100 0 200 100")
+    assert code is None, _err(out)
+    assert len(s.fp.get_block_rects("b")) == 2
+
+
 def test_add_keepout_refuses_rather_than_shrinking_the_zone():
     # The whole point: `10.9` silently became `10`, so the zone was ~1 unit
     # smaller than written on both axes and routing looked legal over it.
