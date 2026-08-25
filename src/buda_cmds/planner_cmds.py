@@ -321,36 +321,62 @@ def cmd_run_planner(session, cmd, args, cmd_line):
 
 
 def cmd_select_topology(session, cmd, args, cmd_line):
-    # Usage: select_topology <bundle_id | hint | id:N | net:PREFIX> <topo_id | group:N>
+    # Usage: select_topology <bundle_id | hint | id:N | net:PREFIX> <topo_id | type-spec | group:N>
     #   bare integer  -> bundle ID (legacy);  bare non-numeric -> net-name hint
     #   id:N          -> force bundle ID;     net:PFX (name:/hint:) -> force hint
     #   <topo_id>     -> pin that single 1-based candidate
+    #   <type-spec>   -> pin by topology TYPE — 'Z_VHV', 'TRUNK_H+MST',
+    #                    optionally with coordinates ('TRUNK_H+MST@y1268') —
+    #                    the pin that survives a regeneration whose knobs
+    #                    renumbered the ids: shape matches case-insensitively,
+    #                    a coordinate matches the CLOSEST candidate locus
+    #                    (reported), and ambiguity resolves by the planner's
+    #                    real cost (estimated WL pre-plan), per bundle
     #   group:<N>     -> pin the whole nominal-locus FAMILY (super-candidate) that
-    #                    contains candidate N; the planner refines which member wins
+    #                    contains candidate N (or the type-spec's resolution);
+    #                    the planner refines which member wins
     if len(args) < 2:
         print("Error: select_topology requires <bundle_id|hint> and "
-              "<topo_id|group:N> (1-based)")
+              "<topo_id|type-spec|group:N> (ids 1-based)")
         return
     grp = False
     tok = args[1]
     if tok.lower().startswith("group:"):
         grp, tok = True, tok.split(":", 1)[1]
-    try:
-        tid = int(tok)
-    except ValueError:
-        print(f"Error: invalid topology id '{args[1]}'")
+    tid = _topo_token(tok)
+    if tid is None:
+        print(f"Error: invalid topology selector '{args[1]}'")
         return
     bids, err = session._resolve_bundle_selector(args[0])
     if err:
         print(f"Error: {err}")
         return
+    # Resolve EVERY type spec first, against the unchanged committed state:
+    # applying a pin leaves the wrapper's seg_layers stale until the trailing
+    # _replan_layers, and a later bundle's planner-cost ranking must not
+    # read that hybrid (Codex #838).  Ints pass through untouched.
+    resolved = [(bid, session._resolve_topo_token_for_bid(bid, tid))
+                for bid in bids]
     applied = False
-    for bid in bids:
-        if session._select_single_topology_internal(bid, tid, group=grp):
+    for bid, rtid in resolved:
+        if rtid is None:
+            continue
+        if session._select_single_topology_internal(bid, rtid, group=grp):
             applied = True
     if applied:
         session._replan_layers()
         session._persist_topologies()   # refresh is_selected in the BDB
+
+
+def _topo_token(tok):
+    """A topology selector token: a 1-based integer id, or a TYPE spec
+    ('Z_VHV', 'TRUNK_H+MST@y1268') passed through as a string for
+    `_resolve_topo_spec` to resolve per bundle.  Returns None only for a
+    token that can be neither (empty)."""
+    try:
+        return int(tok)
+    except ValueError:
+        return tok if tok.strip() else None
 
 
 def _parse_selector_list(session, sel_str):
@@ -379,22 +405,36 @@ def _parse_selector_list(session, sel_str):
 
 
 def cmd_select_topologies(session, cmd, args, cmd_line):
-    # Usage: select_topologies <bundle_ids> <topo_id> [<bundle_ids> <topo_id> ...]
+    # Usage: select_topologies <bundle_ids> <topo_id|type-spec> [<bundle_ids> <topo_id|type-spec> ...]
     #   bundle_ids: comma list of IDs, ranges (1,5-9,11), and/or net-name hints
-    #   (e.g. bus_007,bus_044).  Same id:/net: disambiguation as select_topology.
+    #   (e.g. bus_007,bus_044).  Same id:/net: disambiguation as select_topology;
+    #   a TYPE spec ('Z_VHV', 'TRUNK_H+MST@y1268') resolves PER BUNDLE, which is
+    #   what makes it useful here: one spec pins the same shape across a list
+    #   whose members number their candidates differently.
     if len(args) < 2 or len(args) % 2 != 0:
-        print("Error: select_topologies requires (bundle_ids, topo_id) pairs")
+        print("Error: select_topologies requires (bundle_ids, topo_id|type) "
+              "pairs")
         return
-    applied = False
+    # Two passes, whole-command: resolve every pair's spec against the
+    # UNCHANGED committed state first, then apply — a pin leaves its
+    # wrapper's seg_layers stale until the trailing _replan_layers, and a
+    # later pair's planner-cost ranking must not read that hybrid state
+    # (Codex #838).
+    resolved = []
     for i in range(0, len(args), 2):
-        try:
-            tid = int(args[i+1])
-        except ValueError:
-            print(f"Error: invalid topology ID '{args[i+1]}'")
+        tid = _topo_token(args[i+1])
+        if tid is None:
+            print(f"Error: invalid topology selector '{args[i+1]}'")
             continue
         for bid in _parse_selector_list(session, args[i]):
-            if session._select_single_topology_internal(bid, tid):
-                applied = True
+            resolved.append((bid, session._resolve_topo_token_for_bid(bid,
+                                                                      tid)))
+    applied = False
+    for bid, rtid in resolved:
+        if rtid is None:
+            continue
+        if session._select_single_topology_internal(bid, rtid):
+            applied = True
     if applied:
         session._replan_layers()
         session._persist_topologies()   # refresh is_selected in the BDB
