@@ -26,7 +26,81 @@ clean (§1.1) — which makes `teg_mode over`, today, a candidate-pricing
 annotation rather than a routing feature.  *(2026-08-22: no longer — the 1(b)
 TEG_OPEN audit and the 1(a) emission redesign landed; the trunk generator's
 OVER connection metal is ordinary segments now and bridges are legacy-load
-only.  See open 1 and §2.2.)*
+only.  See open 1 and §2.2.  For where the whole arc ended, see the Final
+state section directly below.)*
+
+## Final state (2026-08-25)
+
+Every open in §4 is now either **struck-resolved** or **resolved-as-scoped**
+(the individual entries carry the dates, the measurements and the pinning
+tests).  The arc that started from §1.1's silent electrically-open route
+ended with: TEG-over connection metal emitted as ordinary segments through
+every Direct/gap/one-sided trunk shape (opens 1(a) + the 2026-08-25
+residuals (i)/(ii)), the `TEG_OPEN` audit failing whatever placed metal
+still misses a rect (1(b)), the `BUDA-1907` thru census and `BUDA-1908`
+feedthru warning covering the silent-by-design corners (opens 5/7), the
+planner/margin/TopoEdit multi-rect split-brains repaired (opens 3/9/16),
+declaration validation + `set_teg_mode` (opens 13/14), and the QoR corpus,
+flow tests and demo vehicles pinning it all end to end (open 2,
+`demo/teg_hier_hybrid.buda` / `demo/teg_two_spellings.buda`).  Non-OVER and
+single-rect designs stayed byte-identical throughout (corpus-guarded).
+
+What remains is deliberate scope, each item verified against the code and
+its pinning test on this date:
+
+**Remaining limitations**
+
+1. **MST candidates on OVER multi-rect blocks emit no TEG connection
+   metal** (and the TRUNK+MST hybrids' multi-rect branch blocks mostly drop
+   at generation as non-simple): an MST edge lands on the closest rect pair
+   only, so an OVER block's other rects go unreached — the legacy path,
+   scoped by open 1 residual (iii) (a fix is a redesign: there is no shared
+   trunk locus to hang per-rect attachment from).  Pinned LOUD end to end:
+   `test_teg_open.py::test_mst_on_over_block_fires_teg_open_end_to_end`
+   (a selected MST_HV on an OVER receiver fires TEG_OPEN at both placed
+   stages naming the unreached rect).
+2. **The adjacent-rect Direct corner**: a trunk Direct inside one of two
+   ADJACENT rects emits no connection metal — the rects are physically
+   contiguous, the feature's suppression rule, transitive over the PHYSICAL
+   (`Busterm::orig_rects`) touch graph — while the placed TEG_OPEN contact
+   predicate reads per-rect, so such a route, if selected, still reports
+   TEG_OPEN.  Documented loud corner (open 1); the suppression side is
+   pinned by `test_teg_open.py::
+   test_adjacent_chain_is_suppressed_and_separated_rect_still_stubbed` and
+   `test_margined_adjacent_chain_keeps_physical_suppression_inset_taps`.
+3. **The same-band disjoint sibling** — a DISJOINT rect sharing the trunk's
+   perp band (rects side by side along the spine, trunk inside one) gets no
+   connection metal.  The fix was built and withdrawn: a perpendicular stub
+   has no gap to bridge, a bare spine extension is RETRACTED by NUTS span
+   adjustment (a spine end with no junction has nothing holding it), and an
+   over-the-cell anchoring stub trips the #514 tap-overhang ANTENNA rule —
+   the honest fix needs spine-end anchoring machinery.  Pinned LOUD:
+   `test_teg_open.py::test_same_band_disjoint_sibling_stays_loud_via_teg_open`.
+4. **BITRUNK trees (legacy and two-level) are bbox-only on multi-rect
+   blocks** — no rect selection, no TEG connection metal
+   (resolved-as-documented open 8); an unreached OVER rect fires TEG_OPEN,
+   pinned end to end by
+   `test_teg_open.py::test_bitrunk_on_over_block_fires_teg_open_end_to_end`.
+5. **No import path (DEF/GDS) and no hier declaration produces a multi-rect
+   block** — a BDB component is one bbox (opens 6/17;
+   `opens_interchange.md` item 16): `derive_busterms` writes empty rects,
+   every BDB→Floorplan projection is `add_block(bbox)`, and
+   `tools/buda2bdb.py` collapses to the union bbox with a warning naming
+   the dropped trailing modifiers, `teg_mode` included (pinned by
+   `test_buda2bdb.py::test_multirect_collapse_warning_names_dropped_modifiers`).
+   Multi-rect/TEG is script-declared only; the honest hybrid recipe is
+   `demo/teg_hier_hybrid.buda`.
+6. **The web client renders no legacy-load bridges** — `src/web/serialize.py`
+   still serializes a restored candidate's `bridge_segments`, but no web
+   renderer draws them (open 10's noted remnant); the matplotlib explorer
+   and main viewer DO (`viz_common.draw_legacy_bridges`, pinned by
+   `test_viz_legacy_bridge.py`).  Live designs are unaffected — generation
+   emits no bridges.
+7. **`set_feedthru` on a multi-rect block remains inert in the engine**
+   (the feedthru relay is single-rect MVP — `topology.cpp` skips
+   `rects.size() > 1`); the declaration now warns instead of dropping the
+   intent silently (BUDA-1908, both declaration orders — open 7, pinned by
+   `test_set_feedthru_multirect_warning.py`).
 
 ## 1. Two measurements that anchor this appraisal
 
@@ -147,20 +221,27 @@ catch this shape too, which is another reason to land it first.
 
 **Partial / inconsistent:**
 
-- `corner_margin` shrinks only the **union** bbox; individual rects are never
+- ~~`corner_margin` shrinks only the **union** bbox; individual rects are never
   inset (`src/topology.cpp:3296-3300`), so a per-block margin is silently
-  inert for the faces multi-rect actually uses.
-- Planner split-brain: cut **capacity** is carved per rect (via
+  inert for the faces multi-rect actually uses.~~  RESOLVED 2026-08-23 — see
+  open 9 (`shrink_rects` insets each rect; `orig_rects` keeps the physical
+  spelling).
+- ~~Planner split-brain: cut **capacity** is carved per rect (via
   `low_layer_keepouts`, `src/congestion_planner.cpp:363-383`) but
   `low_seg_obstructed` tests the **union bbox** (`blocks_cache_` from
   `get_all_blocks()`, `src/congestion_planner.cpp:738-784`) — a LOW segment
-  in a routable notch is priced as "crossing the cell" and escalated to TOP.
+  in a routable notch is priced as "crossing the cell" and escalated to TOP.~~
+  RESOLVED 2026-08-23 — see open 3 (`leaf_rects_cache_`; the predicate judges
+  the same per-rect geometry capacity is carved from).
 - Trunk+MST hybrids: a multi-rect branch makes the tree "non-simple", so it
   keeps the legacy un-completed relay shape and is usually dropped as
-  `FEEDTHRU_RELAY` (`src/topology.cpp:4077-4082`, `:4680-4685`).
-- `topo_edit`: `edit_add_stub`/`edit_add_trunk` seed the tap's rects+teg_mode
+  `FEEDTHRU_RELAY` (`src/topology.cpp:4077-4082`, `:4680-4685`).  (Still the
+  case — the hybrid half of open 1 residual (iii), Final-state item 1.)
+- ~~`topo_edit`: `edit_add_stub`/`edit_add_trunk` seed the tap's rects+teg_mode
   (`src/topo_edit.cpp:196-203`) but compute the face and overlap from the
-  union bbox (`:165-185`) — a hand-built stub can land in the notch.
+  union bbox (`:165-185`) — a hand-built stub can land in the notch.~~
+  RESOLVED 2026-08-25 — superseded by open 16 (`edit_add_stub` goes through
+  generation's `best_rect` per-rect selection, with the THRU/OVER mode split).
 - NUTS slide windows union the perp extents of all spanned rects, so a
   segment may legally seat over the notch or in a sibling rect — documented
   as deliberate (`src/nuts.cpp:296-302`), but it means "which rect did I
@@ -170,20 +251,29 @@ catch this shape too, which is another reason to land it first.
 
 - BITRUNK (legacy and two-level) works entirely on `orig_bbox`
   (`src/topology.cpp:4401`, `:4467-4473`) — no rect selection, no bridges.
+  (Resolved-as-documented, open 8 — an unreached OVER rect fires TEG_OPEN,
+  test-pinned; Final-state item 4.)
 - The 2-pin L/Z/U/I family is **bypassed** for any multi-rect endpoint
   (`src/topology.cpp:4646-4652` forces the n-pin path) — safe, but the 2-pin
   generator itself is not rect-aware if reached directly via bindings.
-- `set_feedthru` on a multi-rect block is **silently skipped**
-  (`src/topology.cpp:3049`, `:3056` — "MVP: single-rect only"); no warning
-  anywhere, the CLI validates only block/layer existence.
+- `set_feedthru` on a multi-rect block is skipped by the engine
+  (`src/topology.cpp` — "MVP: single-rect only"); ~~no warning
+  anywhere, the CLI validates only block/layer existence~~ the declaration
+  now warns LOUD in both declaration orders (BUDA-1908, open 7; Final-state
+  item 7).
 - No import path produces a multi-rect block: DEF/LEF components get one
   bbox (rectilinear macros collapse), GDS import likewise; `tools/buda2bdb.py`
-  collapses to the union bbox with a warning and drops `teg_mode`.
+  collapses to the union bbox with a warning that now also NAMES the dropped
+  trailing modifiers, `teg_mode` included (opens 6/17;
+  `opens_interchange.md` item 16; Final-state item 5).
 - The hier flow is single-bbox end to end: `BustermGen::derive` writes empty
   `rects` (`src/busterm.cpp:172`), and every BDB→Floorplan projection calls
   `add_block(bbox)` — `add_block_rects` is called from exactly one place in
-  `src/`: the CLI setup command.  A resumed or hier session therefore loses
-  per-rect geometry unless the setup script re-declares it.
+  `src/`: the CLI setup command.  ~~A resumed or hier session therefore loses
+  per-rect geometry unless the setup script re-declares it.~~  The resume
+  half was MEASURED FALSE 2026-08-23 — read it as superseded by open 6
+  (the recorded setup replays `add_block … rect … teg_mode` verbatim and the
+  restored candidates keep busterm rects+teg; `test_teg_resume.py`).
 
 ### 2.2 TEG-over bridges — lifecycle table
 
@@ -206,7 +296,7 @@ catch this shape too, which is another reason to land it first.
 | Congestion planner / NUTS / DetailedNUTS | consume the NEW connection metal as ordinary segments; restored bridges **never placed** |
 | check_topo / check_nuts / check_dnuts | new metal audited like any segment; a restored unrealized bridge → **TEG_OPEN** ("declared bridge is unrealized") |
 | `report_wirelength` / QoR metrics | new metal counted (it is placed segments); restored bridges not (never placed) |
-| Viz | new metal drawn like any segment; restored bridges: web JSON serializes them (`src/web/serialize.py:225-239`) but no renderer draws them |
+| Viz | new metal drawn like any segment; restored bridges: web JSON serializes them (`src/web/serialize.py:225-239`) ~~but no renderer draws them~~ — the matplotlib explorer and main viewer draw them as a dashed "unrealized bridge (legacy checkpoint)" overlay since open 10 (2026-08-23); the WEB client still draws none (Final-state item 6) |
 | GDS / DEF / `emit_guides` export | new metal exported (placed rows); restored bridges absent |
 | `edit_topology` ops | no bridge create/delete/inspect (nothing creates them any more; `erase_segment` ignores restored ones) |
 
@@ -222,9 +312,11 @@ wrong.
 
 - **Gherkin:** `busterm_over_the_block.feature` is `@landed` — 9 scenarios,
   8 bound and green (thru/over, gap vs inside, L-shape, pure TEG, adjacency
-  suppression, per-block override), 1 **xfail**: thru-before-over adjusted-WL
+  suppression, per-block override), ~~1 **xfail**: thru-before-over adjusted-WL
   ranking (`test_busterm_over_the_block.py:81` — "`Topology.adjusted_wl` and
-  per-topology `teg_mode` attribute not yet in the C++ API").
+  per-topology `teg_mode` attribute not yet in the C++ API")~~ *(the xfail is
+  GONE — open 4 retired the `adjusted_wl` concept and rewrote the scenario as
+  the `@landed` same-locus-twin WL assertion; 9/9 passing, zero xfail)*.
   `multi_rect_block.feature` was tagged `@future` with an "all scenarios
   xfail" header — **stale**: its 7 scenarios pass today
   (`docs/internal/test/suite_analysis.md:312` agrees), the xfail in
@@ -233,9 +325,12 @@ wrong.
   survived.  RESOLVED on this branch 2026-08-22: retagged `@landed`, both
   xfail escape hatches removed (a missing candidate now fails loudly).
   Nothing guards that a `@future` file actually xfails, which is
-  how the label went stale.  Neither feature appears in
-  `feature_coverage_plan.md`'s arc→feature map; the plan's Phase-2 item
-  (hier `teg_mode over` coverage, `:101`) is unbuilt.
+  how the label went stale.  ~~Neither feature appears in
+  `feature_coverage_plan.md`'s arc→feature map~~ *(the map carries a TEG /
+  multi-rect row since the 2026-08-25 final pass)*; the plan's Phase-2 item
+  (hier `teg_mode over` coverage in `datapath_trunk` / `multi_level_trunk`)
+  is still unbuilt — the hier-side coverage that exists is
+  `test_teg_hier_demos.py` on the #842 vehicles, not a feature file.
 - **Units:** multi-rect is broadly exercised (~15 files) — annotation taps
   (`test_offset_topology.py:131`), NUTS-stage face audit
   (`test_check_design_hbundle.py:401`, the ONLY NUTS-stage multi-rect test),
@@ -245,27 +340,43 @@ wrong.
   (`test_busterm_over_the_block.py`, `test_topo_keepout_mst.py:575`,
   `test_topo_pool_cleanup.py:233`, `test_bdb_resume_gaps.py:58`,
   `test_seg_busterm_persist.py:137`).  **Zero** planner/NUTS/DNUTS bridge
-  tests exist — correctly, since the stages have nothing to test.  One test
+  tests exist — correctly, since the stages have nothing to test.  ~~One test
   is vacuous: `test_topo_structural_tiebreak.py:60` claims to pin the
-  bridge-count half of the sort key on an all-single-rect fixture (always 0).
-  All cited suites pass on this commit (19 + 13 passed, 1 xfailed, measured).
+  bridge-count half of the sort key on an all-single-rect fixture (always 0).~~
+  *(Superseded by open 15 — the assertion is REAL now: a restored-legacy
+  bridged twin makes the tie-break term vary.)*  Post-arc the placed stages
+  ARE tested — `test_teg_open.py` drives the full pipeline at both placed
+  stages, `test_teg_resume.py` pins the resume seam, `test_teg_thru_census.py`
+  the BUDA-1907 report, `test_teg_hier_demos.py` the demo vehicles.
+  All cited suites pass on this commit (19 + 13 passed, 1 xfailed, measured
+  2026-08-22; the xfail is gone since open 4).
 - **Flows / QoR:** 7 vehicles (`flow/teg1`, `poly1`, `lShape1`,
   `scenario5_lshaped` (duplicate, deleted 2026-08-22), `tShape1`, `cShape1`,
-  `demo/talk2`).  All
+  `demo/talk2`).  ~~All
   TEG-over vehicles stop at `run_nuts`; the only multi-rect flow reaching
   DetailedNUTS is `demo/talk2.buda` (thru, no bridge) and **no test runs
   it**.  **None of the 7 is in the QoR corpus** (49 flows) — no regression
   gate covers any multi-rect or TEG design, which is why §1.1 can be true
-  with a green board.
+  with a green board.~~  *(Superseded by open 2: `flow/teg_over_audit.buda`
+  runs the full pipeline in the QoR corpus and `demo/talk2.buda` is wired
+  into `test_flow_scripts.py`; the #842 demo vehicles
+  `demo/teg_hier_hybrid.buda` / `demo/teg_two_spellings.buda` are pinned by
+  `test_teg_hier_demos.py`.)*
 - **Docs:** user-facing `docs/script_reference/setup.md:145-165` (TEG
-  section) and `topologies.md:66-78` are good, except `topologies.md:76`
-  documents thru-before-over ranking **as fact while it is the one xfail**.
-  `docs/internal/teg.md` (origin transcript) has a stale viz pointer
+  section) and `topologies.md:66-78` are good, except ~~`topologies.md:76`
+  documents thru-before-over ranking **as fact while it is the one xfail**~~
+  *(superseded by open 4 — the ranking follows from real priced wirelength
+  and the page says so)*.
+  `docs/internal/teg.md` (origin transcript) ~~has a stale viz pointer
   (`_rects_disconnected` — now dead code in `viz_common.py:143`, no callers)
-  and ends mid-task.  `wishlist-bdb.md:271` ("bridge_segments remains
+  and ends mid-task~~ *(carries a dated status note since open 12)*.
+  ~~`wishlist-bdb.md:271` ("bridge_segments remains
   un-persisted") is superseded by v11 but sits in a kept-for-reference
-  section.  CLAUDE.md's TEG section is accurate about generation and silent
-  about the downstream absence.
+  section.~~ *(struck with a pointer, open 12)*.  ~~CLAUDE.md's TEG section is
+  accurate about generation and silent about the downstream absence.~~
+  *(CLAUDE.md now documents the post-emission mechanism, TEG_OPEN and
+  `set_teg_mode`; both script_reference pages carry the post-#841 Direct /
+  one-sided coverage — final docs pass, 2026-08-25.)*
 
 ## 4. Opens, ranked
 
@@ -866,9 +977,14 @@ wrong.
     the entry states why deriving rects from `OBS`/GDS shapes would be an
     item-12-shaped inference and where honest support would start.
 
-## 5. Suggested landing order
+## 5. Suggested landing order — CLOSED (2026-08-25)
 
-1(b) audit first (loud beats silent), with the QoR/corpus vehicle of open 2
-pinning it; then decide 1(a) emission vs an explicit `over`-unsupported
-refusal; 3 and 4 fall out of that decision; the medium/minor items are
-independent and mostly one-liners.
+The order this section proposed is the order that happened: 1(b)'s TEG_OPEN
+audit landed first with open 2's corpus vehicle pinning it (PRs #821/#824 —
+loud beat silent), the emission-vs-refusal decision went to **emission**
+(1(a), PR #823ff), opens 3 and 4 fell out of it as predicted, and the
+medium/minor items landed independently (#827/#828, #832-#835, #838-#842,
+ending with the 2026-08-25 Direct/one-sided residuals and the demo
+vehicles at merge 9a2528bf).  The arc ended with every §4 open struck or
+resolved-as-scoped; the surviving scope is the **Remaining limitations**
+list in the Final state section at the top of this document.
