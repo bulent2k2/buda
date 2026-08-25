@@ -73,11 +73,20 @@ names the rects left to the block's internal routing.
 
 **TEG-over connection metal (`teg_mode over`):**
 
-When a receiver block uses `teg_mode over` and the trunk falls in the gap
-between its rects, the topology carries a stub **per rect** to the trunk (the
-rects are joined through the trunk); when the trunk crosses a rectilinear
-block without spanning every rect, each un-spanned rect gets a perpendicular
-**connector leg** from the trunk to its nearest face.  This metal is ordinary
+When a receiver block uses `teg_mode over` and the trunk does not land inside
+any of its rects — in the gap between them **or** approaching them one-sided
+(all rects on the same side) — the topology carries a stub **per rect** to
+the trunk, each from the rect's locus-facing face (the rects are joined
+through the trunk); when the trunk crosses a rectilinear block without
+spanning every rect, each un-spanned rect gets a perpendicular **connector
+leg** from the trunk to its nearest face; and when the trunk lands **inside
+one rect of a disjoint block**, every rect outside that landing rect's
+*physical contiguity component* gets a stub too.  Rects that physically touch
+the landing rect (a positive-length shared edge, transitively along a chain)
+are continuous with it and emit nothing — the adjacency suppression, which
+reads the **physical** rects even under a `corner_margin` (a margin marks
+faces unusable for taps, it does not physically separate the rects; the
+emitted stubs still tap the margin-inset faces).  This metal is ordinary
 `topology.segments` content, routed and audited like any stub, and it adds
 explicit wirelength, so over-the-block topologies rank after their `thru`
 counterparts when all else is equal.  (`topology.bridge_segments` — the former

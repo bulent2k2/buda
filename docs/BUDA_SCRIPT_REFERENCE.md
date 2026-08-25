@@ -23,7 +23,7 @@ The per-command documentation lives in one page per pipeline stage under
 
 | Page | Stage | Commands |
 |---|---|---|
-| [Setup](script_reference/setup.md) | setup | `def_layer` · `add_block` · `add_keepout` · `add_net` · `add_bus` · `corner_margin` · `detour_channel` · `set_min_stub_length[_dir\|_layer]` · `set_feedthru` · `set_track_pitch` · `set_unit_check` · `import_lef_tech` |
+| [Setup](script_reference/setup.md) | setup | `def_layer` · `add_block` (incl. multi-rect / TEG mode) · `add_keepout` · `add_net` · `add_bus` · `corner_margin` · `detour_channel` · `set_min_stub_length[_dir\|_layer]` · `set_feedthru` · `set_teg_mode` · `set_track_pitch` · `set_unit_check` · `import_lef_tech` |
 | [Bundler](script_reference/bundling.md) | 1 | `run_bundler` · `run_hier_bundler` · `dump_hbundles` |
 | [Topology generator](script_reference/topologies.md) | 2 | `generate_topologies[_for_bundle]` · `generate_more_topologies` · TopoEdit session (`edit_topology` … `edit_commit`) · `generate_hier_topologies` · `generate_topologies_for_hbundle` · `set_prune_dominated` · `set_dedup_loci` · `set_drop_dangling` · `set_trim_mst_legs` · `set_trim_trunk_stubs` |
 | [Planner](script_reference/planner.md) | 3, 4c | `set_planner_param` · `run_planner` (+ `hier`, `post_nuts`) · `select_topology` · `select_topologies` · `unpin_topology` · `dump_pins` · `retire_sidecar` |
@@ -52,7 +52,8 @@ Commands run in the following order. Later stages depend on earlier ones.
 | Stage | Command(s) | Purpose |
 |------:|---|---|
 | Setup | `def_layer` | Register metal layers |
-| Setup | `add_block` | Place floorplan blocks (with optional per-block corner margin) |
+| Setup | `add_block` | Place floorplan blocks (with optional per-block corner margin; the `rect …` form declares a multi-rect block with optional `teg_mode thru\|over`) |
+| Setup | `set_teg_mode` | Global default TEG mode for multi-rect blocks declared without a per-block `teg_mode` keyword (prospective — declare it first; per-block keyword wins) |
 | Setup | `corner_margin` | Set global corner margin for all blocks without a per-block override |
 | Setup | `set_min_stub_length`, `_dir`, `_layer` | Set minimum stub length globally, per direction, or per layer |
 | Setup | `set_feedthru` | Mark a block×layer set as routable-through (opt-in feedthru) |
