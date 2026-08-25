@@ -98,6 +98,25 @@ static bool seg_spans_rect(const ConnSeg& cs, double perp, const Rect& r) {
             && cs.along_lo <= r.y2 && cs.along_hi >= r.y1;
 }
 
+// True when segment `cs` at `perp` genuinely CROSSES rect `r`'s INTERIOR: perp
+// strictly inside the perp-face range AND a positive-length along overlap with
+// the interior.  This is the pass-through-as-ATTACHMENT reading, deliberately
+// stricter than seg_spans_rect (the inclusive coverage reading): a wire lying
+// ON a block's face — grazing an edge, or merely touching a corner — is
+// over-the-edge, not electrically joined to the route THROUGH the block, so it
+// must not manufacture a phantom attachment that hides an antenna.  A trunk
+// that legitimately crosses its driver block over-the-cell runs strictly
+// inside the footprint, so the false-positive the pass-through term guards
+// against (a crossing trunk with one junction, Codex #483) is still credited.
+static bool seg_crosses_rect_interior(const ConnSeg& cs, double perp, const Rect& r) {
+    if (cs.horiz)
+        return perp > r.y1 && perp < r.y2
+            && cs.along_lo < r.x2 && cs.along_hi > r.x1;
+    else
+        return perp > r.x1 && perp < r.x2
+            && cs.along_lo < r.y2 && cs.along_hi > r.y1;
+}
+
 // FEEDTHRU_RELAY: a block must not be silently used as a feedthrough relay --
 // every stub landing on a block's face must be wire-connected to the others.
 //
@@ -253,10 +272,18 @@ static std::vector<int> island_roots(const std::vector<ConnSeg>& segs)
 //   * a BUSTERM tap            -> attaches at its face coordinate
 //   * a SEG junction           -> attaches at `at_pos` along this segment
 //   * a PASS-THROUGH block     -> the segment crosses a connected block's
-//                                 footprint without tapping it (the joint the
-//                                 block-coverage checks above accept as a
-//                                 valid connection); each such block is one
-//                                 attachment, keyed by name
+//                                 INTERIOR without tapping it (over-the-cell
+//                                 routing that joins the route through the
+//                                 block); each such block is one attachment,
+//                                 keyed by name.  Crossing is the strict
+//                                 interior test (seg_crosses_rect_interior),
+//                                 NOT the inclusive coverage span: a wire
+//                                 grazing a block's edge or touching a corner
+//                                 lies ON the face, joins nothing through the
+//                                 block, and must not manufacture a phantom
+//                                 second attachment that hides an antenna
+//                                 (the OOB+MST edge-graze escape:
+//                                 lShape1-dnuts b1, seg grazing rect's top face)
 //
 // Both refinements matter (Codex review on #483).  Without the pass-through
 // term a trunk that crosses its driver block and joins one junction would be
@@ -280,13 +307,16 @@ SegAttachment seg_attachment(const ConnSeg& cs, const Topology& topo,
         if (c.kind == SegConn::BUSTERM) { ++a.n_busterm; a.positions.insert(c.face_coord); }
         else                            { ++a.n_seg;     a.positions.insert(c.at_pos); }
     }
-    // ... plus every connected block this segment merely CROSSES (a
-    // pass-through joint, which carries no conn record).
+    // ... plus every connected block this segment genuinely CROSSES (a
+    // pass-through joint, which carries no conn record).  Crossing means the
+    // INTERIOR (seg_crosses_rect_interior), not the inclusive coverage span:
+    // an edge-graze or corner-touch is over-the-edge metal, not an attachment,
+    // so it must not rescue a one-attachment segment from the antenna verdict.
     for (const auto& bname : topo.connected_block_names) {
         auto rects = fp.get_block_rects(bname);
         if (rects.empty()) rects.push_back(fp.get_block_bounds(bname));
         for (const Rect& r : rects)
-            if (seg_spans_rect(cs, (double)cs.perp_pos, r)) {
+            if (seg_crosses_rect_interior(cs, (double)cs.perp_pos, r)) {
                 a.through.insert(bname);
                 break;
             }
