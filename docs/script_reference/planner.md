@@ -227,7 +227,7 @@ Demonstrated end-to-end by `flow/hbundles/08_cross_level.buda` and
 ### `select_topology`
 
 ```
-select_topology <bundle> <topo_id>
+select_topology <bundle> <topo_id | type-spec | group:N>
 ```
 
 Manually pin a specific topology candidate for a given bundle, overriding the
@@ -256,7 +256,7 @@ always describe the pinned topology's segment list. Pins set before
 | Argument | Type | Description |
 |---|---|---|
 | `bundle` | int \| string | Bundle ID, net-name hint, or `id:<N>` / `net:<prefix>`. |
-| `topo_id` | int \| `group:<N>` | Plain `<N>` pins that single 1-based candidate. `group:<N>` pins a **super-candidate** — see below. |
+| `topo_id` | int \| type-spec \| `group:<N>` | Plain `<N>` pins that single 1-based candidate. A non-numeric token is a **type spec** (below). `group:<N>` pins a **super-candidate** — see further below. |
 
 An out-of-range or unmatched selector reports a specific error naming the bus and
 its candidate count, e.g. `invalid topology id 29 for bundle 8 (bus_033): valid
@@ -268,6 +268,41 @@ generate_topologies[_for_bundle] for it first`.
 select_topology bus_033 29   # pin bus_033's 29th candidate (by name)
 select_topology 8 29         # equivalent, by numeric bundle ID
 ```
+
+#### Type specs — the pin that survives a regeneration
+
+A candidate **id** is a position in a WL-sorted pool, so it renumbers whenever
+the pool is regenerated with different knobs (`double_detour`, `multi_trunk`,
+`no_hanan_loci`, a prune/dedup setting, …) — the pin you wrote yesterday can
+point at a different route today. A **type spec** names the *shape* instead,
+which is what the architect actually chose:
+
+```buda
+select_topology d1 Z_VHV                  # the shape, planner picks among them
+select_topology b44 TRUNK_H+MST@y1268     # the shape at (near) a trunk locus
+select_topology d1 group:Z_VHV            # the family containing that choice
+```
+
+Resolution rules, each step **reported**:
+
+- the shape (the part before the first `@`) matches **case-insensitively**
+  against the candidates' own type strings;
+- a coordinate component (`@y1268`, `@x240`) matches by axis against the
+  **closest** candidate locus — the exact coordinate may not exist after a
+  regeneration (Hanan loci move with the knobs), so the nearest is taken and
+  the distance printed (`nearest match (off by 18)`);
+- when several candidates match (a coordinate-free spec, or ties), the one
+  with the lowest **real planner cost** wins after `run_planner` (the same
+  `candidate_costs` source the explorer's `debug` view reads); before a plan
+  exists the estimated wirelength orders them, and the message names which
+  basis was used;
+- an unknown shape errors listing the shapes the pool actually has; a
+  coordinate on an axis no same-shape candidate carries errors with the
+  coordinate-free spec as the remedy.
+
+`select_topologies` accepts type specs in its pairs too, where they shine: one
+spec pins the same shape across a bundle list whose members number their
+candidates differently.
 
 #### Super-candidate (family) pins — `group:<N>`
 

@@ -1032,6 +1032,97 @@ class EditMixin:
             if ow is w:
                 return
 
+    @staticmethod
+    def _parse_topo_spec(spec):
+        """Split a topology TYPE token into its shape and components:
+        'Z_VHV@y300@x245' -> ('Z_VHV', [('y', 300.0), ('x', 245.0)], []).
+        A component that is not <axis-letters><number> is kept as a LITERAL
+        that must match verbatim — conservative for any type spelling this
+        parser has not met.  Used on both the user's spec and the candidates'
+        own type strings, so the two cannot disagree about the format."""
+        import re
+        parts = spec.split('@')
+        coords, literals = [], []
+        for p in parts[1:]:
+            m = re.fullmatch(r'([A-Za-z]+)(-?\d+(?:\.\d+)?)', p)
+            if m:
+                coords.append((m.group(1).lower(), float(m.group(2))))
+            else:
+                literals.append(p)
+        return parts[0], coords, literals
+
+    def _resolve_topo_spec(self, w, spec):
+        """Resolve a TYPE selector — 'Z_VHV', 'TRUNK_H+MST@y1268' — to a
+        0-based candidate index in `w`'s pool.  Returns (tidx, None) or
+        (None, error).
+
+        This is the pin that SURVIVES regeneration: candidate ids renumber
+        whenever the pool is rebuilt with different knobs (double_detour,
+        multi_trunk, ...), but the SHAPE the architect chose does not.  So:
+
+        - the shape (the pre-@ component) matches case-insensitively;
+        - a coordinate component matches by AXIS against the candidate's own
+          components, CLOSEST first — the exact locus may not exist after a
+          regeneration (Hanan loci move with the knobs), and refusing over a
+          moved trunk line would defeat the point, so the nearest is taken
+          and the distance REPORTED;
+        - ties, and coordinate-free specs matching several candidates, rank
+          by the planner's REAL charged cost when a plan exists (the same
+          `CongestionPlanner::candidate_costs` source the explorer's debug
+          view reads), by estimated wirelength before one does — and the
+          basis is named, because the two orderings can differ.
+
+        Every resolution prints what it matched and how it chose."""
+        shape, coords, lits = self._parse_topo_spec(spec)
+        shape_matches = []          # (index, candidate) with the right shape
+        matches = []                # (index, coord_distance)
+        for i, c in enumerate(w.input.candidates):
+            cshape, ccoords, clits = self._parse_topo_spec(c.type)
+            if cshape.lower() != shape.lower():
+                continue
+            if any(l not in clits for l in lits):
+                continue
+            shape_matches.append(i)
+            cmap = {}
+            for ax, v in ccoords:
+                cmap.setdefault(ax, []).append(v)
+            dist, ok = 0.0, True
+            for ax, v in coords:
+                if ax not in cmap:
+                    ok = False
+                    break
+                dist += min(abs(v - cv) for cv in cmap[ax])
+            if ok:
+                matches.append((i, dist))
+        if not matches:
+            if shape_matches:
+                return None, (
+                    f"no '{shape}' candidate carries the requested "
+                    f"coordinate axis; {len(shape_matches)} shape match(es) "
+                    f"exist — pin without the coordinate: '{shape}'")
+            shapes = sorted({self._parse_topo_spec(c.type)[0]
+                             for c in w.input.candidates})
+            return None, (f"no candidate of shape '{shape}' — this pool has: "
+                          f"{', '.join(shapes) if shapes else 'no candidates'}")
+        costs, is_real = self._candidate_costs(w)
+
+        def _cost(i):
+            r = costs.get(i)
+            return getattr(r, 'total', float('inf')) if r is not None \
+                else float('inf')
+
+        idx, dist = min(matches, key=lambda t: (t[1], _cost(t[0]), t[0]))
+        note = (f"[TopoSpec] '{spec}' -> topo {idx + 1} "
+                f"({w.input.candidates[idx].type})")
+        if coords and dist > 0:
+            note += f", nearest match (off by {dist:g})"
+        if len(matches) > 1:
+            basis = ("REAL planner cost" if is_real
+                     else "estimated wirelength (no plan yet)")
+            note += f"; chosen by {basis} among {len(matches)} match(es)"
+        print(note)
+        return idx, None
+
     def _select_single_topology_internal(self, bid, tid, group=False):
         """Helper for select_topology/select_topologies: set a pin without
         re-planning layers.  Returns True only when a pin was actually APPLIED
@@ -1044,8 +1135,13 @@ class EditMixin:
         `input.pinned_group` (the member indices) and clears `topology_pinned`;
         a single pin does the inverse (clears pinned_group), so the two pin
         modes are mutually exclusive per bundle.
+
+        `tid` may also be a STRING — a topology TYPE spec ('Z_VHV',
+        'TRUNK_H+MST@y1268') — resolved against the found bundle's pool by
+        `_resolve_topo_spec`: the pin that survives a regeneration whose new
+        knobs renumbered every candidate id.
         """
-        tidx = tid - 1  # Convert 1-based id to 0-based index
+        tidx = None if isinstance(tid, str) else tid - 1  # 1-based -> 0-based
 
         def _bad_id(w_or_n, label):
             n = w_or_n if isinstance(w_or_n, int) else len(w_or_n.input.candidates)
@@ -1093,6 +1189,13 @@ class EditMixin:
 
         for w in self.bundles:
             if w.input.original_bundle.id == bid:
+                if isinstance(tid, str):
+                    tidx, err = self._resolve_topo_spec(w, tid)
+                    if tidx is None:
+                        print(f"Error: bundle {bid} "
+                              f"({self._bundle_label(w)}): {err}")
+                        return False
+                    tid = tidx + 1
                 if tidx < 0 or tidx >= len(w.input.candidates):
                     _bad_id(w, self._bundle_label(w))
                     return False
@@ -1106,6 +1209,15 @@ class EditMixin:
         # Look up the original ID in the expansion map and apply to all instances.
         wrappers = self._hier_expansion_map.get(bid, [])
         if wrappers:
+            if isinstance(tid, str):
+                # The candidate pool is the template's, shared by every
+                # instance — resolve the spec once, against the first.
+                tidx, err = self._resolve_topo_spec(wrappers[0], tid)
+                if tidx is None:
+                    print(f"Error: bundle {bid} "
+                          f"({self._bundle_label(wrappers[0])}): {err}")
+                    return False
+                tid = tidx + 1
             # BundleWrapper has no bare .candidates — the pool lives on .input
             # (audit P3-02: this branch crashed with AttributeError before any
             # pin was applied).

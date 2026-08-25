@@ -36,7 +36,7 @@ namespace eval prompt {
     variable verbs {
         {topos    "?sel?"        "list a bundle's candidates (1-based `topo` column)"}
         {explore  "?sel?"        "open the topology explorer (close it to return)"}
-        {pin      "<sel> <N>"    "pin candidate N — 1-based, as the explorer shows it"}
+        {pin      "<sel> <N|type>" "pin candidate N (1-based) or a TYPE (Z_VHV, TRUNK_H+MST@y1268)"}
         {unpin    "<sel>"        "drop a pin, letting the planner re-choose"}
         {replan   ""             "re-run the planner and route with the current pins"}
         {show     ""             "open the main viewer on the routed design"}

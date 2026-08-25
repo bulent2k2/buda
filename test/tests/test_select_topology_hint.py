@@ -123,3 +123,104 @@ def test_select_topologies_mixes_hints_and_numeric_ranges():
     assert out.count("Pinned") == 2
     assert _pinned(s, "busA") == (True, 0)
     assert _pinned(s, "busB") == (True, 0)
+
+# ── type-spec selectors ─────────────────────────────────────────────────────
+# `select_topology <sel> <type-spec>` — the pin that survives a regeneration
+# whose new knobs (double_detour, multi_trunk, ...) renumbered every candidate
+# id: shape matches case-insensitively, a coordinate matches the CLOSEST
+# candidate locus (reported), and ambiguity resolves by the planner's REAL
+# cost after run_planner, by estimated wirelength before it.
+
+
+def _shapes(w):
+    return [c.type.split("@")[0] for c in w.input.candidates]
+
+
+def test_type_spec_pins_by_shape_and_reports():
+    s = _sess()
+    w = s.bundles[0]
+    shape = _shapes(w)[len(w.input.candidates) // 2]
+    out = _run(s, f"select_topology id:{w.input.original_bundle.id} {shape}")
+    assert "[TopoSpec]" in out and "Pinned" in out
+    pinned_idx = w.plan.selected_topology_index
+    assert w.input.topology_pinned
+    assert w.input.candidates[pinned_idx].type.split("@")[0] == shape
+
+
+def test_type_spec_matches_closest_coordinate_and_says_how_far():
+    s = _sess()
+    w = s.bundles[0]
+    # Find the candidate with the LARGEST value on some axis, then ask for a
+    # coordinate 7 past it — the nearest match is that candidate, off by 7.
+    best = None
+    for i, c in enumerate(w.input.candidates):
+        for comp in c.type.split("@")[1:]:
+            ax = comp.rstrip("-0123456789.")
+            if ax and comp[len(ax):].lstrip("-").replace(".", "").isdigit():
+                v = float(comp[len(ax):])
+                if best is None or v > best[3]:
+                    best = (i, c.type.split("@")[0], ax, v)
+    assert best is not None, "fixture pool has no coordinate-bearing candidate"
+    i, shape, ax, v = best
+    out = _run(s, f"select_topology id:{w.input.original_bundle.id} "
+                  f"{shape}@{ax}{v + 7:g}")
+    assert "nearest match (off by 7" in out, out
+    assert w.plan.selected_topology_index == i, out
+
+
+def test_type_spec_ambiguity_ranks_by_planner_cost_after_a_plan():
+    s = _sess("run_planner 3")
+    w = s.bundles[0]
+    shapes = _shapes(w)
+    shape = next((sh for sh in shapes if shapes.count(sh) > 1), None)
+    assert shape is not None, "fixture pool has no repeated shape"
+    out = _run(s, f"select_topology id:{w.input.original_bundle.id} {shape}")
+    assert "chosen by REAL planner cost among" in out, out
+    assert w.input.topology_pinned
+
+
+def test_type_spec_ambiguity_ranks_by_wirelength_before_a_plan():
+    s = _sess()
+    w = s.bundles[0]
+    shapes = _shapes(w)
+    shape = next((sh for sh in shapes if shapes.count(sh) > 1), None)
+    assert shape is not None, "fixture pool has no repeated shape"
+    out = _run(s, f"select_topology id:{w.input.original_bundle.id} {shape}")
+    assert "chosen by estimated wirelength (no plan yet)" in out, out
+
+
+def test_type_spec_unknown_shape_lists_the_pool():
+    s = _sess()
+    w = s.bundles[0]
+    out = _run(s, f"select_topology id:{w.input.original_bundle.id} Q_NOPE")
+    assert "no candidate of shape 'Q_NOPE'" in out
+    assert _shapes(w)[0] in out          # the remedy names real shapes
+    assert not w.input.topology_pinned
+
+
+def test_type_spec_survives_a_regeneration_that_renumbers_ids():
+    # The motivating case: regenerate with a knob that grows the pool (ids
+    # renumber), and the SAME spec still lands on the same shape.
+    s = _sess()
+    w = s.bundles[0]
+    shape = _shapes(w)[0]
+    _run(s, f"select_topology id:{w.input.original_bundle.id} {shape}")
+    n_before = len(w.input.candidates)
+    _run(s, f"generate_topologies_for_bundle "
+            f"id:{w.input.original_bundle.id} double_detour")
+    out = _run(s, f"select_topology id:{w.input.original_bundle.id} {shape}")
+    assert "[TopoSpec]" in out and "Pinned" in out
+    idx = w.plan.selected_topology_index
+    assert w.input.candidates[idx].type.split("@")[0] == shape
+
+
+def test_type_spec_in_select_topologies_pairs():
+    s = _sess()
+    wa = next(w for w in s.bundles
+              if w.input.original_bundle.get_net_names()[0].startswith("busA"))
+    wb = next(w for w in s.bundles
+              if w.input.original_bundle.get_net_names()[0].startswith("busB"))
+    out = _run(s, f"select_topologies busA {_shapes(wa)[0]} "
+                  f"busB {_shapes(wb)[0]}")
+    assert out.count("Pinned") == 2
+    assert wa.input.topology_pinned and wb.input.topology_pinned
