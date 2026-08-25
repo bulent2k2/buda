@@ -239,6 +239,13 @@ CORPUS = [
     # to the un-spanned rect), so the row is 0/0/0 now and guards emission:
     # a regressed leg fires TEG_OPEN and moves the row LOUDLY.  ~0.1s.
     "flow/teg_over_audit.buda",
+    # MST-on-TEG-over guard (teg_multirect_status.md Final-state limitation 1,
+    # RESOLVED 2026-08-25): the MST firing repro + its spanning control as one
+    # row — bundle 1's tree needs the attachment stub to the OVER receiver's
+    # far rect, bundle 2's r2→r4 edge SPANS that rect so no metal is added.
+    # EXPECTED CLEAN (0/0/0); a regressed attachment fires TEG_OPEN and moves
+    # the row LOUDLY.  ~0.1s.
+    "flow/teg_mst_over.buda",
 ]
 
 

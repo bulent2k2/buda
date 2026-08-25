@@ -57,8 +57,8 @@ destination block names are derived automatically from the netlist.
 | `TRUNK_V+MST@x{trunk}` | TRUNK_V hybrid with MST inter-branch edges. Symmetric. |
 | `TRUNK_H_OOB@y{trunk}` | H spine outside the pin bounding box + V stubs (detour equivalent of U-shape). |
 | `TRUNK_V_OOB@x{trunk}` | V spine outside the pin bounding box + H stubs. |
-| `MST_HV` | Prim MST on block bboxes, L-bends H-first. Lower total wirelength for scattered pins. Generated for 4+ blocks. |
-| `MST_VH` | Prim MST, L-bends V-first. |
+| `MST_HV` | Prim MST on block bboxes (multi-rect blocks: edges land on the closest **rect pair**), L-bends H-first. Lower total wirelength for scattered pins. Generated for 4+ blocks. A `teg_mode over` endpoint's rects the finished tree leaves unreached get **TEG attachment metal** (see below). |
+| `MST_VH` | Prim MST, L-bends V-first. Same TEG-over attachment. |
 | `BITRUNK_H` | Two parallel H spines at 25th/75th percentile Y + vertical backbone. Generated for 4+ receivers. |
 | `BITRUNK_HVH@…` | **Requires `multi_trunk`.** Two-level datapath tree: a root H spine feeds perpendicular V branch trunks, each tapping a cluster of x-aligned blocks (a column becomes a multi-tap pass-through trunk). Wins on column-aligned datapaths. |
 | `BITRUNK_VHV@…` | **Requires `multi_trunk`.** Row-oriented mirror: a root V spine feeds H branch trunks tapping y-aligned block rows. |
@@ -98,6 +98,26 @@ counterparts when all else is equal.  (`topology.bridge_segments` — the former
 union-face bridge annotation nothing downstream placed — stays empty at
 generation and is only restored from pre-change checkpoints, where the
 `TEG_OPEN` audit reports the unrealized bridge.)
+
+**MST candidates** carry their TEG-over connection metal too (2026-08-25 —
+the former "MST emits no TEG connection metal" limitation is resolved): an
+MST edge lands on the closest rect pair only, so after the tree is fully
+wired (relay completion included) every rect of an OVER endpoint that no
+tree segment touches — judged by the audit's own inclusive contact, expanded
+over the same physical-adjacency suppression as the trunk shapes — gets an
+**attachment stub** onto the tree: a single perpendicular T-stub from the
+rect's locus-facing face where a tree segment's span overlaps the rect, else
+a two-leg L turning onto the nearest segment's span midpoint; the cheapest
+attachment wins, min-stub floors apply, and the stub taps the rect's face
+(face → outward, like every stub).  A rect with no legal attachment (every
+target shares its perp band — the same-band shape) stays metal-free and
+LOUD via `TEG_OPEN`, exactly like the trunk path's same-band sibling; an
+ADJACENT rect (physically contiguous with a reached rect) is suppressed and,
+if such a candidate is routed, likewise still reports `TEG_OPEN` per rect.
+`TRUNK_*+MST` hybrids inherit the seed trunk's per-rect connection metal (a
+multi-rect branch block keeps its trunk stubs on the legacy hybrid path), so
+they need no separate attachment pass.  Vehicle: `flow/teg_mst_over.buda`
+(the fix plus its spanning-edge control).
 
 **Notes:**
 - Each call targets exactly one bundle. For N bundles, call N times.

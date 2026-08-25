@@ -491,6 +491,40 @@ def test_flip_mst_edge_rejects_bend_on_block_corner():
     assert (100, 150) in bends, "unobstructed flip should reach the opposite bend"
 
 
+def test_flip_mst_edge_refuses_when_a_stub_t_junctions_a_leg_interior():
+    """A foreign segment T-junctioned on the INTERIOR of an MST edge's leg
+    depends on that leg's whole extent — the MST TEG attachment stub
+    (Final-state limitation 1's fix) hangs an OVER rect's stub off an
+    arbitrary tree segment — and the flip moves the extent wholesale, so
+    nothing would repair the stranded junction (ripup's `_rr_apply_move`
+    re-derives seg_conns but not geometry).  The bend-anchor guard now
+    covers the whole leg; the legs' far endpoints (p1/p2) survive the flip,
+    so a sibling sharing one of those must NOT block it."""
+    def make_topo(stub):
+        t = buda.Topology()
+        t.type = "MST_HV"
+        t.segments = [_seg(100, 50, 250, 50, 4, 0),     # H leg p1 -> bend
+                      _seg(250, 50, 250, 150, 5, 0),    # V leg bend -> p2
+                      stub]                              # foreign attachment
+        return t
+
+    fp = buda.Floorplan()
+    # Mid-leg T-junction at (180,50) — strictly inside the H leg: refuse.
+    t1 = make_topo(_seg(180, 110, 180, 50, 5, -1))
+    before = [(s.start.x, s.start.y, s.end.x, s.end.y) for s in t1.segments]
+    assert buda.flip_mst_edge(t1, 0, 4, 5, fp) is False, \
+        "flip must refuse when a foreign endpoint sits on a leg's interior"
+    assert before == [(s.start.x, s.start.y, s.end.x, s.end.y)
+                      for s in t1.segments], \
+        "a refused flip must not mutate the geometry"
+
+    # A stub anchored at p1 (100,50) — a far endpoint that SURVIVES the
+    # flip — must not block it.
+    t2 = make_topo(_seg(40, 50, 100, 50, 4, -1))
+    assert buda.flip_mst_edge(t2, 0, 4, 5, fp) is True, \
+        "a junction at the edge's far endpoint survives the flip"
+
+
 def test_trunk_mst_has_more_segments_than_trunk():
     """TRUNK+MST has more segments than its corresponding plain TRUNK."""
     fp = buda.Floorplan()
