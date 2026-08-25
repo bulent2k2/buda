@@ -1107,11 +1107,19 @@ class EditMixin:
         costs, is_real = self._candidate_costs(w)
 
         def _cost(i):
+            # The explorer debug view's escalation ordering, exactly
+            # (viz_explorer/nav.py): a STRICT-feasible candidate outranks
+            # every infeasible one BEFORE raw cost compares — an infeasible
+            # route can carry a lower best-effort score, and pinning it over
+            # a feasible same-shape alternative would manufacture overflow.
             r = costs.get(i)
-            return getattr(r, 'total', float('inf')) if r is not None \
-                else float('inf')
+            if r is None:
+                return (1, float('inf'))
+            return (0 if getattr(r, 'feasible', True) else 1,
+                    getattr(r, 'total', float('inf')))
 
-        idx, dist = min(matches, key=lambda t: (t[1], _cost(t[0]), t[0]))
+        idx, dist = min(matches,
+                        key=lambda t: (t[1],) + _cost(t[0]) + (t[0],))
         note = (f"[TopoSpec] '{spec}' -> topo {idx + 1} "
                 f"({w.input.candidates[idx].type})")
         if coords and dist > 0:
@@ -1120,8 +1128,43 @@ class EditMixin:
             basis = ("REAL planner cost" if is_real
                      else "estimated wirelength (no plan yet)")
             note += f"; chosen by {basis} among {len(matches)} match(es)"
+        if is_real and _cost(idx)[0]:
+            # Every match was STRICT-infeasible — the pin still applies (a
+            # pin is an explicit override), but say what it costs.
+            note += ("; NOTE: no STRICT-feasible match — this pin is a "
+                     "best-effort candidate (expect overflow)")
         print(note)
         return idx, None
+
+    def _resolve_topo_token_for_bid(self, bid, token):
+        """Resolve a topology selector token for ONE bundle WITHOUT mutating
+        anything: an int passes through; a TYPE spec resolves against the
+        bundle's pool (direct wrapper, or the hier expansion map's shared
+        template pool).  Returns the 1-based id, or None after printing the
+        error.
+
+        The batch commands (`select_topologies`, a prefix hint matching
+        several bundles) resolve EVERY spec through this BEFORE applying any
+        pin: applying a pin changes the wrapper's selected index while its
+        seg_layers stay stale until the trailing `_replan_layers`, and a
+        later spec's planner-cost ranking (`candidate_costs` recharges the
+        committed state) must rank against the real committed plan, not
+        that hybrid (Codex #838)."""
+        if not isinstance(token, str):
+            return token
+        w = next((x for x in self.bundles
+                  if x.input.original_bundle.id == bid), None)
+        if w is None:
+            wrappers = self._hier_expansion_map.get(bid, [])
+            w = wrappers[0] if wrappers else None
+        if w is None:
+            print(f"Error: bundle {bid} not found")
+            return None
+        tidx, err = self._resolve_topo_spec(w, token)
+        if tidx is None:
+            print(f"Error: bundle {bid} ({self._bundle_label(w)}): {err}")
+            return None
+        return tidx + 1
 
     def _select_single_topology_internal(self, bid, tid, group=False):
         """Helper for select_topology/select_topologies: set a pin without

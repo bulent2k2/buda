@@ -224,3 +224,53 @@ def test_type_spec_in_select_topologies_pairs():
                   f"busB {_shapes(wb)[0]}")
     assert out.count("Pinned") == 2
     assert wa.input.topology_pinned and wb.input.topology_pinned
+
+
+class _FakeCost:
+    """Duck-typed CandidateCost for steering the ranking under test."""
+    def __init__(self, total, feasible):
+        self.total, self.feasible = total, feasible
+
+
+def test_type_spec_prefers_feasible_over_cheaper_infeasible():
+    # The explorer debug view's escalation ordering (nav.py): STRICT-feasible
+    # outranks infeasible BEFORE raw cost compares — an infeasible candidate
+    # can carry a lower best-effort score, and pinning it over a feasible
+    # same-shape alternative would manufacture overflow (Codex #838 P1).
+    s = _sess("run_planner 3")
+    w = s.bundles[0]
+    shapes = _shapes(w)
+    shape = next(sh for sh in shapes if shapes.count(sh) > 1)
+    idxs = [i for i, sh in enumerate(shapes) if sh == shape]
+    fake = {i: _FakeCost(1000.0, True) for i in range(len(shapes))}
+    fake[idxs[0]] = _FakeCost(1.0, False)      # cheapest, but infeasible
+    fake[idxs[1]] = _FakeCost(999.0, True)     # feasible wins anyway
+    s._candidate_costs = lambda _w: (fake, True)
+    out = _run(s, f"select_topology id:{w.input.original_bundle.id} {shape}")
+    assert w.plan.selected_topology_index == idxs[1], out
+    assert "no STRICT-feasible match" not in out
+
+    # All matches infeasible: the pin still applies (an explicit override),
+    # but the note says what it costs.
+    for i in idxs:
+        fake[i] = _FakeCost(1.0, False)
+    out = _run(s, f"select_topology id:{w.input.original_bundle.id} {shape}")
+    assert "no STRICT-feasible match" in out, out
+
+
+def test_batch_specs_resolve_before_any_pin_mutates_state():
+    # Both specs must resolve against the UNCHANGED committed state before
+    # either pin applies: a pin leaves its wrapper's seg_layers stale until
+    # the trailing _replan_layers, and a later spec's planner-cost ranking
+    # must not read that hybrid (Codex #838 P2).  Observable as ordering:
+    # every [TopoSpec] resolution prints before the first "Pinned".
+    s = _sess("run_planner 3")
+    wa = next(w for w in s.bundles
+              if w.input.original_bundle.get_net_names()[0].startswith("busA"))
+    wb = next(w for w in s.bundles
+              if w.input.original_bundle.get_net_names()[0].startswith("busB"))
+    out = _run(s, f"select_topologies busA {_shapes(wa)[0]} "
+                  f"busB {_shapes(wb)[0]}")
+    assert out.count("[TopoSpec]") == 2
+    assert out.count("Pinned") == 2
+    assert out.rfind("[TopoSpec]") < out.find("Pinned"), out

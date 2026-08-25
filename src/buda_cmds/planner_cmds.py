@@ -348,9 +348,17 @@ def cmd_select_topology(session, cmd, args, cmd_line):
     if err:
         print(f"Error: {err}")
         return
+    # Resolve EVERY type spec first, against the unchanged committed state:
+    # applying a pin leaves the wrapper's seg_layers stale until the trailing
+    # _replan_layers, and a later bundle's planner-cost ranking must not
+    # read that hybrid (Codex #838).  Ints pass through untouched.
+    resolved = [(bid, session._resolve_topo_token_for_bid(bid, tid))
+                for bid in bids]
     applied = False
-    for bid in bids:
-        if session._select_single_topology_internal(bid, tid, group=grp):
+    for bid, rtid in resolved:
+        if rtid is None:
+            continue
+        if session._select_single_topology_internal(bid, rtid, group=grp):
             applied = True
     if applied:
         session._replan_layers()
@@ -404,15 +412,26 @@ def cmd_select_topologies(session, cmd, args, cmd_line):
         print("Error: select_topologies requires (bundle_ids, topo_id|type) "
               "pairs")
         return
-    applied = False
+    # Two passes, whole-command: resolve every pair's spec against the
+    # UNCHANGED committed state first, then apply — a pin leaves its
+    # wrapper's seg_layers stale until the trailing _replan_layers, and a
+    # later pair's planner-cost ranking must not read that hybrid state
+    # (Codex #838).
+    resolved = []
     for i in range(0, len(args), 2):
         tid = _topo_token(args[i+1])
         if tid is None:
             print(f"Error: invalid topology selector '{args[i+1]}'")
             continue
         for bid in _parse_selector_list(session, args[i]):
-            if session._select_single_topology_internal(bid, tid):
-                applied = True
+            resolved.append((bid, session._resolve_topo_token_for_bid(bid,
+                                                                      tid)))
+    applied = False
+    for bid, rtid in resolved:
+        if rtid is None:
+            continue
+        if session._select_single_topology_internal(bid, rtid):
+            applied = True
     if applied:
         session._replan_layers()
         session._persist_topologies()   # refresh is_selected in the BDB
