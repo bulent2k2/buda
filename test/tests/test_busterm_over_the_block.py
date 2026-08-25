@@ -103,8 +103,38 @@ def test_overtheblock_connection_metal_ranks_after_thru():
 
 
 # ---------------------------------------------------------------------------
-# Given — multi-rect block with explicit teg_mode (unique to this file)
+# Given — global teg_mode default + multi-rect blocks (unique to this file)
 # ---------------------------------------------------------------------------
+
+@given(parsers.re(r'the global teg_mode default is "(?P<mode>over|thru)"'))
+def given_global_teg_mode(ctx, mode):
+    # The `set_teg_mode` global default (teg_multirect_status.md open 14):
+    # resolved at DECLARATION time by add_block_rects when no explicit mode
+    # is passed — prospective-only, so declare it before the blocks.
+    ctx['fp'].set_default_teg_mode(
+        buda.TegMode.OVER if mode.lower() == 'over' else buda.TegMode.THRU)
+
+
+@given(parsers.re(
+    r'a block "(?P<name>[^"]+)" with rects '
+    r'\((?P<rx1>\d+),(?P<ry1>\d+)\)-\((?P<rx2>\d+),(?P<ry2>\d+)\) and '
+    r'\((?P<sx1>\d+),(?P<sy1>\d+)\)-\((?P<sx2>\d+),(?P<sy2>\d+)\) and '
+    r'no per-block teg_mode'
+))
+def given_multi_rect_block_no_teg(ctx, name, rx1, ry1, rx2, ry2,
+                                  sx1, sy1, sx2, sy2):
+    # No teg_mode argument: the block inherits the floorplan's global default
+    # (exactly what the CLI does for an add_block line without the keyword).
+    ctx['fp'].add_block_rects(
+        name,
+        [(int(rx1), int(ry1), int(rx2), int(ry2)),
+         (int(sx1), int(sy1), int(sx2), int(sy2))],
+    )
+    ctx.setdefault('block_names', []).append(name)
+    ctx['block_rects'][name] = [
+        (int(rx1), int(ry1), int(rx2), int(ry2)),
+        (int(sx1), int(sy1), int(sx2), int(sy2)),
+    ]
 
 @given(parsers.re(
     r'a block "(?P<name>[^"]+)" with rects '

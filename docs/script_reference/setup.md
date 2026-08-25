@@ -1,6 +1,6 @@
 # BUDA Script Reference — Setup commands
 
-Technology, floorplan, netlist, and routing-policy declarations that precede the pipeline stages: `def_layer`, `add_block`, `add_keepout`, `add_net`, `add_bus`, `corner_margin`, `detour_channel`, `set_min_stub_length[_dir|_layer]`, `set_feedthru`, `set_track_pitch`, `set_unit_check`, `import_lef_tech`.
+Technology, floorplan, netlist, and routing-policy declarations that precede the pipeline stages: `def_layer`, `add_block`, `add_keepout`, `add_net`, `add_bus`, `corner_margin`, `detour_channel`, `set_min_stub_length[_dir|_layer]`, `set_feedthru`, `set_teg_mode`, `set_track_pitch`, `set_unit_check`, `import_lef_tech`.
 
 Part of the [BUDA Script Reference](../BUDA_SCRIPT_REFERENCE.md) — see its pipeline overview for where these commands run in the flow.
 
@@ -97,7 +97,17 @@ integer. To place a design whose natural units are fractional, **scale it** (µm
 → nm) rather than rounding at the block — rounding a 1.4-unit-wide cell to
 integers distorts it by tens of percent.
 
-| `teg_mode thru\|over` | keyword | Optional; multi-rect form only. Controls how topology generation handles trunks that fall in the gap between rects. Default: `thru`. See **TEG mode** below. |
+The rect **list** is validated at declaration too: a truncated rect (fewer
+than 4 coordinates), a **degenerate** rect (zero width or height — its edges
+would be block faces and Hanan lines with no extent behind them), and a
+**duplicate** rect (identical to an earlier one after coordinate-order
+normalization — it adds no geometry and would double that rect's stubs/taps)
+are all flow-stopping errors naming the offending rect. Overlapping and
+edge-adjacent **non-identical** rects are legal and load-bearing: interior
+overlap is exactly what classifies a block as rectilinear (L/C-shape), and
+touching edges drive the OVER adjacency suppression.
+
+| `teg_mode thru\|over` | keyword | Optional; multi-rect form only. Controls how topology generation handles trunks that fall in the gap between rects. Default: the `set_teg_mode` global default (`thru` when never set). See **TEG mode** below. |
 | `corner_margin dx N` | keyword | Optional. Shrink the routing face by `N` units in X (top/bottom faces). If `dy` is omitted, the same value applies to Y as well. |
 | `corner_margin dy N` | keyword | Optional. Shrink the routing face by `N` units in Y (left/right faces). |
 | `corner_margin pct_h P` | keyword | Shrink X faces by `P`% of block width. If `pct_v` is omitted, same percentage applies to height. |
@@ -195,6 +205,34 @@ add_block u_notch  rect  200  0  280  100  rect  220  300  300  400
 # Hierarchy envelope: a top-level block whose children are imported as sub-blocks.
 # LOW layers can route through the envelope; congestion is charged via child cuts.
 add_block u_proc  0  0  400  400  container
+```
+
+---
+
+### `set_teg_mode`
+
+```
+set_teg_mode <thru|over>
+```
+
+Set the **global default TEG mode**: what a multi-rect block declared
+*without* an explicit per-block `teg_mode` keyword gets. The per-block
+keyword always wins over the global default (most-specific-first, the same
+convention as `set_feedthru`), in either direction. When the command is
+never used the default is `thru`, so existing flows are byte-identical.
+
+Resolution is at **declaration time** — prospective only, matching
+`add_block`'s other declaration-time resolutions: a block declared *before*
+`set_teg_mode` keeps the mode it was declared under, so declare the default
+before the blocks it should govern. This is the deliberate choice: a
+retroactive default would silently re-mode blocks already declared (and
+possibly already routed against), while the prospective rule keeps every
+block's mode readable off the script text above it.
+
+```
+set_teg_mode over                                        # design convention: rects are NOT internally connected
+add_block u_l   rect 0 0 100 400  rect 0 0 400 100       # inherits over
+add_block u_dp  rect 200 0 300 100  rect 400 0 500 100  teg_mode thru   # per-block override wins
 ```
 
 ---

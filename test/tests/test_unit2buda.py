@@ -113,3 +113,37 @@ def test_parametrize_case_selection():
         pass
 
     assert u._parametrize_values(t2, 1) == {"a": 3, "b": 4}
+
+
+def test_global_teg_default_is_recorded_and_emitted(tmp_path):
+    # The `set_teg_mode` global default (teg_multirect_status open 14; Codex
+    # P2 on PR #839): a test that sets the API default and then declares a
+    # KEYWORDLESS multi-rect block routes under OVER — the emitted repro must
+    # carry `set_teg_mode over` BEFORE that block (declaration-time
+    # resolution), else it runs under THRU and no longer reproduces the
+    # topology.  An explicit per-block mode must still win untouched.
+    tf = tmp_path / "test_teg_default.py"
+    tf.write_text(
+        "import buda\n"
+        "def test_default_over():\n"
+        "    fp = buda.Floorplan()\n"
+        "    fp.add_block('A', 0, 150, 100, 250)\n"
+        "    fp.set_default_teg_mode(buda.TegMode.OVER)\n"
+        "    fp.add_block_rects('B', [(200, 0, 300, 100),\n"
+        "                             (200, 300, 300, 400)])\n"
+        "    fp.add_block_rects('C', [(400, 0, 500, 100),\n"
+        "                             (400, 300, 500, 400)],\n"
+        "                       teg_mode=buda.TegMode.THRU)\n"
+        "    g = buda.TopologyGenerator(fp)\n"
+        "    g.set_layer_ids(4, 5)\n"
+        "    g.generate_candidates('A', ['B', 'C'])\n")
+    r, txt = _run(tmp_path, f"{tf}::test_default_over")
+    assert r.returncode == 0, r.stderr
+    lines = txt.splitlines()
+    assert "set_teg_mode over" in lines
+    b_line = next(l for l in lines if l.startswith("add_block B"))
+    c_line = next(l for l in lines if l.startswith("add_block C"))
+    # Declaration-time order: the default precedes the block it governed.
+    assert lines.index("set_teg_mode over") < lines.index(b_line)
+    assert "teg_mode" not in b_line          # keywordless stays keywordless
+    assert c_line.endswith("teg_mode thru")  # explicit per-block mode wins

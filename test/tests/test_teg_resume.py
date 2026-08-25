@@ -266,3 +266,58 @@ def test_flat_resume_keeps_teg_open_audit_armed(tmp_path, monkeypatch):
         "TEG_OPEN went silent across the resume — the floorplan lost its "
         "rects/teg_mode re-declaration:\n" + out2)
     assert "OVER block 'r2'" in out2
+
+
+# ── the HIER stage-resume whitelist (teg_multirect_status open 14 follow-up,
+#    Codex P1 on PR #839): a hier flow's setup replays SESSION-STATE VERBS
+#    ONLY (construction is in the checkpoint), so a verb missing from
+#    tools/buda_interact.tcl's session_verbs is silently HELD.  `add_block`
+#    is whitelisted, so a recorded `set_teg_mode over` before a keywordless
+#    multi-rect add_block would replay the block WITHOUT the default — the
+#    block reverts to THRU (the default is declaration-time-resolved) and
+#    the candidate pool silently changes.  No tclsh runs in this harness
+#    (the mid-tier btcl tests skip without one), so these tests parse the
+#    REAL lists out of the Tcl source — they cannot drift, and the
+#    membership test fails on the pre-fix whitelist. ──
+
+_INTERACT_TCL = __import__("pathlib").Path(__file__).resolve().parents[2] \
+    / "tools" / "buda_interact.tcl"
+
+
+def _tcl_list(name):
+    """The words of `set <name> { ... }` in buda_interact.tcl."""
+    import re
+    text = _INTERACT_TCL.read_text()
+    m = re.search(r"set %s \{([^}]*)\}" % re.escape(name), text)
+    assert m, f"set {name} {{...}} not found in {_INTERACT_TCL}"
+    return m.group(1).split()
+
+
+def test_hier_resume_session_verbs_include_set_teg_mode():
+    verbs = _tcl_list("session_verbs")
+    # Anchors: the list we parsed is the real whitelist.
+    assert "set_feedthru" in verbs and "add_block" in verbs
+    assert "set_teg_mode" in verbs, (
+        "set_teg_mode is missing from buda_interact.tcl's session_verbs: a "
+        "hier stage-resume replays add_block but HOLDS the recorded global "
+        "TEG default, so a keywordless multi-rect block silently reverts "
+        "to THRU with a different candidate pool")
+
+
+def test_hier_resume_classification_replays_teg_default_in_order():
+    # The hier classification rule, applied with the REAL Tcl lists: session
+    # verbs replay in trace order, construction is held.  The default is
+    # declaration-time-resolved, so ORDER matters too — set_teg_mode must
+    # replay BEFORE the add_block it governed in the build.
+    session_verbs = _tcl_list("session_verbs")
+    construction = _tcl_list("construction_verbs")
+    trace = ["open_bdb ck.bdb",
+             "set_teg_mode over",
+             "add_block B rect 200 0 300 100 rect 200 300 300 400",
+             "add_inst i0 leaf top 0 0"]
+    replayed = [ln for ln in trace if ln.split()[0] in session_verbs]
+    held = [ln for ln in trace if ln.split()[0] in construction]
+    assert "set_teg_mode over" in replayed
+    assert held == ["add_inst i0 leaf top 0 0"]      # construction stays held
+    assert replayed.index("set_teg_mode over") \
+        < replayed.index("add_block B rect 200 0 300 100 rect 200 300 300 400")
