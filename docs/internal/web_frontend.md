@@ -8,6 +8,22 @@ layer adds only transport + serialization; it contributes **no routing logic**.
 Plan of record: the phased implementation plan (Phases 0–5). This doc tracks the
 as-built backend.
 
+## Quick reference: stop → build → restart
+
+The "my server looks stale" recipe (details in
+[Restart vs. refresh](#restart-vs-refresh--picking-up-a-change)):
+
+```bash
+pkill -f "uvicorn web.server"    # 1. stop (or Ctrl-C in its terminal)
+bin/bb                           # 2. rebuild C++ (the layer --reload can NOT hot-swap)
+bin/bb web                       # 2b. only if Scala client sources changed (needs sbt)
+PYTHONPATH=build:src uvicorn web.server:app --port 8000 --reload   # 3. restart
+```
+
+`--reload` covers Python-source edits only. A rebuilt `build/*.so` needs the
+stop/restart above; static HTML and a rebuilt `main.js` need only a browser
+reload (the mounts are `no-cache`).
+
 ## Backend (`src/web/`)
 
 Three thin modules over a single headless `BudaSession`:
@@ -157,7 +173,7 @@ Frame schema (`kind`):
 Broadcasts go to every client of the session, so a second viewer sees another
 tab's stage progress live. **Both clients** open the WS on load (the reference
 client's `connectWS`; the Scala client's `WsClient.connect`, both auto-reconnect
-on close), show a pulsing "running <stage>… <s>s" indicator on
+on close), show a pulsing `running <stage>… <s>s` indicator on
 `started`/`heartbeat`, clear it on `done`, forward `notable` to the log, and
 refresh state — the planner/nuts/dnuts buttons go through `/api/stage/*` (the
 instant bundler/topology buttons stay on `/api/command`; the ripup and negotiate
