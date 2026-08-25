@@ -314,3 +314,54 @@ def test_edit_add_stub_single_rect_byte_identical():
     out = _out(s, "edit_add_stub A 4")
     assert "do not overlap on the stub axis" in out
     _quiet(s, "edit_abort")
+
+
+def test_edit_add_stub_thru_pass_through_takes_precedence():
+    """Codex P2 on #840 (fails pre-fix): a V trunk @x250 CROSSES the L-block's
+    base while the arm is also reachable with a real face — under THRU the
+    crossed rect already connects the whole block (its internal routing joins
+    the rects; generation's best_rect picks the zero-cost crossed rect and
+    emits no stub), so a stub to the arm is unnecessary external metal between
+    equivalent terminals.  Pre-fix the loop discarded the crossed rect and
+    emitted the arm stub (100,200)-(250,200); now the pass-through verdict
+    takes precedence, matching the historical union-bbox refusal.  Same
+    precedence for the TOUCH shape (trunk on a rect face)."""
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    _quiet(s,
+           "def_layer 4 M4 H TOP 20", "def_layer 5 M5 V TOP 20",
+           "add_block L rect 0 0 100 400 rect 0 0 400 100",   # thru (default)
+           "add_block B 100 550 700 650", "add_bus d[4] L.p B.q",
+           "run_bundler", "generate_topologies")
+    bid = s.bundles[0].input.original_bundle.id
+    out = _out(s, f"edit_topology {bid} new",
+               "edit_add_trunk V 250 0 600",       # crosses the base interior
+               "edit_add_stub L 0")
+    assert "target crosses the block (pass-through, no stub needed)" in out, out
+    assert len(s._edit_topo.segments) == 1         # trunk only, no arm stub
+    out = _out(s, "edit_add_trunk H 400 0 700",    # seg 1: ON the arm's top face
+               "edit_add_stub L 1")
+    assert "zero-length stub (target touches the block face)" in out, out
+    assert len(s._edit_topo.segments) == 2
+    _quiet(s, "edit_abort")
+
+
+def test_edit_add_stub_over_crossed_rect_still_stubs_unspanned_rect():
+    """The OVER twin of the precedence test: OVER declares the rects NOT
+    internally connected, so the crossed base connects only itself and the
+    un-spanned arm still needs real metal — the edit stub to the arm is
+    exactly the connector leg generation's 1(a) rectilinear branch emits for
+    the Sec-1.1 TRUNK_V@x250 shape ((100,200)-(250,200)), and it is also the
+    hand fix for the trunk-Direct-inside-ONE-disjoint-rect residual that
+    generation leaves to TEG_OPEN."""
+    s = _lshape_session()                          # teg_mode over
+    bid = s.bundles[0].input.original_bundle.id
+    out = _out(s, f"edit_topology {bid} new",
+               "edit_add_trunk V 250 0 600",
+               "edit_add_stub L 0",
+               "edit_status")
+    assert "stub added" in out and "violations: none" in out, out
+    stub = s._edit_topo.segments[1]
+    assert sorted([stub.start.x, stub.end.x]) == [100, 250]   # the 1(a) leg
+    assert stub.start.y == stub.end.y == 200
+    _quiet(s, "edit_abort")

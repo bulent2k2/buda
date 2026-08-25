@@ -198,7 +198,7 @@ EditVerdict edit_add_stub(Topology& topo, const Floorplan& fp,
                              : std::max(j.start.y, j.end.y);
     const int j_perp = j_horiz ? j.start.y : j.start.x;
     std::vector<Rect> reachable;      // overlap on the stub axis + a real face
-    bool any_overlap = false, any_cross = false;
+    bool any_overlap = false, any_cross = false, any_touch = false;
     for (const Rect& r : bt_all_rects(bt)) {
         if (std::max(j_lo, axis.along_lo(r)) > std::min(j_hi, axis.along_hi(r)))
             continue;                              // no span overlap: unreachable
@@ -206,16 +206,34 @@ EditVerdict edit_add_stub(Topology& topo, const Floorplan& fp,
         if (axis.perp_face(r, j_perp) == j_perp) { // target inside/on this rect
             if (j_perp > axis.perp_lo(r) && j_perp < axis.perp_hi(r))
                 any_cross = true;                  // strict interior: pass-through
+            else
+                any_touch = true;                  // on the rect face: contact
             continue;
         }
         reachable.push_back(r);
     }
     if (!any_overlap)
         return fail("block and target segment do not overlap on the stub axis");
-    if (reachable.empty())
+    // A rect the target CROSSES (or touches) is already contacted by the
+    // target itself.  Under THRU that contact connects the WHOLE block — its
+    // internal routing joins the rects — so a stub to a farther rect would be
+    // unnecessary external metal between equivalent terminals (Codex P2 on
+    // #840; generation's best_rect picks the zero-cost crossed rect and emits
+    // no stub): the pass-through verdict takes precedence over any other
+    // reachable rect.  OVER revokes exactly that assumption — the crossed
+    // rect connects only itself — and generation's 1(a) rectilinear branch
+    // emits a connector LEG to each un-spanned rect (the §1.1 TRUNK_V@x250
+    // leg (100,200)-(250,200) is this very geometry), so there the reachable
+    // choice proceeds: the edit stub IS that leg, and it is also the hand fix
+    // for the documented trunk-Direct-inside-ONE-disjoint-rect residual that
+    // generation still leaves to TEG_OPEN.
+    if ((any_cross || any_touch)
+            && (bt.teg_mode != TegMode::OVER || reachable.empty()))
         return fail(any_cross
                         ? "target crosses the block (pass-through, no stub needed)"
                         : "zero-length stub (target touches the block face)");
+    // Here reachable is non-empty by construction: every overlapping rect
+    // either set a cross/touch flag (handled above) or was pushed.
     const Rect tap = best_rect(axis, reachable, j_perp);
     const int o_lo = std::max(j_lo, axis.along_lo(tap));
     const int o_hi = std::min(j_hi, axis.along_hi(tap));

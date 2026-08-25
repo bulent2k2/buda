@@ -713,7 +713,21 @@ wrong.
     `test_edit_commands.py` (notch → real-face fail-before/pass-after,
     unreachable-rect restriction, gap-only refusal, margin-inset face,
     single-rect byte-identity incl. failure messages).  Read §2.1's
-    `topo_edit` bullet as superseded by this entry.
+    `topo_edit` bullet as superseded by this entry.  Review follow-up
+    (PR #840 P2, verified by repro): the first cut let a rect the target
+    CROSSES be discarded while another reachable rect got a stub — under
+    THRU that is unnecessary external metal between internally-connected
+    terminals (generation's best_rect picks the zero-cost crossed rect and
+    emits no stub; the old union path refused with the pass-through
+    message).  Fixed with a MODE SPLIT, each side matched to generation as
+    measured: THRU gives the pass-through/touch verdict precedence over any
+    other reachable rect (refusal restored), while OVER — where the crossed
+    rect connects only itself — keeps emitting the stub, which is exactly
+    the connector leg the 1(a) rectilinear branch generates for the §1.1
+    `TRUNK_V@x250` shape ((100,200)-(250,200), measured identical) and the
+    hand fix for the trunk-Direct-inside-ONE-disjoint-rect residual that
+    generation leaves to TEG_OPEN.  One test per mode in
+    `test_edit_commands.py` (the THRU one fails pre-fix).
 17. **No import path produces multi-rect** (DEF rectilinear macros, GDS) —
     a roadmap item rather than a defect; note it in
     `opens_interchange.md` so it is not rediscovered.
