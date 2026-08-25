@@ -274,6 +274,41 @@ def test_edge_grazing_block_is_not_a_pass_through_attachment():
     assert [v.seg_idx for v in ants] == [added], [v.message for v in res.violations]
 
 
+def test_internal_seam_of_a_rectilinear_block_is_a_pass_through(monkeypatch):
+    """The interior of a RECTILINEAR block is the interior of its UNION, not of
+    each rect.  Two abutting rects share an edge that is a FACE of each yet
+    INTERIOR to the block — a wire along it is over-the-cell for its whole
+    length, with metal on both sides.  The per-rect strict test alone would
+    (wrongly) flag it as a graze; the seam term restores it (Ben's review on
+    #848).  Same probe and one-junction precondition as the graze test — only
+    C's shape differs: two abutting rects meeting on the stub's row."""
+    fp, topo, ct = _gen_z()
+    trunk = next(i for i, cs in enumerate(ct.segs()) if not cs.horiz)
+    tx = ct.segs()[trunk].perp_pos
+    lo, hi = ct.segs()[trunk].along_lo, ct.segs()[trunk].along_hi
+    mid = (lo + hi) // 2
+    # C is two abutting rects sharing the edge y=mid — the stub runs the seam
+    # (add_block_rects self-creates the block from its rect list).
+    fp.add_block_rects("C", [(tx + 40, mid - 60, tx + 120, mid),
+                             (tx + 40, mid, tx + 120, mid + 60)])
+    segs = list(topo.segments)
+    segs.append(_seg(tx, mid, tx + 80, mid, LAYER_H))            # runs the seam
+    topo.segments = segs
+    topo.connected_block_names = list(topo.connected_block_names) + ["C"]
+    buda.annotate_seg_conns(topo)
+    ct2 = buda.ConnTopology()
+    ct2.build(topo, fp)
+    added = len(ct2.segs()) - 1
+    cs = ct2.segs()[added]
+    rects = fp.get_block_rects("C")
+    # Precondition: two rects abutting on the stub's row (a real internal seam),
+    # and the stub carries the single junction that would make it an antenna.
+    assert len(rects) == 2 and len(cs.conns) == 1
+    assert cs.perp_pos == rects[0][3] == rects[1][1]            # seam coordinate
+    res = buda.check_nuts(ct2, _nominal_nuts(ct2), topo, fp, _layers(), 1)
+    assert not _antennas(res), [v.message for v in res.violations]
+
+
 def test_multiway_junction_conns_count_as_one_point():
     """Codex review on #483 (P2): a segment whose end meets a MULTI-WAY
     junction collects one SegConn per neighbour, all at the same `at_pos`.

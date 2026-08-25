@@ -117,6 +117,30 @@ static bool seg_crosses_rect_interior(const ConnSeg& cs, double perp, const Rect
             && cs.along_lo < r.y2 && cs.along_hi > r.y1;
 }
 
+// True when `cs` runs along an INTERNAL SEAM of a rectilinear block — the edge
+// two abutting rects share.  For a rectilinear block "the interior" is the
+// interior of the UNION, not of each rect: the shared edge is a FACE of each
+// rect (so seg_crosses_rect_interior fails against both) yet it is interior to
+// the block, with metal on BOTH sides of the wire.  Credit the crossing when
+// perp is the shared edge of two same-block rects, each with positive along
+// overlap: one rect's high perp-face on the seam (metal just below) and
+// another's low perp-face on it (metal just above).  An OUTER-face graze has a
+// rect on only one side, so it stays flagged (Ben's review on #848).
+static bool seg_along_block_seam(const ConnSeg& cs, double perp,
+                                 const std::vector<Rect>& rects) {
+    bool below = false, above = false;
+    for (const Rect& r : rects) {
+        const int flo = cs.horiz ? r.y1 : r.x1;   // perp-face low
+        const int fhi = cs.horiz ? r.y2 : r.x2;   // perp-face high
+        const int alo = cs.horiz ? r.x1 : r.y1;
+        const int ahi = cs.horiz ? r.x2 : r.y2;
+        if (!(cs.along_lo < ahi && cs.along_hi > alo)) continue;  // no along overlap
+        if (fhi == perp) below = true;   // r sits below: its top edge is the seam
+        if (flo == perp) above = true;   // r sits above: its bottom edge is the seam
+    }
+    return below && above;
+}
+
 // FEEDTHRU_RELAY: a block must not be silently used as a feedthrough relay --
 // every stub landing on a block's face must be wire-connected to the others.
 //
@@ -315,11 +339,18 @@ SegAttachment seg_attachment(const ConnSeg& cs, const Topology& topo,
     for (const auto& bname : topo.connected_block_names) {
         auto rects = fp.get_block_rects(bname);
         if (rects.empty()) rects.push_back(fp.get_block_bounds(bname));
+        bool crosses = false;
         for (const Rect& r : rects)
             if (seg_crosses_rect_interior(cs, (double)cs.perp_pos, r)) {
-                a.through.insert(bname);
+                crosses = true;
                 break;
             }
+        // A rectilinear block's internal seam is interior to the UNION even
+        // though it is a face of each rect — a wire along it is over-the-cell,
+        // not an edge-graze (Ben's review on #848).
+        if (!crosses && rects.size() > 1)
+            crosses = seg_along_block_seam(cs, (double)cs.perp_pos, rects);
+        if (crosses) a.through.insert(bname);
     }
     return a;
 }
