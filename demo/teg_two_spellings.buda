@@ -1,0 +1,83 @@
+# The TWO SPELLINGS of a rectilinear macro, side by side on one die.
+#
+# The same physical shape — an L (tall arm + wide base) — can be told to
+# BUDA three ways, and the viewer shows what each one buys:
+#
+#   LEFT  (soc_*) — the HIERARCHY spelling: a transparent CONTAINER
+#         envelope with two child leaf blocks placed in an L.  Buses
+#         target the CHILDREN (here soc_arm); the arm<->base join is the
+#         block's own internal routing — assumed, never drawn, never
+#         audited.  This is the only spelling the hier flow proper can
+#         hold: a BDB component is ONE bbox, so a multi-rect block cannot
+#         be declared as hier-design input (teg_multirect_status.md item 6
+#         "RESOLVED-AS-BOUNDED"; demo/teg_hier_hybrid.buda is the hybrid).
+#
+#   MIDDLE (l_over) — the TEG spelling, teg_mode OVER: one flat block of
+#         two rects declared NOT internally connected.  The pinned notch
+#         trunk crosses the base only, so BUDA emits a REAL connector leg
+#         to the arm — visible, routed, audited (TEG_OPEN would fire if
+#         it went missing), and counted by report_wl.
+#
+#   RIGHT (l_thru) — the TEG spelling, default THRU: same two rects,
+#         internal connectivity DECLARED.  The same notch trunk reaches
+#         the base only and no leg is emitted; instead the BUDA-1907
+#         census INFO names the untouched arm — the reliance made
+#         discoverable, not a violation.
+#
+# When to use which: a block whose own lower-level routing joins its
+# pieces (a placed-and-routed child, a hard macro) is a CONTAINER + leaf
+# children in a hierarchy, or a THRU multi-rect in a flat floorplan; an
+# abstract rectilinear outline whose pieces are NOT yet connected (early
+# planning, a reserved shape) is an OVER multi-rect, so the plan carries
+# — and prices — the connection metal explicitly.
+#
+# Endpoint: 4 bus segments, 16 bit-wires, check_design Success at nuts
+# AND dnuts, 0 unplaced, one BUDA-1907 census INFO for l_thru.
+
+# ── LEFT: the hierarchy spelling (container + children) ───────────────
+add_block soc_env 0 0 400 400 container
+add_block soc_arm 0 0 100 400
+add_block soc_base 100 0 400 100
+
+# ── MIDDLE: the TEG OVER spelling (one block, two rects) ──────────────
+add_block l_over rect 600 0 700 400 rect 600 0 1000 100 teg_mode over
+
+# ── RIGHT: the TEG THRU twin ──────────────────────────────────────────
+add_block l_thru rect 1200 0 1300 400 rect 1200 0 1600 100
+
+# One source above each macro: src_a sits straight above the arm (the
+# hierarchy target), src_b/src_c above their notches so both TEG routes
+# drop the same vertical trunk toward the L.
+add_block src_a 0 550 100 650
+add_block src_b 750 550 850 650
+add_block src_c 1350 550 1450 650
+
+def_layer 4 M4 H TOP 50
+def_layer 5 M5 V TOP 50
+
+add_bus a[4] src_a.tx soc_arm.rx
+add_bus b[4] src_b.tx l_over.rx
+add_bus c[4] src_c.tx l_thru.rx
+
+run_bundler STRICT
+generate_topologies
+
+def_track_pattern 4 0 (SIGNAL 2 2)x8
+def_track_pattern 5 0 (SIGNAL 2 2)x8
+
+# Type-spec pins (survive pool re-sorts): the hierarchy route is a
+# straight ribbon into the CHILD; both TEG routes drop the same notch
+# trunk, so OVER vs THRU differ only in what BUDA does about the
+# un-reached arm.
+select_topology a I_V
+select_topology b TRUNK_V@x750   # OVER: emits the connector leg to the arm
+select_topology c TRUNK_V@x1350  # THRU: no leg; BUDA-1907 census instead
+
+run_planner
+run_nuts
+check_design
+run_detailed_nuts
+check_design
+report_wl
+
+visualize

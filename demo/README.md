@@ -23,6 +23,8 @@ The **R&D / regression vehicles** used by the test suite live under
 | `congestion_demo.buda`, `keepout_demo.buda`, `large_fanout.buda` | Congestion planning, keep-out zones, and large-fan-out datapath trunks. |
 | `large_scale_demo.buda`, `large_scale_demo_pseudo_hier.buda`, `large_scale_demo_gen_topo.buda`, `realistic_large_chip.buda` | Larger synthetic chips (with `generate_large_demo.py` / `gen_realistic_large_chip.py` generators). The **flat** and **pseudo-hier** large-scale variants share one floorplan — see below. |
 | `talk1.buda`, `talk2.buda` | Small presentation/walkthrough scripts. |
+| `teg_hier_hybrid.buda` | Multi-rect **TEG** macros beside a **real BDB hierarchy** — the honest hybrid: a BDB component is one bbox, so multi-rect cannot be a hier-design input (teg_multirect_status.md item 6); the hierarchy is projected flat with `add_blocks_from_bdb` and the TEG macros are hand-declared beside it. Shows an OVER L's connector leg, an OVER gap-pair's gap stubs, and a THRU block's BUDA-1907 census, all pinned by **type spec**. |
+| `teg_two_spellings.buda` | The **two spellings of a rectilinear macro** side by side: container + child leaves (hierarchy way — internal join assumed), `teg_mode over` (connection metal explicit, routed and audited), and the `thru` twin (reliance reported by the BUDA-1907 census). The header teaches when to use which. |
 | `ariane*.buda` + `ariane/` | The Ariane core (with `gen_ariane136*.py` generators and a DEF/LEF import in `ariane/`). |
 | `mempool_{cluster,group,tile}.buda`, `nvdla_cbuf.buda`, `bp_tile.buda` | Realistic block/cluster designs. |
 | `ispd19_test{1,2,3,5,7}.buda` | ISPD-2019 contest benchmark designs (large). |
