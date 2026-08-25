@@ -138,12 +138,16 @@ def test_bridge_reliant_shape_now_routes_real_leg_and_audits_clean():
     assert "total detailed WL" in out and "12 bit-wire(s)" in out, out
 
 
-def test_unreached_rect_still_fires_teg_open_end_to_end():
-    # The audit half must keep firing where placed metal genuinely misses a
-    # rect: a trunk INSIDE one disjoint rect connects Direct and emits no gap
-    # stubs (OVER activates only for gap/partial-span trunks — the documented
-    # generation residual), so the other rect is untouched by any placed
-    # metal and TEG_OPEN reports it at both placed stages.
+def test_trunk_inside_one_disjoint_rect_now_stubs_the_other_and_audits_clean():
+    # Open 1 residual (i), FLIPPED — the flip is the fix's proof.  A trunk
+    # INSIDE one disjoint rect connects Direct, and used to emit no metal at
+    # all for the other rects ("OVER activates only for gap/partial-span
+    # trunks"), so the routed result fired TEG_OPEN at both placed stages.
+    # The Direct branch now covers disjoint blocks too: each rect outside
+    # the landing contiguity component gets a stub from its locus-facing
+    # perp face to the trunk (face → trunk, at the rect's along-centre), the
+    # spine pre-extended to cover the junction — so the route reaches every
+    # rect and the audit is clean.
     s = _session([
         "add_block T rect 0 300 200 400 rect 0 0 200 100 teg_mode over",
         "add_block src 400 0 500 100",
@@ -158,18 +162,183 @@ def test_unreached_rect_still_fires_teg_open_end_to_end():
     for i, c in enumerate(w.input.candidates):
         if c.type.startswith("TRUNK_H@y"):
             y = int(c.type.split("@y")[1].split("+")[0])
-            if 0 < y < 100:          # inside the lower rect: Direct, no stubs
+            if 0 < y < 100:          # inside the lower rect: Direct
                 pinned = c
                 with contextlib.redirect_stdout(io.StringIO()):
                     s.do_command(f"select_topology 1 {i + 1}")
                 break
     assert pinned is not None, "no trunk-inside-lower-rect candidate found"
+    trunk_y = int(pinned.type.split("@y")[1].split("+")[0])
+    # The upper rect's stub: a V segment at the rect's along-centre (x=100)
+    # from its bottom face (y=300) down to the trunk, tapping T.
+    stubs = [seg for i, seg in enumerate(pinned.segments)
+             if seg.start.x == seg.end.x == 100
+             and {seg.start.y, seg.end.y} == {300, trunk_y}
+             and any(bt is not None and bt.block_name == "T"
+                     for bt in pinned.seg_busterms.get(i, (None, None)))]
+    assert stubs, "expected the V stub from the upper rect down to the trunk"
+    n_segs = len(pinned.segments)
+    for cmd in ("run_planner", "run_nuts"):
+        with contextlib.redirect_stdout(io.StringIO()):
+            s.do_command(cmd)
+    placed = [t for t in s.nuts_result.segments if t.bundle_id == 1]
+    assert len(placed) == n_segs, "every segment incl. the stub must place"
+    verdict, out = _check(s, "nuts")
+    assert verdict["by_kind"].get("TEG_OPEN", 0) == 0, out
+    with contextlib.redirect_stdout(io.StringIO()):
+        s.do_command("run_detailed_nuts")
+    assert s.detailed_result.num_unplaced == 0
+    verdict, out = _check(s, "dnuts")
+    assert verdict["by_kind"].get("TEG_OPEN", 0) == 0, out
+
+
+def test_one_sided_trunk_now_stubs_every_rect_and_audits_clean():
+    # Open 1 residual (ii), FLIPPED: a trunk with ALL rects on the same side
+    # used to fall back to the single best-rect stub, leaving every other
+    # rect untouched (TEG_OPEN at the placed stages).  The gap branch now
+    # covers the one-sided approach too: every rect gets its own stub from
+    # its locus-facing perp face to the trunk, joined through the trunk.
+    s = _session([
+        "add_block T rect 0 200 200 300 rect 0 0 200 100 teg_mode over",
+        "add_block src 400 500 500 600",
+        "def_layer 4 M4 H TOP 0",
+        "def_layer 5 M5 V TOP 0",
+        "add_bus d[4] src.tx T.rx",
+        "run_bundler STRICT",
+        "generate_topologies",
+    ] + _TRACKS)
+    w = s.bundles[0]
+    pinned = None
+    for i, c in enumerate(w.input.candidates):
+        if c.type.startswith("TRUNK_H@y"):
+            y = int(c.type.split("@y")[1].split("+")[0])
+            if 300 < y < 500:        # above BOTH rects: one-sided
+                pinned = c
+                with contextlib.redirect_stdout(io.StringIO()):
+                    s.do_command(f"select_topology 1 {i + 1}")
+                break
+    assert pinned is not None, "no one-sided trunk candidate found"
+    trunk_y = int(pinned.type.split("@y")[1].split("+")[0])
+    # One stub per rect, each from that rect's locus-facing (top) face down
+    # to the trunk.
+    t_faces = sorted(
+        min(seg.start.y, seg.end.y)
+        for i, seg in enumerate(pinned.segments)
+        if seg.start.x == seg.end.x
+        and max(seg.start.y, seg.end.y) == trunk_y
+        and any(bt is not None and bt.block_name == "T"
+                for bt in pinned.seg_busterms.get(i, (None, None))))
+    assert t_faces == [100, 300], (
+        "expected one stub per rect (faces y=100 and y=300 to the trunk), "
+        f"got {t_faces}")
+    for cmd in ("run_planner", "run_nuts"):
+        with contextlib.redirect_stdout(io.StringIO()):
+            s.do_command(cmd)
+    verdict, out = _check(s, "nuts")
+    assert verdict["by_kind"].get("TEG_OPEN", 0) == 0, out
+    with contextlib.redirect_stdout(io.StringIO()):
+        s.do_command("run_detailed_nuts")
+    assert s.detailed_result.num_unplaced == 0
+    verdict, out = _check(s, "dnuts")
+    assert verdict["by_kind"].get("TEG_OPEN", 0) == 0, out
+
+
+def test_adjacent_chain_is_suppressed_and_separated_rect_still_stubbed():
+    # The Direct-branch suppression rules, at generation: a rect ADJACENT to
+    # the trunk's landing rect (touching edges, positive shared edge — the
+    # feature's adjacency rule) is physically continuous with it and gets no
+    # connection metal, TRANSITIVELY along a chain of touching rects — while
+    # a genuinely separated rect of the same block still gets its stub.
+    fp = buda.Floorplan()
+    # 3-rect chain: bottom (landing), middle and top touch in sequence;
+    # 4th rect separated above the chain.
+    fp.add_block_rects("B", [(200, 0, 300, 100), (200, 100, 300, 200),
+                             (200, 200, 300, 300), (200, 500, 300, 600)])
+    fp.set_block_teg_mode("B", buda.TegMode.OVER)
+    fp.add_block("A", 0, 0, 100, 100)
+    g = buda.TopologyGenerator(fp)
+    g.set_layer_ids(4, 5)
+    cand = next(c for c in g.generate_candidates("A", ["B"])
+                if c.type.startswith("TRUNK_H@y50"))
+    b_stub_faces = sorted(
+        y
+        for i, seg in enumerate(cand.segments)
+        if seg.start.x == seg.end.x
+        and any(bt is not None and bt.block_name == "B"
+                for bt in cand.seg_busterms.get(i, (None, None)))
+        for y in (seg.start.y, seg.end.y) if y != 50)
+    # Exactly one stub: from the separated rect's bottom face (y=500) down to
+    # the trunk; the touching chain (faces 100/200/300) emits nothing.
+    assert b_stub_faces == [500], b_stub_faces
+
+
+def test_same_band_disjoint_sibling_stays_loud_via_teg_open():
+    # The one Direct-branch corner residual (i)'s fix deliberately leaves on
+    # the LOUD path: a DISJOINT sibling sharing the trunk's perp band (two
+    # rects side by side along the spine, trunk inside one).  A perpendicular
+    # stub has no gap to bridge, a bare spine extension is retracted by NUTS
+    # span adjustment (an end with no junction has nothing holding it —
+    # measured), and an over-the-cell anchoring stub trips the #514
+    # tap-overhang ANTENNA rule — so nothing is emitted and the routed
+    # result reports TEG_OPEN, exactly as before the fix (documented in
+    # teg_multirect_status.md open 1).
+    s = _session([
+        "add_block T rect 300 0 400 100 rect 0 0 100 100 teg_mode over",
+        "add_block src 600 0 700 100",
+        "def_layer 4 M4 H TOP 0",
+        "def_layer 5 M5 V TOP 0",
+        "add_bus d[4] src.tx T.rx",
+        "run_bundler STRICT",
+        "generate_topologies",
+    ] + _TRACKS)
+    w = s.bundles[0]
+    pinned = None
+    for i, c in enumerate(w.input.candidates):
+        if c.type.startswith("TRUNK_H@y"):
+            y = int(c.type.split("@y")[1].split("+")[0])
+            if 0 < y < 100:          # inside both rects' shared perp band
+                pinned = c
+                with contextlib.redirect_stdout(io.StringIO()):
+                    s.do_command(f"select_topology 1 {i + 1}")
+                break
+    assert pinned is not None, "no same-band trunk candidate found"
     for cmd in ("run_planner", "run_nuts"):
         with contextlib.redirect_stdout(io.StringIO()):
             s.do_command(cmd)
     verdict, out = _check(s, "nuts")
     assert verdict["by_kind"].get("TEG_OPEN", 0) >= 1, out
-    assert "OVER block 'T'" in out and "(nuts)" in out
+    assert "OVER block 'T'" in out, out
+
+
+def test_mst_on_over_block_fires_teg_open_end_to_end():
+    # Open 1 residual (iii), still open BY SCOPING: MST candidates connect
+    # each edge at the closest rect pair and emit no TEG connection metal
+    # for an OVER block's other rects (per-rect attachment into an arbitrary
+    # tree segment would have to compose with relay completion, the
+    # shared-leg trims and ripup's edge flips — a redesign, documented in
+    # teg_multirect_status.md open 1).  This pins the guarantee that makes
+    # the scoping safe: the routed result is LOUD — TEG_OPEN at both placed
+    # stages naming the unreached rect — never silent.
+    s = _session([
+        "add_block src 0 0 100 100",
+        "add_block r1 300 300 400 400",
+        "add_block r2 rect 500 0 600 100 rect 900 0 1000 100 teg_mode over",
+        "add_block r3 300 600 400 700",
+        "def_layer 4 M4 H TOP 0",
+        "def_layer 5 M5 V TOP 0",
+        "add_bus d[4] src.tx r1.a,r2.b,r3.c",
+        "run_bundler STRICT",
+        "generate_topologies",
+    ] + _TRACKS)
+    w = s.bundles[0]
+    pin = next(i for i, c in enumerate(w.input.candidates)
+               if c.type.startswith("MST_"))
+    for cmd in (f"select_topology 1 {pin + 1}", "run_planner", "run_nuts"):
+        with contextlib.redirect_stdout(io.StringIO()):
+            s.do_command(cmd)
+    verdict, out = _check(s, "nuts")
+    assert verdict["by_kind"].get("TEG_OPEN", 0) >= 1, out
+    assert "OVER block 'r2'" in out and "rect#1 (900,0)-(1000,100)" in out, out
     with contextlib.redirect_stdout(io.StringIO()):
         s.do_command("run_detailed_nuts")
     verdict, out = _check(s, "dnuts")
@@ -271,26 +440,22 @@ def test_all_span_trunk_touches_every_rect_no_teg_open():
 def test_check_topo_does_not_carry_teg_open():
     # The kind is placed-stage only: check_topo feeds generation gates and
     # healer metrics, so it must not report TEG_OPEN even on a candidate that
-    # genuinely leaves a rect unreached (a trunk Direct inside one disjoint
-    # rect — the end-to-end firing shape above); the pool must not shrink
-    # over a reporting audit.
+    # genuinely leaves a rect unreached (an MST candidate on an OVER block —
+    # the end-to-end firing shape above, residual (iii)); the pool must not
+    # shrink over a reporting audit.
     s = _session([
-        "add_block T rect 0 300 200 400 rect 0 0 200 100 teg_mode over",
-        "add_block src 400 0 500 100",
+        "add_block src 0 0 100 100",
+        "add_block r1 300 300 400 400",
+        "add_block r2 rect 500 0 600 100 rect 900 0 1000 100 teg_mode over",
+        "add_block r3 300 600 400 700",
         "def_layer 4 M4 H TOP 0",
         "def_layer 5 M5 V TOP 0",
-        "add_bus d[4] src.tx T.rx",
+        "add_bus d[4] src.tx r1.a,r2.b,r3.c",
         "run_bundler STRICT",
         "generate_topologies",
     ] + _TRACKS)
-    cand = None
-    for c in s.bundles[0].input.candidates:
-        if c.type.startswith("TRUNK_H@y"):
-            y = int(c.type.split("@y")[1].split("+")[0])
-            if 0 < y < 100:
-                cand = c
-                break
-    assert cand is not None
+    cand = next(c for c in s.bundles[0].input.candidates
+                if c.type.startswith("MST_"))
     ct = buda.ConnTopology()
     ct.build(cand, s.fp)
     res = buda.check_topo(ct, cand, s.fp, 1)

@@ -1401,6 +1401,52 @@ static bool rects_are_rectilinear(const std::vector<Rect>& rects) {
     return false;
 }
 
+// Two rects share boundary metal: inclusive intersection with a positive-length
+// shared edge (a corner-point touch does not count).  Strict interior overlap is
+// the rectilinear case, which keeps its own branch; this is the ADJACENT case —
+// "touching edges, no gap" — where the block's shape is physically contiguous,
+// so over-the-block emits no connection metal (the feature's adjacency
+// suppression: busterm_over_the_block.feature, "bridge is omitted when rects
+// are adjacent").
+static bool rects_touch(const Rect& a, const Rect& b) {
+    if (a.x1 > b.x2 || b.x1 > a.x2 || a.y1 > b.y2 || b.y1 > a.y2) return false;
+    const int xov = std::min(a.x2, b.x2) - std::max(a.x1, b.x1);
+    const int yov = std::min(a.y2, b.y2) - std::max(a.y1, b.y1);
+    return xov > 0 || yov > 0;
+}
+
+// Per-rect flag "physically continuous with a rect the trunk lands in": seed =
+// every rect whose perp band contains the trunk locus, expanded transitively
+// over rects_touch (a chain of adjacent rects is one contiguous footprint).
+// Used by the OVER Direct branch on DISJOINT (non-rectilinear) blocks: a rect
+// in this component needs no connection metal — the trunk's landing rect and
+// everything adjacent to it form one piece of the block's shape — while every
+// rect OUTSIDE it needs its own stub/leg (residual (i) of
+// teg_multirect_status.md open 1: a trunk Direct inside one disjoint rect used
+// to emit nothing at all for the others).  A same-band NON-landing sibling is
+// a seed too although it gets no metal of its own (the documented LOUD
+// corner): anything suppressed through it shares its fate, and the TEG_OPEN
+// audit names each unreached rect — loud either way, never silent.
+static std::vector<char> teg_landing_component(const Axis& axis,
+                                               const std::vector<Rect>& rects,
+                                               int locus) {
+    const int n = (int)rects.size();
+    std::vector<char> in(n, 0);
+    std::vector<int> work;
+    for (int i = 0; i < n; ++i)
+        if (locus >= axis.perp_lo(rects[i]) && locus <= axis.perp_hi(rects[i])) {
+            in[i] = 1; work.push_back(i);
+        }
+    while (!work.empty()) {
+        int i = work.back(); work.pop_back();
+        for (int j = 0; j < n; ++j)
+            if (!in[j] && rects_touch(rects[i], rects[j])) {
+                in[j] = 1; work.push_back(j);
+            }
+    }
+    return in;
+}
+
 // Best rect for connecting bt to an H trunk at y_trunk: minimises stub length.
 // Best rect for connecting bt to a spine at perpendicular coordinate `trunk_locus`
 // (the shortest stub): pick the candidate rect whose perp-axis face is nearest the
@@ -3043,22 +3089,46 @@ void TopologyGenerator::add_trunk(const Axis& axis, bool suppress_stubs,
         if (blocks[i].teg_mode != TegMode::OVER || blocks[i].rects.size() < 2) continue;
         const auto& rects = blocks[i].rects;
         if (!has_stub[i]) {
-            // Rectilinear pass-through: a connector leg is emitted at each
-            // un-spanned rect's along-centre (see the emission loop).  Enforce
-            // the minimum stub length on each leg exactly as the ordinary stub
-            // path does at the top of this function (a too-short stub SKIPS the
-            // trunk) — the legs are stubs on the stub layer/direction, and the
-            // early check only sees has_stub[] entries, so a locus lying less
-            // than the floor outside an un-spanned rect would otherwise emit an
-            // illegally short leg no ordinary stub is allowed to have (Codex P2
-            // on the 1(a) emission).
-            if (!rects_are_rectilinear(rects)) continue;
+            // Direct pass-through (trunk inside the best rect): connection
+            // metal is emitted at each unreached rect's along-centre (see the
+            // emission loop).  Enforce the minimum stub length on each leg
+            // exactly as the ordinary stub path does at the top of this
+            // function (a too-short stub SKIPS the trunk) — the legs are
+            // stubs on the stub layer/direction, and the early check only
+            // sees has_stub[] entries, so a locus lying less than the floor
+            // outside an un-spanned rect would otherwise emit an illegally
+            // short leg no ordinary stub is allowed to have (Codex P2 on the
+            // 1(a) emission).
+            //   RECTILINEAR: a connector leg per un-spanned rect (the landed
+            //   1(a) behaviour, unchanged — rects sharing the trunk's perp
+            //   band are crossed by the spine inside the contiguous shape).
+            //   DISJOINT (open 1 residual (i), which used to emit NOTHING
+            //   here): a stub per rect outside the landing CONTIGUITY
+            //   component (a rect adjacent to the landing rect is physically
+            //   continuous with it — the feature's adjacency suppression);
+            //   a same-band sibling is reached by the SPINE itself, extended
+            //   through its along-centre.
+            const bool recti = rects_are_rectilinear(rects);
             const int min_leg = use_busterm_
                 ? floorplan_.get_min_stub_length(
                       axis.along_horiz ? 1 /*VERTICAL*/ : 0 /*HORIZONTAL*/, stub_layer)
                 : 0;
-            for (const auto& r : rects) {
+            std::vector<char> landed;
+            if (!recti) landed = teg_landing_component(axis, rects, locus);
+            for (size_t ri = 0; ri < rects.size(); ++ri) {
+                const auto& r = rects[ri];
+                // A rect sharing the trunk's perp band: rectilinear — the
+                // spine runs inside the contiguous shape; disjoint — a
+                // SAME-BAND sibling, which stays on the LOUD TEG_OPEN path
+                // (a perpendicular stub has no gap to bridge, a bare spine
+                // extension is RETRACTED by NUTS span adjustment — an end
+                // with no junction has nothing holding it, measured — and an
+                // over-the-cell anchoring stub trips the #514 tap-overhang
+                // ANTENNA rule; the honest fix needs spine-end anchoring
+                // machinery, so the corner is documented in
+                // teg_multirect_status.md open 1 rather than half-fixed).
                 if (locus >= axis.perp_lo(r) && locus <= axis.perp_hi(r)) continue;
+                if (!recti && landed[ri]) continue;    // contiguous with a landing rect
                 int leg_len = (axis.perp_hi(r) < locus) ? locus - axis.perp_hi(r)
                                                         : axis.perp_lo(r) - locus;
                 if (leg_len < min_leg) return;         // skip this trunk
@@ -3072,12 +3142,10 @@ void TopologyGenerator::add_trunk(const Axis& axis, bool suppress_stubs,
         for (const auto& r : rects)
             if (locus >= axis.perp_lo(r) && locus <= axis.perp_hi(r)) { trunk_inside_any = true; break; }
         if (trunk_inside_any) continue;
-        bool has_near = false, has_far = false;
-        for (const auto& r : rects) {
-            if (axis.perp_hi(r) <= locus) has_near = true;
-            else if (axis.perp_lo(r) >= locus) has_far = true;
-        }
-        if (!has_near || !has_far) continue;           // falls back to the normal att[i] stub
+        // Gap trunks (rects on BOTH sides) and one-sided trunks (open 1
+        // residual (ii), which used to fall back to the single best-rect
+        // stub) alike: every rect gets its own stub to the trunk, so extend
+        // the spine over every stub's junction.
         for (const auto& r : rects) {
             int a = axis.along_center(r);
             a_lo = std::min(a_lo, a);
@@ -3143,16 +3211,31 @@ void TopologyGenerator::add_trunk(const Axis& axis, bool suppress_stubs,
             // existed to connect, and was consumed by nothing downstream
             // (teg_multirect_status.md §1.3 / §2.2).  Ordinary segments ride the
             // whole pipeline — planner, NUTS, DNUTS, audits, report_wl, persist.
-            // Pure TEG blocks (disjoint rects) are exempt as before.
-            if (blocks[i].teg_mode == TegMode::OVER && !blocks[i].rects.empty()
-                    && rects_are_rectilinear(blocks[i].rects)) {
+            // DISJOINT blocks (open 1 residual (i), formerly exempt — a trunk
+            // Direct inside ONE disjoint rect emitted no metal for the others):
+            // a stub per rect outside the landing CONTIGUITY component (a rect
+            // adjacent to the landing rect is physically continuous with it —
+            // the feature's adjacency suppression), while a same-band sibling
+            // is reached by the spine itself (the pre-pass extended it through
+            // the sibling's along-centre).
+            if (blocks[i].teg_mode == TegMode::OVER && blocks[i].rects.size() >= 2) {
+                const auto& rects = blocks[i].rects;
+                const bool recti = rects_are_rectilinear(rects);
+                std::vector<char> landed;
+                if (!recti) landed = teg_landing_component(axis, rects, locus);
                 // FACE → trunk orientation, like every stub: emit_tap_segment
                 // seeds the busterm on the START endpoint, and a trunk-end seed
                 // shadows the real face annotation so NUTS loses its face
                 // anchor and retracts the leg (the gap-stub retraction bug,
                 // claude/teg-gap-stub-fix — same machinery, same hazard).
-                for (const auto& r : blocks[i].rects) {
+                for (size_t ri = 0; ri < rects.size(); ++ri) {
+                    const auto& r = rects[ri];
+                    // Same-band rects: rectilinear — spine inside the shape;
+                    // disjoint — the documented LOUD corner (see the
+                    // pre-pass note: nothing emitted here can survive
+                    // placement/audit without spine-end anchoring).
                     if (locus >= axis.perp_lo(r) && locus <= axis.perp_hi(r)) continue;
+                    if (!recti && landed[ri]) continue;   // contiguous with a landing rect
                     int a = axis.along_center(r);
                     if (axis.perp_hi(r) < locus)          // near side: perp-hi face → trunk
                         emit_tap_segment(t, axis.mkseg(a, axis.perp_hi(r), a, locus, stub_layer), &blocks[i]);
@@ -3181,33 +3264,33 @@ void TopologyGenerator::add_trunk(const Axis& axis, bool suppress_stubs,
                 if (locus >= axis.perp_lo(r) && locus <= axis.perp_hi(r)) { trunk_inside_any = true; break; }
 
             if (!trunk_inside_any) {
-                bool has_near = false, has_far = false;
+                // Gap trunks (rects on BOTH sides) and one-sided trunks (all
+                // rects on the same side — open 1 residual (ii), which used to
+                // fall back to the SINGLE best-rect stub, leaving every other
+                // rect untouched) alike: every rect gets its own stub to the
+                // trunk from its locus-facing perp face, joined THROUGH the
+                // trunk.
+                //
+                // Every stub is emitted FACE → trunk, like every other stub
+                // (the normal single stub below and MST taps alike), because
+                // emit_tap_segment seeds the busterm on the START endpoint.
+                // The far stub used to be emitted trunk → face, which put the
+                // seed on the TRUNK end: derive_conn_segs then dedupes BUSTERM
+                // conns per block, so the bogus trunk-end tap (face_coord =
+                // locus) shadowed the real face-end annotation, and — with the
+                // tapped-endpoint short-circuit suppressing the trunk-end
+                // junction record — NUTS had no face anchor at all and
+                // RETRACTED the stub's span to the trunk (measured: span
+                // [150,158] against a face at 300; BUSTERM_FACE + ANTENNA +
+                // TEG_OPEN on the placed result, both orientations).
                 for (const auto& r : rects) {
-                    if (axis.perp_hi(r) <= locus) has_near = true;
-                    else if (axis.perp_lo(r) >= locus) has_far = true;
+                    int a = axis.along_center(r);
+                    if (axis.perp_hi(r) <= locus)     // near side: perp-hi face → trunk
+                        emit_tap_segment(t, axis.mkseg(a, axis.perp_hi(r), a, locus, stub_layer), &blocks[i]);
+                    else                              // far side: perp-lo face → trunk
+                        emit_tap_segment(t, axis.mkseg(a, axis.perp_lo(r), a, locus, stub_layer), &blocks[i]);
                 }
-                if (has_near && has_far) {
-                    // Every stub is emitted FACE → trunk, like every other stub
-                    // (the normal single stub below and MST taps alike), because
-                    // emit_tap_segment seeds the busterm on the START endpoint.
-                    // The far stub used to be emitted trunk → face, which put the
-                    // seed on the TRUNK end: derive_conn_segs then dedupes BUSTERM
-                    // conns per block, so the bogus trunk-end tap (face_coord =
-                    // locus) shadowed the real face-end annotation, and — with the
-                    // tapped-endpoint short-circuit suppressing the trunk-end
-                    // junction record — NUTS had no face anchor at all and
-                    // RETRACTED the stub's span to the trunk (measured: span
-                    // [150,158] against a face at 300; BUSTERM_FACE + ANTENNA +
-                    // TEG_OPEN on the placed result, both orientations).
-                    for (const auto& r : rects) {
-                        int a = axis.along_center(r);
-                        if (axis.perp_hi(r) <= locus)     // near side: perp-hi face → trunk
-                            emit_tap_segment(t, axis.mkseg(a, axis.perp_hi(r), a, locus, stub_layer), &blocks[i]);
-                        else                              // far side: perp-lo face → trunk
-                            emit_tap_segment(t, axis.mkseg(a, axis.perp_lo(r), a, locus, stub_layer), &blocks[i]);
-                    }
-                    continue;
-                }
+                continue;
             }
         }
 

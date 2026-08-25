@@ -57,9 +57,12 @@ _TRACKS = [
 
 
 def _disjoint_cmds(teg):
-    """Two disjoint rects; a trunk Direct inside the lower rect touches only
-    it, so the upper rect (rect#0) is left to the block's interior — the
-    census shape for thru, the TEG_OPEN shape for over."""
+    """Two disjoint rects; under THRU a trunk Direct inside the lower rect
+    touches only it, so the upper rect (rect#0) is left to the block's
+    interior — the census shape.  (Under OVER the same trunk now emits a
+    real stub to the upper rect — open 1 residual (i) — so the OVER twin of
+    this shape routes clean; the OVER-gets-TEG_OPEN test below uses an MST
+    candidate instead, the remaining no-connection-metal path.)"""
     return [
         f"add_block T rect 0 300 200 400 rect 0 0 200 100{teg}",
         "add_block src 400 0 500 100",
@@ -153,11 +156,26 @@ def test_census_silent_when_every_rect_is_reached():
 
 
 def test_over_block_gets_teg_open_not_the_census():
-    # Same geometry declared OVER: the miss is a VIOLATION (TEG_OPEN), and
-    # the census — thru's report — must not double-report it.
-    s = _session(_disjoint_cmds(" teg_mode over"))
-    _pin_trunk_inside_lower_rect(s)
-    _route(s, "run_planner", "run_nuts")
+    # An OVER block whose rect the route misses: the miss is a VIOLATION
+    # (TEG_OPEN), and the census — thru's report — must not double-report
+    # it.  Since open 1 residuals (i)/(ii) landed, the trunk generator
+    # reaches every rect of an OVER block, so the missing-metal shape here
+    # is an MST candidate (residual (iii), the remaining scoped-out path:
+    # edges land on the closest rect pair only).
+    s = _session([
+        "add_block src 0 0 100 100",
+        "add_block r1 300 300 400 400",
+        "add_block r2 rect 500 0 600 100 rect 900 0 1000 100 teg_mode over",
+        "add_block r3 300 600 400 700",
+        "def_layer 4 M4 H TOP 0",
+        "def_layer 5 M5 V TOP 0",
+        "add_bus d[4] src.tx r1.a,r2.b,r3.c",
+        "run_bundler STRICT",
+        "generate_topologies",
+    ] + _TRACKS)
+    pin = next(i for i, c in enumerate(s.bundles[0].input.candidates)
+               if c.type.startswith("MST_"))
+    _route(s, f"select_topology 1 {pin + 1}", "run_planner", "run_nuts")
     verdict, out = _check(s, "nuts")
     assert verdict["by_kind"].get("TEG_OPEN", 0) >= 1, out
     assert "BUDA-1907" not in out

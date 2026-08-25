@@ -302,14 +302,84 @@ wrong.
    still-unrealized bridge is reported by TEG_OPEN ("declared bridge is
    unrealized"), never routed silently.  Non-OVER designs are byte-identical
    (every new path is gated on `teg_mode == OVER` + multi-rect; corpus
-   0 better / 0 worse, WL +0).  Residuals, all pre-existing and now LOUD
-   via TEG_OPEN rather than silent: a trunk Direct inside ONE disjoint
-   rect emits no metal for the other rects (the documented "OVER activates
-   only for gap/partial-span trunks" scope, pinned by
-   `test_unreached_rect_still_fires_teg_open_end_to_end`); a one-sided
-   approach (all rects on the same side of the trunk) still falls back to
-   the single best-rect stub; MST/BITRUNK still emit no TEG connection
-   metal (multi-rect branch blocks stay on the legacy un-completed path).
+   0 better / 0 worse, WL +0).  Residuals, all pre-existing and LOUD via
+   TEG_OPEN rather than silent:
+   ~~(i) a trunk Direct inside ONE disjoint rect emits no metal for the
+   other rects (the documented "OVER activates only for gap/partial-span
+   trunks" scope)~~ and ~~(ii) a one-sided approach (all rects on the same
+   side of the trunk) still falls back to the single best-rect stub~~
+   **BOTH RESOLVED 2026-08-25**, in the same `emit_tap_segment` machinery
+   and the same FACE→trunk orientation as every 1(a) stub (the #823 hazard
+   — a trunk-end busterm seed costs NUTS its face anchor — is not
+   reintroduced).  For (i) the Direct branch now covers DISJOINT blocks
+   too: each rect outside the landing CONTIGUITY component gets a stub
+   from its locus-facing perp face to the trunk at its along-centre
+   (min-stub floor enforced exactly as the rectilinear legs enforce it),
+   and the component
+   (`teg_landing_component`: locus-containing rects expanded transitively
+   over `rects_touch`) is what keeps the ADJACENT case suppressed — a rect
+   touching the landing rect on a positive-length shared edge is
+   physically continuous with it, the feature's adjacency rule, now
+   transitive by construction (a 3-rect touching chain emits nothing while
+   a separated 4th rect of the same block still gets its stub —
+   `test_adjacent_chain_is_suppressed_and_separated_rect_still_stubbed`).
+   For (ii) the gap branch simply dropped its rects-on-BOTH-sides gate, so
+   a one-sided approach emits the same per-rect face→trunk stubs joined
+   through the trunk.  Measured: the (i) repro — trunk inside the lower
+   disjoint rect — now places every segment and audits clean of TEG_OPEN
+   at nuts AND dnuts where it fired at both
+   (`test_trunk_inside_one_disjoint_rect_now_stubs_the_other_and_audits_clean`
+   — the old firing pin, flipped); the (ii) repro likewise
+   (`test_one_sided_trunk_now_stubs_every_rect_and_audits_clean`, one stub
+   per rect from faces y=100 and y=300 to the trunk); the feature scenario
+   "trunk inside one rect" is rewritten to the stub expectation (its
+   "OVER activates only in the GAP" comment was residual (i)'s spec).
+   Rectilinear Direct blocks and every non-OVER design are byte-identical
+   (the rectilinear branch is untouched; both new paths gate on
+   `teg_mode == OVER` + ≥2 rects), but OVER pools DO re-sort — every
+   one-sided trunk candidate gains its real per-rect stub WL — so
+   `flow/teg_over_audit.buda`'s pool went 18 → 17 candidates with
+   `TRUNK_V@x250` moving index 10 → 6, and the flow now pins by TYPE
+   (`select_topology 1 TRUNK_V@x250`, the #838 selector), retiring the
+   hard index; its routed endpoint is unchanged (3 segs / 12 bit-wires /
+   both audits Success, `test_teg_over_audit_flow_routes_clean`).  QoR
+   corpus (`--vs main` @ 0e24edb8): 0 better / 0 worse / 49 unchanged of
+   50, abstract AND detailed WL +0.00% (`ariane133_heal` NOT COMPARABLE —
+   its fetched inputs are absent in the measuring environment, the
+   harness's documented shape).
+   Two Direct-branch corners are deliberate and stay LOUD: a trunk Direct
+   inside one of two ADJACENT rects emits no connection metal (contiguous
+   shape, the feature's rule) while the placed TEG_OPEN contact predicate
+   is per-rect, so such a route — if selected — still reports TEG_OPEN
+   (pre-existing either way: the shape emitted nothing before too); and a
+   DISJOINT sibling sharing the trunk's perp band (rects side by side
+   along the spine, trunk inside one) also stays metal-free and
+   TEG_OPEN-loud — measured while building the fix: a perpendicular stub
+   has no gap to bridge, a bare spine extension through the sibling is
+   RETRACTED by NUTS span adjustment (a spine end with no junction has
+   nothing holding it), and an over-the-cell anchoring stub trips the
+   #514 tap-overhang ANTENNA rule (the spine, once anchored, crosses the
+   sibling and the stub reads as redundant metal) — the honest fix needs
+   spine-end anchoring machinery, so the corner is documented rather than
+   half-fixed, and pinned by
+   `test_same_band_disjoint_sibling_stays_loud_via_teg_open`.
+   What REMAINS is (iii), narrowed and verified LOUD:
+   **MST candidates (and the TRUNK+MST hybrids' multi-rect branch blocks,
+   which mostly drop at generation as non-simple) still emit no TEG
+   connection metal** — an MST edge lands on the closest rect pair only,
+   so an OVER block's other rects go unreached.  A fix here is a genuine
+   redesign, not a branch edit: there is no shared trunk locus, so
+   per-rect attachment would have to target an arbitrary tree segment and
+   compose with `complete_relay_junctions`' relay wiring, the shared-leg
+   trims (`set_trim_mst_legs`), and ripup's per-edge L/Z flips (a flip
+   re-routes the very edge a connector would hang from).  Left on the
+   legacy path and pinned LOUD end-to-end:
+   `test_mst_on_over_block_fires_teg_open_end_to_end` (a selected MST_HV
+   on an OVER receiver fires TEG_OPEN at both placed stages naming the
+   unreached rect — 1 bundle-level at nuts, 4 per-bit at dnuts) —
+   `test_teg_resume.py`'s dirty vehicle now rides the same shape, so the
+   resume-armed audit stays pinned too, and BITRUNK's twin pin is open
+   8's `test_bitrunk_on_over_block_fires_teg_open_end_to_end`.
    The 1(a) stubs/legs follow the FACE→trunk emission orientation the
    gap-stub retraction fix (#823, see (b)) established — a trunk-end
    busterm seed costs NUTS its face anchor and the stub retracts;

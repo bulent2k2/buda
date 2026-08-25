@@ -15,17 +15,18 @@
 # row guards emission's health: if the leg regresses, TEG_OPEN fires and the
 # row moves LOUDLY.
 #
-# Candidate pin: `select_topology 1 10` is a hard 1-based index —
-# TRUNK_V@x250 in the WL-sorted post-emission pool (18 candidates, none
-# bridged; the leg's real WL re-sorted the pool, which is why the pre-
-# emission pin was 13).  A hard index is fragile by nature, but there is no
-# pin-by-type selector; the guards are:
-#   * an index past the pool is a hard error (the flow exits non-zero), and
+# Candidate pin: `select_topology 1 TRUNK_V@x250` pins by TYPE (the
+# selector that survives a re-sorted pool — the flow used a hard index
+# before that selector existed, and the index moved with the pool twice: 13
+# pre-emission, 10 after the 1(a) legs re-priced the pool, 6 after the
+# open 1 residual (ii) fix gave one-sided trunks their per-rect stubs —
+# every V trunk right of the L gained the arm's stub, so those candidates
+# re-sorted upward in WL; 17 candidates today, none bridged).  The guard:
+#   * an unmatched type spec is a hard error (the flow exits non-zero), and
 #   * test_flow_scripts.py::test_teg_over_audit_flow_routes_clean asserts
 #     the planner line shows `TRUNK_V@x250 [pinned]` AND both check_design
-#     Success lines — so a re-sorted pool that lands a different shape on
-#     index 10 fails the test loudly instead of silently auditing a
-#     different candidate.
+#     Success lines — so a regressed pool fails the test loudly instead of
+#     silently auditing a different candidate.
 #
 # Geometry (shared with test/tests/test_teg_open.py):
 #   L block: tall arm (0,0)-(100,400) + wide base (0,0)-(400,100), OVER
@@ -46,7 +47,7 @@ def_track_pattern 4 0 (SIGNAL 2 2)x8
 def_track_pattern 5 0 (SIGNAL 2 2)x8
 
 # The formerly-bridge-reliant candidate (see header): TRUNK_V@x250 + leg.
-select_topology 1 10
+select_topology 1 TRUNK_V@x250
 
 run_planner
 run_nuts

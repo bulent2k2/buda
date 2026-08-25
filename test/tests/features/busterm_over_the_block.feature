@@ -157,11 +157,25 @@ Feature: Over-the-Block vs Thru-the-Block TEG Routing Modes
     And the TRUNK_H@y200 candidate has no bridge segment for "B"
     And both V stubs of "B" in the TRUNK_H@y200 candidate end on the trunk at y=200
 
-  Scenario: Over-the-block — trunk inside one rect → no bridge needed
-    # Trunk at y=50 is INSIDE R1 (y=0 to y=100).
-    # Direct connection to R1. R2 not reachable by this trunk without a stub.
-    # Even in over-the-block mode: Direct + no stub + no bridge.
-    # Over-the-block only activates when the trunk is in the GAP, not inside a rect.
+  Scenario: Over-the-block — trunk inside one disjoint rect stubs the other rect
+    # Trunk at y=50 is INSIDE R1 (y=0 to y=100): the spine crosses R1 (no
+    # stub for it).  OVER revokes the block's internal continuity, so R2
+    # still needs its own real metal (teg_multirect_status.md open 1
+    # residual (i) — this shape used to emit NOTHING for R2, leaving the
+    # routed result TEG_OPEN at the placed stages): a V stub from R2's
+    # bottom face (y=300) down to the trunk at R2's along-centre x=260,
+    # T-junctioning the spine — which the pre-pass extends through the
+    # junction, so R1's contact becomes a pass-through crossing rather than
+    # an endpoint face tap.  A rect ADJACENT to the landing rect stays
+    # metal-free — a contiguous shape needs no connection metal (see the
+    # adjacency scenario below); R2 here is 200 units away.
+    #
+    #   y=400  +---------+
+    #          :   R2    :
+    #   y=300  x·········x
+    #               ||        ← V stub down: y=300 to y=50 (length 250)
+    #   y= 50  ==x=R1=*==     ← trunk at y=50 crossing R1, extended to x=260
+    #   y=  0  +------+
     #
     Given a block "A" at (0,0)-(100,100)
     And a block "B" with rects (200,0)-(280,100) and (220,300)-(300,400) and teg_mode "over"
@@ -169,7 +183,8 @@ Feature: Over-the-Block vs Thru-the-Block TEG Routing Modes
     And layer M5 is VERTICAL with id 5
     When I generate multicast candidates from "A" to ["B"] using layers M4,M5
     Then in the TRUNK_H@y50 candidate "B" has no bridge segment
-    And "B" has a Direct connection in the TRUNK_H@y50 candidate
+    And in the TRUNK_H@y50 candidate "B" has exactly 1 V stub
+    And the V stub up   from "B" in TRUNK_H@y50 has length 250
 
   Scenario: Over-the-block — L-shaped block with V trunk beside notch
     # L-block: tall arm (0,0)-(100,400) + wide base (0,0)-(400,100).
