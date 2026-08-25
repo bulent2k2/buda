@@ -435,6 +435,13 @@ class Server:
         if req == "__commands":
             self._reply("OK", " ".join(sorted(COMMANDS)))
             return True
+        if req == "__aliases":
+            # LIVE (not cached like __commands): the alias table is session
+            # state the `alias` command mutates mid-flow, and the prompt's
+            # local known-word gate consults this so a just-defined alias
+            # typed at the prompt is passed to the engine, not refused.
+            self._reply("OK", " ".join(sorted(self.session._aliases)))
+            return True
         if req == "__viz" or req.startswith("__viz "):
             # Exact, not `startswith("__viz")`: the no-argument form REPORTS
             # the setting, so a mistyped `__vizz` would otherwise answer OK

@@ -214,8 +214,73 @@ def cmd_exit(session, cmd, args, cmd_line):
     sys.exit(code)
 
 
+def cmd_alias(session, cmd, args, cmd_line):
+    # alias                    -> list the alias table
+    # alias <name>             -> show what <name> resolves to
+    # alias <name> <command>   -> define <name> as a synonym for <command>
+    #
+    # An alias adds a SPELLING; it never changes an existing command's
+    # meaning (a name that is already a real command is refused — no
+    # Tcl-`rename`-style replacement).  Resolution happens once, at the
+    # do_command choke point, BEFORE recording — so a flow using an alias
+    # records CANONICAL and replays anywhere.  The alias DEFINITION only
+    # travels with the flow if declared IN the flow, so keep `alias` lines
+    # in a checked-in flow self-contained (a flow that leans on an alias it
+    # never defines fails LOUD — "unknown command", never a silent
+    # different route).
+    from buda_cmds import COMMANDS as REGISTRY   # assembled registry (lazy: no import cycle)
+    aliases = session._aliases
+    if not args:
+        if not aliases:
+            print("No aliases defined.")
+        else:
+            for name in sorted(aliases):
+                print(f"  {name} -> {aliases[name]}")
+        return
+    name = args[0].lower()
+    if len(args) == 1:
+        if name in aliases:
+            print(f"  {name} -> {aliases[name]}")
+        elif name in REGISTRY:
+            print(f"'{name}' is a command, not an alias.")
+        else:
+            print(f"No alias '{name}' defined.")
+        return
+    target = args[1].lower()
+    # No shadowing: an alias must never redefine a real command.
+    if name in REGISTRY:
+        print(f"Error: alias '{name}' would shadow a real command — an "
+              f"alias adds a spelling, it never replaces one")
+        sys.exit(1)
+    # The target must resolve to a real command NOW — a registered command,
+    # or an existing alias (stored RESOLVED, so use-time is one lookup and
+    # an alias chain can never form a cycle).
+    resolved = target if target in REGISTRY else aliases.get(target)
+    if resolved is None:
+        print(f"Error: alias target '{target}' is not a command "
+              f"(nor an existing alias)")
+        sys.exit(1)
+    prev = aliases.get(name)
+    if prev is not None and prev != resolved:
+        print(f"Note: redefining alias '{name}' ({prev} -> {resolved})")
+    aliases[name] = resolved
+
+
+def cmd_unalias(session, cmd, args, cmd_line):
+    # unalias <name> [<name> ...] -> remove one or more aliases.
+    if not args:
+        print("Error: usage: unalias <name> [<name> ...]")
+        return
+    for a in args:
+        name = a.lower()
+        if session._aliases.pop(name, None) is None:
+            print(f"Warning: no alias '{name}' to remove")
+
+
 COMMANDS = {
     "source": cmd_source,
     "require_file": cmd_require_file,
     "exit": cmd_exit,
+    "alias": cmd_alias,
+    "unalias": cmd_unalias,
 }

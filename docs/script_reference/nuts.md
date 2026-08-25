@@ -92,6 +92,10 @@ Stage 9 snaps each abstract bus segment (from Stage 4) to concrete signal-track 
 run_detailed_nuts [lo_hi|hi_lo]
 ```
 
+Alias: `run_dnuts` — the stage is "dnuts" everywhere the tool speaks
+(`check_design dnuts`, the `btcl -i` stage argument, the log prefixes), so
+the short spelling dispatches to the same handler.
+
 For each bus segment in the NUTS result, calls `signal_tracks_in()` on its layer's routing grid and assigns one signal track per bit-wire.
 
 | Argument | Type | Default | Description |

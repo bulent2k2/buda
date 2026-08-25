@@ -76,7 +76,7 @@ namespace eval ::buda {
     # the engine command).  Listed rather than snapshotted from
     # `info procs`, which would also capture the generated procs if this
     # file were ever sourced twice.  Pinned by the test suite.
-    variable reserved {start stop query output commands stream viz vizfinal
+    variable reserved {start stop query output commands aliases stream viz vizfinal
                        log endreport onprogress async wait running cancel do}
     # Captured HERE, at source time.  Inside a proc `info script` names the
     # script being RUN, not the one the proc was defined in, so resolving the
@@ -210,6 +210,13 @@ proc ::buda::output {} {
 proc ::buda::commands {} {
     variable commands
     return $commands
+}
+
+# The session's live alias table (the `alias` command).  NOT cached like
+# `commands`: aliases are defined mid-session, so the prompt's known-word
+# gate must ask the engine each time.
+proc ::buda::aliases {} {
+    return [buda::_request "__aliases"]
 }
 
 # Summarize the run the way `bin/buda` does: full per-command detail to the

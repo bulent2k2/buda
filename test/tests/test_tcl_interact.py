@@ -1568,3 +1568,18 @@ def test_a_user_pin_survives_the_b_rerun(tmp_path):
     assert "topo 9 (USER) layers[M3 M4 M3]" in r.stdout, \
         "the -b rerun lost the hand-edited pin"
     assert "done -- 0 overlaps, 0 unplaced, 0 audit violations" in r.stdout
+
+
+def test_alias_typed_at_the_prompt_reaches_the_engine(tmp_path):
+    # The alias command's interactive half: an alias defined mid-session is
+    # session state, absent from the registry the prompt cached at start —
+    # so without the gate consulting `buda::aliases` it would be refused
+    # locally as "unknown command".  Define one at the prompt and invoke it.
+    flow = tmp_path / "mini.buda"
+    flow.write_text(_FLAT_FLOW)
+    r = _run(["tclsh", _DRIVER, flow], tmp_path,
+             stdin="alias rd report_wl\nrd\ndone\n")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "unknown command 'rd'" not in r.stdout, r.stdout
+    # The alias reached the engine: report_wl ran on the routed design.
+    assert "detailed WL" in r.stdout, r.stdout
