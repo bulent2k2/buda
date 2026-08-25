@@ -164,36 +164,10 @@ EditVerdict edit_add_stub(Topology& topo, const Floorplan& fp,
     const bool j_horiz = seg_is_horiz(j);
     const Rect bb = fp.get_block_bounds(block);
 
-    // The stub is perpendicular to the target: its along-position must fall in
-    // the overlap of the block's extent and the target's span on the target's
-    // axis; take the overlap centre (an expert can refine with edit_set_span).
-    int j_lo = j_horiz ? std::min(j.start.x, j.end.x) : std::min(j.start.y, j.end.y);
-    int j_hi = j_horiz ? std::max(j.start.x, j.end.x) : std::max(j.start.y, j.end.y);
-    int b_lo = j_horiz ? bb.x1 : bb.y1;
-    int b_hi = j_horiz ? bb.x2 : bb.y2;
-    int o_lo = std::max(j_lo, b_lo), o_hi = std::min(j_hi, b_hi);
-    if (o_lo > o_hi)
-        return fail("block and target segment do not overlap on the stub axis");
-    const int at = (o_lo + o_hi) / 2;
-
-    const int j_perp = j_horiz ? j.start.y : j.start.x;
-    const int face = j_horiz ? bb.face_y(j_perp) : bb.face_x(j_perp);
-    if (face == j_perp)
-        return fail(j_perp > (j_horiz ? bb.y1 : bb.x1) &&
-                    j_perp < (j_horiz ? bb.y2 : bb.x2)
-                        ? "target crosses the block (pass-through, no stub needed)"
-                        : "zero-length stub (target touches the block face)");
-
-    Segment s;
-    s.start = j_horiz ? Point{at, face}   : Point{face, at};      // block end
-    s.end   = j_horiz ? Point{at, j_perp} : Point{j_perp, at};    // junction end
-    s.layer_hint = layer;
-    int idx = (int)topo.segments.size();
-    topo.segments.push_back(s);
-
     // Seed the tap exactly like the generators do: margin-inset bbox +
-    // full extent + multi-rect (margin-inset per rect, open 9) + TEG, at the
-    // block-side endpoint (start).
+    // full extent + multi-rect (margin-inset per rect, open 9) + TEG.
+    // Built BEFORE the geometry because the geometry now reads it: the tap
+    // face is chosen from the same rect view generation's best_rect reads.
     Busterm bt;
     bt.block_name = block;
     BlockCornerMargin cm = fp.get_block_corner_margin(block);
@@ -206,6 +180,73 @@ EditVerdict edit_add_stub(Topology& topo, const Floorplan& fp,
             bt.orig_rects = std::move(phys);   // both face spellings (P2)
     }
     bt.teg_mode  = fp.get_block_teg_mode(block);
+
+    // The stub is perpendicular to the target: its along-position must fall in
+    // the overlap of the tapped RECT's extent and the target's span on the
+    // target's axis; take the overlap centre (an expert can refine with
+    // edit_set_span).  Which rect: generation's per-rect selection (open 16 —
+    // the union bbox aimed a multi-rect stub at a face that may not physically
+    // exist, landing it in the notch), restricted to the rects the fixed
+    // target span can actually reach with a real perpendicular stub, then
+    // best_rect's shortest-stub rule among those.  A single-rect block has
+    // exactly one candidate (its physical bbox, via bt_all_rects), so its
+    // geometry and failure messages are byte-identical to the union-bbox path.
+    const Axis axis{j_horiz};
+    const int j_lo = j_horiz ? std::min(j.start.x, j.end.x)
+                             : std::min(j.start.y, j.end.y);
+    const int j_hi = j_horiz ? std::max(j.start.x, j.end.x)
+                             : std::max(j.start.y, j.end.y);
+    const int j_perp = j_horiz ? j.start.y : j.start.x;
+    std::vector<Rect> reachable;      // overlap on the stub axis + a real face
+    bool any_overlap = false, any_cross = false, any_touch = false;
+    for (const Rect& r : bt_all_rects(bt)) {
+        if (std::max(j_lo, axis.along_lo(r)) > std::min(j_hi, axis.along_hi(r)))
+            continue;                              // no span overlap: unreachable
+        any_overlap = true;
+        if (axis.perp_face(r, j_perp) == j_perp) { // target inside/on this rect
+            if (j_perp > axis.perp_lo(r) && j_perp < axis.perp_hi(r))
+                any_cross = true;                  // strict interior: pass-through
+            else
+                any_touch = true;                  // on the rect face: contact
+            continue;
+        }
+        reachable.push_back(r);
+    }
+    if (!any_overlap)
+        return fail("block and target segment do not overlap on the stub axis");
+    // A rect the target CROSSES (or touches) is already contacted by the
+    // target itself.  Under THRU that contact connects the WHOLE block — its
+    // internal routing joins the rects — so a stub to a farther rect would be
+    // unnecessary external metal between equivalent terminals (Codex P2 on
+    // #840; generation's best_rect picks the zero-cost crossed rect and emits
+    // no stub): the pass-through verdict takes precedence over any other
+    // reachable rect.  OVER revokes exactly that assumption — the crossed
+    // rect connects only itself — and generation's 1(a) rectilinear branch
+    // emits a connector LEG to each un-spanned rect (the §1.1 TRUNK_V@x250
+    // leg (100,200)-(250,200) is this very geometry), so there the reachable
+    // choice proceeds: the edit stub IS that leg, and it is also the hand fix
+    // for the documented trunk-Direct-inside-ONE-disjoint-rect residual that
+    // generation still leaves to TEG_OPEN.
+    if ((any_cross || any_touch)
+            && (bt.teg_mode != TegMode::OVER || reachable.empty()))
+        return fail(any_cross
+                        ? "target crosses the block (pass-through, no stub needed)"
+                        : "zero-length stub (target touches the block face)");
+    // Here reachable is non-empty by construction: every overlapping rect
+    // either set a cross/touch flag (handled above) or was pushed.
+    const Rect tap = best_rect(axis, reachable, j_perp);
+    const int o_lo = std::max(j_lo, axis.along_lo(tap));
+    const int o_hi = std::min(j_hi, axis.along_hi(tap));
+    const int at = (o_lo + o_hi) / 2;
+    const int face = axis.perp_face(tap, j_perp);
+
+    Segment s;
+    s.start = j_horiz ? Point{at, face}   : Point{face, at};      // block end
+    s.end   = j_horiz ? Point{at, j_perp} : Point{j_perp, at};    // junction end
+    s.layer_hint = layer;
+    int idx = (int)topo.segments.size();
+    topo.segments.push_back(s);
+
     topo.seg_busterms[idx].first = bt;
 
     // The edited topology must also claim the block, or check_topo won't
