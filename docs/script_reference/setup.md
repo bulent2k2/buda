@@ -107,7 +107,7 @@ edge-adjacent **non-identical** rects are legal and load-bearing: interior
 overlap is exactly what classifies a block as rectilinear (L/C-shape), and
 touching edges drive the OVER adjacency suppression.
 
-| `teg_mode thru\|over` | keyword | Optional; multi-rect form only. Controls how topology generation handles trunks that fall in the gap between rects. Default: the `set_teg_mode` global default (`thru` when never set). See **TEG mode** below. |
+| `teg_mode thru\|over` | keyword | Optional; multi-rect form only. Controls whether topology generation emits per-rect connection metal (gap / one-sided / partial-span / direct-inside-one-rect trunks alike). Default: the `set_teg_mode` global default (`thru` when never set). See **TEG mode** below. |
 | `corner_margin dx N` | keyword | Optional. Shrink the routing face by `N` units in X (top/bottom faces). If `dy` is omitted, the same value applies to Y as well. |
 | `corner_margin dy N` | keyword | Optional. Shrink the routing face by `N` units in Y (left/right faces). |
 | `corner_margin pct_h P` | keyword | Shrink X faces by `P`% of block width. If `pct_v` is omitted, same percentage applies to height. |
@@ -162,8 +162,8 @@ gap between rects (or a vertical trunk falls in the horizontal gap):
 
 | Mode | Behaviour |
 |---|---|
-| `thru` (default) | The topology connects only the **nearest** rect (lowest stub length). The block's internal routing is assumed to join any disconnected portions. No extra connection metal is generated. |
-| `over` — disjoint rects | When the trunk falls in the gap between rects, **every** rect is connected with its own stub to the trunk (near side from its gap-facing face, far side likewise, each at the rect's centre); the rects are physically joined **through the trunk** — each stub T-junctions the spine. |
+| `thru` (default) | The topology connects only the **nearest** rect (lowest stub length). The block's internal routing is assumed to join any disconnected portions. No extra connection metal is generated. At the placed audits, `check_design` reports which rects were left to the internal routing (the **BUDA-1907** census — report only, never a violation). |
+| `over` — disjoint rects | When the trunk does not land inside any rect — in the gap between rects **or** approaching them one-sided (all rects on the same side) — **every** rect is connected with its own stub to the trunk, from its locus-facing face at the rect's centre; the rects are physically joined **through the trunk** — each stub T-junctions the spine. When the trunk lands **inside one** rect, every rect outside that landing rect's physical contiguity component still gets its stub (see the suppression list below for what counts as contiguous). |
 | `over` — rectilinear rects | When the trunk is inside some rects but not all (partial span), each un-spanned rect gets a perpendicular **connector leg** from the trunk to the rect's nearest face at the rect's centre. Stubs/legs are only generated for rects that the trunk does not directly cross. |
 
 All of this connection metal is **ordinary topology segments**, so the
@@ -179,10 +179,21 @@ reports the unrealized bridge.)
 Over-the-block mode does **not** generate extra connection metal when:
 - The trunk crosses every rect (rectilinear all-span: direct connection, no
   un-spanned portion).
-- The trunk lands inside one rect of a **disjoint** TEG (direct connection to
-  that rect only — the other rects get no metal from this candidate; the
-  placed-stage `TEG_OPEN` audit reports them if such a candidate is routed).
-- The two rects are adjacent (touching edges, no gap).
+- A rect is **physically contiguous** with the rect the trunk lands in — it
+  touches it on a positive-length shared edge, transitively along a chain of
+  touching rects.  Contiguity is judged on the **physical** rects even under
+  a `corner_margin` (a margin marks faces unusable for taps; it does not
+  physically separate the rects — emitted stubs elsewhere still tap the
+  margin-inset faces).  Note the placed-stage `TEG_OPEN` audit reads contact
+  **per rect**, so a routed candidate whose trunk lands in one of two
+  adjacent rects still reports the untouched neighbour — a documented loud
+  corner.
+- A **disjoint** rect shares the trunk's perpendicular band with the landing
+  rect (rects side by side along the spine): a perpendicular stub has no gap
+  to bridge there, so the rect stays metal-free and the placed-stage
+  `TEG_OPEN` audit reports it if such a candidate is routed (the documented
+  same-band-sibling limitation — see
+  `docs/internal/teg_multirect_status.md`, Final state).
 
 **Examples:**
 ```
@@ -190,13 +201,14 @@ add_block u_cpu   0    0  100  100
 add_block u_mem 200    0  300  100  corner_margin dx 5
 add_block u_io  400    0  500  100  corner_margin pct_h 10 pct_v 15
 
-# L-shaped block: tall arm + wide base (rectilinear; teg_mode over emits bridge)
+# L-shaped block: tall arm + wide base (rectilinear; teg_mode over emits a
+# connector leg per rect the trunk does not span)
 add_block u_l  rect  0  0  100  400  rect  0  0  400  100  teg_mode over
 
 # Block with disjoint left and right ports (pure TEG; thru = default)
 add_block u_dp rect  200  0  300  100  rect  400  0  500  100  teg_mode thru
 
-# Notched block where trunk may fall in gap — explicit over-the-block bridge
+# Notched block where trunk may fall in gap — explicit per-rect connection metal
 add_block u_notch  rect  200  0  280  100  rect  220  300  300  400  teg_mode over
 
 # Same notched block, relying on internal routing to join the two sides (default)
@@ -622,6 +634,12 @@ router bridges the gap. `check_topo` accepts this declared relay (it is recorded
 flagged. An *unrelated* block the trunk merely crosses (not a bundle busterm) is a
 pass-through, never a feedthru. Straight/I-shape feedthru and a `feedthru_penalty`
 ranking knob are later phases.
+
+Feedthru is **single-rect only**: the engine skips a multi-rect block, so a
+`set_feedthru … on` naming one — directly or via `*`, in either declaration
+order — warns (**BUDA-1908**) while still taking effect for the single-rect
+blocks it names (`off` is not warned: a multi-rect block never relays
+regardless, so disabling changes nothing).
 
 Feedthru is genuinely **per-(block, layer)** — a block may be routable-through on one
 trunk layer but not another — so the command sets a full block×layer grid rather than

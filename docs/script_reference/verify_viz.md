@@ -60,6 +60,22 @@ zones are taken from the session floorplan the NUTS engine placed against,
 so hierarchical bundles' cell-local generation floorplans cannot mask a
 conflict. See `docs/internal/keepout_model_audit.md`.
 
+The `nuts` and `dnuts` stages also audit **TEG contact** (`TEG_OPEN`): every
+rect of a `teg_mode over` multi-rect block must be touched by the bundle's
+placed metal, and all rects must sit in **one connected component** of that
+metal (two islands each touching a different rect are still open). At
+`dnuts` the audit runs **per bit** — each bit is its own net, so bit 0
+touching rect A and bit 1 touching rect B connects neither; a bit tapered
+away from the block entirely is exempt. `thru` blocks are exempt **by
+design** (the mode declares the rects internally connected) and instead get
+the **BUDA-1907** census — an INFO report naming the rects left to the
+block's internal routing, so a wrong `thru` assumption is discoverable
+without reading the topology dump. The kind is deliberately absent from the
+`topo` stage, which feeds generation gates and healer metrics a reporting
+audit must not perturb. See the [TEG mode section](setup.md#teg-mode) for
+what generation emits, and `docs/internal/teg_multirect_status.md` (Final
+state) for the deliberately-loud corners.
+
 The `nuts` and `dnuts` stages also flag **antennas** (`ANTENNA`, issue
 #482): a segment attached to the route at **fewer than two DISTINCT
 points**, so everything past that single attachment is a dangling wire that
