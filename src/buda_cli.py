@@ -381,6 +381,13 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
         # (cell-local / cross-level / depth projection) re-apply them via
         # _apply_fp_session_settings.
         self._min_stub = {"global": None, "dir": {}, "layer": {}}
+        # Feedthru declarations in order (set_feedthru), replayed onto
+        # derived hier floorplans by _apply_fp_session_settings — the flags
+        # live on session.fp, which none of the derived frames are, so
+        # without the replay a hier bundle's trunk silently passes through
+        # a block the flow declared routable-through.  Each entry is
+        # (block_names_or_None, layer_ids_or_None, val); None = wildcard.
+        self._feedthru_decls = []
         # Bundling permissions per net-name prefix (set_bundling) and the
         # optional bundle bit bound (set_max_bundle_bits) — consumed by
         # run_bundler's generalized/COMBINED path and its split pass.

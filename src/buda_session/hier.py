@@ -1018,7 +1018,19 @@ class HierMixin:
     def _apply_fp_session_settings(self, fp, min_stub=False):
         """Mirror session-level Floorplan settings onto a DERIVED floorplan
         (cell-local, cross-level, depth projection): the global corner
-        margin always; the min-stub-length tiers only on request.
+        margin and the feedthru declarations always; the min-stub-length
+        tiers only on request.
+
+        Feedthru is replayed everywhere because the flags live on
+        session.fp and none of the derived frames are session.fp — so a
+        `set_feedthru` in a hier flow used to be silently dropped for
+        EVERY hier bundle (the trunk passed straight through the declared
+        block, reported only as a pass-through).  Block-scoped rules match
+        by name, so each rule bites exactly the frames that know the name:
+        depth-projection and cross-level frames use full component paths,
+        a cell-local template frame uses the child's LOCAL name (the same
+        rule then governs every instance of the cell — template
+        semantics, consistent with solve-once-copy).
 
         min_stub=True is passed by the CELL-LOCAL floorplan, whose frame
         must match the flat pipeline's semantics exactly — a bottom-up
@@ -1041,6 +1053,19 @@ class HierMixin:
             fp.set_min_stub_length_dir(d, v)
         for lid, v in (ms.get("layer") or {}).items():
             fp.set_min_stub_length_layer(lid, v)
+        for blocks, layers, val in getattr(self, "_feedthru_decls", ()):
+            if blocks is None and layers is None:
+                fp.set_feedthru(val)
+            elif blocks is None:
+                for lid in layers:
+                    fp.set_feedthru_layer(lid, val)
+            elif layers is None:
+                for n in blocks:
+                    fp.set_feedthru_block(n, val)
+            else:
+                for n in blocks:
+                    for lid in layers:
+                        fp.set_feedthru_block_layer(n, lid, val)
         return fp
 
     def _build_cell_local_floorplan(self, parent_comp_name):
