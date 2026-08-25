@@ -32,7 +32,7 @@ The per-command documentation lives in one page per pipeline stage under
 | [Non-default rules (NDR)](script_reference/ndr.md) | setup | `def_ndr` · `set_ndr` · `dump_ndr` — per-net width / spacing / shielding, with the demand model and the worked vehicles |
 | [Verification & visualisation](script_reference/verify_viz.md) | verify / — | `check_design` · `dump_topologies` · `visualize` · `visualize_topologies` · `emit_guides` · `export_def_blockages` · `dump_messages` |
 
-Script control (paths and quoting, `source`, `require_file`, `exit`, comments), the output-files table, the typical
+Script control (paths and quoting, `source`, `alias`/`unalias`, `require_file`, `exit`, comments), the output-files table, the typical
 script skeleton, and the BDB command quick reference stay on this page, below —
 after the pipeline overview that follows.
 
@@ -98,6 +98,7 @@ Commands run in the following order. Later stages depend on earlier ones.
 | — | `visualize` | Open interactive NUTS result viewer |
 | — | `visualize_topologies` | Open topology explorer |
 | — | `source` | Include another `.buda` file |
+| — | `alias`, `unalias` | Define / remove a user command alias (a spelling for an existing command; never shadows one). Resolved before recording, so a flow using an alias records canonical and replays anywhere |
 | Setup | `require_file` | Declare the input files this flow needs, with the remedy — a missing one stops the run at once instead of partway through |
 | BDB | `open_bdb`, `import_def_lef`, `import_verilog` | Open / populate the physical design database |
 | BDB | `move_comp`, `resize_cell`, `add_comp`, `flip_comp`, `rotate_comp`, `add_cell`, `add_inst`, `add_inst_to_cell`, `add_cell_pin` | Mutate placement and cell/pin definition data in the database |
@@ -187,6 +188,45 @@ source ../common/base_layers.buda
 source my_floorplan.buda
 run_bundler strict
 ```
+
+### `alias` / `unalias`
+
+```
+alias                      # list the alias table
+alias <name>               # show what <name> resolves to
+alias <name> <command>     # define <name> as a synonym for <command>
+unalias <name> [<name> ...]  # remove one or more aliases
+```
+
+Define your own spelling for an existing command. `alias qr run_detailed_nuts`
+makes `qr` run detailed NUTS; `run_dnuts` is the same idea shipped as a
+built-in. An alias only ever **adds** a spelling — a name that is already a
+real command is refused (there is no `rename`-style replacement, so an
+existing command can never come to mean something else), and the target must
+resolve to a real command (or an existing alias) at declaration.
+
+**Aliases and portable flows.** Resolution happens once, at the command
+dispatch point, *before* the command is recorded — so a flow that uses an
+alias records the **canonical** command (and not the `alias` line) into
+`BUDA_RECORD` traces and the flattened replay, which therefore run anywhere
+with no alias defined. The alias *definition*, though, only travels with the
+flow if you declare it **in** the flow: a checked-in flow that leans on an
+alias defined only elsewhere fails loudly on another machine (`unknown
+command 'qr'` — never a silently different route), so keep `alias` lines in
+the flow that uses them. Aliases are session state (not written to a BDB),
+and work identically at the CLI, in a `source`d flow, and — for a name
+defined earlier in the same session — at the `btcl -i` prompt.
+
+**Example:**
+```
+alias qr run_detailed_nuts
+alias                       # lists:  qr -> run_detailed_nuts
+run_nuts
+qr                          # runs run_detailed_nuts
+unalias qr
+```
+
+---
 
 ### `require_file`
 

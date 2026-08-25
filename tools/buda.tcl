@@ -212,6 +212,13 @@ proc ::buda::commands {} {
     return $commands
 }
 
+# The session's live alias table (the `alias` command).  NOT cached like
+# `commands`: aliases are defined mid-session, so the prompt's known-word
+# gate must ask the engine each time.
+proc ::buda::aliases {} {
+    return [buda::_request "__aliases"]
+}
+
 # Summarize the run the way `bin/buda` does: full per-command detail to the
 # flow log beside the flow (`<dir>/log/<stem>_flow.log`), ONE line per command
 # on the terminal.  `buda::log <flow>` arms it, `buda::log off` disarms, and a

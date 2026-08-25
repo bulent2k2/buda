@@ -193,6 +193,20 @@ _ERROR_RE = re.compile(r'\s*Error\b', re.I)
 _PASSTHROUGH_CMDS = frozenset({"source", "visualize", "visualize_topologies"})
 
 
+def _rewrite_leading_token(cmd_line, new_head):
+    """Return cmd_line with its first whitespace-delimited token replaced by
+    new_head, preserving leading whitespace and EVERYTHING after the first
+    token verbatim (the arguments and any inline comment).  Used to
+    canonicalize an alias to its real command at the dispatch choke point,
+    so a rest-of-line handler and the recorder both see the exact remainder
+    the user typed."""
+    stripped = cmd_line.lstrip()
+    lead = cmd_line[:len(cmd_line) - len(stripped)]
+    first = stripped.split(None, 1)[0]
+    rest = stripped[len(first):]          # separating ws + args + comment
+    return f"{lead}{new_head}{rest}"
+
+
 def _rotate_log(path):
     """Move an existing log to `<path>.1` so a re-run does not destroy it.
 
@@ -377,6 +391,12 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
         self._busterm_gen = None     # BustermGen instance (created by derive_busterms)
         self.bdb_net_mode = False    # when True, add_net/add_bus also write to BDB
         self._corner_margin = (0, 0) # (dx, dy) — mirrors fp global corner margin
+        # User-defined command aliases (the `alias` command): {new -> canon},
+        # canon always a real registered command (resolved and no-shadow
+        # checked at definition).  Resolved at the do_command choke point
+        # BEFORE recording/dispatch, so a flow using an alias records
+        # CANONICAL and replays anywhere.  Session state, not persisted.
+        self._aliases = {}
         # Mirrors the fp min-stub-length tiers, so derived hier floorplans
         # (cell-local / cross-level / depth projection) re-apply them via
         # _apply_fp_session_settings.
@@ -806,7 +826,10 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
     # because its children are recorded individually (keeping both would run
     # them twice on replay), so an include tree flattens into one file too.
     def _record(self, cmd, cmd_line):
-        if not self._record_path or cmd == "source":
+        if not self._record_path or cmd in ("source", "alias", "unalias"):
+            # alias/unalias configure the session, not the design; usages are
+            # already canonicalized before this point, so the trace needs
+            # neither the definition nor the aliased spelling.
             return
         if self._record_fh is None:
             try:
@@ -891,6 +914,18 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
         if not parts: return
         cmd = parts[0].lower()
         args = parts[1:]
+        # Alias resolution (the `alias` command), at this ONE choke point —
+        # before recording, dispatch, and the -v verb trace — so the
+        # flattened BUDA_RECORD trace, the QoR replay, and every downstream
+        # reader see only canonical commands (a sourced flow using an alias
+        # records portably even when the alias definition does not travel
+        # with it).  A real command always wins over an alias of the same
+        # name (definition forbids shadowing, so this is belt-and-braces),
+        # and alias/unalias are never themselves aliased, so no recursion.
+        canon = self._aliases.get(cmd)
+        if canon is not None and cmd not in COMMANDS:
+            cmd_line = _rewrite_leading_token(cmd_line, canon)
+            cmd = canon
         self._record(cmd, cmd_line)
         # Track the leaf command sequence for -v's end-of-flow decision.  Skip
         # `source` (a wrapper — its children run through here too, so the tail
@@ -906,7 +941,8 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
             # A typo like 'add_layer' (the command is 'def_layer') would otherwise
             # leave the design misconfigured (no layers) with no warning.
             import difflib
-            sugg = difflib.get_close_matches(cmd, KNOWN_COMMANDS, n=1)
+            pool = KNOWN_COMMANDS | set(self._aliases)
+            sugg = difflib.get_close_matches(cmd, pool, n=1)
             hint = f" Did you mean '{sugg[0]}'?" if sugg else ""
             where = (f" in {os.path.basename(self._script_stack[-1])}"
                      if self._script_stack else "")

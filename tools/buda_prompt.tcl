@@ -278,7 +278,7 @@ proc prompt::run {tag ps route bdb example {guard ""} {sidecar ""}} {
                     # prompt that would cost the whole session.
                     # `buda::commands` is that registry, asked of the running
                     # engine at start, so it cannot drift.
-                    if {$verb in [buda::commands]} {
+                    if {$verb in [buda::commands] || $verb in [buda::aliases]} {
                         # The guard sees EVERY raw engine command and
                         # decides — a blocked `pin` retyped as
                         # `select_topology` must not become the way around
