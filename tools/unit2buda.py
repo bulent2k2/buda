@@ -116,6 +116,16 @@ class _RecordingFloorplan(buda.Floorplan):
         self._u2b.append(("set_block_teg_mode", name, mode))
         return super().set_block_teg_mode(name, mode)
 
+    def set_default_teg_mode(self, mode):
+        # The `set_teg_mode` global default.  Declaration-time-resolved: a
+        # keywordless add_block_rects takes the default in force AT THAT
+        # CALL, so the recording keeps it in setup order and emit_script
+        # interleaves the emitted `set_teg_mode` with the block lines —
+        # dropping it would emit a repro that runs under THRU and no longer
+        # reproduces an OVER topology.
+        self._u2b.append(("set_default_teg_mode", mode))
+        return super().set_default_teg_mode(mode)
+
     def set_min_stub_length(self, n):
         self._u2b.append(("set_min_stub_length", n))
         return super().set_min_stub_length(n)
@@ -435,6 +445,12 @@ def emit_script(call, test_spec, n_calls):
         if c[0] == "add_block":
             _, name, x1, y1, x2, y2 = c
             out.append(f"add_block {name} {x1} {y1} {x2} {y2}{trailer(name)}")
+        elif c[0] == "set_default_teg_mode":
+            # Interleaved with the block lines, NOT hoisted to the globals
+            # section: the default is declaration-time-resolved, so a
+            # mid-test change governs only the blocks declared after it —
+            # emission in recorded order reproduces exactly that.
+            out.append(f"set_teg_mode {_teg_word(c[1])}")
         elif c[0] == "add_block_rects":
             _, name, rects, teg = c
             teg = teg_overrides.get(name, teg)
