@@ -378,16 +378,77 @@ def _antenna_segs(topo, fp):
     return len(_antennas(res))
 
 
+def _free_collinear_splits(topo):
+    """The issue #849 defect predicate, over a candidate's raw geometry.
+
+    Two COLLINEAR segments meeting end-to-end at a point where nothing else of
+    the topology is attached (no endpoint, no perpendicular crossing) are one
+    wire the generator emitted as two.  ConnTopology infers no junction between
+    collinear segments, so the pair is not merely untidy — it is not connected
+    at all, and NUTS is free to seat the halves on different tracks.  Returns
+    the offending (i, j) index pairs.
+    """
+    segs = list(topo.segments)
+
+    def horiz(s):
+        return s.start.y == s.end.y
+
+    def perp(s):
+        return s.start.y if horiz(s) else s.start.x
+
+    def lo(s):
+        return min(s.start.x, s.end.x) if horiz(s) else min(s.start.y, s.end.y)
+
+    def hi(s):
+        return max(s.start.x, s.end.x) if horiz(s) else max(s.start.y, s.end.y)
+
+    def touches(s, qx, qy):
+        if horiz(s):
+            return s.start.y == qy and lo(s) <= qx <= hi(s)
+        return s.start.x == qx and lo(s) <= qy <= hi(s)
+
+    out = []
+    for i in range(len(segs)):
+        for j in range(i + 1, len(segs)):
+            a, b = segs[i], segs[j]
+            if horiz(a) != horiz(b) or perp(a) != perp(b):
+                continue
+            if lo(a) == hi(a) or lo(b) == hi(b):
+                continue          # degenerate: no wire to split
+            if hi(a) == lo(b):
+                q = hi(a)
+            elif hi(b) == lo(a):
+                q = lo(a)
+            else:
+                continue          # overlapping or apart, not end-to-end
+            qx, qy = (q, perp(a)) if horiz(a) else (perp(a), q)
+            if any(touches(segs[k], qx, qy)
+                   for k in range(len(segs)) if k not in (i, j)):
+                continue          # a real junction holds the split together
+            out.append((i, j))
+    return out
+
+
 @pytest.mark.mid
-def test_lshape_oob_mst_antenna_is_flagged_end_to_end():
-    """The reported escape, end to end: the `TRUNK_V_OOB+MST` candidate of the
-    lShape1-dnuts design routes an out-of-bbox seed-trunk loop whose two
-    collinear stub halves graze the driver block's top face.  Each half has one
-    real junction; the inclusive coverage span credited the graze as a
-    pass-through and `check_design` reported Success on electrically inert
-    metal.  With the interior-crossing pass-through, both halves are flagged
-    ANTENNA at nuts AND dnuts.  Pinned by TYPE (the candidate is not the
-    planner's pick — it must be selected to route it)."""
+def test_lshape_oob_mst_free_collinear_split_is_not_generated():
+    """The reported escape, end to end — repaired at GENERATION (issue #849).
+
+    The `TRUNK_V_OOB+MST@x-80` candidate of the lShape1-dnuts design carried
+    THREE collinear pieces on the driver block's top row: the seed trunk's stub
+    `[-80,100]`, a relay connector `[100,150]`, and `[150,600]`.  The join at
+    x=150 is a real T (the MST leg to `l1` lands there); the one at x=100 held
+    NOTHING — `connect`'s orthogonal-landing branch emitted its H leg from the
+    stub's own endpoint after the V leg vanished — so the stub and the
+    connector were two dangling wires, both ANTENNA, and pre-#848 the audit
+    reported Success on them.
+
+    Relay completion now MERGES that free join (dropping either piece would
+    lose reach).  The merge dissolves the antennas and reveals what they were
+    hiding: the merged wire closes a LOOP with the spine, so the pre-existing
+    clean-tree gate drops the whole hybrid — no gate change was needed.  So the
+    candidate is GONE from the pool, and the design routes clean on the
+    planner's own pick.
+    """
     s = buda_cli.BudaSession()
     s.no_viz = True
     cwd = os.getcwd()
@@ -399,19 +460,51 @@ def test_lshape_oob_mst_antenna_is_flagged_end_to_end():
                       "add_block l2 rect 500 300 800 400 rect 600 400 800 500",
                       "source tracks/tracks2top.buda",
                       "add_bus bus1[8] rect.out l1.in,l2.in",
-                      "run_bundler STRICT", "generate_topologies",
-                      "select_topology bus1 TRUNK_V_OOB+MST@x-80",
-                      "run_planner", "run_nuts", "run_dnuts"]:
+                      "run_bundler STRICT", "generate_topologies"]:
                 s.do_command(c)
     finally:
         os.chdir(cwd)
-    # The pin routed the OOB+MST loop (dump_pins confirms it interactively);
-    # its two grazing stub halves are the only shape in this design that yields
-    # ANTENNA violations, so the audit verdict alone is a non-vacuous proof.
-    nuts = s._check_design("nuts")
-    dnuts = s._check_design("dnuts")
-    assert nuts["by_kind"].get("ANTENNA", 0) >= 2, nuts
-    assert dnuts["by_kind"].get("ANTENNA", 0) >= 2, dnuts
+    w = s.bundles[0]
+    types = [t.type for t in w.input.candidates]
+    # Non-vacuity: the pool is real and still carries the hybrid FAMILY, so the
+    # assertion below is about this shape and not about an empty pool.
+    assert len(types) > 20, types
+    assert any(t.startswith("TRUNK_V+MST") for t in types), types
+    assert not any(t.startswith("TRUNK_V_OOB+MST") for t in types), (
+        f"the free-split hybrid is back in the pool: {types}")
+    # And no candidate of this pool carries the defect shape or an antenna.
+    for i, t in enumerate(w.input.candidates):
+        assert not _free_collinear_splits(t), (i, t.type)
+        assert _antenna_segs(t, s.fp) == 0, (i, t.type)
+
+
+@pytest.mark.mid
+@pytest.mark.parametrize("flow", ["demo/comprehensive_demo.buda",
+                                  "flow/rnr/mix.buda",
+                                  "flow/big_data_test/big.buda"])
+def test_no_free_collinear_split_survives_generation(flow):
+    """Issue #849 corpus-wide: no candidate anywhere may carry a FREE
+    collinear-adjacent split.  The `TRUNK_V_OOB+MST` report is one instance of
+    a shape that is broken wherever it occurs — two pieces of one wire with
+    nothing holding them at the same track — so the guard is the predicate, not
+    the vehicle.  Measured over EVERY candidate of EVERY bundle, like its
+    antenna sibling above: a non-selected split is still a candidate the
+    planner may pick under different congestion.
+
+    HONEST SCOPE: this is a FORWARD guard, not fail-before evidence.  Measured
+    on the pre-fix engine these three flows carry ZERO of the shape (0 of 300 /
+    1183 / 3851 candidates), so it passed before the fix too — the shape needs
+    an orthogonal relay landing whose connector leg degenerates, which the
+    lShape1 vehicle has and these do not.  The non-vacuous instance is
+    `test_lshape_oob_mst_free_collinear_split_is_not_generated` above, where
+    the pre-fix engine emits exactly one (candidate 28, segments 1|5 at
+    (100,100))."""
+    s, pool = _corpus_pool(flow)
+    offenders = [(bid, t.type, _free_collinear_splits(t)) for bid, t in pool
+                 if _free_collinear_splits(t)]
+    assert not offenders, (
+        f"{len(offenders)} candidate(s) with a free collinear split: "
+        f"{offenders[:8]}")
 
 
 @pytest.mark.mid

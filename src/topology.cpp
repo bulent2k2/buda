@@ -2095,7 +2095,8 @@ static void complete_relay_junctions(Topology& topo,
                                      const std::vector<Busterm>& blocks,
                                      const Floorplan& fp,
                                      int h_layer, int v_layer,
-                                     bool spine_relays = false) {
+                                     bool spine_relays = false,
+                                     int* n_merged_out = nullptr) {
     // min-stub is intentionally not enforced on completion connectors: a relay
     // MUST be completed (correctness over the min-stub heuristic).  fp is used by
     // the verified de-overlap pass at the end.
@@ -2634,6 +2635,134 @@ static void complete_relay_junctions(Topology& topo,
         auto& ep = topo.seg_busterms[s];
         ep.first  = std::nullopt;
         ep.second = std::nullopt;
+    }
+
+    // ── Collinear ADJACENT merge (issue #849) ────────────────────────────────
+    // The de-overlap pass below removes a connector collinear-CONTAINED in another
+    // wire.  Its blind spot is the ADJACENT form: two collinear pieces meeting
+    // END-TO-END at a point where NOTHING else is attached.  ConnTopology never
+    // infers a junction between COLLINEAR segments, so such a pair is not one wire
+    // but TWO — each dangling at the shared end — and NUTS is free to seat them on
+    // different tracks, opening the net.  Both pieces are then ANTENNA-flagged
+    // (verify's seg_attachment) and the drop pass cannot help: dropping either
+    // LOSES REACH, so the repair is a MERGE.
+    //
+    // `connect` above is where the pair is born.  Each orthogonal-landing branch
+    // guards ONE vanishing-leg degeneracy and misses its mirror: the "A leaves H"
+    // branch detours when `a.y == b.y` (its V leg would vanish) but not when
+    // `a.x == b.x` (its H leg vanishes and the V leg runs collinear into B), and
+    // the "A leaves V" branch mirrors the omission.  That second case is the
+    // reported `TRUNK_V_OOB+MST@x-80`: the trunk stub lands on `rect`'s corner at
+    // (100,100) and the connector to the MST leg at (150,100) emits its H leg from
+    // the SAME point, collinear with the stub.
+    //
+    // Fixing it inside `connect` is possible but not better: the mirror branch's
+    // remedy is a 4-leg HVHV detour, which here would spend real metal to route
+    // AROUND a join that is already geometrically perfect, and extending the
+    // incident segment in place would mutate landing points the chaining loop and
+    // the single-tap pass still read by index.  The merge is the honest repair and
+    // it sees FINAL geometry, so it also catches the shape from any other emitter.
+    //
+    // Merge i and j only when the join is provably free — same orientation, same
+    // perpendicular line, same layer/jog/edge identity and bit membership, ranges
+    // meeting at exactly one point Q with no interior overlap, NO busterm tap
+    // annotated at Q, and NOTHING else of the topology touching Q (no endpoint,
+    // no perpendicular crossing).  Under those conditions the merged wire occupies
+    // exactly the same metal and carries exactly the same attachments, so the
+    // change is confined to the defect: a split that held nothing together.  A Q
+    // that DOES carry a perpendicular junction is left alone — that split is a real
+    // T (seg5|seg6 at x=150 in the report) and merging across it is a separate,
+    // larger question about trunk canonicalization.
+    {
+        auto seg_h    = [](const Segment& s) { return s.start.y == s.end.y; };
+        auto seg_perp = [&](const Segment& s) { return seg_h(s) ? s.start.y : s.start.x; };
+        auto seg_lo   = [&](const Segment& s) {
+            return seg_h(s) ? std::min(s.start.x, s.end.x) : std::min(s.start.y, s.end.y); };
+        auto seg_hi   = [&](const Segment& s) {
+            return seg_h(s) ? std::max(s.start.x, s.end.x) : std::max(s.start.y, s.end.y); };
+        // Does segment k have any metal AT point Q (endpoint or interior crossing)?
+        auto touches = [&](const Segment& s, const Point& Q) {
+            if (seg_h(s)) return s.start.y == Q.y &&
+                                 seg_lo(s) <= Q.x && Q.x <= seg_hi(s);
+            return s.start.x == Q.x && seg_lo(s) <= Q.y && Q.y <= seg_hi(s);
+        };
+        auto bits_of = [&](int k) -> const std::vector<int>* {
+            auto it = topo.seg_bits.find(k);
+            return it == topo.seg_bits.end() ? nullptr : &it->second;
+        };
+        bool merged = true;
+        while (merged) {
+            merged = false;
+            const int n = (int)topo.segments.size();
+            for (int i = 0; i < n && !merged; ++i) {
+                for (int j = i + 1; j < n && !merged; ++j) {
+                    const Segment& a = topo.segments[i];
+                    const Segment& b = topo.segments[j];
+                    if (seg_h(a) != seg_h(b))              continue;
+                    if (seg_perp(a) != seg_perp(b))        continue;
+                    if (a.layer_hint != b.layer_hint)      continue;
+                    if (a.is_jog != b.is_jog)              continue;
+                    if (a.edge_id != b.edge_id)            continue;
+                    if (a.perp_clamp_lo != b.perp_clamp_lo ||
+                        a.perp_clamp_hi != b.perp_clamp_hi) continue;
+                    // Tapered fan-in membership must agree — merging pieces that
+                    // carry different bit subsets would widen one of them.
+                    const std::vector<int>* ba = bits_of(i);
+                    const std::vector<int>* bb = bits_of(j);
+                    if ((ba == nullptr) != (bb == nullptr))  continue;
+                    if (ba && *ba != *bb)                    continue;
+                    const int alo = seg_lo(a), ahi = seg_hi(a);
+                    const int blo = seg_lo(b), bhi = seg_hi(b);
+                    if (alo == ahi || blo == bhi)          continue;  // degenerate
+                    int q;                                            // the shared coord
+                    if (ahi == blo)      q = ahi;
+                    else if (bhi == alo) q = alo;
+                    else                 continue;                    // not adjacent
+                    const Point Q = seg_h(a) ? Point{q, seg_perp(a)}
+                                             : Point{seg_perp(a), q};
+                    // Nothing else may be attached at Q.
+                    bool foreign = false;
+                    for (int k = 0; k < n && !foreign; ++k)
+                        if (k != i && k != j && touches(topo.segments[k], Q))
+                            foreign = true;
+                    if (foreign) continue;
+                    // No busterm tap may be lost at Q.
+                    auto tap_at = [&](int k, const Point& P) -> bool {
+                        auto it = topo.seg_busterms.find(k);
+                        if (it == topo.seg_busterms.end()) return false;
+                        const Segment& s = topo.segments[k];
+                        if (s.start.x == P.x && s.start.y == P.y && it->second.first)
+                            return true;
+                        if (s.end.x   == P.x && s.end.y   == P.y && it->second.second)
+                            return true;
+                        return false;
+                    };
+                    if (tap_at(i, Q) || tap_at(j, Q)) continue;
+                    // Extend i over the union and carry j's FAR-end annotation.
+                    const bool b_start_at_q =
+                        (b.start.x == Q.x && b.start.y == Q.y);
+                    const Point b_far = b_start_at_q ? b.end : b.start;
+                    std::optional<Busterm> far_bt;
+                    {
+                        auto it = topo.seg_busterms.find(j);
+                        if (it != topo.seg_busterms.end())
+                            far_bt = b_start_at_q ? it->second.second : it->second.first;
+                    }
+                    Segment& ai = topo.segments[i];
+                    if (ai.start.x == Q.x && ai.start.y == Q.y) {
+                        ai.start = b_far;
+                        topo.seg_busterms[i].first = far_bt;
+                    } else {
+                        ai.end = b_far;
+                        topo.seg_busterms[i].second = far_bt;
+                    }
+                    erase_segment(topo, j);
+                    if (j < n_seg) --n_seg;
+                    if (n_merged_out) ++*n_merged_out;
+                    merged = true;
+                }
+            }
+        }
     }
 
     // De-overlap connectors.  At a high-degree relay the landing-chaining can lay
@@ -4239,6 +4368,10 @@ void TopologyGenerator::add_mst_candidates(const std::vector<Busterm>& blocks,
     // at 4 blocks where the pure tree structure offers something distinct.
     if (blocks.size() < 4) return;
 
+    // Collinear-adjacent merges performed by relay completion (issue #849);
+    // reported once below so the shape repair is never a silent change.
+    int n_collinear_merged = 0;
+
     // Use individual rects for multi-rect blocks so that closest_points finds
     // a point on an actual physical face, not in the union-bbox interior.
     auto block_rects = [&](int i) -> std::vector<Rect> {
@@ -4312,7 +4445,7 @@ void TopologyGenerator::add_mst_candidates(const std::vector<Busterm>& blocks,
             // relay busterm taps (single tap + SEG junctions) and annotates the
             // connectors it appends, so it must run after the baseline annotation.
             annotate_endpoints(mst, blocks);
-            complete_relay_junctions(mst, blocks, floorplan_, h_layer_, v_layer_, allow_spine_relays_);
+            complete_relay_junctions(mst, blocks, floorplan_, h_layer_, v_layer_, allow_spine_relays_, &n_collinear_merged);
             // TEG-over attachment: reach every OVER multi-rect endpoint's
             // still-unreached rects on the FINISHED tree (see the pass above —
             // running before completion would feed the relay machinery a
@@ -4332,6 +4465,10 @@ void TopologyGenerator::add_mst_candidates(const std::vector<Busterm>& blocks,
                 results.push_back(std::move(mst));
         }
     }
+    if (n_collinear_merged > 0)
+        notes() << "[TopoGen] merged " << n_collinear_merged
+                << " collinear-adjacent segment pair(s) in MST relay completion "
+                   "(a free end-to-end join is one wire, not two).\n";
 }
 
 // Is `topo` a clean routing TREE under the SEG junctions ConnTopology infers --
@@ -4510,6 +4647,9 @@ void TopologyGenerator::add_trunk_mst_candidates(
     // antenna-flagged while its spine is NOT removable (the collinear-stub case).
     int n_antenna_dropped = 0;
     std::string first_redundant;
+    // Collinear-adjacent merges performed by relay completion (issue #849),
+    // reported with the drops below for the same reason they are.
+    int n_collinear_merged = 0;
 
     for (int ti = 0; ti < orig_count; ++ti) {
         const Topology& trunk_topo = results[ti];
@@ -4709,7 +4849,7 @@ void TopologyGenerator::add_trunk_mst_candidates(
             // the extreme kept landing so no phantom overhang remains (defect 1).
             clip_spine_to_landings(tree, trunk_pos, is_h, blocks);
             annotate_endpoints(tree, blocks);
-            complete_relay_junctions(tree, blocks, floorplan_, h_layer_, v_layer_, allow_spine_relays_);
+            complete_relay_junctions(tree, blocks, floorplan_, h_layer_, v_layer_, allow_spine_relays_, &n_collinear_merged);
             // connected_block_names is populated globally only after this pass
             // (generate_candidates), so set it here so the gate's coverage check
             // knows which blocks the tree must cover.
@@ -4765,7 +4905,7 @@ void TopologyGenerator::add_trunk_mst_candidates(
         // <4-block coverage fallback below.
         Topology uncompleted = legacy;
         annotate_endpoints(legacy, blocks);
-        complete_relay_junctions(legacy, blocks, floorplan_, h_layer_, v_layer_, allow_spine_relays_);
+        complete_relay_junctions(legacy, blocks, floorplan_, h_layer_, v_layer_, allow_spine_relays_, &n_collinear_merged);
         if (legacy.connected_block_names.empty())
             for (const auto& b : blocks)
                 legacy.connected_block_names.push_back(b.block_name);
@@ -4813,6 +4953,10 @@ void TopologyGenerator::add_trunk_mst_candidates(
         if (n_antenna_dropped > 0) notes() << n_antenna_dropped << " antenna seed trunk";
         notes() << "; first: " << first_redundant << ").\n";
     }
+    if (n_collinear_merged > 0)
+        notes() << "[TopoGen] merged " << n_collinear_merged
+                << " collinear-adjacent segment pair(s) in trunk+MST relay "
+                   "completion (a free end-to-end join is one wire, not two).\n";
 
     // Emit a single un-completed fallback ONLY if the whole bundle produced no clean
     // MST-type candidate (neither here nor in the completed-tree path above) -- so a
