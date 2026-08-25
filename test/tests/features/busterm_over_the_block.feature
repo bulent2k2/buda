@@ -261,14 +261,23 @@ Feature: Over-the-Block vs Thru-the-Block TEG Routing Modes
     Then the TRUNK_H@y150 candidate has no bridge segment for "B"
 
   Scenario: Global teg_mode overridden per block
-    # Global teg_mode = thru; block "B" has per-block teg_mode = over.
-    # Block "C" has no override → inherits global = thru.
-    # Two blocks, same trunk in both gaps; only B (over) stubs BOTH its rects
-    # (its rects need real external metal), while C (thru) stubs the nearest
-    # rect only (its internal routing joins the sides by declaration).
+    # The GLOBAL default is `set_teg_mode over` (Floorplan::set_default_teg_mode).
+    # Block "B" is declared with NO per-block teg_mode keyword, so it inherits
+    # the global default (over) at DECLARATION time — prospective-only, the
+    # add_block convention.  Block "C" declares per-block teg_mode = thru,
+    # which WINS over the global (most-specific-first, like set_feedthru).
+    # Same trunk in both gaps: B (over, via the global) stubs BOTH its rects
+    # (its rects need real external metal), while C (thru, via the per-block
+    # override) stubs the nearest rect only (its internal routing joins the
+    # sides by declaration).
     #
-    Given a block "A" at (0,150)-(100,250)
-    And a block "B" with rects (200,0)-(280,100) and (220,300)-(300,400) and teg_mode "over"
+    # (Until set_teg_mode landed — teg_multirect_status.md open 14 — this
+    # scenario's title promised a global-override test while both blocks
+    # carried per-block keywords, i.e. it only asserted the per-block path.)
+    #
+    Given the global teg_mode default is "over"
+    And a block "A" at (0,150)-(100,250)
+    And a block "B" with rects (200,0)-(280,100) and (220,300)-(300,400) and no per-block teg_mode
     And a block "C" with rects (400,0)-(480,100) and (420,300)-(500,400) and teg_mode "thru"
     And layer M4 is HORIZONTAL with id 4
     And layer M5 is VERTICAL with id 5

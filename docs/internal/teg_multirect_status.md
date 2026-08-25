@@ -642,22 +642,73 @@ wrong.
     was unwired, so the dashed box draws unconditionally; the wishlist line
     is struck with a pointer to the v11 gap-closed note it predated).  Item
     12 is fully closed.
-13. **Validation gaps in `add_block ... rect`**: no overlap/degeneracy check
+13. ~~**Validation gaps in `add_block ... rect`**: no overlap/degeneracy check
     on the rect list (only classified later), and a malformed rect with <4
     coords raises a bare `IndexError` (`src/buda_cmds/setup_cmds.py:67-69`)
-    instead of the named-argument error the fractional-coord path gets.
-14. **`teg_mode` is per-block only** — no global default command exists;
+    instead of the named-argument error the fractional-coord path gets.~~
+    RESOLVED 2026-08-25: (a) a truncated rect is a hard error naming the
+    missing coordinate and the rect number (`rect 1 is missing <y2>`), the
+    same style as the fractional-coord path; (b) a DEGENERATE rect (zero
+    width or height — its edges would be block faces and Hanan lines with
+    no extent behind them) and a DUPLICATE rect (identical after the
+    coordinate-order normalization `add_block_rects` applies — it adds no
+    geometry and doubles that rect's stubs/taps) are hard errors at
+    declaration naming the rect.  OVERLAP is deliberately NOT refused —
+    the "only classified later" this item complained about is the
+    classification working as designed: interior overlap between
+    non-identical rects is exactly what `rects_are_rectilinear`
+    (`src/topology.cpp`) reads to classify an L/C-shape block, and
+    edge-adjacent rects drive the OVER adjacency suppression, so
+    forbidding either would break the rectilinear branch's own input
+    (checked before deciding; pinned positive in the tests).  Tests:
+    `test_coord_validation.py` (truncated ×2, zero-width, zero-height,
+    duplicate incl. reversed-coordinate spelling, and the two
+    stay-legal controls: overlapping L-shape + adjacent rects); docs:
+    `docs/script_reference/setup.md` add_block validation paragraph.
+14. ~~**`teg_mode` is per-block only** — no global default command exists;
     the feature scenario titled as a global-override test asserts only the
-    per-block keyword.  Either add `set_teg_mode` or retitle the scenario.
+    per-block keyword.  Either add `set_teg_mode` or retitle the scenario.~~
+    RESOLVED 2026-08-25, by ADDING `set_teg_mode <thru|over>`: a
+    Floorplan-level default (`default_teg_mode_` +
+    `set_default_teg_mode`/`default_teg_mode`, bound to Python) that a
+    multi-rect block declared WITHOUT an explicit per-block `teg_mode`
+    keyword takes; the per-block keyword wins in either direction
+    (most-specific-first, the `set_feedthru` convention).  Resolution is
+    at DECLARATION time — PROSPECTIVE ONLY, matching add_block's other
+    declaration-time resolutions (a retroactive default would silently
+    re-mode already-declared blocks): the CLI passes no mode when the
+    keyword is absent and `add_block_rects` reads the floorplan's
+    CURRENT default, so a flow that never calls the command is
+    byte-identical (the default default is THRU).  The mistitled
+    scenario (`busterm_over_the_block.feature` "Global teg_mode
+    overridden per block", which declared per-block keywords on BOTH
+    blocks) now actually exercises the global: `set_teg_mode over` +
+    a keyword-less block B (inherits over, stubs both rects) + an
+    explicit `teg_mode thru` block C (override wins, one stub).  Tests:
+    `test_set_teg_mode.py` (default-off identity, global applies,
+    override wins both ways, prospective-only, engine-API contract,
+    unknown/missing/extra-argument errors) + the rewritten scenario;
+    docs: CLAUDE.md command row + `docs/script_reference/setup.md`
+    `set_teg_mode` section (which states the prospective choice).
 15. **Vacuous tie-break test** — give `test_topo_structural_tiebreak.py` a
     bridged fixture so `len(bridge_segments)` actually varies.
 16. **`topo_edit` stubs from union bbox** (`src/topo_edit.cpp:165-185`) — a
     hand-built stub can land in the notch; low priority since `edit_status`'s
     verdict would flag most consequences, but the tap-face choice should go
     through `best_rect` like generation does.
-17. **No import path produces multi-rect** (DEF rectilinear macros, GDS) —
+17. ~~**No import path produces multi-rect** (DEF rectilinear macros, GDS) —
     a roadmap item rather than a defect; note it in
-    `opens_interchange.md` so it is not rediscovered.
+    `opens_interchange.md` so it is not rediscovered.~~  RESOLVED-AS-NOTED
+    2026-08-25: recorded as `opens_interchange.md` **item 16**, with the
+    claim re-verified on the importers rather than copied from here — a
+    DEF/LEF component's footprint is its LEF `SIZE` bbox and a rectilinear
+    macro's finer geometry becomes `OBS` KEEPOUTS (item 12's rects), GDS
+    import derives one recursive footprint bbox per structure
+    (`gds_io.cpp` `bbox_of`), and `add_block_rects` is called from
+    exactly one place in `src/` (the CLI handler; measured by grep,
+    matching §2.1) — so the TEG machinery is script-declared only, and
+    the entry states why deriving rects from `OBS`/GDS shapes would be an
+    item-12-shaped inference and where honest support would start.
 
 ## 5. Suggested landing order
 

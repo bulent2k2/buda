@@ -1346,7 +1346,7 @@ if {$stage eq "build"} {
         open_bdb def_layer import_lef_tech def_track_pattern
         add_grid_override def_gds_layer corner_margin set_track_pitch
         set_unit_check set_import_scale detour_channel set_feedthru
-        set_bundling set_max_bundle_bits set_keepout_loci
+        set_teg_mode set_bundling set_max_bundle_bits set_keepout_loci
         set_prune_dominated set_dedup_loci set_trim_mst_legs
         set_trim_trunk_stubs set_drop_dangling set_dead_span_escalate
         set_pair_align_heal set_planner_param set_die set_bottom_up
