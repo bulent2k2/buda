@@ -41,6 +41,7 @@
   #candbar, #focusbar { position: absolute; top: 8px; left: 8px; background: #000a;
              color: #fff; padding: 6px 10px; border-radius: 5px; }
   #candbar button, #focusbar button { background: #fff2; color: #fff; border: 1px solid #fff4; }
+  .barsep { opacity: .35; margin: 0 5px; }
   #editpanel { border: 1px solid #8884; border-radius: 4px; padding: 6px;
                display: flex; flex-direction: column; gap: 5px; }
   #editverdict { font-size: 12px; }
@@ -109,9 +110,13 @@
 <div id="main">
   <div id="running" hidden></div>
   <div id="candbar" hidden>
-    <button onclick="stepCand(-1)">◀</button>
-    <button onclick="stepCand(1)">▶</button>
+    <button onclick="stepBundleSel(-1)" title="previous bundle ([)">◀</button>
+    <span id="bundlelbl"></span>
+    <button onclick="stepBundleSel(1)" title="next bundle (])">▶</button>
+    <span class="barsep">│</span>
+    <button onclick="stepCand(-1)" title="previous candidate (p)">◀</button>
     <span id="candlbl"></span>
+    <button onclick="stepCand(1)" title="next candidate (n)">▶</button>
     <button id="pinbtn" onclick="pinToggle()">Pin</button>
     <button onclick="editOpen()">Edit</button>
     <button onclick="editOpen('new')">Edit new</button>
@@ -128,6 +133,12 @@
 const API = "/api";
 let RENDER = null, CAND = 0, VIEW = "generation", EDIT = null;
 let DEMOS = [], ACTIVE = null, BUNDLE_FOCUS = null;   // BUNDLE_FOCUS: null = show all
+// The generation view renders ONE bundle at a time (?bundle=<id>): BUNDLE_SEL is
+// which one, BUNDLE_IDS the ring to step through (from /state's bundle digests).
+// Unlike BUNDLE_FOCUS — a per-view dimming that resets on every refresh — this is
+// a SELECTION and PERSISTS, so pinning a candidate or running a stage leaves you
+// on the bundle you were reading.
+let BUNDLE_SEL = null, BUNDLE_IDS = [];
 
 async function post(path, body) {
   const r = await fetch(API + path, {method: "POST",
@@ -213,10 +224,49 @@ function bundleAlpha(bid) {
   return (BUNDLE_FOCUS === null || bid === BUNDLE_FOCUS) ? 1 : 0.1;
 }
 
+// ── bundle selection (generation view) ──────────────────────────────────────
+// Distinct from the focus ring above: that DIMS the other bundles of one placed
+// render, this changes WHICH bundle's candidate pool is fetched.  Nothing is
+// needed server-side — GET /api/render/generation has always taken ?bundle=<id>
+// (serialize_generation filters on original_bundle.id).
+async function stepBundleSel(d) {
+  // An edit session is bound to its bundle server-side, so stepping away would
+  // draw another bundle's frame under the working copy.
+  if (VIEW !== "generation" || EDIT || !BUNDLE_IDS.length) return;
+  let i = BUNDLE_IDS.indexOf(BUNDLE_SEL);
+  if (i < 0) i = 0;
+  BUNDLE_SEL = BUNDLE_IDS[(i + d + BUNDLE_IDS.length) % BUNDLE_IDS.length];
+  CAND = 0;                        // a different bundle has its own candidate pool
+  RENDER = await get("/render/generation?bundle=" + BUNDLE_SEL);
+  draw();
+}
+function updateBundleLabel() {
+  const lbl = document.getElementById("bundlelbl");
+  if (!lbl) return;
+  lbl.textContent = BUNDLE_IDS.length
+    ? `bundle ${BUNDLE_SEL} · ${BUNDLE_IDS.indexOf(BUNDLE_SEL) + 1}/${BUNDLE_IDS.length} · [/]`
+    : "";
+}
+// serialize_state() lists EVERY bundle, not just the rendered one, so the shown
+// bundle's digest (pin state) must be looked up by id — bundles[0] was only ever
+// right while the view was stuck on the first bundle.
+function shownDigest() {
+  const bs = (RENDER && RENDER.state && RENDER.state.bundles) || [];
+  return bs.find(b => b.id === BUNDLE_SEL) || bs[0] || {};
+}
+
 // ── keyboard: step candidates (topo) / bundles (nuts, detailed) ─────────────
 window.addEventListener("keydown", (e) => {
   const tag = (e.target.tagName || "").toLowerCase();
   if (tag === "textarea" || tag === "input" || tag === "select") return;
+  // n/p (and the arrows) were already fully consumed — candidates in the
+  // generation view, bundle focus in nuts/detailed — so the bundle SELECTION
+  // gets [ and ].
+  if (e.key === "[" || e.key === "]") {
+    e.preventDefault();
+    stepBundleSel(e.key === "]" ? 1 : -1);
+    return;
+  }
   const fwd = (e.key === "n" || e.key === "ArrowRight");
   const back = (e.key === "p" || e.key === "ArrowLeft");
   if (!fwd && !back) return;
@@ -289,7 +339,15 @@ async function refresh() {
   if (VIEW === "detailed" && !sr.dnuts) VIEW = sr.nuts ? "nuts" : "generation";
   if (VIEW === "nuts" && !sr.nuts) VIEW = "generation";
   if (!sr.topologies) { RENDER = null; return draw(); }
-  RENDER = await get("/render/" + VIEW + (VIEW === "generation" ? "?bundle=1" : ""));
+  // Re-bundling can retire an id, so re-resolve the selection against the live
+  // digest list — but keep it when it is still there, so a stage run or a pin
+  // does not throw the reader back to the first bundle.
+  BUNDLE_IDS = (st.bundles || []).map(b => b.id);
+  if (!BUNDLE_IDS.includes(BUNDLE_SEL)) {
+    BUNDLE_SEL = BUNDLE_IDS.length ? BUNDLE_IDS[0] : 1;
+    CAND = 0;
+  }
+  RENDER = await get("/render/" + VIEW + (VIEW === "generation" ? "?bundle=" + BUNDLE_SEL : ""));
   if (VIEW === "generation")
     CAND = Math.min(CAND, (RENDER.bundles[0]?.candidates.length || 1) - 1);
   draw();
@@ -311,8 +369,8 @@ function setPinBtn() {
 async function pinToggle() {
   if (VIEW !== "generation" || !RENDER || EDIT) return;
   const res = PINNED_HERE
-    ? await post("/unpin", {bundle: 1})
-    : await post("/select", {bundle: 1, candidate: CAND});
+    ? await post("/unpin", {bundle: BUNDLE_SEL})
+    : await post("/select", {bundle: BUNDLE_SEL, candidate: CAND});
   log(res.result.summary || (PINNED_HERE ? "unpinned" : "pinned"));
   showStages(res.state);
   await refresh();
@@ -360,7 +418,7 @@ function applyEdit(resp) {
 async function editOpen(cand) {
   const c = cand === "new" ? "new" : CAND;
   VIEW = "generation";                          // an uncommitted edit is topo-only
-  applyEdit(await post("/edit/open", {bundle: 1, candidate: c}));
+  applyEdit(await post("/edit/open", {bundle: BUNDLE_SEL, candidate: c}));
 }
 async function editApply() {
   const cmd = document.getElementById("editop").value.trim();
@@ -444,7 +502,7 @@ function draw() {
   document.getElementById("candbar").hidden = (VIEW !== "generation");
   const showFocus = (VIEW === "nuts" || VIEW === "detailed");
   document.getElementById("focusbar").hidden = !showFocus;
-  if (VIEW === "generation") drawGeneration(g, W, H);
+  if (VIEW === "generation") { updateBundleLabel(); drawGeneration(g, W, H); }
   else if (VIEW === "nuts") drawNuts(g);
   else if (VIEW === "detailed") drawDetailed(g, Math.max(W, H));
   if (showFocus) updateFocusLabel();
@@ -519,10 +577,18 @@ function drawGeneration(g, W, H) {
     const bundle = RENDER.bundles[0];
     if (!bundle) return;
     cand = bundle.candidates[CAND];
-    const sb = (RENDER.state && RENDER.state.bundles[0]) || {};
+    // A degenerate placement can leave a bundle with NO candidates at all; the
+    // stepper can now land on one, so say so instead of throwing on `cand`.
+    if (!cand) {
+      PINNED_HERE = false; setPinBtn();
+      document.getElementById("candlbl").textContent = "no candidates";
+      return;
+    }
+    const sb = shownDigest();
     PINNED_HERE = !!(sb.pinned && sb.selected_index === CAND);
     const pin = PINNED_HERE ? " 📌PINNED" : "";
-    lbl = `bundle ${bundle.id} · cand ${CAND + 1}/${bundle.candidates.length} · ${cand.type} · WL ${cand.estimated_wirelength}${pin}`;
+    // The bundle id lives in #bundlelbl now, so it is not repeated here.
+    lbl = `cand ${CAND + 1}/${bundle.candidates.length} · ${cand.type} · WL ${cand.estimated_wirelength}${pin}`;
   }
   setPinBtn();
   document.getElementById("candlbl").textContent = lbl;

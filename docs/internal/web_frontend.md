@@ -222,6 +222,27 @@ resets to "all" on any stage run or view switch. Both clients are byte-for-byte
 equivalent here — the Scala client's dimming lives in `Renderer.bundleAlpha`, the
 reference client's in `bundleAlpha`.
 
+The generation view renders **one bundle at a time** (`?bundle=<id>`), so *which*
+one is its own control: a second `◀ ▶` pair on the cand bar, and the `[` / `]`
+keys — `n`/`p` and the arrows were already fully consumed by the two rings above.
+The ring is the id list from `GET /api/state`'s bundle digests, so it needs
+nothing server-side; the hier demo steps 35 bundles where the view used to be
+hardcoded to bundle 1. Unlike the focus ring this is a **selection** and
+PERSISTS: a stage run or a pin leaves the reader on the bundle they were reading,
+and it is re-resolved only when re-bundling retires the id. It also governs what
+`Pin`/`Unpin` and `Edit` act on — those posted a literal `bundle: 1` while the
+view could not move — and stepping is refused while an edit session is open,
+since the session is bound to its bundle server-side.
+
+Two things the hardcoding had masked. `state` is the WHOLE session's digest list,
+not the filtered render, so the shown bundle's pin state must be looked up **by
+id** — `state.bundles[0]` is the session's first bundle whatever `?bundle=` asked
+for, and it was only ever right while the view was stuck there (`shownDigest()`
+in the reference client, `pinSuffix` in `Renderer`). And a degenerate placement
+can leave a bundle with **no candidates at all**; the stepper can land on one, so
+both clients label it rather than dereferencing `candidates[0]`. The bundle id
+moved out of the candidate label into the new one, so it is not printed twice.
+
 Both clients are served by a `_NoCacheStatic` mount that stamps
 `Cache-Control: no-cache`, so a `bb web` rebuild of `main.js` is picked up on a
 normal reload (no hard refresh) while ETags still short-circuit unchanged files

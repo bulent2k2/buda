@@ -140,11 +140,14 @@ object Renderer {
         if (bundles.isEmpty) return lbl
         val bundle = bundles(0)
         val cands = arr(bundle, "candidates")
-        if (cands.isEmpty) return lbl
+        // A degenerate placement can leave a bundle with NO candidates at all;
+        // the bundle stepper can land on one, so say so rather than draw nothing.
+        if (cands.isEmpty) return "no candidates"
         val idx = math.max(0, math.min(cand, cands.length - 1))
         val cc = cands(idx)
-        val pin = pinSuffix(payload, idx)
-        lbl = s"bundle ${bundle.id} · cand ${idx + 1}/${cands.length} · ${cc.`type`} · WL ${cc.estimated_wirelength}$pin"
+        val pin = pinSuffix(payload, bundle.id.asInstanceOf[Double].toInt, idx)
+        // The bundle id lives in #bundlelbl now, so it is not repeated here.
+        lbl = s"cand ${idx + 1}/${cands.length} · ${cc.`type`} · WL ${cc.estimated_wirelength}$pin"
         cc
       }
 
@@ -181,10 +184,13 @@ object Renderer {
   }
 
   /** " 📌PINNED" when the shown candidate is the pinned selection, else "". */
-  private def pinSuffix(payload: js.Dynamic, idx: Int): String = {
+  /** serialize_state() lists EVERY bundle, not just the rendered one, so the shown
+    * bundle's digest must be looked up by id — bundles(0) was only ever right
+    * while the view was stuck on the first bundle. */
+  private def pinSuffix(payload: js.Dynamic, bundleId: Int, idx: Int): String = {
     val state = payload.selectDynamic("state")
     if (!defined(state)) return ""
-    val sbs = arr(state, "bundles")
+    val sbs = arr(state, "bundles").filter(_.id.asInstanceOf[Double].toInt == bundleId)
     if (sbs.isEmpty) return ""
     val sb = sbs(0)
     val pinned = defined(sb.selectDynamic("pinned")) && sb.pinned.asInstanceOf[Boolean]
