@@ -139,6 +139,13 @@ let DEMOS = [], ACTIVE = null, BUNDLE_FOCUS = null;   // BUNDLE_FOCUS: null = sh
 // a SELECTION and PERSISTS, so pinning a candidate or running a stage leaves you
 // on the bundle you were reading.
 let BUNDLE_SEL = null, BUNDLE_IDS = [];
+// A render fetch is ASYNC, so a step must not publish its target before its own
+// payload lands: BUNDLE_SEL is the bundle actually SHOWN — what RENDER holds and
+// what Pin/Edit act on — while BUNDLE_WANT is where the stepper has moved to.
+// Publishing early let Pin target a bundle whose geometry was not on screen yet.
+// RENDER_SEQ drops superseded responses, so rapid presses cannot install out of
+// order and leave the label naming one bundle while the wires belong to another.
+let BUNDLE_WANT = null, RENDER_SEQ = 0;
 
 async function post(path, body) {
   const r = await fetch(API + path, {method: "POST",
@@ -233,11 +240,20 @@ async function stepBundleSel(d) {
   // An edit session is bound to its bundle server-side, so stepping away would
   // draw another bundle's frame under the working copy.
   if (VIEW !== "generation" || EDIT || !BUNDLE_IDS.length) return;
-  let i = BUNDLE_IDS.indexOf(BUNDLE_SEL);
+  // Step the CURSOR, not the shown bundle: successive presses must advance from
+  // where the last press was heading, not from what is still on screen.
+  let i = BUNDLE_IDS.indexOf(BUNDLE_WANT);
   if (i < 0) i = 0;
-  BUNDLE_SEL = BUNDLE_IDS[(i + d + BUNDLE_IDS.length) % BUNDLE_IDS.length];
+  const target = BUNDLE_IDS[(i + d + BUNDLE_IDS.length) % BUNDLE_IDS.length];
+  BUNDLE_WANT = target;
+  const seq = ++RENDER_SEQ;
+  const payload = await get("/render/generation?bundle=" + target);
+  if (seq !== RENDER_SEQ) return;   // a later step superseded this one
+  // Publish the bundle, its payload and the candidate index TOGETHER, so no one
+  // can read a CAND belonging to one bundle against another bundle's pool.
+  BUNDLE_SEL = target;
   CAND = 0;                        // a different bundle has its own candidate pool
-  RENDER = await get("/render/generation?bundle=" + BUNDLE_SEL);
+  RENDER = payload;
   draw();
 }
 function updateBundleLabel() {
@@ -347,9 +363,15 @@ async function refresh() {
     BUNDLE_SEL = BUNDLE_IDS.length ? BUNDLE_IDS[0] : 1;
     CAND = 0;
   }
-  RENDER = await get("/render/" + VIEW + (VIEW === "generation" ? "?bundle=" + BUNDLE_SEL : ""));
+  BUNDLE_WANT = BUNDLE_SEL;             // a refresh re-anchors the stepper cursor
+  const seq = ++RENDER_SEQ;
+  const payload = await get("/render/" + VIEW + (VIEW === "generation" ? "?bundle=" + BUNDLE_SEL : ""));
+  if (seq !== RENDER_SEQ) return;       // a later render superseded this one
+  RENDER = payload;
+  // Clamp on INSTALL — a bundle reached mid-flight has its own pool size, and a
+  // pool of 0 must floor at 0 rather than land on -1.
   if (VIEW === "generation")
-    CAND = Math.min(CAND, (RENDER.bundles[0]?.candidates.length || 1) - 1);
+    CAND = Math.max(0, Math.min(CAND, (RENDER.bundles[0]?.candidates.length || 1) - 1));
   draw();
 }
 function stepCand(d) {

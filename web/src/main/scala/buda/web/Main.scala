@@ -30,6 +30,15 @@ object Main {
   // leaves the reader on the bundle they were reading.
   private var bundleSel: Int = -1               // -1 = not resolved yet
   private var bundleIds: Seq[Int] = Seq.empty
+  // A render fetch is ASYNC, so a step must not publish its target before its own
+  // payload lands: `bundleSel` is the bundle actually SHOWN — what `render` holds
+  // and what Pin/Edit act on — while `bundleWant` is where the stepper has moved
+  // to.  Publishing early let Pin target a bundle whose geometry was not on screen
+  // yet.  `renderSeq` drops superseded responses, so rapid presses cannot install
+  // out of order and leave the label naming one bundle while the wires belong to
+  // another.
+  private var bundleWant: Int = -1
+  private var renderSeq: Int = 0
 
   private def svg = dom.document.getElementById("svg").asInstanceOf[dom.svg.SVG]
   private def byId(id: String) = dom.document.getElementById(id)
@@ -251,15 +260,21 @@ object Main {
           bundleSel = bundleIds.headOption.getOrElse(1)
           cand = 0
         }
+        bundleWant = bundleSel        // a refresh re-anchors the stepper cursor
         val bundle = if (view == "generation") Some(bundleSel) else None
+        renderSeq += 1
+        val seq = renderSeq
         ApiClient.render(view, bundle).foreach { p =>
-          render = p
-          if (view == "generation") {
-            val bs = render.bundles.asInstanceOf[js.Array[js.Dynamic]]
-            val n = if (bs.nonEmpty) bs(0).candidates.asInstanceOf[js.Array[js.Dynamic]].length else 1
-            cand = math.min(cand, math.max(0, n - 1))
+          if (seq == renderSeq) {     // a later render supersedes this one
+            render = p
+            // Clamp on INSTALL — a bundle reached mid-flight has its own pool size.
+            if (view == "generation") {
+              val bs = render.bundles.asInstanceOf[js.Array[js.Dynamic]]
+              val n = if (bs.nonEmpty) bs(0).candidates.asInstanceOf[js.Array[js.Dynamic]].length else 1
+              cand = math.min(cand, math.max(0, n - 1))
+            }
+            draw()
           }
-          draw()
         }
       }
     }
@@ -281,10 +296,23 @@ object Main {
     // An edit session is bound to its bundle server-side, so stepping away would
     // draw another bundle's frame under the working copy.
     if (view != "generation" || edit != null || bundleIds.isEmpty) return
-    val i = math.max(0, bundleIds.indexOf(bundleSel))
-    bundleSel = bundleIds(((i + dir) % bundleIds.length + bundleIds.length) % bundleIds.length)
-    cand = 0                       // a different bundle has its own candidate pool
-    ApiClient.render("generation", Some(bundleSel)).foreach { p => render = p; draw() }
+    // Step the CURSOR, not the shown bundle: successive presses must advance from
+    // where the last press was heading, not from what is still on screen.
+    val i = math.max(0, bundleIds.indexOf(bundleWant))
+    val target = bundleIds(((i + dir) % bundleIds.length + bundleIds.length) % bundleIds.length)
+    bundleWant = target
+    renderSeq += 1
+    val seq = renderSeq
+    ApiClient.render("generation", Some(target)).foreach { p =>
+      if (seq == renderSeq) {       // a later step supersedes this one
+        // Publish the bundle, its payload and the candidate index TOGETHER, so no
+        // one can read a `cand` belonging to one bundle against another's pool.
+        bundleSel = target
+        cand = 0                    // a different bundle has its own candidate pool
+        render = p
+        draw()
+      }
+    }
   }
 
   private def updateBundleLabel(): Unit =
