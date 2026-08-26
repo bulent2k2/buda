@@ -28,8 +28,12 @@ here is asserted from reading the code alone — every measurement is from a run
 | 6 | a culled partner strands a segment | `flow/antenna_culled_partner.buda` + `flow/antenna_starved_partner.buda` | **FIXED** — re-adjust after the cull |
 | 7 | `rv/soc` 1.25M units mid-flow | `flow/rv/soc.buda` | **FIXED with 6** |
 | 8 | a seat its partner cannot reach | `flow/keepout_blocks_partner_reach.buda` | **FIXED** — partner-reach seat pruning |
+| 9 | a free collinear split: one wire emitted as two | `TRUNK_V_OOB+MST@x-80` on the lShape1-dnuts design (`test_antenna_check.py`) | **FIXED** — collinear-adjacent merge in relay completion |
 
-Nothing here is open any more. Entries 6 and 7 were **one defect** — a
+Nothing here is open any more. Entry 9 is the newest and the one that repeats
+this page's own warning: the candidate it fixes was in use as the FIXTURE of the
+#848 audit test, so repairing generation deleted that test's subject. Entries 6
+and 7 were **one defect** — a
 DetailedNUTS pass-ordering problem, isolated to a 4-bit vehicle in entry 6 and
 fixed there.  Entry 8 is entry 6's **sibling and its opposite**: the same
 geometry and the same cull, but the keepout is declared UP FRONT rather than
@@ -689,6 +693,115 @@ always MID-FLOW ONLY (the healers re-pinned away from it before the endpoint,
 which `test_bit_antenna_audit.py` pins from both sides), so this cost nothing in
 the shipped route; what it cost was a latent shape any design without those
 healers would keep.
+
+---
+
+## 9. A free collinear split: one wire emitted as two
+
+**Mechanism.** `complete_relay_junctions`' `connect` wires two landings on a
+relay block with legs that must meet each incident segment PERPENDICULARLY —
+ConnTopology infers no junction between COLLINEAR segments. Each of its two
+orthogonal-landing branches guards ONE vanishing-leg degeneracy and misses its
+mirror: "A leaves H" detours when `a.y == b.y` (its V leg would vanish) and not
+when `a.x == b.x`; "A leaves V" mirrors the omission. When the unguarded
+degeneracy hits, the surviving leg starts at the incident segment's own endpoint
+and runs COLLINEAR with it — so the wire the generator drew as one continuous
+piece of metal is, to every downstream stage, two separate segments joined by
+nothing, each free to be seated on its own track by NUTS.
+
+This is the mirror image of the pass that follows it. The collinear-CONTAINED
+antenna drop handles the pair that OVERLAPS; this is the pair that ABUTS, and
+there the drop is the wrong tool — removing either piece loses reach. The
+repair is a MERGE.
+
+**Reproduce** (from `flow/`, the lShape1-dnuts design):
+
+```
+add_block rect      100 0   700 100
+add_block l1   rect   0 300 200 600 rect   0 600 300 800
+add_block l2   rect 500 300 800 400 rect 600 400 800 500
+source tracks/tracks2top.buda
+add_bus bus1[8] rect.out l1.in,l2.in
+run_bundler STRICT
+generate_topologies
+select_topology bus1 TRUNK_V_OOB+MST@x-80
+run_planner
+run_nuts
+check_design
+```
+
+**Measured, pre-fix.** The pool's candidate 28 is `TRUNK_V_OOB+MST@x-80`, and
+it carries THREE collinear pieces on `rect`'s top row: the seed trunk's stub
+`[-80,100]`, a relay connector `[100,150]`, and `[150,600]`. The join at x=150
+is a real T (the MST leg to `l1` lands there). The join at x=100 holds NOTHING —
+the trunk stub landed on `rect`'s top-left CORNER, so `connect` took the
+"A leaves V" branch, its V leg vanished, and its H leg left the same point. Both
+pieces are `ANTENNA` (2 at nuts, 2 at dnuts); before the #848 interior-crossing
+pass-through they were silently credited by the graze and `check_design`
+reported Success.
+
+**Fix.** A collinear-ADJACENT merge at the end of relay completion, beside the
+contained-drop. It merges only a provably FREE join: same orientation, same
+perpendicular line, same layer / jog / `edge_id` / `perp_clamp` / `seg_bits`,
+ranges meeting at exactly one point with no interior overlap, no busterm tap
+annotated there, and NOTHING else of the topology touching it. Under those
+conditions the merged wire occupies exactly the same metal and carries exactly
+the same attachments. A join that DOES carry a perpendicular junction is left
+alone — that is a real T, and merging across it is a separate question about
+trunk canonicalization.
+
+Fixing `connect` itself was considered and is not better: the guarded mirror's
+remedy is a 4-leg HVHV detour, which here would spend real metal routing AROUND
+a join that is already geometrically perfect, and extending the incident segment
+in place would mutate landing points the chaining loop and the single-tap pass
+still read by index. The merge is the honest semantics and, seeing FINAL
+geometry, it catches the shape from any emitter.
+
+**ALWAYS ON, and why.** The precedent is the one the opt-in knobs draw:
+`set_trim_mst_legs` / `set_trim_trunk_stubs` are opt-in because they mutate
+candidates that are VALID but wasteful, so opting out preserves a working
+alternative. This shape is electrically BROKEN — the two halves are not
+connected — so opting out would mean keeping a candidate that opens nets, which
+is what the always-on coverage gate and seed-trunk gates exist to prevent.
+
+**What the fix left for the seed-trunk gate — nothing.** The gate's known
+weakness (`seed_trunk_is_antenna` asks whether the spine has ≥2 attachments,
+not whether they are LOAD-BEARING) was expected to need a companion fix: here
+the spine has two junctions and one of them is to the antenna half. The merge
+dissolves that premise. Merged, the wire closes a LOOP with the spine, so the
+pre-existing `topology_is_clean_tree` gate drops the whole hybrid and the
+reported candidate is GONE from the pool. No gate change was made, and none is
+justified on present evidence: `test_no_antenna_survives_generation` reports
+zero antenna candidates across the three flows, so no surviving spine is
+attached to dead metal — the count rule has nothing left to get wrong here.
+
+**Corpus (`tools/qor_corpus.py --vs f73a5dfd`): 0 better / 1 worse / 49
+unchanged**, abstract WL −0.00%, detailed WL −0.00%. The regression is
+`chip/chip_stack_topdown.buda`, 21/241/18 → 22/263/21, and it is question 3
+below in its purest measured form:
+
+* the merge fires 5 times on `big.buda` and changes exactly ONE of its 80
+  bundle hashes (the only golden diff in the tree); on `chip_stack_topdown` it
+  changes **3 of 660** pools, each of which GAINS a candidate and loses none
+  (16425 → 16429 candidates);
+* every gained candidate is one that was previously REJECTED because it was
+  broken — on `big.buda` bundle 25 the recovered `TRUNK_V+MST@x5735` is a
+  6-segment tree at wl 8655, cheaper than the previous best tree at equal
+  segment count;
+* **none of the 4 newly-admitted candidates is selected anywhere** on
+  `chip_stack_topdown`. Only 5 of 660 selections move, all of them in bundles
+  whose pool did not change, and all between candidates that existed on both
+  sides (`L_VH ↔ L_HV`, `TRUNK_V → TRUNK_V+MST@x795`).
+
+So the fix puts ZERO new geometry into that design's route. The endpoint moved
+because candidates are WL-SORTED: four repaired candidates entering three pools
+renumbers indices, which perturbs the greedy planner's order, and a design
+sitting at 241 unplaced re-lands 22 unplaced away. That is a real cost and it is
+reported as one — but it is a basin shift, not the fix's metal being worse, and
+the twin `chip_stack_bottomup` is unchanged. For scale, the documented
+sensitivity of these chip flows to a comparable pool nudge is larger:
+`set_trim_mst_legs` moves 9 of 640 selected TYPES on `chip3_topdown` and takes
+leaf bundles from 260 to 636 unplaced.
 
 ---
 
