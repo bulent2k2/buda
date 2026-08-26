@@ -107,8 +107,31 @@ object Main {
     Option(byId("log")).foreach(_.textContent = txt)
 
   // ── command console ─────────────────────────────────────────────────────────
-  private def runCmds(): Unit =
-    ApiClient.command(cmdsText).foreach { res => showResults(res); refresh() }
+  /** Running a demo's setup VERBATIM means "start this demo", so it starts from a
+    * clean session — a setup only ADDS, and over another design both are live at
+    * once (see `loadDemo`).  Guarding the PICKER alone cannot cover this: a fresh
+    * tab, a reopened tab, or private mode has no remembered key, so the picker
+    * shows the FIRST demo against whatever session the server still holds and Run
+    * silently merges the two.  The picker guard gives immediate feedback on a
+    * switch; THIS is the one that actually closes the hole, because it sits at the
+    * hazard rather than at one route to it.
+    *
+    * An EDITED or ad-hoc command list runs as-is (that is the console's job), and
+    * a session with no blocks is left alone so a BDB opened before setup survives. */
+  private def runCmds(): Unit = {
+    val raw = byId("cmds").asInstanceOf[dom.html.TextArea].value
+    val isDemoSetup =
+      active != null && raw.trim == active.setup.asInstanceOf[String].trim
+    val send = () => ApiClient.command(cmdsText).foreach { res => showResults(res); refresh() }
+    if (!isDemoSetup) send()
+    else ApiClient.state().foreach { st =>
+      val n = st.selectDynamic("n_blocks")
+      val loaded = defined(n) && n.asInstanceOf[Double] > 0
+      if (loaded) ApiClient.reset().foreach { st2 =>
+        showStages(st2); render = null; hideEditPanel(); send() }
+      else send()
+    }
+  }
 
   private def stage(cmd: String): Unit =
     ApiClient.command(Seq(cmd)).foreach { res => showResults(res); refresh() }

@@ -118,12 +118,28 @@ union of ALL blocks, so the frame blows up ~17× (`1220×730` → `6240×14380`)
 the design just run renders as a speck beside the previous demo's three
 rectangles. The **topo view hides it** — `activeFrame()` prefers the shown
 bundle's own floorplan — so it surfaces only in NUTS and detailed, which have no
-per-bundle frame and fall back to the contaminated session floorplan. A page
-RELOAD does not reset (the server session outlives the page, and reloading should
-keep the session you were working in); the picker's selection is remembered in
-`sessionStorage` so a reloaded page shows the demo the session is actually in,
-rather than snapping back to the first one and turning a re-pick of your own demo
-into a wipe. Both halves are pinned by
+per-bundle frame and fall back to the contaminated session floorplan.
+
+Two guards, because the picker is only one route to the hazard. Picking a
+different demo resets — immediate feedback that you are starting over. But the
+**server session outlives the page**, so a fresh tab, a reopened tab or private
+mode arrives with no remembered demo, the picker shows the FIRST catalog entry
+against whatever the server still holds, and Run merges the two with no switch
+ever happening (measured: 78 hier blocks + the flat setup = 81 and a `blk_07` in
+the frame). So the load-bearing guard sits at the hazard itself: **running a
+demo's setup VERBATIM starts that demo from a clean session.** An edited or
+ad-hoc command list runs as-is — that is the console's job — and a session with
+no blocks is left alone so a BDB opened before setup survives. That last test is
+what `n_blocks` is for in `serialize_state`: `stages_run` cannot answer "is a
+design already loaded", since a declared-but-unbundled floorplan reads as
+all-false, which is exactly the state a freshly-served page finds.
+
+A page RELOAD does not reset (reloading should keep the session you were working
+in); the picker's selection is remembered in `sessionStorage` so a reloaded page
+shows the demo the session is actually in, rather than snapping back to the first
+one and turning a re-pick of your own demo into a wipe. That is a convenience —
+correctness rests on the setup-run guard above, which holds whether or not the
+storage is available. Both halves are pinned by
 `test_a_demo_setup_accumulates_onto_the_session_unless_reset` — the fix lives in
 the clients but rests on two server properties (setup accumulates; `POST
 /api/reset` clears the floorplan), and a silent change to either would strand it.

@@ -162,7 +162,21 @@ function showStages(state) {
 }
 
 async function runCmds() {
-  const cmds = document.getElementById("cmds").value.split("\n").map(s => s.trim()).filter(Boolean);
+  const text = document.getElementById("cmds").value;
+  const cmds = text.split("\n").map(s => s.trim()).filter(Boolean);
+  // Running a demo's setup VERBATIM means "start this demo", so it starts from a
+  // clean session — a setup only ADDS, and over another design both are live at
+  // once (see loadDemo).  Guarding the PICKER alone cannot cover this: a fresh
+  // tab, a reopened tab, or private mode has no remembered key, so the picker
+  // shows the FIRST demo against whatever session the server still holds and Run
+  // silently merges the two.  The picker guard gives immediate feedback on a
+  // switch; THIS is the one that actually closes the hole, because it sits at the
+  // hazard rather than at one route to it.
+  // An EDITED or ad-hoc command list runs as-is (that is the console's job), and
+  // a session with no blocks is left alone so a BDB opened before setup survives.
+  if (ACTIVE && text.trim() === ACTIVE.setup.trim()
+      && ((await get("/state")).n_blocks || 0) > 0)
+    await reset();
   const res = await post("/command", {cmds});
   log(res.results.map(r => (r.ok ? "  " : "x ") + (r.summary || "(ok)")).join("\n"));
   showStages(res.state);

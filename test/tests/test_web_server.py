@@ -330,6 +330,16 @@ def test_a_demo_setup_accumulates_onto_the_session_unless_reset():
     run_setup("hier")
     assert not ({b["name"] for b in blocks()} & flat)
 
+    # (c) `n_blocks` is how a client decides whether a design is already loaded
+    # before it runs a demo's setup.  stages_run CANNOT answer that — a declared
+    # but unbundled floorplan reads as all-false — which is exactly the state a
+    # freshly-served page finds when the server session outlives it.
+    st = client.get("/api/state").json()
+    assert st["n_blocks"] == len(blocks()) > 0
+    assert not any(st["stages_run"].values()), "setup alone runs no stage"
+    client.post("/api/reset", json={})
+    assert client.get("/api/state").json()["n_blocks"] == 0
+
 
 def test_static_assets_send_no_cache_but_revalidate():
     """The demo static mount stamps Cache-Control: no-cache so a rebuilt bundle
