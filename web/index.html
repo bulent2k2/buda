@@ -27,11 +27,17 @@
   .blklbl { fill: #48c; font-size: 10px; }
   .keepout { fill: #f443; stroke: #e33; stroke-width: 1; }
   .hanan { stroke: #8883; stroke-width: .5; stroke-dasharray: 2 3; }
+  /* Layer palette (consistent across topo / NUTS / DNUTS): warm hues so
+     wires stay legible over the BLUE blocks (.blk).  H = orange, V = red,
+     jog = gold — the red/orange/yellow family.  V is nudged off the keepout
+     stroke (#e33) so a wire crossing a keepout edge is still its own color.
+     Kept in sync with the served clients (src/web/static/{index,scala/index}.html). */
   .seg { stroke-width: 2.5; fill: none; }
-  .seg.H { stroke: #e6a; } .seg.V { stroke: #4ad; } .seg.jog { stroke: #fa0; }
+  .seg.H { stroke: #f80; } .seg.V { stroke: #e22; } .seg.jog { stroke: #fc0; }
   .bt { fill: #0bd; } .rcv { fill: none; stroke: #d0b; stroke-width: 1.5; }
-  .track { stroke: #2a7; stroke-width: 2; } .trackftp { fill: #2a73; }
-  .bit { stroke: #08a; stroke-width: 1; } .bit.H { stroke: #e83; }
+  .track { stroke-width: 2; } .track.H { stroke: #f80; } .track.V { stroke: #e22; }
+  .trackftp { fill: #fa03; }
+  .bit { stroke-width: 1; } .bit.H { stroke: #f80; } .bit.V { stroke: #e22; }
   .via { fill: #f60; stroke: #a30; stroke-width: .5; }
   .overlap { fill: #f005; stroke: #f00; stroke-width: 1; }
   #candbar { position: absolute; top: 8px; left: 8px; background: #000a; color: #fff;
@@ -66,7 +72,7 @@ add_bus bus_060[52] blk_23.p blk_07.p,io_pad_tl.p</textarea>
   </div>
   <div class="row">view:
     <button id="view-topo">topo</button><button id="view-nuts">NUTS</button
-    ><button id="view-detailed">detailed</button>
+    ><button id="view-detailed">DNUTS</button>
   </div>
   <div class="row">bdb:
     <input id="bdbpath" value="/tmp/buda_demo.bdb" style="flex:1;font:inherit" />
