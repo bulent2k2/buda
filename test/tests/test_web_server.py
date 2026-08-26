@@ -252,6 +252,43 @@ def test_hier_demo_drives_full_pipeline():
     assert len(bundle_ids) >= 2                # bundle-focus isolation needs these
 
 
+def test_generation_bundle_stepper_contract():
+    """The generation view renders ONE bundle at a time, so the front end steps
+    through them with `?bundle=<id>` over the id ring in GET /api/state.  Pins the
+    three properties both clients rely on.
+
+    (c) is the one that bit: `state` is the WHOLE session's digest list, NOT the
+    filtered render, so `state.bundles[0]` is the first bundle of the session
+    whatever `?bundle=` asked for.  Reading the shown bundle's pin state off index
+    0 was only ever right while the view was hardcoded to the first bundle — which
+    is exactly what the stepper stops being true.
+    """
+    client = _client()
+    demos = {d["key"]: d for d in client.get("/api/demos").json()["demos"]}
+    hier = demos["hier"]
+    client.post("/api/command", json={
+        "cmds": [ln for ln in hier["setup"].splitlines() if ln.strip()]})
+    for stage in ("bundler", "topologies", "planner"):
+        client.post("/api/command", json={"cmds": [hier["stages"][stage]]})
+
+    ids = [b["id"] for b in client.get("/api/state").json()["bundles"]]
+    # (a) the ring is a set of DISTINCT ids — the client cycles it positionally,
+    # and a duplicate would be an id the stepper could never leave.
+    assert len(ids) > 1 and len(set(ids)) == len(ids)
+
+    # (b) each id serves its OWN single bundle, with its own candidate pool.
+    for bid in ids[:4]:
+        gen = client.get(f"/api/render/generation?bundle={bid}").json()
+        assert [b["id"] for b in gen["bundles"]] == [bid]
+        assert gen["bundles"][0]["candidates"]
+
+    # (c) state is unfiltered, so the shown bundle's digest must be found by id.
+    other = ids[2]
+    gen = client.get(f"/api/render/generation?bundle={other}").json()
+    assert gen["state"]["bundles"][0]["id"] != other
+    assert [b for b in gen["state"]["bundles"] if b["id"] == other]
+
+
 def test_static_assets_send_no_cache_but_revalidate():
     """The demo static mount stamps Cache-Control: no-cache so a rebuilt bundle
     (`bb web` → main.js) is picked up on a normal reload, while ETag revalidation

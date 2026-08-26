@@ -23,6 +23,22 @@ object Main {
   private var demoList: js.Array[js.Dynamic] = js.Array()
   private var active: js.Dynamic = null      // the selected demo {label, setup, stages}
   private var bundleFocus: Option[Int] = None   // None = show all bundles (nuts/detailed)
+  // The generation view renders ONE bundle at a time (?bundle=<id>): `bundleSel`
+  // is which one, `bundleIds` the ring to step through (from /state's bundle
+  // digests).  Unlike `bundleFocus` — a per-view dimming reset on every refresh —
+  // this is a SELECTION and PERSISTS, so pinning a candidate or running a stage
+  // leaves the reader on the bundle they were reading.
+  private var bundleSel: Int = -1               // -1 = not resolved yet
+  private var bundleIds: Seq[Int] = Seq.empty
+  // A render fetch is ASYNC, so a step must not publish its target before its own
+  // payload lands: `bundleSel` is the bundle actually SHOWN — what `render` holds
+  // and what Pin/Edit act on — while `bundleWant` is where the stepper has moved
+  // to.  Publishing early let Pin target a bundle whose geometry was not on screen
+  // yet.  `renderSeq` drops superseded responses, so rapid presses cannot install
+  // out of order and leave the label naming one bundle while the wires belong to
+  // another.
+  private var bundleWant: Int = -1
+  private var renderSeq: Int = 0
 
   private def svg = dom.document.getElementById("svg").asInstanceOf[dom.svg.SVG]
   private def byId(id: String) = dom.document.getElementById(id)
@@ -50,6 +66,8 @@ object Main {
     wire("next", () => stepCand(1))
     wire("focus-prev", () => stepBundle(-1))
     wire("focus-next", () => stepBundle(1))
+    wire("bundle-prev", () => stepBundleSel(-1))
+    wire("bundle-next", () => stepBundleSel(1))
     wire("pin", () => pinCand())
     wire("edit-open", () => editOpen(cand))                 // int index
     wire("edit-open-new", () => editOpen("new"))
@@ -233,15 +251,30 @@ object Main {
       if (view == "nuts" && !sr.nuts.asInstanceOf[Boolean]) view = "generation"
       if (!sr.topologies.asInstanceOf[Boolean]) { render = null; draw() }
       else {
-        val bundle = if (view == "generation") Some(1) else None
+        // Re-bundling can retire an id, so re-resolve the selection against the
+        // live digest list — but keep it when it is still there, so a stage run
+        // or a pin does not throw the reader back to the first bundle.
+        bundleIds = st.bundles.asInstanceOf[js.Array[js.Dynamic]]
+          .map(_.id.asInstanceOf[Double].toInt).toSeq
+        if (!bundleIds.contains(bundleSel)) {
+          bundleSel = bundleIds.headOption.getOrElse(1)
+          cand = 0
+        }
+        bundleWant = bundleSel        // a refresh re-anchors the stepper cursor
+        val bundle = if (view == "generation") Some(bundleSel) else None
+        renderSeq += 1
+        val seq = renderSeq
         ApiClient.render(view, bundle).foreach { p =>
-          render = p
-          if (view == "generation") {
-            val bs = render.bundles.asInstanceOf[js.Array[js.Dynamic]]
-            val n = if (bs.nonEmpty) bs(0).candidates.asInstanceOf[js.Array[js.Dynamic]].length else 1
-            cand = math.min(cand, math.max(0, n - 1))
+          if (seq == renderSeq) {     // a later render supersedes this one
+            render = p
+            // Clamp on INSTALL — a bundle reached mid-flight has its own pool size.
+            if (view == "generation") {
+              val bs = render.bundles.asInstanceOf[js.Array[js.Dynamic]]
+              val n = if (bs.nonEmpty) bs(0).candidates.asInstanceOf[js.Array[js.Dynamic]].length else 1
+              cand = math.min(cand, math.max(0, n - 1))
+            }
+            draw()
           }
-          draw()
         }
       }
     }
@@ -253,6 +286,41 @@ object Main {
     val n = if (bs.nonEmpty) bs(0).candidates.asInstanceOf[js.Array[js.Dynamic]].length else 0
     if (n > 0) { cand = ((cand + dir) % n + n) % n; draw() }
   }
+
+  // ── bundle selection (generation view) ──────────────────────────────────────
+  // Distinct from the focus ring below: that DIMS the other bundles of one placed
+  // render, this changes WHICH bundle's candidate pool is fetched.  Nothing is
+  // needed server-side — GET /api/render/generation has always taken ?bundle=<id>
+  // (serialize_generation filters on original_bundle.id).
+  private def stepBundleSel(dir: Int): Unit = {
+    // An edit session is bound to its bundle server-side, so stepping away would
+    // draw another bundle's frame under the working copy.
+    if (view != "generation" || edit != null || bundleIds.isEmpty) return
+    // Step the CURSOR, not the shown bundle: successive presses must advance from
+    // where the last press was heading, not from what is still on screen.
+    val i = math.max(0, bundleIds.indexOf(bundleWant))
+    val target = bundleIds(((i + dir) % bundleIds.length + bundleIds.length) % bundleIds.length)
+    bundleWant = target
+    renderSeq += 1
+    val seq = renderSeq
+    ApiClient.render("generation", Some(target)).foreach { p =>
+      if (seq == renderSeq) {       // a later step supersedes this one
+        // Publish the bundle, its payload and the candidate index TOGETHER, so no
+        // one can read a `cand` belonging to one bundle against another's pool.
+        bundleSel = target
+        cand = 0                    // a different bundle has its own candidate pool
+        render = p
+        draw()
+      }
+    }
+  }
+
+  private def updateBundleLabel(): Unit =
+    Option(byId("bundlelbl")).foreach { l =>
+      l.textContent =
+        if (bundleIds.isEmpty) ""
+        else s"bundle $bundleSel · ${bundleIds.indexOf(bundleSel) + 1}/${bundleIds.length} · [/]"
+    }
 
   // ── bundle focus (NUTS / detailed views) ────────────────────────────────────
   /** The sorted distinct bundle ids present in the current view's segments. */
@@ -295,6 +363,14 @@ object Main {
   private def onKey(e: dom.KeyboardEvent): Unit = {
     val tag = Option(e.target).map(_.asInstanceOf[dom.html.Element].tagName.toLowerCase).getOrElse("")
     if (tag == "textarea" || tag == "input" || tag == "select") return
+    // n/p (and the arrows) were already fully consumed — candidates in the
+    // generation view, bundle focus in nuts/detailed — so the bundle SELECTION
+    // gets [ and ].
+    if (e.key == "[" || e.key == "]") {
+      e.preventDefault()
+      stepBundleSel(if (e.key == "]") 1 else -1)
+      return
+    }
     val fwd = e.key == "n" || e.key == "ArrowRight"
     val back = e.key == "p" || e.key == "ArrowLeft"
     if (!fwd && !back) return
@@ -307,7 +383,7 @@ object Main {
   // Pin the shown candidate, or unpin if it's already pinned (toggle).
   private def pinCand(): Unit = {
     if (view != "generation" || render == null || edit != null) return
-    val call = if (pinnedHere) ApiClient.unpin(1) else ApiClient.select(1, cand)
+    val call = if (pinnedHere) ApiClient.unpin(bundleSel) else ApiClient.select(bundleSel, cand)
     call.foreach { res =>
       val s = res.result.summary
       log(if (defined(s)) s.asInstanceOf[String]
@@ -370,7 +446,7 @@ object Main {
 
   private def editOpen(candidate: js.Any): Unit = {
     view = "generation"                       // an uncommitted edit is topo-only
-    ApiClient.editOpen(1, candidate).foreach(applyEdit)
+    ApiClient.editOpen(bundleSel, candidate).foreach(applyEdit)
   }
 
   private def editApply(): Unit = {
@@ -402,7 +478,11 @@ object Main {
     if (render != null && view == "generation" && edit == null) {
       val st = render.selectDynamic("state")
       if (defined(st)) {
+        // serialize_state() lists EVERY bundle, not just the rendered one, so the
+        // shown bundle's digest must be looked up by id — bundles(0) was only ever
+        // right while the view was stuck on the first bundle.
         val bs = st.bundles.asInstanceOf[js.Array[js.Dynamic]]
+          .filter(_.id.asInstanceOf[Double].toInt == bundleSel)
         if (bs.length > 0) {
           val sb = bs(0)
           pinnedHere = defined(sb.selectDynamic("pinned")) &&
@@ -416,7 +496,10 @@ object Main {
       val bare = bar.asInstanceOf[dom.html.Element]
       val show = render != null && view == "generation"
       if (show) bare.removeAttribute("hidden") else bare.setAttribute("hidden", "")
-      if (show) Option(byId("candlbl")).foreach(_.textContent = label)
+      if (show) {
+        Option(byId("candlbl")).foreach(_.textContent = label)
+        updateBundleLabel()
+      }
     }
     // The focus bar (bundle isolation) belongs to the NUTS/detailed views only.
     Option(byId("focusbar")).foreach { bar =>
