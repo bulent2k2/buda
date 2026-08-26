@@ -205,7 +205,8 @@ object Renderer {
       val (rx, ry, rw, rh) = placedRect(s)
       g.appendChild(el("rect", "class" -> "trackftp", "opacity" -> op, "x" -> rx, "y" -> ry, "width" -> rw, "height" -> rh))
       val (a, b, c, d2) = placedLine(s)
-      g.appendChild(el("line", "class" -> "track", "opacity" -> op, "x1" -> a, "y1" -> b, "x2" -> c, "y2" -> d2))
+      val cls = "track " + (if (s.horiz.asInstanceOf[Boolean]) "H" else "V")
+      g.appendChild(el("line", "class" -> cls, "opacity" -> op, "x1" -> a, "y1" -> b, "x2" -> c, "y2" -> d2))
     }
     // Overlaps stay full-opacity (congestion markers, not per-bundle geometry).
     arr(n, "overlap_details").foreach { o =>
