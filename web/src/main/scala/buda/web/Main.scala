@@ -47,8 +47,7 @@ object Main {
 
   def main(args: Array[String]): Unit = {
     wire("run", () => runCmds())
-    wire("reset", () => ApiClient.reset().foreach { st =>
-      showStages(st); render = null; hideEditPanel(); draw() })
+    wire("reset", () => ApiClient.reset().foreach { st => afterReset(st); draw() })
     wire("bundler", () => runDemoStage("bundler"))
     wire("topologies", () => runDemoStage("topologies"))
     wire("planner", () => runDemoStage("planner"))
@@ -93,6 +92,19 @@ object Main {
       }
     }
 
+  /** Land a `POST /api/reset` response.  Reset now fires from THREE places — the
+    * button, a demo switch and a demo setup run — so it must invalidate any render
+    * still in flight: a bundle step launched just before it would otherwise land
+    * afterwards and paint the destroyed session's geometry over the fresh one.
+    * Also drops any open edit session, else `draw()` keeps handing the stale
+    * working copy to the renderer. */
+  private def afterReset(st: js.Dynamic): Unit = {
+    showStages(st)
+    renderSeq += 1
+    render = null
+    hideEditPanel()
+  }
+
   private def wire(id: String, fn: () => Unit): Unit =
     Option(byId(id)).foreach(_.addEventListener("click", (_: dom.Event) => fn()))
 
@@ -127,8 +139,7 @@ object Main {
     else ApiClient.state().foreach { st =>
       val n = st.selectDynamic("n_blocks")
       val loaded = defined(n) && n.asInstanceOf[Double] > 0
-      if (loaded) ApiClient.reset().foreach { st2 =>
-        showStages(st2); render = null; hideEditPanel(); send() }
+      if (loaded) ApiClient.reset().foreach { st2 => afterReset(st2); send() }
       else send()
     }
   }
@@ -196,8 +207,7 @@ object Main {
     loadedDemo = if (active != null) active.key.asInstanceOf[String] else null
     rememberDemo(loadedDemo)
     if (prev != null && loadedDemo != prev)
-      ApiClient.reset().foreach { st =>
-        showStages(st); render = null; hideEditPanel(); draw() }
+      ApiClient.reset().foreach { st => afterReset(st); draw() }
   }
 
   // The long stages go through the WS-progress endpoint POST /api/stage/{stage}

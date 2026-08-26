@@ -188,6 +188,11 @@ async function runCmds() {
 // done this; the reference client's had not, and switching demos now resets.
 async function reset() {
   showStages(await post("/reset", {}));
+  // Invalidate any render still in flight.  Reset now fires from three places —
+  // the button, a demo switch, and a demo setup run — so a bundle step launched
+  // just before it would otherwise land afterwards and paint the destroyed
+  // session's geometry over the fresh one.
+  RENDER_SEQ++;
   RENDER = null;
   EDIT = null;
   document.getElementById("editpanel").hidden = true;
