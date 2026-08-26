@@ -22,6 +22,7 @@ object Main {
   private var pinnedHere: Boolean = false   // is the shown candidate the pinned one?
   private var demoList: js.Array[js.Dynamic] = js.Array()
   private var active: js.Dynamic = null      // the selected demo {label, setup, stages}
+  private var loadedDemo: String = null      // the demo key the SESSION was set up from
   private var bundleFocus: Option[Int] = None   // None = show all bundles (nuts/detailed)
   // The generation view renders ONE bundle at a time (?bundle=<id>): `bundleSel`
   // is which one, `bundleIds` the ring to step through (from /state's bundle
@@ -129,15 +130,51 @@ object Main {
           s.appendChild(o)
         }
       }
+      // The server session OUTLIVES the page, so after a reload the picker must
+      // show the demo the session is actually in — otherwise it snaps back to the
+      // first one and re-picking the demo you are already in reads as a switch
+      // and wipes the session that just survived the reload.
+      Option(byId("demo")).foreach { sel =>
+        val remembered = rememberedDemo()
+        val i = demoList.indexWhere(d => d.key.asInstanceOf[String] == remembered)
+        if (remembered != null && i >= 0)
+          sel.asInstanceOf[dom.html.Select].value = i.toString
+      }
       if (demoList.nonEmpty) loadDemo()
     }
 
+  /** The demo key stashed by the last `loadDemo`, or null.  sessionStorage can
+    * throw (private mode / a file:// origin), so every touch is guarded. */
+  private def rememberedDemo(): String =
+    try dom.window.sessionStorage.getItem("buda_demo") catch { case _: Throwable => null }
+
+  private def rememberDemo(key: String): Unit =
+    try dom.window.sessionStorage.setItem("buda_demo", if (key == null) "" else key)
+    catch { case _: Throwable => () }
+
+  /** Picking a DIFFERENT demo starts a fresh session.  A demo is a whole DESIGN
+    * and its setup only ever ADDS to the session, so running a second one over the
+    * first leaves both designs' blocks live at once — and since the two sit in
+    * far-apart coordinate ranges (b44 around y 10000, the hier demo around y 300)
+    * while every view frames the union of ALL blocks, the frame blows up ~17x and
+    * the design just run renders as a speck.  The topo view hides it (the
+    * generation payload carries the shown bundle's own floorplan); NUTS and
+    * detailed have no per-bundle frame and show it in full.
+    *
+    * `prev == null` is the startup / page-reload call and must NOT reset:
+    * reloading the page keeps the session you were working in. */
   private def loadDemo(): Unit = {
+    val prev = loadedDemo
     val i = Option(byId("demo")).map(_.asInstanceOf[dom.html.Select].value)
       .flatMap(v => scala.util.Try(v.toInt).toOption).getOrElse(0)
     active = if (i >= 0 && i < demoList.length) demoList(i) else null
     val setup = if (active != null) active.setup.asInstanceOf[String] else ""
     Option(byId("cmds")).foreach(_.asInstanceOf[dom.html.TextArea].value = setup)
+    loadedDemo = if (active != null) active.key.asInstanceOf[String] else null
+    rememberDemo(loadedDemo)
+    if (prev != null && loadedDemo != prev)
+      ApiClient.reset().foreach { st =>
+        showStages(st); render = null; hideEditPanel(); draw() }
   }
 
   // The long stages go through the WS-progress endpoint POST /api/stage/{stage}

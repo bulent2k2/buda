@@ -110,6 +110,24 @@ knowing either command sequence:
   `generate_hier_topologies` / `run_planner hier 5` / `run_nuts` /
   `run_detailed_nuts`).
 
+**Picking a different demo resets the session.** A demo is a whole DESIGN and its
+setup only ever ADDS, so running a second demo's setup over the first leaves both
+designs' blocks live at once — and the two sit in far-apart coordinate ranges
+(b44 around y 10000, the hier demo around y 300) while every view frames the
+union of ALL blocks, so the frame blows up ~17× (`1220×730` → `6240×14380`) and
+the design just run renders as a speck beside the previous demo's three
+rectangles. The **topo view hides it** — `activeFrame()` prefers the shown
+bundle's own floorplan — so it surfaces only in NUTS and detailed, which have no
+per-bundle frame and fall back to the contaminated session floorplan. A page
+RELOAD does not reset (the server session outlives the page, and reloading should
+keep the session you were working in); the picker's selection is remembered in
+`sessionStorage` so a reloaded page shows the demo the session is actually in,
+rather than snapping back to the first one and turning a re-pick of your own demo
+into a wipe. Both halves are pinned by
+`test_a_demo_setup_accumulates_onto_the_session_unless_reset` — the fix lives in
+the clients but rests on two server properties (setup accumulates; `POST
+/api/reset` clears the floorplan), and a silent change to either would strand it.
+
 `stages` keys are the button ids (`bundler`/`topologies`/`planner`/`nuts`/
 `dnuts`), so the reference client's `runDemoStage(key)` just looks up the active
 demo's command for that button. For the WS-streamed long stages

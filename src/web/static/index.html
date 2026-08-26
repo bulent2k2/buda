@@ -146,6 +146,7 @@ let BUNDLE_SEL = null, BUNDLE_IDS = [];
 // RENDER_SEQ drops superseded responses, so rapid presses cannot install out of
 // order and leave the label naming one bundle while the wires belong to another.
 let BUNDLE_WANT = null, RENDER_SEQ = 0;
+let LOADED_DEMO = null;   // the demo key the SESSION was last set up from
 
 async function post(path, body) {
   const r = await fetch(API + path, {method: "POST",
@@ -167,7 +168,17 @@ async function runCmds() {
   showStages(res.state);
   await refresh();
 }
-async function reset() { showStages(await post("/reset", {})); RENDER = null; draw(); }
+// Reset must also drop any open edit session, else `draw()` keeps handing the
+// stale working copy to drawGeneration and paints it over the fresh session until
+// some later edit call happens to clear it.  The Scala client's reset has always
+// done this; the reference client's had not, and switching demos now resets.
+async function reset() {
+  showStages(await post("/reset", {}));
+  RENDER = null;
+  EDIT = null;
+  document.getElementById("editpanel").hidden = true;
+  draw();
+}
 async function stage(cmd) {
   const res = await post("/command", {cmds: [cmd]});
   log(res.results.map(r => (r.ok ? "  " : "x ") + (r.summary || "(ok)")).join("\n"));
@@ -188,11 +199,33 @@ async function initDemos() {
     const o = document.createElement("option");
     o.value = i; o.textContent = d.label; sel.appendChild(o);
   });
-  if (DEMOS.length) loadDemo();
+  // The server session OUTLIVES the page, so after a reload the picker must show
+  // the demo the session is actually in — otherwise it snaps back to the first
+  // one and re-picking the demo you are already in reads as a switch and wipes
+  // the session that just survived the reload.
+  try {
+    const i = DEMOS.findIndex(d => d.key === sessionStorage.getItem("buda_demo"));
+    if (i >= 0) sel.value = String(i);
+  } catch (e) { /* sessionStorage unavailable (file://, private mode) — ignore */ }
+  if (DEMOS.length) await loadDemo();
 }
-function loadDemo() {
+// Picking a DIFFERENT demo starts a fresh session.  A demo is a whole DESIGN and
+// its setup only ever ADDS to the session, so running a second one over the first
+// leaves both designs' blocks live at once — and since the two sit in far-apart
+// coordinate ranges (b44 around y 10000, the hier demo around y 300) while every
+// view frames the union of ALL blocks, the frame blows up ~17x and the design you
+// just ran renders as a speck.  The topo view hides it (`activeFrame()` prefers
+// the shown bundle's own floorplan); NUTS and detailed have no per-bundle frame
+// and show it in full.
+// `prev === null` is the startup / page-reload call and must NOT reset: reloading
+// the page keeps the session you were working in.
+async function loadDemo() {
+  const prev = LOADED_DEMO;
   ACTIVE = DEMOS[+document.getElementById("demo").value || 0];
   document.getElementById("cmds").value = ACTIVE ? ACTIVE.setup : "";
+  LOADED_DEMO = ACTIVE ? ACTIVE.key : null;
+  try { sessionStorage.setItem("buda_demo", LOADED_DEMO || ""); } catch (e) {}
+  if (prev !== null && LOADED_DEMO !== prev) await reset();
 }
 // Long stages (planner/nuts/dnuts) keep the WS progress path — split the demo's
 // command into the /api/stage key + args (e.g. "run_planner hier 5" -> args

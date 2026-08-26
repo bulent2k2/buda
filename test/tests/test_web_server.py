@@ -288,6 +288,48 @@ def test_generation_bundle_stepper_contract():
     assert gen["state"]["bundles"][0]["id"] != other
     assert [b for b in gen["state"]["bundles"] if b["id"] == other]
 
+def test_a_demo_setup_accumulates_onto_the_session_unless_reset():
+    """A demo's setup only ADDS to the session, so running a second demo over the
+    first leaves BOTH designs' blocks live — and the two live in far-apart
+    coordinate ranges, so a view that frames the union of all blocks blows up.
+
+    This is why the client resets on a demo switch.  Pinned here because the fix
+    lives in the client but rests entirely on two server properties: that setup
+    accumulates (the hazard) and that POST /api/reset clears the floorplan (the
+    remedy).  Either one changing silently would strand the client-side fix.
+    """
+    client = _client()
+    demos = {d["key"]: d for d in client.get("/api/demos").json()["demos"]}
+
+    def run_setup(key):
+        client.post("/api/command", json={
+            "cmds": [ln for ln in demos[key]["setup"].splitlines() if ln.strip()]})
+
+    # The SESSION floorplan, as the nuts/detailed views frame it — deliberately
+    # not the generation payload, whose top-level floorplan is the last shown
+    # BUNDLE's frame (cell-local under hier) rather than the session's.
+    def blocks():
+        return client.get("/api/render/nuts").json()["floorplan"]["blocks"]
+
+    run_setup("flat")
+    flat = {b["name"] for b in blocks()}
+    flat_ys = [b["bbox"]["y1"] for b in blocks()]
+
+    # (a) the hazard: a second setup with NO reset keeps the first demo's blocks.
+    run_setup("hier")
+    both = {b["name"] for b in blocks()}
+    assert flat < both, "flat blocks should have survived the hier setup"
+
+    # ...and the two designs are decades apart in y, which is what wrecks a frame
+    # taken over the union.
+    hier_ys = [b["bbox"]["y1"] for b in blocks() if b["name"] not in flat]
+    assert min(flat_ys) > max(hier_ys) * 5
+
+    # (b) the remedy: reset clears the floorplan, so the next setup starts clean.
+    client.post("/api/reset", json={})
+    run_setup("hier")
+    assert not ({b["name"] for b in blocks()} & flat)
+
 
 def test_static_assets_send_no_cache_but_revalidate():
     """The demo static mount stamps Cache-Control: no-cache so a rebuilt bundle
