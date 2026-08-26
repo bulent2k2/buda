@@ -95,10 +95,20 @@ def serialize_state(session):
             "width": w.input.width,
         })
 
+    # How many blocks the session's floorplan holds.  `stages_run` cannot answer
+    # "is a design already loaded" — a declared-but-unbundled floorplan reads as
+    # all-false — and that is exactly the question the client must settle before
+    # running a demo's setup, since a setup only ADDS (see web_frontend.md).
+    try:
+        n_blocks = len(session.fp.get_all_blocks())
+    except Exception:
+        n_blocks = 0
+
     return {
         "stages_run": stages_run,
         "bundles": bundle_digests,
         "has_bdb": getattr(session, "bdb", None) is not None,
+        "n_blocks": n_blocks,
     }
 
 

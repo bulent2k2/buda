@@ -22,6 +22,7 @@ object Main {
   private var pinnedHere: Boolean = false   // is the shown candidate the pinned one?
   private var demoList: js.Array[js.Dynamic] = js.Array()
   private var active: js.Dynamic = null      // the selected demo {label, setup, stages}
+  private var loadedDemo: String = null      // the demo key the SESSION was set up from
   private var bundleFocus: Option[Int] = None   // None = show all bundles (nuts/detailed)
   // The generation view renders ONE bundle at a time (?bundle=<id>): `bundleSel`
   // is which one, `bundleIds` the ring to step through (from /state's bundle
@@ -46,8 +47,7 @@ object Main {
 
   def main(args: Array[String]): Unit = {
     wire("run", () => runCmds())
-    wire("reset", () => ApiClient.reset().foreach { st =>
-      showStages(st); render = null; hideEditPanel(); draw() })
+    wire("reset", () => ApiClient.reset().foreach { st => afterReset(st); draw() })
     wire("bundler", () => runDemoStage("bundler"))
     wire("topologies", () => runDemoStage("topologies"))
     wire("planner", () => runDemoStage("planner"))
@@ -92,6 +92,19 @@ object Main {
       }
     }
 
+  /** Land a `POST /api/reset` response.  Reset now fires from THREE places — the
+    * button, a demo switch and a demo setup run — so it must invalidate any render
+    * still in flight: a bundle step launched just before it would otherwise land
+    * afterwards and paint the destroyed session's geometry over the fresh one.
+    * Also drops any open edit session, else `draw()` keeps handing the stale
+    * working copy to the renderer. */
+  private def afterReset(st: js.Dynamic): Unit = {
+    showStages(st)
+    renderSeq += 1
+    render = null
+    hideEditPanel()
+  }
+
   private def wire(id: String, fn: () => Unit): Unit =
     Option(byId(id)).foreach(_.addEventListener("click", (_: dom.Event) => fn()))
 
@@ -106,8 +119,30 @@ object Main {
     Option(byId("log")).foreach(_.textContent = txt)
 
   // ── command console ─────────────────────────────────────────────────────────
-  private def runCmds(): Unit =
-    ApiClient.command(cmdsText).foreach { res => showResults(res); refresh() }
+  /** Running a demo's setup VERBATIM means "start this demo", so it starts from a
+    * clean session — a setup only ADDS, and over another design both are live at
+    * once (see `loadDemo`).  Guarding the PICKER alone cannot cover this: a fresh
+    * tab, a reopened tab, or private mode has no remembered key, so the picker
+    * shows the FIRST demo against whatever session the server still holds and Run
+    * silently merges the two.  The picker guard gives immediate feedback on a
+    * switch; THIS is the one that actually closes the hole, because it sits at the
+    * hazard rather than at one route to it.
+    *
+    * An EDITED or ad-hoc command list runs as-is (that is the console's job), and
+    * a session with no blocks is left alone so a BDB opened before setup survives. */
+  private def runCmds(): Unit = {
+    val raw = byId("cmds").asInstanceOf[dom.html.TextArea].value
+    val isDemoSetup =
+      active != null && raw.trim == active.setup.asInstanceOf[String].trim
+    val send = () => ApiClient.command(cmdsText).foreach { res => showResults(res); refresh() }
+    if (!isDemoSetup) send()
+    else ApiClient.state().foreach { st =>
+      val n = st.selectDynamic("n_blocks")
+      val loaded = defined(n) && n.asInstanceOf[Double] > 0
+      if (loaded) ApiClient.reset().foreach { st2 => afterReset(st2); send() }
+      else send()
+    }
+  }
 
   private def stage(cmd: String): Unit =
     ApiClient.command(Seq(cmd)).foreach { res => showResults(res); refresh() }
@@ -129,15 +164,50 @@ object Main {
           s.appendChild(o)
         }
       }
+      // The server session OUTLIVES the page, so after a reload the picker must
+      // show the demo the session is actually in — otherwise it snaps back to the
+      // first one and re-picking the demo you are already in reads as a switch
+      // and wipes the session that just survived the reload.
+      Option(byId("demo")).foreach { sel =>
+        val remembered = rememberedDemo()
+        val i = demoList.indexWhere(d => d.key.asInstanceOf[String] == remembered)
+        if (remembered != null && i >= 0)
+          sel.asInstanceOf[dom.html.Select].value = i.toString
+      }
       if (demoList.nonEmpty) loadDemo()
     }
 
+  /** The demo key stashed by the last `loadDemo`, or null.  sessionStorage can
+    * throw (private mode / a file:// origin), so every touch is guarded. */
+  private def rememberedDemo(): String =
+    try dom.window.sessionStorage.getItem("buda_demo") catch { case _: Throwable => null }
+
+  private def rememberDemo(key: String): Unit =
+    try dom.window.sessionStorage.setItem("buda_demo", if (key == null) "" else key)
+    catch { case _: Throwable => () }
+
+  /** Picking a DIFFERENT demo starts a fresh session.  A demo is a whole DESIGN
+    * and its setup only ever ADDS to the session, so running a second one over the
+    * first leaves both designs' blocks live at once — and since the two sit in
+    * far-apart coordinate ranges (b44 around y 10000, the hier demo around y 300)
+    * while every view frames the union of ALL blocks, the frame blows up ~17x and
+    * the design just run renders as a speck.  The topo view hides it (the
+    * generation payload carries the shown bundle's own floorplan); NUTS and
+    * detailed have no per-bundle frame and show it in full.
+    *
+    * `prev == null` is the startup / page-reload call and must NOT reset:
+    * reloading the page keeps the session you were working in. */
   private def loadDemo(): Unit = {
+    val prev = loadedDemo
     val i = Option(byId("demo")).map(_.asInstanceOf[dom.html.Select].value)
       .flatMap(v => scala.util.Try(v.toInt).toOption).getOrElse(0)
     active = if (i >= 0 && i < demoList.length) demoList(i) else null
     val setup = if (active != null) active.setup.asInstanceOf[String] else ""
     Option(byId("cmds")).foreach(_.asInstanceOf[dom.html.TextArea].value = setup)
+    loadedDemo = if (active != null) active.key.asInstanceOf[String] else null
+    rememberDemo(loadedDemo)
+    if (prev != null && loadedDemo != prev)
+      ApiClient.reset().foreach { st => afterReset(st); draw() }
   }
 
   // The long stages go through the WS-progress endpoint POST /api/stage/{stage}
