@@ -52,34 +52,106 @@ its pinning test on this date:
 
 **Remaining limitations**
 
-0. **The ANTENNA audit reads NOMINAL geometry, at both stages** (Codex P2 on
+0. ~~**The ANTENNA audit reads NOMINAL geometry, at both stages** (Codex P2 on
    #855, verified and scoped out of it).  `detect_antennas` takes
    `(segs, topo, fp, bundle_id, stage, result)` and **no placement argument at
    all** — `segs` is `ct.segs()`, the nominal `ConnTopology`, at the NUTS call
    site and the DNUTS one alike.  So every sibling it consults is nominal: a
    segment that went UNPLACED (or, at DNUTS, has no wire for the affected bit)
-   still counts as metal holding a block or a rect.  The consequence Codex
-   named is real — if a tap-overhang piece is the only PLACED wire touching an
-   OVER rect while an unplaced nominal sibling intersects it, the per-rect
-   guard's `still` reads true, the piece is not judged load-bearing, and the
-   block-level test may report ANTENNA on a wire whose removal would open the
-   rect.
-   NOT introduced by the limitation-2 companion fix, and not fixable inside
-   it: the PRE-EXISTING block-level test (`covered_without_piece`, issue #482 /
-   Codex #517) has the identical property — it reads `segs[j]` and each
-   sibling's `conns` with no placement test anywhere — and the new per-rect
-   branch mirrors it deliberately, so making only the new branch
-   placement-aware would leave one function reading two different worlds three
-   lines apart.  The honest fix is to give the audit placement (a
-   `NUTSResult` / `DetailedNUTSResult` and, at DNUTS, the bit group) and apply
-   it to BOTH tests, which changes pre-existing verdicts and therefore needs
-   its own corpus measurement.
-   Severity is bounded by the shape: the scenario requires an unplaced
-   segment, which is already an `UNPLACED` violation, and `TEG_OPEN` is
-   computed from PLACED metal independently (`detect_teg_open` reads
-   `TegMetal` groups, not `segs`), so the open is reported whatever ANTENNA
-   says.  The defect is therefore a spurious EXTRA report on a route already
-   reported dirty — never a silent pass.
+   still counts as metal holding a block or a rect.~~  **RESOLVED 2026-08-27 —
+   the honest fix, both tests, measured.**
+
+   The defect was CONSTRUCTED before it was fixed, which matters because the
+   scenario needs three things at once and the corpus supplies none of them
+   together: HUB is `teg_mode over` with rects R0 (100,100)-(300,200) and R1
+   (100,120)-(139,180); the spine taps HUB's far west face at x=100 with its
+   nearest other attachment at x=140, so the overhang piece [100,140] is the
+   only part of the spine touching R1 (the trimmed remainder [140,600] misses
+   it, R1 ending at 139); and one H sibling at y=170 crosses R1 *nominally*.
+   With that sibling UNPLACED, on `main`:
+
+   ```
+   E  AssertionError: ["Segment 0 (H along [100,600] @ 150) overhangs
+      [100,140] past its last junction, entirely over block 'HUB', only to
+      tap its far face at 100 — the block stays covered without it: a
+      tap-overhang 'antenna' (nuts)"]
+   ```
+
+   — the audit asking for the removal of the one wire holding R1, on the
+   strength of a wire nobody built.  The DNUTS twin fires the same way with
+   the sibling placed for bit 0 and missing for bit 1.
+
+   **What landed.**  `detect_antennas` takes a `placed_groups` argument — the
+   same shape `detect_teg_open` already takes (label → members; `-1` = the
+   bundle-level group at NUTS, a bit index at DNUTS) — built at both call
+   sites from placement that was ALREADY there: `check_nuts`'s `ts_map`
+   (`TrackSegment::placed`, the `if (!ts.placed) continue;` idiom every other
+   check in that function uses) and `check_dnuts`'s `ns_map`.  At DNUTS
+   "unplaced" is the ABSENCE of an `ns_map` entry, not a false flag —
+   `detailed_nuts.cpp` never sets `placed` false; the engine emits no row for
+   a bit it cannot place, which is exactly what `check_dnuts` raises its own
+   `UNPLACED` off — and shields are excluded, carrying a rail net rather than
+   a signal bit.
+
+   The rule: **the piece is redundant only if it is redundant in every WORLD
+   the placement defines**, a world being the segments that exist alongside
+   it.  One world at NUTS.  At DNUTS one per BIT, because a sibling placed for
+   some bits is not there for the others and the piece cannot be removed for
+   one bit and kept for another — so the verdict must hold for all of them.
+   Identical worlds collapse, so a fully-placed bundle costs exactly one
+   evaluation: the nominal audit's.  A piece with no placed existence at all
+   (an empty result, a hand-built checker fixture, a segment NUTS never
+   emitted) keeps the nominal world, so the change can only ever SUPPRESS a
+   verdict placement disproves — never manufacture one.
+
+   Applied to **BOTH** tests, which is what "not fixable inside #855" meant:
+   the pre-existing block-level `covered_without_piece` (issue #482 / Codex
+   #517) and the per-rect OVER branch now share one world-parameterised
+   evaluation, so the two cannot read different worlds three lines apart.
+
+   **Two deliberate scope lines, both narrower than they could be.**
+   Placement is an EXISTENCE test and NOT geometry: a sibling that exists is
+   still measured at its nominal extent, as the whole audit is.  A bit-wire's
+   placed span can differ from nominal (span adjustment), so judging the
+   geometry per bit is a strictly larger change with its own corpus risk;
+   the residual is recorded here rather than half-done.  And the
+   ATTACHMENT-COUNT rule is deliberately left purely structural — it is a
+   generator-fault detector documented to "answer at every placed stage", and
+   gating its attachments on placement would ADD reports (a segment joined
+   only to unplaced siblings would become an antenna), the opposite of the
+   bounded, report-only defect being fixed.  That is also what keeps
+   GENERATION untouched: `seg_attachment` — shared with `seed_trunk_is_antenna`
+   and `topology_is_clean_tree` in `topology.cpp` — takes no placement and
+   cannot, since the generator has none.
+
+   **Measured.**  QoR corpus `--vs origin/main`: **0 better, 0 worse, 55
+   unchanged of 55**, abstract WL +0 and detailed WL +0 — a fully-placed
+   bundle is one world, and the corpus's partially-placed flows (chip_bottomup
+   alone carries 2205 unplaced bits) hold no tap-overhang piece whose
+   redundancy turned on a sibling that was not built.  All 55 rows are
+   COMPARABLE: `flow/ariane133/ariane133_heal.buda` reads NOT COMPARABLE on a
+   checkout without its fetched inputs — both sides die at `require_file`, so
+   nothing is measured either way — and it was fetched
+   (`python3 flow/ariane133/fetch.py`) and re-swept rather than left as a hole
+   in the one real 45nm design here.  Fast tier 2746 passed / 34 skipped / 34 xfailed;
+   fast+mid 3659 passed / 168 skipped / 35 xfailed / 1 xpassed (the
+   documented host-fragile `test_big2_b4_b24_routes_cleanly`).
+   Pinned by `test_antenna_check.py` §4: the two constructed repros above
+   (both FAIL on `main`), the fully-placed control at each stage (the
+   byte-identity pin), the "unplaced piece keeps the nominal verdict" pin —
+   which also shows `TEG_OPEN` reporting the real open independently, the
+   severity claim that made this a P2 rather than a P1 — and two contract
+   pins: `check_topo` still runs no antenna detector, and `seg_attachment`'s
+   declaration still takes no placement with `detect_antennas` called from
+   exactly the two placed-stage checkers.
+
+   The original severity assessment stands and is why this was safe to fix
+   without urgency: the scenario requires an unplaced segment, which is
+   already an `UNPLACED` violation, and `TEG_OPEN` is computed from PLACED
+   metal independently (`detect_teg_open` reads `TegMetal` groups, not
+   `segs`), so the open was reported whatever ANTENNA said.  The defect was a
+   spurious EXTRA report on a route already reported dirty — never a silent
+   pass.
 
 1. ~~**MST candidates on OVER multi-rect blocks emit no TEG connection
    metal**: an MST edge lands on the closest rect pair only, so an OVER

@@ -883,3 +883,194 @@ def test_piece_covering_a_nested_block_is_not_flagged():
     # the trimmed remainder [140,600] misses INNER ([105,130]).
     res = buda.check_nuts(ct, _nominal_nuts(ct), topo, fp, _layers(), 1)
     assert not _antennas(res), [v.message for v in res.violations]
+
+
+# ── 4. the audit reads PLACEMENT, not just nominal geometry ──────────────────
+#
+# teg_multirect_status.md limitation 0.  Both redundancy tests inside the
+# tap-overhang rule ask "does something ELSE still hold this?", and both used
+# to answer off the nominal ConnTopology alone — so a sibling that went
+# UNPLACED still counted as metal, and a piece which is the only PLACED wire
+# holding an OVER rect could be reported ANTENNA on the strength of a wire
+# nobody built.  The audit now takes the placement at both stages and requires
+# the verdict to hold in every world the placement defines (one at NUTS, one
+# per BIT at DNUTS).  Placement is an EXISTENCE test only — a sibling that
+# exists is still measured at its nominal extent, as the whole audit is.
+
+def _limitation0_fixture():
+    """The defect, constructed.
+
+    HUB is `teg_mode over` with rects R0 (100,100)-(300,200) and R1
+    (100,120)-(139,180).  The spine (seg 0) taps HUB's far west face at x=100
+    and its nearest other attachment is the seg-1 junction at x=140, so the
+    overhang piece is [100,140] — the ONLY part of the spine that touches R1
+    (the trimmed remainder [140,600] misses it, R1 ending at 139).
+
+    Seg 3 is an H sibling at y=170 running [110,250]: it crosses R1
+    nominally, so the per-rect guard's `still` reads true, the piece is not
+    judged load-bearing, and the block-level test then finds HUB covered by
+    the remainder and reports ANTENNA.  Segs 4/5 are risers joining seg 3 to
+    the spine so seg 3 is properly attached and the count rule stays quiet —
+    the tap-overhang verdict is the only ANTENNA in play.
+    """
+    fp = buda.Floorplan()
+    fp.add_block_rects("HUB", [(100, 100, 300, 200), (100, 120, 139, 180)])
+    fp.set_block_teg_mode("HUB", buda.TegMode.OVER)
+    fp.add_block("B1", 120, 0, 160, 50)
+    fp.add_block("B2", 160, 260, 200, 310)
+    fp.add_block("C", 580, 100, 660, 200)
+    topo = buda.Topology()
+    topo.type = "TEST_HUB_SPINE_L0"
+    topo.segments = [
+        _seg(100, 150, 600, 150, LAYER_H),   # 0: spine, taps HUB far face @100
+        _seg(140, 50, 140, 150, LAYER_V),    # 1: stub to B1 — junction at 140
+        _seg(180, 150, 180, 260, LAYER_V),   # 2: stub to B2
+        _seg(110, 170, 250, 170, LAYER_H),   # 3: the sibling crossing R1
+        _seg(200, 150, 200, 170, LAYER_V),   # 4: riser joining 0 and 3
+        _seg(250, 150, 250, 170, LAYER_V),   # 5: riser joining 0 and 3
+    ]
+    topo.connected_block_names = ["HUB", "B1", "B2", "C"]
+    buda.annotate_topology(topo, fp)
+    buda.annotate_seg_conns(topo)
+    ct = buda.ConnTopology()
+    ct.build(topo, fp)
+    return fp, topo, ct
+
+
+def _nuts_without(ct, unplaced, bundle_id=1):
+    """`_nominal_nuts` with the named segments marked NOT placed — how an
+    unplaced abstract segment really looks (NUTSResult carries the row with
+    `placed` false; check_nuts's own idiom is `if (!ts.placed) continue`)."""
+    nuts = _nominal_nuts(ct, bundle_id)
+    for ts in nuts.segments:
+        if ts.seg_idx in unplaced:
+            ts.placed = False
+    return nuts
+
+
+def _dnuts_without(ct, num_bits, unplaced, bundle_id=1):
+    """`_nominal_dnuts` with the named (seg, bit) wires MISSING.
+
+    That is what an unplaced bit is at DetailedNUTS: the engine emits no
+    NetSegment row for a bit it cannot place (nothing in detailed_nuts.cpp
+    ever sets `placed` false), and check_dnuts raises its own UNPLACED off
+    exactly that absence.
+    """
+    dnuts = _nominal_dnuts(ct, num_bits, bundle_id)
+    dnuts.net_segments = [ns for ns in dnuts.net_segments
+                          if (ns.seg_idx, ns.bit_index) not in unplaced]
+    return dnuts
+
+
+def test_limitation0_fixture_reproduces_the_shape_when_all_is_placed():
+    """Non-vacuity + the byte-identity control in one: with everything placed
+    the fixture reports exactly the ANTENNA it always did.  If this ever goes
+    quiet the tests below prove nothing."""
+    fp, topo, ct = _limitation0_fixture()
+    res = buda.check_nuts(ct, _nominal_nuts(ct), topo, fp, _layers(), 1)
+    ants = _antennas(res)
+    assert len(ants) == 1, [v.message for v in res.violations]
+    assert ants[0].seg_idx == 0 and ants[0].block_name == "HUB"
+    assert "tap-overhang" in ants[0].message
+
+
+def test_unplaced_sibling_no_longer_excuses_a_load_bearing_piece_at_nuts():
+    """The fix at NUTS.  Seg 3 is unplaced, so the spine's [100,140] piece is
+    the only PLACED metal touching R1 — removing it would open the rect, and
+    calling it an antenna asks for exactly that.  Fails on the pre-change
+    build (1 ANTENNA)."""
+    fp, topo, ct = _limitation0_fixture()
+    nuts = _nuts_without(ct, {3})
+    # Precondition: with seg 3 gone, no other PLACED segment touches R1.
+    r1 = (100, 120, 139, 180)
+    others = [ts.seg_idx for ts in nuts.segments
+              if ts.placed and ts.seg_idx != 0
+              and _touches(ts.horiz, ts.track_position,
+                           ts.span_lo, ts.span_hi, r1)]
+    assert not others, f"fixture drifted: segs {others} still hold R1"
+    res = buda.check_nuts(ct, nuts, topo, fp, _layers(), 1)
+    assert not _antennas(res), [v.message for v in res.violations]
+
+
+def test_unplaced_bit_no_longer_excuses_a_load_bearing_piece_at_dnuts():
+    """The fix at DNUTS, where the question is per BIT.  Seg 3 has a wire for
+    bit 0 and none for bit 1; in bit 1's world the piece is the only metal on
+    R1, and the piece cannot be removed for one bit and kept for another — so
+    the verdict must hold for every bit, and it does not.  Fails on the
+    pre-change build (1 ANTENNA)."""
+    fp, topo, ct = _limitation0_fixture()
+    res = buda.check_dnuts(ct, _dnuts_without(ct, 2, {(3, 1)}),
+                           topo, fp, _layers(), 1, 2)
+    assert not _antennas(res), [v.message for v in res.violations]
+    # The route is still reported dirty — by the audit that owns the fault.
+    assert [v for v in res.violations
+            if v.kind == buda.ViolationKind.UNPLACED], \
+        "the unplaced bit itself must still be reported"
+
+
+def test_fully_placed_dnuts_keeps_the_verdict():
+    """The DNUTS byte-identity control: every bit placed collapses to ONE
+    world, which is the nominal audit's, so the verdict is unchanged."""
+    fp, topo, ct = _limitation0_fixture()
+    res = buda.check_dnuts(ct, _nominal_dnuts(ct, 2), topo, fp, _layers(), 1, 2)
+    ants = _antennas(res)
+    assert len(ants) == 1 and "tap-overhang" in ants[0].message
+
+
+def test_an_unplaced_piece_still_gets_the_nominal_verdict():
+    """The fix only ever SUPPRESSES a verdict placement disproves; it must
+    never manufacture one, and it must not go quiet where it has nothing to
+    say.  With the judged segment itself unplaced it belongs to no world, so
+    the audit keeps the nominal answer it has always given — and TEG_OPEN,
+    which reads placed metal independently, reports the real open."""
+    fp, topo, ct = _limitation0_fixture()
+    res = buda.check_nuts(ct, _nuts_without(ct, {0, 3}), topo, fp, _layers(), 1)
+    assert len(_antennas(res)) == 1, [v.message for v in res.violations]
+    teg = [v for v in res.violations if v.kind == buda.ViolationKind.TEG_OPEN]
+    assert teg and "rect#1" in teg[0].message, [v.message for v in res.violations]
+
+
+def test_check_topo_still_runs_no_antenna_detector():
+    """`detect_antennas` must stay out of check_topo, which feeds generation
+    gates, dogleg trials and healer metrics — a reporting audit must not
+    perturb them.  check_topo has no placement to read, so a placement-aware
+    detector there would be meaningless as well as harmful."""
+    fp, topo, ct = _limitation0_fixture()
+    res = buda.check_topo(ct, topo, fp, 1)
+    assert not _antennas(res), [v.message for v in res.violations]
+
+
+def test_generation_predicate_takes_no_placement():
+    """Generation has none to take.  `seg_attachment` is shared with the
+    trunk+MST seed gate (`seed_trunk_is_antenna`) and `topology_is_clean_tree`
+    in topology.cpp, so its signature is a generation contract; and
+    `detect_antennas`, which now carries placement, is called from the two
+    placed-stage checkers and nowhere else.  Pinned at the source so a later
+    edit cannot quietly wire placement into the generator.
+    """
+    verify = (_ROOT / "src" / "verify.cpp").read_text()
+    header = (_ROOT / "src" / "verify.h").read_text()
+    decl = header[header.index("SegAttachment seg_attachment"):]
+    decl = decl[:decl.index(";")]
+    for banned in ("NUTSResult", "DetailedNUTSResult", "placed"):
+        assert banned not in decl, \
+            f"seg_attachment took on {banned!r} — generation cannot supply it"
+
+    calls = [ln.strip() for ln in verify.splitlines()
+             if "detect_antennas(" in ln and not ln.lstrip().startswith("//")
+             and "static void" not in ln]
+    assert len(calls) == 2, calls
+    assert any('"nuts"' in c for c in calls) and any('"dnuts"' in c for c in calls)
+    topo_body = verify[verify.index("ConnResult check_topo("):
+                       verify.index("ConnResult check_nuts(")]
+    assert "detect_antennas" not in topo_body, \
+        "detect_antennas leaked into check_topo"
+
+
+def _touches(horiz, perp, a_lo, a_hi, rect):
+    """topology.h's `axis_touches_rect`, in Python, for fixture assertions."""
+    x1, y1, x2, y2 = rect
+    p1, p2 = (y1, y2) if horiz else (x1, x2)
+    a1, a2 = (x1, x2) if horiz else (y1, y2)
+    lo, hi = min(a_lo, a_hi), max(a_lo, a_hi)
+    return p1 <= perp <= p2 and lo <= a2 and hi >= a1
