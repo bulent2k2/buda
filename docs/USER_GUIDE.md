@@ -170,8 +170,11 @@ checkpoint's choice
 ```
 
 so a stale `.json` can no longer quietly outvote the pin you made at the `btcl`
-prompt.  A sidecar that names the *same* candidate as the checkpoint changes
-nothing and stays silent.
+prompt.  A durable **group** pin (`select_topology <bus> group:<N>`) is covered
+the same way; a sidecar that names the same candidate as the checkpoint — or a
+member of its pinned family — changes nothing and stays silent.  If the design
+changed so the checkpoint's candidate is no longer generated, the notice says
+*that* instead (deleting the sidecar could not bring it back).
 
 **Resuming** (`load_pipeline`).  The restored pin is already on the bundle when
 the sidecar is consulted, so an ordinary sidecar selection does not move it.
