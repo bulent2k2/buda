@@ -93,22 +93,54 @@ bbox/viewBox math works off whichever floorplan is used. Covered by
 
 ### Demo catalog (`GET /api/demos`, `src/web/demos.py`)
 
-`GET /api/demos` returns `{demos:[{key, label, setup, stages}]}` — the built-in
-demos the client's picker offers, so one "load setup + click the stage buttons"
-UX drives **both** the flat and the hierarchy-aware flow without the client
-knowing either command sequence:
+`GET /api/demos` returns `{demos:[{key, label, note, flow_path, setup, stages,
+flow, unavailable?}]}` — the demos the client's picker offers, so one "load
+setup + click the stage buttons" UX drives **both** the flat and the
+hierarchy-aware flow without the client knowing either command sequence.
 
-- **`flat`** — the single-bundle b44 bus (3 blocks, 52 bits). `stages` maps each
-  button to the flat commands (`run_bundler` / `generate_topologies` /
-  `run_planner` / `run_nuts` / `run_detailed_nuts`).
-- **`hier`** — a depth-2 hierarchy (multi-pin stress, 35 buses). Its `setup` is
-  **extracted** from `flow/hbundles/06_multipin_stress.buda` (everything up to
-  the first pipeline command, comments stripped, the file-relative
-  `source ../tracks/…` rewritten repo-root-relative) rather than duplicated, so
-  editing the flow keeps the demo current (the catalog is rebuilt per request).
-  Its `stages` maps to the hier commands (`run_hier_bundler depth 2` /
-  `generate_hier_topologies` / `run_planner hier 5` / `run_nuts` /
-  `run_detailed_nuts`).
+**The catalog is DATA, derived from real flows.** `demo/web/demos.json` lists
+`{key, label, flow, note}` per demo — nothing but the label is written twice —
+and `src/web/demos.py` reads the named `.buda` file and splits it at the first
+pipeline command:
+
+| field | derived as |
+|---|---|
+| `setup` | the commands ABOVE the split (technology, floorplan, netlist, BDB hierarchy) — what the command box shows and "Run commands" runs |
+| `stages` | the flow's OWN spelling of each stage, so a hier flow drives `run_hier_bundler` / `generate_hier_topologies` / `run_planner hier …` **without the manifest saying which kind it is** |
+| `flow` | the whole pipeline tail in order — what the **Run flow** button replays |
+
+So a demo is added by adding a JSON entry, and a flow that changes takes its
+demo with it (the catalog is rebuilt per request, so no restart either). The
+derivation paid for itself immediately: the hier demo's planner stage was
+hardcoded `run_planner hier 5` while its flow says `run_planner hier
+signal_tracks` — the hand-written catalog had already drifted from the flow it
+claimed to extract from.
+
+Two rules the parse enforces, both because a browser is not a terminal:
+
+- **Paths.** A flow resolves a relative path against its OWN directory, but
+  these lines are replayed one at a time through `/api/command` with no
+  enclosing script, where the engine falls back to the CWD. So every argument
+  naming an existing FILE relative to the flow's directory is rewritten
+  repo-root-relative (the server's documented CWD). Keyed on "is a file", not
+  on a list of commands, because a list would silently miss the next
+  path-taking command; `:memory:`, a block name and a number are left as
+  written.
+- **Skips.** The `flow` tail drops viewers (`visualize*` — a window nobody can
+  see, blocking the server), `exit`, and the artifact writers (`emit_guides`,
+  `export_*`, `save_bdb`): clicking a demo button must not scribble output into
+  the user's checkout.
+
+A flow whose `require_file` inputs are missing is listed with `unavailable` and
+its own hint — the repo's existing precondition mechanism — instead of failing
+when clicked.
+
+The eight shipped demos (all with checked-in inputs) are the two originals — the
+b44 flat design, saved as `demo/web/flat_b44.buda` since it had no flow file of
+its own, and the depth-2 hier `flow/hbundles/06_multipin_stress.buda` — plus
+`user_guide`, `comprehensive_demo`, `congestion`, `keepout`, `channel_stress`
+(a healer flow) and the RV SoC (`flow/rv/soc.buda`: imported DEF/LEF/Verilog,
+1230 nets, ~10s through **Run flow**).
 
 **Picking a different demo resets the session.** A demo is a whole DESIGN and its
 setup only ever ADDS, so running a second demo's setup over the first leaves both
@@ -225,8 +257,10 @@ the caller toggles the indicator itself; the client just retries the socket.
   browser, and the porting reference for the Scala.js renderer. Command console +
   stage buttons (bundler→dnuts, plus the ripup/negotiate healers and a `check`
   button that runs `check_design` — which auto-selects its audit stage
-  topo/nuts/dnuts server-side from how far the pipeline has run) + a
-  `topo/NUTS/detailed` view switch. Browser-
+  topo/nuts/dnuts server-side from how far the pipeline has run), a **Run flow**
+  button (the demo's whole flow: its setup then the catalog's `flow` tail, from
+  a clean session — a setup only ADDS, so replaying it over a loaded design is a
+  duplicate-block error) + a `topo/nuts/dnuts` view switch. Browser-
   verified (Playwright/Chromium): the generation view draws the floorplan +
   candidate segments (stepping the 35 b44 candidates); the NUTS view draws placed
   track footprints + centerlines; the detailed view draws all 104 bit-wires + 52
@@ -242,6 +276,23 @@ the caller toggles the indicator itself; the client just retries the socket.
   shows a "not built" banner pointing back to the toolchain-free client at `/`, so
   a fresh clone without the Scala toolchain still has the full demo. See
   `web/README.md`.
+
+Both clients expose a **Zoom** toggle (button, or `z`) that frames the ONE
+bundle on screen — the shown candidate in the topo view, the focused bundle's
+placed wires in nuts/dnuts — instead of the whole floorplan. It yields no box
+when nothing is isolated (nuts/dnuts showing ALL bundles), so the toggle then
+keeps the full view rather than pretending to zoom; a single bundle spanning its
+whole design (the `flat` demo) correctly does not move either.
+
+**Bundle-block markers** come in two kinds in the topo view: a block the
+candidate TAPS gets a solid magenta ring, one it passes THROUGH — crossed
+geometry with no tap — gets a dashed teal ring, slightly larger so a block both
+tapped and crossed shows both. Both carry a `<title>`, so hovering names the
+kind. The pass-through set is the serializer's `passthru_blocks`, derived by the
+SAME predicate `dump_topologies --conn` prints its `passthru:` line from
+(`seg_crosses_rect` / `seg_spans_block` / `passthru_blocks` in
+`buda_session/util.py`, which `reports.py` now delegates to) — so the marker the
+client draws and the line the CLI prints cannot disagree about one candidate.
 
 Both clients expose the **demo picker** (a dropdown filled from `GET /api/demos`;
 selecting one drops its `setup` into the command textarea and rebinds the stage
