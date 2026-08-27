@@ -640,6 +640,21 @@ class HierMixin:
                         print(f"  [sidecar] GUI-pinned USER candidate "
                               f"overrides the script's select_topology for "
                               f"bundle {bid}")
+                    elif not w_pinned:
+                        # THE rebuild-override notice.  When the sidecar pins
+                        # an UNPINNED wrapper on a rebuild, it silently
+                        # displaces any durable checkpoint pin the open BDB
+                        # holds for this bundle (the generation tail's
+                        # `_apply_bdb_pins` skips an already-pinned wrapper,
+                        # so the checkpoint pin — single OR group — is never
+                        # re-attached: the one interaction in USER_GUIDE §3.3
+                        # that produced no output).  Scoped to `not w_pinned`
+                        # so a script `select_topology` overriding a
+                        # checkpoint — documented and intended — stays quiet,
+                        # and so the resume USER-override above (which already
+                        # prints) is not double-reported.
+                        self._warn_sidecar_overrides_checkpoint(
+                            w, bid, target_idx)
                     w.plan.selected_topology_index = target_idx
                     w.input.topology_pinned = True
                     n_adopted += 1

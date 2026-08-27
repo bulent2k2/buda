@@ -345,6 +345,102 @@ class PersistMixin:
                     self.bdb.rollback_batch()
                     raise
 
+    def _durable_single_pin_uid(self, bid, memo=None, mirror_fresh=None):
+        """The `topo_uid` of the durable single `select_topology` pin the
+        open BDB holds for bundle `bid`, or None.
+
+        Memo-first (the same-process mirror `_persist_topologies` maintains),
+        with the `topology.is_pinned` table rows as the cross-process
+        fallback — a FRESH rebuild process has no memo yet but the previous
+        session's pin is on disk.  Single source for both the pin re-attach
+        below and the sidecar-override notice in `_apply_selections`."""
+        if self.bdb is None:
+            return None
+        bid = str(bid)                 # memo + rows key bundles by string id
+        if memo is None:
+            memo = getattr(self, '_bdb_pin_memo', None) or {}
+        uid = memo.get(bid)
+        if uid is not None:
+            return uid
+        if mirror_fresh is None:
+            mirror_fresh = (getattr(self, '_bdb_pin_snap_for', None)
+                            == id(self.bdb))
+        if mirror_fresh:
+            return None            # memo authoritative — absence means no pin
+        try:
+            rows = [tr for tr in self.bdb.topologies(bid) if tr.is_pinned]
+        except RuntimeError:
+            return None
+        return rows[0].topo_uid if rows else None
+
+    def _warn_sidecar_overrides_checkpoint(self, w, bid, target_idx):
+        """Announce when a sidecar SINGLE pin, about to be applied to an
+        UNPINNED wrapper on a rebuild, displaces a durable checkpoint pin the
+        open BDB holds for this bundle.
+
+        Covers a durable SINGLE pin AND a durable GROUP (super-candidate) pin
+        — both of which `_apply_bdb_pins` would restore onto an unpinned
+        wrapper, but which the sidecar-pinned wrapper skips past, so both need
+        the notice (Codex #861).  Distinguishes a genuine OVERRIDE (remedy:
+        delete the sidecar, and the checkpoint's choice comes back) from a
+        durable pin whose candidate REGENERATION NO LONGER PRODUCES: that pin
+        is dropped no matter what the sidecar does (the design changed), so
+        deleting the sidecar cannot restore it — mirror `_apply_bdb_pins`'
+        missing-candidate diagnostic instead of advising an impossible remedy.
+        Silent without an open BDB and when the sidecar agrees with the
+        checkpoint."""
+        if self.bdb is None:
+            return
+        import json
+        cands = w.input.candidates
+        if not (0 <= target_idx < len(cands)):
+            return
+        sel_uid = buda.topo_uid(cands[target_idx])
+        sel_txt = f"topo {target_idx + 1} ({cands[target_idx].type})"
+
+        dur_uid = self._durable_single_pin_uid(bid)
+        if dur_uid is not None:
+            if dur_uid == sel_uid:
+                return                              # sidecar agrees — silent
+            dur_i = next((i for i, c in enumerate(cands)
+                          if buda.topo_uid(c) == dur_uid), None)
+            if dur_i is None:
+                print(f"Warning: bundle {bid}: durable checkpoint pin "
+                      f"(uid {dur_uid}) matches no regenerated candidate — "
+                      f"dropped (design changed); the sidecar (.json) pin -> "
+                      f"{sel_txt} takes effect")
+            else:
+                print(f"Warning: bundle {bid}: sidecar (.json) pin -> "
+                      f"{sel_txt} OVERRIDES a durable checkpoint pin "
+                      f"(topo {cands[dur_i].type}) — delete the sidecar to "
+                      f"keep the checkpoint's choice")
+            return
+
+        # No durable SINGLE pin — a durable GROUP pin may still be present
+        # (pinned_group meta; single-pin rows absent).  Same restore/skip
+        # asymmetry, so same notice.
+        raw = self.bdb.meta_get(f"pinned_group:{bid}", "")
+        if not raw:
+            return
+        try:
+            guids = set(json.loads(raw))
+        except (ValueError, TypeError):
+            return
+        if not guids or sel_uid in guids:
+            return       # no group pin, or the sidecar chose within the family
+        members = [i for i, c in enumerate(cands)
+                   if buda.topo_uid(c) in guids]
+        if members:
+            print(f"Warning: bundle {bid}: sidecar (.json) pin -> {sel_txt} "
+                  f"OVERRIDES a durable checkpoint GROUP pin "
+                  f"({len(members)} family member(s)) — delete the sidecar to "
+                  f"keep the checkpoint's choice")
+        else:
+            print(f"Warning: bundle {bid}: durable checkpoint GROUP pin "
+                  f"matches no regenerated candidate — dropped (design "
+                  f"changed); the sidecar (.json) pin -> {sel_txt} takes "
+                  f"effect")
+
     def _apply_bdb_pins(self):
         """Re-attach durable `select_topology` pins from the open BDB onto a
         REBUILT candidate pool, by stable content uid.
@@ -395,14 +491,7 @@ class PersistMixin:
             # re-restore is already prevented by the pinned-wrapper skip
             # above (a dropped pin cannot return either — the drop's own
             # persist rebuilt the mirror without it).
-            uid = memo.get(bid)
-            if uid is None and not mirror_fresh:
-                try:
-                    rows = [tr for tr in self.bdb.topologies(bid)
-                            if tr.is_pinned]
-                except RuntimeError:
-                    continue
-                uid = rows[0].topo_uid if rows else None
+            uid = self._durable_single_pin_uid(bid, memo, mirror_fresh)
             if uid is None:
                 # No single pin — a GROUP pin may still be durable: the
                 # pinned_group meta was load_pipeline-only, so a rebuild

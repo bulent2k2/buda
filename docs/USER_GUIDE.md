@@ -160,7 +160,21 @@ lists cannot land the pin on a neighbour:
 ```
 
 So a checkpoint pin is *not* discarded by a rebuild — it survives everywhere
-the sidecar is silent.  Where the sidecar does have an entry, it wins.
+the sidecar is silent.  Where the sidecar *does* have an entry that names a
+**different** candidate, it wins — and now says so:
+
+```text
+Warning: bundle 1: sidecar (.json) pin -> topo 1 (I_H) OVERRIDES a durable
+checkpoint pin (topo Z_HVH@x400@y245) — delete the sidecar to keep the
+checkpoint's choice
+```
+
+so a stale `.json` can no longer quietly outvote the pin you made at the `btcl`
+prompt.  A durable **group** pin (`select_topology <bus> group:<N>`) is covered
+the same way; a sidecar that names the same candidate as the checkpoint — or a
+member of its pinned family — changes nothing and stays silent.  If the design
+changed so the checkpoint's candidate is no longer generated, the notice says
+*that* instead (deleting the sidecar could not bring it back).
 
 **Resuming** (`load_pipeline`).  The restored pin is already on the bundle when
 the sidecar is consulted, so an ordinary sidecar selection does not move it.
@@ -185,11 +199,10 @@ Both announce themselves (`[sidecar] GUI-pinned USER candidate overrides …`,
 `Merged sidecar layer overrides (3) onto … bundle 1`), so a resume tells you
 when a sidecar touched it.
 
-**The one silent case** is the rebuild override: the sidecar reports the pin it
-made, but nothing says a checkpoint pin was passed over for it.  A stale
-`.json` — left by a visualizer session weeks ago — will quietly outvote the pin
-you made at the `btcl` prompt last night.  Once you have moved to checkpoints,
-**delete the sidecar** so it cannot.
+In short, every place the two disagree now prints a line — the rebuild override
+above, and the two resume effects.  If you have moved to checkpoints, the tidy
+habit is still to **delete the sidecar** so the question cannot arise; but a
+leftover one can no longer change your route without telling you.
 
 ---
 
