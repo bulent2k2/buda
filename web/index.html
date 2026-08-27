@@ -33,10 +33,11 @@
      stroke (#e33) so a wire crossing a keepout edge is still its own color.
      Kept in sync with the served clients (src/web/static/{index,scala/index}.html). */
   .seg { stroke-width: 2.5; fill: none; }
-  .seg.H { stroke: #f80; } .seg.V { stroke: #e22; } .seg.jog { stroke: #fc0; }
+  .seg.H { stroke: #f80; } .seg.V { stroke: #e22; }
+  .seg.jog { stroke: #c90; stroke-width: 4; }
   .bt { fill: #0bd; } .rcv { fill: none; stroke: #d0b; stroke-width: 1.5; }
   .track { stroke-width: 2; } .track.H { stroke: #f80; } .track.V { stroke: #e22; }
-  .trackftp { fill: #fa03; }
+  .trackftp.H { fill: #f803; } .trackftp.V { fill: #e223; }
   .bit { stroke-width: 1; } .bit.H { stroke: #f80; } .bit.V { stroke: #e22; }
   .via { fill: #f60; stroke: #a30; stroke-width: .5; }
   .overlap { fill: #f005; stroke: #f00; stroke-width: 1; }
@@ -97,7 +98,7 @@ add_bus bus_060[52] blk_23.p blk_07.p,io_pad_tl.p</textarea>
 </div>
 <div id="main">
   <div id="candbar" hidden>
-    <button id="prev">◀</button> <span id="candlbl"></span> <button id="next">▶</button>
+    <button id="prev">◀</button> <button id="next">▶</button> <span id="candlbl"></span>
     <button id="pin">Pin</button>
     <button id="edit-open">Edit</button>
     <button id="edit-open-new">Edit new</button>

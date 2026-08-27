@@ -272,9 +272,10 @@ object Renderer {
     arr(n, "segments").foreach { s =>
       val op = bundleAlpha(d(s, "bundle_id"), focus)
       val (rx, ry, rw, rh) = placedRect(s)
-      g.appendChild(el("rect", "class" -> "trackftp", "opacity" -> op, "x" -> rx, "y" -> ry, "width" -> rw, "height" -> rh))
+      val hv = if (s.horiz.asInstanceOf[Boolean]) "H" else "V"
+      g.appendChild(el("rect", "class" -> ("trackftp " + hv), "opacity" -> op, "x" -> rx, "y" -> ry, "width" -> rw, "height" -> rh))
       val (a, b, c, d2) = placedLine(s)
-      val cls = "track " + (if (s.horiz.asInstanceOf[Boolean]) "H" else "V")
+      val cls = "track " + hv
       g.appendChild(el("line", "class" -> cls, "opacity" -> op, "x1" -> a, "y1" -> b, "x2" -> c, "y2" -> d2))
     }
     // Overlaps stay full-opacity (congestion markers, not per-bundle geometry).
