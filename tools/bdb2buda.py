@@ -292,14 +292,36 @@ def convert(bdb_path: str, cell_name: Optional[str] = None,
         leaf = _leaf(c.name)
         if c.cell in mr_cells:
             cw, ch = cell_dims.get(c.cell, (c.x2 - c.x1, c.y2 - c.y1))
-            quads = " ".join(
-                f"rect {s(r[0])} {s(r[1])} {s(r[2])} {s(r[3])}"
-                for r in orient_rect.comp_rects_abs(
-                    c.x1, c.y1, c.orient, cw, ch, db.cell_rects(c.cell),
-                    ox, oy, to_int=False))
-            tail = " teg_mode over" if db.cell_teg_mode(c.cell) == "OVER" else ""
-            lines.append(f"add_block {leaf} {quads}{tail}")
-            continue
+            rects = orient_rect.comp_rects_abs(
+                c.x1, c.y1, c.orient, cw, ch, db.cell_rects(c.cell),
+                ox, oy, to_int=False)
+            # The SAME staleness rule the projection applies (`_fp_add_comp`,
+            # BUDA-1919): a resize or a hand-edited `.bdb.sql` can leave rects
+            # that no longer union to the component extent.  `add_block ...
+            # rect` derives the block's bbox FROM the rects, so emitting a
+            # stale footprint writes a script whose geometry matches neither
+            # the placement nor what routing sees.  Fall back to the bbox,
+            # exactly as the projection does, and say so.
+            ux1 = min(r[0] for r in rects); uy1 = min(r[1] for r in rects)
+            ux2 = max(r[2] for r in rects); uy2 = max(r[3] for r in rects)
+            bx1, by1 = c.x1 - ox, c.y1 - oy
+            bx2, by2 = c.x2 - ox, c.y2 - oy
+            if (ux1, uy1, ux2, uy2) != (bx1, by1, bx2, by2):
+                print(
+                    f"bdb2buda: warning: cell '{c.cell}': its rects union to "
+                    f"({s(ux1)},{s(uy1)})-({s(ux2)},{s(uy2)}) at instance "
+                    f"'{c.name}', whose extent is ({s(bx1)},{s(by1)})-"
+                    f"({s(bx2)},{s(by2)}); exporting the single bbox.  "
+                    f"Re-declare `set_cell_rects {c.cell} ...` against the "
+                    f"current cell size.", file=sys.stderr)
+            else:
+                quads = " ".join(
+                    f"rect {s(r[0])} {s(r[1])} {s(r[2])} {s(r[3])}"
+                    for r in rects)
+                tail = (" teg_mode over"
+                        if db.cell_teg_mode(c.cell) == "OVER" else "")
+                lines.append(f"add_block {leaf} {quads}{tail}")
+                continue
         lines.append(
             f"add_block {leaf}"
             f" {s(c.x1 - ox)} {s(c.y1 - oy)}"

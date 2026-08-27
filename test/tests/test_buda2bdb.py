@@ -405,3 +405,76 @@ def test_roundtrip_flow_two(tmp_path):
     out2 = bdb2buda.convert(bdb2, cell_name="two", scale=1.0)
 
     assert _sections(out1) == _sections(out2)
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Stale / reused footprints (Codex P2 x2 on PR #857)
+# ──────────────────────────────────────────────────────────────────────────
+
+def test_rerun_clears_a_retained_child_cells_old_footprint(tmp_path):
+    """multi-rect -> plain bbox on a re-run must CLEAR the old footprint.
+
+    `_delete_cell_footprint` deliberately keeps a synthetic child cell that a
+    surviving component still references (so other instances keep valid
+    bodies rather than dangling cell refs), and `add_cell` only upserts the
+    SIZE.  So the `cell_rect` rows and `cell.teg_mode` of a block that has
+    since become single-rect would survive with nothing to remove them, and
+    the block would go on inheriting a footprint its script no longer
+    declares — silently, since every consumer reads the cell.
+    """
+    bdb = str(tmp_path / "reuse.bdb")
+    s1 = _write(tmp_path, "m1.buda",
+                "set_die 700 500\n"
+                "add_block L rect 0 0 100 400 rect 0 0 400 100 teg_mode over\n"
+                "add_block src 500 150 600 250\n")
+    buda2bdb.convert(s1, bdb, "tc")
+    db = buda_db.BDB(bdb)
+    assert [tuple(r) for r in db.cell_rects("tc__L")] != []
+    # A second instance of the parent cell keeps `tc__L` referenced, so
+    # _delete_cell_footprint retains it on the re-run.
+    db.add_inst("u_other", "tc", "", 2000.0, 2000.0)
+    del db
+
+    # Re-run with L as an ORDINARY bbox block.
+    s2 = _write(tmp_path, "m2.buda",
+                "set_die 700 500\n"
+                "add_block L 0 0 400 400\n"
+                "add_block src 500 150 600 250\n")
+    buda2bdb.convert(s2, bdb, "tc")
+
+    db = buda_db.BDB(bdb)
+    assert [tuple(r) for r in db.cell_rects("tc__L")] == [], \
+        "stale multi-rect footprint survived a re-run"
+    assert db.cell_teg_mode("tc__L") == "THRU"
+    assert "tc__L" not in set(db.multirect_cells())
+
+
+def test_export_falls_back_to_the_bbox_when_a_footprint_is_stale(tmp_path):
+    """bdb2buda must apply the SAME staleness rule the projection applies.
+
+    `_fp_add_comp` refuses a footprint whose rects no longer union to the
+    component extent (BUDA-1919) and projects the single bbox, because
+    `add_block_rects` derives the block bbox FROM the rects — so a stale one
+    gives routing a different shape from the one placement reads.  An export
+    that emits the rect form regardless writes a `.buda` describing geometry
+    that matches neither.
+    """
+    import bdb2buda
+    bdb = str(tmp_path / "stale.bdb")
+    script = _write(tmp_path, "s.buda",
+                    "set_die 700 500\n"
+                    "add_block L rect 0 0 100 400 rect 0 0 400 100 teg_mode over\n"
+                    "add_block src 500 150 600 250\n")
+    buda2bdb.convert(script, bdb, "tc")
+
+    # Make the stored footprint stale: grow the cell so its rects no longer
+    # union to the instance extent (what `resize_cell` / a hand-edited
+    # `.bdb.sql` does).
+    db = buda_db.BDB(bdb)
+    db.resize_cell("tc__L", 500.0, 400.0)
+    del db
+
+    out = bdb2buda.convert(bdb, "tc", scale=1)
+    line = next(l for l in out.splitlines() if l.startswith("add_block L "))
+    assert "rect" not in line, f"stale footprint exported as rects: {line}"
+    assert "teg_mode" not in line

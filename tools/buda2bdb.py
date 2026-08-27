@@ -393,6 +393,15 @@ def convert(buda_path: str, bdb_path: str, cell: str) -> dict:
             child_cell = f"{cell}__{name}"
             db.add_cell(child_cell, x2 - x1, y2 - y1)
             mr = parsed.block_rects.get(name)
+            if not mr:
+                # A child cell another component still references is RETAINED
+                # by _delete_cell_footprint (so its other instances keep valid
+                # bodies rather than dangling cell refs) and `add_cell` only
+                # upserts the SIZE — so a block that has since become
+                # single-rect would go on inheriting the footprint and
+                # `teg_mode` of the run that declared it, with nothing to
+                # remove them.  Clear them explicitly.
+                db.set_cell_rects(child_cell, [], "THRU")
             if mr:
                 # Cell-LOCAL rects (offsets from the block's lower-left), the
                 # v30 storage convention — so every instance of the synthetic
