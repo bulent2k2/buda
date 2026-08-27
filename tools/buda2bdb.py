@@ -21,10 +21,13 @@ blocks) becomes the cell size.
   * Any OTHER instances of the cell already in the BDB are size-synced to the
     new cell size (via resize_cell).
 
-Commands read: set_die, add_block (single-rect; multi-rect `rect ...` uses the
-union bbox with a warning), add_net, add_bus.  `source <f>` is followed when the
-file is found.  All other commands (def_layer, run_*, visualize, corner_margin,
-container/teg_mode/corner_margin modifiers, …) are ignored with a warning.
+Commands read: set_die, add_block, add_net, add_bus.  A MULTI-rect
+`add_block ... rect ... [teg_mode thru|over]` keeps its geometry: the rects
+(cell-local) and the mode become the synthetic child cell's v30 `cell_rect`
+footprint, so a TEG macro survives the round trip.  `source <f>` is followed
+when the file is found.  All other commands (def_layer, run_*, visualize,
+corner_margin, container/corner_margin modifiers, …) are ignored with a
+warning.
 
 Coordinates are stored 1:1 as micron values.  Round-trip with:
   python3 tools/bdb2buda.py <bdbfile> -cell <name> -scale 1
@@ -75,6 +78,9 @@ class ParsedScript:
     def __init__(self) -> None:
         # name -> (x1, y1, x2, y2)
         self.blocks: dict = {}
+        # name -> ([(x1,y1,x2,y2), ...], teg_mode) for MULTI-rect blocks only
+        # (v30: the synthetic child cell gets a `cell_rect` footprint).
+        self.block_rects: dict = {}
         # list of {name, drv, rcvs, dir}  (dir in {"", "unknown", "inout"})
         self.nets: list = []
         self.die: Optional[tuple] = None      # (w, h) or None
@@ -151,31 +157,38 @@ def _parse_add_block(args: list, parsed: ParsedScript) -> None:
         return
     name = args[0]
     if args[1].lower() == "rect":
-        # Multi-rect: union bbox of all rect quads; warn that detail is dropped.
-        xs, ys, i = [], [], 1
+        rects, xs, ys, i = [], [], [], 1
         while i + 4 < len(args) + 1 and i < len(args) and args[i].lower() == "rect":
             try:
                 x1, y1, x2, y2 = (float(args[i + 1]), float(args[i + 2]),
                                   float(args[i + 3]), float(args[i + 4]))
             except (IndexError, ValueError):
                 break
+            rects.append((min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2)))
             xs += [x1, x2]
             ys += [y1, y2]
             i += 5
         if not xs:
             _warn(f"add_block {name}: malformed rect form — ignored")
             return
-        # Name what the collapse drops: a BDB component holds ONE bbox, so
-        # the rect list is lost by construction — and so is any trailing
-        # modifier (teg_mode over most consequentially: the OVER declaration
-        # is what makes the connection metal real, and dropping it silently
-        # would turn an electrically-open block into a clean-auditing one).
-        dropped = args[i:]
-        msg = f"add_block {name}: multi-rect collapsed to union bbox"
-        if dropped:
-            msg += f"; modifiers dropped ({' '.join(dropped)})"
-        _warn(msg)
+        # `teg_mode` rides the rect list into the BDB (schema v30 cell_rect +
+        # cell.teg_mode).  Until v30 a BDB cell was ONE bbox, so both were
+        # lost by construction and this warned about the collapse; now the
+        # geometry survives and only the OTHER trailing modifiers can be
+        # dropped.  (The old warning text was
+        #   "add_block X: multi-rect collapsed to union bbox; modifiers
+        #    dropped (teg_mode over)"
+        # — kept here so the flip is legible.)
+        teg = "THRU"
+        rest = list(args[i:])
+        if len(rest) >= 2 and rest[0].lower() == "teg_mode":
+            teg = "OVER" if rest[1].lower() == "over" else "THRU"
+            rest = rest[2:]
+        if rest:
+            _warn(f"add_block {name}: modifiers dropped ({' '.join(rest)})")
         parsed.blocks[name] = (min(xs), min(ys), max(xs), max(ys))
+        if len(rects) > 1:
+            parsed.block_rects[name] = (rects, teg)
         return
     try:
         x1, y1, x2, y2 = (float(args[1]), float(args[2]),
@@ -331,6 +344,10 @@ def _delete_cell_footprint(bdb_path: str, cell: str) -> None:
                 drop = [s for s in syn if s not in referenced]
                 if drop:
                     qm = ",".join("?" * len(drop))
+                    # cell_rect FKs cell(name) (v30) — clear it first.
+                    if "cell_rect" in tabs:
+                        cur.execute(
+                            f"DELETE FROM cell_rect WHERE cell IN ({qm})", drop)
                     cur.execute(f"DELETE FROM cell WHERE name IN ({qm})", drop)
         con.commit()
     finally:
@@ -375,6 +392,26 @@ def convert(buda_path: str, bdb_path: str, cell: str) -> dict:
         for name, (x1, y1, x2, y2) in parsed.blocks.items():
             child_cell = f"{cell}__{name}"
             db.add_cell(child_cell, x2 - x1, y2 - y1)
+            mr = parsed.block_rects.get(name)
+            if not mr:
+                # A child cell another component still references is RETAINED
+                # by _delete_cell_footprint (so its other instances keep valid
+                # bodies rather than dangling cell refs) and `add_cell` only
+                # upserts the SIZE — so a block that has since become
+                # single-rect would go on inheriting the footprint and
+                # `teg_mode` of the run that declared it, with nothing to
+                # remove them.  Clear them explicitly.
+                db.set_cell_rects(child_cell, [], "THRU")
+            if mr:
+                # Cell-LOCAL rects (offsets from the block's lower-left), the
+                # v30 storage convention — so every instance of the synthetic
+                # cell inherits the footprint and a move cannot stale it.
+                rects, teg = mr
+                db.set_cell_rects(
+                    child_cell,
+                    [(rx1 - x1, ry1 - y1, rx2 - x1, ry2 - y1)
+                     for (rx1, ry1, rx2, ry2) in rects],
+                    teg)
             db.add_inst_to_cell(cell, name, child_cell, x1 - ox, y1 - oy)
         # 3. Materialize the representative instance "<cell>" + its children.
         db.add_inst(cell, cell, "", 0.0, 0.0)

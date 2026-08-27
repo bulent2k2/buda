@@ -92,22 +92,59 @@ def test_no_set_die_uses_bbox_and_shifts(tmp_path):
     assert (comps["blk/q"].x1, comps["blk/q"].y1) == (200, 200)
 
 
-def test_multirect_collapse_warning_names_dropped_modifiers(tmp_path, capsys):
-    # A BDB component holds ONE bbox, so the multi-rect collapse is by
-    # construction (teg_multirect_status.md open 6 — the hier/BDB boundary);
-    # what must NOT be silent is the dropped teg_mode: OVER is the
-    # declaration that makes the connection metal real, so losing it
-    # unannounced turns an electrically-open block into a clean-auditing
-    # one.  The warning must name the collapse AND the dropped modifiers.
+def test_multirect_geometry_and_teg_mode_survive_the_conversion(tmp_path):
+    # FLIPPED (schema v30): a BDB cell now carries a multi-rect footprint
+    # (`cell_rect` + `cell.teg_mode`), so the rects and `teg_mode over` reach
+    # the BDB instead of collapsing to the union bbox.  The old assertion
+    # (kept so the flip is legible) was:
+    #
+    #     assert "multi-rect collapsed to union bbox" in err
+    #     assert "teg_mode over" in err   # dropped modifiers named
+    #
+    # — the collapse was by construction while a cell was ONE box
+    # (teg_multirect_status.md limitation 5), and what must not be silent was
+    # the dropped teg_mode: OVER is the declaration that makes the connection
+    # metal real, so losing it unannounced turned an electrically-open block
+    # into a clean-auditing one.  Now nothing is lost, so nothing is warned.
     script = _write(tmp_path, "mr.buda",
+                    "set_die 700 500\n"
                     "add_block L rect 0 0 100 400 rect 0 0 400 100 teg_mode over\n"
                     "add_block src 500 150 600 250\n"
                     "add_net d src.tx L.rx\n")
     parsed = buda2bdb.parse_script(script)
-    err = capsys.readouterr().err
-    assert parsed.blocks["L"] == (0, 0, 400, 400)  # union bbox
-    assert "multi-rect collapsed to union bbox" in err
-    assert "teg_mode over" in err, f"dropped modifiers not named: {err!r}"
+    assert parsed.blocks["L"] == (0, 0, 400, 400)          # union bbox kept
+    assert parsed.block_rects["L"] == ([(0, 0, 100, 400),
+                                        (0, 0, 400, 100)], "OVER")
+
+    bdb = str(tmp_path / "mr.bdb")
+    buda2bdb.convert(script, bdb, "tc")
+    db = buda_db.BDB(bdb)
+    assert "tc__L" in set(db.multirect_cells())
+    # Stored CELL-LOCAL (the block sits at the cell origin here, so the
+    # values coincide) with the declared mode.
+    assert [tuple(r) for r in db.cell_rects("tc__L")] == [
+        (0.0, 0.0, 100.0, 400.0), (0.0, 0.0, 400.0, 100.0)]
+    assert db.cell_teg_mode("tc__L") == "OVER"
+    # A single-rect block is untouched — no rect rows, THRU.
+    assert "tc__src" not in set(db.multirect_cells())
+
+
+def test_multirect_round_trips_back_to_the_rect_form(tmp_path):
+    # buda2bdb -> bdb2buda: the `rect ... teg_mode over` spelling comes back,
+    # which the union-bbox collapse made impossible before v30.
+    import bdb2buda
+    script = _write(tmp_path, "rt.buda",
+                    "set_die 700 500\n"
+                    "add_block L rect 0 0 100 400 rect 0 0 400 100 teg_mode over\n"
+                    "add_block src 500 150 600 250\n"
+                    "add_net d src.tx L.rx\n")
+    bdb = str(tmp_path / "rt.bdb")
+    buda2bdb.convert(script, bdb, "tc")
+    out = bdb2buda.convert(bdb, "tc", scale=1)
+    lines = [l for l in out.splitlines() if l.startswith("add_block L ")]
+    assert lines == [
+        "add_block L rect 0 0 100 400 rect 0 0 400 100 teg_mode over"], out
+    assert "add_block src 500 150 600 250" in out
 
 
 def test_add_bus_expands_to_nets(tmp_path):
@@ -368,3 +405,76 @@ def test_roundtrip_flow_two(tmp_path):
     out2 = bdb2buda.convert(bdb2, cell_name="two", scale=1.0)
 
     assert _sections(out1) == _sections(out2)
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Stale / reused footprints (Codex P2 x2 on PR #857)
+# ──────────────────────────────────────────────────────────────────────────
+
+def test_rerun_clears_a_retained_child_cells_old_footprint(tmp_path):
+    """multi-rect -> plain bbox on a re-run must CLEAR the old footprint.
+
+    `_delete_cell_footprint` deliberately keeps a synthetic child cell that a
+    surviving component still references (so other instances keep valid
+    bodies rather than dangling cell refs), and `add_cell` only upserts the
+    SIZE.  So the `cell_rect` rows and `cell.teg_mode` of a block that has
+    since become single-rect would survive with nothing to remove them, and
+    the block would go on inheriting a footprint its script no longer
+    declares — silently, since every consumer reads the cell.
+    """
+    bdb = str(tmp_path / "reuse.bdb")
+    s1 = _write(tmp_path, "m1.buda",
+                "set_die 700 500\n"
+                "add_block L rect 0 0 100 400 rect 0 0 400 100 teg_mode over\n"
+                "add_block src 500 150 600 250\n")
+    buda2bdb.convert(s1, bdb, "tc")
+    db = buda_db.BDB(bdb)
+    assert [tuple(r) for r in db.cell_rects("tc__L")] != []
+    # A second instance of the parent cell keeps `tc__L` referenced, so
+    # _delete_cell_footprint retains it on the re-run.
+    db.add_inst("u_other", "tc", "", 2000.0, 2000.0)
+    del db
+
+    # Re-run with L as an ORDINARY bbox block.
+    s2 = _write(tmp_path, "m2.buda",
+                "set_die 700 500\n"
+                "add_block L 0 0 400 400\n"
+                "add_block src 500 150 600 250\n")
+    buda2bdb.convert(s2, bdb, "tc")
+
+    db = buda_db.BDB(bdb)
+    assert [tuple(r) for r in db.cell_rects("tc__L")] == [], \
+        "stale multi-rect footprint survived a re-run"
+    assert db.cell_teg_mode("tc__L") == "THRU"
+    assert "tc__L" not in set(db.multirect_cells())
+
+
+def test_export_falls_back_to_the_bbox_when_a_footprint_is_stale(tmp_path):
+    """bdb2buda must apply the SAME staleness rule the projection applies.
+
+    `_fp_add_comp` refuses a footprint whose rects no longer union to the
+    component extent (BUDA-1919) and projects the single bbox, because
+    `add_block_rects` derives the block bbox FROM the rects — so a stale one
+    gives routing a different shape from the one placement reads.  An export
+    that emits the rect form regardless writes a `.buda` describing geometry
+    that matches neither.
+    """
+    import bdb2buda
+    bdb = str(tmp_path / "stale.bdb")
+    script = _write(tmp_path, "s.buda",
+                    "set_die 700 500\n"
+                    "add_block L rect 0 0 100 400 rect 0 0 400 100 teg_mode over\n"
+                    "add_block src 500 150 600 250\n")
+    buda2bdb.convert(script, bdb, "tc")
+
+    # Make the stored footprint stale: grow the cell so its rects no longer
+    # union to the instance extent (what `resize_cell` / a hand-edited
+    # `.bdb.sql` does).
+    db = buda_db.BDB(bdb)
+    db.resize_cell("tc__L", 500.0, 400.0)
+    del db
+
+    out = bdb2buda.convert(bdb, "tc", scale=1)
+    line = next(l for l in out.splitlines() if l.startswith("add_block L "))
+    assert "rect" not in line, f"stale footprint exported as rects: {line}"
+    assert "teg_mode" not in line

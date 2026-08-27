@@ -88,6 +88,48 @@ def test_v0_db_missing_rects_migrates_on_open(tmp_path):
     con.close()
 
 
+def test_pre_v30_db_gains_the_multirect_footprint_tables_on_open(tmp_path):
+    # v29 to v30: the cell's MULTI-RECT footprint (cell_rect + cell.teg_mode).
+    # A pre-v30 cell was ONE `width x height` box by construction, so there is
+    # nothing to migrate — an empty cell_rect table and 'THRU' are exactly the
+    # design that was stored, and the existing cell rows must survive.
+    p = str(tmp_path / "v29.bdb")
+    db = buda.BDB(p)
+    db.add_cell("mac", 400, 400)
+    del db
+
+    # Rewind to the v29 shape: drop cell_rect and rebuild `cell` without
+    # teg_mode, then stamp user_version back.
+    con = sqlite3.connect(p)
+    con.executescript(
+        """
+        DROP TABLE cell_rect;
+        ALTER TABLE cell RENAME TO cell_old;
+        CREATE TABLE cell (name TEXT PRIMARY KEY, width REAL NOT NULL,
+            height REAL NOT NULL, cls TEXT NOT NULL DEFAULT '',
+            bottom_up INTEGER NOT NULL DEFAULT 0,
+            layer_cap INTEGER NOT NULL DEFAULT -1,
+            layer_floor INTEGER NOT NULL DEFAULT -1);
+        INSERT INTO cell SELECT name,width,height,cls,bottom_up,layer_cap,
+            layer_floor FROM cell_old;
+        DROP TABLE cell_old;
+        PRAGMA user_version = 29;
+        """
+    )
+    con.commit()
+    assert "teg_mode" not in {r[1] for r in con.execute("PRAGMA table_info(cell)")}
+    con.close()
+
+    db = buda.BDB(p)                       # opening migrates
+    assert db.schema_version() == buda.BDB.SCHEMA_VERSION
+    assert db.multirect_cells() == []      # a pre-v30 design declared none
+    assert db.cell_teg_mode("mac") == "THRU"
+    assert {c.name for c in db.all_cells()} == {"mac"}   # data preserved
+    # …and the migrated DB accepts a footprint like a fresh one.
+    db.set_cell_rects("mac", [(0, 0, 400, 100), (0, 0, 100, 400)], "OVER")
+    assert db.multirect_cells() == ["mac"]
+
+
 def test_newer_schema_version_is_rejected(tmp_path):
     # A DB written by a newer BUDA (user_version > SCHEMA_VERSION) must fail fast
     # rather than be opened writable by an older binary that can't understand it.

@@ -25,7 +25,8 @@ import os
 import sys
 
 import buda_diag
-from ._options import reject_unknown_options
+from ._options import (parse_rect_list, reject_unknown_options,
+                       require_number, validate_rect_list)
 from buda_session.util import (apply_pattern_layer_facts,
                                ensure_parent_dir, resolve_script_path)
 from buda_script import (leading_path_and_options, sole_path_arg,
@@ -776,6 +777,115 @@ def cmd_add_cell(session, cmd, args, cmd_line):
     session.bdb.add_cell(args[0], float(args[1]), float(args[2]))
 
 
+_SET_CELL_RECTS_USAGE = (
+    "set_cell_rects <cell> rect <x1> <y1> <x2> <y2> [rect ...] "
+    "[teg_mode thru|over]  |  set_cell_rects <cell> off")
+
+
+def cmd_set_cell_rects(session, cmd, args, cmd_line):
+    """Declare a cell's MULTI-RECT footprint (schema v30).
+
+    The hier/BDB twin of `add_block <name> rect ...`: a BDB cell is one
+    `width x height` box by construction, so before this a rectilinear or
+    split macro could not be STATED in a hierarchical design at all and the
+    whole TEG machinery was script-declared only
+    (teg_multirect_status.md limitation 5, opens_interchange.md item 16).
+
+    Coordinates are CELL-LOCAL (offsets from the cell origin, like
+    `add_cell_pin`'s px/py and `add_inst_to_cell`'s x/y), so every instance
+    of the cell inherits the footprint, a move can never stale it, and a
+    rotated/mirrored instance gets the rects transformed with it.  The rects'
+    union bbox must be EXACTLY the cell's declared size: the component bbox
+    is what placement, HPWL, overlap checking and every non-routing consumer
+    read, so a union that disagreed with it would be a split-brain of the
+    kind the planner's `low_seg_obstructed` had (open 3).
+    """
+    if session.bdb is None:
+        print("Error: open_bdb first"); return
+    if not args:
+        print(f"Error: set_cell_rects requires <cell>."
+              f"\n  Usage: {_SET_CELL_RECTS_USAGE}")
+        sys.exit(1)
+    cell = args[0]
+    cells = {c.name: c for c in session.bdb.all_cells()}
+    if cell not in cells:
+        print(f"Error: set_cell_rects: cell '{cell}' is not defined — "
+              f"declare it with `add_cell {cell} <w> <h>` first."
+              f"\n  Usage: {_SET_CELL_RECTS_USAGE}")
+        sys.exit(1)
+
+    if len(args) > 1 and args[1].lower() == "off":
+        reject_unknown_options("set_cell_rects", [a.lower() for a in args[2:]],
+                               ())
+        session.bdb.set_cell_rects(cell, [], "THRU")
+        print(f"set_cell_rects: cleared the multi-rect footprint of "
+              f"cell '{cell}' (back to its single {cells[cell].width} x "
+              f"{cells[cell].height} bbox).")
+        return
+
+    if len(args) < 2 or args[1].lower() != "rect":
+        print(f"Error: set_cell_rects: expected `rect` after the cell name."
+              f"\n  Usage: {_SET_CELL_RECTS_USAGE}")
+        sys.exit(1)
+
+    def _coord(what, tok):
+        return require_number("set_cell_rects", what, tok,
+                              usage=_SET_CELL_RECTS_USAGE)
+
+    # One parser + one validator, shared with `add_block`'s rect form.
+    rects, i = parse_rect_list("set_cell_rects", args, 1, _coord,
+                               usage=_SET_CELL_RECTS_USAGE)
+    validate_rect_list("set_cell_rects", f"cell '{cell}'", rects,
+                       usage=_SET_CELL_RECTS_USAGE)
+
+    teg_mode = "THRU"
+    if i < len(args) and args[i].lower() == "teg_mode":
+        i += 1
+        if i >= len(args):
+            print(f"Error: set_cell_rects: teg_mode needs a value "
+                  f"(thru|over).\n  Usage: {_SET_CELL_RECTS_USAGE}")
+            sys.exit(1)
+        reject_unknown_options("set_cell_rects teg_mode", [args[i].lower()],
+                               ("over", "thru"))
+        teg_mode = args[i].upper()
+        i += 1
+    reject_unknown_options("set_cell_rects", [a.lower() for a in args[i:]], ())
+
+    # A single rect is the cell's own bbox spelled the long way: it declares
+    # nothing the size does not already say, and `teg_mode` on ONE rectangle
+    # has no referent (there is no second rect for it to be disconnected
+    # from).  Refuse it rather than storing a footprint that changes nothing.
+    if len(rects) < 2:
+        print(f"Error: set_cell_rects: cell '{cell}' declares "
+              f"{len(rects)} rect — a multi-rect footprint needs at least 2 "
+              f"(one rect is the cell's own bbox, which `add_cell` already "
+              f"states).  Use `set_cell_rects {cell} off` to clear one."
+              f"\n  Usage: {_SET_CELL_RECTS_USAGE}")
+        sys.exit(1)
+
+    # The union must be the cell box, EXACTLY.  Anything else silently makes
+    # the routing footprint and the placement footprint two different shapes.
+    ux1 = min(r[0] for r in rects); uy1 = min(r[1] for r in rects)
+    ux2 = max(r[2] for r in rects); uy2 = max(r[3] for r in rects)
+    w, h = cells[cell].width, cells[cell].height
+    if (ux1, uy1, ux2, uy2) != (0.0, 0.0, w, h):
+        print(f"Error: set_cell_rects: the rects of cell '{cell}' union to "
+              f"({ux1},{uy1})-({ux2},{uy2}), but the cell is "
+              f"{w} x {h} — i.e. (0,0)-({w},{h}).  Cell-local rects are "
+              f"offsets from the cell origin and their union IS the cell's "
+              f"extent: every instance's placed bbox comes from the cell "
+              f"size, so a disagreement would route against one shape and "
+              f"place against another.  Move the rects, or resize the cell "
+              f"first (`add_cell {cell} <w> <h>` for the stored size; "
+              f"`resize_cell {cell} <w> <h>` to move its instances with it)."
+              f"\n  Usage: {_SET_CELL_RECTS_USAGE}")
+        sys.exit(1)
+
+    session.bdb.set_cell_rects(cell, rects, teg_mode)
+    print(f"set_cell_rects: cell '{cell}' has {len(rects)} rects "
+          f"(teg_mode {teg_mode.lower()}).")
+
+
 def cmd_add_inst(session, cmd, args, cmd_line):
     # add_inst <inst_name> <cell_name> <parent|-> <x> <y>
     # x,y are relative to parent's origin; absolute when parent is "-"
@@ -802,6 +912,41 @@ def cmd_add_inst_to_cell(session, cmd, args, cmd_line):
                               float(args[3]), float(args[4]))
 
 
+def _warn_multirect_transform(session, name, verb):
+    """BUDA-1918: a rotate/flip on a CONTAINER cannot carry a descendant's
+    multi-rect footprint.
+
+    `rotate_comp`/`flip_comp` rewrite descendant BBOXES and deliberately leave
+    their orientation tokens alone (composing them too would make GDS export
+    double-transform), because for a single-bbox instance the bbox rewrite IS
+    the transform.  A v30 `cell_rect` footprint is geometry the bbox does not
+    carry, so it stays upright while the instance turns — silently, since
+    nothing in the row records that a transform happened.  Say so at the
+    moment it happens; a leaf transformed DIRECTLY is fine (a childless
+    subtree composes its own token, which the projection reads).
+    """
+    mr = set(session.bdb.multirect_cells())
+    if not mr:
+        return
+    comps = session.bdb.all_components()
+    root = next((c for c in comps if c.name == name), None)
+    if root is None:
+        return
+    prefix = name + "/"
+    hit = sorted(c.name for c in comps
+                 if c.name.startswith(prefix) and c.cell in mr)
+    if not hit:
+        return
+    named = ", ".join(hit[:8]) + (f" (+{len(hit) - 8} more)" if len(hit) > 8 else "")
+    buda_diag.emit(
+        "BUDA-1918",
+        f"{verb} '{name}' moved {len(hit)} descendant(s) whose cell declares "
+        f"a multi-rect footprint: {named}.  Their rects do NOT follow the "
+        f"transform (the bbox does; a cell_rect footprint does not), so the "
+        f"routing footprint no longer matches the placement.  Transform the "
+        f"leaf itself, or re-declare its placement.")
+
+
 def cmd_flip_comp(session, cmd, args, cmd_line):
     # flip_comp <name> x|y
     if len(args) < 2:
@@ -811,6 +956,7 @@ def cmd_flip_comp(session, cmd, args, cmd_line):
     axis = args[1].lower()
     if axis not in ('x', 'y'):
         print(f"Error: flip_comp axis must be 'x' or 'y', got {args[1]!r}"); return
+    _warn_multirect_transform(session, args[0], 'flip_comp')
     session.bdb.flip_comp(args[0], axis == 'x')
 
 
@@ -824,6 +970,7 @@ def cmd_rotate_comp(session, cmd, args, cmd_line):
         degrees = int(args[1])
     except ValueError:
         print("Error: rotate_comp degrees must be 90, 180, or 270"); return
+    _warn_multirect_transform(session, args[0], 'rotate_comp')
     session.bdb.rotate_comp(args[0], degrees)
 
 
@@ -844,6 +991,45 @@ def cmd_add_comp(session, cmd, args, cmd_line):
                       float(args[5]), float(args[6]), is_leaf)
 
 
+def _fill_busterm_rects(session):
+    """Stamp the multi-rect footprint (v30 `cell_rect`) onto the busterm rows
+    `BustermGen` just wrote, and return how many rows got one.
+
+    `BustermRow` has carried an optional multi-rect JSON since v1, and
+    `BustermGen` wrote it EMPTY because a cell had no rects to write — the
+    other half of teg_multirect_status.md limitation 5.  It is stamped HERE
+    rather than in `BustermGen::derive` because the per-instance rects need
+    the ORIENTATION transform, which lives in `topology.cpp` (the `buda`
+    module) while `busterm.cpp` is in `buda_core` and cannot link against
+    it; the Python projection helper already owns that transform and is the
+    single source both paths read.  `add_busterm` is INSERT OR REPLACE, so
+    re-writing the row is the documented way to amend it.
+    """
+    # Deferred import: buda_cmds and buda_session import each other lazily.
+    from buda_session import hier as hier_mod
+    mr = session._bdb_multirect()
+    if not mr:
+        return 0
+    by_path = {c.name: c for c in session.bdb.all_components()}
+    n = 0
+    for row in session.bdb.all_busterms():
+        comp = by_path.get(row.hier_path)
+        ent = mr.get(comp.cell) if comp is not None else None
+        if not ent or not ent[2]:
+            continue
+        rects = hier_mod._comp_rects_abs(comp, ent)
+        # The engine's own codec (bound for this), not a second copy of the
+        # format: `decode_rects_json` is what reads these rows back.
+        row.rects = buda.encode_rects_json([tuple(float(v) for v in r)
+                                            for r in rects])
+        row.teg_mode = ent[3]
+        row.orig_x1, row.orig_y1 = row.x1, row.y1
+        row.orig_x2, row.orig_y2 = row.x2, row.y2
+        session.bdb.add_busterm(row)
+        n += 1
+    return n
+
+
 def cmd_derive_busterms(session, cmd, args, cmd_line):
     # derive_busterms [max_depth]
     # Populate BDB busterm table from the component hierarchy.
@@ -852,8 +1038,12 @@ def cmd_derive_busterms(session, cmd, args, cmd_line):
     max_depth = int(args[0]) if args else 1
     session._busterm_gen = buda.BustermGen(session.bdb)
     session._busterm_gen.derive(max_depth)
+    n_mr = _fill_busterm_rects(session)
     bts = session.bdb.all_busterms()
-    print(f"derive_busterms: {len(bts)} busterms written (depth 0..{max_depth}).")
+    msg = f"derive_busterms: {len(bts)} busterms written (depth 0..{max_depth})."
+    if n_mr:
+        msg += f"  {n_mr} carry a multi-rect footprint."
+    print(msg)
 
 
 def cmd_derive_container_bboxes(session, cmd, args, cmd_line):
@@ -902,6 +1092,7 @@ def cmd_refine_busterms(session, cmd, args, cmd_line):
     if session._busterm_gen is None:
         print("Error: run derive_busterms first"); return
     session._busterm_gen.refine()
+    _fill_busterm_rects(session)
     bts = session.bdb.all_busterms()
     print(f"refine_busterms: {len(bts)} busterms written.")
 
@@ -1643,6 +1834,7 @@ COMMANDS = {
     "move_comp": cmd_move_comp,
     "resize_cell": cmd_resize_cell,
     "add_cell": cmd_add_cell,
+    "set_cell_rects": cmd_set_cell_rects,
     "add_inst": cmd_add_inst,
     "add_inst_to_cell": cmd_add_inst_to_cell,
     "flip_comp": cmd_flip_comp,

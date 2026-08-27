@@ -240,3 +240,60 @@ def require_number(cmd, what, tok, *, integer=False, usage=""):
         print(f"Error: {cmd}: expected a number for {what}, got '{tok}'."
               + _usage_line(usage))
         sys.exit(1)
+
+
+def parse_rect_list(cmd, args, start, coord, usage=""):
+    """Parse a `rect <x1> <y1> <x2> <y2> [rect ...]` run out of `args[start:]`.
+
+    Returns `(rects, next_index)` — the rect quads in declaration order and the
+    index of the first token past the run.  `coord(what, tok)` converts one
+    coordinate, which is the ONLY thing that differs between the two callers:
+    `add_block` lands in the integer Floorplan (its coordinates become Hanan
+    lines) while `set_cell_rects` writes REAL micron values to the BDB like
+    every other cell dimension.  A truncated rect stops the flow naming the
+    missing argument, instead of the bare IndexError it raised before the two
+    parsers were made one.
+    """
+    rects, i = [], start
+    while i < len(args) and args[i].lower() == "rect":
+        n = len(rects) + 1
+        have = len(args) - (i + 1)          # coords present after this 'rect'
+        if have < 4:
+            missing = ("x1", "y1", "x2", "y2")[have]
+            print(f"Error: {cmd}: rect {n} is missing <{missing}> — "
+                  f"each rect takes exactly 4 coordinates "
+                  f"(<x1> <y1> <x2> <y2>)." + _usage_line(usage))
+            sys.exit(1)
+        rects.append(tuple(
+            coord(f"<{ax}> of rect {n}", args[i + k])
+            for k, ax in enumerate(("x1", "y1", "x2", "y2"), start=1)))
+        i += 5
+    return rects, i
+
+
+def validate_rect_list(cmd, subject, rects, usage=""):
+    """Refuse the meaningless rect shapes, shared by every rect declaration.
+
+    Degenerate (zero-extent) and DUPLICATE rects are hard errors; overlapping
+    non-identical rects stay legal, because interior overlap is exactly how a
+    rectilinear L/C-shape is drawn and edge-adjacent rects draw one footprint
+    by abutment.  `subject` names what is being declared, e.g. "block 'L'" or
+    "cell 'dsp'".
+    """
+    seen = {}
+    for n, (rx1, ry1, rx2, ry2) in enumerate(rects, start=1):
+        if rx1 == rx2 or ry1 == ry2:
+            axis = "width (x1 == x2)" if rx1 == rx2 else "height (y1 == y2)"
+            print(f"Error: {cmd}: rect {n} of {subject} is degenerate — "
+                  f"zero {axis}. A rect must have positive extent on both "
+                  f"axes; its edges become block faces and Hanan lines."
+                  + _usage_line(usage))
+            sys.exit(1)
+        key = (min(rx1, rx2), min(ry1, ry2), max(rx1, rx2), max(ry1, ry2))
+        if key in seen:
+            print(f"Error: {cmd}: rect {n} of {subject} duplicates rect "
+                  f"{seen[key]} ({key[0]},{key[1]})-({key[2]},{key[3]}) — a "
+                  f"repeated rect adds no geometry and doubles its "
+                  f"stubs/taps; remove one." + _usage_line(usage))
+            sys.exit(1)
+        seen[key] = n
