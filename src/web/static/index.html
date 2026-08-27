@@ -43,6 +43,14 @@
   .bit { stroke-width: 1; } .bit.H { stroke: #f80; } .bit.V { stroke: #e22; }
   .via { fill: #f60; stroke: #a30; stroke-width: .5; }
   .overlap { fill: #f005; stroke: #f00; stroke-width: 1; }
+  /* Legacy-load TEG bridge (teg_multirect_status.md limitation 6): a
+     candidate restored from a pre-emission checkpoint carries UNREALIZED
+     metal that TEG_OPEN reports as "declared bridge is unrealized".  Dashed
+     and deliberately OFF the layer palette above — it is not a routed wire.
+     Same colour/idiom as the matplotlib overlay (viz_common.LEGACY_BRIDGE_COLOR). */
+  .legacybridge { stroke: #cc3344; stroke-width: 2.5; fill: none;
+                  stroke-dasharray: 6 3; opacity: .9; }
+  .legacybridgelbl { fill: #cc3344; font-size: 10px; }
   #candbar, #focusbar { position: absolute; top: 8px; left: 8px; background: #000a;
              color: #fff; padding: 6px 10px; border-radius: 5px; }
   #candbar button, #focusbar button { background: #fff2; color: #fff; border: 1px solid #fff4; }
@@ -646,6 +654,46 @@ function computeDisplay(analysis) {
   return {perp, alo, ahi};
 }
 
+// Restored legacy TEG bridges as drawable wires (teg_multirect_status.md
+// limitation 6).  PURE over the serialized payload — the node port test
+// (test_web_legacy_bridge.py) runs exactly this function, so the geometry and
+// the label text cannot drift from the matplotlib overlay unnoticed.
+//
+// Accepts BOTH payload shapes: the generation view's per-candidate
+// `bridge_segments` map {block_name: segment} and the NUTS view's flat
+// `legacy_bridges` list [{block_name, ...segment}].  Map entries are sorted by
+// block name, matching viz_common.draw_legacy_bridges (`for bname in sorted`);
+// the list arrives already sorted from the server, so its order is preserved.
+// An empty/absent payload — every live design, since generation emits no
+// bridges — yields [] and draws nothing.
+function legacyBridgeWires(bridges) {
+  const out = [];
+  if (!bridges) return out;
+  const items = Array.isArray(bridges)
+      ? bridges.map(b => [b.block_name, b])
+      : Object.keys(bridges).sort().map(k => [k, bridges[k]]);
+  for (const [name, seg] of items) {
+    if (!seg || !seg.start || !seg.end) continue;
+    out.push({name: name,
+              x1: seg.start.x, y1: seg.start.y,
+              x2: seg.end.x, y2: seg.end.y,
+              label: "unrealized bridge (legacy checkpoint): " + name});
+  }
+  return out;
+}
+
+// Draw what legacyBridgeWires() returns: a dashed off-palette wire plus its
+// label, un-flipped like the block labels so the text reads upright.
+function drawLegacyBridges(g, bridges) {
+  for (const w of legacyBridgeWires(bridges)) {
+    el("line", {class: "legacybridge", x1: w.x1, y1: w.y1, x2: w.x2, y2: w.y2}, g);
+    const lg = el("g", {transform:
+        `translate(${(w.x1 + w.x2) / 2} ${(w.y1 + w.y2) / 2}) scale(1 -1)`}, g);
+    el("text", {class: "legacybridgelbl", x: 0, y: -4,
+        "text-anchor": "middle"}, lg).textContent = w.label;
+  }
+}
+
 function drawGeneration(g, W, H) {
   let cand, lbl;
   if (EDIT) {                                   // draw the edit working copy
@@ -688,6 +736,7 @@ function drawGeneration(g, W, H) {
       el("circle", {class: "rcv", cx: (b.bbox.x1 + b.bbox.x2)/2,
           cy: (b.bbox.y1 + b.bbox.y2)/2, r: Math.max(W, H) * 0.008}, g);
     }
+  drawLegacyBridges(g, cand.bridge_segments);
 }
 
 function drawNuts(g) {
@@ -702,6 +751,10 @@ function drawNuts(g) {
   for (const o of n.overlap_details)   // overlaps stay full-opacity (congestion markers)
     el("rect", {class: "overlap", x: o.span_lo, y: o.perp_lo,
         width: o.span_hi - o.span_lo, height: o.perp_hi - o.perp_lo}, g);
+  // A restored legacy bridge is UNPLACED by definition, so it is drawn here at
+  // its recorded nominal coordinates — unrealized metal beside the placed
+  // tracks, exactly as the matplotlib NUTS view draws it.
+  drawLegacyBridges(g, RENDER.legacy_bridges);
 }
 
 function drawDetailed(g, span) {

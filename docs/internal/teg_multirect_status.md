@@ -363,12 +363,62 @@ its pinning test on this date:
    `test_buda2bdb.py::test_multirect_collapse_warning_names_dropped_modifiers`).
    Multi-rect/TEG is script-declared only; the honest hybrid recipe is
    `demo/teg_hier_hybrid.buda`.
-6. **The web client renders no legacy-load bridges** — `src/web/serialize.py`
-   still serializes a restored candidate's `bridge_segments`, but no web
-   renderer draws them (open 10's noted remnant); the matplotlib explorer
-   and main viewer DO (`viz_common.draw_legacy_bridges`, pinned by
-   `test_viz_legacy_bridge.py`).  Live designs are unaffected — generation
-   emits no bridges.
+6. ~~**The web client renders no legacy-load bridges**~~ **RESOLVED
+   2026-08-27** — both web clients now draw a restored bridge in the
+   matplotlib overlay's own visual language, and the placed payload learned
+   to carry one.
+
+   The direction was decided on evidence, not on the way the limitation was
+   phrased.  Two facts settled it.  First, **the web path can reach a
+   restored bridge**: `POST /api/command` runs arbitrary `.buda` commands
+   through the same `do_command` the CLI uses, and `/api/bdb/open` +
+   `/api/bdb/load_pipeline` are a first-class, tested workflow
+   (`test_web_checkpoint.py::test_checkpoint_resume_round_trip`), so a
+   pre-#828 checkpoint opens in a browser session exactly as it does in a
+   script — which rules out the honest alternative of DELETING the
+   serialization as dead weight.  Second, the matplotlib side already
+   settled what to draw, so the web must not invent a second language for
+   the same thing: `viz_common.draw_legacy_bridges` — dashed, off-palette
+   `#cc3344`, labelled `unrealized bridge (legacy checkpoint): <block>` —
+   is mirrored by `.legacybridge` / `.legacybridgelbl` in both clients.
+
+   What landed:
+   * `serialize_render_nuts` gained **`legacy_bridges`** — the SELECTED
+     candidate's bridges as a flat list (`bundle_id` + `block_name` +
+     the usual segment fields), sorted, empty for every live design.  The
+     generation payload already carried the per-candidate map; the placed
+     payload has no candidate list at all, and the placed stage is exactly
+     where `TEG_OPEN` names the bridge, which is why the matplotlib main
+     viewer draws it in its NUTS view too.
+   * `legacyBridgeWires` (JS, `src/web/static/index.html`) and its Scala
+     twin in `Renderer.scala` turn EITHER payload shape — the generation
+     map or the placed list — into the same wire + label; `drawGeneration`
+     and `drawNuts` call the overlay in both clients.
+
+   Pinned by `test_web_legacy_bridge.py`, whose fixture is a **real
+   restore**: the build session injects the bridge, persists through the
+   session's own `_persist_topologies` (so the checkpoint holds genuine v11
+   `topology_bridge_segment` rows and the restored `topo_uid`s still match),
+   and a second session re-declares the setup, opens the checkpoint and
+   `load_pipeline`s it — the test then asserts `TEG_OPEN` fires and reads
+   the real serializer output.  The JS half is EXECUTED under node in the
+   `test_web_js_port.py` idiom, over that same output.
+
+   **What is NOT verified, stated plainly**: the Scala renderer's draw code
+   is not compiled or run anywhere — `test_web_scala_port.py` compiles
+   `DisplayGeom.scala` only (it is pure; `Renderer.scala` needs
+   scalajs-dom), and the Scala.js LINK step is still the open in
+   `docs/internal/opens_ci.md` §4.  Re-confirmed here: a hand-assembled
+   `scalac` classpath over the sjs1 stdlib dies with the same
+   `Symbols$NoSymbol$ cannot be cast to ClassSymbol` that page records.
+   What WAS checked is the API surface the new code uses, read off the
+   PRECOMPILED stdlib rather than a shim — `javap` on
+   `scala3-library_sjs1_3` / `scalajs-library_2.13` confirms
+   `js.Object.keys(js.Object): js.Array[String]` and
+   `js.Array.isArray(Any): Boolean` — plus a source-parity test asserting
+   both clients name the same label, the same colour and the same call
+   sites, so one client updated without the other fails (the issue #554
+   shape).
 7. **`set_feedthru` on a multi-rect block remains inert in the engine**
    (the feedthru relay is single-rect MVP — `topology.cpp` skips
    `rects.size() > 1`); the declaration now warns instead of dropping the

@@ -256,6 +256,45 @@ uniformly `Double`, say — is invisible to a JVM run. Covering that needs sbt +
 the scalajs plugin + a JS runtime. This buys the logic, which is the part that
 actually drifted; it does not claim to buy the link step.
 
+**It also does not cover `Renderer.scala` at all**, which is worth naming
+because it is not the same gap. `DisplayGeom.scala` compiles here only because
+it is *pure* — the JVM shim stands in for the sliver of `scala.scalajs` it
+touches. `Renderer.scala` builds SVG through `org.scalajs.dom`, so compiling it
+would need a second, larger fake (a DOM), and a fake I author cannot testify
+that a method exists in the real library — it says only that it exists in my
+shim. So the Scala renderer's draw code is **unexecuted and uncompiled** by any
+test. The dead end was re-confirmed while adding the legacy-bridge overlay
+(teg_multirect_status.md limitation 6): a hand-assembled `scalac` classpath over
+`scala3-library_sjs1_3` + `scalajs-library` + `scalajs-dom` dies with the very
+`Symbols$NoSymbol$ cannot be cast to ClassSymbol` recorded above.
+
+Two cheaper things are worth doing in the meantime, and were:
+*read the API surface off the precompiled stdlib* (`javap` on the cached
+`scala3-library_sjs1_3` / `scalajs-library_2.13` jars confirms
+`js.Object.keys(js.Object): js.Array[String]` and
+`js.Array.isArray(Any): Boolean` — evidence from the real library, not from a
+shim), and *pin cross-client parity in source* (`test_web_legacy_bridge.py::
+test_all_three_renderers_share_the_label_and_the_colour` asserts matplotlib, the
+JS client and the Scala client name the same label text, the same colour and the
+same call sites). Neither is execution; both catch the failure that actually
+happens, which is one client edited and the other forgotten (#554).
+
+### Web-backend dependencies: present in CI, absent on a bare dev box
+
+Recorded because it misleads locally in the direction the gate is built to
+prevent. `src/web/requirements.txt` (`fastapi`, `uvicorn`, `httpx`) is installed
+by the workflow, so CI runs every web test. A checkout that has not installed it
+runs `test_web_serialize.py` and the port tests but **skips
+`test_web_server.py` / `test_web_edit.py` / `test_web_checkpoint.py` /
+`test_web_ws.py`** — 24 tests here — with reason `could not import 'fastapi'`.
+That is the exact string the workflow's skip guard greps for, so CI would fail
+loudly; a developer just sees a smaller green run. Measured 2026-08-27 on a
+fresh container: 25 passed / 24 skipped before `pip install -r
+src/web/requirements.txt`, 55 passed / 0 skipped after. Install it before
+concluding anything about the web layer. (`httpx` is needed for the *skip* to
+turn into a *pass*: with `fastapi` alone, `starlette.testclient` raises at
+import and the run ends in a collection ERROR rather than a skip.)
+
 ---
 
 ## Not gaps

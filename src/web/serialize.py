@@ -453,12 +453,45 @@ def _orient_map(nuts_result):
             for ts in nuts_result.segments}
 
 
+def serialize_legacy_bridges(session):
+    """Restored legacy TEG bridges of every bundle's SELECTED candidate.
+
+    `Topology.bridge_segments` is non-empty ONLY on a candidate restored from a
+    pre-emission checkpoint (since open 1(a) generation emits the TEG-over
+    connection metal as ordinary segments), where the bridge is UNREALIZED
+    metal the `TEG_OPEN` audit reports as "declared bridge is unrealized".  The
+    generation payload carries it per candidate (`serialize_topology`); the
+    PLACED payload has no candidate list, so the selected candidate's bridges
+    are emitted here as a flat list — the same thing the matplotlib main viewer
+    draws in its NUTS view (`viz_main/draw_abstract.py::draw_nuts_tracks`),
+    since the audit that names the bridge fires at the placed stage.
+
+    Sorted by (bundle_id, block_name), matching `viz_common.draw_legacy_bridges`
+    (`for bname in sorted(bridges)`), so the payload is deterministic.  Empty
+    for every live design — nothing to draw, byte-identical render.
+    """
+    out = []
+    for w in list(getattr(session, "bundles", []) or []):
+        cands = list(w.input.candidates)
+        sel = w.plan.selected_topology_index
+        if not (0 <= sel < len(cands)):
+            continue
+        bridges = dict(cands[sel].bridge_segments)
+        bid = w.input.original_bundle.id
+        for name in sorted(bridges):
+            d = {"bundle_id": bid, "block_name": name}
+            d.update(_segment(bridges[name]))
+            out.append(d)
+    return out
+
+
 def serialize_render_nuts(session):
     """Compose the NUTS-stage render payload: floorplan + placed bus segments."""
     return {
         "floorplan": serialize_floorplan(session.fp),
         "hanan": serialize_hanan(session.fp),
         "nuts": serialize_nuts(getattr(session, "nuts_result", None)),
+        "legacy_bridges": serialize_legacy_bridges(session),
         "state": serialize_state(session),
     }
 
