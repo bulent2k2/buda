@@ -50,6 +50,35 @@ its pinning test on this date:
 
 **Remaining limitations**
 
+0. **The ANTENNA audit reads NOMINAL geometry, at both stages** (Codex P2 on
+   #855, verified and scoped out of it).  `detect_antennas` takes
+   `(segs, topo, fp, bundle_id, stage, result)` and **no placement argument at
+   all** — `segs` is `ct.segs()`, the nominal `ConnTopology`, at the NUTS call
+   site and the DNUTS one alike.  So every sibling it consults is nominal: a
+   segment that went UNPLACED (or, at DNUTS, has no wire for the affected bit)
+   still counts as metal holding a block or a rect.  The consequence Codex
+   named is real — if a tap-overhang piece is the only PLACED wire touching an
+   OVER rect while an unplaced nominal sibling intersects it, the per-rect
+   guard's `still` reads true, the piece is not judged load-bearing, and the
+   block-level test may report ANTENNA on a wire whose removal would open the
+   rect.
+   NOT introduced by the limitation-2 companion fix, and not fixable inside
+   it: the PRE-EXISTING block-level test (`covered_without_piece`, issue #482 /
+   Codex #517) has the identical property — it reads `segs[j]` and each
+   sibling's `conns` with no placement test anywhere — and the new per-rect
+   branch mirrors it deliberately, so making only the new branch
+   placement-aware would leave one function reading two different worlds three
+   lines apart.  The honest fix is to give the audit placement (a
+   `NUTSResult` / `DetailedNUTSResult` and, at DNUTS, the bit group) and apply
+   it to BOTH tests, which changes pre-existing verdicts and therefore needs
+   its own corpus measurement.
+   Severity is bounded by the shape: the scenario requires an unplaced
+   segment, which is already an `UNPLACED` violation, and `TEG_OPEN` is
+   computed from PLACED metal independently (`detect_teg_open` reads
+   `TegMetal` groups, not `segs`), so the open is reported whatever ANTENNA
+   says.  The defect is therefore a spurious EXTRA report on a route already
+   reported dirty — never a silent pass.
+
 1. ~~**MST candidates on OVER multi-rect blocks emit no TEG connection
    metal**: an MST edge lands on the closest rect pair only, so an OVER
    block's other rects go unreached — the legacy path, scoped by open 1
