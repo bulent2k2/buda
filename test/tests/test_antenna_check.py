@@ -655,15 +655,24 @@ def test_seed_trunk_families_are_still_generated():
 # no longer produces it (J-anchor: the spine stops at the outermost tap and
 # the hub is covered by the crossing).
 
-def _hub_fixture(overhang):
+def _hub_fixture(overhang, hub_over_rects=None, hub_teg=None):
     """The issue-514 shape, flat.  An H spine runs westward over hub block H
     from east block C; two V stubs junction ON the spine inside the hub's
     footprint (the spine-relay 2-1 split).  overhang=True reproduces the
     retired M-anchor form — spine extended past the last junction (x=140) to
     the hub's FAR face (x=100) and tapped there; False is the J-anchor form
-    (spine ends at the outermost junction, hub covered by the crossing)."""
+    (spine ends at the outermost junction, hub covered by the crossing).
+
+    hub_over_rects declares HUB as a multi-rect block with those rects instead
+    of the single bbox, `teg_mode over` unless hub_teg says otherwise — the
+    scope controls for the limitation-2 companion fix (see the OVER tests
+    below)."""
     fp = buda.Floorplan()
-    fp.add_block("HUB", 100, 100, 300, 200)
+    if hub_over_rects:
+        fp.add_block_rects("HUB", hub_over_rects)
+        fp.set_block_teg_mode("HUB", hub_teg or buda.TegMode.OVER)
+    else:
+        fp.add_block("HUB", 100, 100, 300, 200)
     fp.add_block("B1", 120, 0, 160, 50)       # below; stub at x=140
     fp.add_block("B2", 160, 260, 200, 310)    # above; stub at x=180
     fp.add_block("C", 580, 100, 660, 200)     # east; spine terminates inside
@@ -703,6 +712,58 @@ def test_tap_overhang_antenna_is_flagged():
     assert "tap-overhang" in ants[0].message
     res_d = buda.check_dnuts(ct, _nominal_dnuts(ct, 2), topo, fp, _layers(), 1, 2)
     assert len(_antennas(res_d)) == 1
+
+
+def test_tap_overhang_on_an_over_block_still_flagged_when_rects_keep_contact():
+    """The SCOPE control for the limitation-2 companion fix (2026-08-27).
+
+    `teg_mode over` makes the redundancy test per RECT rather than per BLOCK,
+    because an OVER block's rects are not interchangeable — but that is a
+    sharper question, not an exemption.  Here HUB is OVER with two abutting
+    rects [100,200] and [200,300] and the overhang piece [100,140] lies inside
+    the first: the trimmed remainder [140,600] still touches BOTH rects, so no
+    rect loses its attachment and the antenna is still flagged, exactly as for
+    the single-rect HUB above."""
+    fp, topo, ct = _hub_fixture(
+        overhang=True, hub_over_rects=[(100, 100, 200, 200),
+                                       (200, 100, 300, 200)])
+    res = buda.check_nuts(ct, _nominal_nuts(ct), topo, fp, _layers(), 1)
+    ants = _antennas(res)
+    assert len(ants) == 1, [v.message for v in res.violations]
+    assert ants[0].block_name == "HUB"
+    assert "tap-overhang" in ants[0].message
+
+
+def test_tap_overhang_holding_an_over_rect_is_load_bearing():
+    """The fix itself: same shape, but HUB is OVER with a second rect
+    (100,120)-(139,180) lying under the overhang piece [100,140] and ending
+    BEFORE the trim point, so that piece is the only metal touching it.  Under
+    `over` the piece is that rect's own attachment, and calling it an antenna
+    would demand the removal of the one wire holding it.  Block-level coverage
+    cannot see the difference — HUB stays 'covered' either way, by the
+    remainder over the big rect — which is why the test is per rect.  Fails on
+    the pre-fix build (1 ANTENNA)."""
+    fp, topo, ct = _hub_fixture(
+        overhang=True, hub_over_rects=[(100, 100, 300, 200),
+                                       (100, 120, 139, 180)])
+    res = buda.check_nuts(ct, _nominal_nuts(ct), topo, fp, _layers(), 1)
+    assert not _antennas(res), [v.message for v in res.violations]
+
+
+def test_thru_multirect_keeps_the_block_level_overhang_verdict():
+    """The other scope boundary: the per-rect redundancy test is gated on
+    `teg_mode over`, which is the declaration that revokes block-level
+    equivalence.  A THRU multi-rect block with the SAME geometry as the
+    load-bearing case above declares its interior DOES join its rects, so the
+    block-level verdict is the right one and the antenna is still flagged."""
+    fp, topo, ct = _hub_fixture(
+        overhang=True, hub_over_rects=[(100, 100, 300, 200),
+                                       (100, 120, 139, 180)],
+        hub_teg=buda.TegMode.THRU)
+    res = buda.check_nuts(ct, _nominal_nuts(ct), topo, fp, _layers(), 1)
+    ants = _antennas(res)
+    assert len(ants) == 1, [v.message for v in res.violations]
+    assert "tap-overhang" in ants[0].message
 
 
 def test_j_anchor_spine_is_clean_and_covers_the_hub():

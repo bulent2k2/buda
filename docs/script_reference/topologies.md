@@ -80,19 +80,23 @@ the trunk, each from the rect's locus-facing face (the rects are joined
 through the trunk); when the trunk crosses a rectilinear block without
 spanning every rect, each un-spanned rect gets a perpendicular **connector
 leg** from the trunk to its nearest face; and when the trunk lands **inside
-one rect of a disjoint block**, every rect outside that landing rect's
-*physical contiguity component* gets a stub too — EXCEPT a disjoint sibling
-sharing the trunk's own perpendicular band (rects side by side along the
-spine): there is no perpendicular gap to bridge there, so the connection
-metal is the **spine itself** — its span is extended to land exactly on the
-sibling's facing face as a real busterm landing (spine-end anchoring), which
-NUTS holds the way it holds every face landing, and the route audits clean
-(vehicle: `flow/teg_same_band.buda`).  Rects that physically touch
-the landing rect (a positive-length shared edge, transitively along a chain)
-are continuous with it and emit nothing — the adjacency suppression, which
-reads the **physical** rects even under a `corner_margin` (a margin marks
-faces unusable for taps, it does not physically separate the rects; the
-emitted stubs still tap the margin-inset faces).  This metal is ordinary
+one rect of a disjoint block**, every rect the trunk does not cross gets a
+stub too — EXCEPT a sibling sharing the trunk's own perpendicular band (rects
+side by side along the spine): there is no perpendicular gap to bridge there,
+so the connection metal is the **spine itself** — its span is extended to
+land exactly on the sibling's facing face as a real busterm landing (spine-end
+anchoring), which NUTS holds the way it holds every face landing, and the
+route audits clean (vehicle: `flow/teg_same_band.buda`).  A rect that merely
+ABUTS the landing rect is not special: **adjacency is not internal
+connection** (2026-08-27).  Until then it was suppressed as "physically
+contiguous", transitively along a chain of touching rects, which left
+generation and the placed `TEG_OPEN` audit — which reads contact per rect —
+disagreeing about the same geometry; `teg_mode over` speaks about the block's
+own ROUTING while a shared edge is a fact about its FOOTPRINT, so the
+declaration wins and the abutting rect gets its stub (`corner_margin` still
+governs where that stub TAPS — the inset face — never whether it is emitted;
+vehicle: `flow/teg_adjacent.buda`).
+This metal is ordinary
 `topology.segments` content, routed and audited like any stub, and it adds
 explicit wirelength, so over-the-block topologies rank after their `thru`
 counterparts when all else is equal.  (`topology.bridge_segments` — the former
@@ -104,8 +108,8 @@ generation and is only restored from pre-change checkpoints, where the
 the former "MST emits no TEG connection metal" limitation is resolved): an
 MST edge lands on the closest rect pair only, so after the tree is fully
 wired (relay completion included) every rect of an OVER endpoint that no
-tree segment touches — judged by the audit's own inclusive contact, expanded
-over the same physical-adjacency suppression as the trunk shapes — gets an
+tree segment touches — judged by the audit's own inclusive contact, the one
+predicate both sides read — gets an
 **attachment stub** onto the tree: a single perpendicular T-stub from the
 rect's locus-facing face where a tree segment's span overlaps the rect, else
 a two-leg L turning onto the nearest segment's span midpoint; the cheapest
@@ -113,8 +117,8 @@ attachment wins, min-stub floors apply, and the stub taps the rect's face
 (face → outward, like every stub).  A rect with no legal attachment (every
 target shares its perp band — the same-band shape) stays metal-free and
 LOUD via `TEG_OPEN`, exactly like the trunk path's same-band sibling; an
-ADJACENT rect (physically contiguous with a reached rect) is suppressed and,
-if such a candidate is routed, likewise still reports `TEG_OPEN` per rect.
+ADJACENT rect nothing touches gets its attachment like any other (2026-08-27,
+the adjacency suppression removed here too — one predicate, both sides).
 `TRUNK_*+MST` hybrids inherit the seed trunk's per-rect connection metal (a
 multi-rect branch block keeps its trunk stubs on the legacy hybrid path), so
 they need no separate attachment pass.  Vehicle: `flow/teg_mst_over.buda`

@@ -1328,6 +1328,44 @@ def test_teg_same_band_flow_routes_clean():
     assert "TEG_OPEN" not in out, out
 
 
+def test_teg_adjacent_flow_routes_clean():
+    """flow/teg_adjacent.buda (teg_multirect_status.md Final-state limitation 2,
+    resolved 2026-08-27): the adjacent-rect Direct repro as a checked-in
+    vehicle — two ABUTTING OVER rects stacked across the trunk axis, the trunk
+    Direct inside the lower one, TRUNK_H@y50 pinned by TYPE.
+
+    EXPECTED CLEAN.  Generation used to suppress the upper rect's connection
+    metal as "physically contiguous" with the landing rect while the placed
+    TEG_OPEN audit reads contact PER RECT, so this exact script fired TEG_OPEN
+    at both placed stages (1 bundle-level at nuts, 4 per-bit at dnuts).  A
+    shared edge is a FOOTPRINT fact and `teg_mode over` speaks about the
+    block's ROUTING, so the upper rect gets its own V stub — 2 segments /
+    8 bit-wires, both audits Success.
+
+    It also guards the #514 companion: that stub overhangs its junction
+    entirely over r2, and the tap-overhang ANTENNA rule's "the block stays
+    covered without it" is BLOCK-level — the assumption `over` revokes.  If
+    that guard regresses the run reports ANTENNA and the Success assertions
+    fail HERE."""
+    out, rc = run_script("teg_adjacent.buda")
+    assert rc == 0, f"teg_adjacent.buda: non-zero exit {rc}\n{out}"
+    assert re.search(
+        r"\[Planner\] Bundle 1 .*TRUNK_H@y50 \[pinned\]", out), (
+        "the type pin no longer lands on TRUNK_H@y50 — the pool lost the "
+        f"candidate or the pin regressed:\n{out}")
+    # Spine + the abutting rect's own stub, placed cleanly.
+    segs, viols, ovlps = nuts_summary(out)
+    assert (segs, viols, ovlps) == (2, 0, 0)
+    dm = re.search(
+        r"\[DetailedNUTS\] (\d+) net segments placed, (\d+) bits unplaced", out)
+    assert dm, "DetailedNUTS summary not found"
+    assert (int(dm.group(1)), int(dm.group(2))) == (8, 0)
+    # The point of the vehicle: BOTH placed audits clean.
+    assert out.count("Success: no violations found.") == 2, out
+    assert "TEG_OPEN" not in out, out
+    assert "ANTENNA" not in out and "antenna" not in out, out
+
+
 def test_ndr_bottom_up_composition():
     """flow/ndr_bottom_up.buda (requirement R13): a governed cell template
     marked set_bottom_up is solved once and COPIED to every instance,

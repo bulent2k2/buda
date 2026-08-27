@@ -246,6 +246,14 @@ CORPUS = [
     # EXPECTED CLEAN (0/0/0); a regressed attachment fires TEG_OPEN and moves
     # the row LOUDLY.  ~0.1s.
     "flow/teg_mst_over.buda",
+    # ADJACENT-rect TEG-over guard (teg_multirect_status.md Final-state
+    # limitation 2, RESOLVED 2026-08-27): two ABUTTING OVER rects, the trunk
+    # Direct inside one — the shape generation used to leave metal-free (the
+    # adjacency suppression) while the per-rect TEG_OPEN audit reported it.
+    # EXPECTED CLEAN (0/0/0).  It also covers the #514 companion: the emitted
+    # stub overhangs entirely over the block, so a BLOCK-level tap-overhang
+    # verdict would fire ANTENNA and move the row LOUDLY.  ~0.1s.
+    "flow/teg_adjacent.buda",
 ]
 
 

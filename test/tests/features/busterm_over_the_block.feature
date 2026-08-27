@@ -259,14 +259,29 @@ Feature: Over-the-Block vs Thru-the-Block TEG Routing Modes
     And in the TRUNK_V@x250 candidate "B" has 2 H stubs (one to each rect)
     And both H stubs of "B" in the TRUNK_V@x250 candidate end on the trunk at x=250
 
-  Scenario: Over-the-block — bridge is omitted when rects are adjacent (no gap)
-    # When two rects share an edge (no gap between them), thru-the-block and
-    # over-the-block produce identical results — no bridge is needed because
-    # the two rects are already physically contiguous.
+  Scenario: Over-the-block — adjacent rects still get their own connection metal
+    # ADJACENCY IS NOT INTERNAL CONNECTION (teg_multirect_status.md
+    # limitation 2, resolved 2026-08-27).  This scenario used to assert only
+    # "no bridge", carrying the comment "thru-the-block and over-the-block
+    # produce identical results — no bridge is needed because the two rects
+    # are already physically contiguous".  That was true of the BRIDGE (there
+    # is no gap to span) and false of the connection metal that replaced it:
+    # `teg_mode over` declares the block's own ROUTING does not join its
+    # rects, while a shared edge is a fact about its FOOTPRINT — and a
+    # footprint is a placement region, not a wire (two macros abutting edge to
+    # edge are a contiguous footprint and entirely separate metal).  The
+    # feature already took the declaration at face value for the STRONGER
+    # contiguity: the L-shape scenario above emits a connector leg to an arm
+    # that shares AREA with the base.  Suppressing on the WEAKER one left
+    # generation and the placed TEG_OPEN audit — which reads contact per
+    # rect — disagreeing about the same geometry.
     #
     # B: rects (200,0)-(300,100) and (200,100)-(300,200) — touching at y=100.
-    # No gap. Trunk at y=150 (inside upper rect) → Direct to upper rect.
-    # Even with teg_mode=over: no bridge.
+    # No gap. Trunk at y=150 (inside the upper rect) → Direct to the upper
+    # rect; the LOWER rect is outside the trunk's band, so it gets its own V
+    # stub from its top face (y=100) up to the trunk (length 50), running over
+    # the block — which is what "over the block" means.  Still no bridge:
+    # bridges are legacy-load only.
     #
     Given a block "A" at (0,100)-(100,200)
     And a block "B" with rects (200,0)-(300,100) and (200,100)-(300,200) and teg_mode "over"
@@ -274,6 +289,8 @@ Feature: Over-the-Block vs Thru-the-Block TEG Routing Modes
     And layer M5 is VERTICAL with id 5
     When I generate multicast candidates from "A" to ["B"] using layers M4,M5
     Then the TRUNK_H@y150 candidate has no bridge segment for "B"
+    And in the TRUNK_H@y150 candidate "B" has exactly 1 V stub
+    And the V stub down from "B" in TRUNK_H@y150 has length 50
 
   Scenario: Global teg_mode overridden per block
     # The GLOBAL default is `set_teg_mode over` (Floorplan::set_default_teg_mode).

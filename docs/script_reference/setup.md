@@ -105,7 +105,8 @@ normalization — it adds no geometry and would double that rect's stubs/taps)
 are all flow-stopping errors naming the offending rect. Overlapping and
 edge-adjacent **non-identical** rects are legal and load-bearing: interior
 overlap is exactly what classifies a block as rectilinear (L/C-shape), and
-touching edges drive the OVER adjacency suppression.
+touching edges are a legitimate way to draw a rectilinear footprint (they no
+longer suppress anything under `over` — see **TEG mode**).
 
 | `teg_mode thru\|over` | keyword | Optional; multi-rect form only. Controls whether topology generation emits per-rect connection metal (gap / one-sided / partial-span / direct-inside-one-rect trunks alike). Default: the `set_teg_mode` global default (`thru` when never set). See **TEG mode** below. |
 | `corner_margin dx N` | keyword | Optional. Shrink the routing face by `N` units in X (top/bottom faces). If `dy` is omitted, the same value applies to Y as well. |
@@ -163,7 +164,7 @@ gap between rects (or a vertical trunk falls in the horizontal gap):
 | Mode | Behaviour |
 |---|---|
 | `thru` (default) | The topology connects only the **nearest** rect (lowest stub length). The block's internal routing is assumed to join any disconnected portions. No extra connection metal is generated. At the placed audits, `check_design` reports which rects were left to the internal routing (the **BUDA-1907** census — report only, never a violation). |
-| `over` — disjoint rects | When the trunk does not land inside any rect — in the gap between rects **or** approaching them one-sided (all rects on the same side) — **every** rect is connected with its own stub to the trunk, from its locus-facing face at the rect's centre; the rects are physically joined **through the trunk** — each stub T-junctions the spine. When the trunk lands **inside one** rect, every rect outside that landing rect's physical contiguity component still gets its stub (see the suppression list below for what counts as contiguous). |
+| `over` — disjoint rects | When the trunk does not land inside any rect — in the gap between rects **or** approaching them one-sided (all rects on the same side) — **every** rect is connected with its own stub to the trunk, from its locus-facing face at the rect's centre; the rects are physically joined **through the trunk** — each stub T-junctions the spine. When the trunk lands **inside one** rect, every rect the trunk does not cross still gets its stub — *including one that merely abuts the landing rect* (see the note below). |
 | `over` — rectilinear rects | When the trunk is inside some rects but not all (partial span), each un-spanned rect gets a perpendicular **connector leg** from the trunk to the rect's nearest face at the rect's centre. Stubs/legs are only generated for rects that the trunk does not directly cross. |
 
 All of this connection metal is **ordinary topology segments**, so the
@@ -177,17 +178,9 @@ only restored from pre-change checkpoints, where the `TEG_OPEN` audit
 reports the unrealized bridge.)
 
 Over-the-block mode does **not** generate extra connection metal when:
-- The trunk crosses every rect (rectilinear all-span: direct connection, no
-  un-spanned portion).
-- A rect is **physically contiguous** with the rect the trunk lands in — it
-  touches it on a positive-length shared edge, transitively along a chain of
-  touching rects.  Contiguity is judged on the **physical** rects even under
-  a `corner_margin` (a margin marks faces unusable for taps; it does not
-  physically separate the rects — emitted stubs elsewhere still tap the
-  margin-inset faces).  Note the placed-stage `TEG_OPEN` audit reads contact
-  **per rect**, so a routed candidate whose trunk lands in one of two
-  adjacent rects still reports the untouched neighbour — a documented loud
-  corner.
+- The trunk **crosses** the rect — it is already attached (rectilinear
+  all-span is this case for every rect: direct connection, no un-spanned
+  portion).
 - A **disjoint** rect shares the trunk's perpendicular band with the landing
   rect (rects side by side along the spine): there is no perpendicular gap
   to bridge, so no *extra* segment is emitted — instead the **spine itself**
@@ -196,6 +189,20 @@ Over-the-block mode does **not** generate extra connection metal when:
   taps land on the margin-inset faces as everywhere else).  The sibling then
   holds that spine end the way any tapped face holds one, so the route
   audits clean at the placed stages (vehicle: `flow/teg_same_band.buda`).
+  An abutting same-band sibling is anchored the same way.
+
+That list is the whole of it: **adjacency is not internal connection.**
+Through 2026-08-26 a rect that merely *touched* the landing rect on a
+positive-length shared edge was suppressed as "physically contiguous"
+(transitively along a chain), which left the placed `TEG_OPEN` audit — which
+reads contact **per rect** — reporting a route generation had declared
+finished.  `teg_mode over` is a statement about the block's own **routing**,
+while a shared edge is a fact about its **footprint**, and a footprint is a
+placement region rather than a wire: two macros abutting edge to edge are one
+contiguous footprint and entirely separate metal.  Declare `thru` for a block
+whose interior does join its rects — that is what `thru` is for and it is the
+default.  (`corner_margin` is unaffected: it governs where a stub may **tap**,
+never whether one is emitted.)  Vehicle: `flow/teg_adjacent.buda`.
 
 **Examples:**
 ```

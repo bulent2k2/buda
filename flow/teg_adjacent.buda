@@ -1,0 +1,53 @@
+# TEG adjacent rects — the "adjacency is not internal connection" vehicle
+# (teg_multirect_status.md Final-state limitation 2, RESOLVED 2026-08-27).
+#
+# r2's two rects ABUT on a positive-length shared edge (y=100), stacked across
+# the trunk axis, and are declared NOT internally connected (`teg_mode over`).
+# The Direct trunk (TRUNK_H@y50) lands INSIDE the lower rect; the upper rect is
+# outside the trunk's band.
+#
+# Until 2026-08-27 generation emitted NOTHING for the upper rect — it was
+# suppressed as "physically contiguous" with the landing rect — while the
+# placed TEG_OPEN audit reads contact PER RECT and reported it: this exact
+# script fired TEG_OPEN at both placed stages (1 bundle-level at nuts, 4 per-bit
+# at dnuts).  `teg_mode over` is a statement about the block's own ROUTING and a
+# shared edge is a fact about its FOOTPRINT — a footprint is a placement region,
+# not a wire — so the upper rect now gets its own V stub (face y=100 down to the
+# trunk at y=50), running OVER the lower rect, which is what routing over a
+# block means.
+#
+# The vehicle also guards the #514 companion: that stub overhangs its junction
+# entirely over block r2, and the tap-overhang ANTENNA rule's redundancy test —
+# "the block stays covered without it" — is BLOCK-level, the very assumption
+# `over` revokes.  Judged per RECT the piece is load-bearing, so it is not an
+# antenna.  A regression in either half shows up here as a violation.
+#
+# Candidate pin: by TYPE (`TRUNK_H@y50`), the selector that survives a
+# re-sorted pool; test_flow_scripts.py::test_teg_adjacent_flow_routes_clean
+# asserts the planner line names it AND both audits report Success.
+
+add_block src 0 0 100 100
+add_block r2 rect 200 0 300 100 rect 200 100 300 200 teg_mode over
+
+def_layer 4 M4 H TOP 0
+def_layer 5 M5 V TOP 0
+
+def_track_pattern 4 0 (SIGNAL 2 2)x8
+def_track_pattern 5 0 (SIGNAL 2 2)x8
+
+add_bus d[4] src.tx r2.b
+
+run_bundler STRICT
+generate_topologies
+
+# The Direct trunk inside the LOWER rect: spine (100,50)-(250,50) crossing it,
+# plus the upper rect's own V stub (250,100)-(250,50) T-junctioning the spine.
+select_topology 1 TRUNK_H@y50
+
+run_planner
+run_nuts
+check_design
+run_detailed_nuts
+check_design
+report_wl
+visualize

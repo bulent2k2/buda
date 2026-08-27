@@ -1419,81 +1419,34 @@ std::vector<Rect> bt_all_rects(const Busterm& bt) {
     return bt.rects.empty() ? std::vector<Rect>{bt.orig_bbox} : bt.rects;
 }
 
-// True if any two rects have overlapping interiors (strict overlap, not just touching).
-// A block whose rects overlap forms a rectilinear polygon; one with disjoint rects
-// is a true TEG (terminal equivalence group).
-static bool rects_are_rectilinear(const std::vector<Rect>& rects) {
-    for (size_t i = 0; i < rects.size(); ++i)
-        for (size_t j = i + 1; j < rects.size(); ++j) {
-            const Rect& a = rects[i]; const Rect& b = rects[j];
-            if (a.x1 < b.x2 && b.x1 < a.x2 && a.y1 < b.y2 && b.y1 < a.y2)
-                return true;
-        }
-    return false;
-}
-
-// Two rects ABUT: a positive-length shared edge in exactly one axis (corner
-// touch is a point, not metal continuity).  This is the ADJACENT case —
-// "touching edges, no gap" — where the block's shape is physically contiguous,
-// so over-the-block emits no connection metal (the feature's adjacency
-// suppression: busterm_over_the_block.feature, "bridge is omitted when rects
-// are adjacent").  STRICT interior overlap is deliberately NOT an edge: at
-// zero margin an overlapping pair makes the block rectilinear (its own
-// branch, which EMITS a leg to an un-spanned rect), and under a margin that
-// re-classifies a thin overlap as a gap (#835's documented semantic) the
-// join stub is the honest metal — suppressing it would both flip the
-// margin-0 behaviour and leave the route TEG_OPEN.
-static bool rects_touch(const Rect& a, const Rect& b) {
-    if (a.x1 > b.x2 || b.x1 > a.x2 || a.y1 > b.y2 || b.y1 > a.y2) return false;
-    const int xov = std::min(a.x2, b.x2) - std::max(a.x1, b.x1);
-    const int yov = std::min(a.y2, b.y2) - std::max(a.y1, b.y1);
-    return (xov > 0) != (yov > 0);
-}
-
-// Per-rect flag "physically continuous with a rect the trunk lands in": seed =
-// every rect whose perp band contains the trunk locus, expanded transitively
-// over rects_touch (a chain of adjacent rects is one contiguous footprint).
-// Used by the OVER Direct branch on DISJOINT (non-rectilinear) blocks: a rect
-// in this component needs no connection metal — the trunk's landing rect and
-// everything adjacent to it form one piece of the block's shape — while every
-// rect OUTSIDE it needs its own stub/leg (residual (i) of
-// teg_multirect_status.md open 1: a trunk Direct inside one disjoint rect used
-// to emit nothing at all for the others).  A same-band NON-landing sibling is
-// a seed too: the spine-end anchoring pass in add_trunk extends the spine to
-// LAND on its facing face (a real BUSTERM landing), so it IS reached — and a
-// rect suppressed through it is physically continuous with reached metal.
+// NOTE (2026-08-27, teg_multirect_status.md limitation 2 RESOLVED): the
+// ADJACENCY SUPPRESSION that used to live here — `rects_touch` (positive-length
+// shared edge) plus the transitive `teg_landing_component` closure over it — is
+// GONE, and with it the generator's private notion of "reached".  `teg_mode
+// over` declares the block's rects NOT internally connected; that declaration
+// is about the block's own ROUTING, and a shared edge is a fact about its
+// FOOTPRINT.  A footprint is a placement region, not a wire: two macros abutting
+// edge to edge are a contiguous footprint and entirely separate metal, which is
+// precisely the design a user spells `over`.  The generator already took the
+// declaration at face value for the STRONGER contiguity — a rectilinear block's
+// rects share AREA and an un-spanned one still gets a connector leg (§1.1/§1.3,
+// the CRITICAL fix) — so suppressing on the WEAKER one was the bridge era's rule
+// ("no gap, so no bridge to draw") kept verbatim into a world where the metal
+// means "this rect's own attachment".  Which rects need connection metal is now
+// decided by CONTACT alone (topology.h's `seg_touches_rect`), the same rule the
+// TEG_OPEN audit reads.
 //
-// TWO GEOMETRY SPELLINGS, deliberately (Codex P2 on #841): the SEEDS read the
-// INSET rects (`rects` — the same band test the emission loop applies, so
-// seed and skip cannot disagree), while the TOUCH EDGES read the PHYSICAL
-// rects (`phys` = Busterm::orig_rects where a nonzero corner margin makes
-// them differ, #835).  A margin marks faces unusable for TAPS; it does not
-// physically separate the rects — insetting each rect independently opens a
-// 2*margin gap between edge-adjacent rects, so an inset touch graph emitted
-// a connector between already-contiguous metal (measured: the margined
-// adjacent pair grew a stub from the lower rect's inset face).  `phys` may be
-// empty (zero margin) — then the inset rects ARE the physical ones.
-static std::vector<char> teg_landing_component(const Axis& axis,
-                                               const std::vector<Rect>& rects,
-                                               const std::vector<Rect>& phys,
-                                               int locus) {
-    const int n = (int)rects.size();
-    const std::vector<Rect>& touch = (phys.size() == rects.size()) ? phys : rects;
-    std::vector<char> in(n, 0);
-    std::vector<int> work;
-    for (int i = 0; i < n; ++i)
-        if (locus >= axis.perp_lo(rects[i]) && locus <= axis.perp_hi(rects[i])) {
-            in[i] = 1; work.push_back(i);
-        }
-    while (!work.empty()) {
-        int i = work.back(); work.pop_back();
-        for (int j = 0; j < n; ++j)
-            if (!in[j] && rects_touch(touch[i], touch[j])) {
-                in[j] = 1; work.push_back(j);
-            }
-    }
-    return in;
-}
+// `rects_are_rectilinear` (strict interior overlap = one polygon, vs a true
+// disjoint TEG) went with them, and its death is the argument's own
+// confirmation: the OVER Direct branch used it ONLY to pick which suppression
+// to apply — a connector leg for a rectilinear block's cross-band rect, a stub
+// for a disjoint block's rect outside the landing component — and both emit the
+// SAME geometry through emit_tap_segment.  With nothing suppressed the two
+// branches are one rule ("every rect the trunk does not cross gets its
+// attachment"), so the classifier had nothing left to decide.  A block's
+// rectilinear-vs-disjoint shape is still a real distinction for a READER (see
+// docs/script_reference/setup.md's TEG mode section); it is no longer a
+// distinction the generator acts on.
 
 // Best rect for connecting bt to an H trunk at y_trunk: minimises stub length.
 // Best rect for connecting bt to a spine at perpendicular coordinate `trunk_locus`
@@ -1689,21 +1642,11 @@ std::vector<int> derive_fanin_seg_bits(
         if (segs.empty()) {
             auto rects = fp.get_block_rects(block);
             if (rects.empty()) rects.push_back(fp.get_block_bounds(block));
-            for (int si = 0; si < n_seg; ++si) {
-                const Segment& s = topo.segments[si];
-                const bool h    = (s.start.y == s.end.y);
-                const int  perp = h ? s.start.y : s.start.x;
-                const int  lo   = h ? std::min(s.start.x, s.end.x)
-                                    : std::min(s.start.y, s.end.y);
-                const int  hi   = h ? std::max(s.start.x, s.end.x)
-                                    : std::max(s.start.y, s.end.y);
-                for (const Rect& r : rects) {
-                    const bool hit = h
-                        ? (perp >= r.y1 && perp <= r.y2 && lo <= r.x2 && hi >= r.x1)
-                        : (perp >= r.x1 && perp <= r.x2 && lo <= r.y2 && hi >= r.y1);
-                    if (hit) { segs.push_back(si); break; }
-                }
-            }
+            for (int si = 0; si < n_seg; ++si)
+                for (const Rect& r : rects)
+                    if (seg_touches_rect(topo.segments[si], r)) {
+                        segs.push_back(si); break;
+                    }
         }
         return attach.emplace(block, std::move(segs)).first->second;
     };
@@ -3282,37 +3225,29 @@ void TopologyGenerator::add_trunk(const Axis& axis, bool suppress_stubs,
             // outside an un-spanned rect would otherwise emit an illegally
             // short leg no ordinary stub is allowed to have (Codex P2 on the
             // 1(a) emission).
-            //   RECTILINEAR: a connector leg per un-spanned rect (the landed
-            //   1(a) behaviour, unchanged — rects sharing the trunk's perp
-            //   band are crossed by the spine inside the contiguous shape).
-            //   DISJOINT (open 1 residual (i), which used to emit NOTHING
-            //   here): a stub per rect outside the landing CONTIGUITY
-            //   component (a rect adjacent to the landing rect is physically
-            //   continuous with it — the feature's adjacency suppression);
-            //   a same-band sibling is reached by the SPINE itself, extended
-            //   to LAND on its facing face (the anchoring pass below).
-            const bool recti = rects_are_rectilinear(rects);
+            //   Every rect the trunk does NOT span — rectilinear or disjoint,
+            //   adjacent to the landing rect or not (limitation 2, resolved
+            //   2026-08-27: abutment is a FOOTPRINT fact and `over` speaks
+            //   about the block's ROUTING, so it suppresses nothing) — gets
+            //   its own connection metal here; a same-band sibling is reached
+            //   by the SPINE itself, extended to LAND on its facing face (the
+            //   anchoring pass below).
             const int min_leg = use_busterm_
                 ? floorplan_.get_min_stub_length(
                       axis.along_horiz ? 1 /*VERTICAL*/ : 0 /*HORIZONTAL*/, stub_layer)
                 : 0;
-            std::vector<char> landed;
-            if (!recti)
-                landed = teg_landing_component(axis, rects,
-                                               blocks[i].orig_rects, locus);
             for (size_t ri = 0; ri < rects.size(); ++ri) {
                 const auto& r = rects[ri];
-                // A rect sharing the trunk's perp band: rectilinear — the
-                // spine runs inside the contiguous shape; disjoint — a
-                // SAME-BAND sibling, reached by SPINE-END ANCHORING (the
-                // dedicated pass right after this loop): the spine is
-                // extended to LAND on the sibling's facing along-face, a
-                // real BUSTERM landing annotate_endpoints tags, so NUTS
-                // holds the end the way it holds every face landing
+                // A rect sharing the trunk's perp band: the spine already runs
+                // through its band, so either it CROSSES the rect (contact, no
+                // metal needed) or it is a SAME-BAND sibling reached by
+                // SPINE-END ANCHORING (the dedicated pass right after this
+                // loop): the spine is extended to LAND on the sibling's facing
+                // along-face, a real BUSTERM landing annotate_endpoints tags,
+                // so NUTS holds the end the way it holds every face landing
                 // (busterm_faces span_cover).  No perpendicular metal is
                 // emitted here — there is no gap to bridge.
                 if (locus >= axis.perp_lo(r) && locus <= axis.perp_hi(r)) continue;
-                if (!recti && landed[ri]) continue;    // contiguous with a landing rect
                 int leg_len = (axis.perp_hi(r) < locus) ? locus - axis.perp_hi(r)
                                                         : axis.perp_lo(r) - locus;
                 if (leg_len < min_leg) return;         // skip this trunk
@@ -3350,58 +3285,33 @@ void TopologyGenerator::add_trunk(const Axis& axis, bool suppress_stubs,
     // anchoring stub is needed (the #514 tap-overhang trap).  The sibling then
     // holds its spine end exactly as src's face holds the other end, and the
     // audit's inclusive per-rect contact predicate sees the face touch.
-    //   Which band rects extend: only those OUTSIDE the component of rects the
-    // un-extended spine already reaches — seeded from the band rects the
-    // natural span [a_lo, a_hi] intersects, expanded transitively over the
-    // PHYSICAL connectivity graph (Busterm::orig_rects, the #835 spelling: a
-    // corner margin marks faces unusable for taps, it does not physically
-    // separate the rects).  Connectivity here is abutment OR strict interior
-    // overlap — unlike the disjoint branch's rects_touch, because this pass
-    // runs on EVERY OVER multi-rect block, MIXED rect sets included (an
-    // overlapping pair PLUS a disjoint same-band rect; Codex P2 on #845:
-    // gating the whole block on rects_are_rectilinear skipped the sibling,
-    // and the rectilinear leg branch has no same-band metal either, so the
-    // mixed set stayed TEG_OPEN).  An overlapping pair is one connected
-    // piece of metal, so counting it connected keeps a FULLY-connected
-    // rectilinear block a provable no-op (every rect joins the reached
-    // component — byte-identical), while the separated sibling of a mixed
-    // set still extends.  A band rect ADJACENT to (or overlapping) the
-    // landing component is physically continuous with it — the feature's
-    // adjacency suppression (Final-state item 2, deliberately untouched) —
-    // so it must NOT pull the spine to its face; a band rect the span
-    // already crosses is a pass-through contact and needs no landing.
-    // Extensions are monotone (the span only grows), so processing order
-    // cannot mis-classify a rect: one skipped as crossed stays crossed, and
-    // a nearer sibling's landing subsumed by a farther one's extension
-    // becomes a crossing — contact either way.
+    //   Which band rects extend: only those the un-extended spine does not
+    // already TOUCH — `axis_touches_rect` with the spine's own (locus,
+    // [a_lo,a_hi]), i.e. the very predicate the TEG_OPEN audit will read off
+    // the placed result.  Nothing else: the transitive "physically contiguous
+    // with a reached rect" closure this pass used to run (abutment OR strict
+    // interior overlap) was the generator's private second opinion about what
+    // counts as connected, and limitation 2 was that opinion disagreeing with
+    // the audit — resolved 2026-08-27 by deleting it, not by teaching the
+    // audit to agree (a footprint is not a wire, and `teg_mode over` says the
+    // block does not join its rects).  A band rect the span already crosses is
+    // a pass-through contact and needs no landing.  Extensions are monotone
+    // (the span only grows), so processing order cannot mis-classify a rect:
+    // one skipped as crossed stays crossed, and a nearer sibling's landing
+    // subsumed by a farther one's extension becomes a crossing — contact
+    // either way.  The rects read here are the INSET ones, as everywhere the
+    // spine picks a coordinate to land on (#835: tappable = inset geometry);
+    // the audit reads the PHYSICAL extent, which an inset landing lies inside,
+    // so the two cannot disagree in the direction that matters.
     for (int i = 0; i < n; ++i) {
         if (blocks[i].teg_mode != TegMode::OVER || blocks[i].rects.size() < 2) continue;
         if (has_stub[i]) continue;                       // Direct trunks only
         const auto& rects = blocks[i].rects;
-        const std::vector<Rect>& touch =
-            (blocks[i].orig_rects.size() == rects.size()) ? blocks[i].orig_rects : rects;
-        auto connected = [](const Rect& a, const Rect& b) {
-            if (rects_touch(a, b)) return true;          // positive-length abutment
-            return a.x1 < b.x2 && b.x1 < a.x2 &&         // strict interior overlap
-                   a.y1 < b.y2 && b.y1 < a.y2;           // (one rectilinear piece)
-        };
         const int nr = (int)rects.size();
         std::vector<char> reached(nr, 0);
-        std::vector<int>  work;
-        for (int ri = 0; ri < nr; ++ri) {
-            const Rect& r = rects[ri];
-            if (!(locus >= axis.perp_lo(r) && locus <= axis.perp_hi(r))) continue;
-            if (axis.along_lo(r) <= a_hi && axis.along_hi(r) >= a_lo) {
-                reached[ri] = 1; work.push_back(ri);
-            }
-        }
-        while (!work.empty()) {
-            int ri = work.back(); work.pop_back();
-            for (int rj = 0; rj < nr; ++rj)
-                if (!reached[rj] && connected(touch[ri], touch[rj])) {
-                    reached[rj] = 1; work.push_back(rj);
-                }
-        }
+        for (int ri = 0; ri < nr; ++ri)
+            reached[ri] = axis_touches_rect(axis.along_horiz, locus,
+                                            a_lo, a_hi, rects[ri]) ? 1 : 0;
         for (int ri = 0; ri < nr; ++ri) {
             const Rect& r = rects[ri];
             if (reached[ri]) continue;
@@ -3471,19 +3381,18 @@ void TopologyGenerator::add_trunk(const Axis& axis, bool suppress_stubs,
             // (teg_multirect_status.md §1.3 / §2.2).  Ordinary segments ride the
             // whole pipeline — planner, NUTS, DNUTS, audits, report_wl, persist.
             // DISJOINT blocks (open 1 residual (i), formerly exempt — a trunk
-            // Direct inside ONE disjoint rect emitted no metal for the others):
-            // a stub per rect outside the landing CONTIGUITY component (a rect
-            // adjacent to the landing rect is physically continuous with it —
-            // the feature's adjacency suppression), while a same-band sibling
-            // is reached by the spine itself (the pre-pass extended it through
-            // the sibling's along-centre).
+            // Direct inside ONE disjoint rect emitted no metal for the others)
+            // take the same treatment, ADJACENT rects included: a rect merely
+            // ABUTTING the landing rect used to be suppressed as "physically
+            // contiguous", which the placed TEG_OPEN audit — reading contact
+            // per rect — flatly disagreed with (limitation 2, resolved
+            // 2026-08-27).  A shared edge is a FOOTPRINT fact; `over` declares
+            // the block's ROUTING does not join its rects, and the declaration
+            // is what the tool must honour.  Same-band siblings are reached by
+            // the spine itself (the pre-pass extended it through the sibling's
+            // along-centre).
             if (blocks[i].teg_mode == TegMode::OVER && blocks[i].rects.size() >= 2) {
                 const auto& rects = blocks[i].rects;
-                const bool recti = rects_are_rectilinear(rects);
-                std::vector<char> landed;
-                if (!recti)
-                    landed = teg_landing_component(axis, rects,
-                                                   blocks[i].orig_rects, locus);
                 // FACE → trunk orientation, like every stub: emit_tap_segment
                 // seeds the busterm on the START endpoint, and a trunk-end seed
                 // shadows the real face annotation so NUTS loses its face
@@ -3491,12 +3400,10 @@ void TopologyGenerator::add_trunk(const Axis& axis, bool suppress_stubs,
                 // claude/teg-gap-stub-fix — same machinery, same hazard).
                 for (size_t ri = 0; ri < rects.size(); ++ri) {
                     const auto& r = rects[ri];
-                    // Same-band rects: rectilinear — spine inside the shape;
-                    // disjoint — reached by the spine itself via the
-                    // spine-end anchoring pass (extended to land on the
-                    // sibling's facing face; no perpendicular metal here).
+                    // Same-band rects: the spine either crosses the rect
+                    // (contact) or is extended to LAND on it by the spine-end
+                    // anchoring pass — no perpendicular metal here either way.
                     if (locus >= axis.perp_lo(r) && locus <= axis.perp_hi(r)) continue;
-                    if (!recti && landed[ri]) continue;   // contiguous with a landing rect
                     int a = axis.along_center(r);
                     if (axis.perp_hi(r) < locus)          // near side: perp-hi face → trunk
                         emit_tap_segment(t, axis.mkseg(a, axis.perp_hi(r), a, locus, stub_layer), &blocks[i]);
@@ -4178,14 +4085,15 @@ static int trim_shared_leg_overlaps(std::vector<Segment>& segs,
 // rewire what is already connected through the tree) and attaches every rect
 // the finished tree leaves unreached.
 //
-// "Reached" is the audit's own reading: inclusive segment/rect contact (the
-// generation-side spelling of verify.cpp's `teg_touches`) judged on the
-// PHYSICAL rects (`Busterm::orig_rects` — what `fp.get_block_rects` hands the
-// audit), expanded transitively over `rects_touch` exactly like the trunk
-// path's `teg_landing_component`: a rect physically contiguous with a reached
-// rect is one piece of the block's shape (the feature's adjacency
-// suppression), so an ADJACENT pair emits nothing here — and, selected, still
-// reports TEG_OPEN per-rect (the documented limitation-2 corner, unchanged).
+// "Reached" is the audit's own reading and ONLY that: inclusive segment/rect
+// contact — `seg_touches_rect`, the shared predicate verify.cpp's TEG_OPEN
+// reads — judged on the PHYSICAL rects (`Busterm::orig_rects` — what
+// `fp.get_block_rects` hands the audit).  A rect an edge SPANS is reached
+// (pass-through contact IS attachment); an ADJACENT rect nothing touches is
+// NOT (limitation 2, resolved 2026-08-27: the transitive contiguity closure
+// this pass used to run made the generator and the audit disagree about the
+// same geometry, and abutment is a footprint fact `teg_mode over` does not
+// license reading as a wire).
 //
 // The attachment itself is ordinary segments through emit_tap_segment, FACE →
 // outward per the #823 rule (a trunk-end busterm seed costs NUTS its face
@@ -4210,20 +4118,6 @@ static int trim_shared_leg_overlaps(std::vector<Segment>& segs,
 // NUTS retracts) is left as it was: unreached and LOUD via TEG_OPEN, never
 // silently half-fixed.  Stubs carry edge_id -1, so ripup's per-edge flips
 // never mistake one for an MST leg.
-static bool seg_touches_rect_incl(const Segment& s, const Rect& r) {
-    const bool horiz = (s.start.y == s.end.y);
-    const int perp = horiz ? s.start.y : s.start.x;
-    const int alo  = horiz ? std::min(s.start.x, s.end.x)
-                           : std::min(s.start.y, s.end.y);
-    const int ahi  = horiz ? std::max(s.start.x, s.end.x)
-                           : std::max(s.start.y, s.end.y);
-    const int plo  = horiz ? r.y1 : r.x1;
-    const int phi  = horiz ? r.y2 : r.x2;
-    const int blo  = horiz ? r.x1 : r.y1;
-    const int bhi  = horiz ? r.x2 : r.y2;
-    return perp >= plo && perp <= phi && alo <= bhi && ahi >= blo;
-}
-
 static void add_mst_teg_attachments(Topology& topo,
                                     const std::vector<Busterm>& blocks,
                                     int h_layer, int v_layer,
@@ -4235,24 +4129,19 @@ static void add_mst_teg_attachments(Topology& topo,
             (bt.orig_rects.size() == rects.size()) ? bt.orig_rects : rects;
         const int nr = (int)rects.size();
 
-        // Contact + physical contiguity, recomputed per rect so an emitted
-        // stub that happens to touch (or chain to) a later rect discharges it.
+        // CONTACT, recomputed per rect so an emitted stub that happens to
+        // touch a later rect discharges it.  Contact and nothing else: the
+        // transitive `rects_touch` contiguity closure that used to follow it
+        // is gone with limitation 2 (2026-08-27) — abutment described the
+        // block's FOOTPRINT while the audit reads its METAL, so the two
+        // disagreed by construction on an adjacent rect.  `seg_touches_rect`
+        // IS verify.cpp's TEG_OPEN predicate, on the PHYSICAL rects the audit
+        // reads (`fp.get_block_rects`).
         auto reached_now = [&]() {
             std::vector<char> in(nr, 0);
             for (int ri = 0; ri < nr; ++ri)
                 for (const Segment& s : topo.segments)
-                    if (seg_touches_rect_incl(s, phys[ri])) { in[ri] = 1; break; }
-            bool grow = true;
-            while (grow) {
-                grow = false;
-                for (int i = 0; i < nr; ++i) {
-                    if (!in[i]) continue;
-                    for (int j = 0; j < nr; ++j)
-                        if (!in[j] && rects_touch(phys[i], phys[j])) {
-                            in[j] = 1; grow = true;
-                        }
-                }
-            }
+                    if (seg_touches_rect(s, phys[ri])) { in[ri] = 1; break; }
             return in;
         };
 

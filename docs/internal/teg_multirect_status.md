@@ -50,6 +50,35 @@ its pinning test on this date:
 
 **Remaining limitations**
 
+0. **The ANTENNA audit reads NOMINAL geometry, at both stages** (Codex P2 on
+   #855, verified and scoped out of it).  `detect_antennas` takes
+   `(segs, topo, fp, bundle_id, stage, result)` and **no placement argument at
+   all** — `segs` is `ct.segs()`, the nominal `ConnTopology`, at the NUTS call
+   site and the DNUTS one alike.  So every sibling it consults is nominal: a
+   segment that went UNPLACED (or, at DNUTS, has no wire for the affected bit)
+   still counts as metal holding a block or a rect.  The consequence Codex
+   named is real — if a tap-overhang piece is the only PLACED wire touching an
+   OVER rect while an unplaced nominal sibling intersects it, the per-rect
+   guard's `still` reads true, the piece is not judged load-bearing, and the
+   block-level test may report ANTENNA on a wire whose removal would open the
+   rect.
+   NOT introduced by the limitation-2 companion fix, and not fixable inside
+   it: the PRE-EXISTING block-level test (`covered_without_piece`, issue #482 /
+   Codex #517) has the identical property — it reads `segs[j]` and each
+   sibling's `conns` with no placement test anywhere — and the new per-rect
+   branch mirrors it deliberately, so making only the new branch
+   placement-aware would leave one function reading two different worlds three
+   lines apart.  The honest fix is to give the audit placement (a
+   `NUTSResult` / `DetailedNUTSResult` and, at DNUTS, the bit group) and apply
+   it to BOTH tests, which changes pre-existing verdicts and therefore needs
+   its own corpus measurement.
+   Severity is bounded by the shape: the scenario requires an unplaced
+   segment, which is already an `UNPLACED` violation, and `TEG_OPEN` is
+   computed from PLACED metal independently (`detect_teg_open` reads
+   `TegMetal` groups, not `segs`), so the open is reported whatever ANTENNA
+   says.  The defect is therefore a spurious EXTRA report on a route already
+   reported dirty — never a silent pass.
+
 1. ~~**MST candidates on OVER multi-rect blocks emit no TEG connection
    metal**: an MST edge lands on the closest rect pair only, so an OVER
    block's other rects go unreached — the legacy path, scoped by open 1
@@ -65,24 +94,127 @@ its pinning test on this date:
    (face→outward per #823, min-stub floors, `edge_id -1`).  The old firing
    pin is FLIPPED (`test_teg_open.py::
    test_mst_on_over_block_now_attaches_every_rect_and_audits_clean`), the
-   spanning-edge control is pinned beside it, and the corner that REMAINS
-   loud is limitation 2's: an ADJACENT rect is suppressed (contiguity) and
-   a selected MST on such a block still reports TEG_OPEN
-   (`test_mst_on_adjacent_rect_over_block_stays_loud`).  The TRUNK+MST
+   spanning-edge control is pinned beside it.  (The corner that remained
+   loud here — an ADJACENT rect suppressed by contiguity while a selected MST
+   on such a block still reported TEG_OPEN — was limitation 2's, and is
+   RESOLVED 2026-08-27 with it: `reached_now` reads contact alone now, so the
+   adjacent rect gets its attachment,
+   `test_mst_on_adjacent_rect_over_block_now_attaches_and_audits_clean`.)  The TRUNK+MST
    hybrids need no attachment pass: their multi-rect branch blocks flunk
    `simple` onto the legacy hybrid path, which keeps the FULL seed trunk —
    per-rect OVER connection metal included — under the clean-tree gate.
    End-to-end vehicle `flow/teg_mst_over.buda` (QoR corpus row, EXPECTED
    CLEAN).
-2. **The adjacent-rect Direct corner**: a trunk Direct inside one of two
+2. ~~**The adjacent-rect Direct corner**: a trunk Direct inside one of two
    ADJACENT rects emits no connection metal — the rects are physically
    contiguous, the feature's suppression rule, transitive over the PHYSICAL
    (`Busterm::orig_rects`) touch graph — while the placed TEG_OPEN contact
    predicate reads per-rect, so such a route, if selected, still reports
-   TEG_OPEN.  Documented loud corner (open 1); the suppression side is
-   pinned by `test_teg_open.py::
-   test_adjacent_chain_is_suppressed_and_separated_rect_still_stubbed` and
-   `test_margined_adjacent_chain_keeps_physical_suppression_inset_taps`.
+   TEG_OPEN.~~  **RESOLVED 2026-08-27 — direction (b), the generator moved to
+   the audit, and the crux was decided by the feature's own code.**
+
+   The question this corner posed: `teg_mode over` declares the rects not
+   internally connected, yet two rects sharing a positive-length edge are a
+   contiguous FOOTPRINT — does the shared edge imply shared metal (teach the
+   AUDIT to expand its contact over the contiguity graph, direction (a)), or
+   is the declaration authoritative across an abutment (make the GENERATOR
+   emit the metal, direction (b))?
+
+   **A footprint is not a wire, and the code had already said so.**  A block
+   rect is a PLACEMENT REGION; the metal is what the router puts down.  Two
+   macros placed edge to edge are one contiguous footprint and entirely
+   separate metal — which is exactly the design a user spells `over`, since a
+   block whose interior DOES join its rects is what `thru` is for (and `thru`
+   is the default).  The decisive evidence is internal: `rects_are_rectilinear`
+   classifies by strict interior OVERLAP, and for such a block — rects sharing
+   AREA, unambiguously one polygon, a STRONGER contiguity than abutment — the
+   OVER Direct branch emits a connector leg to every un-spanned rect.  That
+   emission is the landed §1.1/§1.3 fix, the CRITICAL one this whole arc
+   started from.  Suppressing on the WEAKER contiguity while emitting on the
+   stronger is not a policy, it is a leftover: the adjacency rule was stated in
+   BRIDGE terms ("no gap between them, so no bridge is needed" —
+   `busterm_over_the_block.feature`, and true of a bridge), and open 1(a)
+   replaced bridges with each rect's OWN attachment without re-deriving it.
+   The audit — written AFTER that redesign, straight off the declaration —
+   reads contact per rect and was right; the generator held the stale half.
+   Direction (a) was therefore rejected: it is the cheaper change and the one
+   the repo's single-sourcing instinct reaches for, but it would have taught
+   the audit to certify a route whose second rect no metal reaches, which is
+   §1.1's silent electrical open re-introduced in a narrower shape.
+
+   What landed, in generation: `rects_touch` and `teg_landing_component` are
+   DELETED, and with them the generator's private notion of "reached" at all
+   three sites that had one — the Direct branch's landing component, the
+   spine-end anchoring pass's reached-component (its `connected` lambda, both
+   the abutment and the strict-overlap term), and `add_mst_teg_attachments`'
+   `reached_now` closure.  `rects_are_rectilinear` went with them, and its death
+   confirms the argument: the Direct branch consulted it ONLY to pick which
+   suppression to apply (a connector leg for a rectilinear block's cross-band
+   rect, a stub for a disjoint block's rect outside the landing component) —
+   both emitting the same geometry through `emit_tap_segment` — so with nothing
+   suppressed the two branches are one rule and the classifier had nothing left
+   to decide.  All three sites now read CONTACT and nothing else, through
+   the ONE predicate the audit reads (`axis_touches_rect` / `seg_touches_rect`,
+   hoisted into `topology.h`; `verify.cpp`'s `teg_touches` is a one-line
+   forward to it, and the third open-coded copy in `derive_fanin_seg_bits`'
+   `attach_segs` folded in too).  Measured on the two forms of the corner —
+   CROSS-BAND (stacked rects, H trunk Direct inside the lower): TEG_OPEN 1 at
+   nuts / 4 at dnuts → both clean, generation emitting a V stub from the upper
+   rect's face y=100 to the trunk; SAME-BAND (side-by-side rects): the spine
+   anchors to the sibling's face (x400→x300, was no extension) and the route is
+   clean.  The MST form likewise (rect#1 gets an H T-stub from x=600).
+
+   One companion fix was NOT optional and is the same conflation one audit
+   over: the new cross-band stub overhangs its junction entirely over the block,
+   and the #514 TAP-OVERHANG ANTENNA rule asks whether "the block stays
+   covered without it" — a BLOCK-level question `teg_mode over` revokes, so it
+   called the one wire holding rect#1 an antenna (measured: `ANTENNA` 1 at both
+   stages the moment the metal appeared).  For an OVER multi-rect block the
+   redundancy test is now judged per RECT, through the same contact predicate:
+   a piece whose removal would leave any rect it touches untouched is
+   load-bearing.  Non-OVER and single-rect blocks are untouched.
+
+   QoR corpus (`--vs main` @ ba590394): **0 better / 0 worse / 50 unchanged**
+   of 51, abstract AND detailed WL **+0.00%** (`ariane133_heal` NOT
+   COMPARABLE — its fetched inputs are absent in the baseline worktree, the
+   harness's documented shape).  Byte-identical is the honest reading AND the
+   gap: **no checked-in design uses an abutting OVER pair**, so the corpus was
+   structurally blind to the change — the coverage is the unit pins below plus
+   a direct baseline-vs-branch run of every OVER vehicle there IS
+   (`lShape1`, `cShape1`, `tShape1`, `teg_same_band`, `teg_two_spellings`,
+   `teg_hier_hybrid`, all identical: same segment counts, same detailed WL).
+   The anchoring pass's strict-OVERLAP term went with the abutment one — same
+   fallacy, and leaving it would have left a second generator-only notion of
+   "reached" — and those runs are what says the removal costs nothing here: a
+   rectilinear block's in-band rects are span-touched, so the pass stays the
+   no-op the overlap term used to guarantee.  New corpus row
+   `flow/teg_adjacent.buda` (0/0/0) closes the blind spot going forward.
+   Pins: `test_teg_open.py::
+   test_adjacent_chain_gets_a_stub_per_rect_the_trunk_misses` (was
+   `..._is_suppressed_and_separated_rect_still_stubbed`, asserting `== [500]`;
+   now `== [100, 200, 500]`),
+   `test_margined_adjacent_chain_taps_inset_faces` (`== [510]` →
+   `== [110, 210, 510]` — the #835 tap semantic survives, its "touching =
+   physical geometry" twin is moot with no touch graph left),
+   `test_same_band_adjacent_pair_anchors_the_spine_and_audits_clean`,
+   `test_cross_band_adjacent_pair_stubs_the_second_rect_and_audits_clean` (new
+   — also the ANTENNA companion's pin), and
+   `test_mst_on_adjacent_rect_over_block_now_attaches_and_audits_clean`.
+   Controls held: a genuinely DISJOINT unreached rect still fires
+   (`test_bitrunk_on_over_block_fires_teg_open_end_to_end`, the same-band
+   no-legal-attachment MST shape, the island verdict, the legacy-bridge
+   restore), a SPANNED rect still gets no redundant stub
+   (`test_mst_edge_spanning_the_far_rect_gets_no_redundant_stub`), and THRU
+   blocks stay exempt.  The two dirty vehicles that had been MOVED onto this
+   shape in #846 — `test_teg_resume.py`'s resume-armed audit and
+   `test_teg_thru_census.py`'s OVER twin — were re-homed again, onto the
+   BITRUNK shape (limitation 4, bbox-only BY SCOPING and the last checked-in
+   missing-metal shape), so both still measure a LOUD audit rather than a
+   vacuous one.  End-to-end vehicle: `flow/teg_adjacent.buda` (EXPECTED
+   CLEAN, `test_flow_scripts.py::test_teg_adjacent_flow_routes_clean` + the
+   QoR corpus row), which guards the ANTENNA companion too — the stub it
+   emits overhangs entirely over the block, so a BLOCK-level tap-overhang
+   verdict moves the row LOUDLY.
 3. ~~**The same-band disjoint sibling** — a DISJOINT rect sharing the trunk's
    perp band (rects side by side along the spine, trunk inside one) gets no
    connection metal.~~  **RESOLVED 2026-08-25 via SPINE-END ANCHORING**, the
@@ -99,8 +231,11 @@ its pinning test on this date:
    decided PER RECT by a reached-component test — band rects the natural
    span intersects, expanded transitively over PHYSICAL connectivity
    (abutment OR strict interior overlap) — so the ADJACENT corner (item 2)
-   is untouched — an adjacent same-band pair still emits nothing and stays
-   TEG_OPEN-loud (control-pinned).  Per-rect rather than gated on the
+   was untouched — an adjacent same-band pair still emitted nothing and
+   stayed TEG_OPEN-loud (control-pinned).  *(2026-08-27, item 2: that
+   reached-component is GONE — contact alone, the audit's own predicate — so
+   an adjacent same-band pair now anchors the spine like any other sibling
+   and audits clean.)*  Per-rect rather than gated on the
    block-level `rects_are_rectilinear` classification, which the first cut
    was and Codex P2 on #845 caught, measured real: a MIXED rect set (an
    overlapping pair PLUS a disjoint same-band rect) classified rectilinear,
@@ -140,7 +275,8 @@ its pinning test on this date:
    `test_same_band_disjoint_sibling_routes_clean_via_spine_anchoring`, the
    far-side dedup shape, the V twin, a 3-rect same-band chain (farthest
    sibling tapped, middle one crossed as a pass-through), the min-stub-floor
-   edge, the margined variant, and the adjacent-pair loud control.
+   edge, the margined variant, and the adjacent pair (a LOUD control until
+   item 2 landed 2026-08-27; now the anchoring twin).
 4. **BITRUNK trees (legacy and two-level) are bbox-only on multi-rect
    blocks** — no rect selection, no TEG connection metal
    (resolved-as-documented open 8); an unreached OVER rect fires TEG_OPEN,
@@ -379,8 +515,9 @@ wrong.
 ## 3. Test and spec coverage
 
 - **Gherkin:** `busterm_over_the_block.feature` is `@landed` — 9 scenarios,
-  8 bound and green (thru/over, gap vs inside, L-shape, pure TEG, adjacency
-  suppression, per-block override), ~~1 **xfail**: thru-before-over adjusted-WL
+  8 bound and green (thru/over, gap vs inside, L-shape, pure TEG, adjacent
+  rects — a "no bridge is needed" scenario until 2026-08-27, now the
+  connection-metal one, Final-state item 2 — per-block override), ~~1 **xfail**: thru-before-over adjusted-WL
   ranking (`test_busterm_over_the_block.py:81` — "`Topology.adjusted_wl` and
   per-topology `teg_mode` attribute not yet in the C++ API")~~ *(the xfail is
   GONE — open 4 retired the `adjusted_wl` concept and rewrote the scenario as
@@ -494,14 +631,13 @@ wrong.
    too: each rect outside the landing CONTIGUITY component gets a stub
    from its locus-facing perp face to the trunk at its along-centre
    (min-stub floor enforced exactly as the rectilinear legs enforce it),
-   and the component
+   ~~and the component
    (`teg_landing_component`: locus-containing rects expanded transitively
    over `rects_touch`) is what keeps the ADJACENT case suppressed — a rect
    touching the landing rect on a positive-length shared edge is
    physically continuous with it, the feature's adjacency rule, now
    transitive by construction (a 3-rect touching chain emits nothing while
-   a separated 4th rect of the same block still gets its stub —
-   `test_adjacent_chain_is_suppressed_and_separated_rect_still_stubbed`).
+   a separated 4th rect of the same block still gets its stub).
    The suppression's touch graph reads the PHYSICAL rects
    (`Busterm::orig_rects`, the #835 spelling) while band seeds and tap
    coordinates stay on the INSET rects — touching = physical geometry,
@@ -509,12 +645,19 @@ wrong.
    taps, it does not physically separate the rects, and the first cut read
    the inset rects for BOTH, so a margined abutting pair grew a connector
    between already-contiguous metal (Codex P2 on #841, measured and fixed
-   2026-08-25; `rects_touch` is pure abutment — a strict-overlap pair
-   margin-classified as a gap keeps its join stub, #835's documented
-   honest-consequence semantic, and at margin 0 no strict-overlap pair can
-   reach the component so margin-0 output is untouched; pinned by
-   `test_margined_adjacent_chain_keeps_physical_suppression_inset_taps`,
-   which fails on the pre-fix build).
+   2026-08-25).~~
+   **The whole suppression is WITHDRAWN 2026-08-27** (Final-state item 2,
+   which carries the argument and the measurements): abutment describes the
+   FOOTPRINT and `over` declares the block's ROUTING, so the landing
+   COMPONENT is now just the landing rect and every rect the trunk does not
+   cross gets its stub — `teg_landing_component` and `rects_touch` are
+   deleted, and "reached" is the audit's own contact predicate at every OVER
+   site.  What SURVIVES of the #841 P2 fix is the half that was never about
+   suppression: tap coordinates are still the INSET faces (the margined
+   chain taps y=110/210/510, `test_margined_adjacent_chain_taps_inset_faces`).
+   Its other half — "touching = physical geometry" — existed only to keep a
+   margin from re-classifying an abutting pair as needing a connector, and
+   with no touch graph left there is nothing to read in either spelling.
    For (ii) the gap branch simply dropped its rects-on-BOTH-sides gate, so
    a one-sided approach emits the same per-rect face→trunk stubs joined
    through the trunk.  Measured: the (i) repro — trunk inside the lower
@@ -539,11 +682,17 @@ wrong.
    50, abstract AND detailed WL +0.00% (`ariane133_heal` NOT COMPARABLE —
    its fetched inputs are absent in the measuring environment, the
    harness's documented shape).
-   One Direct-branch corner is deliberate and stays LOUD: a trunk Direct
+   ~~One Direct-branch corner is deliberate and stays LOUD: a trunk Direct
    inside one of two ADJACENT rects emits no connection metal (contiguous
    shape, the feature's rule) while the placed TEG_OPEN contact predicate
    is per-rect, so such a route — if selected — still reports TEG_OPEN
-   (pre-existing either way: the shape emitted nothing before too).  The
+   (pre-existing either way: the shape emitted nothing before too).~~
+   **RESOLVED 2026-08-27** — "deliberate" was inherited rather than derived:
+   the rule was stated in BRIDGE terms and outlived the metal it described,
+   and the generator's own rectilinear branch already emitted a leg across
+   the STRONGER contiguity.  Full argument, the rejected direction (teaching
+   the audit to expand its contact instead) and the measurements: Final-state
+   item 2.  The
    OTHER corner — a DISJOINT sibling sharing the trunk's perp band (rects
    side by side along the spine, trunk inside one) — was documented here
    with its measured failed attempts (a perpendicular stub has no gap to
@@ -557,8 +706,10 @@ wrong.
    same block at both ends keeps both anchors.  Full record: Final-state
    item 3; vehicle `flow/teg_same_band.buda`; pinned by
    `test_same_band_disjoint_sibling_routes_clean_via_spine_anchoring` and
-   the same-band family beside it (the adjacent-pair loud control
-   included).
+   the same-band family beside it (the adjacent pair among them — its loud
+   control became the anchoring twin
+   `test_same_band_adjacent_pair_anchors_the_spine_and_audits_clean` when
+   item 2 landed 2026-08-27).
    ~~What REMAINS is (iii), narrowed and verified LOUD:
    **MST candidates (and the TRUNK+MST hybrids' multi-rect branch blocks,
    which mostly drop at generation as non-simple) still emit no TEG
@@ -578,12 +729,16 @@ wrong.
    metal that is already connected through the tree.  "Unreached" is the
    AUDIT's own reading (inclusive contact, the generation spelling of
    verify's `teg_touches`, judged on the PHYSICAL rects the audit reads),
-   expanded transitively over `rects_touch` exactly like the trunk path's
-   `teg_landing_component` — so a rect an edge SPANS is reached
+   ~~expanded transitively over `rects_touch` exactly like the trunk path's
+   `teg_landing_component`~~ — so a rect an edge SPANS is reached
    (pass-through contact IS attachment: the r4 control adds no metal), and
-   an ADJACENT rect is suppressed (limitation 2's corner, which a selected
-   candidate still reports per-rect —
-   `test_mst_on_adjacent_rect_over_block_stays_loud`).  The attachment is
+   ~~an ADJACENT rect is suppressed (limitation 2's corner, which a selected
+   candidate still reports per-rect)~~ **— the closure is GONE 2026-08-27
+   with limitation 2 (contact alone now, `seg_touches_rect`, which IS
+   verify's predicate rather than a spelling of it), so an adjacent rect
+   nothing touches gets its attachment like any other:
+   `test_mst_on_adjacent_rect_over_block_now_attaches_and_audits_clean`.**
+   The attachment is
    ordinary segments through `emit_tap_segment`, FACE → outward (#823): a
    perpendicular T-stub from the rect's locus-facing face at its
    along-centre onto an along-overlapping tree segment, else a two-leg L
@@ -621,7 +776,10 @@ wrong.
    the spanning-edge control beside it), the two dirty vehicles that SAT on
    the MST shape because it was dirty — `test_teg_resume.py`'s
    resume-armed audit and `test_teg_thru_census.py`'s OVER twin — moved
-   onto the adjacent-rect Direct shape (limitation 2, still loud), and
+   onto the adjacent-rect Direct shape (limitation 2, then still loud — and
+   moved AGAIN on 2026-08-27 when that shape went clean too, onto BITRUNK's;
+   a resume test whose vehicle audits clean proves nothing about the audit
+   staying armed), and
    BITRUNK's twin pin is open 8's
    `test_bitrunk_on_over_block_fires_teg_open_end_to_end`.  End-to-end
    vehicle `flow/teg_mst_over.buda` (fix + control in one design, both
@@ -978,7 +1136,9 @@ wrong.
     classification working as designed: interior overlap between
     non-identical rects is exactly what `rects_are_rectilinear`
     (`src/topology.cpp`) reads to classify an L/C-shape block, and
-    edge-adjacent rects drive the OVER adjacency suppression, so
+    edge-adjacent rects are an ordinary way to draw a rectilinear footprint
+    (they drove the OVER adjacency suppression until it was withdrawn
+    2026-08-27 — Final-state item 2), so
     forbidding either would break the rectilinear branch's own input
     (checked before deciding; pinned positive in the tests).  Tests:
     `test_coord_validation.py` (truncated ×2, zero-width, zero-height,

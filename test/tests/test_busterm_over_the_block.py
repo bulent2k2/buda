@@ -84,8 +84,8 @@ def test_overtheblock__v_trunk_horizontal_gap_stubs_joined_through_trunk():
 
 
 @scenario('features/busterm_over_the_block.feature',
-          'Over-the-block — bridge is omitted when rects are adjacent (no gap)')
-def test_overtheblock__bridge_is_omitted_when_rects_are_adjacent_no_gap():
+          'Over-the-block — adjacent rects still get their own connection metal')
+def test_overtheblock__adjacent_rects_get_their_own_connection_metal():
     pass
 
 

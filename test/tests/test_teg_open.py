@@ -266,29 +266,33 @@ def _chain_stub_faces(margin):
         for y in (seg.start.y, seg.end.y) if y != 50)
 
 
-def test_adjacent_chain_is_suppressed_and_separated_rect_still_stubbed():
-    # The Direct-branch suppression rules, at generation: a rect ADJACENT to
-    # the trunk's landing rect (touching edges, positive shared edge — the
-    # feature's adjacency rule) is physically continuous with it and gets no
-    # connection metal, TRANSITIVELY along a chain of touching rects — while
-    # a genuinely separated rect of the same block still gets its stub.
-    # Exactly one stub: from the separated rect's bottom face (y=500) down to
-    # the trunk; the touching chain (faces 100/200/300) emits nothing.
-    assert _chain_stub_faces(None) == [500]
+def test_adjacent_chain_gets_a_stub_per_rect_the_trunk_misses():
+    # Limitation 2 RESOLVED (2026-08-27) — this assertion is the flip, and
+    # the flip is the fix's proof.  It used to read `== [500]`: a rect merely
+    # ABUTTING the trunk's landing rect was suppressed as "physically
+    # contiguous", transitively along the chain, so only the genuinely
+    # separated 4th rect got metal — while the placed TEG_OPEN audit reads
+    # contact PER RECT and reported the three silent ones.  `teg_mode over`
+    # declares the block's ROUTING does not join its rects; a shared edge is
+    # a fact about its FOOTPRINT, and a footprint is not a wire (two macros
+    # placed edge to edge are a contiguous footprint and separate metal).  So
+    # every rect the trunk misses now gets its own stub — faces y=100, 200
+    # (the touching chain) and y=500 (the separated rect) — and generation
+    # and the audit read ONE predicate.
+    assert _chain_stub_faces(None) == [100, 200, 500]
 
 
-def test_margined_adjacent_chain_keeps_physical_suppression_inset_taps():
-    # Codex P2 on #841, measured before the fix: `corner_margin` insets each
-    # rect INDEPENDENTLY (#835), so the chain's physically-abutting rects no
-    # longer touched in the suppression component's geometry and each grew a
-    # connector to metal it is already continuous with (the margined pair
-    # emitted a stub from the lower rect's inset face).  The touch graph now
-    # reads the PHYSICAL rects (Busterm::orig_rects) — a margin marks faces
-    # unusable for TAPS, it does not physically separate the rects — while
-    # the emitted stub still taps the separated rect's INSET face (y=510),
-    # the #835 semantic for tap coordinates.  The two semantics divide as:
-    # touching = physical geometry, tappable = inset geometry.
-    assert _chain_stub_faces((10, 10)) == [510]
+def test_margined_adjacent_chain_taps_inset_faces():
+    # The #835 tap semantic survives the limitation-2 resolution: `corner_
+    # margin` insets each rect INDEPENDENTLY, and a stub taps the INSET face
+    # (y=110/210/510, not the physical 100/200/500) — tappable = inset
+    # geometry.  What is GONE is the other half of the old pair, "touching =
+    # physical geometry": that spelling existed only to keep a margin from
+    # re-classifying an abutting pair as needing a connector (Codex P2 on
+    # #841), and with the adjacency suppression itself removed there is no
+    # touch graph left to read in either spelling.  The margined chain now
+    # emits exactly what the margin-0 chain emits, one face inset further in.
+    assert _chain_stub_faces((10, 10)) == [110, 210, 510]
 
 
 def _pin_same_band_trunk(s, prefix="TRUNK_H@y", band=(0, 100)):
@@ -458,7 +462,7 @@ def test_same_band_margined_lands_on_inset_face_suppression_stays_physical():
 
 def test_mixed_rect_set_same_band_sibling_anchors_despite_overlap():
     # Codex P2 on #845, measured before the fix: a MIXED rect set — an
-    # OVERLAPPING pair (base + arm, so rects_are_rectilinear() is true) PLUS
+    # OVERLAPPING pair (base + arm, one rectilinear polygon) PLUS
     # a DISJOINT rect sharing the trunk's perp band — skipped the anchoring
     # pass entirely (it was gated on the block-level classification), and the
     # rectilinear branch emits legs only for CROSS-band rects, so the
@@ -509,14 +513,16 @@ def test_mixed_rect_set_cross_band_rect_keeps_the_rectilinear_leg():
     _route_and_check_clean(s)
 
 
-def test_same_band_adjacent_pair_keeps_the_documented_loud_corner():
-    # Limitation 2's control beside the fix: a trunk Direct inside one of two
-    # ADJACENT same-band rects emits no connection metal (the rects are
-    # physically contiguous — the feature's suppression rule) and the spine
-    # is NOT extended to the neighbour's face (the anchoring's
-    # reached-component includes every rect touching the landing rect), while
-    # the per-rect TEG_OPEN contact predicate still reports the un-touched
-    # rect — the documented loud corner, byte-identical to before the fix.
+def test_same_band_adjacent_pair_anchors_the_spine_and_audits_clean():
+    # Limitation 2's SAME-BAND form, FLIPPED (2026-08-27).  Two ADJACENT rects
+    # side by side along the spine, trunk Direct inside the near one: the
+    # anchoring pass used to treat the far rect as "reached" because it abuts
+    # the landing rect (its reached-component expanded over the abutment
+    # graph), so the spine stopped at x=400 and the per-rect TEG_OPEN audit
+    # reported the untouched rect.  The reached set is now CONTACT and nothing
+    # else — the same `axis_touches_rect` the audit reads — so the spine is
+    # extended to LAND on the sibling's facing face at x=300 and the route is
+    # clean at both placed stages.  Used to assert [400, 600] + TEG_OPEN >= 1.
     s = _session([
         "add_block T rect 300 0 400 100 rect 200 0 300 100 teg_mode over",
         "add_block src 600 0 700 100",
@@ -528,13 +534,41 @@ def test_same_band_adjacent_pair_keeps_the_documented_loud_corner():
     ] + _TRACKS)
     c = _pin_same_band_trunk(s)
     spine = next(seg for seg in c.segments if seg.start.y == seg.end.y)
-    assert sorted((spine.start.x, spine.end.x)) == [400, 600]   # no extension
-    for cmd in ("run_planner", "run_nuts"):
-        with contextlib.redirect_stdout(io.StringIO()):
-            s.do_command(cmd)
-    verdict, out = _check(s, "nuts")
-    assert verdict["by_kind"].get("TEG_OPEN", 0) >= 1, out
-    assert "OVER block 'T'" in out, out
+    assert sorted((spine.start.x, spine.end.x)) == [300, 600]   # anchored
+    _route_and_check_clean(s)
+
+
+def test_cross_band_adjacent_pair_stubs_the_second_rect_and_audits_clean():
+    # Limitation 2's CROSS-BAND form, the shape the two dirty vehicles used to
+    # sit on (test_teg_resume / test_teg_thru_census): two STACKED adjacent
+    # rects, an H trunk Direct inside the lower one.  Generation emits a V stub
+    # from the upper rect's bottom face (y=100) down to the trunk — metal that
+    # necessarily runs over the LOWER rect, which is exactly what routing OVER
+    # a block means — and both placed audits are clean where they reported
+    # TEG_OPEN (1 at nuts, 4 at dnuts).
+    #
+    # It also pins the ANTENNA companion: that stub overhangs its junction
+    # entirely over block 'r2', and the #514 tap-overhang rule asks whether
+    # "the block stays covered without it" — a BLOCK-level question `teg_mode
+    # over` revokes.  Judged per RECT (through the same contact predicate) the
+    # piece is load-bearing, so it is not an antenna.
+    s = _session([
+        "add_block src 0 0 100 100",
+        "add_block r2 rect 200 0 300 100 rect 200 100 300 200 teg_mode over",
+        "def_layer 4 M4 H TOP 0",
+        "def_layer 5 M5 V TOP 0",
+        "add_bus d[4] src.tx r2.b",
+        "run_bundler STRICT",
+        "generate_topologies",
+    ] + _TRACKS)
+    c = _pin_same_band_trunk(s)          # TRUNK_H@y50: Direct inside rect#0
+    stubs = [seg for i, seg in enumerate(c.segments)
+             if seg.start.x == seg.end.x
+             and sorted((seg.start.y, seg.end.y)) == [50, 100]
+             and any(bt is not None and bt.block_name == "r2"
+                     for bt in c.seg_busterms.get(i, (None, None)))]
+    assert stubs, [(g.start.x, g.start.y, g.end.x, g.end.y) for g in c.segments]
+    _route_and_check_clean(s)
 
 
 _MST_OVER_CMDS = [
@@ -620,14 +654,15 @@ def test_mst_edge_spanning_the_far_rect_gets_no_redundant_stub():
     assert verdict["by_kind"].get("TEG_OPEN", 0) == 0, out
 
 
-def test_mst_on_adjacent_rect_over_block_stays_loud():
-    # The adjacency rule carries over to the MST attachment pass unchanged
-    # (limitation 2's corner): a rect physically contiguous with a reached
-    # rect — positive-length shared edge, transitive over the PHYSICAL
-    # rects — is one piece of the block's shape, so the pass emits nothing
-    # for it, while the placed TEG_OPEN contact predicate stays per-rect.
-    # A selected MST on such a block therefore still reports TEG_OPEN,
-    # exactly like the trunk Direct inside one of two adjacent rects.
+def test_mst_on_adjacent_rect_over_block_now_attaches_and_audits_clean():
+    # Limitation 2's MST form, FLIPPED (2026-08-27).  The attachment pass's
+    # "reached" set used to expand transitively over the abutment graph, so a
+    # rect merely touching a reached one got no attachment while the placed
+    # TEG_OPEN audit — reading contact per rect — reported it.  "Reached" is
+    # now CONTACT alone (`seg_touches_rect`, the audit's own predicate), so
+    # rect#1 gets a real H T-stub from its left face (x=600) onto the r1->r2
+    # edge's V leg and the route is clean at both stages.  Used to assert "no
+    # attachment metal" + TEG_OPEN >= 1 naming rect#1.
     s = _session([
         "add_block src 0 0 100 100",
         "add_block r1 300 300 400 400",
@@ -642,15 +677,24 @@ def test_mst_on_adjacent_rect_over_block_stays_loud():
     w = s.bundles[0]
     pin, cand = next((i, c) for i, c in enumerate(w.input.candidates)
                      if c.type.startswith("MST_"))
-    assert not any(seg.edge_id == -1 and seg.start.x >= 600
-                   for seg in cand.segments), \
-        "adjacent rect must stay suppressed (no attachment metal)"
+    stubs = [seg for i, seg in enumerate(cand.segments)
+             if seg.edge_id == -1 and seg.start.x == 600
+             and any(bt is not None and bt.block_name == "r2"
+                     for bt in cand.seg_busterms.get(i, (None, None)))]
+    assert stubs, "expected the attachment stub from rect#1's face at x=600"
+    n_segs = len(cand.segments)
     for cmd in (f"select_topology 1 {pin + 1}", "run_planner", "run_nuts"):
         with contextlib.redirect_stdout(io.StringIO()):
             s.do_command(cmd)
+    placed = [t for t in s.nuts_result.segments if t.bundle_id == 1]
+    assert len(placed) == n_segs, "every segment incl. the stub must place"
     verdict, out = _check(s, "nuts")
-    assert verdict["by_kind"].get("TEG_OPEN", 0) >= 1, out
-    assert "OVER block 'r2'" in out and "rect#1 (600,0)-(700,100)" in out, out
+    assert verdict["by_kind"].get("TEG_OPEN", 0) == 0, out
+    with contextlib.redirect_stdout(io.StringIO()):
+        s.do_command("run_detailed_nuts")
+    assert s.detailed_result.num_unplaced == 0
+    verdict, out = _check(s, "dnuts")
+    assert verdict["by_kind"].get("TEG_OPEN", 0) == 0, out
 
 
 def test_thru_block_is_exempt_by_design():

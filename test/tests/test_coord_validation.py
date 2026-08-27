@@ -131,8 +131,8 @@ def test_add_block_duplicate_rect_detected_across_coordinate_order():
 
 
 def test_add_block_overlapping_rects_stay_legal():
-    # Interior overlap is exactly what classifies a rectilinear (L-shape)
-    # block — topology.cpp rects_are_rectilinear — so it must NOT be refused.
+    # Interior overlap is how a rectilinear (L-shape) block is drawn, so it
+    # must NOT be refused.
     s, code, out = _run("add_block L rect 0 0 100 400 rect 0 0 400 100")
     assert code is None, _err(out)
     assert len(s.fp.get_block_rects("L")) == 2
