@@ -457,8 +457,11 @@ async def post_reset(req: SessionRequest = SessionRequest()):
 
 @app.get("/api/demos")
 async def get_demos():
-    """The built-in demo catalog (flat + hierarchical) the client's picker shows:
-    each entry carries its setup commands and its per-stage command map."""
+    """The demo catalog the client's picker shows, derived from real `.buda`
+    flows (demo/web/demos.json names them — see src/web/demos.py): each entry
+    carries its setup commands, its per-stage command map, and the flow's whole
+    pipeline tail for the client's "Run flow" button.  An entry whose flow or
+    declared inputs are missing carries `unavailable` with the remedy instead."""
     return {"demos": demos.catalog()}
 
 
