@@ -159,32 +159,34 @@ def test_census_silent_when_every_rect_is_reached():
 def test_over_block_gets_teg_open_not_the_census():
     # An OVER block whose rect the route misses: the miss is a VIOLATION
     # (TEG_OPEN), and the census — thru's report — must not double-report
-    # it.  Since the trunk shapes (open 1 residuals (i)/(ii)) and the MST
-    # attachment pass (Final-state limitation 1) landed, the remaining
-    # checked-in missing-metal shape is the ADJACENT-rect Direct corner
-    # (limitation 2): a trunk Direct inside one of two touching rects —
-    # the adjacency suppression emits nothing while the placed contact
-    # predicate reads per-rect.
+    # it.  Finding a still-dirty shape is the moving part here: the trunk
+    # shapes (open 1 residuals (i)/(ii)), the MST attachment pass (Final-state
+    # limitation 1) and now the ADJACENT-rect Direct corner (limitation 2,
+    # 2026-08-27) have each been resolved out from under this vehicle in turn.
+    # What remains is BITRUNK (Final-state limitation 4, bbox-only BY SCOPING —
+    # no rect selection, no TEG connection metal): rect#1 at x 900..1000 lies
+    # beyond the rungs' along-span and its union-centre stub lands in the gap,
+    # so no placed metal of the bundle touches it.  Same pin as
+    # test_teg_open.py::test_bitrunk_on_over_block_fires_teg_open_end_to_end,
+    # which is where that guarantee is pinned end to end.
     s = _session([
         "add_block src 0 0 100 100",
-        "add_block r2 rect 200 0 300 100 rect 200 100 300 200 teg_mode over",
+        "add_block r1 300 300 400 400",
+        "add_block r2 rect 500 0 600 100 rect 900 0 1000 100 teg_mode over",
+        "add_block r3 300 600 400 700",
         "def_layer 4 M4 H TOP 0",
         "def_layer 5 M5 V TOP 0",
-        "add_bus d[4] src.tx r2.b",
+        "add_bus d[4] src.tx r1.a,r2.b,r3.c",
         "run_bundler STRICT",
         "generate_topologies",
     ] + _TRACKS)
-    pin = None
-    for i, c in enumerate(s.bundles[0].input.candidates):
-        if c.type.startswith("TRUNK_H@y"):
-            y = int(c.type.split("@y")[1].split("+")[0])
-            if 0 < y < 100:          # Direct inside the lower rect
-                pin = i
-                break
-    assert pin is not None, "no trunk-inside-lower-rect candidate found"
+    pin = next((i for i, c in enumerate(s.bundles[0].input.candidates)
+                if c.type.startswith("BITRUNK_H")), None)
+    assert pin is not None, "no BITRUNK_H candidate found"
     _route(s, f"select_topology 1 {pin + 1}", "run_planner", "run_nuts")
     verdict, out = _check(s, "nuts")
     assert verdict["by_kind"].get("TEG_OPEN", 0) >= 1, out
+    assert "rect#1 (900,0)-(1000,100)" in out, out
     assert "BUDA-1907" not in out
 
 

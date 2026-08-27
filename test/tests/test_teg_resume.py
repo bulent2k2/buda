@@ -135,7 +135,14 @@ def _flat_setup_from_trace(trace_path, cut_verb):
 
 
 _MULTIRECT_LINE_L = "add_block L rect 0 0 100 400 rect 0 0 400 100 teg_mode over"
-_MULTIRECT_LINE_R2 = ("add_block r2 rect 200 0 300 100 rect 200 100 300 200 "
+# The still-DIRTY vehicle: BITRUNK on an OVER multi-rect block (Final-state
+# limitation 4 — the datapath trees are bbox-only BY SCOPING, so rect#1 at
+# x 900..1000 is touched by no placed metal).  It has been re-homed twice as
+# the shapes under it were fixed: the MST shape (Final-state limitation 1,
+# 2026-08-25) and then the ADJACENT-rect Direct corner (limitation 2,
+# 2026-08-27) both became clean, and a resume test whose vehicle audits clean
+# proves nothing about the audit staying armed.
+_MULTIRECT_LINE_R2 = ("add_block r2 rect 500 0 600 100 rect 900 0 1000 100 "
                       "teg_mode over")
 
 
@@ -224,29 +231,25 @@ def test_flat_resume_keeps_teg_open_audit_armed(tmp_path, monkeypatch):
     flow = [
         f"open_bdb {ckpt}",
         "add_block src 0 0 100 100",
+        "add_block r1 300 300 400 400",
         _MULTIRECT_LINE_R2,
+        "add_block r3 300 600 400 700",
         "def_layer 4 M4 H TOP 0",
         "def_layer 5 M5 V TOP 0",
-        "add_bus d[4] src.tx r2.b",
+        "add_bus d[4] src.tx r1.a,r2.b,r3.c",
         "def_track_pattern 4 0 (SIGNAL 2 2)x8",
         "def_track_pattern 5 0 (SIGNAL 2 2)x8",
     ]
 
-    # ── build session, RECORDED: a trunk Direct inside the LOWER of two
-    #    ADJACENT rects (the limitation-2 corner — adjacency suppression
-    #    emits no connection metal, the per-rect audit still fires; the MST
-    #    shape that used to sit here now attaches every rect, so this is
-    #    the remaining checked-in missing-metal shape) ──
+    # ── build session, RECORDED: a BITRUNK tree on the OVER block, whose
+    #    bbox-only scoping leaves rect#1 untouched (Final-state limitation 4;
+    #    pinned end to end by test_teg_open.py::
+    #    test_bitrunk_on_over_block_fires_teg_open_end_to_end) ──
     monkeypatch.setenv("BUDA_RECORD", trace)
     s1 = _session(flow + ["run_bundler STRICT", "generate_topologies"])
-    pin = None
-    for i, c in enumerate(s1.bundles[0].input.candidates):
-        if c.type.startswith("TRUNK_H@y"):
-            y = int(c.type.split("@y")[1].split("+")[0])
-            if 0 < y < 100:          # Direct inside the lower rect
-                pin = i + 1
-                break
-    assert pin is not None, "no trunk-inside-lower-rect candidate found"
+    pin = next((i + 1 for i, c in enumerate(s1.bundles[0].input.candidates)
+                if c.type.startswith("BITRUNK_H")), None)
+    assert pin is not None, "no BITRUNK_H candidate found"
     for cmd in (f"select_topology 1 {pin}", "run_planner", "run_nuts"):
         _run(s1, cmd)
     monkeypatch.delenv("BUDA_RECORD")

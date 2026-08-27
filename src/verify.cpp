@@ -597,6 +597,39 @@ static void detect_antennas(const std::vector<ConnSeg>& segs,
                 plo >= alo && phi <= ahi) { inside = true; break; }
         }
         if (!inside) continue;
+        // `teg_mode over` revokes exactly the assumption the redundancy test
+        // below makes.  "The block stays covered" is a BLOCK-level reading,
+        // and an OVER block's rects are NOT interchangeable: a piece tapping
+        // rect#1's face is that rect's OWN attachment even though the spine
+        // crosses rect#0, so the block-coverage test would call the one wire
+        // holding rect#1 an antenna (measured on the adjacent-rect Direct
+        // shape the moment generation started emitting that wire —
+        // teg_multirect_status.md limitation 2).  Judge per RECT instead, on
+        // the rects the piece touches, through the SAME contact predicate
+        // TEG_OPEN reads: a piece whose removal would leave any of them
+        // untouched is load-bearing.
+        if (fp.get_block_teg_mode(tap->block_name) == TegMode::OVER &&
+            rects.size() >= 2) {
+            ConnSeg rest = cs;
+            if (at_lo) rest.along_lo = (int)A; else rest.along_hi = (int)A;
+            bool load_bearing = false;
+            for (const Rect& r : rects) {
+                if (!axis_touches_rect(cs.horiz, (double)cs.perp_pos,
+                                       plo, phi, r)) continue;
+                bool still = axis_touches_rect(rest.horiz, (double)rest.perp_pos,
+                                               (double)rest.along_lo,
+                                               (double)rest.along_hi, r);
+                for (int j = 0; j < n && !still; ++j) {
+                    if (j == i) continue;
+                    still = axis_touches_rect(segs[j].horiz,
+                                              (double)segs[j].perp_pos,
+                                              (double)segs[j].along_lo,
+                                              (double)segs[j].along_hi, r);
+                }
+                if (!still) { load_bearing = true; break; }
+            }
+            if (load_bearing) continue;
+        }
         // Redundancy: with the piece removed, the TAPPED block must remain
         // covered — by this segment's trimmed remainder or by any sibling's
         // tap / pass-through — and so must EVERY OTHER connected block the
@@ -716,12 +749,12 @@ static void detect_disconnected(const std::vector<ConnSeg>& segs,
 // declared meaning).
 struct TegMetal { int seg_idx; bool horiz; double perp, a_lo, a_hi; };
 
+// The audit's reading of "touched" is topology.h's `axis_touches_rect` and
+// nothing of its own: generation decides which rects need connection metal by
+// the SAME rule (`seg_touches_rect`), and the two drifting apart is exactly
+// what teg_multirect_status.md limitation 2 recorded.
 static bool teg_touches(const TegMetal& m, const Rect& r) {
-    const double p1 = m.horiz ? r.y1 : r.x1;
-    const double p2 = m.horiz ? r.y2 : r.x2;
-    const double a1 = m.horiz ? r.x1 : r.y1;
-    const double a2 = m.horiz ? r.x2 : r.y2;
-    return m.perp >= p1 && m.perp <= p2 && m.a_lo <= a2 && m.a_hi >= a1;
+    return axis_touches_rect(m.horiz, m.perp, m.a_lo, m.a_hi, r);
 }
 
 // groups: label (-1 = bundle-level, else bit index) → that net's placed metal.

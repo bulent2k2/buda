@@ -104,6 +104,40 @@ struct Segment {
     int perp_clamp_hi = INT_MAX;
 };
 
+// ── ONE inclusive metal↔rect CONTACT rule ────────────────────────────────────
+//
+// "Does this piece of axis-aligned metal touch this rect?", inclusive on every
+// edge (a wire lying exactly on a face counts — that IS a tap).  It is the
+// predicate `teg_mode over` is audited by (verify.cpp's TEG_OPEN: every rect of
+// an OVER block must be touched by the bundle's placed metal) AND the predicate
+// generation decides connection metal by (a rect nothing touches gets a stub),
+// so the two MUST be one rule: the whole point of
+// teg_multirect_status.md limitation 2 was that they had drifted apart.  Stated
+// once here on the raw (orientation, perp, along-range, rect) tuple, because
+// verify reads PLACED metal (a track position, double) and generation reads
+// nominal `Segment`s — the plumbing differs, the geometry may not.
+inline bool axis_touches_rect(bool horiz, double perp, double a_lo, double a_hi,
+                              const Rect& r) {
+    const double p1 = horiz ? r.y1 : r.x1;
+    const double p2 = horiz ? r.y2 : r.x2;
+    const double a1 = horiz ? r.x1 : r.y1;
+    const double a2 = horiz ? r.x2 : r.y2;
+    return perp >= p1 && perp <= p2 && a_lo <= a2 && a_hi >= a1;
+}
+
+// The nominal-geometry spelling: a generated Segment against a rect.  A
+// degenerate (zero-length) segment is read as horizontal — both spellings agree
+// on a point, so the choice cannot change the verdict.
+inline bool seg_touches_rect(const Segment& s, const Rect& r) {
+    const bool horiz = (s.start.y == s.end.y);
+    const int perp = horiz ? s.start.y : s.start.x;
+    const int a_lo = horiz ? std::min(s.start.x, s.end.x)
+                           : std::min(s.start.y, s.end.y);
+    const int a_hi = horiz ? std::max(s.start.x, s.end.x)
+                           : std::max(s.start.y, s.end.y);
+    return axis_touches_rect(horiz, perp, a_lo, a_hi, r);
+}
+
 // Orientation abstraction for topology generation.  A spine runs ALONG one axis
 // and its perpendicular stubs run along the other; `along_horiz` picks which.
 // Every generator that comes in an H and a V flavour (trunks, BITRUNK, and — as

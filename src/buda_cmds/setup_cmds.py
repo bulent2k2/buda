@@ -101,10 +101,13 @@ def cmd_add_block(session, cmd, args, cmd_line):
         # Degenerate / duplicate rects are hard errors at declaration (the
         # engine normalizes coordinate ORDER, so only zero-extent is
         # degenerate).  Overlapping non-identical rects are deliberately
-        # LEGAL: interior overlap is exactly what classifies a block as
-        # rectilinear (L/C-shape — topology.cpp rects_are_rectilinear), and
-        # edge-adjacent rects drive the adjacency suppression, so only the
-        # genuinely meaningless shapes are refused.
+        # LEGAL: interior overlap is what makes a block rectilinear (an
+        # L/C-shape drawn as overlapping rects) and edge-adjacent rects draw
+        # the same footprint by abutment, so only the genuinely meaningless
+        # shapes are refused.  (Neither is a code-level distinction any more:
+        # the OVER emission rule became "every rect the trunk does not cross
+        # gets its attachment" when the adjacency suppression was withdrawn —
+        # teg_multirect_status.md Final-state item 2, 2026-08-27.)
         seen = {}
         for n, (rx1, ry1, rx2, ry2) in enumerate(rects, start=1):
             if rx1 == rx2 or ry1 == ry2:
