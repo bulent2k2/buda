@@ -9,7 +9,7 @@
   "ovl": 0,
   "unpl": 0,
   "viol": 1,
-  "sec": 122.1
+  "sec": 125.3
  },
  {
   "flow": "flow/big_data_test/b44.buda",
@@ -117,7 +117,7 @@
   "ovl": 0,
   "unpl": 0,
   "viol": 0,
-  "sec": 1.9
+  "sec": 2.0
  },
  {
   "flow": "flow/big_data_test/bigHalf.buda",
@@ -129,7 +129,7 @@
   "ovl": 0,
   "unpl": 0,
   "viol": 0,
-  "sec": 67.4
+  "sec": 67.5
  },
  {
   "flow": "flow/big_data_test/bigHalf_bus038_bitrunk.buda",
@@ -177,7 +177,7 @@
   "ovl": 0,
   "unpl": 0,
   "viol": 0,
-  "sec": 3.2
+  "sec": 3.0
  },
  {
   "flow": "flow/c_dd_detour.buda",
@@ -201,7 +201,7 @@
   "ovl": 6,
   "unpl": 260,
   "viol": 34,
-  "sec": 219.6
+  "sec": 183.3
  },
  {
   "flow": "flow/chip/chip3a_bottomup.buda",
@@ -213,7 +213,7 @@
   "ovl": 38,
   "unpl": 78,
   "viol": 9,
-  "sec": 202.8
+  "sec": 163.5
  },
  {
   "flow": "flow/chip/chip_bottomup.buda",
@@ -225,7 +225,7 @@
   "ovl": 56,
   "unpl": 231,
   "viol": 17,
-  "sec": 167.4
+  "sec": 141.7
  },
  {
   "flow": "flow/chip/chip_bottomup_caps.buda",
@@ -237,7 +237,7 @@
   "ovl": 56,
   "unpl": 143,
   "viol": 13,
-  "sec": 177.9
+  "sec": 146.8
  },
  {
   "flow": "flow/chip/chip_stack_bottomup.buda",
@@ -249,7 +249,7 @@
   "ovl": 99,
   "unpl": 240,
   "viol": 19,
-  "sec": 375.7
+  "sec": 311.9
  },
  {
   "flow": "flow/chip/chip_stack_topdown.buda",
@@ -261,7 +261,7 @@
   "ovl": 22,
   "unpl": 263,
   "viol": 21,
-  "sec": 185.1
+  "sec": 154.6
  },
  {
   "flow": "flow/chip/chip_topdown.buda",
@@ -273,7 +273,7 @@
   "ovl": 4,
   "unpl": 134,
   "viol": 9,
-  "sec": 204.4
+  "sec": 172.7
  },
  {
   "flow": "flow/comprehensive_regression.buda",
@@ -369,7 +369,7 @@
   "ovl": 0,
   "unpl": 0,
   "viol": 0,
-  "sec": 20.6
+  "sec": 22.1
  },
  {
   "flow": "flow/hbundles/07_wide_fan_stress.buda",
@@ -381,7 +381,7 @@
   "ovl": 0,
   "unpl": 0,
   "viol": 0,
-  "sec": 0.7
+  "sec": 0.8
  },
  {
   "flow": "flow/hbundles/08_cross_level.buda",
@@ -417,7 +417,7 @@
   "ovl": 0,
   "unpl": 0,
   "viol": 0,
-  "sec": 1.3
+  "sec": 1.2
  },
  {
   "flow": "flow/ndr_bond.buda",
@@ -465,7 +465,7 @@
   "ovl": 0,
   "unpl": 0,
   "viol": 0,
-  "sec": 4.7
+  "sec": 5.1
  },
  {
   "flow": "flow/rnr/mix2.buda",
@@ -477,7 +477,7 @@
   "ovl": 0,
   "unpl": 0,
   "viol": 0,
-  "sec": 37.1
+  "sec": 38.1
  },
  {
   "flow": "flow/rnr/mix2_fast_bottomup.buda",
@@ -489,7 +489,7 @@
   "ovl": 0,
   "unpl": 0,
   "viol": 0,
-  "sec": 7.5
+  "sec": 7.3
  },
  {
   "flow": "flow/rnr/mix2_fast_bottomup_caps.buda",
@@ -501,7 +501,7 @@
   "ovl": 2,
   "unpl": 0,
   "viol": 0,
-  "sec": 38.8
+  "sec": 40.9
  },
  {
   "flow": "flow/rnr/mix2_fast_bottomup_caps_2x.buda",
@@ -513,7 +513,7 @@
   "ovl": 0,
   "unpl": 0,
   "viol": 0,
-  "sec": 19.3
+  "sec": 19.0
  },
  {
   "flow": "flow/rnr/mix2_fast_bottomup_shared.buda",
@@ -525,7 +525,7 @@
   "ovl": 0,
   "unpl": 0,
   "viol": 0,
-  "sec": 50.9
+  "sec": 54.2
  },
  {
   "flow": "flow/rnr/mix2_fast_on_aligned_sql.buda",
@@ -537,7 +537,7 @@
   "ovl": 2,
   "unpl": 16,
   "viol": 1,
-  "sec": 42.8
+  "sec": 46.7
  },
  {
   "flow": "flow/rnr/mix2_fast_on_aligned_sql_2x.buda",
@@ -573,7 +573,7 @@
   "ovl": 0,
   "unpl": 0,
   "viol": 0,
-  "sec": 59.6
+  "sec": 63.4
  },
  {
   "flow": "flow/rv/soc_conv_div.buda",
@@ -585,7 +585,43 @@
   "ovl": 0,
   "unpl": 0,
   "viol": 0,
-  "sec": 26.5
+  "sec": 30.1
+ },
+ {
+  "flow": "flow/teg_adjacent.buda",
+  "bund": 1,
+  "busS": 2,
+  "netS": 8,
+  "busWL": 136,
+  "netWL": 544,
+  "ovl": 0,
+  "unpl": 0,
+  "viol": 0,
+  "sec": 0.0
+ },
+ {
+  "flow": "flow/teg_bitrunk.buda",
+  "bund": 1,
+  "busS": 4,
+  "netS": 16,
+  "busWL": 1516,
+  "netWL": 6064,
+  "ovl": 0,
+  "unpl": 0,
+  "viol": 0,
+  "sec": 0.0
+ },
+ {
+  "flow": "flow/teg_hier_cell.buda",
+  "bund": 4,
+  "busS": 8,
+  "netS": 32,
+  "busWL": 2005,
+  "netWL": 8033,
+  "ovl": 0,
+  "unpl": 0,
+  "viol": 0,
+  "sec": 0.1
  },
  {
   "flow": "flow/teg_mst_over.buda",
