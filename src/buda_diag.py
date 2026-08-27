@@ -147,9 +147,10 @@ MESSAGES = {
                            "relies on the block's internal routing to join "
                            "them (report only — thru declares them "
                            "internally connected)."),
-    "BUDA-1908": (WARNING, "set_feedthru names a multi-rect block, but "
-                           "feedthru is single-rect only, so the declaration "
-                           "has no effect for that block."),
+    "BUDA-1908": (WARNING, "set_feedthru enables a relay on a `teg_mode over` "
+                           "multi-rect block, which declares its rects NOT "
+                           "internally connected — the two contradict, so the "
+                           "feedthru is refused for that block."),
     "BUDA-1912": (WARNING, "An NDR rule's stored per-layer values are not "
                            "readable and were dropped, so the rule restores "
                            "layer-independent."),
