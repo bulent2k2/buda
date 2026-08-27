@@ -22,6 +22,7 @@
 #include <climits>
 #include <limits>
 #include <string>
+#include <tuple>
 #include <vector>
 #include <optional>
 #include <unordered_map>
@@ -511,6 +512,10 @@ struct CellRow {
     // floor: no lower bound).
     int         layer_cap   = -1;
     int         layer_floor = -1;
+    // TEG mode of the cell's multi-rect footprint (v30): 'THRU' | 'OVER'.
+    // Meaningless without cell_rect rows (a single-bbox cell has one
+    // rectangle, which is internally connected by definition).
+    std::string teg_mode = "THRU";
 };
 
 struct CellPinRow {
@@ -606,7 +611,16 @@ public:
     //       outright, which was the only honest moment — `run_nuts` and the
     //       healers ran on before it, against a coarser, blockage-free
     //       model than the one the checkpoint was routed under.
-    static constexpr int SCHEMA_VERSION = 29;
+    // v30 = the cell's MULTI-RECT footprint: the cell_rect table (one row per
+    //       rectangle, in CELL-LOCAL coordinates) + cell.teg_mode.  A cell is
+    //       one `width x height` box by construction, so a rectilinear or
+    //       split macro could not be STATED in a BDB at all — which is why
+    //       multi-rect / TEG was script-declared only and no hier design
+    //       could reach it.  Attached to the CELL rather than the component
+    //       because the footprint is a property of the cell type (LEF's
+    //       `SIZE` is), so one declaration governs every instance and the
+    //       rects survive a move by construction.
+    static constexpr int SCHEMA_VERSION = 30;
 
     explicit BDB(const std::string& db_path);
     ~BDB();
@@ -668,6 +682,24 @@ public:
     void set_cell_layer_share(const std::string& cell, int layer_id, double share);
     std::vector<std::pair<int,double>> cell_layer_shares(const std::string& cell) const;
     std::vector<std::string> layer_share_cells() const;
+    // Multi-rect cell footprint (v30, cell_rect + cell.teg_mode).  Rects are
+    // CELL-LOCAL (offsets from the cell origin, like cell_pin.px/py and
+    // add_inst_to_cell's x/y), so an instance's rects are the cell's rects
+    // transformed by its orientation and translated to its placement — a
+    // move can never stale them.  set_cell_rects REPLACES the cell's rect
+    // list (an empty list clears it, restoring the single-bbox reading) and
+    // throws if the cell is not defined or a rect is degenerate; the caller
+    // owns the union-vs-size agreement (the CLI checks it).  cell_rects
+    // returns the rows in declaration order; multirect_cells lists cells
+    // holding any rect row, sorted.
+    void set_cell_rects(
+        const std::string& cell,
+        const std::vector<std::tuple<double,double,double,double>>& rects,
+        const std::string& teg_mode = "THRU");
+    std::vector<std::tuple<double,double,double,double>>
+        cell_rects(const std::string& cell) const;
+    std::string cell_teg_mode(const std::string& cell) const;
+    std::vector<std::string> multirect_cells() const;
 
     // ── NDR rule persistence (v21, docs/internal/ndr_architecture.md §4) ──
     // set_ndr_rule upserts a declared rule; ndr_rules returns every rule

@@ -1296,6 +1296,37 @@ def test_teg_mst_over_flow_routes_clean():
     assert (int(dm.group(1)), int(dm.group(2))) == (88, 0)
 
 
+def test_teg_hier_cell_flow_routes_clean():
+    """flow/teg_hier_cell.buda (teg_multirect_status.md limitation 5,
+    RESOLVED): multi-rect TEG macros declared on BDB CELLS
+    (`set_cell_rects`, schema v30) and routed by the HIER pipeline — the
+    first vehicle where the rects reach generation through the
+    BDB->Floorplan projections rather than an `add_block ... rect` line.
+
+    EXPECTED CLEAN: every rect of every OVER macro carries real placed
+    metal, so neither placed audit may report TEG_OPEN.  The BUDA-1907
+    census on the THRU macro is the control that proves the per-rect
+    contact predicate is RUNNING in a hier frame — without the projection
+    the blocks are single bboxes and there is nothing to census.
+
+    Measured against the same design on `main`, where the footprint cannot
+    be expressed at all: 32 -> 64 candidates, 5 -> 8 bus segments, 20 -> 32
+    bit-wires."""
+    out, rc = run_script("teg_hier_cell.buda")
+    assert rc == 0, f"teg_hier_cell.buda: non-zero exit {rc}\n{out}"
+    assert "TEG_OPEN" not in out, out
+    assert out.count("Success: no violations found.") >= 2, out
+    segs, viols, ovlps = nuts_summary(out)
+    assert (segs, viols, ovlps) == (8, 0, 0)
+    dm = re.search(
+        r"\[DetailedNUTS\] (\d+) net segments placed, (\d+) bits unplaced", out)
+    assert dm, "DetailedNUTS summary not found"
+    assert (int(dm.group(1)), int(dm.group(2))) == (32, 0)
+    # The THRU macro's untouched rect is named, once, as a report.
+    assert "BUDA-1907" in out, out
+    assert "teg_mode thru block 'u0/ioc_i'" in out, out
+
+
 def test_teg_same_band_flow_routes_clean():
     """flow/teg_same_band.buda (teg_multirect_status.md Final-state item 3,
     resolved): the same-band disjoint sibling repro as a checked-in vehicle —

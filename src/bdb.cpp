@@ -446,7 +446,21 @@ void BDB::_create_schema() {
             cls         TEXT NOT NULL DEFAULT '',
             bottom_up   INTEGER NOT NULL DEFAULT 0,
             layer_cap   INTEGER NOT NULL DEFAULT -1,
-            layer_floor INTEGER NOT NULL DEFAULT -1
+            layer_floor INTEGER NOT NULL DEFAULT -1,
+            -- TEG mode of the cell's multi-rect footprint (v30): 'THRU'
+            -- (the rects are internally connected) | 'OVER' (they are not,
+            -- so a route that misses one owes it explicit metal).
+            teg_mode    TEXT NOT NULL DEFAULT 'THRU'
+        );
+        -- The cell's MULTI-RECT footprint (v30): one row per rectangle, in
+        -- CELL-LOCAL coordinates (offsets from the cell origin).  No rows =
+        -- the cell is the single `width x height` box it has always been.
+        CREATE TABLE IF NOT EXISTS cell_rect (
+            cell TEXT NOT NULL REFERENCES cell(name),
+            ord  INTEGER NOT NULL,
+            x1 REAL NOT NULL, y1 REAL NOT NULL,
+            x2 REAL NOT NULL, y2 REAL NOT NULL,
+            PRIMARY KEY (cell, ord)
         );
         CREATE TABLE IF NOT EXISTS cell_layer_share (
             cell     TEXT NOT NULL REFERENCES cell(name),
@@ -929,6 +943,22 @@ void BDB::_migrate() {
         sqlite3_exec(_db,
             "ALTER TABLE bundle_net ADD COLUMN rcv_paths TEXT DEFAULT ''",
             nullptr, nullptr, nullptr);
+    }
+    if (v < 30) {
+        // v29 -> v30: the cell's multi-rect footprint.  A pre-v30 cell is one
+        // bbox by construction, so an empty cell_rect table and 'THRU' are
+        // exactly the design that was stored — nothing to migrate, only to
+        // create.  (A pre-v30 checkpoint that WANTED a multi-rect block could
+        // not have said so; see teg_multirect_status.md limitation 5.)
+        sqlite3_exec(_db,
+            "ALTER TABLE cell ADD COLUMN teg_mode TEXT NOT NULL DEFAULT 'THRU'",
+            nullptr, nullptr, nullptr);   // ignored if the column already exists
+        _exec("CREATE TABLE IF NOT EXISTS cell_rect ("
+              " cell TEXT NOT NULL REFERENCES cell(name),"
+              " ord  INTEGER NOT NULL,"
+              " x1 REAL NOT NULL, y1 REAL NOT NULL,"
+              " x2 REAL NOT NULL, y2 REAL NOT NULL,"
+              " PRIMARY KEY (cell, ord));");
     }
     if (v < SCHEMA_VERSION) {
         // Refresh provenance (incl. the meta.schema_version mirror) on EVERY
@@ -1464,6 +1494,7 @@ void BDB::clear_design() {
           "DELETE FROM pin; DELETE FROM net_props; DELETE FROM net; "
           "DELETE FROM cell_pin; DELETE FROM cell_children; "
           "DELETE FROM cell_layer_share; "         // FKs cell (v20)
+          "DELETE FROM cell_rect; "                // FKs cell (v30)
           "DELETE FROM component; DELETE FROM cell;");
     // The top-module memo describes the design being wiped, and the GDS
     // export ADOPTS the cell it names as the top structure — stale, it
@@ -3471,8 +3502,8 @@ void BDB::add_cell(const std::string& name, double w, double h) {
 }
 
 std::vector<CellRow> BDB::all_cells() const {
-    Stmt q(_db, "SELECT name, width, height, bottom_up, layer_cap, layer_floor"
-                " FROM cell ORDER BY name");
+    Stmt q(_db, "SELECT name, width, height, bottom_up, layer_cap, layer_floor,"
+                " teg_mode FROM cell ORDER BY name");
     std::vector<CellRow> result;
     while (sqlite3_step(q) == SQLITE_ROW)
         result.push_back({ (const char*)sqlite3_column_text(q,0),
@@ -3480,8 +3511,87 @@ std::vector<CellRow> BDB::all_cells() const {
                            sqlite3_column_double(q,2),
                            sqlite3_column_int(q,3) != 0,
                            sqlite3_column_int(q,4),
-                           sqlite3_column_int(q,5) });
+                           sqlite3_column_int(q,5),
+                           (const char*)sqlite3_column_text(q,6) });
     return result;
+}
+
+// ── Multi-rect cell footprint (v30) ──────────────────────────────────────────
+
+void BDB::set_cell_rects(
+        const std::string& cell,
+        const std::vector<std::tuple<double,double,double,double>>& rects,
+        const std::string& teg_mode) {
+    {   // The FK target must exist (matches set_cell_layer_band's contract).
+        Stmt q(_db, "SELECT 1 FROM cell WHERE name=?");
+        sqlite3_bind_text(q, 1, cell.c_str(), -1, SQLITE_TRANSIENT);
+        if (sqlite3_step(q) != SQLITE_ROW)
+            throw std::runtime_error("set_cell_rects: cell not defined: " + cell);
+    }
+    const std::string mode = (teg_mode == "OVER") ? "OVER" : "THRU";
+    // Validate and normalize the WHOLE list before touching the table: a
+    // throw halfway through would leave the cell with a partial footprint,
+    // which is a worse state than either the old one or the new one.
+    // (Corner ORDER is normalized to the Rect convention everywhere else; a
+    // zero-extent rect is meaningless geometry and is refused here so no
+    // consumer has to guess what it meant.)
+    std::vector<std::tuple<double,double,double,double>> norm;
+    norm.reserve(rects.size());
+    for (const auto& [x1, y1, x2, y2] : rects) {
+        const double lx = std::min(x1, x2), hx = std::max(x1, x2);
+        const double ly = std::min(y1, y2), hy = std::max(y1, y2);
+        if (lx == hx || ly == hy)
+            throw std::runtime_error(
+                "set_cell_rects: degenerate rect (zero extent) on cell: " + cell);
+        norm.emplace_back(lx, ly, hx, hy);
+    }
+    {   Stmt d(_db, "DELETE FROM cell_rect WHERE cell=?");
+        sqlite3_bind_text(d, 1, cell.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_step(d); }
+    int ord = 0;
+    for (const auto& [lx, ly, hx, hy] : norm) {
+        Stmt ins(_db, "INSERT INTO cell_rect(cell,ord,x1,y1,x2,y2)"
+                      " VALUES(?,?,?,?,?,?)");
+        sqlite3_bind_text  (ins, 1, cell.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int   (ins, 2, ord++);
+        sqlite3_bind_double(ins, 3, lx);
+        sqlite3_bind_double(ins, 4, ly);
+        sqlite3_bind_double(ins, 5, hx);
+        sqlite3_bind_double(ins, 6, hy);
+        if (sqlite3_step(ins) != SQLITE_DONE)
+            throw std::runtime_error("set_cell_rects: insert failed for: " + cell);
+    }
+    Stmt u(_db, "UPDATE cell SET teg_mode=? WHERE name=?");
+    sqlite3_bind_text(u, 1, mode.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(u, 2, cell.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_step(u);
+}
+
+std::vector<std::tuple<double,double,double,double>>
+BDB::cell_rects(const std::string& cell) const {
+    Stmt q(_db, "SELECT x1,y1,x2,y2 FROM cell_rect WHERE cell=? ORDER BY ord");
+    sqlite3_bind_text(q, 1, cell.c_str(), -1, SQLITE_TRANSIENT);
+    std::vector<std::tuple<double,double,double,double>> out;
+    while (sqlite3_step(q) == SQLITE_ROW)
+        out.emplace_back(sqlite3_column_double(q,0), sqlite3_column_double(q,1),
+                         sqlite3_column_double(q,2), sqlite3_column_double(q,3));
+    return out;
+}
+
+std::string BDB::cell_teg_mode(const std::string& cell) const {
+    Stmt q(_db, "SELECT teg_mode FROM cell WHERE name=?");
+    sqlite3_bind_text(q, 1, cell.c_str(), -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(q) == SQLITE_ROW)
+        return (const char*)sqlite3_column_text(q, 0);
+    return "THRU";
+}
+
+std::vector<std::string> BDB::multirect_cells() const {
+    Stmt q(_db, "SELECT DISTINCT cell FROM cell_rect ORDER BY cell");
+    std::vector<std::string> out;
+    while (sqlite3_step(q) == SQLITE_ROW)
+        out.push_back((const char*)sqlite3_column_text(q, 0));
+    return out;
 }
 
 void BDB::set_cell_bottom_up(const std::string& cell, bool on) {

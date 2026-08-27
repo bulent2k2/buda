@@ -12,8 +12,11 @@ Snapshot index — last verified against `main`: **2026-08-14** (item 16
 added 2026-08-25).  Everything here has landed except **item 8, the
 packaged wheel**, which is a CI and packaging project rather than an
 interchange defect and is the only entry still owed code, and **item 16**,
-which is a roadmap boundary (no import path produces a multi-rect block)
-recorded so it is not rediscovered, not a defect owing one.  Item 13 is the newest, and was found by chasing what
+whose STORAGE half closed 2026-08-27 (a BDB cell can carry a multi-rect
+footprint now — `set_cell_rects`, schema v30) and whose READER half is a
+roadmap boundary recorded so it is not rediscovered: no import file states a
+multi-rect block, so reading one would be an inference with item 12's
+failure mode.  Item 13 is the newest, and was found by chasing what
 looked like a QoR problem in `flow/ariane133` and turned out to be an
 importer defect — the third-vehicle argument again, and a reminder that a
 diagnostic reporting ZERO of something is a different claim from a
@@ -1227,18 +1230,36 @@ per cell (`def_io.cpp` / `bdb.cpp::import_def_lef`); a macro whose real
 outline is rectilinear arrives as that bbox, and its finer geometry — the
 `OBS` rects item 12 is about — becomes **keepouts**, never candidate
 connection rects.  GDS import likewise derives one recursive footprint
-**bbox** per structure (`gds_io.cpp`, the memoized `bbox_of` walk), and every
-BDB→Floorplan projection calls `add_block(bbox)` — `add_block_rects` is
-called from exactly one place in `src/`: the CLI's `add_block ... rect`
-handler (verified 2026-08-25: `grep -rn add_block_rects src/` finds the
-Floorplan implementation, the binding, and that one caller).  The TEG
-machinery (`teg_mode thru|over`, the OVER connection metal, the `TEG_OPEN`
-audit, the BUDA-1907 thru census) is therefore **script-declared only**: an
-imported design cannot reach any of it, however non-rectangular its macros
-really are.
+**bbox** per structure (`gds_io.cpp`, the memoized `bbox_of` walk).
 
-**Why it is left, not forgotten** (teg_multirect_status.md item 17 — a
-roadmap item rather than a defect): nothing in the current import inputs
+~~and every BDB→Floorplan projection calls `add_block(bbox)` —
+`add_block_rects` is called from exactly one place in `src/`: the CLI's
+`add_block ... rect` handler (verified 2026-08-25: `grep -rn add_block_rects
+src/` finds the Floorplan implementation, the binding, and that one caller).
+The TEG machinery (`teg_mode thru|over`, the OVER connection metal, the
+`TEG_OPEN` audit, the BUDA-1907 thru census) is therefore **script-declared
+only**: an imported design cannot reach any of it, however non-rectangular
+its macros really are.~~  That consequence is GONE since 2026-08-27 (the note
+below): the projections call `add_block_rects` whenever the component's cell
+declares a footprint, so an imported design reaches the whole TEG machinery
+the moment someone DECLARES the macro's shape.  What no READER does is
+declare it for them.
+
+**2026-08-27 — the OTHER half of this item is closed, and it is the half
+that decides this one.**  A BDB **cell** now carries a multi-rect footprint
+(`set_cell_rects`, schema v30 `cell_rect` + `cell.teg_mode`), so a
+hierarchical design CAN state one and every BDB→Floorplan projection carries
+it into the routing frame (teg_multirect_status.md Final-state item 5;
+vehicle `flow/teg_hier_cell.buda`).  That removes the second reason this item
+gave for leaving the reader alone — "an import fix alone would not carry the
+rects to the hier pipeline" — and leaves the first standing on its own:
+there is still nothing in the FILES to read.  The declaration route the
+"where to start" paragraph named as the zero-inference option is now the
+supported one, and it composes with an import: import the design, then
+`set_cell_rects` the macros whose real outline is rectilinear.
+
+**Why the READER is left, not forgotten** (teg_multirect_status.md item 17 —
+a roadmap item rather than a defect): nothing in the current import inputs
 *states* a multi-rect block.  DEF `COMPONENTS` carry no outline at all (the
 footprint comes from the LEF `SIZE`, which is one `w BY h` by grammar), LEF
 expresses a non-rectangular macro only implicitly through `OBS`/pin geometry
@@ -1248,17 +1269,26 @@ is whatever its shapes union to, with no marker for "these rects are the
 connection interface".  Deriving rects from any of those would be an
 inference with item 12's failure mode; honest support needs either an
 explicit source (e.g. a rectilinear-macro convention agreed with the
-producer) or a declaration alongside the import.  Note the hier flow has the
+producer) or a declaration alongside the import.  ~~Note the hier flow has the
 same boundary from the other side (teg_multirect_status item 6, resolved-as-
 bounded): a BDB component holds ONE bbox, so multi-rect cannot be *stored*
 as a hier-design input either — an import fix alone would not carry the
-rects to the hier pipeline.
+rects to the hier pipeline.~~  That second half is CLOSED (see the
+2026-08-27 note above): the storage exists, so an import fix would now have
+somewhere to put its rects — which makes the remaining question purely
+"does the file say it?", and the answer is still no.
 
-**Where to start:** decide the source of truth first (a sidecar declaration
-in the `.buda` script over imported blocks is the zero-inference option —
-`add_block ... rect` already exists and `set_block_teg_mode` can re-mode an
-existing block), and only then consider derivation; any derivation must be
-opt-in and measured on `flow/ariane133`'s macros, item 12's vehicle.
+**Where to start:** the source of truth is DECIDED and it is a declaration —
+`set_cell_rects <cell> rect … [teg_mode over]` over an imported design's
+macro cells, which needs no inference at all and reaches the hier pipeline
+(2026-08-27).  Only then consider derivation; any derivation must be opt-in
+and measured on `flow/ariane133`'s macros, item 12's vehicle.  The concrete
+first experiment, if anyone wants one: take `fakeram45_256x16`'s `OBS` rects
+(the 13,034-keepout set item 12 measured), ask whether their complement
+inside `SIZE` is a small rect set a human would recognize as the macro's
+outline, and compare it against what `set_cell_rects` a designer would write
+by hand.  If the two disagree, the derivation is the wrong idea and the
+declaration is the answer for good.
 
 ---
 

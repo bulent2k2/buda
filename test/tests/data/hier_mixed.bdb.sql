@@ -1,5 +1,5 @@
 -- BUDA BDB text dump (sqlite3 iterdump); regenerate via tools/bdb_serialize.py
-PRAGMA user_version=29;
+PRAGMA user_version=30;
 BEGIN TRANSACTION;
 CREATE TABLE bundle (
         id             TEXT PRIMARY KEY,
@@ -108,14 +108,18 @@ CREATE TABLE cell (
             cls         TEXT NOT NULL DEFAULT '',
             bottom_up   INTEGER NOT NULL DEFAULT 0,
             layer_cap   INTEGER NOT NULL DEFAULT -1,
-            layer_floor INTEGER NOT NULL DEFAULT -1
+            layer_floor INTEGER NOT NULL DEFAULT -1,
+            -- TEG mode of the cell's multi-rect footprint (v30): 'THRU'
+            -- (the rects are internally connected) | 'OVER' (they are not,
+            -- so a route that misses one owes it explicit metal).
+            teg_mode    TEXT NOT NULL DEFAULT 'THRU'
         );
-INSERT INTO "cell" VALUES('proc_cell',420.0,200.0,'',0,-1,-1);
-INSERT INTO "cell" VALUES('pipe_cell',110.0,80.0,'',0,-1,-1);
-INSERT INTO "cell" VALUES('src_cell',200.0,200.0,'',0,-1,-1);
-INSERT INTO "cell" VALUES('snk_cell',200.0,200.0,'',0,-1,-1);
-INSERT INTO "cell" VALUES('gen_cell',80.0,80.0,'',0,-1,-1);
-INSERT INTO "cell" VALUES('rcv_cell',80.0,80.0,'',0,-1,-1);
+INSERT INTO "cell" VALUES('proc_cell',420.0,200.0,'',0,-1,-1,'THRU');
+INSERT INTO "cell" VALUES('pipe_cell',110.0,80.0,'',0,-1,-1,'THRU');
+INSERT INTO "cell" VALUES('src_cell',200.0,200.0,'',0,-1,-1,'THRU');
+INSERT INTO "cell" VALUES('snk_cell',200.0,200.0,'',0,-1,-1,'THRU');
+INSERT INTO "cell" VALUES('gen_cell',80.0,80.0,'',0,-1,-1,'THRU');
+INSERT INTO "cell" VALUES('rcv_cell',80.0,80.0,'',0,-1,-1,'THRU');
 CREATE TABLE cell_children (
             parent_cell TEXT NOT NULL REFERENCES cell(name),
             inst_name   TEXT NOT NULL,
@@ -163,6 +167,13 @@ INSERT INTO "cell_pin" VALUES('src_cell','s2p_3','OUTPUT',-1.0,-1.0);
 INSERT INTO "cell_pin" VALUES('proc_cell','s2p_3','INPUT',-1.0,-1.0);
 INSERT INTO "cell_pin" VALUES('proc_cell','p2s_3','OUTPUT',-1.0,-1.0);
 INSERT INTO "cell_pin" VALUES('snk_cell','p2s_3','INPUT',-1.0,-1.0);
+CREATE TABLE cell_rect (
+            cell TEXT NOT NULL REFERENCES cell(name),
+            ord  INTEGER NOT NULL,
+            x1 REAL NOT NULL, y1 REAL NOT NULL,
+            x2 REAL NOT NULL, y2 REAL NOT NULL,
+            PRIMARY KEY (cell, ord)
+        );
 CREATE TABLE component (
             id           INTEGER PRIMARY KEY,
             name         TEXT UNIQUE NOT NULL,
@@ -215,7 +226,7 @@ CREATE TABLE meta (
             key   TEXT PRIMARY KEY,
             value TEXT
         );
-INSERT INTO "meta" VALUES('schema_version','29');
+INSERT INTO "meta" VALUES('schema_version','30');
 INSERT INTO "meta" VALUES('bdb_tool','buda-bdb');
 CREATE TABLE ndr_rule (
             name         TEXT PRIMARY KEY,

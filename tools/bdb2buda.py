@@ -37,7 +37,7 @@ from typing import Optional
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.dirname(_HERE)
-for _p in [os.path.join(_ROOT, "build"), _HERE]:
+for _p in [os.path.join(_ROOT, "src"), os.path.join(_ROOT, "build"), _HERE]:
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
@@ -52,6 +52,10 @@ except ModuleNotFoundError:
 # Lets convert() accept a diffable *.bdb.sql text fixture as transparently as a
 # binary *.bdb (materialized to a throwaway temp binary, read-only).
 import bdb_serialize
+
+# The 8-orientation rect transform, shared with the hier projections
+# (src/orient_rect.py is standalone so this tool need not import `buda`).
+import orient_rect
 
 
 def _leaf(name: str) -> str:
@@ -278,8 +282,24 @@ def convert(bdb_path: str, cell_name: Optional[str] = None,
     lines.append(f"set_die {s(die_w)} {s(die_h)}")
     lines.append("")
 
+    # Multi-rect footprints (v30 cell_rect): a cell declaring one exports as
+    # the `add_block ... rect ...` form so a TEG macro survives the round trip
+    # (it collapsed to the union bbox before v30, because a BDB cell was one
+    # box and there was nothing else to read).
+    mr_cells = set(db.multirect_cells())
+    cell_dims = {r.name: (r.width, r.height) for r in db.all_cells()}
     for c in sorted(target_comps, key=lambda c: c.name):
         leaf = _leaf(c.name)
+        if c.cell in mr_cells:
+            cw, ch = cell_dims.get(c.cell, (c.x2 - c.x1, c.y2 - c.y1))
+            quads = " ".join(
+                f"rect {s(r[0])} {s(r[1])} {s(r[2])} {s(r[3])}"
+                for r in orient_rect.comp_rects_abs(
+                    c.x1, c.y1, c.orient, cw, ch, db.cell_rects(c.cell),
+                    ox, oy, to_int=False))
+            tail = " teg_mode over" if db.cell_teg_mode(c.cell) == "OVER" else ""
+            lines.append(f"add_block {leaf} {quads}{tail}")
+            continue
         lines.append(
             f"add_block {leaf}"
             f" {s(c.x1 - ox)} {s(c.y1 - oy)}"

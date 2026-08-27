@@ -1,17 +1,23 @@
 # TEG multi-rect blocks beside a REAL hierarchy — the honest hybrid.
 #
-# WHY A HYBRID: a BDB component holds ONE bbox, so multi-rect cannot be
-# DECLARED as a hier-design input — derive_busterms writes empty rects and
-# every BDB->Floorplan projection is add_block(bbox) (see
-# docs/internal/teg_multirect_status.md item 6 "RESOLVED-AS-BOUNDED" and
-# docs/BDB_REFERENCE.md).  And the two bundlers cannot compose in one
-# session either: run_bundler and run_hier_bundler each rebuild
-# session.bundles, so the second clobbers the first.  The supported shape
-# is therefore HIERARCHY-FED FLAT: build the hierarchy in the BDB, project
-# it into the flat floorplan with add_blocks_from_bdb (containers stay
-# transparent envelopes, leaves are the routing targets), hand-declare the
-# multi-rect TEG macros beside the projection, and route everything with
-# the flat pipeline.
+# WHY A HYBRID — and what it is STILL for since schema v30.  The original
+# reason is gone: a BDB CELL now carries a multi-rect footprint
+# (`set_cell_rects`), so multi-rect CAN be declared as a hier-design input
+# and routed by the hier pipeline — that flow is `flow/teg_hier_cell.buda`
+# (teg_multirect_status.md Final-state item 5).  Prefer it when the macro
+# is a cell of the hierarchy.
+#
+# This vehicle keeps a different shape: the macros here are declared as
+# FLAT blocks beside a projected hierarchy, which is what you write when
+# the macro is NOT in the BDB at all (a hand-placed pad ring, a block you
+# are sketching before it exists as a cell).  The other half of the reason
+# still holds: the two bundlers cannot compose in one session — run_bundler
+# and run_hier_bundler each rebuild session.bundles, so the second clobbers
+# the first — so HIERARCHY-FED FLAT is: build the hierarchy in the BDB,
+# project it into the flat floorplan with add_blocks_from_bdb (containers
+# stay transparent envelopes, leaves are the routing targets), hand-declare
+# the multi-rect TEG macros beside the projection, and route everything
+# with the flat pipeline.
 #
 # What to look at in the viewer:
 #   * dsp — an L-shaped teg_mode OVER macro (arm right, base bottom).  The

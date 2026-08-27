@@ -168,6 +168,26 @@ MESSAGES = {
                            "two files: rows persisted before this line stay "
                            "in the previous file, and everything from here "
                            "on lands in the new one."),
+    "BUDA-1918": (WARNING, "A rotate_comp / flip_comp on a CONTAINER moved a "
+                           "descendant whose cell declares a multi-rect "
+                           "footprint (set_cell_rects).  The transform "
+                           "rewrites descendant BBOXES and leaves their "
+                           "orientation tokens untouched — the deliberate "
+                           "convention, since a bbox carries the geometry — "
+                           "but a multi-rect footprint is geometry the bbox "
+                           "does NOT carry, so those rects stay upright "
+                           "while the instance turns.  Rotate the leaf "
+                           "itself (its token IS composed) or re-declare "
+                           "the placement."),
+    "BUDA-1919": (WARNING, "A cell's multi-rect footprint no longer unions to "
+                           "the extent of an instance of that cell, so the "
+                           "routing frame and the placement would be two "
+                           "different shapes.  The footprint is IGNORED for "
+                           "that instance (it projects as its single bbox).  "
+                           "set_cell_rects enforces the agreement at "
+                           "declaration, so this means the cell was resized "
+                           "or its instance moved afterwards — re-declare the "
+                           "footprint against the current size."),
 }
 
 # Ids that were ISSUED and whose fault no longer exists.

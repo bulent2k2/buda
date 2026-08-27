@@ -133,6 +133,8 @@ updating this table, which is exactly the drift the guard now prevents):
 | BUDA-1915 | WARNING | a `set_ndr` scope matches no net in the design, so the rule it names governs nothing |
 | BUDA-1916 | INFO | a `set_ndr` scope is outranked by a longer prefix on every net it matches, so it governs nothing |
 | BUDA-1917 | WARNING | a second `open_bdb` replaced an already-open file-backed BDB, so persistence splits across two files: rows persisted before this line stay in the previous file, and everything from here on lands in the new one |
+| BUDA-1918 | WARNING | a `rotate_comp` / `flip_comp` on a CONTAINER moved a descendant whose cell declares a multi-rect footprint (`set_cell_rects`).  The transform rewrites descendant BBOXES and leaves their orientation tokens untouched — the deliberate convention, since a bbox carries the geometry — but a multi-rect footprint is geometry the bbox does NOT carry, so those rects stay upright while the instance turns.  Rotate the leaf itself (its token IS composed) or re-declare the placement |
+| BUDA-1919 | WARNING | a cell's multi-rect footprint no longer unions to the extent of an instance of that cell, so the routing frame and the placement would be two different shapes; the footprint is IGNORED for that instance.  `set_cell_rects` enforces the agreement at declaration, so this means the cell was resized or its instance moved afterwards |
 
 **Retired ids.**  An id may never be reused and never changes meaning, so one
 whose fault has been fixed is recorded as *spent* rather than deleted — a

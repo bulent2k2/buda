@@ -293,7 +293,8 @@ void bind_db(py::module_& m) {
         .def_readwrite("height",      &CellRow::height)
         .def_readwrite("bottom_up",   &CellRow::bottom_up)
         .def_readwrite("layer_cap",   &CellRow::layer_cap)
-        .def_readwrite("layer_floor", &CellRow::layer_floor);
+        .def_readwrite("layer_floor", &CellRow::layer_floor)
+        .def_readwrite("teg_mode",    &CellRow::teg_mode);
 
     py::class_<CellPinRow>(m, "CellPinRow")
         .def_readwrite("cell",     &CellPinRow::cell)
@@ -314,7 +315,14 @@ void bind_db(py::module_& m) {
         .def_readwrite("y2",         &BustermRow::y2)
         .def_readwrite("resolution", &BustermRow::resolution)
         .def_readwrite("parent_id",  &BustermRow::parent_id)
-        .def_readwrite("rects",      &BustermRow::rects);
+        .def_readwrite("rects",      &BustermRow::rects)
+        // Routing-time busterm attrs (v9): a hier-derived row carries them
+        // too once its cell declares a multi-rect footprint (v30).
+        .def_readwrite("teg_mode",   &BustermRow::teg_mode)
+        .def_readwrite("orig_x1",    &BustermRow::orig_x1)
+        .def_readwrite("orig_y1",    &BustermRow::orig_y1)
+        .def_readwrite("orig_x2",    &BustermRow::orig_x2)
+        .def_readwrite("orig_y2",    &BustermRow::orig_y2);
 
     // ── BDB ───────────────────────────────────────────────────────────────
     py::class_<GdsImportStats>(m, "GdsImportStats")
@@ -557,6 +565,11 @@ void bind_db(py::module_& m) {
           },
           py::arg("text"), py::arg("where") = "<text>");
 
+    // The busterm multi-rect JSON codec, so a Python writer of
+    // `BustermRow.rects` (the v30 cell-footprint stamp in derive_busterms)
+    // uses the ENGINE's format rather than a second copy of it.
+    m.def("encode_rects_json", &encode_rects_json, py::arg("rects"));
+    m.def("decode_rects_json", &decode_rects_json, py::arg("s"));
     m.def("read_lef",  &read_lef,  py::arg("path"));
     m.def("parse_lef", &parse_lef, py::arg("text"), py::arg("where") = "<text>");
 
@@ -735,6 +748,12 @@ void bind_db(py::module_& m) {
         .def("set_cell_layer_share", &BDB::set_cell_layer_share,
              py::arg("cell"), py::arg("layer_id"), py::arg("share"))
         .def("cell_layer_shares", &BDB::cell_layer_shares, py::arg("cell"))
+        // Multi-rect cell footprint (v30): rects are CELL-LOCAL.
+        .def("set_cell_rects", &BDB::set_cell_rects,
+             py::arg("cell"), py::arg("rects"), py::arg("teg_mode") = "THRU")
+        .def("cell_rects", &BDB::cell_rects, py::arg("cell"))
+        .def("cell_teg_mode", &BDB::cell_teg_mode, py::arg("cell"))
+        .def("multirect_cells", &BDB::multirect_cells)
         .def("layer_share_cells", &BDB::layer_share_cells)
         .def("set_ndr_rule",     &BDB::set_ndr_rule, py::arg("rule"))
         .def("ndr_rules",        &BDB::ndr_rules)
