@@ -48,7 +48,11 @@ flow tests and demo vehicles pinning it all end to end (open 2,
 single-rect designs stayed byte-identical throughout (corpus-guarded).
 
 What remains is deliberate scope, each item verified against the code and
-its pinning test on this date:
+its pinning test on this date.  *(2026-08-27: limitation 8 — the last item
+opened rather than scoped — is RESOLVED with the rest.  With it, no GENERATED
+candidate leaves an OVER rect untouched on anything measured, and the three
+vehicles that exist to measure a LOUD audit moved off the generators entirely,
+onto a hand-edited USER candidate; see item 8.)*
 
 **Remaining limitations**
 
@@ -210,9 +214,12 @@ its pinning test on this date:
    blocks stay exempt.  The two dirty vehicles that had been MOVED onto this
    shape in #846 — `test_teg_resume.py`'s resume-armed audit and
    `test_teg_thru_census.py`'s OVER twin — were re-homed again, onto the
-   BITRUNK shape (limitation 4) — and on 2026-08-27 a THIRD time, onto the
-   `TRUNK_*+MST` hybrid (limitation 8), when BITRUNK went clean too — so both
-   still measure a LOUD audit rather than a vacuous one.  End-to-end vehicle: `flow/teg_adjacent.buda` (EXPECTED
+   BITRUNK shape (limitation 4), then a THIRD time onto the `TRUNK_*+MST`
+   hybrid (limitation 8) when BITRUNK went clean too, and — the same day,
+   when the hybrid did — a FOURTH and last time onto a HAND-EDITED (USER)
+   candidate, which comes from no generator and so cannot be resolved out
+   from under them again.  All of them still measure a LOUD audit rather
+   than a vacuous one.  End-to-end vehicle: `flow/teg_adjacent.buda` (EXPECTED
    CLEAN, `test_flow_scripts.py::test_teg_adjacent_flow_routes_clean` + the
    QoR corpus row), which guards the ANTENNA companion too — the stub it
    emits overhangs entirely over the block, so a BLOCK-level tap-overhang
@@ -355,7 +362,9 @@ its pinning test on this date:
    test — every one of which FAILS pre-fix.  Controls held: a THRU multi-rect
    block still gets ONE stub and no invented metal, a single-rect design is
    byte-identical on exact coordinates, and a genuinely unreached rect still
-   fires (limitation 8 below, which is where the two dirty vehicles moved).
+   fires — at the time that was limitation 8 below, which is where the two
+   dirty vehicles moved; with THAT resolved too they moved once more, onto a
+   HAND-EDITED (USER) candidate, which no generator improvement can reach.
 5. ~~**No import path (DEF/GDS) and no hier declaration produces a
    multi-rect block**~~ — the HIER/BDB half is **RESOLVED 2026-08-27**
    (schema **v30**, `set_cell_rects`); the IMPORT half is **REFUSED, with
@@ -593,32 +602,130 @@ its pinning test on this date:
    `flow/feedthru_multirect.buda` (QoR corpus row — `set_feedthru`
    appeared in NO corpus flow before it, so the spine-splitting branch,
    which DELETES metal, was swept by nothing).
-8. **A `TRUNK_*+MST` hybrid drops the seed trunk's TEG connection metal**
+8. ~~**A `TRUNK_*+MST` hybrid drops the seed trunk's TEG connection metal**
    (OPENED 2026-08-27 by the limitation-4 work, which needed a still-dirty
-   shape and found this one).  `add_trunk_mst_candidates` copies the seed
-   trunk and then re-derives the spine from the SURVIVING branch blocks,
-   which loses both forms of the seed's OVER metal.  Measured on
-   `flow/teg_bitrunk.buda`'s geometry:
-   * the seed `TRUNK_H@y100` spans x 100..900 (spine-end anchored onto
-     rect#1's facing face) while `TRUNK_H+MST@y100` spans x 100..500;
-   * `TRUNK_V@x600` carries the per-rect stub `(900,50)-(600,50)` for
-     rect#1 and `TRUNK_V+MST@x600` simply does not.
-   Both route to TEG_OPEN — 1 bundle-level at nuts, 4 per-bit at dnuts — so
-   it is LOUD, not silent, which is the same guarantee that made BITRUNK's
-   bbox-only scoping acceptable.  CLAUDE.md's stage-2 TEG section claimed
-   "`TRUNK_*+MST` hybrids inherit the seed trunk's per-rect metal"; that is
-   false for these two shapes and is corrected there.  The hybrid path
-   already declines to rewire a multi-rect branch block (`simple = false`,
-   "dropping them for an MST edge would detach the rects the stubs exist to
-   connect"), so the fix is presumably to re-run the same per-rect rules
-   against the hybrid's OWN final spine rather than to inherit the seed's —
-   deliberately NOT attempted here, since it is a different generator with
-   its own clean-tree and stub-replacement invariants.  Pinned by
-   `test_teg_open.py::test_trunk_mst_hybrid_on_over_block_still_fires_teg_open`,
-   and it is where the two dirty vehicles (`test_teg_resume.py`'s
-   resume-armed audit, `test_teg_thru_census.py`'s OVER twin) now sit — each
-   has been re-homed every time a shape was resolved out from under it, and
-   both still measure a LOUD audit rather than a vacuous one.
+   shape and found this one).~~  **RESOLVED 2026-08-27 — and the suspected
+   fix was the wrong one, which the first measurement said.**
+
+   The page guessed that `add_trunk_mst_candidates` "re-derives the spine from
+   the SURVIVING branch blocks", so the remedy would be to re-run the per-rect
+   rules against the hybrid's OWN final spine.  It does not re-derive anything:
+   it COPIES the seed (`Topology tree = trunk_topo;`), and the seed's OVER
+   connection metal is copied with it.  The multi-rect branch block cannot lose
+   its stubs either — `simple = false` sends such a bundle to the legacy path,
+   which keeps the full trunk — so nothing in the hybrid generator removes this
+   metal at all.  **Three SHARED passes did, and all three are ones the hybrid
+   path runs and `add_trunk` does not**, which is why the seed was clean and its
+   copy was not.  Each rests on the same premise: that a block's rects are
+   interchangeable covers.  `teg_mode over` revokes exactly that, and the code
+   has had to be taught it three times already (`PassthruCrossing::own_anchor`
+   for the NUTS pass-through election, the #514 tap-overhang rule, and open
+   1(b)'s audit itself).
+
+   * **`clip_spine_to_landings`** re-clips the copied spine to the extreme
+     surviving landing, then extends it to keep every pass-through block
+     covered — asking for the UNION bbox.  So the seed `TRUNK_H@y100`'s x
+     100..900 (spine-end anchored onto rect#1's facing face) came back as
+     100..500, r2's union near face, i.e. rect#0.  Coverage is now asked PER
+     RECT for an OVER block and **ADDED to** the union requirement, never
+     substituted for it: the first cut swapped it and was measured WRONG in
+     the other direction — on an L-shaped OVER block only the arm straddling
+     the trunk contributes, the requirement SHRANK below what block coverage
+     needs, and six hybrids on `flow/lShape1`'s geometry failed the clean-tree
+     gate and vanished.  Both branches of that loop only widen `[lo,hi]`, so
+     the per-rect pass can only extend the spine.
+   * **`complete_relay_junctions`' degenerate-collinear merge** erased
+     `TRUNK_V@x600`'s per-rect stub `(900,50)-(600,50)` outright.  The landing
+     collection records distinct landing POINTS, and that stub lands on
+     rect#1's face at one end and — because the trunk sits on rect#0's far
+     face x=600 — on rect#0's at the other, so the block presented TWO landings
+     from ONE segment.  "Extend A's landing endpoint to B's far endpoint" is
+     then a self-assignment and the erase deletes the wire.
+   * **its parallel and orthogonal OTC extensions** move a landing endpoint off
+     the face it taps.  A FUZZ over 900 randomized OVER geometries is what
+     showed the scale: with only the two fixes above, **95 hybrids still left a
+     rect untouched, 85 of them with a CLEAN seed** — two per-rect stubs off one
+     spine dragged to a shared column between the rects; and, three block
+     indices away from any OVER block, a corner extension at a SINGLE-RECT
+     relay pulling a spine back from x=1350 (anchored on an OVER rect's facing
+     face) to x=1250, because that endpoint served two purposes and the pass
+     knew only one.
+
+   **What landed is a measured accept, not a premise test**, and that choice was
+   made on evidence.  A premise guard — refuse the relay whenever a landing's
+   segment is some OVER rect's sole contact — is the obvious rule and is too
+   blunt: an extension that runs the stub DEEPER into the block keeps the
+   contact, and refusing there cost `flow/lShape1`'s geometry both standalone
+   MST candidates.  So the branch is APPLIED and the RESULT is compared against
+   a before/after census of every OVER rect's contact (`over_rect_contacts`,
+   through `seg_touches_rect` — the TEG_OPEN audit's own predicate, on the
+   PHYSICAL rects it reads): a rect that HAD metal and would lose it reverts the
+   whole relay and the block keeps its taps; a rect that was already unreached
+   vetoes nothing.  Falling through to the general CHAINING on a revert was
+   measured too and is worse (7 hybrids lost across the two OVER geometries — a
+   chained relay is not the clean tree the hybrid gate demands).  And the check
+   stands DOWN where an attachment pass follows (`teg_attachments_follow`, set
+   by the standalone-MST path alone): `add_mst_teg_attachments` runs immediately
+   after relay completion and repairs any rect left without metal, so
+   pre-empting it refused a relay the tree needed and dropped `MST_HV`.
+
+   Measured.  Both named shapes route CLEAN at both placed stages where they
+   fired `TEG_OPEN` 1 at nuts / 4 at dnuts, with the spine at 100..900 and the
+   stub `(900,50)-(600,50)` present.  Fuzz **0 dirty candidates over 900
+   randomized OVER geometries** (6 seeds x 150 trials), against 95 before.  The
+   candidate POOL only grows: on the `flow/teg_bitrunk` geometry two hybrids
+   that the antenna/redundancy gates had dropped now survive (34 -> 36
+   candidates) and nothing anywhere is lost.  It DOES re-sort the WL-ordered
+   pool on a multi-rect design, renumbering candidate indices there — the
+   property that makes `set_trim_mst_legs` and friends opt-in — but like
+   limitations 1-4 this repairs electrically broken metal, so it lands
+   ALWAYS-ON and multi-rect flows pin by TYPE.  A design with no OVER
+   multi-rect block cannot reach any of it: the census is behind
+   `any_over_multirect` and the coverage unit is the union bbox as before.
+
+   QoR corpus (`--vs origin/main` @ 8a643b9d, `flow/ariane133/fetch.py` run so
+   `ariane133_heal` is comparable): **0 better / 0 worse / 55 unchanged** of 56,
+   abstract AND detailed WL **+0.00%**.  That is a BLIND SPOT, not a clean bill
+   — before `flow/teg_hybrid.buda` no corpus row pinned a `TRUNK_*+MST` hybrid
+   on an OVER block, and the change is unreachable without one — so all 16
+   checked-in multi-rect/TEG vehicles were run baseline-vs-branch directly and
+   are byte-identical on segment counts, bit-wires, WL and audit verdicts.  New
+   corpus row `flow/teg_hybrid.buda` (0/0/0, ~0.01s) closes it going forward,
+   deliberately on the SAME floorplan as `flow/teg_bitrunk.buda` so the two rows
+   differ only in which family they pin.
+
+   Pins: `test_teg_open.py::test_trunk_mst_hybrid_inherits_the_seed_trunks_spine_anchoring`,
+   `..._keeps_the_seed_trunks_per_rect_stub` and
+   `test_relay_completion_never_costs_an_over_rect_its_only_metal` (all three
+   FAIL pre-fix — the first two on geometry, the third because the candidate is
+   not in the pool at all pre-fix, the erase having left it unclean), plus
+   `test_flow_scripts.py::test_teg_hybrid_flow_routes_clean`.  Controls held:
+   `test_thru_twin_keeps_the_historical_relay_merge` (the SAME block declared
+   `thru` still merges as it always did — the guard is OVER-gated) and
+   `test_standalone_mst_pool_is_untouched_by_the_relay_guard` (the
+   `teg_attachments_follow` pin), with the whole existing suite green (fast tier
+   2744 passed; `not slow` 3659 passed / 167 skipped / 35 xfailed / 1 xpassed,
+   the xpass a pre-existing host-fragile golden verified to xpass on the
+   baseline too).
+
+   **The three dirty vehicles moved a FOURTH time, and this time off the
+   generators entirely.**  With this resolved no GENERATED candidate leaves an
+   OVER rect untouched on anything measured, so `test_teg_resume.py`'s
+   resume-armed audit and `test_teg_thru_census.py`'s OVER twin (and this
+   file's own end-to-end loud pin) now sit on a **HAND-EDITED (`edit_*`, type
+   USER) candidate**: an H trunk clear of both rects with a stub to every block,
+   so `best_rect` taps r2 on rect#0 and rect#1 is reached by nothing.  It comes
+   from no generator, so no generation improvement can resolve it away — and it
+   makes the audit's own boundary the point of the test: TopoEdit's verdict is
+   `check_topo`, from which `TEG_OPEN` is deliberately ABSENT (check_topo feeds
+   generation gates, dogleg trials and healer metrics, which a reporting audit
+   must not perturb), so every edit step reports "clean" and only the PLACED
+   audit catches the open.  `DISCONNECTED` is already documented as "the
+   hand-edit escape"; this is its per-rect twin.  The resume vehicle gains
+   coverage from the move rather than losing it: a USER candidate is rehydrated
+   from the BDB with its op-log provenance, and both `edit_*` and
+   `select_topology` are on the never-replayed list, so the restored pin comes
+   from `load_pipeline` alone.
 
 ## 1. Two measurements that anchor this appraisal
 

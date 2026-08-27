@@ -1,0 +1,66 @@
+# TEG on a TRUNK+MST hybrid — the "a copy is not an inheritance" vehicle
+# (teg_multirect_status.md Final-state limitation 8, RESOLVED 2026-08-27).
+#
+# Same geometry as flow/teg_bitrunk.buda (deliberately: one floorplan, two
+# candidate families, so the two vehicles differ only in what they pin) — four
+# endpoint blocks, one of which, r2, is a `teg_mode over` multi-rect block whose
+# rects sit far apart along x.
+#
+# A `TRUNK_*+MST` hybrid COPIES its seed trunk and then replaces some branch
+# stubs with inter-block MST edges.  Since the copy carries the seed's OVER
+# connection metal, CLAUDE.md claimed the hybrids "inherit the seed trunk's
+# per-rect metal".  They did not — three passes the hybrid path runs and
+# `add_trunk` does not were quietly taking it back out, each of them on the same
+# false premise that a block's rects are interchangeable covers:
+#
+#   • `clip_spine_to_landings` re-derives the spine's extent from the surviving
+#     landings plus each pass-through block's UNION bbox, so the seed's
+#     spine-end anchoring onto rect#1's facing face (x=900) was clipped back to
+#     the union's near face (x=500).  Coverage is now asked PER RECT for an OVER
+#     block, ADDED to the union requirement rather than replacing it.
+#   • `complete_relay_junctions`' degenerate-collinear merge saw ONE segment —
+#     the seed's per-rect stub (900,50)-(600,50), which lands on rect#1's face at
+#     one end and on rect#0's at the other because the trunk sits on rect#0's far
+#     face — as two collinear stubs, "merged" it into itself and ERASED it.
+#   • its parallel/orthogonal OTC extensions drag a landing endpoint off the face
+#     it taps, which is the per-rect contact TEG_OPEN audits.
+#
+# The relay pass now checks its own RESULT: a completion that would cost an OVER
+# rect its last metal is reverted and the block keeps its taps.  (Where an
+# attachment pass runs straight after — the standalone-MST path's
+# `add_mst_teg_attachments` — the check stands down, because the rect is repaired
+# there and pre-empting it cost real candidates.)
+#
+# Both pins below routed to TEG_OPEN before the fix (1 bundle-level at nuts, 4
+# per-bit at dnuts) and route clean now.  Candidate pin is by TYPE — this change
+# re-sorts the WL-ordered pool on a multi-rect design, so indices move.
+
+add_block src 0 0 100 100
+add_block r1 300 300 400 400
+add_block r2 rect 500 0 600 100 rect 900 0 1000 100 teg_mode over
+add_block r3 300 600 400 700
+
+def_layer 4 M4 H TOP 0
+def_layer 5 M5 V TOP 0
+
+def_track_pattern 4 0 (SIGNAL 2 2)x8
+def_track_pattern 5 0 (SIGNAL 2 2)x8
+
+add_bus d[4] src.tx r1.a,r2.b,r3.c
+
+run_bundler STRICT
+generate_topologies
+
+# The H hybrid: its spine must span x 100..900 like its seed's, anchored on
+# rect#1's facing face.  (`select_topology 1 TRUNK_V+MST@x600` is the V twin,
+# whose per-rect stub (900,50)-(600,50) is the other half — unit-pinned in
+# test_teg_open.py; one flow can only route one of them.)
+select_topology 1 TRUNK_H+MST@y100
+
+run_planner
+run_nuts
+check_design
+run_detailed_nuts
+check_design
+report_wl
+visualize
