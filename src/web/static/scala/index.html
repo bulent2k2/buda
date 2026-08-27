@@ -36,6 +36,10 @@
   .seg.H { stroke: #f80; } .seg.V { stroke: #e22; }
   .seg.jog { stroke: #c90; stroke-width: 4; }
   .bt { fill: #0bd; } .rcv { fill: none; stroke: #d0b; stroke-width: 1.5; }
+  /* Bundle-block markers: a block the candidate TAPS gets the solid magenta
+     .rcv ring; one it passes THROUGH (crossed, not tapped) gets a DASHED teal
+     ring.  Kept in sync with the reference client. */
+  .passthru { fill: none; stroke: #0c8; stroke-width: 1.8; stroke-dasharray: 4 3; }
   .track { stroke-width: 2; } .track.H { stroke: #f80; } .track.V { stroke: #e22; }
   .trackftp.H { fill: #f803; } .trackftp.V { fill: #e223; }
   .bit { stroke-width: 1; } .bit.H { stroke: #f80; } .bit.V { stroke: #e22; }
@@ -76,7 +80,8 @@
   </div>
   <textarea id="cmds"></textarea>
   <div class="row">
-    <button id="run">Run commands</button><button id="reset">Reset</button>
+    <button id="run">Run commands</button
+    ><button id="run-flow" title="run this demo's whole .buda flow">Run flow</button><button id="reset">Reset</button>
   </div>
   <div class="row">
     <button id="bundler">bundler</button><button id="topologies">topologies</button
@@ -85,8 +90,8 @@
     ><button id="negotiate">negotiate</button><button id="check">check</button>
   </div>
   <div class="row">view:
-    <button id="view-topo">topo</button><button id="view-nuts">NUTS</button
-    ><button id="view-detailed">DNUTS</button>
+    <button id="view-topo">topo</button><button id="view-nuts">nuts</button
+    ><button id="view-detailed">dnuts</button>
   </div>
   <div class="row">bdb:
     <input id="bdbpath" value="/tmp/buda_demo.bdb" style="flex:1;font:inherit" />
@@ -131,6 +136,7 @@
     <button id="prev" title="previous candidate (p)">◀</button>
     <button id="next" title="next candidate (n)">▶</button>
     <span id="candlbl"></span>
+    <button id="zoom" title="zoom to this bundle (z)">Zoom</button>
     <button id="pin">Pin</button>
     <button id="edit-open">Edit</button>
     <button id="edit-open-new">Edit new</button>

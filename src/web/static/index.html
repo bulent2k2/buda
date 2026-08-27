@@ -42,6 +42,12 @@
   .seg.H { stroke: #f80; } .seg.V { stroke: #e22; }
   .seg.jog { stroke: #c90; stroke-width: 4; }
   .bt { fill: #0bd; } .rcv { fill: none; stroke: #d0b; stroke-width: 1.5; }
+  /* Bundle-block markers: a block the candidate TAPS gets the solid magenta
+     .rcv ring; one it passes THROUGH (crossed, not tapped — the `passthru:`
+     set dump_topologies --conn prints) gets a DASHED teal ring, so the two
+     kinds of contact read apart at a glance and neither is confusable with
+     the warm wire palette or the blue blocks. */
+  .passthru { fill: none; stroke: #0c8; stroke-width: 1.8; stroke-dasharray: 4 3; }
   /* NUTS interval band: direction-tinted (not one orange for both), so an H
      segment reads fully orange and a V segment fully red — the thin track
      line alone was swamped by a uniform-orange band, reading as "same color". */
@@ -88,6 +94,7 @@
   <textarea id="cmds"></textarea>
   <div class="row">
     <button onclick="runCmds()">Run commands</button>
+    <button onclick="runFlow()" title="run this demo's whole .buda flow">Run flow</button>
     <button onclick="reset()">Reset</button>
   </div>
   <div class="row">
@@ -102,8 +109,8 @@
   </div>
   <div class="row">view:
     <button onclick="setView('generation')">topo</button>
-    <button onclick="setView('nuts')">NUTS</button>
-    <button onclick="setView('detailed')">DNUTS</button>
+    <button onclick="setView('nuts')">nuts</button>
+    <button onclick="setView('detailed')">dnuts</button>
   </div>
   <div class="row">bdb:
     <input id="bdbpath" value="/tmp/buda_demo.bdb" style="flex:1;font:inherit" />
@@ -137,6 +144,7 @@
     <button onclick="stepCand(-1)" title="previous candidate (p)">◀</button>
     <button onclick="stepCand(1)" title="next candidate (n)">▶</button>
     <span id="candlbl"></span>
+    <button id="zoombtn" onclick="toggleZoom()" title="zoom to this bundle (z)">Zoom</button>
     <button id="pinbtn" onclick="pinToggle()">Pin</button>
     <button onclick="editOpen()">Edit</button>
     <button onclick="editOpen('new')">Edit new</button>
@@ -145,13 +153,14 @@
     <button onclick="stepBundle(-1)">◀</button>
     <button onclick="stepBundle(1)">▶</button>
     <span id="focuslbl"></span>
+    <button id="zoombtn2" onclick="toggleZoom()" title="zoom to the focused bundle (z)">Zoom</button>
   </div>
   <svg id="svg" xmlns="http://www.w3.org/2000/svg"></svg>
 </div>
 
 <script>
 const API = "/api";
-let RENDER = null, CAND = 0, VIEW = "generation", EDIT = null;
+let RENDER = null, CAND = 0, VIEW = "generation", EDIT = null, ZOOM = false;
 let DEMOS = [], ACTIVE = null, BUNDLE_FOCUS = null;   // BUNDLE_FOCUS: null = show all
 // The generation view renders ONE bundle at a time (?bundle=<id>): BUNDLE_SEL is
 // which one, BUNDLE_IDS the ring to step through (from /state's bundle digests).
@@ -230,6 +239,31 @@ async function setView(v) { VIEW = v; await refresh(); }
 // The catalog (GET /api/demos) gives each demo its setup text + a per-stage
 // command map, so the same "setup + click stages" UX drives the flat AND the
 // hierarchy-aware flow (which needs run_hier_bundler / run_planner hier / …).
+// Run the demo's WHOLE .buda flow: its setup, then the pipeline tail the
+// catalog derived from the flow file (minus the commands that make no sense in
+// a browser — viewers, `exit`, artifact writers; see src/web/demos.py).
+//
+// From a CLEAN session, always.  A setup only ADDS, so replaying it over a
+// session that already has the design is a duplicate-block error — and the
+// point of this button is "show me this whole demo", which is a fresh run.
+async function runFlow() {
+  if (!ACTIVE) return;
+  if (ACTIVE.unavailable) { log("demo unavailable: " + ACTIVE.unavailable); return; }
+  const setup = (ACTIVE.setup || "").split("\n").map(s => s.trim()).filter(Boolean);
+  const tail = ACTIVE.flow || [];
+  if (!tail.length) { log("this demo declares no pipeline flow"); return; }
+  setRunning(`running ${ACTIVE.key} flow…`);
+  try {
+    await reset();
+    const res = await post("/command", {cmds: setup.concat(tail)});
+    log(res.results.map(r => (r.ok ? "  " : "x ") + (r.summary || "(ok)")).join("\n"));
+    showStages(res.state);
+    await refresh();
+  } finally {
+    setRunning(null);
+  }
+}
+
 async function initDemos() {
   DEMOS = (await get("/demos")).demos || [];
   const sel = document.getElementById("demo");
@@ -355,6 +389,7 @@ window.addEventListener("keydown", (e) => {
     stepBundleSel(e.key === "]" ? 1 : -1);
     return;
   }
+  if (e.key === "z") { e.preventDefault(); toggleZoom(); return; }
   const fwd = (e.key === "n" || e.key === "ArrowRight");
   const back = (e.key === "p" || e.key === "ArrowLeft");
   if (!fwd && !back) return;
@@ -529,6 +564,50 @@ function el(tag, attrs, parent) {
   if (parent) parent.appendChild(e);
   return e;
 }
+function toggleZoom() {
+  ZOOM = !ZOOM;
+  for (const id of ["zoombtn", "zoombtn2"]) {
+    const b = document.getElementById(id);
+    if (b) b.textContent = ZOOM ? "Zoom ✓" : "Zoom";
+  }
+  draw();
+}
+
+// The view box for "zoom to this bundle": the geometry of the ONE bundle on
+// screen — the shown candidate in the topo view, the focused bundle's placed
+// wires in nuts/dnuts.  Returns null when there is nothing isolated to zoom to
+// (nuts/dnuts showing ALL bundles), so the toggle then simply keeps the full
+// floorplan rather than pretending to zoom.
+function zoomBox() {
+  const acc = [];
+  const add = (ax1, ay1, ax2, ay2) => acc.push(
+      [Math.min(ax1, ax2), Math.min(ay1, ay2), Math.max(ax1, ax2), Math.max(ay1, ay2)]);
+  if (VIEW === "generation") {
+    const bundle = RENDER.bundles && RENDER.bundles[0];
+    const cand = EDIT ? EDIT.topology : (bundle && bundle.candidates[CAND]);
+    if (!cand) return null;
+    for (const sg of cand.segments) add(sg.start.x, sg.start.y, sg.end.x, sg.end.y);
+    for (const bt of cand.seg_busterms)
+      for (const side of ["start", "end"]) {
+        const b = bt[side];
+        if (b) add(b.bbox.x1, b.bbox.y1, b.bbox.x2, b.bbox.y2);
+      }
+  } else {
+    if (BUNDLE_FOCUS === null) return null;
+    const segs = VIEW === "nuts"
+      ? ((RENDER.nuts && RENDER.nuts.segments) || [])
+      : ((RENDER.detailed && RENDER.detailed.net_segments) || []);
+    for (const sg of segs) {
+      if (sg.bundle_id !== BUNDLE_FOCUS) continue;
+      const [a, b, c, d] = placedLine(sg);
+      add(a, b, c, d);
+    }
+  }
+  if (!acc.length) return null;
+  return [Math.min(...acc.map(r => r[0])), Math.min(...acc.map(r => r[1])),
+          Math.max(...acc.map(r => r[2])), Math.max(...acc.map(r => r[3]))];
+}
+
 function bboxOf(fp) {
   let x1 = 1e18, y1 = 1e18, x2 = -1e18, y2 = -1e18;
   for (const b of fp.blocks) {
@@ -557,6 +636,8 @@ function draw() {
   if (!RENDER) return;
   const {fp, hanan} = activeFrame();
   let [x1, y1, x2, y2] = bboxOf(fp);
+  const zb = ZOOM ? zoomBox() : null;
+  if (zb) [x1, y1, x2, y2] = zb;
   const pad = Math.max(x2 - x1, y2 - y1) * 0.06 + 50;
   x1 -= pad; y1 -= pad; x2 += pad; y2 += pad;
   // BUDA y grows UP; SVG y grows DOWN — flip via a group transform.
@@ -746,12 +827,32 @@ function drawGeneration(g, W, H) {
     else
       el("line", {class: cls, x1: p, y1: disp.alo[i], x2: p, y2: disp.ahi[i]}, g);
   });
+  // Bundle-block markers.  A ring on every block of the bundle's contract,
+  // in two kinds: SOLID magenta where the candidate TAPS the block (a busterm
+  // landing), DASHED teal where it passes THROUGH — crossed geometry with no
+  // tap, which is the `passthru:` set `dump_topologies --conn` prints and the
+  // thing feedthru/coverage arguments are about.  Both carry a <title>, so
+  // hovering says which kind it is instead of leaving the colours to memory.
+  const r = Math.max(W, H) * 0.008;
+  const ring = (cx, cy, cls, tip, rad) => {
+    const c = el("circle", {class: cls, cx: cx, cy: cy, r: rad}, g);
+    el("title", {}, c).textContent = tip;
+  };
   for (const bt of cand.seg_busterms)
     for (const side of ["start", "end"]) {
       const b = bt[side]; if (!b) continue;
-      el("circle", {class: "rcv", cx: (b.bbox.x1 + b.bbox.x2)/2,
-          cy: (b.bbox.y1 + b.bbox.y2)/2, r: Math.max(W, H) * 0.008}, g);
+      ring((b.bbox.x1 + b.bbox.x2)/2, (b.bbox.y1 + b.bbox.y2)/2,
+           "rcv", `busterm tap: ${b.block_name}`, r);
     }
+  // Slightly larger, so a block that is tapped by one segment and crossed by
+  // another shows both rings instead of one hiding the other.
+  const byName = {};
+  for (const b of activeFrame().fp.blocks) byName[b.name] = b;
+  for (const name of (cand.passthru_blocks || [])) {
+    const b = byName[name]; if (!b) continue;
+    ring((b.bbox.x1 + b.bbox.x2)/2, (b.bbox.y1 + b.bbox.y2)/2,
+         "passthru", `pass-through (crossed, not tapped): ${name}`, r * 1.45);
+  }
   drawLegacyBridges(g, cand.bridge_segments);
 }
 

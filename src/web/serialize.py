@@ -234,6 +234,15 @@ def serialize_topology(topo, fp):
                           "partners": list(topo.seg_conns[(si, ep)])})
     bridges = {name: _segment(seg)
                for name, seg in topo.bridge_segments.items()}
+    # The bundle's own blocks this candidate passes THROUGH rather than taps.
+    # Derived by the SAME predicate `dump_topologies --conn` prints its
+    # `passthru:` line from (buda_session.util), so the marker the client draws
+    # and the line the CLI prints cannot disagree about the same candidate.
+    import buda
+    from buda_session.util import passthru_blocks
+    _ct = buda.ConnTopology()
+    _ct.build(topo, fp)
+    passthru = passthru_blocks(topo, list(_ct.segs()), fp)
     return {
         "type": topo.type,
         "estimated_wirelength": topo.estimated_wirelength,
@@ -245,6 +254,7 @@ def serialize_topology(topo, fp):
         "wl_hi": getattr(topo, "wl_hi", None),
         "segments": [_segment(sg) for sg in topo.segments],
         "seg_busterms": seg_busterms,
+        "passthru_blocks": passthru,
         "seg_conns": seg_conns,
         "bridge_segments": bridges,
         "analysis": serialize_conn_topology(topo, fp),

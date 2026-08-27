@@ -514,3 +514,58 @@ def apply_pattern_layer_facts(layers, layer_id, pattern):
         # pushed beside it so the two can never describe different patterns.
         layers.set_ndr_geom(layer_id, pattern.ndr_geom())
     return True
+
+
+def seg_crosses_rect(cs, x1, y1, x2, y2):
+    """True iff ConnSeg `cs` crosses the rect's INTERIOR: perp coordinate
+    strictly inside the rect's perp extent, along overlap of positive length.
+    A wire that merely rides a face line, or abuts the rect at a single point
+    (a trunk whose endpoint lands on the block face flanking its junction),
+    does not cross it.  Deliberately STRICTER than verify's seg_spans_rect,
+    whose inclusive bounds grant COVERAGE for bundle blocks (full-edge
+    abutment is load-bearing there — ABUT candidates)."""
+    if cs.horiz:   # perp = y (perp_pos), along = x
+        return (y1 < cs.perp_pos < y2
+                and cs.along_lo < x2 and cs.along_hi > x1)
+    return (x1 < cs.perp_pos < x2      # perp = x, along = y
+            and cs.along_lo < y2 and cs.along_hi > y1)
+
+
+def seg_spans_block(cs, name, ubbox, fp):
+    """True iff `cs` crosses block `name`'s SOLID geometry.  Multi-rect / TEG
+    blocks store their real rectangles in get_block_rects(); a segment through
+    a notch/gap between them does NOT cross the block even though it crosses
+    the union bbox.  Single-rect blocks have an empty rect list — fall back to
+    the union bbox (which is their solid extent)."""
+    rects = fp.get_block_rects(name)   # [] for single-rect blocks
+    if rects:
+        return any(seg_crosses_rect(cs, x1, y1, x2, y2)
+                   for (x1, y1, x2, y2) in rects)
+    return seg_crosses_rect(cs, ubbox.x1, ubbox.y1, ubbox.x2, ubbox.y2)
+
+
+def passthru_blocks(topo, segs, fp):
+    """The bundle's OWN blocks a candidate passes THROUGH rather than taps —
+    crossed solid geometry with no busterm landing on that segment.
+
+    One definition for the two readers of it: `dump_topologies --conn`'s
+    `passthru:` line and the web client's pass-through markers.  Unrelated
+    floorplan blocks the wire merely flies over are NOT this (that is
+    over-the-cell routing, context rather than a bundle fact) — the set is
+    scoped to the topology's block CONTRACT, which is what coverage and
+    feedthru are argued about.
+
+    `segs` is the ConnTopology's ConnSeg list; returns sorted names."""
+    import buda
+    contract = set(topo.connected_block_names)
+    if not contract:
+        return []
+    out = set()
+    for cs in segs:
+        tapped = {c.block_name for c in cs.conns
+                  if c.kind == buda.SegConnKind.BUSTERM}
+        for name, ubbox in fp.get_all_blocks():
+            if name in contract and name not in tapped \
+                    and seg_spans_block(cs, name, ubbox, fp):
+                out.add(name)
+    return sorted(out)
