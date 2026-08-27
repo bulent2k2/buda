@@ -33,13 +33,20 @@
   .hanan { stroke: #8883; stroke-width: .5; stroke-dasharray: 2 3; }
   /* Layer palette (consistent across topo / NUTS / DNUTS): warm hues so
      wires stay legible over the BLUE blocks (.blk).  H = orange, V = red,
-     jog = gold — the red/orange/yellow family.  V is nudged off the keepout
-     stroke (#e33) so a wire crossing a keepout edge is still its own color. */
+     jog = dark gold — the red/orange/yellow family.  V is nudged off the
+     keepout stroke (#e33) so a wire crossing a keepout edge is still its own
+     color.  The jog connector is a DARK gold (#c90, not pale #fc0) and drawn
+     thicker than the trunks it joins, because a bright-yellow jog washes out
+     on a light background and a jog is short (thin reads as invisible). */
   .seg { stroke-width: 2.5; fill: none; }
-  .seg.H { stroke: #f80; } .seg.V { stroke: #e22; } .seg.jog { stroke: #fc0; }
+  .seg.H { stroke: #f80; } .seg.V { stroke: #e22; }
+  .seg.jog { stroke: #c90; stroke-width: 4; }
   .bt { fill: #0bd; } .rcv { fill: none; stroke: #d0b; stroke-width: 1.5; }
+  /* NUTS interval band: direction-tinted (not one orange for both), so an H
+     segment reads fully orange and a V segment fully red — the thin track
+     line alone was swamped by a uniform-orange band, reading as "same color". */
   .track { stroke-width: 2; } .track.H { stroke: #f80; } .track.V { stroke: #e22; }
-  .trackftp { fill: #fa03; }
+  .trackftp.H { fill: #f803; } .trackftp.V { fill: #e223; }
   .bit { stroke-width: 1; } .bit.H { stroke: #f80; } .bit.V { stroke: #e22; }
   .via { fill: #f60; stroke: #a30; stroke-width: .5; }
   .overlap { fill: #f005; stroke: #f00; stroke-width: 1; }
@@ -124,12 +131,12 @@
   <div id="running" hidden></div>
   <div id="candbar" hidden>
     <button onclick="stepBundleSel(-1)" title="previous bundle ([)">◀</button>
-    <span id="bundlelbl"></span>
     <button onclick="stepBundleSel(1)" title="next bundle (])">▶</button>
+    <span id="bundlelbl"></span>
     <span class="barsep">│</span>
     <button onclick="stepCand(-1)" title="previous candidate (p)">◀</button>
-    <span id="candlbl"></span>
     <button onclick="stepCand(1)" title="next candidate (n)">▶</button>
+    <span id="candlbl"></span>
     <button id="pinbtn" onclick="pinToggle()">Pin</button>
     <button onclick="editOpen()">Edit</button>
     <button onclick="editOpen('new')">Edit new</button>
@@ -752,7 +759,7 @@ function drawNuts(g) {
   const n = RENDER.nuts; if (!n) return;
   for (const s of n.segments) {
     const op = bundleAlpha(s.bundle_id);
-    el("rect", Object.assign({class: "trackftp", opacity: op}, placedRect(s)), g);
+    el("rect", Object.assign({class: "trackftp " + (s.horiz ? "H" : "V"), opacity: op}, placedRect(s)), g);
     const [a, b, c, d2] = placedLine(s);
     el("line", {class: "track " + (s.horiz ? "H" : "V"), opacity: op,
         x1: a, y1: b, x2: c, y2: d2}, g);
