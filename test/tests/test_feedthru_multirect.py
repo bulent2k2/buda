@@ -222,3 +222,44 @@ def test_the_relay_composes_with_a_cell_declared_multirect_footprint():
     # Control: the same design without the declaration relays nowhere.
     without, _ = _hier_relay_candidates(False)
     assert without == []
+
+
+def _hier_over_relay(feedthru):
+    """The `_HIER` design with the relay cell declared `teg_mode over`."""
+    cmds = [c.replace("set_cell_rects relay rect 0 0 80 400 rect 120 0 200 400",
+                      "set_cell_rects relay rect 0 0 80 400 "
+                      "rect 120 0 200 400 teg_mode over")
+            for c in _HIER]
+    if feedthru:
+        cmds.append("set_feedthru relay_i *")
+    cmds += ["run_hier_bundler", "generate_hier_topologies"]
+    s, out = _session(cmds)
+    return [c for w in s.bundles for c in w.input.candidates
+            if list(c.feedthru_blocks)], out
+
+
+def test_hier_over_multirect_feedthru_is_refused_LOUDLY(tmp_path=None):
+    """The hierarchical twin of the flat OVER refusal (Codex P2 on #860).
+
+    A cell-local component name exists only in the BDB — `session.fp` never
+    knows it — so the CLI's declaration-time check reads an empty rect list
+    and stays silent, while `_build_cell_local_floorplan` goes on to project
+    the component as a multi-rect `teg_mode over` block whose relay the
+    engine skips.  That is the SAME silent inertness this change removes for
+    the flat case, surviving one frame further in.  The verdict is therefore
+    made in `_fp_add_comp` — the one projection rule every derived frame goes
+    through — against the frame's own replayed feedthru flags.
+    """
+    relayed, out = _hier_over_relay(True)
+    assert "BUDA-1908" in out, out
+    assert "relay_i" in out, out
+    # ...and the refusal is real: nothing relays through the OVER macro.
+    assert relayed == [], [list(c.feedthru_blocks) for c in relayed]
+
+
+def test_hier_over_multirect_without_a_declaration_stays_quiet():
+    """Control: the OVER cell alone warns nothing — the warning is about a
+    feedthru DECLARATION being refused, not about `teg_mode over`."""
+    relayed, out = _hier_over_relay(False)
+    assert "BUDA-1908" not in out, out
+    assert relayed == []
