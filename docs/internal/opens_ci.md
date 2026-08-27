@@ -274,3 +274,38 @@ Recorded so they are not "fixed" by someone reading the list too eagerly:
 - **The 5-minute gate is not a problem yet.** If it becomes one, split
   fast-tier on push / full suite on PR (~10-16s vs ~3m16s) rather than dropping
   tiers.
+- **The corpus carries a PARTIALLY-HEALED flow, not its full healer version.**
+  `chip_stack_topdown` is in the corpus; `chip_stack_topdown_heal` is not.  The
+  corpus row is not a healerless measurement and must not be described as one:
+  the flow ends in one default-budget `negotiate_congestion` (line 35) before
+  `report_wl` / `check_design`, which is the healer twin's FIRST healer of nine.
+  What goes unmeasured is everything after it — three `ripup_reroute` bursts,
+  three `refine_selection` passes and two further negotiates.  So a change that
+  perturbs the route is measured only insofar as that first negotiate does NOT
+  absorb it, and whether the full scheme still converges is not measured at all.
+  That asymmetry is real and was exercised: PR #850 nudged
+  `chip_stack_topdown` 21/241/18 -> 22/263/21 (index renumbering moving a greedy
+  order, zero new geometry in the route), and the corpus could not say whether
+  it survived healing.  Measured on demand instead
+  (**2026-08-26**, 4-core box, `--threads 4`): the healer twin reaches **0 opens
+  / 0 overlaps**, `check_design` Success, abstract WL 2,275,077 — and reaches it
+  with margin, round 3's `negotiate_congestion` and `ripup_reroute` both
+  complete no-ops (0.05s / 0.18s) because the design was already clean before
+  the final polish round.  Adding it to the corpus is still refused, on the
+  corpus's own **coverage-per-second** rule: `--candidates` places both
+  `chip_stack_topdown_heal` and `chip3_topdown_heal` in NO NEW TOKENS — they
+  exercise no command family the corpus lacks — and the flow costs **1143s**,
+  which is longer on its own than the entire 48-flow sweep (**7m41s** on the
+  runner), landing **twice** while item 3 stands.  `ariane133_heal` is in the
+  corpus because it earned a row on TOKENS, not because healer flows are
+  admitted on principle — 23 of the 51 corpus flows run at least one healer
+  command, and `ariane133_heal` runs the very same three-round interleaved
+  scheme, so the bar is the row's coverage per second and nothing else.  The
+  cheap alternative is what was actually done: run the healer twin by hand.  Its
+  trigger cannot be "when the corpus row moves" — a perturbation the in-flow
+  negotiate absorbs leaves the row byte-identical, which is exactly the case the
+  twin exists to cover — so the trigger is the CHANGE, not the row: run it when
+  a change touches what the healers consume or are made of (topology
+  generation, planner selection, NUTS/DNUTS placement, or the healer passes
+  themselves).  A moved row is a sufficient reason to run it, never a necessary
+  one.
