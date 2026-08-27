@@ -38,7 +38,9 @@ ended with: TEG-over connection metal emitted as ordinary segments through
 every Direct/gap/one-sided trunk shape (opens 1(a) + the 2026-08-25
 residuals (i)/(ii)), the `TEG_OPEN` audit failing whatever placed metal
 still misses a rect (1(b)), the `BUDA-1907` thru census and `BUDA-1908`
-feedthru warning covering the silent-by-design corners (opens 5/7), the
+feedthru warning covering the silent-by-design corners (opens 5/7 — and,
+since 2026-08-27, the multi-rect feedthru RELAY itself, honoured under
+`thru` and refused under `over`), the
 planner/margin/TopoEdit multi-rect split-brains repaired (opens 3/9/16),
 declaration validation + `set_teg_mode` (opens 13/14), and the QoR corpus,
 flow tests and demo vehicles pinning it all end to end (open 2,
@@ -539,11 +541,58 @@ its pinning test on this date:
    both clients name the same label, the same colour and the same call
    sites, so one client updated without the other fails (the issue #554
    shape).
-7. **`set_feedthru` on a multi-rect block remains inert in the engine**
+7. ~~**`set_feedthru` on a multi-rect block remains inert in the engine**
    (the feedthru relay is single-rect MVP — `topology.cpp` skips
    `rects.size() > 1`); the declaration now warns instead of dropping the
    intent silently (BUDA-1908, both declaration orders — open 7, pinned by
-   `test_set_feedthru_multirect_warning.py`).
+   `test_set_feedthru_multirect_warning.py`).~~  **RESOLVED 2026-08-27** —
+   and by TEG MODE, not by a size gate, because `teg_mode` and
+   `set_feedthru` are declarations about the SAME thing (the block's own
+   internal routing) and the MVP gate had collapsed two opposite answers
+   into one refusal:
+   * **THRU** declares the rects internally connected, which is exactly the
+     trust a relay asks for — the tool ALREADY spends it everywhere else,
+     since a `thru` gap trunk taps the nearest rect and leaves the sides
+     "to the block's internal routing".  So the relay is HONOURED, and the
+     spine splits at the **along-hull of the rects the spine's band
+     crosses**.  Not the union bbox: a rect in ANOTHER band is not under
+     the trunk, so deleting spine across its extent would claim a relay
+     over empty space and leave both pieces ending in mid-air instead of
+     on a face (`test_thru_multirect_relay_stops_at_the_rects_under_the_trunk`
+     measures exactly that).  The hull DOES span the physical gaps
+     BETWEEN the crossed rects, which is the cross-gap continuity `thru`
+     asserts.  Band membership and the hull are read through
+     `bt_all_rects` — the same geometry `best_rect`/`has_stub` decided the
+     pass-through on, so the pass cannot disagree with itself about which
+     rects the trunk meets.
+   * **OVER** declares the rects NOT internally connected, which
+     contradicts the relay claim, so it is REFUSED — the trunk stays whole
+     (the ordinary pass-through) and `over`'s own per-rect connection metal
+     is emitted as usual.  Refusing beats implementing: under `over` the
+     per-rect legs T-junction the spine, so a split can leave a leg
+     hanging in a removed gap — and `disconnected_islands_bridged` EXEMPTS
+     an island touching a declared feedthru block, so the declaration
+     would launder the very open `over` exists to expose.  A WARNING
+     rather than a hard error, because the reachable spelling is a
+     wildcard (`set_feedthru * *`) over a design that merely happens to
+     contain an OVER block, and the declaration is still correct for every
+     other block it names.
+   **BUDA-1908 is retargeted, not retired** — same identity ("this
+   feedthru declaration will not take effect on the named multi-rect
+   block"), sharper text and a narrower trigger; it no longer fires for a
+   THRU block, which is what the resolution buys.  The audits needed
+   nothing: `disconnected_islands_bridged` already read a feedthru block
+   per rect, the `FEEDTHRU_RELAY` and #514 tap-overhang exemptions are
+   by NAME, and `TEG_OPEN` is OVER-gated, so the refusal keeps the two
+   features from meeting at all.  Tests:
+   `test_feedthru_multirect.py` (geometry both ways, the off-band honesty
+   guard, single-rect + undeclared controls, an end-to-end audit, and the
+   HIER composition — a `set_cell_rects` THRU macro relaying in a
+   cell-local template frame, where the block is known by its LOCAL name)
+   and the retargeted `test_set_feedthru_multirect_warning.py`; vehicle
+   `flow/feedthru_multirect.buda` (QoR corpus row — `set_feedthru`
+   appeared in NO corpus flow before it, so the spine-splitting branch,
+   which DELETES metal, was swept by nothing).
 8. **A `TRUNK_*+MST` hybrid drops the seed trunk's TEG connection metal**
    (OPENED 2026-08-27 by the limitation-4 work, which needed a still-dirty
    shape and found this one).  `add_trunk_mst_candidates` copies the seed
@@ -731,11 +780,14 @@ catch this shape too, which is another reason to land it first.
 - The 2-pin L/Z/U/I family is **bypassed** for any multi-rect endpoint
   (`src/topology.cpp:4646-4652` forces the n-pin path) — safe, but the 2-pin
   generator itself is not rect-aware if reached directly via bindings.
-- `set_feedthru` on a multi-rect block is skipped by the engine
-  (`src/topology.cpp` — "MVP: single-rect only"); ~~no warning
-  anywhere, the CLI validates only block/layer existence~~ the declaration
-  now warns LOUD in both declaration orders (BUDA-1908, open 7; Final-state
-  item 7).
+- ~~`set_feedthru` on a multi-rect block is skipped by the engine
+  (`src/topology.cpp` — "MVP: single-rect only"); no warning
+  anywhere, the CLI validates only block/layer existence~~ RESOLVED
+  2026-08-27: the relay is HONOURED on a `teg_mode thru` multi-rect block
+  (split at the along-hull of the rects the spine's band crosses) and
+  REFUSED on an `over` one, which declares its rects not internally
+  connected — reported in both declaration orders (BUDA-1908, retargeted;
+  Final-state item 7).
 - No IMPORT path produces a multi-rect block: DEF/LEF components get one
   bbox (rectilinear macros collapse), GDS import likewise.  REFUSED rather
   than undone — none of those files STATES a multi-rect block, so deriving
@@ -1287,7 +1339,10 @@ wrong.
    `get_feedthru` resolution the engine uses — and the two sites share one
    session-level per-block memo (`_warn_feedthru_multirect`), so the same
    block never warns twice whichever order the flow declares in.  Tests:
-   `test_set_feedthru_multirect_warning.py`.
+   `test_set_feedthru_multirect_warning.py`.  *(2026-08-27: the engine gate
+   is gone for THRU blocks — the relay is honoured there — so the warning
+   is retargeted to `teg_mode over`, which genuinely contradicts it.  See
+   Final-state item 7.)*
 8. ~~**BITRUNK is bbox-only** (`src/topology.cpp:4401`, `:4467-4473`): the
    datapath trees neither select rects nor bridge.  Acceptable as a scoping
    decision, but undocumented.~~  RESOLVED-AS-DOCUMENTED 2026-08-23: the

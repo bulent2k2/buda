@@ -274,6 +274,18 @@ CORPUS = [
     # and the cross-block depth frame.  EXPECTED CLEAN (0/0/0), with the
     # THRU macro's BUDA-1907 census beside the OVER one.  ~0.1s.
     "flow/teg_hier_cell.buda",
+    # MULTI-RECT FEEDTHRU guard (teg_multirect_status.md limitation 7,
+    # RESOLVED 2026-08-27): a THRU multi-rect block relaying the trunk (the
+    # spine splits at the along-hull of the rects its band crosses) beside an
+    # identical OVER block whose relay is REFUSED — the two verdicts from one
+    # `set_feedthru` line.  It earns its row on a coverage gap rather than on
+    # size: `set_feedthru` appeared in NO corpus flow before it, so the
+    # trunk generator's spine-splitting branch — which deletes metal, the one
+    # kind of change an audit is least likely to notice — was swept by
+    # nothing at all.  EXPECTED CLEAN (0/0/0); a lost relay shows as bundle
+    # `a`'s WL jumping 500 -> 800, and a relay wrongly granted to the OVER
+    # block fires TEG_OPEN.  ~0.03s.
+    "flow/feedthru_multirect.buda",
 ]
 
 

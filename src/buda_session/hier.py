@@ -759,9 +759,32 @@ class HierMixin:
                     f"{comp.cell} ...` against the current cell size.")
             fp.add_block(nm, x1, y1, x2, y2)
             return
+        over = (ent[3] == "OVER")
         fp.add_block_rects(
             nm, rects,
-            buda.TegMode.OVER if ent[3] == "OVER" else buda.TegMode.THRU)
+            buda.TegMode.OVER if over else buda.TegMode.THRU)
+        # A feedthru relay is REFUSED for a multi-rect OVER block, and the
+        # refusal must be as loud here as it is in the flat flow.  The CLI's
+        # declaration-time check reads `session.fp`, which a cell-local name
+        # never reaches — it exists only in the BDB — so a hier flow declaring
+        # a feedthru on such a component got silence, the exact inertness this
+        # change removes (Codex P2 on #860).  Judge it HERE instead, in the one
+        # projection rule every derived frame goes through, against the frame's
+        # own replayed flags: `_apply_fp_session_settings` has already applied
+        # them, so `get_feedthru` answers for the name THIS frame knows.  The
+        # warn helper is memoized per block, so repeating frames say it once.
+        if over and len(rects) > 1:
+            lids = set(getattr(self, "_layer_name_map", {}).values()) or {-1}
+            if any(fp.get_feedthru(nm, lid) for lid in lids):
+                from buda_cmds.setup_cmds import _warn_feedthru_multirect
+                _warn_feedthru_multirect(
+                    self, [nm],
+                    lambda fresh: (
+                        f"set_feedthru: a `teg_mode over` block declares its "
+                        f"rects NOT internally connected, so it cannot relay "
+                        f"— the feedthru is refused for block(s): "
+                        f"{', '.join(fresh)} (hierarchical frame; the block's "
+                        f"footprint comes from its BDB cell)"))
 
     def _add_blocks_from_bdb(self, depth: int, mode: str = "deepest"):
         """Walk BDB hierarchy and call fp.add_block() for components at `depth`.

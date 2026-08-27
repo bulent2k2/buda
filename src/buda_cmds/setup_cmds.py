@@ -45,22 +45,42 @@ _KEEPOUT_COORD_WHY = ("Truncating would SHRINK the zone, leaving routing that "
 
 
 def _warn_feedthru_multirect(session, names, detail):
-    """BUDA-1908, the ONE emission mechanism (teg_multirect_status.md open
-    7): feedthru is single-rect only in the engine, so an ENABLED feedthru
-    resolving onto a multi-rect block is an intent the engine drops — and
-    the declarations can arrive in either order: `set_feedthru` naming an
-    existing multi-rect block, or a multi-rect `add_block` landing under an
-    already-active wildcard/per-layer setting.  Both sites call here, and
-    the session-level per-block memo is what keeps the two from
-    double-firing for the same block (`set_feedthru * * on` before the
-    block warns at add_block; a later explicit `set_feedthru L * on` for
-    the already-warned block stays quiet)."""
+    """BUDA-1908, the ONE emission mechanism (teg_multirect_status.md
+    limitation 7): a feedthru relay and `teg_mode over` are contradictory
+    declarations about the SAME thing — the block's own internal routing.
+    `over` says the rects are NOT internally connected; a feedthru says the
+    block relays the bus through its own routing.  The engine refuses the
+    combination (add_trunk's relay loop skips an OVER multi-rect block), so
+    say so at declaration — and the declarations can arrive in either
+    order: `set_feedthru` naming an existing OVER block, or an OVER
+    `add_block` landing under an already-active wildcard/per-layer setting.
+    Both sites call here, and the session-level per-block memo is what
+    keeps the two from double-firing for the same block (`set_feedthru * *
+    on` before the block warns at add_block; a later explicit
+    `set_feedthru L * on` for the already-warned block stays quiet).
+
+    A THRU multi-rect block is NOT warned: the relay is honoured there
+    (the spine splits at the along-hull of the rects it crosses)."""
     said = session.__dict__.setdefault("_feedthru_mr_warned", set())
     fresh = sorted(n for n in set(names) if n not in said)
     if not fresh:
         return
     said.update(fresh)
     buda_diag.emit("BUDA-1908", detail(fresh))
+
+
+def _feedthru_refused_blocks(session, names):
+    """Of `names`, the ones a feedthru relay is REFUSED for: multi-rect AND
+    `teg_mode over`.  Reads the same per-block resolution the engine reads
+    (`get_block_teg_mode` carries the `set_teg_mode` default resolved at
+    declaration), so the report and the refusal cannot drift."""
+    out = []
+    for n in names:
+        if len(session.fp.get_block_rects(n)) <= 1:
+            continue
+        if session.fp.get_block_teg_mode(n) == buda.TegMode.OVER:
+            out.append(n)
+    return out
 
 
 def cmd_add_block(session, cmd, args, cmd_line):
@@ -119,8 +139,8 @@ def cmd_add_block(session, cmd, args, cmd_line):
         # The reverse declaration order of the set_feedthru-time warning
         # (Codex P2 on #834): `set_feedthru * * on` (or a per-layer enable)
         # declared BEFORE this block exists warned about nothing, yet the
-        # new multi-rect block inherits the enabled policy — which the
-        # engine's single-rect-only gate then silently drops.  Warn here
+        # new block inherits the enabled policy — which the engine then
+        # refuses if the block is a `teg_mode over` multi-rect.  Warn here
         # when a currently-active setting resolves feedthru ON for this
         # block on any declared layer (a brand-new block has no per-block
         # rule, so this reads the wildcard/per-layer/global resolution);
@@ -128,7 +148,7 @@ def cmd_add_block(session, cmd, args, cmd_line):
         # memo with the set_feedthru site, so the same block never warns
         # twice.  (No feedthru declared anywhere => get_feedthru resolves
         # the global default False on every layer and this stays silent.)
-        if len(rects) > 1:
+        if _feedthru_refused_blocks(session, [name]):
             lids = set(session._layer_name_map.values()) or {-1}
             if any(session.fp.get_feedthru(name, lid) for lid in lids):
                 _warn_feedthru_multirect(
@@ -136,8 +156,9 @@ def cmd_add_block(session, cmd, args, cmd_line):
                     lambda fresh: (
                         f"add_block: feedthru is enabled for "
                         f"'{fresh[0]}' by an earlier set_feedthru setting, "
-                        f"but feedthru is single-rect only — it has no "
-                        f"effect for this multi-rect block"))
+                        f"but this block is `teg_mode over` — its rects are "
+                        f"declared NOT internally connected, so it cannot "
+                        f"relay; the feedthru is refused for it"))
         x1 = min(r[0] for r in rects); y1 = min(r[1] for r in rects)
         x2 = max(r[2] for r in rects); y2 = max(r[3] for r in rects)
         rest = list(args[i:])
@@ -350,28 +371,30 @@ def cmd_set_feedthru(session, cmd, args, cmd_line):
                         layer_ids.append(session._layer_name_map[t])
                     else:
                         print(f"Warning: unknown layer '{t}' in set_feedthru")
-            # Feedthru is single-rect only in the engine (the trunk
-            # generator's "MVP: single-rect only" gate skips multi-rect
-            # blocks with no report — teg_multirect_status.md open 7), so a
-            # declaration ENABLING it for a multi-rect block states an intent
-            # the engine drops.  Say so at declaration time, once, naming
-            # every affected block; the declaration still takes effect for
-            # every other block it names.  `off` is not warned: a multi-rect
-            # block never relays regardless of the flag, so disabling it
-            # changes nothing AND the outcome matches the intent.
+            # A feedthru relay and `teg_mode over` contradict each other
+            # (teg_multirect_status.md limitation 7): `over` declares the
+            # block's rects NOT internally connected while a feedthru asks
+            # the block to relay the bus through its own internal routing.
+            # The engine refuses the combination, so say so at declaration
+            # time, once, naming every affected block; the declaration still
+            # takes effect for every other block it names — including a THRU
+            # multi-rect block, whose relay is honoured.  `off` is not
+            # warned: an OVER block never relays regardless of the flag, so
+            # disabling it changes nothing AND the outcome matches the
+            # intent.
             if val:
                 if blocks_wild:
                     cands = [n for n, _ in session.fp.get_all_blocks()]
                 else:
                     cands = block_names
-                multi = [n for n in cands
-                         if len(session.fp.get_block_rects(n)) > 1]
-                if multi:
+                refused = _feedthru_refused_blocks(session, cands)
+                if refused:
                     _warn_feedthru_multirect(
-                        session, multi,
+                        session, refused,
                         lambda fresh: (
-                            f"set_feedthru: feedthru is single-rect only — "
-                            f"the declaration has no effect for multi-rect "
+                            f"set_feedthru: a `teg_mode over` block declares "
+                            f"its rects NOT internally connected, so it "
+                            f"cannot relay — the feedthru is refused for "
                             f"block(s): {', '.join(fresh)}"))
             if blocks_wild and layers_wild:
                 session.fp.set_feedthru(val)

@@ -665,11 +665,29 @@ flagged. An *unrelated* block the trunk merely crosses (not a bundle busterm) is
 pass-through, never a feedthru. Straight/I-shape feedthru and a `feedthru_penalty`
 ranking knob are later phases.
 
-Feedthru is **single-rect only**: the engine skips a multi-rect block, so a
-`set_feedthru … on` naming one — directly or via `*`, in either declaration
-order — warns (**BUDA-1908**) while still taking effect for the single-rect
-blocks it names (`off` is not warned: a multi-rect block never relays
-regardless, so disabling changes nothing).
+**Multi-rect blocks** are decided by their [TEG mode](#set_teg_mode), because
+`teg_mode` and `set_feedthru` are declarations about the same thing — the
+block's own internal routing:
+
+* **`teg_mode thru`** (the default) declares the rects internally connected,
+  which is exactly the trust a relay asks for, so the feedthru is **honoured**.
+  The spine splits at the **along-hull of the rects its band actually crosses**
+  — not at the union bbox, whose extent can include a rect in another band the
+  trunk never meets; deleting spine there would claim a relay across empty
+  space and leave the two pieces ending in mid-air instead of on a face. The
+  hull *does* span the physical gaps between the crossed rects, which is the
+  same cross-gap continuity `thru` already asserts everywhere else.
+* **`teg_mode over`** declares the rects **not** internally connected, which
+  contradicts the relay claim, so the feedthru is **refused** for that block
+  and reported (**BUDA-1908**) — directly or via `*`, in either declaration
+  order. The trunk stays whole (an ordinary pass-through) and `over`'s own
+  per-rect connection metal is emitted as usual. The declaration still takes
+  effect for every other block it names. `off` is not warned: an `over` block
+  never relays regardless, so disabling changes nothing.
+
+Worked vehicle: [`flow/feedthru_multirect.buda`](../../flow/feedthru_multirect.buda)
+— the two modes side by side on identical geometry, one `set_feedthru` line,
+two verdicts.
 
 Feedthru is genuinely **per-(block, layer)** — a block may be routable-through on one
 trunk layer but not another — so the command sets a full block×layer grid rather than

@@ -1,0 +1,79 @@
+# ============================================================
+# flow/feedthru_multirect.buda — set_feedthru on a MULTI-RECT block
+#
+#   bin/buda --no-viz flow/feedthru_multirect.buda
+#
+# `set_feedthru` and `teg_mode` are declarations about the SAME thing —
+# the block's own internal routing — so the multi-rect answer is decided
+# by the TEG mode (teg_multirect_status.md limitation 7):
+#
+#   * teg_mode thru (the default) declares the rects internally
+#     connected, which is exactly the trust a feedthru relay asks for.
+#     The relay is HONOURED: the trunk splits at the along-hull of the
+#     rects its band actually crosses, giving two BUSTERM landings and
+#     less top-level metal.
+#
+#   * teg_mode over declares the rects NOT internally connected, which
+#     contradicts the relay claim.  The feedthru is REFUSED for that
+#     block (BUDA-1908) and the trunk stays whole — the ordinary
+#     pass-through, with `over`'s own per-rect connection metal.
+#
+# Two identical geometries, one per mode, so the difference in the dump
+# is the declaration and nothing else:
+#
+#   ┌──────────────────────────────────────────────────────┐
+#   │ [src2]      [midz#0] [midz#1]            [dst2]      │  teg_mode over
+#   │                                                      │
+#   │ [src]       [mid#0]  [mid#1]             [dst]       │  teg_mode thru
+#   └──────────────────────────────────────────────────────┘
+#
+# Both blocks are two rects side by side in the SAME perpendicular band
+# with a gap along the trunk — the shape a feedthru is for: the trunk
+# enters the block's metal, and leaves it again.
+# ============================================================
+
+def_layer 3 M3 H 20
+def_layer 4 M4 V 20
+def_layer 5 M5 H TOP 10
+def_layer 6 M6 V TOP 10
+
+def_track_pattern 3 0  POWER 2 1  (SIGNAL 1 0.5)x4  GROUND 2 1  (SIGNAL 1 0.5)x4
+def_track_pattern 4 0  POWER 2 1  (SIGNAL 1 0.5)x4  GROUND 2 1  (SIGNAL 1 0.5)x4
+def_track_pattern 5 0  POWER 3 1  (SIGNAL 2 1)x4    GROUND 3 1  (SIGNAL 2 1)x4
+def_track_pattern 6 0  POWER 3 1  (SIGNAL 2 1)x4    GROUND 3 1  (SIGNAL 2 1)x4
+
+# ---- the relayed (thru) row ---------------------------------
+add_block src  0 200 100 300
+add_block mid  rect 400 150 500 350  rect 600 150 700 350
+add_block dst  900 200 1000 300
+
+# ---- the refused (over) row ---------------------------------
+add_block src2 0 600 100 700
+add_block midz rect 400 550 500 750  rect 600 550 700 750 teg_mode over
+add_block dst2 900 600 1000 700
+
+add_bus a[4] src.out  mid.in,dst.in
+add_bus b[4] src2.out midz.in,dst2.in
+
+# One declaration, two verdicts: `mid` relays, `midz` is refused LOUD
+# (BUDA-1908) — the declaration still stands for every block it names
+# that CAN relay.
+set_feedthru mid,midz *
+
+run_bundler STRICT
+generate_topologies
+
+# `a` splits at mid's band hull (2 spine pieces, mid tapped twice, no
+# pass-through); `b` keeps one continuous spine over midz plus over's
+# own per-rect connection metal.
+select_topology a TRUNK_H@y200
+select_topology b TRUNK_H@y600
+dump_topologies a --conn
+dump_topologies b --conn
+
+run_planner 5
+run_nuts
+check_design nuts
+run_detailed_nuts
+check_design dnuts
+report_wl

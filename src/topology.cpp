@@ -3331,22 +3331,54 @@ void TopologyGenerator::add_trunk(const Axis& axis, bool suppress_stubs,
     // Opt-in feedthru: a bundle block the trunk passes straight through (a busterm
     // of THIS bundle with no stub) may relay the bus across its interior; split the
     // trunk at the block's along-faces.  Only blocks this topology connects to are
-    // eligible.  Single-rect MVP.  Gated on feedthru_active() (default off).
+    // eligible.  Gated on feedthru_active() (default off).
+    //
+    // MULTI-RECT (teg_multirect_status.md limitation 7, resolved 2026-08-27) is
+    // decided by TEG MODE, because `teg_mode` and `set_feedthru` speak about the
+    // very same thing — the block's own internal routing:
+    //   * THRU declares the rects internally connected, which is exactly the trust
+    //     a feedthru relay asks for, so the relay is honoured.  The split spans the
+    //     ALONG-HULL of the rects the spine's band actually CROSSES — not the union
+    //     bbox, whose extent may include a rect in another band that the trunk never
+    //     meets: deleting spine there would claim a relay across empty space, and
+    //     the two spine pieces would end in mid-air rather than on a face.  The hull
+    //     of the crossed rects DOES include the physical gaps between them, which is
+    //     the same cross-gap continuity `thru` already asserts everywhere else (a
+    //     gap trunk taps the nearest rect and leaves the sides to the block).
+    //   * OVER declares the rects NOT internally connected, which contradicts the
+    //     relay claim.  Refused here and reported at declaration (BUDA-1908): the
+    //     spine stays whole, exactly as an undeclared pass-through.
+    // A single-rect block keeps reading its `orig_bbox` (identical geometry, and the
+    // one-rect `rect` form is unchanged byte for byte).
     std::vector<std::pair<int,int>> ft_gaps;   // (lo,hi) along-faces of feedthru blocks
     std::vector<bool> is_feedthru(n, false);
     if (floorplan_.feedthru_active()) {
         for (int i = 0; i < n; ++i) {
             if (has_stub[i] || stub_suppressed[i]) continue;  // not passed through
             if (!floorplan_.get_feedthru(blocks[i].block_name, spine_layer)) continue;
-            if (blocks[i].rects.size() > 1) continue;         // MVP: single-rect only
+            int ft_lo = axis.along_lo(blocks[i].orig_bbox);
+            int ft_hi = axis.along_hi(blocks[i].orig_bbox);
+            if (blocks[i].rects.size() > 1) {
+                if (blocks[i].teg_mode == TegMode::OVER) continue;   // refused (BUDA-1908)
+                // Hull over the rects the spine's band crosses.  Read through
+                // bt_all_rects — the same geometry best_rect/has_stub decided the
+                // pass-through on, so band membership cannot disagree with itself.
+                ft_lo = INT_MAX; ft_hi = INT_MIN;
+                for (const auto& r : bt_all_rects(blocks[i])) {
+                    if (locus < axis.perp_lo(r) || locus > axis.perp_hi(r)) continue;
+                    ft_lo = std::min(ft_lo, axis.along_lo(r));
+                    ft_hi = std::max(ft_hi, axis.along_hi(r));
+                }
+                if (ft_lo >= ft_hi) continue;    // no rect under the trunk: nothing to relay
+            }
             // A feedthru relay needs the trunk to PASS THROUGH the block (enter one
             // face, exit the other).  A spine fully contained in the block (the
             // bounded interior spine, #84) does not pass through, so it must not be
             // split out — that would delete the only junction (Codex P1).
-            if (a_lo >= axis.along_lo(blocks[i].orig_bbox) && a_hi <= axis.along_hi(blocks[i].orig_bbox))
+            if (a_lo >= ft_lo && a_hi <= ft_hi)
                 continue;
-            int f1 = std::max(a_lo, axis.along_lo(blocks[i].orig_bbox));
-            int f2 = std::min(a_hi, axis.along_hi(blocks[i].orig_bbox));
+            int f1 = std::max(a_lo, ft_lo);
+            int f2 = std::min(a_hi, ft_hi);
             if (f1 < f2) {
                 ft_gaps.push_back({f1, f2});
                 is_feedthru[i] = true;
