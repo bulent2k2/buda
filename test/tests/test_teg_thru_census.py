@@ -163,12 +163,16 @@ def test_over_block_gets_teg_open_not_the_census():
     # shapes (open 1 residuals (i)/(ii)), the MST attachment pass (Final-state
     # limitation 1) and now the ADJACENT-rect Direct corner (limitation 2,
     # 2026-08-27) have each been resolved out from under this vehicle in turn.
-    # What remains is BITRUNK (Final-state limitation 4, bbox-only BY SCOPING —
-    # no rect selection, no TEG connection metal): rect#1 at x 900..1000 lies
-    # beyond the rungs' along-span and its union-centre stub lands in the gap,
-    # so no placed metal of the bundle touches it.  Same pin as
-    # test_teg_open.py::test_bitrunk_on_over_block_fires_teg_open_end_to_end,
-    # which is where that guarantee is pinned end to end.
+    # BITRUNK went the same way (limitation 4, 2026-08-27: per-rect selection
+    # plus the trunk generator's own connection-metal rules), so what remains
+    # is the `TRUNK_*+MST` HYBRID (Final-state limitation 8, opened by that
+    # work): the hybrid re-derives its spine from the SURVIVING branch blocks
+    # and drops the seed trunk's TEG metal with it — the seed `TRUNK_H@y100`
+    # spans x 100..900 (spine-end anchored onto rect#1's face) while
+    # `TRUNK_H+MST@y100` spans x 100..500, so rect#1 is touched by no placed
+    # metal.  Same pin as test_teg_open.py::
+    # test_trunk_mst_hybrid_on_over_block_still_fires_teg_open, which is where
+    # that guarantee is pinned end to end.
     s = _session([
         "add_block src 0 0 100 100",
         "add_block r1 300 300 400 400",
@@ -181,8 +185,8 @@ def test_over_block_gets_teg_open_not_the_census():
         "generate_topologies",
     ] + _TRACKS)
     pin = next((i for i, c in enumerate(s.bundles[0].input.candidates)
-                if c.type.startswith("BITRUNK_H")), None)
-    assert pin is not None, "no BITRUNK_H candidate found"
+                if c.type == "TRUNK_H+MST@y100"), None)
+    assert pin is not None, "no TRUNK_H+MST@y100 candidate found"
     _route(s, f"select_topology 1 {pin + 1}", "run_planner", "run_nuts")
     verdict, out = _check(s, "nuts")
     assert verdict["by_kind"].get("TEG_OPEN", 0) >= 1, out

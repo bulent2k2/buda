@@ -1,0 +1,74 @@
+# TEG on a BITRUNK datapath tree — the "bbox-only is not a tap" vehicle
+# (teg_multirect_status.md Final-state limitation 4, RESOLVED 2026-08-27).
+#
+# The legacy BITRUNK_H tree (two H rungs + a V backbone) over four endpoint
+# blocks, one of which — r2 — is a `teg_mode over` multi-rect block whose two
+# rects sit side by side ALONG the rung axis, sharing the rung's perp band.
+#
+# Until 2026-08-27 both BITRUNK families worked entirely on `orig_bbox`: no
+# rect SELECTION and no TEG connection metal.  Both halves cost something real
+# on this geometry, and they cost it in opposite directions:
+#
+#   • SELECTION: the "tap" was the UNION bbox face at the pin's along
+#     coordinate — x=750, which on this block is the GAP between the rects.  A
+#     tap on no metal is a silent open, and the generation coverage gate said
+#     so by dropping the whole candidate (`[TopoGen] dropped 1 candidate(s)
+#     … first open: BITRUNK_H missing block 'r2'`) whenever the union face fell
+#     outside every rect — so a multi-rect design silently lost the datapath
+#     shape it asked for.
+#   • CONNECTION METAL: where the candidate did survive (this flow), rect#1 at
+#     x 900..1000 lay beyond the rungs' along-span and NO placed metal of the
+#     bundle touched it — TEG_OPEN at both placed stages (1 bundle-level at
+#     nuts, 4 per-bit at dnuts).  That loudness is what made the scoping
+#     acceptable; it is no longer needed.
+#
+# Both are now the TRUNK generator's own rules, read through the shared
+# predicates: `best_rect` picks the tap rect, a rect sharing the spine's perp
+# band is reached by GROWING the spine over its along-centre (a CROSSING, which
+# needs no busterm seed — BITRUNK deliberately never calls annotate_endpoints,
+# so it has no face anchor to fall back on), and every other rect gets one
+# perpendicular stub from its facing face.  Here both rects share the y=50
+# rung's band, so the rung itself is the connection metal: its span grows from
+# x 750 to x 950 (rect#1's along-centre) and crosses both.
+#
+# The vehicle also guards the NUTS half.  `tighten_spans_to_reach` elects
+# exactly ONE pass-through anchor per (bundle, BLOCK) — anchoring every
+# crossing keeps phantom span for nothing (b44) — which rests on a block's
+# rects being interchangeable covers, precisely what `teg_mode over` REVOKES.
+# Without the per-rect anchor the generated rung reaches x=950 and the PLACED
+# span comes back clipped to x=600 (rect#0's far face, the one elected
+# crossing), so TEG_OPEN fires on placed geometry while the candidate is
+# correct.  A regression in either half shows up here as a violation.
+#
+# Candidate pin: by TYPE (`BITRUNK_H`), the selector that survives a re-sorted
+# pool — and this change DOES re-sort it, since the rung grew.
+# test_flow_scripts.py::test_teg_bitrunk_flow_routes_clean asserts the planner
+# line names it AND both audits report Success.
+
+add_block src 0 0 100 100
+add_block r1 300 300 400 400
+add_block r2 rect 500 0 600 100 rect 900 0 1000 100 teg_mode over
+add_block r3 300 600 400 700
+
+def_layer 4 M4 H TOP 0
+def_layer 5 M5 V TOP 0
+
+def_track_pattern 4 0 (SIGNAL 2 2)x8
+def_track_pattern 5 0 (SIGNAL 2 2)x8
+
+add_bus d[4] src.tx r1.a,r2.b,r3.c
+
+run_bundler STRICT
+generate_topologies
+
+# The legacy datapath tree: rungs at y=50 and y=650, backbone at x=300.  The
+# y=50 rung spans x 50..950, crossing BOTH of r2's rects.
+select_topology 1 BITRUNK_H
+
+run_planner
+run_nuts
+check_design
+run_detailed_nuts
+check_design
+report_wl
+visualize

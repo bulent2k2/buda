@@ -135,13 +135,15 @@ def _flat_setup_from_trace(trace_path, cut_verb):
 
 
 _MULTIRECT_LINE_L = "add_block L rect 0 0 100 400 rect 0 0 400 100 teg_mode over"
-# The still-DIRTY vehicle: BITRUNK on an OVER multi-rect block (Final-state
-# limitation 4 — the datapath trees are bbox-only BY SCOPING, so rect#1 at
-# x 900..1000 is touched by no placed metal).  It has been re-homed twice as
-# the shapes under it were fixed: the MST shape (Final-state limitation 1,
-# 2026-08-25) and then the ADJACENT-rect Direct corner (limitation 2,
-# 2026-08-27) both became clean, and a resume test whose vehicle audits clean
-# proves nothing about the audit staying armed.
+# The still-DIRTY vehicle: a `TRUNK_*+MST` hybrid on an OVER multi-rect block
+# (Final-state limitation 8 — the hybrid re-derives its spine from the
+# SURVIVING branch blocks and drops the seed trunk's TEG connection metal with
+# it, so rect#1 at x 900..1000 is touched by no placed metal).  It has been
+# re-homed three times as the shapes under it were fixed: the MST shape
+# (limitation 1, 2026-08-25), the ADJACENT-rect Direct corner (limitation 2,
+# 2026-08-27) and BITRUNK (limitation 4, the same day) all became clean, and a
+# resume test whose vehicle audits clean proves nothing about the audit
+# staying armed.
 _MULTIRECT_LINE_R2 = ("add_block r2 rect 500 0 600 100 rect 900 0 1000 100 "
                       "teg_mode over")
 
@@ -241,15 +243,20 @@ def test_flat_resume_keeps_teg_open_audit_armed(tmp_path, monkeypatch):
         "def_track_pattern 5 0 (SIGNAL 2 2)x8",
     ]
 
-    # ── build session, RECORDED: a BITRUNK tree on the OVER block, whose
-    #    bbox-only scoping leaves rect#1 untouched (Final-state limitation 4;
-    #    pinned end to end by test_teg_open.py::
-    #    test_bitrunk_on_over_block_fires_teg_open_end_to_end) ──
+    # ── build session, RECORDED: a `TRUNK_*+MST` hybrid on the OVER block.
+    #    The hybrid re-derives its spine from the SURVIVING branch blocks and
+    #    drops the seed trunk's TEG connection metal with it, so rect#1 stays
+    #    untouched (Final-state limitation 8; pinned end to end by
+    #    test_teg_open.py::
+    #    test_trunk_mst_hybrid_on_over_block_still_fires_teg_open).  This
+    #    vehicle needs a DIRTY route and has been re-homed each time a shape
+    #    was resolved out from under it — BITRUNK's turn came 2026-08-27
+    #    (limitation 4). ──
     monkeypatch.setenv("BUDA_RECORD", trace)
     s1 = _session(flow + ["run_bundler STRICT", "generate_topologies"])
     pin = next((i + 1 for i, c in enumerate(s1.bundles[0].input.candidates)
-                if c.type.startswith("BITRUNK_H")), None)
-    assert pin is not None, "no BITRUNK_H candidate found"
+                if c.type == "TRUNK_H+MST@y100"), None)
+    assert pin is not None, "no TRUNK_H+MST@y100 candidate found"
     for cmd in (f"select_topology 1 {pin}", "run_planner", "run_nuts"):
         _run(s1, cmd)
     monkeypatch.delenv("BUDA_RECORD")

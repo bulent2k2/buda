@@ -43,6 +43,17 @@ struct PassthruCrossing {
     double      perp_lo  = 0, perp_hi  = 0;   // the covered RECT's perp extent
     std::string block;                        // block name (bundle-local key)
     int         rect = 0;                     // which rect of that block
+    // Does this rect need an anchor of its OWN, or does one per block do?
+    // The election below keeps exactly ONE anchor per block, because anchoring
+    // every crossing keeps phantom span for nothing (b44).  That rests on the
+    // block's rects being interchangeable covers — which is precisely what
+    // `teg_mode over` REVOKES: an OVER block does not join its rects
+    // internally, so a spine crossing two of them holds two independent
+    // attachments and clipping the span past the second one OPENS that rect
+    // (teg_multirect_status.md limitation 4; the same per-rect reading the
+    // #514 ANTENNA rule already takes for OVER blocks).  Set only for OVER
+    // multi-rect blocks, so every other design elects per block byte for byte.
+    bool        own_anchor = false;
 };
 
 // One bus segment after track assignment (kind BUS in the placed-segment

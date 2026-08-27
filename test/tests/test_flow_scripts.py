@@ -1366,6 +1366,43 @@ def test_teg_adjacent_flow_routes_clean():
     assert "ANTENNA" not in out and "antenna" not in out, out
 
 
+def test_teg_bitrunk_flow_routes_clean():
+    """flow/teg_bitrunk.buda (teg_multirect_status.md Final-state
+    limitation 4, RESOLVED 2026-08-27): the BITRUNK-on-OVER firing repro as a
+    checked-in vehicle, EXPECTED CLEAN.
+
+    The legacy BITRUNK_H tree over a `teg_mode over` multi-rect endpoint whose
+    two rects share the rung's perp band.  Both halves of the bbox-only
+    scoping cost something here and this pins both: per-rect SELECTION (the
+    union-bbox "tap" fell in the GAP, so where that mattered the coverage gate
+    dropped the whole candidate) and TEG CONNECTION METAL (rect#1 lay beyond
+    the rungs' along-span, TEG_OPEN at both placed stages — 1 bundle-level at
+    nuts, 4 per-bit at dnuts).  The rung now grows from x 750 to x 950 and
+    CROSSES both rects.
+
+    It also guards the NUTS half: the one-anchor-per-BLOCK pass-through
+    election prunes rect#1's crossing unless the crossing carries its own
+    anchor (`PassthruCrossing::own_anchor`, set for OVER multi-rect blocks), and
+    then `tighten_spans_to_reach` clips the PLACED span back to x=600 and
+    TEG_OPEN fires on placed geometry while the candidate is correct.  A
+    regression in either half shows up here as a violation."""
+    out, rc = run_script("teg_bitrunk.buda")
+    assert rc == 0, f"teg_bitrunk.buda: non-zero exit {rc}\n{out}"
+    assert re.search(r"\[Planner\] Bundle 1 .*BITRUNK_H \[pinned\]", out), (
+        "the type pin no longer lands on BITRUNK_H — the pool lost the "
+        f"candidate or the pin regressed:\n{out}")
+    # two rungs + backbone + r1's stub, placed cleanly.
+    segs, viols, ovlps = nuts_summary(out)
+    assert (segs, viols, ovlps) == (4, 0, 0)
+    dm = re.search(
+        r"\[DetailedNUTS\] (\d+) net segments placed, (\d+) bits unplaced", out)
+    assert dm, "DetailedNUTS summary not found"
+    assert (int(dm.group(1)), int(dm.group(2))) == (16, 0)
+    # The point of the vehicle: BOTH placed audits clean.
+    assert out.count("Success: no violations found.") == 2, out
+    assert "TEG_OPEN" not in out, out
+
+
 def test_ndr_bottom_up_composition():
     """flow/ndr_bottom_up.buda (requirement R13): a governed cell template
     marked set_bottom_up is solved once and COPIED to every instance,

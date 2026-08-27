@@ -436,8 +436,11 @@ void erase_segment(Topology& topo, int idx);
 
 // MST TEG attachment (teg_multirect_status.md Final-state limitation 1):
 // attach every `teg_mode over` multi-rect block's rects that the topology's
-// segments leave unreached — inclusive contact on the PHYSICAL rects,
-// expanded over physical adjacency — with a perpendicular T-stub onto an
+// segments leave unreached — inclusive contact on the PHYSICAL rects, and
+// ONLY that (the transitive physical-adjacency closure this pass used to run
+// went with limitation 2 on 2026-08-27: abutment is a FOOTPRINT fact and the
+// audit reads METAL, so the two disagreed by construction) — with a
+// perpendicular T-stub onto an
 // along-overlapping segment, else a two-leg L onto the nearest segment's
 // span midpoint (cheapest total length wins; equal-cost ties prefer the
 // T-stub — the exact rule is in topology.cpp).  Runs inside

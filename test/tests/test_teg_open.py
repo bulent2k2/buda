@@ -1020,43 +1020,6 @@ def test_connector_leg_respects_min_stub_length():
     assert not any(t.startswith("TRUNK_V@x250") for t in types_at(200))  # 150 < 200
 
 
-def test_bitrunk_on_over_block_fires_teg_open_end_to_end():
-    # BITRUNK is bbox-only BY SCOPING (teg_multirect_status.md open 8): the
-    # datapath trees work entirely on orig_bbox — no rect selection, no TEG
-    # connection metal.  This pins the guarantee that makes the scoping safe
-    # to accept: where the bbox-only shape actually bites — an OVER block
-    # whose rect the BITRUNK's union-bbox metal never reaches — the routed
-    # result is LOUD, not silent: TEG_OPEN fires at both placed stages.
-    # Geometry: 4 endpoint blocks (the legacy BITRUNK_H floor), the OVER
-    # receiver's second rect at x 900..1000 lies beyond the rungs' along-span
-    # (pin centers reach x=750) and its union-center stub lands in the gap,
-    # so no placed metal of the bundle touches rect#1.
-    s = _session([
-        "add_block src 0 0 100 100",
-        "add_block r1 300 300 400 400",
-        "add_block r2 rect 500 0 600 100 rect 900 0 1000 100 teg_mode over",
-        "add_block r3 300 600 400 700",
-        "def_layer 4 M4 H TOP 0",
-        "def_layer 5 M5 V TOP 0",
-        "add_bus d[4] src.tx r1.a,r2.b,r3.c",
-        "run_bundler STRICT",
-        "generate_topologies",
-    ] + _TRACKS)
-    w = s.bundles[0]
-    pin = next(i for i, c in enumerate(w.input.candidates)
-               if c.type.startswith("BITRUNK_H"))
-    for cmd in (f"select_topology 1 {pin + 1}", "run_planner", "run_nuts"):
-        with contextlib.redirect_stdout(io.StringIO()):
-            s.do_command(cmd)
-    verdict, out = _check(s, "nuts")
-    assert verdict["by_kind"].get("TEG_OPEN", 0) >= 1, out
-    assert "rect#1 (900,0)-(1000,100)" in out, out
-    with contextlib.redirect_stdout(io.StringIO()):
-        s.do_command("run_detailed_nuts")
-    verdict, out = _check(s, "dnuts")
-    assert verdict["by_kind"].get("TEG_OPEN", 0) >= 1, out
-
-
 def test_joined_contacts_audit_clean():
     # Control for the island verdict: ONE wire touching both rects (an H wire
     # at y=50 from x=50 crosses arm and base alike) is one island — no
@@ -1069,3 +1032,296 @@ def test_joined_contacts_audit_clean():
     res = buda.check_dnuts(ct, dnuts, topo, fp, _layers(), 1, 1)
     teg = [v for v in res.violations if v.kind == buda.ViolationKind.TEG_OPEN]
     assert not teg, [v.message for v in teg]
+
+
+# ── BITRUNK per-rect selection + TEG connection metal ─────────────────────────
+#    (teg_multirect_status.md Final-state limitation 4, RESOLVED)
+#
+# The datapath trees used to work entirely on `orig_bbox`: no rect selection —
+# a "tap" could land on the UNION bbox face over a GAP, on no metal at all —
+# and no TEG connection metal, so an OVER rect the tree missed was left
+# electrically open (LOUD via TEG_OPEN, which is what made the scoping
+# acceptable).  Both families now read the trunk generator's own two rules
+# through the shared predicates: `best_rect` picks the tap rect, a rect sharing
+# the spine's perp band is reached by GROWING the spine over its along-centre,
+# and every other rect gets one perpendicular stub from its facing face
+# (`plan_teg_attachments` — one rule for the legacy rungs and, axis-transposed,
+# the two-level branches).
+
+_BITRUNK_CMDS = [
+    "add_block src 0 0 100 100",
+    "add_block r1 300 300 400 400",
+    "add_block r2 rect 500 0 600 100 rect 900 0 1000 100 teg_mode over",
+    "add_block r3 300 600 400 700",
+    "def_layer 4 M4 H TOP 0",
+    "def_layer 5 M5 V TOP 0",
+    "add_bus d[4] src.tx r1.a,r2.b,r3.c",
+    "run_bundler STRICT",
+]
+
+
+def _pin_type(s, want):
+    """Pin bundle 1's candidate whose type equals or starts with `want`."""
+    for i, c in enumerate(s.bundles[0].input.candidates):
+        if c.type == want or c.type.startswith(want):
+            with contextlib.redirect_stdout(io.StringIO()):
+                s.do_command(f"select_topology 1 {i + 1}")
+            return c
+    raise AssertionError(f"no {want} candidate: "
+                         + str([c.type for c in s.bundles[0].input.candidates]))
+
+
+def _run_cmds(s, *cmds):
+    for c in cmds:
+        with contextlib.redirect_stdout(io.StringIO()):
+            s.do_command(c)
+
+
+def _seg_touches(g, r):
+    """topology.h's seg_touches_rect, in Python (the audit's own rule)."""
+    horiz = (g.start.y == g.end.y)
+    perp = g.start.y if horiz else g.start.x
+    a_lo = min(g.start.x, g.end.x) if horiz else min(g.start.y, g.end.y)
+    a_hi = max(g.start.x, g.end.x) if horiz else max(g.start.y, g.end.y)
+    p1, p2 = (r[1], r[3]) if horiz else (r[0], r[2])
+    a1, a2 = (r[0], r[2]) if horiz else (r[1], r[3])
+    return p1 <= perp <= p2 and a_lo <= a2 and a_hi >= a1
+
+
+def test_bitrunk_on_over_block_routes_clean_via_per_rect_metal():
+    # WAS test_bitrunk_on_over_block_fires_teg_open_end_to_end, which asserted
+    #     verdict["by_kind"].get("TEG_OPEN", 0) >= 1
+    #     and "rect#1 (900,0)-(1000,100)" in out
+    # at BOTH placed stages — the guarantee that made the bbox-only scoping
+    # acceptable (loud, not silent).  Limitation 4 is resolved, so the same
+    # geometry ROUTES the rect instead of reporting it: r2's rects both share
+    # the y=50 rung's perp band, so the rung itself IS the connection metal and
+    # its span grows from x 750 (the union-bbox pin) to x 950 (rect#1's
+    # along-centre), CROSSING both rects.
+    s = _session(_BITRUNK_CMDS + ["generate_topologies"] + _TRACKS)
+    c = _pin_type(s, "BITRUNK_H")
+    rung = next(g for g in c.segments if g.start.y == g.end.y == 50)
+    assert (min(rung.start.x, rung.end.x),
+            max(rung.start.x, rung.end.x)) == (50, 950), (
+        (rung.start.x, rung.start.y), (rung.end.x, rung.end.y))
+    _run_cmds(s, "run_planner", "run_nuts")
+    verdict, out = _check(s, "nuts")
+    assert verdict["by_kind"].get("TEG_OPEN", 0) == 0, out
+    # ...and the PLACED span keeps the reach (the NUTS half of the fix — see
+    # test_over_block_crossed_twice_keeps_both_pass_through_anchors).
+    placed = next(t for t in s.nuts_result.segments
+                  if t.bundle_id == 1 and t.horiz and t.track_position <= 100)
+    assert max(placed.span_lo, placed.span_hi) >= 900, (placed.span_lo,
+                                                        placed.span_hi)
+    _run_cmds(s, "run_detailed_nuts")
+    verdict, out = _check(s, "dnuts")
+    assert verdict["by_kind"].get("TEG_OPEN", 0) == 0, out
+    assert s.detailed_result.num_unplaced == 0
+
+
+def test_bitrunk_off_band_rect_gets_its_own_perpendicular_stub():
+    # The other half of the rule: a rect the rung's band does NOT cover cannot
+    # be reached by growing the rung, so it gets ONE perpendicular stub from
+    # its rung-facing perp face at its along-centre — FACE → rung, the #823
+    # tap-seed orientation.  Pre-fix the block got a single union-bbox stub and
+    # rect#1 was untouched.
+    cmds = list(_BITRUNK_CMDS)
+    cmds[2] = ("add_block r2 rect 500 0 600 100 "
+               "rect 900 200 1000 300 teg_mode over")
+    s = _session(cmds + ["generate_topologies"] + _TRACKS)
+    c = _pin_type(s, "BITRUNK_H")
+    stubs = [g for g in c.segments if g.start.x == g.end.x == 950]
+    assert len(stubs) == 1, [((g.start.x, g.start.y), (g.end.x, g.end.y))
+                             for g in c.segments]
+    # it STARTS on rect#1's rung-facing perp face (y=200) and ends on a rung
+    rungs = {g.start.y for g in c.segments if g.start.y == g.end.y}
+    assert stubs[0].start.y == 200, (stubs[0].start.y, stubs[0].end.y)
+    assert stubs[0].end.y in rungs, (stubs[0].end.y, rungs)
+    # the busterm seed sits on the FACE end, never the rung end
+    si = c.segments.index(stubs[0])
+    bt = c.seg_busterms.get(si, (None, None))
+    assert bt[0] is not None and bt[0].block_name == "r2", bt
+    assert bt[1] is None, bt
+    _run_cmds(s, "run_planner", "run_nuts", "run_detailed_nuts")
+    for stage in ("nuts", "dnuts"):
+        verdict, out = _check(s, stage)
+        assert verdict["by_kind"].get("TEG_OPEN", 0) == 0, out
+
+
+def test_bitrunk_v_mirror_takes_the_same_treatment():
+    # The rule is written once against Axis, so the opt-in BITRUNK_V mirror
+    # (V rungs + an H backbone) gets it too — test-pinned, not assumed.
+    s = _session([
+        "add_block src 0 0 100 100",
+        "add_block r1 300 300 400 400",
+        "add_block r2 rect 0 500 100 600 rect 0 900 100 1000 teg_mode over",
+        "add_block r3 600 300 700 400",
+        "def_layer 4 M4 H TOP 0",
+        "def_layer 5 M5 V TOP 0",
+        "add_bus d[4] src.tx r1.a,r2.b,r3.c",
+        "run_bundler STRICT",
+        "generate_topologies multi_trunk",
+    ] + _TRACKS)
+    c = _pin_type(s, "BITRUNK_V")
+    for r in ((0, 500, 100, 600), (0, 900, 100, 1000)):
+        assert any(_seg_touches(g, r) for g in c.segments), (
+            r, [((g.start.x, g.start.y), (g.end.x, g.end.y))
+                for g in c.segments])
+    _run_cmds(s, "run_planner", "run_nuts", "run_detailed_nuts")
+    for stage in ("nuts", "dnuts"):
+        verdict, out = _check(s, stage)
+        assert verdict["by_kind"].get("TEG_OPEN", 0) == 0, out
+
+
+def test_two_level_bitrunk_over_block_gets_per_rect_metal():
+    # The two-level trees share the SAME rule through the transposed axis: a
+    # leaf stub runs along the ROOT axis at the rect's perp centre off a
+    # branch, which is the legacy rung shape read through Axis{!root_horiz}.
+    # Pre-fix the leaf stub started at the union-bbox face at the union perp
+    # centre — a coordinate that can sit in a gap — and no other rect got metal.
+    s = _session([
+        "add_block src 0 400 80 480",
+        "add_block a 200 400 280 480",
+        "add_block b 600 400 680 480",
+        "add_block c 1000 400 1080 480",
+        "add_block d rect 1400 400 1480 480 rect 1400 700 1480 780 "
+        "teg_mode over",
+        "def_layer 4 M4 H TOP 0",
+        "def_layer 5 M5 V TOP 0",
+        "add_bus q[4] src.tx a.rx,b.rx,c.rx,d.rx",
+        "run_bundler STRICT",
+        "generate_topologies multi_trunk",
+    ] + _TRACKS)
+    cands = [c for c in s.bundles[0].input.candidates
+             if c.type.startswith("BITRUNK_HVH")
+             or c.type.startswith("BITRUNK_VHV")]
+    assert cands, [c.type for c in s.bundles[0].input.candidates]
+    # every emitted two-level tree carries metal touching BOTH of d's rects
+    for cand in cands:
+        for r in ((1400, 400, 1480, 480), (1400, 700, 1480, 780)):
+            assert any(_seg_touches(g, r) for g in cand.segments), (
+                cand.type, r,
+                [((g.start.x, g.start.y), (g.end.x, g.end.y))
+                 for g in cand.segments])
+
+
+def test_bitrunk_thru_multirect_block_gets_one_best_rect_stub():
+    # CONTROL: `thru` declares the block's own routing joins its rects, so it
+    # gets exactly ONE stub — but to the BEST RECT (the rung-facing one), not
+    # to the union bbox face over the gap.  Per-rect SELECTION applies to THRU
+    # blocks too; the TEG connection metal does not.
+    #
+    # What the selection half actually COST is measured here: pre-fix the
+    # union-bbox tap landed on no rect at all, so the generation coverage gate
+    # dropped the whole candidate — `[TopoGen] dropped 1 candidate(s) (0
+    # feedthru-relay, first open: BITRUNK_H missing block 'r2')` — and a
+    # multi-rect design silently lost the datapath shape.  This test fails
+    # pre-fix with "no BITRUNK_H candidate".
+    cmds = list(_BITRUNK_CMDS)
+    cmds[2] = "add_block r2 rect 500 0 600 100 rect 900 200 1000 300"
+    s = _session(cmds + ["generate_topologies"] + _TRACKS)
+    c = _pin_type(s, "BITRUNK_H")
+    r2_stubs = [i for i in range(len(c.segments))
+                if any(bt is not None and bt.block_name == "r2"
+                       for bt in c.seg_busterms.get(i, (None, None)))]
+    assert len(r2_stubs) <= 1, r2_stubs
+    # no TEG metal was invented for the thru block
+    assert not any(g.start.x == g.end.x == 950 for g in c.segments), [
+        ((g.start.x, g.start.y), (g.end.x, g.end.y)) for g in c.segments]
+
+
+def test_bitrunk_single_rect_design_is_byte_identical():
+    # CONTROL / scope proof: the change is reachable ONLY through
+    # `Busterm::rects`, so a single-rect design generates the historical
+    # geometry exactly (best_rect over bt_all_rects returns {orig_bbox}, and
+    # `rects.empty()` keeps the pin's along-coordinate).
+    s = _session([
+        "add_block src 0 0 100 100",
+        "add_block r1 300 300 400 400",
+        "add_block r2 500 0 600 100",
+        "add_block r3 300 600 400 700",
+        "def_layer 4 M4 H TOP 0",
+        "def_layer 5 M5 V TOP 0",
+        "add_bus d[4] src.tx r1.a,r2.b,r3.c",
+        "run_bundler STRICT",
+        "generate_topologies",
+    ] + _TRACKS)
+    c = _pin_type(s, "BITRUNK_H")
+    assert [((g.start.x, g.start.y), (g.end.x, g.end.y))
+            for g in c.segments] == [((50, 50), (550, 50)),
+                                     ((50, 650), (550, 650)),
+                                     ((300, 50), (300, 650)),
+                                     ((350, 300), (350, 50))]
+
+
+def test_bitrunk_per_rect_stubs_never_duplicate_collinearly():
+    # Two rects sharing an along-centre on the SAME side of the rung: the
+    # farther stub crosses the nearer rect, so planning FARTHEST-face-first and
+    # skipping a rect a planned stub already TOUCHES (`seg_touches_rect`, the
+    # audit's own predicate) yields ONE stub, not the collinear containing pair
+    # the trim knobs exist to remove.
+    # Geometry: r2's rung is r1's (its own pin sits at p_mid), so BOTH rects
+    # lie above it — the containment case.
+    cmds = list(_BITRUNK_CMDS)
+    cmds[2] = ("add_block r2 rect 900 500 1000 600 "
+               "rect 900 800 1000 900 teg_mode over")
+    cmds[3] = "add_block r3 300 1500 400 1600"
+    s = _session(cmds + ["generate_topologies"] + _TRACKS)
+    c = _pin_type(s, "BITRUNK_H")
+    stubs = [g for g in c.segments if g.start.x == g.end.x == 950]
+    assert len(stubs) == 1, [((g.start.x, g.start.y), (g.end.x, g.end.y))
+                             for g in c.segments]
+    # the ONE stub reaches the FAR rect and CROSSES the near one on the way
+    for r in ((900, 500, 1000, 600), (900, 800, 1000, 900)):
+        assert _seg_touches(stubs[0], r), (
+            r, ((stubs[0].start.x, stubs[0].start.y),
+                (stubs[0].end.x, stubs[0].end.y)))
+    _run_cmds(s, "run_planner", "run_nuts", "run_detailed_nuts")
+    for stage in ("nuts", "dnuts"):
+        verdict, out = _check(s, stage)
+        assert verdict["by_kind"].get("TEG_OPEN", 0) == 0, out
+
+
+def test_trunk_mst_hybrid_on_over_block_still_fires_teg_open():
+    # THE REMAINING LOUD SHAPE (teg_multirect_status.md Final-state
+    # limitation 8, opened by this work): a `TRUNK_*+MST` hybrid re-derives its
+    # spine from the SURVIVING branch blocks and drops the seed trunk's TEG
+    # connection metal with it — measured on this very geometry, the seed
+    # `TRUNK_H@y100` spans x 100..900 (spine-end anchored onto rect#1's face)
+    # while `TRUNK_H+MST@y100` spans x 100..500, and `TRUNK_V@x600`'s per-rect
+    # stub (900,50)-(600,50) is simply absent from `TRUNK_V+MST@x600`.  The
+    # route is LOUD, not silent — the same guarantee that made BITRUNK's
+    # bbox-only scoping acceptable — and this is where the two dirty vehicles
+    # (test_teg_resume, test_teg_thru_census) now sit.
+    s = _session(_BITRUNK_CMDS + ["generate_topologies"] + _TRACKS)
+    _pin_type(s, "TRUNK_H+MST@y100")
+    _run_cmds(s, "run_planner", "run_nuts")
+    verdict, out = _check(s, "nuts")
+    assert verdict["by_kind"].get("TEG_OPEN", 0) >= 1, out
+    assert "rect#1 (900,0)-(1000,100)" in out, out
+    _run_cmds(s, "run_detailed_nuts")
+    verdict, out = _check(s, "dnuts")
+    assert verdict["by_kind"].get("TEG_OPEN", 0) >= 1, out
+
+
+def test_over_block_crossed_twice_keeps_both_pass_through_anchors():
+    # The NUTS half, isolated: `tighten_spans_to_reach` elects exactly ONE
+    # pass-through anchor per (bundle, BLOCK) — anchoring every crossing keeps
+    # phantom span for nothing (b44).  That rests on a block's rects being
+    # interchangeable covers, which is exactly what `teg_mode over` REVOKES,
+    # so an OVER multi-rect block's crossings carry their own anchor
+    # (`PassthruCrossing::own_anchor`).  Without it the generated rung reached
+    # x=950 and the PLACED span came back clipped to 600 — rect#0's far face,
+    # i.e. the one elected crossing — so TEG_OPEN fired on placed geometry
+    # while the candidate was correct.
+    s = _session(_BITRUNK_CMDS + ["generate_topologies"] + _TRACKS)
+    _pin_type(s, "BITRUNK_H")
+    _run_cmds(s, "run_planner", "run_nuts")
+    rung = next(t for t in s.nuts_result.segments
+                if t.bundle_id == 1 and t.horiz and t.track_position <= 100)
+    r2 = [p for p in rung.passthru_spans if p.block == "r2"]
+    assert len(r2) == 2, [(p.block, p.rect, p.along_lo, p.along_hi)
+                          for p in rung.passthru_spans]
+    assert {p.rect for p in r2} == {0, 1}
+    # ...while an ordinary (single-rect) pass-through keeps ONE anchor
+    assert len([p for p in rung.passthru_spans if p.block == "src"]) == 1

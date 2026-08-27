@@ -208,9 +208,9 @@ its pinning test on this date:
    blocks stay exempt.  The two dirty vehicles that had been MOVED onto this
    shape in #846 — `test_teg_resume.py`'s resume-armed audit and
    `test_teg_thru_census.py`'s OVER twin — were re-homed again, onto the
-   BITRUNK shape (limitation 4, bbox-only BY SCOPING and the last checked-in
-   missing-metal shape), so both still measure a LOUD audit rather than a
-   vacuous one.  End-to-end vehicle: `flow/teg_adjacent.buda` (EXPECTED
+   BITRUNK shape (limitation 4) — and on 2026-08-27 a THIRD time, onto the
+   `TRUNK_*+MST` hybrid (limitation 8), when BITRUNK went clean too — so both
+   still measure a LOUD audit rather than a vacuous one.  End-to-end vehicle: `flow/teg_adjacent.buda` (EXPECTED
    CLEAN, `test_flow_scripts.py::test_teg_adjacent_flow_routes_clean` + the
    QoR corpus row), which guards the ANTENNA companion too — the stub it
    emits overhangs entirely over the block, so a BLOCK-level tap-overhang
@@ -277,11 +277,83 @@ its pinning test on this date:
    sibling tapped, middle one crossed as a pass-through), the min-stub-floor
    edge, the margined variant, and the adjacent pair (a LOUD control until
    item 2 landed 2026-08-27; now the anchoring twin).
-4. **BITRUNK trees (legacy and two-level) are bbox-only on multi-rect
+4. ~~**BITRUNK trees (legacy and two-level) are bbox-only on multi-rect
    blocks** — no rect selection, no TEG connection metal
-   (resolved-as-documented open 8); an unreached OVER rect fires TEG_OPEN,
-   pinned end to end by
-   `test_teg_open.py::test_bitrunk_on_over_block_fires_teg_open_end_to_end`.
+   (resolved-as-documented open 8); an unreached OVER rect fires TEG_OPEN.~~
+   **RESOLVED 2026-08-27.**  Both halves cost something real and they cost it
+   in opposite directions, which is why they landed together:
+   * **SELECTION.** The tap was the UNION bbox face at the PIN's along
+     coordinate, which on a multi-rect block can be the GAP between rects — a
+     tap on no metal.  Measured: the generation coverage gate then dropped the
+     whole candidate (`[TopoGen] dropped 1 candidate(s) (0 feedthru-relay,
+     first open: BITRUNK_H missing block 'r2')`), so a multi-rect design
+     silently lost the datapath shape it asked for.  It now picks the tap rect
+     with `best_rect` and lands at that rect's along-centre, exactly as
+     `add_trunk` does — for THRU blocks too, since a tap that misses is a miss
+     whatever the block declares.
+   * **CONNECTION METAL.** Where the candidate did survive, an OVER rect the
+     tree missed was electrically open (LOUD via TEG_OPEN, which is what made
+     the scoping acceptable).  Each OVER rect now takes the trunk generator's
+     own two rules: one sharing the spine's perp band is reached by GROWING
+     the spine over its along-centre (a CROSSING — interior contact, needing
+     no busterm seed, unlike `add_trunk`'s Direct spine-end anchoring which
+     lands on a FACE and relies on `annotate_endpoints`; BITRUNK deliberately
+     never calls it, so it has no face anchor to fall back on), and every
+     other rect gets ONE perpendicular stub from its locus-facing face,
+     FACE → spine per the #823 rule.
+   ONE rule serves both families (`plan_teg_attachments`, `src/topology.cpp`):
+   a two-level tree's leaf stub runs along the ROOT axis at the rect's PERP
+   centre off a branch, which is the legacy rung's stub shape read through
+   `Axis{!root_horiz}` — so the transposition is what makes it one rule and
+   not two.  Rects are planned FARTHEST-face-first and one a planned stub
+   already TOUCHES is skipped (`seg_touches_rect`, the TEG_OPEN audit's own
+   predicate), so two rects sharing an along-centre on the same side yield ONE
+   stub rather than the collinear containing pair `set_trim_trunk_stubs`
+   exists to remove.
+   **Reusing `add_mst_teg_attachments` was tried and REJECTED, measured**: on
+   the pinned vehicle it emits an H stub `(900,50)→(400,50)` lying COLLINEAR
+   ON the rung `(50,50)-(750,50)` over x∈[400,750] — 350 units of duplicate
+   metal.  The pass has no notion that a spine already runs at the target's
+   perp; its same-band case is the documented "no legal attachment → stays
+   LOUD", so the legal-but-worse alternative wins instead.  Teaching it to
+   EXTEND a target would change MST behaviour on a deliberately conservative
+   path for no MST-side evidence, so the pass is untouched and the
+   spine-shaped family got the spine-shaped rule.
+   **It needed a NUTS half.**  `tighten_spans_to_reach` elects exactly ONE
+   pass-through anchor per (bundle, BLOCK) — anchoring every crossing keeps
+   phantom span for nothing (b44) — which rests on a block's rects being
+   interchangeable covers, precisely what `teg_mode over` REVOKES.  So the
+   generated rung reached x=950 and the PLACED span came back clipped to
+   x=600 (rect#0's far face, the one elected crossing), TEG_OPEN firing on
+   placed geometry while the candidate was correct.
+   `PassthruCrossing::own_anchor` (set only for OVER multi-rect blocks) keys
+   the election on the RECT there; every other design elects per block byte
+   for byte.  Same per-rect reading the #514 ANTENNA rule already takes.
+   ALWAYS-ON, and the scope is a property of the code rather than a
+   measurement: every branch is reachable only through `Busterm::rects`, so a
+   single-rect design generates the historical geometry exactly
+   (`bt_all_rects` hands `best_rect` the single `{orig_bbox}` and
+   `rects.empty()` keeps the pin's along-coordinate) — test-pinned on exact
+   coordinates.  It DOES re-sort the WL-ordered pool on a multi-rect design
+   (the rung grew), renumbering candidate indices there, which is the property
+   that makes `set_trim_mst_legs`/`set_trim_trunk_stubs` opt-in; this one
+   repairs electrically broken metal and a dropped candidate, so it lands
+   always-on like limitations 1-3 did, and multi-rect flows pin by TYPE.
+   Corpus 0 better / 0 worse / 51 unchanged, abstract AND detailed WL +0 —
+   and that is a BLIND SPOT, not a clean bill: BITRUNK needs >= 4 endpoint
+   blocks in one bundle and no corpus flow has that WITH a multi-rect
+   endpoint.  All 13 checked-in multi-rect vehicles were therefore run
+   baseline-vs-branch directly and are identical.  New corpus row
+   `flow/teg_bitrunk.buda` (0/0/0) closes it going forward.
+   Pins: `test_teg_open.py::
+   test_bitrunk_on_over_block_routes_clean_via_per_rect_metal` (was
+   `..._fires_teg_open_end_to_end`, asserting `TEG_OPEN >= 1` + the rect name
+   at both placed stages), the off-band stub, the BITRUNK_V mirror, the
+   two-level per-rect contact, the collinear-dedup, and the NUTS-half anchor
+   test — every one of which FAILS pre-fix.  Controls held: a THRU multi-rect
+   block still gets ONE stub and no invented metal, a single-rect design is
+   byte-identical on exact coordinates, and a genuinely unreached rect still
+   fires (limitation 8 below, which is where the two dirty vehicles moved).
 5. **No import path (DEF/GDS) and no hier declaration produces a multi-rect
    block** — a BDB component is one bbox (opens 6/17;
    `opens_interchange.md` item 16): `derive_busterms` writes empty rects,
@@ -302,6 +374,32 @@ its pinning test on this date:
    `rects.size() > 1`); the declaration now warns instead of dropping the
    intent silently (BUDA-1908, both declaration orders — open 7, pinned by
    `test_set_feedthru_multirect_warning.py`).
+8. **A `TRUNK_*+MST` hybrid drops the seed trunk's TEG connection metal**
+   (OPENED 2026-08-27 by the limitation-4 work, which needed a still-dirty
+   shape and found this one).  `add_trunk_mst_candidates` copies the seed
+   trunk and then re-derives the spine from the SURVIVING branch blocks,
+   which loses both forms of the seed's OVER metal.  Measured on
+   `flow/teg_bitrunk.buda`'s geometry:
+   * the seed `TRUNK_H@y100` spans x 100..900 (spine-end anchored onto
+     rect#1's facing face) while `TRUNK_H+MST@y100` spans x 100..500;
+   * `TRUNK_V@x600` carries the per-rect stub `(900,50)-(600,50)` for
+     rect#1 and `TRUNK_V+MST@x600` simply does not.
+   Both route to TEG_OPEN — 1 bundle-level at nuts, 4 per-bit at dnuts — so
+   it is LOUD, not silent, which is the same guarantee that made BITRUNK's
+   bbox-only scoping acceptable.  CLAUDE.md's stage-2 TEG section claimed
+   "`TRUNK_*+MST` hybrids inherit the seed trunk's per-rect metal"; that is
+   false for these two shapes and is corrected there.  The hybrid path
+   already declines to rewire a multi-rect branch block (`simple = false`,
+   "dropping them for an MST edge would detach the rects the stubs exist to
+   connect"), so the fix is presumably to re-run the same per-rect rules
+   against the hybrid's OWN final spine rather than to inherit the seed's —
+   deliberately NOT attempted here, since it is a different generator with
+   its own clean-tree and stub-replacement invariants.  Pinned by
+   `test_teg_open.py::test_trunk_mst_hybrid_on_over_block_still_fires_teg_open`,
+   and it is where the two dirty vehicles (`test_teg_resume.py`'s
+   resume-armed audit, `test_teg_thru_census.py`'s OVER twin) now sit — each
+   has been re-homed every time a shape was resolved out from under it, and
+   both still measure a LOUD audit rather than a vacuous one.
 
 ## 1. Two measurements that anchor this appraisal
 
@@ -453,10 +551,13 @@ catch this shape too, which is another reason to land it first.
 
 **Absent:**
 
-- BITRUNK (legacy and two-level) works entirely on `orig_bbox`
-  (`src/topology.cpp:4401`, `:4467-4473`) — no rect selection, no bridges.
-  (Resolved-as-documented, open 8 — an unreached OVER rect fires TEG_OPEN,
-  test-pinned; Final-state item 4.)
+- ~~BITRUNK (legacy and two-level) works entirely on `orig_bbox` — no rect
+  selection, no bridges.~~  RESOLVED 2026-08-27 (Final-state item 4): both
+  families pick their tap rect with `best_rect` and emit the trunk
+  generator's own OVER connection metal through one shared, axis-transposed
+  rule (`plan_teg_attachments`), with the NUTS pass-through anchor election
+  keyed per RECT for OVER blocks (`PassthruCrossing::own_anchor`).
+  Single-rect designs are unchanged by construction.
 - The 2-pin L/Z/U/I family is **bypassed** for any multi-rect endpoint
   (`src/topology.cpp:4646-4652` forces the n-pin path) — safe, but the 2-pin
   generator itself is not rect-aware if reached directly via bindings.
@@ -492,7 +593,7 @@ catch this shape too, which is another reason to land it first.
 
 | Stage | Status |
 |---|---|
-| Generation | **no longer emits bridges** (open 1(a), 2026-08-22): the trunk generator's OVER branches emit real per-rect gap stubs / rectilinear connector legs via `emit_tap_segment` (`src/topology.cpp`, `add_trunk`); MST candidates carry attachment stubs since 2026-08-25 (`add_mst_teg_attachments`, residual (iii)); BITRUNK/2-pin still emit no TEG connection metal |
+| Generation | **no longer emits bridges** (open 1(a), 2026-08-22): the trunk generator's OVER branches emit real per-rect gap stubs / rectilinear connector legs via `emit_tap_segment` (`src/topology.cpp`, `add_trunk`); MST candidates carry attachment stubs since 2026-08-25 (`add_mst_teg_attachments`, residual (iii)); BITRUNK does since 2026-08-27 (`plan_teg_attachments`, Final-state item 4).  Still absent: the `TRUNK_*+MST` hybrid, which re-derives its spine and drops the seed's metal (Final-state item 8), and the 2-pin family, which any multi-rect endpoint bypasses anyway |
 | Nominal WL + segment-count tie-break | restored bridges still counted (`src/topology.cpp` `wirelength()`/`annotate_and_sort`) so a restored pool keeps its recorded order |
 | `topo_uid` fingerprint, hier offset/rotate | hashed + transformed (`src/topology_analysis.cpp:116-119`, `src/topology.cpp:70-75`) — a restored candidate keeps its recorded identity |
 | BDB persistence + `load_pipeline` restore | **kept, v11** (`topology_bridge_segment`): generation persists zero rows; pre-change checkpoints restore theirs (`test_bdb_resume_gaps.py`) |
@@ -777,11 +878,13 @@ wrong.
    the MST shape because it was dirty — `test_teg_resume.py`'s
    resume-armed audit and `test_teg_thru_census.py`'s OVER twin — moved
    onto the adjacent-rect Direct shape (limitation 2, then still loud — and
-   moved AGAIN on 2026-08-27 when that shape went clean too, onto BITRUNK's;
-   a resume test whose vehicle audits clean proves nothing about the audit
-   staying armed), and
-   BITRUNK's twin pin is open 8's
-   `test_bitrunk_on_over_block_fires_teg_open_end_to_end`.  End-to-end
+   moved AGAIN on 2026-08-27 when that shape went clean too, onto BITRUNK's
+   — and a THIRD time the same day, onto the `TRUNK_*+MST` hybrid, when
+   BITRUNK went clean with it (limitations 4 and 8); a resume test whose
+   vehicle audits clean proves nothing about the audit staying armed), and
+   BITRUNK's twin pin was open 8's
+   `test_bitrunk_on_over_block_fires_teg_open_end_to_end`, now flipped to
+   `..._routes_clean_via_per_rect_metal`.  End-to-end
    vehicle `flow/teg_mst_over.buda` (fix + control in one design, both
    audits Success, QoR corpus row EXPECTED CLEAN).  QoR corpus
    (`--vs main` @ 6e3ba29d): **0 better / 0 worse / 49 unchanged** of 51,
@@ -1017,7 +1120,14 @@ wrong.
    not silent — pinned by `test_teg_open.py::
    test_bitrunk_on_over_block_fires_teg_open_end_to_end`.  On a `thru`
    block the open-5 BUDA-1907 census covers the same blind spot as a
-   report.
+   report.  *(2026-08-27: the scoping itself is GONE — see Final-state
+   item 4.  Both halves are fixed, the pin is flipped to
+   `..._routes_clean_via_per_rect_metal`, and the same experiment that made
+   the scoping acceptable is now the vehicle `flow/teg_bitrunk.buda`.  What
+   the experiment MISSED, because it only ever pinned one candidate: on a
+   different multi-rect geometry the union-bbox tap fell in the GAP and the
+   coverage gate dropped the whole BITRUNK candidate, so the cost was not
+   only a loud open but a silently missing datapath shape.)*
 9. ~~**`corner_margin` is inert for individual rects** (`src/topology.cpp:
    3296-3300`) — silently, on the faces multi-rect routing actually lands
    on.~~  **RESOLVED 2026-08-23**: each rect is now inset exactly as the

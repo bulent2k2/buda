@@ -4869,6 +4869,68 @@ void TopologyGenerator::add_trunk_mst_candidates(
     }
 }
 
+// ── Per-rect TEG connection metal for a SPINE-shaped tree (BITRUNK) ──────────
+// teg_multirect_status.md limitation 4.  ONE `teg_mode over` multi-rect
+// endpoint against a spine that runs ALONG `axis` at perpendicular coordinate
+// `locus`.  The two rules are the TRUNK generator's own (add_trunk's gap-stub
+// branch plus its spine-end anchoring pre-pass), read off the SHARED contact
+// predicate rather than restated:
+//   • a rect sharing the spine's PERP BAND is reached by the SPINE itself — the
+//     caller grows the spine's along-span to the rect's along-CENTRE so the
+//     spine CROSSES it.  A crossing is interior contact and needs no busterm
+//     seed; landing on the near FACE (what add_trunk's Direct anchoring does)
+//     would be a graze NUTS may retract, and BITRUNK deliberately never calls
+//     annotate_endpoints (a trunk end grazing a neighbour face would become a
+//     spurious feedthru busterm), so it has no face anchor to fall back on.
+//   • every other rect gets ONE perpendicular stub from its locus-facing perp
+//     face at its along-centre, FACE → spine per the #823 rule so
+//     emit_tap_segment seeds the busterm on the face end (a spine-end seed
+//     shadows the real face annotation and NUTS retracts the stub).
+// Rects are planned FARTHEST-face-first and one a planned stub already TOUCHES
+// is skipped — `seg_touches_rect`, the very predicate the TEG_OPEN audit reads
+// — so two rects sharing an along-centre on the same side of the spine yield
+// ONE stub instead of the collinear containing pair the trim knobs exist to
+// remove.  Returns false when a stub falls below the min-stub floor: the caller
+// drops the candidate, which is the legacy BITRUNK per-stub viability rule
+// applied per rect.
+//
+// Axis-TRANSPOSED reuse is what makes this one rule and not two: a two-level
+// BITRUNK's leaf stub runs along the ROOT axis at the rect's PERP centre off a
+// branch, which is exactly this shape read through Axis{!root_horiz}.  So the
+// legacy rungs and the two-level branches share it.
+struct TegAttach {
+    int  along;   // spine along-coordinate the attachment sits at
+    int  face;    // rect face the stub starts on (== locus when there is no stub)
+    bool stub;    // false = same-band rect, reached by growing the spine
+};
+
+static bool plan_teg_attachments(const Axis& axis, const Busterm& bt, int locus,
+                                 int m_stub, int stub_layer,
+                                 std::vector<TegAttach>& out) {
+    const std::vector<Rect>& rects = bt.rects;   // inset (tap) spelling
+    std::vector<int> order(rects.size());
+    std::iota(order.begin(), order.end(), 0);
+    std::stable_sort(order.begin(), order.end(), [&](int a, int b) {
+        return std::abs(axis.perp_face(rects[a], locus) - locus)
+             > std::abs(axis.perp_face(rects[b], locus) - locus);
+    });
+    std::vector<Segment> planned;
+    for (int ri : order) {
+        const Rect& r   = rects[ri];
+        const int along = axis.along_center(r);
+        const int face  = axis.perp_face(r, locus);   // == locus when locus is in r's band
+        if (face == locus) { out.push_back({along, locus, false}); continue; }
+        bool covered = false;
+        for (const Segment& s : planned)
+            if (seg_touches_rect(s, r)) { covered = true; break; }
+        if (covered) continue;
+        if (std::abs(locus - face) < m_stub) return false;
+        planned.push_back(axis.mkseg(along, face, along, locus, stub_layer));
+        out.push_back({along, face, true});
+    }
+    return true;
+}
+
 // Two-level BITRUNK trees for high-fan-out nets over regular datapath-like
 // placements.  A root spine (one orientation) feeds perpendicular BRANCH trunks,
 // each tapping a cluster of leaf blocks aligned along the root axis; a leaf either
@@ -4907,31 +4969,83 @@ void TopologyGenerator::add_multi_trunk_candidates(
         int p_t1  = perp_coords[perp_coords.size() / 4];
         int p_t2  = perp_coords[3 * perp_coords.size() / 4];
         if (p_t1 == p_t2) return;
+        const int nb = (int)blocks.size();
+        const int m_stub = floorplan_.get_min_stub_length(stub_dir, perp_layer);
+
+        // ── Per-block connection plan ───────────────────────────────────────
+        // MULTI-RECT AWARE since teg_multirect_status.md limitation 4: the tap
+        // rect is picked by `best_rect` (shortest stub to this rung), exactly as
+        // add_trunk picks it, instead of reading the union bbox — a union-bbox
+        // face can sit over a GAP, so the "tap" landed on no metal at all and
+        // the block read open.  Single-rect blocks are unchanged BY
+        // CONSTRUCTION: `bt_all_rects` hands best_rect the single {orig_bbox},
+        // and `rects.empty()` keeps the pin's along-coordinate, so a design with
+        // no multi-rect block generates byte-for-byte the historical geometry.
+        std::vector<int>  pt(nb), att(nb), conn(nb);
+        std::vector<char> teg_block(nb, 0);
+        // TEG connection metal for `teg_mode over` multi-rect endpoints, planned
+        // (not yet emitted) so the rung spans can grow to cover every junction
+        // and every same-band crossing before the rungs are laid down.
+        std::vector<std::pair<int, TegAttach>> teg;   // (block index, attachment)
+        for (int i = 0; i < nb; ++i) {
+            pt[i]   = (axis.perp(pins[i]) <= p_mid) ? p_t1 : p_t2;
+            Rect br = best_rect(axis, blocks[i], pt[i]);
+            conn[i] = axis.perp_face(br, pt[i]);
+            att[i]  = blocks[i].rects.empty() ? axis.along(pins[i])
+                                              : axis.along_center(br);
+            if (blocks[i].teg_mode == TegMode::OVER && blocks[i].rects.size() >= 2) {
+                teg_block[i] = 1;
+                std::vector<TegAttach> as;
+                if (!plan_teg_attachments(axis, blocks[i], pt[i], m_stub,
+                                          perp_layer, as))
+                    return;   // a per-rect stub below the floor → not viable
+                for (const TegAttach& a : as) teg.push_back({i, a});
+            }
+        }
+
         Topology t;
         t.type = rungs_horiz ? "BITRUNK_H" : "BITRUNK_V";
         int a_min = INT_MAX, a_max = INT_MIN;
-        for (const auto& p : pins) { a_min = std::min(a_min, axis.along(p));
-                                     a_max = std::max(a_max, axis.along(p)); }
+        for (int i = 0; i < nb; ++i) { a_min = std::min(a_min, att[i]);
+                                       a_max = std::max(a_max, att[i]); }
         // A pin-set with no along-extent collapses both rungs to points — a
         // zero-length wire has no conn-segs to pin it, carries no bus, and
         // cannot be placed by NUTS (kAbutmentSpanEpsilon invariant).  Mirror the
         // p_t1==p_t2 guard (audit C4-02); the perpendicular TRUNK shapes cover it.
         if (a_min == a_max) return;
         int a_backbone = (a_min + a_max) / 2;
-        t.segments.push_back(axis.mkseg(a_min, p_t1, a_max, p_t1, rung_layer));
-        t.segments.push_back(axis.mkseg(a_min, p_t2, a_max, p_t2, rung_layer));
+        // Each rung spans the shared extent, grown by the TEG attachments that
+        // sit on THAT rung: a same-band rect is reached by the rung CROSSING its
+        // along-centre, and a stub's junction has to be on the rung it lands on.
+        // Growing only the rung that needs it keeps the other one at the shared
+        // extent — and with no TEG attachment anywhere both are the historical
+        // [a_min, a_max], so the emission is unchanged.
+        int lo1 = a_min, hi1 = a_max, lo2 = a_min, hi2 = a_max;
+        for (const auto& [bi, a] : teg) {
+            int& lo = (pt[bi] == p_t1) ? lo1 : lo2;
+            int& hi = (pt[bi] == p_t1) ? hi1 : hi2;
+            lo = std::min(lo, a.along);
+            hi = std::max(hi, a.along);
+        }
+        t.segments.push_back(axis.mkseg(lo1, p_t1, hi1, p_t1, rung_layer));
+        t.segments.push_back(axis.mkseg(lo2, p_t2, hi2, p_t2, rung_layer));
         t.segments.push_back(axis.mkseg(a_backbone, p_t1, a_backbone, p_t2, perp_layer));
-        int m_stub = floorplan_.get_min_stub_length(stub_dir, perp_layer);
-        for (int i = 0; i < (int)blocks.size(); ++i) {
-            int pt    = (axis.perp(pins[i]) <= p_mid) ? p_t1 : p_t2;
-            int src_p = axis.perp_face(blocks[i].orig_bbox, pt);
-            if (std::abs(pt - src_p) >= m_stub) {
-                emit_tap_segment(t, axis.mkseg(axis.along(pins[i]), src_p,
-                                               axis.along(pins[i]), pt, perp_layer),
+        for (int i = 0; i < nb; ++i) {
+            if (teg_block[i]) continue;    // its per-rect stubs are emitted below
+            if (std::abs(pt[i] - conn[i]) >= m_stub) {
+                emit_tap_segment(t, axis.mkseg(att[i], conn[i], att[i], pt[i], perp_layer),
                                  &blocks[i]);
-            } else if (pt != src_p) {
+            } else if (pt[i] != conn[i]) {
                 return;   // a stub too short → this legacy BITRUNK is not viable
             }
+        }
+        // Per-rect TEG stubs.  A same-band attachment emits nothing: the rung
+        // above was grown to cross that rect.  FACE → rung, so emit_tap_segment
+        // seeds the busterm on the face end (the #823 rule).
+        for (const auto& [bi, a] : teg) {
+            if (!a.stub) continue;
+            emit_tap_segment(t, axis.mkseg(a.along, a.face, a.along, pt[bi], perp_layer),
+                             &blocks[bi]);
         }
         // Give the two rung trunks + backbone a seg_busterms entry (the leaf
         // stubs are seeded above) so ConnTopology uses the authoritative path for
@@ -4991,12 +5105,11 @@ void TopologyGenerator::add_multi_trunk_candidates(
         // one definition.  root_horiz==true ⇒ root spine runs along x.
         const Axis axis{root_horiz};
         auto RA  = [&](const Busterm& b){ return axis.along_center(b.orig_bbox); };
-        auto PA  = [&](const Busterm& b){ return axis.perp_center(b.orig_bbox); };
-        auto RA1 = [&](const Busterm& b){ return axis.along_lo(b.orig_bbox); };
-        auto RA2 = [&](const Busterm& b){ return axis.along_hi(b.orig_bbox); };
         auto PA1 = [&](const Busterm& b){ return axis.perp_lo(b.orig_bbox); };
         auto PA2 = [&](const Busterm& b){ return axis.perp_hi(b.orig_bbox); };
-        auto RAface = [&](const Busterm& b, int toward){ return axis.along_face(b.orig_bbox, toward); };
+        // PA / RA1 / RA2 / RAface are gone: the leaf loop reads its coordinates
+        // off the SELECTED rect (best_rect) rather than the union bbox, so the
+        // union-bbox spellings had no remaining caller (limitation 4).
         auto mkseg = [&](int ra1, int pa1, int ra2, int pa2, int layer){
             return axis.mkseg(ra1, pa1, ra2, pa2, layer); };
 
@@ -5038,16 +5151,50 @@ void TopologyGenerator::add_multi_trunk_candidates(
 
             for (int i : cl) {
                 const Busterm& b = blocks[i];
+                // A two-level leaf stub runs along the ROOT axis at the block's
+                // PERP centre off the branch — which is the legacy rung's
+                // stub shape read through the TRANSPOSED axis, so both families
+                // share plan_teg_attachments / best_rect (teg_multirect_status.md
+                // limitation 4).  `taxis.perp` is the ROOT axis, so
+                // `taxis.perp_face(r, b_ra)` is r's branch-facing RA face and
+                // `taxis.along_center(r)` is its connection PA coordinate.
+                const Axis taxis{!root_horiz};
+                if (b.teg_mode == TegMode::OVER && b.rects.size() >= 2) {
+                    // `teg_mode over` revokes the block's internal continuity, so
+                    // every rect the BRANCH does not cross needs its own metal.
+                    // No span growth is needed for the rects it does cross: the
+                    // branch already spans every cluster block's FULL perp extent
+                    // (b_pa_lo/b_pa_hi above), so b_ra inside a rect's root-axis
+                    // range IS contact.
+                    std::vector<TegAttach> as;
+                    if (!plan_teg_attachments(taxis, b, b_ra, stub_root,
+                                              root_layer, as))
+                        return;   // a per-rect stub below the floor → drop
+                    for (const TegAttach& a : as) {
+                        if (!a.stub) continue;         // branch crosses this rect
+                        emit_tap_segment(t, mkseg(a.face, a.along, b_ra, a.along,
+                                                  root_layer), &b);
+                    }
+                    (void)branch_idx;
+                    continue;
+                }
+                // Single-rect, or a THRU multi-rect block whose own routing joins
+                // its rects: one stub, to the rect whose branch-facing face is
+                // nearest (best_rect — add_trunk's rule).  A single-rect block
+                // takes bt_all_rects' {orig_bbox}, i.e. the historical geometry
+                // byte for byte.
+                const Rect sel = b.rects.empty() ? b.orig_bbox
+                                                 : best_rect(taxis, b, b_ra);
                 // Inclusive straddle (audit C4-05): a branch landing exactly on
                 // a leaf's along-edge is an edge-riding pass-through covered by
                 // the branch span — matching add_trunk's inclusive convention.
                 // The strict form computed a zero-length 'stub' there and the
                 // < stub_root check silently dropped the WHOLE candidate.
-                bool straddle = (b_ra >= RA1(b) && b_ra <= RA2(b));
+                bool straddle = (b_ra >= axis.along_lo(sel) && b_ra <= axis.along_hi(sel));
                 if (straddle) continue;   // pass-through: branch covers this block
-                int face = RAface(b, b_ra);
+                int face = axis.along_face(sel, b_ra);
                 if (std::abs(face - b_ra) < stub_root) return;   // stub too short → drop
-                int lp = PA(b);            // leaf connects at its perp centre
+                int lp = axis.perp_center(sel);   // leaf connects at its perp centre
                 emit_tap_segment(t, mkseg(face, lp, b_ra, lp, root_layer), &b);
                 (void)branch_idx;
             }
