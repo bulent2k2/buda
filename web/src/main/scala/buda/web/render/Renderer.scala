@@ -33,6 +33,74 @@ object Renderer {
 
   private def defined(v: js.Dynamic): Boolean = !js.isUndefined(v) && v != null
 
+  /** One restored legacy TEG bridge, ready to draw. */
+  private final case class BridgeWire(x1: Double, y1: Double, x2: Double,
+                                      y2: Double, label: String,
+                                      bundleId: Option[Int])
+
+  /** Restored legacy TEG bridges as drawable wires (teg_multirect_status.md
+    * limitation 6).  A candidate restored from a pre-emission checkpoint carries
+    * UNREALIZED metal that the `TEG_OPEN` audit reports as "declared bridge is
+    * unrealized"; generation emits none, so a live design yields an empty list
+    * and nothing is drawn.
+    *
+    * Mirrors `legacyBridgeWires` in the reference client
+    * (`src/web/static/index.html`) — including the label text, which is the same
+    * string `viz_common.draw_legacy_bridges` annotates with.  Accepts both
+    * payload shapes: the generation view's `{block_name: segment}` map (drawn in
+    * sorted block-name order, as matplotlib does) and the NUTS view's flat
+    * `legacy_bridges` list, which the server already sorts. */
+  private def legacyBridgeWires(bridges: js.Dynamic): List[BridgeWire] = {
+    if (!defined(bridges)) return Nil
+    // Explicit index loops over the JS values (no Scala collection ops on
+    // js.Array, no implicit conversions) so the shape of the payload is the
+    // only thing this depends on.
+    val entries = scala.collection.mutable.ArrayBuffer.empty[(String, js.Dynamic)]
+    if (js.Array.isArray(bridges)) {
+      val a = bridges.asInstanceOf[js.Array[js.Dynamic]]
+      var i = 0
+      while (i < a.length) {
+        entries += ((a(i).block_name.asInstanceOf[String], a(i))); i += 1
+      }
+    } else {
+      val keys = js.Object.keys(bridges.asInstanceOf[js.Object])
+      val names = scala.collection.mutable.ArrayBuffer.empty[String]
+      var i = 0
+      while (i < keys.length) { names += keys(i); i += 1 }
+      names.sorted.foreach(k => entries += ((k, bridges.selectDynamic(k))))
+    }
+    val out = scala.collection.mutable.ListBuffer.empty[BridgeWire]
+    entries.foreach { case (name, seg) =>
+      if (defined(seg) && defined(seg.start) && defined(seg.end))
+        // `bundle_id` rides along so the focus view can dim a bridge with its
+        // bundle, like the bits and vias beside it.  The generation map is
+        // per-candidate and carries none — one bundle in that view, so None
+        // reads as "always focused".
+        out += BridgeWire(d(seg.start, "x"), d(seg.start, "y"),
+                          d(seg.end, "x"), d(seg.end, "y"),
+                          s"unrealized bridge (legacy checkpoint): $name",
+                          if (defined(seg.selectDynamic("bundle_id")))
+                            Some(d(seg, "bundle_id").toInt) else None)
+    }
+    out.toList
+  }
+
+  /** Draw `legacyBridgeWires`: a dashed off-palette wire plus its label,
+    * locally un-flipped like the block labels so the text reads upright. */
+  private def drawLegacyBridges(g: dom.svg.Element, bridges: js.Dynamic,
+                               focus: Option[Int] = None): Unit =
+    legacyBridgeWires(bridges).foreach { w =>
+      val op = w.bundleId.map(b => bundleAlpha(b.toDouble, focus)).getOrElse(1.0)
+      g.appendChild(el("line", "class" -> "legacybridge", "opacity" -> op,
+        "x1" -> w.x1, "y1" -> w.y1, "x2" -> w.x2, "y2" -> w.y2))
+      val lg = el("g", "opacity" -> op, "transform" ->
+        s"translate(${(w.x1 + w.x2) / 2} ${(w.y1 + w.y2) / 2}) scale(1 -1)")
+      val t = el("text", "class" -> "legacybridgelbl", "x" -> 0, "y" -> -4,
+        "text-anchor" -> "middle")
+      t.textContent = w.label
+      lg.appendChild(t); g.appendChild(lg)
+    }
+
   /** A placed segment centerline: perp coord = track_position, extent = span_lo..hi. */
   private def placedLine(s: js.Dynamic): (Double, Double, Double, Double) = {
     val tp = d(s, "track_position"); val lo = d(s, "span_lo"); val hi = d(s, "span_hi")
@@ -180,6 +248,7 @@ object Renderer {
         }
       }
     }
+    drawLegacyBridges(g, c.selectDynamic("bridge_segments"))
     lbl
   }
 
@@ -215,6 +284,10 @@ object Renderer {
         "width" -> (d(o, "span_hi") - d(o, "span_lo")),
         "height" -> (d(o, "perp_hi") - d(o, "perp_lo"))))
     }
+    // A restored legacy bridge is UNPLACED by definition, so it is drawn here
+    // at its recorded nominal coordinates — unrealized metal beside the placed
+    // tracks, exactly as the matplotlib NUTS view draws it.
+    drawLegacyBridges(g, payload.selectDynamic("legacy_bridges"), focus)
   }
 
   private def drawDetailed(g: dom.svg.Element, payload: js.Dynamic, span: Double,

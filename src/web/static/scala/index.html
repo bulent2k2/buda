@@ -40,6 +40,13 @@
   .bit { stroke-width: 1; } .bit.H { stroke: #f80; } .bit.V { stroke: #e22; }
   .via { fill: #f60; stroke: #a30; stroke-width: .5; }
   .overlap { fill: #f005; stroke: #f00; stroke-width: 1; }
+  /* Legacy-load TEG bridge (teg_multirect_status.md limitation 6): UNREALIZED
+     metal on a candidate restored from a pre-emission checkpoint, dashed and
+     deliberately OFF the layer palette.  Kept in sync with the reference
+     client (../index.html) and the matplotlib overlay. */
+  .legacybridge { stroke: #cc3344; stroke-width: 2.5; fill: none;
+                  stroke-dasharray: 6 3; opacity: .9; }
+  .legacybridgelbl { fill: #cc3344; font-size: 10px; }
   #candbar, #focusbar { position: absolute; top: 8px; left: 8px; background: #000a;
              color: #fff; padding: 6px 10px; border-radius: 5px; }
   #candbar button, #focusbar button { background: #fff2; color: #fff; border: 1px solid #fff4; }
