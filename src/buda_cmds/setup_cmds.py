@@ -28,7 +28,8 @@ import re
 from buda_session.util import apply_pattern_layer_facts, min_bit_pitch, resolve_script_path
 from buda_script import leading_path_and_options
 
-from ._options import (reject_unknown_options, require_distance,
+from ._options import (parse_rect_list, validate_rect_list,
+                       reject_unknown_options, require_distance,
                        require_int)
 
 _ADD_BLOCK_USAGE = (
@@ -80,24 +81,11 @@ def cmd_add_block(session, cmd, args, cmd_line):
                                 usage=_ADD_BLOCK_USAGE, why=_BLOCK_COORD_WHY)
 
     if len(args) > 1 and args[1].lower() == "rect":
-        rects = []
-        i = 1
-        while i < len(args) and args[i].lower() == "rect":
-            n = len(rects) + 1
-            # A truncated rect (`rect 0 0 100` — fewer than 4 coords) used to
-            # raise a bare IndexError naming nothing; name the missing
-            # argument like the fractional-coord path does.
-            have = len(args) - (i + 1)      # coords present after this 'rect'
-            if have < 4:
-                missing = ("x1", "y1", "x2", "y2")[have]
-                print(f"Error: add_block: rect {n} is missing <{missing}> — "
-                      f"each rect takes exactly 4 coordinates "
-                      f"(<x1> <y1> <x2> <y2>).\n  Usage: {_ADD_BLOCK_USAGE}")
-                sys.exit(1)
-            rects.append(tuple(
-                _block_coord(f"<{ax}> of rect {n}", args[i + k])
-                for k, ax in enumerate(("x1", "y1", "x2", "y2"), start=1)))
-            i += 5
+        # One parser, shared with `set_cell_rects` (the BDB/hier declaration
+        # of the same geometry) so the two cannot drift on what a malformed
+        # rect list means.
+        rects, i = parse_rect_list("add_block", args, 1, _block_coord,
+                                   usage=_ADD_BLOCK_USAGE)
         # Degenerate / duplicate rects are hard errors at declaration (the
         # engine normalizes coordinate ORDER, so only zero-extent is
         # degenerate).  Overlapping non-identical rects are deliberately
@@ -108,24 +96,8 @@ def cmd_add_block(session, cmd, args, cmd_line):
         # the OVER emission rule became "every rect the trunk does not cross
         # gets its attachment" when the adjacency suppression was withdrawn —
         # teg_multirect_status.md Final-state item 2, 2026-08-27.)
-        seen = {}
-        for n, (rx1, ry1, rx2, ry2) in enumerate(rects, start=1):
-            if rx1 == rx2 or ry1 == ry2:
-                axis = "width (x1 == x2)" if rx1 == rx2 else "height (y1 == y2)"
-                print(f"Error: add_block: rect {n} of block '{name}' is "
-                      f"degenerate — zero {axis}. A rect must have positive "
-                      f"extent on both axes; its edges become block faces "
-                      f"and Hanan lines.\n  Usage: {_ADD_BLOCK_USAGE}")
-                sys.exit(1)
-            key = (min(rx1, rx2), min(ry1, ry2), max(rx1, rx2), max(ry1, ry2))
-            if key in seen:
-                print(f"Error: add_block: rect {n} of block '{name}' "
-                      f"duplicates rect {seen[key]} "
-                      f"({key[0]},{key[1]})-({key[2]},{key[3]}) — a repeated "
-                      f"rect adds no geometry and doubles its stubs/taps; "
-                      f"remove one.\n  Usage: {_ADD_BLOCK_USAGE}")
-                sys.exit(1)
-            seen[key] = n
+        validate_rect_list("add_block", f"block '{name}'", rects,
+                           usage=_ADD_BLOCK_USAGE)
         # Optional teg_mode keyword after rects.  Without one the block takes
         # the `set_teg_mode` global default (per-block keyword wins,
         # most-specific-first like set_feedthru), resolved at DECLARATION

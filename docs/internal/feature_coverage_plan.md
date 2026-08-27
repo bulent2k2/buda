@@ -133,7 +133,7 @@ Updated as files land. `L` = `@landed`, `F` = `@future`, `D` = `@doc`.
 | Pipeline resume / save_bdb | `pipeline_resume.feature` | L | `test_bdb_*persist*`, resume tests |
 | Planner knobs | `planner_knobs.feature` | L | `test_planner_*` |
 | Hanan-line trunk loci (opens #13a) | `hanan_trunk_loci.feature` | L | `test_topo_hanan_loci.py` |
-| TEG / multi-rect blocks (teg_multirect_status.md, arc closed 2026-08-25) | `busterm_over_the_block.feature`, `multi_rect_block.feature` | L | `test_busterm_over_the_block.py`, `test_multi_rect_block.py`, `test_teg_open.py`, `test_teg_resume.py`, `test_teg_thru_census.py`, `test_teg_hier_demos.py` |
+| TEG / multi-rect blocks (teg_multirect_status.md, arc closed 2026-08-25; the hier/BDB declaration `set_cell_rects` landed 2026-08-27) | `busterm_over_the_block.feature`, `multi_rect_block.feature` | L | `test_busterm_over_the_block.py`, `test_multi_rect_block.py`, `test_teg_open.py`, `test_teg_resume.py`, `test_teg_thru_census.py`, `test_teg_hier_demos.py`, `test_bdb_multirect_cell.py` |
 | Roadmap / opens | `future_directions.feature` | F | — (pending) |
 
 ## Maintenance rule

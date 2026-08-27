@@ -135,6 +135,13 @@ cell_layer_share cell→cell, layer_id, share (fraction of the layer's
                  signal tracks, v20)
                  PRIMARY KEY (cell, layer_id)
 
+cell_rect        cell→cell, ord, x1,y1,x2,y2  — one rectangle of the cell's
+                 MULTI-RECT footprint, in CELL-LOCAL coordinates (v30; no
+                 rows = the cell is its single width x height box).  The
+                 mode rides the cell row as `cell.teg_mode`
+                 ('THRU' | 'OVER').
+                 PRIMARY KEY (cell, ord)
+
 ndr_rule         name (PK), width_x, spacing_x (multipliers), shield_mode,
                  shield_per_n, shield_net, layers (CSV; '' = every layer),
                  credit (R5a, v22), bond (R6; 0 = off, N = stride, v25),
@@ -304,6 +311,21 @@ its checkpoint handed back.  A pre-v29 checkpoint carries no grid rows and
 cannot be fixed retroactively, so `load_pipeline` says so (BUDA-1503) when
 it restores a routed design into a session with no grid.
 
+v30 added the **cell's multi-rect footprint** — the `cell_rect` table (one
+row per rectangle, in CELL-LOCAL coordinates) plus `cell.teg_mode`.  A cell
+was one `width x height` box by construction, so a rectilinear or split macro
+could not be STATED in a BDB at all: `derive_busterms` wrote empty rects,
+every BDB→Floorplan projection was `add_block(bbox)`, and the whole
+multi-rect / TEG machinery was reachable only from a flat `.buda` script
+(`docs/internal/teg_multirect_status.md` limitation 5).  It hangs off the
+CELL rather than the component because that is what it is a property OF —
+LEF's `SIZE` is a MACRO property — so one declaration governs every
+instance, a `move_comp` can never stale the rects, and a transformed
+instance gets them transformed with it.  A pre-v30 checkpoint holds no rect
+rows and every cell reads `THRU`, which is exactly the design it stored: a
+cell that WANTED a footprint could not have said so.  See
+[`set_cell_rects`](#set_cell_rects).
+
 `tools/bdb_serialize.py` preserves the version across the `*.bdb.sql`
 round-trip.
 
@@ -378,20 +400,29 @@ annotation from the link rows + `BDB::busterm(id)` alone (no floorplan). C++ API
 `topology_seg_busterms(bundle_id, cand_index)`, `busterm(id)` (fetches a single
 row incl. `tb:` — `all_busterms()` returns hier-derived rows only).
 
-> **Multi-rect boundary** (teg_multirect_status.md open 6): the busterm
-> `rects` + `teg_mode` columns are a **routing-time persist artifact** — the
-> `tb:` rows above, written by the flat pipeline so a restored candidate's
-> taps keep their multi-rect/TEG identity — **not a hier-design input**.  A
-> BDB *component* holds ONE bbox, `derive_busterms` writes empty `rects`, and
-> every BDB→Floorplan projection calls `add_block(bbox)`, so a multi-rect
+> **Two writers of a busterm's `rects` + `teg_mode`, and they are different
+> things.**  On a `tb:` row (above) they are a **routing-time persist
+> artifact** — written by the pipeline so a restored candidate's taps keep
+> their multi-rect/TEG identity.  On a hier-derived `bt:` row they are the
+> DESIGN's footprint, stamped from the component's cell
+> ([`set_cell_rects`](#set_cell_rects), schema v30) at `derive_busterms`.
+>
+> ~~A BDB *component* holds ONE bbox, `derive_busterms` writes empty `rects`,
+> and every BDB→Floorplan projection calls `add_block(bbox)`, so a multi-rect
 > block cannot be DECLARED through the hier flow (`tools/buda2bdb.py`
 > collapses the rect form to the union bbox and names the dropped modifiers,
 > `teg_mode` included).  The flat script's `add_block … rect … teg_mode` is
-> the one door — and a flat stage-resume keeps it: the recorded trace
-> replays that line verbatim before `load_pipeline`, so the resumed
-> floorplan re-declares rects + mode and the `TEG_OPEN` audit (which reads
-> them off the floorplan) stays armed (measured 2026-08-23; pinned by
-> `test_teg_resume.py`).
+> the one door~~ — that boundary is GONE since v30
+> (teg_multirect_status.md Final-state item 5): the footprint lives on the
+> CELL, the projections carry it, and `buda2bdb`/`bdb2buda` round-trip it.
+> Both resume paths keep it, for opposite reasons: a FLAT stage-resume
+> replays the recorded `add_block … rect … teg_mode` line verbatim before
+> `load_pipeline` (measured 2026-08-23; pinned by `test_teg_resume.py`),
+> while a HIER stage-resume HOLDS its construction commands and reads the
+> footprint back out of the checkpoint (pinned by
+> `test_bdb_multirect_cell.py::test_the_footprint_survives_a_hier_stage_resume`).
+> Either way the `TEG_OPEN` audit — which reads rects + mode off the
+> floorplan — stays armed.
 
 **Planner-output persistence.** `run_planner` records its decision: it marks the
 selected candidate (`topology.is_selected`, via `set_topology_selected`) and the
@@ -1188,6 +1219,85 @@ entries.
 | `name` | str | Cell type name, e.g. `cpu`. |
 | `width` | float | Width in µm. |
 | `height` | float | Height in µm. |
+
+---
+
+### `set_cell_rects`
+
+```
+set_cell_rects <cell> rect <x1> <y1> <x2> <y2> [rect ...] [teg_mode thru|over]
+set_cell_rects <cell> off
+```
+
+Declare a cell's **multi-rect footprint** — the hier/BDB twin of
+`add_block <name> rect ...`, and what lets a hierarchical or BDB-backed design
+reach the multi-rect / TEG machinery at all.  Before schema **v30** a BDB cell
+was one `width x height` box, so `derive_busterms` wrote empty rects and every
+BDB→Floorplan projection was `add_block(bbox)`: `teg_mode`, the OVER
+connection metal, the `TEG_OPEN` audit and the BUDA-1907 thru census were
+script-declared only
+(`docs/internal/teg_multirect_status.md` limitation 5).
+
+Coordinates are **cell-local** — offsets from the cell origin, like
+`add_cell_pin`'s `px`/`py` and `add_inst_to_cell`'s `x`/`y`.  The footprint is
+therefore a property of the **cell type** (as LEF's `SIZE` is), which is what
+makes it behave: one declaration governs every instance, a `move_comp` can
+never stale it, and a rotated or mirrored instance gets the rects transformed
+with it.
+
+| Argument | Type | Description |
+|---|---|---|
+| `cell` | str | Cell type name; must already exist (`add_cell`). |
+| `rect x1 y1 x2 y2` | float ×4 | One rectangle, cell-local.  At least **two** are required. |
+| `teg_mode` | enum | `thru` (default — the rects ARE internally connected) or `over` (they are not, so a route reaching only some of them owes the rest explicit metal). |
+| `off` | — | Clear the footprint; the cell is its single `width x height` box again. |
+
+**The union of the rects must be exactly `(0,0)-(width,height)`** — a hard
+error otherwise, naming both shapes.  Every non-routing consumer (placement,
+HPWL, overlap checking, `validate()`) reads the component bbox, which comes
+from the cell size; a union that disagreed with it would route against one
+shape and place against another — the split-brain the planner's
+`low_seg_obstructed` had before open 3.
+
+Also hard errors: an undeclared cell, a single rect (it declares nothing
+`add_cell` has not already said, and `teg_mode` on one rectangle has no
+referent), a degenerate (zero-extent) rect, a duplicate rect, and an unknown
+`teg_mode` value.  Overlapping non-identical rects stay legal — interior
+overlap is exactly how a rectilinear L/C-shape is drawn.
+
+Persisted in the BDB (`cell_rect` rows + `cell.teg_mode`, schema v30) and
+restored by `open_bdb` like every other cell attribute.  A pre-v30 checkpoint
+holds no rect rows and every cell reads `THRU`, which is exactly the design it
+stored — a cell that WANTED a multi-rect footprint could not have said so.
+
+**A footprint that goes STALE is refused at the projection (BUDA-1919):**
+the union rule above is enforced at declaration, but a later `resize_cell`
+rewrites every instance's bbox and keeps the rects (so does a hand-edited
+`.bdb.sql`).  `add_block_rects` derives the block's bbox FROM the rects, so
+projecting a stale footprint would hand the routing frame a different shape
+from the one placement reads.  The projection warns, names both shapes, and
+falls back to the single bbox — the honest projection of what the BDB now
+says.
+
+**One further limitation, reported rather than silent (BUDA-1918):**
+`rotate_comp`/`flip_comp` on a **container** rewrite descendant *bboxes* and
+deliberately leave their orientation tokens untouched (for a single-bbox
+instance the bbox rewrite IS the transform, and composing the tokens too
+would make GDS export double-transform).  A multi-rect footprint is geometry
+the bbox does not carry, so it stays upright while the instance turns.  The
+transform therefore **warns**, naming every affected descendant.  Transform
+the leaf itself — a childless subtree composes its own token, which the
+projection reads — or re-declare the placement.
+
+```
+add_cell dsp 400 400
+set_cell_rects dsp rect 0 0 400 100 rect 0 0 100 400 teg_mode over
+add_inst_to_cell unit dsp_i dsp 30 30
+```
+
+`tools/buda2bdb.py` writes this footprint for a multi-rect `add_block`, and
+`tools/bdb2buda.py` exports it back as the `rect ... teg_mode over` form, so
+a TEG macro survives the round trip.  Vehicle: `flow/teg_hier_cell.buda`.
 
 ---
 

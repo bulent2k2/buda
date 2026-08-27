@@ -354,15 +354,135 @@ its pinning test on this date:
    block still gets ONE stub and no invented metal, a single-rect design is
    byte-identical on exact coordinates, and a genuinely unreached rect still
    fires (limitation 8 below, which is where the two dirty vehicles moved).
-5. **No import path (DEF/GDS) and no hier declaration produces a multi-rect
-   block** — a BDB component is one bbox (opens 6/17;
-   `opens_interchange.md` item 16): `derive_busterms` writes empty rects,
-   every BDB→Floorplan projection is `add_block(bbox)`, and
-   `tools/buda2bdb.py` collapses to the union bbox with a warning naming
-   the dropped trailing modifiers, `teg_mode` included (pinned by
-   `test_buda2bdb.py::test_multirect_collapse_warning_names_dropped_modifiers`).
-   Multi-rect/TEG is script-declared only; the honest hybrid recipe is
-   `demo/teg_hier_hybrid.buda`.
+5. ~~**No import path (DEF/GDS) and no hier declaration produces a
+   multi-rect block**~~ — the HIER/BDB half is **RESOLVED 2026-08-27**
+   (schema **v30**, `set_cell_rects`); the IMPORT half is **REFUSED, with
+   the evidence**, and stays recorded as `opens_interchange.md` item 16.
+
+   **What was true**: a BDB *cell* was one `width x height` box, so a
+   multi-rect footprint had nowhere to live — `derive_busterms` wrote empty
+   rects, every BDB→Floorplan projection was `add_block(bbox)`, and
+   `tools/buda2bdb.py` collapsed to the union bbox.  The whole TEG machinery
+   (`teg_mode`, the OVER connection metal, `TEG_OPEN`, the BUDA-1907 thru
+   census) was therefore reachable only from a flat `.buda` script, and
+   `demo/teg_hier_hybrid.buda` is the workaround that boundary forced:
+   hierarchy in the BDB, macros hand-declared beside it, routed by the FLAT
+   bundler.
+
+   **What landed** (direction (b) of the three the task offered — (a) plus
+   round-trip fidelity, without an import path):
+
+   * **`set_cell_rects <cell> rect … [teg_mode thru|over]`** (and
+     `… off`), stored as v30 `cell_rect` rows + `cell.teg_mode`.  The
+     footprint hangs off the **CELL**, not the component, because that is
+     what it is a property OF — LEF's `SIZE` is a MACRO property — and the
+     consequences are the reason: one declaration governs every instance,
+     the rects are CELL-LOCAL so a `move_comp` can never stale them, and a
+     transformed instance gets them transformed with it.  A component-level
+     table would have needed every mutation to rewrite N rect rows and would
+     have let two instances of one cell disagree about their own footprint.
+   * **The union must be exactly the cell box** (hard error naming both).
+     Placement, HPWL, overlap checking and `validate()` all read the
+     component bbox, which comes from the cell size; a union that disagreed
+     would route against one shape and place against another — the
+     split-brain open 3 fixed on the planner side.
+   * **ONE projection rule** (`_fp_add_comp` in `src/buda_session/hier.py`)
+     serving all five BDB→Floorplan sites — `add_blocks_from_bdb`, the
+     depth frame, the cell-local template frame, and the two cross-level
+     frames — so they cannot disagree about a block's shape.  Its transform
+     is `src/orient_rect.py`, standalone and dependency-free for the
+     `slot_groups.py` reason: `tools/bdb2buda.py` needs the same rule and
+     deliberately imports only `buda_db`.
+   * **`derive_busterms` stamps the rects** onto the `bt:` rows it writes.
+     `BustermRow.rects` has carried an optional multi-rect JSON since v1 and
+     `BustermGen` wrote it empty because a cell had no rects to write; it is
+     stamped from the CLI handler rather than inside `BustermGen::derive`
+     because the per-instance rects need the ORIENTATION transform, which
+     lives in `topology.cpp` (the `buda` module) while `busterm.cpp` is in
+     `buda_core` and cannot link against it.  Nothing consumes those rows'
+     geometry today (the bundler uses busterm IDs, and generation builds its
+     `Busterm`s from the Floorplan), so this is completeness, not the
+     load-bearing path.
+   * **A footprint that goes STALE is refused at the projection**
+     (**BUDA-1919**): the union-equals-the-cell-box invariant is enforced at
+     declaration, but a later `resize_cell` rewrites every instance's bbox
+     and keeps the rects (so does a hand-edited `.bdb.sql`).
+     `add_block_rects` derives the block's bbox FROM the rects, so
+     projecting a stale footprint would hand the routing frame a different
+     shape from the one placement reads.  The check sits in the ONE
+     projection rule — where every frame passes — rather than in N mutation
+     sites, and it falls back to the single bbox, which is the honest
+     projection of what the BDB now says.
+   * **The RESUME seam needs no code and is pinned anyway.**  A hier
+     stage-resume HOLDS the construction commands (a replayed `add_inst` is
+     a duplicate-instance error), so a re-declared footprint was never an
+     option — which is precisely the argument for STORING it: the rects come
+     back with the checkpoint and the projection reads them fresh.  Measured
+     (`test_the_footprint_survives_a_hier_stage_resume`): a second session
+     declaring only the stack + `add_blocks_from_bdb` + `load_pipeline`
+     rebuilds the same multi-rect frame and reproduces the routed endpoint
+     exactly.  Compare open 6's flat resume, which works for the opposite
+     reason — there the recorded `add_block … rect … teg_mode over` replays
+     verbatim.
+   * **Round trip**: `tools/buda2bdb.py` writes a multi-rect `add_block`'s
+     rects + `teg_mode` onto the synthetic child cell, and
+     `tools/bdb2buda.py` exports them back as `add_block … rect … teg_mode
+     over`.  The collapse warning is GONE and its test is flipped
+     (`test_buda2bdb.py::
+     test_multirect_geometry_and_teg_mode_survive_the_conversion`, with the
+     old assertion kept in a comment) beside a new round-trip pin.
+
+   **The one limitation the fix has, reported rather than silent
+   (BUDA-1918)**: `rotate_comp`/`flip_comp` on a CONTAINER rewrite descendant
+   **bboxes** and deliberately leave their orientation tokens untouched
+   (`BDB::rotate_comp` composes the token only for a childless subtree —
+   composing it for a hierarchical block would make GDS export
+   double-transform).  For a single-bbox instance the bbox rewrite IS the
+   transform; a multi-rect footprint is geometry the bbox does not carry, so
+   it stays upright while the instance turns, and nothing in the row records
+   that a transform happened.  The transform therefore WARNS, naming every
+   affected descendant; transforming the leaf itself works (its token is
+   composed, and the projection reads it — test-pinned in both directions).
+
+   **The IMPORT half is refused on measurement, not left undone.**  Nothing
+   in the current import inputs *states* a multi-rect block: DEF `COMPONENTS`
+   carry no outline (the footprint is the LEF `SIZE`, one `w BY h` by
+   grammar), LEF expresses a non-rectangular macro only implicitly through
+   `OBS`/pin geometry, and a GDS structure's outline is whatever its shapes
+   union to, with no marker for "these rects are the connection interface".
+   Deriving rects from any of those is an INFERENCE with item 12's failure
+   mode — the reading that turned 133 macros' `OBS` into 13,034 keepouts and
+   a 1012× grid.  So the source of truth is a DECLARATION, which is exactly
+   what `set_cell_rects` is; `opens_interchange.md` item 16 keeps the
+   derivation question open with the same "opt-in and measured on
+   `flow/ariane133`" precondition it always had.
+
+   **QoR corpus** (`--vs main` @ 9955d9a1): **0 better / 0 worse / 51
+   unchanged** of 53, abstract AND detailed WL **+0.00%**, the new row
+   measuring 0/0/0 (`ariane133_heal` NOT COMPARABLE — its fetched inputs are
+   absent in the baseline worktree, the harness's documented shape).  Read
+   "all unchanged" as the DESIGNED answer rather than a blind spot: every
+   new path is gated on the design declaring a footprint (`multirect_cells()`
+   empty is one `SELECT DISTINCT` and out), and the FLAT multi-rect path —
+   whose rect parser was refactored into the shared
+   `parse_rect_list`/`validate_rect_list` — is genuinely covered by the
+   corpus rows that already exercise it (`teg_over_audit`, `teg_mst_over`,
+   `teg_adjacent`, plus `talk2`/`lShape1` through `test_flow_scripts.py`).
+   What the corpus could NOT have covered is the new behaviour itself, which
+   is why the new row exists.
+
+   **Vehicle**: `flow/teg_hier_cell.buda` (QoR corpus row, EXPECTED CLEAN) —
+   two `unit` instances, each holding an OVER L-shaped macro and a THRU
+   two-slab macro, routed by `run_hier_bundler` → `generate_hier_topologies`
+   → `run_planner hier` → NUTS → DNUTS.  Measured against the same design on
+   `main` (where the footprint simply cannot be expressed): 32 → 64
+   candidates, 5 → 8 bus segments, 20 → 32 bit-wires, detailed WL 3462 →
+   8033, both audits clean either way, and the BUDA-1907 census appears —
+   naming `u0/ioc_i` rect#0 `(400,160)-(520,310)`, which is the per-rect
+   contact predicate (`teg_touches`, the same one `TEG_OPEN` reads with the
+   OVER gate) running in a HIER frame for the first time.  Unit pins in
+   `test_bdb_multirect_cell.py`; the migration pin is
+   `test_bdb_schema.py::test_pre_v30_db_gains_the_multirect_footprint_tables_on_open`.
 6. ~~**The web client renders no legacy-load bridges**~~ **RESOLVED
    2026-08-27** — both web clients now draw a restored bridge in the
    matplotlib overlay's own visual language, and the placed payload learned
@@ -616,15 +736,21 @@ catch this shape too, which is another reason to land it first.
   anywhere, the CLI validates only block/layer existence~~ the declaration
   now warns LOUD in both declaration orders (BUDA-1908, open 7; Final-state
   item 7).
-- No import path produces a multi-rect block: DEF/LEF components get one
-  bbox (rectilinear macros collapse), GDS import likewise; `tools/buda2bdb.py`
-  collapses to the union bbox with a warning that now also NAMES the dropped
-  trailing modifiers, `teg_mode` included (opens 6/17;
-  `opens_interchange.md` item 16; Final-state item 5).
-- The hier flow is single-bbox end to end: `BustermGen::derive` writes empty
+- No IMPORT path produces a multi-rect block: DEF/LEF components get one
+  bbox (rectilinear macros collapse), GDS import likewise.  REFUSED rather
+  than undone — none of those files STATES a multi-rect block, so deriving
+  one is an inference with item 12's failure mode (`opens_interchange.md`
+  item 16; Final-state item 5).  `tools/buda2bdb.py` no longer collapses:
+  since v30 it writes the rects + `teg_mode` onto the synthetic child cell
+  and `tools/bdb2buda.py` exports them back.
+- ~~The hier flow is single-bbox end to end: `BustermGen::derive` writes empty
   `rects` (`src/busterm.cpp:172`), and every BDB→Floorplan projection calls
   `add_block(bbox)` — `add_block_rects` is called from exactly one place in
-  `src/`: the CLI setup command.  ~~A resumed or hier session therefore loses
+  `src/`: the CLI setup command.~~  RESOLVED 2026-08-27 (schema v30,
+  `set_cell_rects`): the five projections go through ONE rule
+  (`_fp_add_comp`) that calls `add_block_rects` whenever the component's cell
+  declares a footprint, and `derive_busterms` stamps the rects + `teg_mode`
+  onto its rows — see Final-state item 5.  ~~A resumed or hier session therefore loses
   per-rect geometry unless the setup script re-declares it.~~  The resume
   half was MEASURED FALSE 2026-08-23 — read it as superseded by open 6
   (the recorded setup replays `add_block … rect … teg_mode` verbatim and the
@@ -1106,7 +1232,12 @@ wrong.
    every rect is reached; OVER gets TEG_OPEN, never the census; single-rect
    silent; id in `dump_messages`).
 6. ~~**Multi-rect never reaches the hier flow**~~ **RESOLVED-AS-BOUNDED
-   2026-08-23, with the suspected resume loss MEASURED AND REFUTED.**  The
+   2026-08-23, with the suspected resume loss MEASURED AND REFUTED — then
+   the boundary itself REMOVED 2026-08-27 (schema v30, `set_cell_rects`;
+   Final-state item 5).  Read the "boundary by construction" below as the
+   record of what was true until a CELL could carry a footprint: it was
+   argued from the COMPONENT holding one bbox, and the answer was that the
+   footprint belongs on the cell type in the first place.**  The
    hier half is a boundary by construction, not a defect: a BDB *component*
    holds ONE bbox, so multi-rect cannot be DECLARED as a hier-design input —
    `derive_busterms` writes empty rects (`src/busterm.cpp:172`), every
@@ -1135,9 +1266,10 @@ wrong.
    FLOORPLAN, and a resumed dirty checkpoint (trunk-Direct-inside-one-rect)
    still FIRES `TEG_OPEN` identically.  Both halves pinned by
    `test_teg_resume.py` (clean endpoint equality + audit-stays-armed).
-   Read §2.1's resume sentence as superseded by this entry.  What remains
-   genuinely absent is unchanged and lives in items 8/17: no import path
-   and no hier declaration produces a multi-rect block.
+   Read §2.1's resume sentence as superseded by this entry.  What remained
+   genuinely absent lived in items 8/17 — and the HIER-declaration half of
+   that is resolved (Final-state item 5); the IMPORT half is refused with
+   its evidence and stays in `opens_interchange.md` item 16.
 7. ~~**`set_feedthru` on a multi-rect block is silently ignored**
    (`src/topology.cpp:3056`).  Warn at declaration — the user stated an
    intent the engine drops.~~  RESOLVED 2026-08-23: **BUDA-1908** (WARNING,

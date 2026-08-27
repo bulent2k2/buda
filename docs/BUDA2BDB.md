@@ -63,13 +63,16 @@ python3 tools/buda2bdb.py core_flat.buda cells.bdb.sql -cell core
 
 All other commands (`def_layer`, `def_track_pattern`, `run_*`, `visualize`,
 `corner_margin`, …) are **ignored with a warning** — only placement and
-connectivity are translated.  Multi-rect `add_block <name> rect …` is collapsed
-to the union bounding box — a BDB component holds ONE bbox, so the collapse is
-by construction (the hier/BDB multi-rect boundary,
-`docs/internal/teg_multirect_status.md` open 6) — and the warning names both
-the collapse and every dropped trailing modifier, `teg_mode` included (an
-OVER declaration lost silently would turn an electrically-open block into a
-clean-auditing one); `container` / `corner_margin` are dropped the same way.
+connectivity are translated.  A **multi-rect** `add_block <name> rect …
+[teg_mode thru|over]` keeps its geometry: the rects (cell-local) and the mode
+become the synthetic child cell's `set_cell_rects` footprint (schema v30
+`cell_rect` + `cell.teg_mode`), so `tools/bdb2buda.py` exports it back in the
+`rect …` form and a TEG macro survives the round trip.  Until v30 a BDB cell
+was ONE `width x height` box and the rect list collapsed to the union bbox
+with a warning naming the dropped modifiers — an OVER declaration lost
+silently would have turned an electrically-open block into a clean-auditing
+one (`docs/internal/teg_multirect_status.md` Final-state item 5).
+`container` / `corner_margin` are still dropped with a warning.
 
 ---
 
@@ -149,5 +152,5 @@ Notes on fidelity:
 |---|---|
 | No external ports | Cell `cell_pin` ports are not inferred; all nets are internal |
 | No routing tech | `def_layer` / `def_track_pattern` and run/verify commands are ignored |
-| Multi-rect blocks | Collapsed to the union bbox (by construction — one bbox per BDB component); the warning names the dropped modifiers, `teg_mode` included |
+| `container` / `corner_margin` modifiers | Dropped with a warning (multi-rect geometry and `teg_mode` are NOT — they become the child cell's v30 `cell_rect` footprint) |
 | Global net names | `net.name` is unique BDB-wide; the replace step clears the cell's old nets to avoid collisions |

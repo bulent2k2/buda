@@ -1,0 +1,98 @@
+# ============================================================
+# flow/teg_hier_cell.buda — MULTI-RECT / TEG macros declared in a BDB
+#                           and routed by the HIER pipeline.
+#
+# The vehicle for teg_multirect_status.md limitation 5.  Before schema v30
+# a BDB cell was one `width x height` box, so multi-rect / TEG could not be
+# STATED in a hierarchical design at all — `derive_busterms` wrote empty
+# rects and every BDB->Floorplan projection was `add_block(bbox)`.
+# `demo/teg_hier_hybrid.buda` is the workaround that boundary forced:
+# hand-declare the macros beside a projected hierarchy and route them with
+# the FLAT bundler.  Here the macros are CELLS, so they instantiate like any
+# other cell and the hier pipeline routes them:
+#
+#   set_cell_rects  ->  add_blocks_from_bdb / the cell-local + cross-block
+#                       generation frames
+#                   ->  run_hier_bundler
+#                   ->  generate_hier_topologies   (TEG metal emitted)
+#                   ->  run_planner hier -> run_nuts -> run_detailed_nuts
+#                   ->  check_design                (TEG_OPEN / BUDA-1907)
+#
+# Design: two identical `unit` instances, each holding a driver leaf and two
+# multi-rect macros.
+#
+#   cell dsp   400 x 400  rects (0,0)-(400,100) + (0,0)-(100,400)  OVER
+#              an L: the rects are NOT internally connected, so a trunk that
+#              reaches only one arm owes the other real connection metal.
+#   cell ioc   120 x 400  rects (0,0)-(120,150) + (0,250)-(120,400)  THRU
+#              two disjoint slabs DECLARED internally connected, so the
+#              untouched one is the BUDA-1907 census INFO, never a violation.
+#   cell drv   100 x  80
+#   cell unit  700 x 500 :  dsp_i @ (30,30)  ioc_i @ (300,60)  drv_i @ (550,200)
+#   top        u0 @ (100,100)   u1 @ (100,700)
+#
+#   d0[4] u0/drv_i.out -> u0/dsp_i.in   cell-local template (level 1)
+#   d1[4] u1/drv_i.out -> u1/dsp_i.in   its replica — ONE template, both
+#                                        instances, which the flat
+#                                        workaround structurally cannot do
+#   c0[4] u0/drv_i.out -> u0/ioc_i.in   the THRU census
+#   x[4]  u0/drv_i.out -> u1/dsp_i.in   cross-block at depth 1
+#
+# Expected: both audits clean, 0 unplaced, no TEG_OPEN — every rect of every
+# OVER macro carries real placed metal — with ONE BUDA-1907 INFO naming the
+# ioc rect the THRU declaration leaves to the block's internal routing.
+# ============================================================
+
+source tracks/tracks.buda
+
+corner_margin dx 5 dy 5
+set_min_stub_length 2
+
+open_bdb :memory:
+
+# ── Cells ─────────────────────────────────────────────────
+add_cell dsp  400 400
+add_cell ioc  120 400
+add_cell drv  100  80
+add_cell unit 700 500
+
+# The multi-rect footprints, in CELL-LOCAL coordinates.  Each union is
+# exactly the cell's declared extent — the routing footprint and the
+# placement footprint are one shape by construction.
+set_cell_rects dsp rect 0 0 400 100 rect 0 0 100 400 teg_mode over
+set_cell_rects ioc rect 0 0 120 150 rect 0 250 120 400
+
+add_inst_to_cell unit dsp_i dsp  30  30
+add_inst_to_cell unit ioc_i ioc 300  60
+add_inst_to_cell unit drv_i drv 550 200
+
+add_inst u0 unit - 100 100
+add_inst u1 unit - 100 700
+
+derive_busterms 1
+
+add_blocks_from_bdb 0
+add_blocks_from_bdb 1 skip
+
+# ── Buses ─────────────────────────────────────────────────
+bdb_net_mode on
+
+add_bus d0[4] u0/drv_i.out u0/dsp_i.in
+add_bus d1[4] u1/drv_i.out u1/dsp_i.in
+add_bus c0[4] u0/drv_i.out u0/ioc_i.in
+add_bus x[4]  u0/drv_i.out u1/dsp_i.in
+
+# ── Hier pipeline ─────────────────────────────────────────
+run_hier_bundler depth 1
+generate_hier_topologies
+run_planner hier 5
+
+run_nuts
+check_design nuts
+
+run_detailed_nuts
+check_design dnuts
+
+report_wl
+
+visualize

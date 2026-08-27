@@ -90,6 +90,20 @@ block name is the component's full name (which for flat BDBs has no `/`).
 In `-cell` mode the *leaf* part of the name is used and coordinates are
 relative to the parent's lower-left corner.
 
+**A component whose CELL declares a multi-rect footprint** (`set_cell_rects`,
+schema v30) is emitted in the rect form instead:
+
+```
+add_block <name> rect <x1> <y1> <x2> <y2> [rect ...] [teg_mode over]
+```
+
+The cell-local rects are transformed by the instance's orientation and
+translated to its placement (the same rule the hier BDB→Floorplan projections
+use — `src/orient_rect.py`, shared rather than re-derived), so what comes out
+is the geometry the routing frame sees.  Before v30 a BDB cell was one
+`width x height` box, so a TEG macro round-tripped as its union bbox and lost
+`teg_mode` with it.
+
 ### `add_net` and `add_bus`
 
 Nets with at least two endpoints inside the selected component set are

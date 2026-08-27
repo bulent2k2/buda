@@ -265,6 +265,15 @@ CORPUS = [
     # clips the placed span back and fires TEG_OPEN unless an OVER block's
     # crossings carry their own anchor.  ~0.01s.
     "flow/teg_bitrunk.buda",
+    # HIER multi-rect guard (teg_multirect_status.md limitation 5,
+    # RESOLVED 2026-08-27): the first corpus design whose blocks get their
+    # rects from a BDB CELL (`set_cell_rects`, schema v30) rather than from
+    # an `add_block ... rect` line — so it covers what every other TEG row
+    # structurally cannot: the five BDB->Floorplan projections, the
+    # cell-local TEMPLATE frame (one macro solved once for two instances)
+    # and the cross-block depth frame.  EXPECTED CLEAN (0/0/0), with the
+    # THRU macro's BUDA-1907 census beside the OVER one.  ~0.1s.
+    "flow/teg_hier_cell.buda",
 ]
 
 

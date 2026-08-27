@@ -35,6 +35,7 @@ import sys
 import buda
 
 import buda_diag
+import orient_rect
 from bus_names import parse_bus_bit
 # WHETHER a component has a placement — one definition for every frame this
 # module builds, because generation validates in its frame and load_pipeline
@@ -45,34 +46,27 @@ from comp_placement import is_placed
 # Output-normalized orientation maps over a w×h box: (swap, reflect-x,
 # reflect-y).  Token convention = mirror-about-X-axis FIRST, then CCW
 # rotation (bdb.cpp / gds_io.cpp).
-_ORIENT_MAPS = {"N":  (0, 0, 0), "S":  (0, 1, 1),
-                "FN": (0, 0, 1), "FS": (0, 1, 0),
-                "W":  (1, 1, 0), "E":  (1, 0, 1),
-                "FW": (1, 0, 0), "FE": (1, 1, 1)}
-_DIR_PRESERVING = ("N", "S", "FN", "FS")   # H stays H, V stays V
+# The 8-orientation rect transform lives in `src/orient_rect.py` — standalone
+# and dependency-free, because `tools/bdb2buda.py` needs the SAME transform to
+# read a v30 `cell_rect` footprint in an instance's frame and deliberately
+# imports only `buda_db` (see that module's docstring).
+_ORIENT_MAPS = orient_rect.ORIENT_MAPS
+_DIR_PRESERVING = orient_rect.DIR_PRESERVING   # H stays H, V stays V
+_oxf_rect = orient_rect.oxf_rect
 
 _PHASE_SCALE = 1_000_000   # µ-unit integers for exact modular phase math
 
 
-def _oxf_rect(o, x1, y1, x2, y2, w, h):
-    """Transform a rect through orientation `o` over a w×h box
-    (normalized: the transformed box's lower-left stays at the origin)."""
-    s, rx, ry = _ORIENT_MAPS[o]
+def _comp_rects_abs(comp, cell_entry, ox=0.0, oy=0.0):
+    """The component's multi-rect footprint in the target frame, or [].
 
-    def pt(x, y):
-        if s:
-            x, y, bw, bh = y, x, h, w
-        else:
-            bw, bh = w, h
-        if rx:
-            x = bw - x
-        if ry:
-            y = bh - y
-        return x, y
-    ax, ay = pt(x1, y1)
-    bx, by = pt(x2, y2)
-    return (round(min(ax, bx), 3), round(min(ay, by), 3),
-            round(max(ax, bx), 3), round(max(ay, by), 3))
+    `cell_entry` is `(w, h, cell_local_rects, teg_mode)` for the component's
+    CELL (schema v30 `cell_rect`).  Thin wrapper over the shared transform so
+    the hier projections and `tools/bdb2buda.py` read one rule.
+    """
+    w, h, rects, _mode = cell_entry
+    return orient_rect.comp_rects_abs(comp.x1, comp.y1, comp.orient, w, h,
+                                      rects, ox, oy)
 
 
 def _pattern_two_sigma(pat):
@@ -701,6 +695,74 @@ class HierMixin:
         if persist and applied_change and self.bdb is not None:
             self._persist_topologies()
 
+    def _bdb_multirect(self):
+        """{cell -> (w, h, [cell-local rects], teg_mode)} for every cell that
+        declares a MULTI-RECT footprint (schema v30 `cell_rect`, written by
+        `set_cell_rects`).
+
+        This is what lets a HIER design reach the multi-rect / TEG machinery at
+        all: before v30 a BDB cell was one `width x height` box, so every
+        BDB->Floorplan projection was `add_block(bbox)` and TEG was
+        script-declared only (teg_multirect_status.md limitation 5).  Returns
+        {} when no cell declares one — which is every design that never calls
+        `set_cell_rects`, so every projection below stays byte-identical
+        there (one cheap `SELECT DISTINCT` and out).
+        """
+        if self.bdb is None:
+            return {}
+        names = list(self.bdb.multirect_cells())
+        if not names:
+            return {}
+        dims = {c.name: (c.width, c.height, c.teg_mode)
+                for c in self.bdb.all_cells()}
+        out = {}
+        for n in names:
+            w, h, mode = dims.get(n, (0.0, 0.0, "THRU"))
+            out[n] = (w, h, [tuple(r) for r in self.bdb.cell_rects(n)], mode)
+        return out
+
+    def _fp_add_comp(self, fp, comp, mr, name=None, ox=0.0, oy=0.0):
+        """Project ONE BDB component into `fp` — `add_block_rects` when its
+        cell declares a multi-rect footprint, else the historical
+        `add_block(bbox)`.  `name` overrides the block name (a cell-local
+        frame uses the child's LOCAL name) and (`ox`,`oy`) is the frame
+        origin.  The ONE place the projection rule lives, so the five hier
+        frames cannot disagree about a block's shape."""
+        nm = comp.name if name is None else name
+        x1 = int(round(comp.x1 - ox)); y1 = int(round(comp.y1 - oy))
+        x2 = int(round(comp.x2 - ox)); y2 = int(round(comp.y2 - oy))
+        ent = mr.get(comp.cell) if mr else None
+        if not ent or not ent[2]:
+            fp.add_block(nm, x1, y1, x2, y2)
+            return
+        rects = _comp_rects_abs(comp, ent, ox, oy)
+        # The invariant `set_cell_rects` enforces at declaration — the rects
+        # union to the cell's extent — can be broken AFTERWARDS by a resize
+        # (`add_cell` upserts the size, `resize_cell` rewrites instance
+        # bboxes) or by a hand-edited `.bdb.sql`.  `add_block_rects` derives
+        # the block's bbox from the rects, so projecting a stale footprint
+        # would give the routing frame a different shape from the one
+        # placement, HPWL and overlap checking read.  Refuse it HERE, where
+        # every projection passes, rather than trusting N mutation sites.
+        ux1 = min(r[0] for r in rects); uy1 = min(r[1] for r in rects)
+        ux2 = max(r[2] for r in rects); uy2 = max(r[3] for r in rects)
+        if (ux1, uy1, ux2, uy2) != (x1, y1, x2, y2):
+            said = self.__dict__.setdefault("_mr_stale_said", set())
+            if comp.cell not in said:
+                said.add(comp.cell)
+                buda_diag.emit(
+                    "BUDA-1919",
+                    f"cell '{comp.cell}': its rects union to "
+                    f"({ux1},{uy1})-({ux2},{uy2}) at instance '{nm}', whose "
+                    f"extent is ({x1},{y1})-({x2},{y2}).  Projecting the "
+                    f"single bbox instead; re-declare `set_cell_rects "
+                    f"{comp.cell} ...` against the current cell size.")
+            fp.add_block(nm, x1, y1, x2, y2)
+            return
+        fp.add_block_rects(
+            nm, rects,
+            buda.TegMode.OVER if ent[3] == "OVER" else buda.TegMode.THRU)
+
     def _add_blocks_from_bdb(self, depth: int, mode: str = "deepest"):
         """Walk BDB hierarchy and call fp.add_block() for components at `depth`.
 
@@ -766,13 +828,12 @@ class HierMixin:
         # Add blocks to floorplan
         added_rows = []   # (ComponentRow, is_fallback) for placed blocks
         skipped_unplaced = fallback_count = 0
+        mr = self._bdb_multirect()
         for r, is_fallback in blocks_to_add:
             if not is_placed(r):
                 skipped_unplaced += 1
                 continue
-            self.fp.add_block(r.name,
-                              int(round(r.x1)), int(round(r.y1)),
-                              int(round(r.x2)), int(round(r.y2)))
+            self._fp_add_comp(self.fp, r, mr)
             self._bdb_added_ids.add(r.id)
             added_rows.append((r, is_fallback))
             if is_fallback:
@@ -869,10 +930,10 @@ class HierMixin:
     def _build_bdb_floorplan(self, depth):
         """Build a Floorplan with placed components at exactly this depth from BDB."""
         fp = self._apply_fp_session_settings(buda.Floorplan())
+        mr = self._bdb_multirect()
         for c in self.bdb.all_components():
             if c.depth == depth and is_placed(c):
-                fp.add_block(c.name, int(round(c.x1)), int(round(c.y1)),
-                             int(round(c.x2)), int(round(c.y2)))
+                self._fp_add_comp(fp, c, mr)
         return fp
 
     # Output-normalized 8-orientation maps over a w×h box — mirror of the
@@ -1077,14 +1138,12 @@ class HierMixin:
         if parent is None:
             return None
         fp = self._apply_fp_session_settings(buda.Floorplan(), min_stub=True)
+        mr = self._bdb_multirect()
         for c in comps.values():
             if c.parent_id == parent.id and is_placed(c):
                 local_name = c.name.rsplit('/', 1)[-1]
-                lx1 = int(round(c.x1 - parent.x1))
-                ly1 = int(round(c.y1 - parent.y1))
-                lx2 = int(round(c.x2 - parent.x1))
-                ly2 = int(round(c.y2 - parent.y1))
-                fp.add_block(local_name, lx1, ly1, lx2, ly2)
+                self._fp_add_comp(fp, c, mr, name=local_name,
+                                  ox=parent.x1, oy=parent.y1)
         return fp
 
     @staticmethod
@@ -1314,6 +1373,7 @@ class HierMixin:
                 src = b.drv_spec_path
                 dsts = list(b.rcv_spec_paths)
             fp = self._apply_fp_session_settings(buda.Floorplan())
+            mr = self._bdb_multirect()
             for blk in [src, *dsts]:
                 c = comps_by_name.get(blk)
                 if c is None:
@@ -1326,8 +1386,7 @@ class HierMixin:
                 # generator a phantom {0,0,0,0} block at the die origin.
                 if not is_placed(c):
                     continue
-                fp.add_block(blk, int(round(c.x1)), int(round(c.y1)),
-                             int(round(c.x2)), int(round(c.y2)))
+                self._fp_add_comp(fp, c, mr, name=blk)
             tg = self._make_topo_gen(fp, use_center, use_double_detour,
                                      use_multi_trunk, use_hanan_loci,
                                      use_spine_relays)
@@ -1552,6 +1611,7 @@ class HierMixin:
                 blocks = ([root_c, *leaves_c] if fanin_c
                           else [b.drv_spec_path, *b.rcv_spec_paths])
                 fp = self._apply_fp_session_settings(buda.Floorplan())
+                mr = self._bdb_multirect()
                 for blk in blocks:
                     c = comps_by_name.get(blk)
                     if c is None:
@@ -1564,8 +1624,7 @@ class HierMixin:
                     # this frame accept a block contract no other frame could.
                     if not is_placed(c):
                         continue
-                    fp.add_block(blk, int(round(c.x1)), int(round(c.y1)),
-                                 int(round(c.x2)), int(round(c.y2)))
+                    self._fp_add_comp(fp, c, mr, name=blk)
                 fp_cache[cache_key] = fp
             return fp_cache[cache_key]
 

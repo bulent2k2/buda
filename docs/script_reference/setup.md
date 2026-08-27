@@ -146,6 +146,20 @@ Topology generation handles blocks that are *not* cleanly separated as follows:
 
 #### TEG mode
 
+> **A hierarchical or BDB-backed design declares the same thing on the CELL**
+> — `set_cell_rects <cell> rect <x1> <y1> <x2> <y2> [rect ...] [teg_mode
+> thru|over]`, in cell-local coordinates (schema v30; see
+> [BDB Reference](../BDB_REFERENCE.md#set_cell_rects)).  Everything on this
+> page then applies to every instance of that cell, because the five
+> BDB→Floorplan projections carry the footprint into the routing frame.
+> Until v30 a BDB cell was one `width x height` box, so multi-rect / TEG was
+> reachable only from a flat script; `flow/teg_hier_cell.buda` is the hier
+> vehicle and `demo/teg_hier_hybrid.buda` the workaround that boundary
+> forced.  There is still no IMPORT path — no DEF/LEF/GDS file *states* a
+> multi-rect block, so reading one would be an inference
+> (`docs/internal/opens_interchange.md` item 16); declare it beside the
+> import instead.
+
 A multi-rect block models one of two physical situations:
 
 **Disjoint rects (pure TEG — Terminal Equivalence Group):** the rects are
@@ -222,6 +236,13 @@ add_block u_notch  rect  200  0  280  100  rect  220  300  300  400  teg_mode ov
 
 # Same notched block, relying on internal routing to join the two sides (default)
 add_block u_notch  rect  200  0  280  100  rect  220  300  300  400
+
+# The same L-shaped macro as a hierarchical CELL: one declaration, every
+# instance.  Cell-LOCAL coordinates, and their union must be the cell's
+# declared size.
+add_cell dsp 400 400
+set_cell_rects dsp rect 0 0 100 400 rect 0 0 400 100 teg_mode over
+add_inst_to_cell unit dsp_i dsp 30 30
 
 # Hierarchy envelope: a top-level block whose children are imported as sub-blocks.
 # LOW layers can route through the envelope; congestion is charged via child cuts.
