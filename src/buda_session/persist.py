@@ -345,6 +345,34 @@ class PersistMixin:
                     self.bdb.rollback_batch()
                     raise
 
+    def _durable_single_pin_uid(self, bid, memo=None, mirror_fresh=None):
+        """The `topo_uid` of the durable single `select_topology` pin the
+        open BDB holds for bundle `bid`, or None.
+
+        Memo-first (the same-process mirror `_persist_topologies` maintains),
+        with the `topology.is_pinned` table rows as the cross-process
+        fallback — a FRESH rebuild process has no memo yet but the previous
+        session's pin is on disk.  Single source for both the pin re-attach
+        below and the sidecar-override notice in `_apply_selections`."""
+        if self.bdb is None:
+            return None
+        bid = str(bid)                 # memo + rows key bundles by string id
+        if memo is None:
+            memo = getattr(self, '_bdb_pin_memo', None) or {}
+        uid = memo.get(bid)
+        if uid is not None:
+            return uid
+        if mirror_fresh is None:
+            mirror_fresh = (getattr(self, '_bdb_pin_snap_for', None)
+                            == id(self.bdb))
+        if mirror_fresh:
+            return None            # memo authoritative — absence means no pin
+        try:
+            rows = [tr for tr in self.bdb.topologies(bid) if tr.is_pinned]
+        except RuntimeError:
+            return None
+        return rows[0].topo_uid if rows else None
+
     def _apply_bdb_pins(self):
         """Re-attach durable `select_topology` pins from the open BDB onto a
         REBUILT candidate pool, by stable content uid.
@@ -395,14 +423,7 @@ class PersistMixin:
             # re-restore is already prevented by the pinned-wrapper skip
             # above (a dropped pin cannot return either — the drop's own
             # persist rebuilt the mirror without it).
-            uid = memo.get(bid)
-            if uid is None and not mirror_fresh:
-                try:
-                    rows = [tr for tr in self.bdb.topologies(bid)
-                            if tr.is_pinned]
-                except RuntimeError:
-                    continue
-                uid = rows[0].topo_uid if rows else None
+            uid = self._durable_single_pin_uid(bid, memo, mirror_fresh)
             if uid is None:
                 # No single pin — a GROUP pin may still be durable: the
                 # pinned_group meta was load_pipeline-only, so a rebuild

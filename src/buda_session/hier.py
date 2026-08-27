@@ -640,6 +640,38 @@ class HierMixin:
                         print(f"  [sidecar] GUI-pinned USER candidate "
                               f"overrides the script's select_topology for "
                               f"bundle {bid}")
+                    elif not w_pinned:
+                        # THE rebuild-override notice.  When the sidecar pins
+                        # an UNPINNED wrapper on a rebuild, it silently
+                        # displaces any durable checkpoint pin the open BDB
+                        # holds for this bundle (the generation tail's
+                        # `_apply_bdb_pins` skips an already-pinned wrapper,
+                        # so the checkpoint pin is never re-attached — the
+                        # one interaction in USER_GUIDE §3.3 that produced no
+                        # output).  Announce it, but only when a durable pin
+                        # actually EXISTS and points ELSEWHERE: a fresh build
+                        # (no prior pin) or a sidecar that agrees with the
+                        # checkpoint says nothing.  Scoped to `not w_pinned`
+                        # so a script `select_topology` overriding a
+                        # checkpoint — documented and intended — stays quiet,
+                        # and so the resume USER-override above (which already
+                        # prints) is not double-reported.
+                        dur_uid = self._durable_single_pin_uid(bid)
+                        if (dur_uid is not None
+                                and 0 <= target_idx < len(w.input.candidates)
+                                and buda.topo_uid(
+                                    w.input.candidates[target_idx]) != dur_uid):
+                            dur_i = next(
+                                (i for i, c in enumerate(w.input.candidates)
+                                 if buda.topo_uid(c) == dur_uid), None)
+                            dur_t = (w.input.candidates[dur_i].type
+                                     if dur_i is not None else "?")
+                            print(f"Warning: bundle {bid}: sidecar (.json) pin "
+                                  f"-> topo {target_idx + 1} "
+                                  f"({w.input.candidates[target_idx].type}) "
+                                  f"OVERRIDES a durable checkpoint pin "
+                                  f"(topo {dur_t}) — delete the sidecar to "
+                                  f"keep the checkpoint's choice")
                     w.plan.selected_topology_index = target_idx
                     w.input.topology_pinned = True
                     n_adopted += 1
