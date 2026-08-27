@@ -274,3 +274,23 @@ Recorded so they are not "fixed" by someone reading the list too eagerly:
 - **The 5-minute gate is not a problem yet.** If it becomes one, split
   fast-tier on push / full suite on PR (~10-16s vs ~3m16s) rather than dropping
   tiers.
+- **The corpus carries healerless twins, not their healer versions.**
+  `chip_stack_topdown` is in the corpus; `chip_stack_topdown_heal` is not — so a
+  change that perturbs the healerless START POINT is measured, while whether the
+  healers still ABSORB it is not.  That asymmetry is real and was exercised:
+  PR #850 nudged `chip_stack_topdown` 21/241/18 -> 22/263/21 (index renumbering
+  moving a greedy order, zero new geometry in the route), and the corpus could
+  not say whether it survived healing.  Measured on demand instead
+  (**2026-08-26**, 4-core box, `--threads 4`): the healer twin reaches **0 opens
+  / 0 overlaps**, `check_design` Success, abstract WL 2,275,077 — and reaches it
+  with margin, round 3's `negotiate_congestion` and `ripup_reroute` both
+  complete no-ops (0.05s / 0.18s) because the design was already clean before
+  the final polish round.  Adding it to the corpus is still refused, on the
+  corpus's own **coverage-per-second** rule: `--candidates` places both
+  `chip_stack_topdown_heal` and `chip3_topdown_heal` in NO NEW TOKENS — they
+  exercise no command family the corpus lacks — and the flow costs **1143s**,
+  which is longer on its own than the entire 48-flow sweep (**7m41s** on the
+  runner), landing **twice** while item 3 stands.  `ariane133_heal` is in the
+  corpus because it earned a row on TOKENS, not because healer flows are
+  admitted on principle.  The cheap alternative is what was actually done: run
+  the healer twin by hand when a change moves its healerless twin.
