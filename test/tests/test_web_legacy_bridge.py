@@ -238,7 +238,17 @@ def test_js_client_turns_both_payload_shapes_into_the_same_wire(tmp_path):
         w = got[0]
         assert (w["x1"], w["y1"], w["x2"], w["y2"]) == (x1, y1, x2, y2), where
         assert w["label"] == f"{_LABEL}: L", where
-    assert from_map == from_list, "the two payload shapes must draw the same wire"
+    # The drawn WIRE must be identical from either payload shape.  `bundle_id`
+    # is the one field that legitimately differs: the generation map is
+    # per-candidate and carries none (one bundle in that view), while the
+    # placed list carries the real id so the focus view can dim it — asserted
+    # explicitly below rather than papered over by dropping the field.
+    def _wire(w):
+        return {k: v for k, v in w.items() if k != "bundle_id"}
+    assert [_wire(w) for w in from_map] == [_wire(w) for w in from_list], \
+        "the two payload shapes must draw the same wire"
+    assert [w["bundle_id"] for w in from_map] == [None]
+    assert [w["bundle_id"] for w in from_list] == [1]
 
 
 @pytest.mark.skipif(_node is None, reason=_NO_NODE)
@@ -290,9 +300,58 @@ def test_all_three_renderers_share_the_label_and_the_colour():
             f"{path} uses a different bridge colour"
     scala = open(_SCALA_RENDERER).read()
     assert 'drawLegacyBridges(g, c.selectDynamic("bridge_segments"))' in scala
-    assert 'drawLegacyBridges(g, payload.selectDynamic("legacy_bridges"))' in scala
+    assert ('drawLegacyBridges(g, payload.selectDynamic("legacy_bridges"), focus)'
+            in scala)
     # Both web clients must carry the CSS their renderers reference.
     for page in (_INDEX_HTML, _SCALA_INDEX):
         css = open(page).read()
         assert re.search(r"\.legacybridge\s*\{", css), page
         assert re.search(r"\.legacybridgelbl\s*\{", css), page
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Bundle focus (Codex P2 on PR #858)
+# ──────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.skipif(_node is None, reason=_NO_NODE)
+def test_js_bridge_wires_keep_the_bundle_id_for_focus_dimming(tmp_path):
+    """A bridge must dim with its bundle, like every other placed wire.
+
+    The NUTS view dims non-focused bundles through `bundleAlpha(bid)` (bits
+    and vias both), and the matplotlib main viewer registers each bridge line
+    under its bundle id (`viz_main/draw_abstract.py`: `self._register(bid,
+    ln, ...)`), so a focused view dims restored bridges there.  A web
+    renderer that discards `bundle_id` leaves unrelated UNREALIZED wires at
+    full opacity while the real metal fades — the focus view then emphasises
+    exactly the wires that are not there.  Same drift this PR exists to
+    remove, in the opposite direction.
+    """
+    s = _routed_session(tmp_path, with_bridges=True)
+    nuts_list = serialize.serialize_render_nuts(s)["legacy_bridges"]
+    assert nuts_list and "bundle_id" in nuts_list[0], "payload lost bundle_id"
+    (wires,) = _run_js([nuts_list])
+    assert wires, "no wire produced"
+    for w in wires:
+        assert "bundle_id" in w, \
+            f"legacyBridgeWires dropped bundle_id: {w}"
+    assert {w["bundle_id"] for w in wires} == {
+        b["bundle_id"] for b in nuts_list}
+
+
+def test_both_web_renderers_apply_focus_opacity_to_bridges():
+    """Source parity: neither client may draw a bridge at flat opacity.
+
+    Pinned in the source because the drawing itself needs a DOM (JS) or
+    scalajs-dom (Scala), neither of which any test executes — the same
+    boundary `opens_ci.md` records for the ports.
+    """
+    js = open(_INDEX_HTML).read()
+    draw = extract_js_function("drawLegacyBridges", js)
+    assert "bundleAlpha" in draw, \
+        "JS drawLegacyBridges does not dim by bundle focus"
+
+    scala = open(_SCALA_RENDERER).read()
+    i = scala.index("drawLegacyBridges")
+    body = scala[i:i + 1400]
+    assert "bundleAlpha" in body, \
+        "Scala drawLegacyBridges does not dim by bundle focus"

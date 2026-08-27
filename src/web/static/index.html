@@ -674,7 +674,14 @@ function legacyBridgeWires(bridges) {
       : Object.keys(bridges).sort().map(k => [k, bridges[k]]);
   for (const [name, seg] of items) {
     if (!seg || !seg.start || !seg.end) continue;
-    out.push({name: name,
+    // Keep `bundle_id` so the focus view can dim a bridge with its bundle,
+    // exactly as the bits and vias beside it are dimmed (`bundleAlpha`) and
+    // as the matplotlib viewer already does (it registers each bridge line
+    // under its bundle id).  The generation map is per-candidate and carries
+    // no id — there is only one bundle in that view, so `null` reads as
+    // "always focused", which is what bundleAlpha(null) gives.
+    out.push({name: name, bundle_id: (seg.bundle_id === undefined
+                                        ? null : seg.bundle_id),
               x1: seg.start.x, y1: seg.start.y,
               x2: seg.end.x, y2: seg.end.y,
               label: "unrealized bridge (legacy checkpoint): " + name});
@@ -686,8 +693,10 @@ function legacyBridgeWires(bridges) {
 // label, un-flipped like the block labels so the text reads upright.
 function drawLegacyBridges(g, bridges) {
   for (const w of legacyBridgeWires(bridges)) {
-    el("line", {class: "legacybridge", x1: w.x1, y1: w.y1, x2: w.x2, y2: w.y2}, g);
-    const lg = el("g", {transform:
+    const op = w.bundle_id === null ? 1 : bundleAlpha(w.bundle_id);
+    el("line", {class: "legacybridge", opacity: op,
+                x1: w.x1, y1: w.y1, x2: w.x2, y2: w.y2}, g);
+    const lg = el("g", {opacity: op, transform:
         `translate(${(w.x1 + w.x2) / 2} ${(w.y1 + w.y2) / 2}) scale(1 -1)`}, g);
     el("text", {class: "legacybridgelbl", x: 0, y: -4,
         "text-anchor": "middle"}, lg).textContent = w.label;
