@@ -14,13 +14,15 @@
 
 """How a `.buda` LINE is read — the rules the engine and every tool share.
 
-The engine is not the only thing that parses `.buda`.  FIVE other readers
-do, and this is the list to check before adding a sixth:
+The engine is not the only thing that parses `.buda`.  SIX other readers
+do, and this is the list to check before adding a seventh:
 
   * `tools/buda2tcl.py`      translates a flow to Tcl
   * `tools/buda2bdb.py`      ingests one as a BDB cell
   * `tools/qor_corpus.py`    walks one for feature coverage
   * `tools/scan_fanin.py`    scans one for net shapes
+  * `src/web/demos.py`       splits one into the web client's demo catalog,
+                             and REASSEMBLES lines (hence `quote_arg`)
   * `tools/buda_interact.tcl`  reads the RECORDED lines of a `btcl -i`
                              session — and is written in **Tcl**
 
@@ -29,7 +31,7 @@ engine is therefore a rule the readers will DISAGREE with, and the
 disagreement is silent: a reader resolves a different file, or none, and
 reports on a script nobody wrote.
 
-The four Python readers import this module, so a fix here reaches them.  The
+The five Python readers import this module, so a fix here reaches them.  The
 Tcl one CANNOT, and that is what made it the last to be fixed: the quoting
 rule (#771/#772/#775) landed here and looked complete, while
 `buda_interact.tcl` went on splitting a recorded `open_bdb "my designs/x.bdb"`
@@ -165,6 +167,31 @@ def unquote(s):
     if len(s) >= 2 and s[0] == s[-1] and s[0] in "\"'":
         return s[1:-1]
     return s
+
+
+def quote_arg(tok):
+    """`tok` spelled so `split_quoted_args` reads it back as ONE token.
+
+    The inverse of the tokenizer above, and it lives beside it because the
+    condition is the tokenizer's own rule: a quote is honoured only where a
+    token BEGINS, so a token needs quoting exactly when it is empty, carries
+    whitespace, or STARTS with a `#` (a comment) or a quote character (which
+    would be read as an opening quote).  A `#` or an apostrophe anywhere else
+    in the token is an ordinary character and is left alone — which is what
+    keeps this the identity for every argument a checked-in flow writes.
+
+    A token containing BOTH quote characters cannot be spelled at all — the
+    grammar has no escape — so it is returned unchanged rather than wrapped
+    in a quote that would terminate early.  Callers that reassemble a line
+    (`src/web/demos.py`) therefore leave such a path exactly as the author
+    wrote it instead of corrupting it.
+    """
+    if tok and not (tok[0] in "#\"'" or any(c.isspace() for c in tok)):
+        return tok
+    for q in "\"'":
+        if q not in tok:
+            return q + tok + q
+    return tok
 
 
 def split_quoted_args(cmd_line, skip=1):

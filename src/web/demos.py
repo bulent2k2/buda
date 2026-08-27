@@ -40,12 +40,29 @@ relative to the flow's directory is rewritten repo-root-relative (the server's
 documented CWD).  Keyed on "is an existing file", not on a list of commands,
 because a list would silently miss the next path-taking command; a token that
 is not a file (`:memory:`, a block name, a number) is left exactly as written.
+
+This module is the SIXTH reader of `.buda` text, so it reads a line through
+`buda_script` rather than reparsing the syntax (Codex #863 P2, and the list in
+that module's docstring is where the rule is stated).  Reparsing it here got
+all three rules wrong at once on a legal quoted path — `require_file "rev
+#2/top.v"` cut at the `#`, so the setup replayed `require_file "rev`, the
+availability check reported `rev` as a missing input, and a `source` beside it
+was left un-rerooted.  Reassembly quotes back through `quote_arg`, the
+tokenizer's own inverse, so a rerooted spaced path survives the round trip.
 """
 import json
 import os
 
+from buda_script import (quote_arg, sole_path_arg, split_quoted_args,
+                         strip_inline_comment)
+
 _REPO = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", ".."))
 _CATALOG = os.path.join(_REPO, "demo", "web", "demos.json")
+
+# Commands whose argument list is exactly ONE path, so the engine reads the
+# rest of the line as that path, spaces and all (`buda_script.sole_path_arg`).
+# The value is how many leading words are the command rather than the path.
+_SOLE_PATH = {"source": 1, "import_verilog": 1, "save_bdb": 1}
 
 # Commands that begin the routing PIPELINE — the setup is everything BEFORE the
 # first of these, the flow tail everything from it on.
@@ -93,18 +110,48 @@ _DEFAULT_STAGES = {
 
 def _strip(raw):
     """A flow line reduced to its command, or "" for comment/blank."""
-    return raw.split("#", 1)[0].strip()
+    return strip_inline_comment(raw).strip()
+
+
+def _repath(tok, flow_dir):
+    """`tok` rewritten repo-root-relative when it names an existing file
+    relative to `flow_dir`, else None (leave it exactly as written)."""
+    cand = os.path.join(flow_dir, tok)
+    if os.path.isfile(cand):
+        return os.path.relpath(os.path.realpath(cand), _REPO)
+    return None
+
+
+def _sole_path_skip(toks):
+    """How many leading words of `toks` are the command of a rest-of-line
+    path form, or None when the line is not one.  `def_gds_layer file <path>`
+    is the sub-verb spelling of the same rule."""
+    verb = toks[0].lower()
+    if verb in _SOLE_PATH:
+        return _SOLE_PATH[verb]
+    if verb == "def_gds_layer" and len(toks) > 1 and toks[1].lower() == "file":
+        return 2
+    return None
 
 
 def _reroot(line, flow_dir):
     """`line` with every argument that names an existing file relative to
     `flow_dir` rewritten repo-root-relative (see the module docstring)."""
-    out = []
-    for i, tok in enumerate(line.split()):
-        cand = os.path.join(flow_dir, tok)
-        if i and os.path.isfile(cand):
-            tok = os.path.relpath(os.path.realpath(cand), _REPO)
-        out.append(tok)
+    toks = split_quoted_args(line, skip=0)
+    if not toks:
+        return line
+    skip = _sole_path_skip(toks)
+    if skip is not None:
+        # The rest of the line IS the path, so it is read (and rewritten) whole
+        # rather than token by token — `source my dir/flow.buda` names one file.
+        rooted = _repath(sole_path_arg(line, skip), flow_dir)
+        if rooted is None:
+            return line
+        return " ".join(toks[:skip]) + " " + quote_arg(rooted)
+    out = [toks[0]]
+    for tok in toks[1:]:
+        rooted = _repath(tok, flow_dir)
+        out.append(quote_arg(rooted if rooted is not None else tok))
     return " ".join(out)
 
 
@@ -115,17 +162,17 @@ def _missing_inputs(lines, flow_dir):
     the remedy its author wrote, instead of failing when clicked."""
     missing, hint = [], ""
     for line in lines:
-        parts = line.split()
-        if not parts or parts[0] != "require_file":
+        toks = split_quoted_args(line, skip=0)
+        if not toks or toks[0] != "require_file":
             continue
-        args = parts[1:]
+        args = toks[1:]
         if "hint" in args:
             k = args.index("hint")
             hint = " ".join(args[k + 1:])
             args = args[:k]
         for p in args:
-            if not os.path.isfile(os.path.join(flow_dir, p.strip('"'))):
-                missing.append(p.strip('"'))
+            if not os.path.isfile(os.path.join(flow_dir, p)):
+                missing.append(p)
     return missing, hint
 
 
@@ -138,7 +185,7 @@ def _parse_flow(path):
     setup, tail, stages = [], [], {}
     in_tail = False
     for line in lines:
-        verb = line.split()[0].lower()
+        verb = split_quoted_args(line, skip=0)[0].lower()
         if not in_tail and verb in _PIPELINE_CMDS:
             in_tail = True
         rooted = _reroot(line, flow_dir)
@@ -151,7 +198,6 @@ def _parse_flow(path):
             tail.append(rooted)
     missing, hint = _missing_inputs(lines, flow_dir)
     return "\n".join(setup), stages, tail, missing, hint
-
 
 def catalog():
     """The demo list the client renders in its picker.  Built fresh on every

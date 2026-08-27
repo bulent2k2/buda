@@ -125,7 +125,16 @@ Two rules the parse enforces, both because a browser is not a terminal:
   repo-root-relative (the server's documented CWD). Keyed on "is a file", not
   on a list of commands, because a list would silently miss the next
   path-taking command; `:memory:`, a block name and a number are left as
-  written.
+  written. The line is read (and reassembled) through **`buda_script`** — this
+  module is the sixth `.buda` reader and is listed in that module's docstring,
+  which is where the rule to check lives. Reparsing the syntax here got all
+  three of its rules wrong at once on a path the engine handles fine (Codex
+  #863 P2): `require_file "rev #2/top.v"` cut at the `#`, so the setup replayed
+  `require_file "rev`, the availability check reported `rev` as a missing input
+  and marked the demo unavailable, and a `source` beside it went un-rerooted.
+  Reassembly re-quotes through `quote_arg`, the tokenizer's own inverse, so a
+  rerooted spaced path survives the round trip. Identity on every checked-in
+  flow (none quotes anything) — the catalog is byte-identical, test-pinned.
 - **Skips.** The `flow` tail drops viewers (`visualize*` — a window nobody can
   see, blocking the server), `exit`, and the artifact writers (`emit_guides`,
   `export_*`, `save_bdb`): clicking a demo button must not scribble output into

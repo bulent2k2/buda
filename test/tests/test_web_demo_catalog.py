@@ -141,3 +141,61 @@ def test_each_demo_setup_runs_clean(key):
         res = client.post("/api/command", json={"cmds": cmds}).json()["results"]
     bad = [r for r in res if not r["ok"]]
     assert not bad, (key, bad[:3])
+
+
+# ---------------------------------------------------------------- quoted paths
+# Codex #863 P2.  This module is a `.buda` READER, and reparsing the syntax
+# here got all three of its rules wrong at once on a path the engine reads
+# fine.  The fix is to go through `buda_script`; these pin the behaviour that
+# proves it, on a flow written the way the engine documents.
+
+def _quoted_flow(tmp_path):
+    """A flow whose input directory carries a `#` and a space in its name —
+    legal on every filesystem, and exactly the spelling `require_file`'s
+    quoting exists for."""
+    d = tmp_path / "rev #2 inputs"
+    d.mkdir()
+    (d / "top.v").write_text("module top(); endmodule\n")
+    (d / "inc.buda").write_text("# included\n")
+    flow = tmp_path / "f.buda"
+    flow.write_text('require_file "rev #2 inputs/top.v" hint run fetch.py\n'
+                    'source "rev #2 inputs/inc.buda"\n'
+                    'run_bundler STRICT\n')
+    return flow
+
+
+def test_a_quoted_path_is_not_cut_at_its_hash(tmp_path):
+    """The `#` inside a quoted run is part of the filename, not a comment."""
+    setup, _stages, _tail, _missing, _hint = demos_mod._parse_flow(
+        str(_quoted_flow(tmp_path)))
+    assert "rev #2 inputs/top.v" in setup
+    assert "rev #2 inputs/inc.buda" in setup
+
+
+def test_a_quoted_path_that_exists_is_not_reported_missing(tmp_path):
+    """The availability check reads the same tokens the engine does, so a
+    flow whose inputs are all present is not marked unavailable."""
+    *_, missing, _hint = demos_mod._parse_flow(str(_quoted_flow(tmp_path)))
+    assert missing == []
+
+
+def test_a_rerooted_spaced_path_is_requoted(tmp_path):
+    """Reassembly is the tokenizer's inverse: a rerooted path carrying a
+    space (or a `#`) comes back QUOTED, so replaying the line through
+    /api/command reads it as ONE argument again."""
+    from buda_script import split_quoted_args
+    setup, *_ = demos_mod._parse_flow(str(_quoted_flow(tmp_path)))
+    for line in setup.splitlines():
+        toks = split_quoted_args(line, skip=0)
+        # `source <path>` and `require_file <path> hint …`: the path is one
+        # token whichever rule reads it, and it still names a real file.
+        assert any("rev #2 inputs/" in t for t in toks), line
+        assert not any(t.startswith('"') for t in toks), line
+
+
+def test_the_checked_in_catalog_is_unchanged_by_the_quote_rule():
+    """No checked-in flow quotes anything, so the quote-aware read is the
+    identity on all of them — the property that makes the fix safe."""
+    for d in _catalog():
+        for line in [l for l in d["setup"].splitlines()] + d["flow"]:
+            assert '"' not in line and "'" not in line, (d["key"], line)
