@@ -317,6 +317,10 @@ static void build_nuts_maps(
                     pc.perp_hi  = p_hi;
                     pc.block    = bname;
                     pc.rect     = ri;
+                    // `teg_mode over` revokes the interchangeability the
+                    // one-anchor-per-block election assumes (see nuts.h).
+                    pc.own_anchor = (rects.size() > 1 &&
+                                     floorplan.get_block_teg_mode(bname) == TegMode::OVER);
                     passthru_map[{bid, si}].push_back(std::move(pc));
                 }
             }
@@ -924,9 +928,17 @@ static void tighten_spans_to_reach(std::vector<TrackSegment>& segments,
     // Each segment's list is PRUNED to its elected anchors, so downstream
     // consumers (detailed NUTS) see exactly what was honored.
     {
-        // (bundle, block) -> the elected (seg_idx, crossing)
-        // (bundle, block) -> the elected (seg_idx, rect)
-        std::map<std::pair<int,std::string>, std::pair<int,int>> elected;
+        // (bundle, block, scope) -> the elected (seg_idx, rect).  `scope` is -1
+        // for the ordinary one-anchor-per-block rule and the RECT INDEX for a
+        // crossing that carries its own anchor (`own_anchor` — a `teg_mode
+        // over` multi-rect block, whose rects are not interchangeable covers;
+        // see nuts.h).  A design with no OVER multi-rect block therefore elects
+        // exactly as before.
+        using EKey = std::tuple<int,std::string,int>;
+        auto ekey = [](int bid, const PassthruCrossing& pc) {
+            return EKey{bid, pc.block, pc.own_anchor ? pc.rect : -1};
+        };
+        std::map<EKey, std::pair<int,int>> elected;
         for (const auto& ts : segments) {
             if (!ts.placed) continue;
             for (const auto& pc : ts.passthru_spans) {
@@ -934,7 +946,7 @@ static void tighten_spans_to_reach(std::vector<TrackSegment>& segments,
                 // RECT can protect the block.
                 if (ts.track_position < pc.perp_lo || ts.track_position > pc.perp_hi)
                     continue;
-                auto key = std::make_pair(ts.bundle_id, pc.block);
+                auto key = ekey(ts.bundle_id, pc);
                 auto it  = elected.find(key);
                 if (it == elected.end() ||
                     std::make_pair(ts.seg_idx, pc.rect) < it->second)
@@ -945,7 +957,7 @@ static void tighten_spans_to_reach(std::vector<TrackSegment>& segments,
             if (ts.passthru_spans.empty()) continue;
             std::vector<PassthruCrossing> kept;
             for (const auto& pc : ts.passthru_spans) {
-                auto it = elected.find({ts.bundle_id, pc.block});
+                auto it = elected.find(ekey(ts.bundle_id, pc));
                 // Keep the elected RECT only — not every entry sharing the
                 // elected segment index, which would re-admit rects the segment
                 // was not seated in.

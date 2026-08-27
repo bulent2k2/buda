@@ -63,13 +63,21 @@ destination block names are derived automatically from the netlist.
 | `BITRUNK_HVH@…` | **Requires `multi_trunk`.** Two-level datapath tree: a root H spine feeds perpendicular V branch trunks, each tapping a cluster of x-aligned blocks (a column becomes a multi-tap pass-through trunk). Wins on column-aligned datapaths. |
 | `BITRUNK_VHV@…` | **Requires `multi_trunk`.** Row-oriented mirror: a root V spine feeds H branch trunks tapping y-aligned block rows. |
 
-All BITRUNK shapes (legacy and two-level) are **bbox-only on multi-rect
-blocks**: stubs and branches target the block's union bounding box — no
-per-rect selection and no `teg_mode over` connection metal — an accepted
-scoping decision.  Where it bites it is loud, not silent: a routed BITRUNK
-that leaves a rect of an OVER block unreached fires `TEG_OPEN` at the placed
-audits (measured end to end), and on a `thru` block the BUDA-1907 census
-names the rects left to the block's internal routing.
+BITRUNK shapes (legacy and two-level) are **multi-rect aware** since
+2026-08-27: a stub or leaf branch targets the rect whose spine-facing face is
+nearest (the same `best_rect` rule the TRUNK shapes use, so the tap lands on
+real metal rather than on a union-bbox face that may sit over a GAP), and a
+`teg_mode over` endpoint gets connection metal per rect — a rect sharing the
+spine's perpendicular band is reached by growing the spine over its
+along-centre, every other rect gets its own perpendicular stub.  Single-rect
+designs are unaffected by construction.  On a `thru` block the BUDA-1907
+census still names the rects left to the block's internal routing.
+
+The one shape that still leaves an OVER rect unreached is the
+`TRUNK_*+MST` **hybrid**, which re-derives its spine from the surviving
+branch blocks and loses the seed trunk's per-rect metal with it.  Where that
+bites it is loud, not silent: the routed result fires `TEG_OPEN` at the
+placed audits (measured end to end) naming the unreached rect.
 
 **TEG-over connection metal (`teg_mode over`):**
 
@@ -297,7 +305,7 @@ Source and destination block names are derived automatically from the netlist
 |---|---|
 | `center_mode` | Use block centres as connection points instead of the nearest busterm face. |
 | `double_detour` | Also generate `UU_VHV` / `UU_HVH` high-detour candidates for very congested situations. |
-| `multi_trunk` | Also generate two-level `BITRUNK_HVH` / `BITRUNK_VHV` datapath trees for high-fan-out column/row-aligned buses (opt-in; wins on datapaths, QoR-neutral elsewhere at a small candidate-count cost). All BITRUNK shapes are bbox-only on multi-rect blocks (no rect selection, no TEG connection metal — a miss on an OVER block fires `TEG_OPEN`). |
+| `multi_trunk` | Also generate two-level `BITRUNK_HVH` / `BITRUNK_VHV` datapath trees for high-fan-out column/row-aligned buses (opt-in; wins on datapaths, QoR-neutral elsewhere at a small candidate-count cost). BITRUNK shapes are multi-rect aware (`best_rect` tap selection + per-rect `teg_mode over` connection metal) since 2026-08-27. |
 | `no_hanan_loci` | Opt OUT of the default Hanan-line trunk loci for this run: n-pin trunk loci are sampled only at the channel midpoints (the pre-flip behavior). Since the default flip, loci ON the in-bbox Hanan lines (block/keepout edges) are sampled BY DEFAULT, so a block-edge-aligned trunk can nominal at the geometric WL floor; the default pool is ~1.3-1.6x the midpoint-only pool and the WL-sorted candidate indices `select_topology` pins DIFFER between the two settings, so pins must come from the matching run. The legacy `hanan_loci` flag remains accepted as a keep-on no-op (backward compatibility for pre-flip scripts and v15 knob memos). The degenerate-loci soundness gate is built in (see wishlist-topo piece (a) / hanan_loci_flip_audit.md): face/abutment-coincident loci get their stub↔spine junctions restored, a loci-only candidate whose slide window collapses under the final block contract is dropped with a note, and `DISCONNECTED` island-split candidates are dropped by generation's coverage gate (declared-feedthru candidates exempt). |
 | `spine_relays` | Complete MST relay hubs with a single collector SPINE the majority stubs tap independently, instead of the over-the-cell bracket chain — fixes the segment blow-up at high-degree hubs in pure-`MST_HV/VH` candidates (double-star geometry). Opt-in, default OFF (byte-identical without it); recorded in the v15 per-bundle knob memo so it round-trips a bulk regeneration, exactly like `multi_trunk`. See wishlist-topo "Star→spine relay completion". |
 

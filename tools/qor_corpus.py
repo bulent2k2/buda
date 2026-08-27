@@ -254,6 +254,17 @@ CORPUS = [
     # stub overhangs entirely over the block, so a BLOCK-level tap-overhang
     # verdict would fire ANTENNA and move the row LOUDLY.  ~0.1s.
     "flow/teg_adjacent.buda",
+    # BITRUNK-on-TEG-over guard (teg_multirect_status.md Final-state
+    # limitation 4, RESOLVED 2026-08-27): the legacy datapath tree on an OVER
+    # multi-rect endpoint — the family that had NO rect selection and NO TEG
+    # connection metal, so a "tap" could land in the GAP (the coverage gate
+    # then dropped the whole candidate) and a rect beyond the rungs' span was
+    # left electrically open.  EXPECTED CLEAN (0/0/0).  It is the only corpus
+    # row exercising a BITRUNK tree over a multi-rect block at all, and it
+    # covers the NUTS half too: the one-anchor-per-BLOCK pass-through election
+    # clips the placed span back and fires TEG_OPEN unless an OVER block's
+    # crossings carry their own anchor.  ~0.01s.
+    "flow/teg_bitrunk.buda",
 ]
 
 
