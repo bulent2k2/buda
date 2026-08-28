@@ -158,21 +158,19 @@ def test_census_silent_when_every_rect_is_reached():
 
 def test_over_block_gets_teg_open_not_the_census():
     # An OVER block whose rect the route misses: the miss is a VIOLATION
-    # (TEG_OPEN), and the census — thru's report — must not double-report
-    # it.  Finding a still-dirty shape is the moving part here: the trunk
-    # shapes (open 1 residuals (i)/(ii)), the MST attachment pass (Final-state
-    # limitation 1) and now the ADJACENT-rect Direct corner (limitation 2,
-    # 2026-08-27) have each been resolved out from under this vehicle in turn.
-    # BITRUNK went the same way (limitation 4, 2026-08-27: per-rect selection
-    # plus the trunk generator's own connection-metal rules), so what remains
-    # is the `TRUNK_*+MST` HYBRID (Final-state limitation 8, opened by that
-    # work): the hybrid re-derives its spine from the SURVIVING branch blocks
-    # and drops the seed trunk's TEG metal with it — the seed `TRUNK_H@y100`
-    # spans x 100..900 (spine-end anchored onto rect#1's face) while
-    # `TRUNK_H+MST@y100` spans x 100..500, so rect#1 is touched by no placed
-    # metal.  Same pin as test_teg_open.py::
-    # test_trunk_mst_hybrid_on_over_block_still_fires_teg_open, which is where
-    # that guarantee is pinned end to end.
+    # (TEG_OPEN), and the census — thru's report — must not double-report it.
+    # Finding a still-dirty shape has been the moving part here, and this
+    # vehicle has now been re-homed four times: the trunk shapes (open 1
+    # residuals (i)/(ii)), the MST attachment pass (Final-state limitation 1),
+    # the ADJACENT-rect Direct corner (limitation 2), BITRUNK (limitation 4)
+    # and finally the `TRUNK_*+MST` HYBRID (limitation 8, 2026-08-27) each
+    # became clean under it.  So the home is no longer a GENERATED candidate
+    # at all: a HAND-EDITED (`edit_*`, type USER) topology comes from no
+    # generator, so no generation improvement can resolve it away, and
+    # TopoEdit's own verdict is `check_topo` — from which TEG_OPEN is
+    # deliberately absent — so the edit session calls it clean and only the
+    # PLACED audit catches the open.  The end-to-end pin lives in
+    # test_teg_open.py::test_hand_edited_candidate_missing_a_rect_still_fires_teg_open.
     s = _session([
         "add_block src 0 0 100 100",
         "add_block r1 300 300 400 400",
@@ -184,10 +182,12 @@ def test_over_block_gets_teg_open_not_the_census():
         "run_bundler STRICT",
         "generate_topologies",
     ] + _TRACKS)
-    pin = next((i for i, c in enumerate(s.bundles[0].input.candidates)
-                if c.type == "TRUNK_H+MST@y100"), None)
-    assert pin is not None, "no TRUNK_H+MST@y100 candidate found"
-    _route(s, f"select_topology 1 {pin + 1}", "run_planner", "run_nuts")
+    # A trunk at y=150 clear of both rects, stubbed to every block: `best_rect`
+    # taps r2 on rect#0, so rect#1 at x 900..1000 is reached by nothing.
+    _route(s, "edit_topology 1 new", "edit_add_trunk H 150 50 600",
+           "edit_add_stub src 0", "edit_add_stub r1 0",
+           "edit_add_stub r2 0", "edit_add_stub r3 0", "edit_commit pin")
+    _route(s, "run_planner", "run_nuts")
     verdict, out = _check(s, "nuts")
     assert verdict["by_kind"].get("TEG_OPEN", 0) >= 1, out
     assert "rect#1 (900,0)-(1000,100)" in out, out

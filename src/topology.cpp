@@ -2034,12 +2034,56 @@ static bool seed_trunk_is_redundant(const Topology& topo, int trunk_pos, bool is
     return true;                                 // valid without the spine → redundant
 }
 
+// Which `teg_mode over` rects does this segment list touch?  `teg_mode over`
+// declares a block's rects NOT internally connected, so every one of them needs
+// its own metal and TEG_OPEN audits that contact PER RECT — a fact no
+// block-level test can see.  Read through `seg_touches_rect`, the audit's own
+// predicate, on the PHYSICAL rects it reads.  Returned as a flat vector of
+// (block index, rect index, touched) so a before/after comparison is a walk.
+struct OverRectContact { int bi; int ri; bool touched; };
+static std::vector<OverRectContact>
+over_rect_contacts(const std::vector<Segment>& segs,
+                   const std::vector<Busterm>& blocks,
+                   const std::set<int>& skip) {
+    std::vector<OverRectContact> out;
+    for (int bi = 0; bi < (int)blocks.size(); ++bi) {
+        const Busterm& bt = blocks[bi];
+        if (bt.teg_mode != TegMode::OVER || bt.rects.size() < 2) continue;
+        const std::vector<Rect>& phys =
+            (bt.orig_rects.size() == bt.rects.size()) ? bt.orig_rects : bt.rects;
+        for (int ri = 0; ri < (int)phys.size(); ++ri) {
+            bool hit = false;
+            for (int sj = 0; sj < (int)segs.size() && !hit; ++sj)
+                if (!skip.count(sj) && seg_touches_rect(segs[sj], phys[ri])) hit = true;
+            out.push_back({bi, ri, hit});
+        }
+    }
+    return out;
+}
+
+// Does this design declare an OVER multi-rect block at all?  Everything the
+// per-rect relay guard costs is behind this, so a design without one takes the
+// historical path with no snapshot taken and no census computed.
+static bool any_over_multirect(const std::vector<Busterm>& blocks) {
+    for (const Busterm& bt : blocks)
+        if (bt.teg_mode == TegMode::OVER && bt.rects.size() >= 2) return true;
+    return false;
+}
+
 static void complete_relay_junctions(Topology& topo,
                                      const std::vector<Busterm>& blocks,
                                      const Floorplan& fp,
                                      int h_layer, int v_layer,
                                      bool spine_relays = false,
-                                     int* n_merged_out = nullptr) {
+                                     int* n_merged_out = nullptr,
+                                     // The caller runs `add_mst_teg_attachments`
+                                     // straight after this (the standalone-MST
+                                     // path does), so an OVER rect this pass
+                                     // leaves without metal is repaired there and
+                                     // the per-rect relay guard below must not
+                                     // pre-empt it.  The TRUNK+MST hybrid path has
+                                     // no such pass, so for it the loss is final.
+                                     bool teg_attachments_follow = false) {
     // min-stub is intentionally not enforced on completion connectors: a relay
     // MUST be completed (correctness over the min-stub heuristic).  fp is used by
     // the verified de-overlap pass at the end.
@@ -2186,6 +2230,7 @@ static void complete_relay_junctions(Topology& topo,
     //     into one straight wire through the block.
     std::set<int> otc_handled;
     std::set<int> to_erase;   // stubs merged away by the collinear-relay case below
+    const bool has_over_multirect = any_over_multirect(blocks);
     for (auto& [bi, pts] : incident) {
         if (pts.size() != 2 || all_land[bi].size() != 2) continue;  // clean 2-stub only
         const Inc& A = pts[0];
@@ -2206,6 +2251,45 @@ static void complete_relay_junctions(Topology& topo,
             return false;
         };
         if (on_other_boundary(A.p) || on_other_boundary(B.p)) continue;
+        // ── `teg_mode over`: complete the relay, then CHECK it kept the metal ─
+        // The rule directly above skips the relay when a landing may be another
+        // BLOCK's only coverage, because every branch below MOVES that landing.
+        // `teg_mode over` needs the identical care one level finer: it declares
+        // the block's rects NOT internally connected, so each needs its own metal
+        // and TEG_OPEN audits contact PER RECT — a distinction `on_other_boundary`
+        // (which reads `orig_bbox`) cannot make.  Measured (teg_multirect_status.md
+        // limitation 8), every branch, all of it metal the SEED trunk had and the
+        // hybrid inherited:
+        //   • DEGENERATE — a TRUNK_V@x600 seed's per-rect stub (900,50)-(600,50)
+        //     lands on rect#1's face at one end and, since the trunk sits on
+        //     rect#0's far face, on rect#0's at the other.  A and B are then the
+        //     SAME segment: "extend A to B's far end" is a self-assignment and the
+        //     erase deletes the only wire reaching rect#1.
+        //   • PARALLEL — two per-rect stubs off one spine are dragged to a shared
+        //     column between the rects, so NEITHER reaches its face any more.
+        //   • ORTHOGONAL — the corner extension pulled a spine back from x=1350
+        //     (anchored on an OVER rect's facing face) to x=1250, the OTHER
+        //     landing's column, at a single-rect relay block three indices away:
+        //     the endpoint served two purposes and the pass knew only one.
+        // A PREMISE test was tried first and REJECTED, measured: refusing the relay
+        // whenever a landing's segment is some OVER rect's sole contact is too
+        // blunt — an extension that runs the stub DEEPER into the block keeps the
+        // contact, and refusing there cost `flow/lShape1`'s geometry both standalone
+        // MST candidates (MST_HV, MST_VH) to the clean-tree gate.  So the branch is
+        // applied and the RESULT is checked: a rect that HAD metal and would lose it
+        // reverts the whole relay, and the block keeps its real taps.  A rect that
+        // was already unreached does not veto anything — the attachment passes own
+        // that.  If the two pieces are then not otherwise joined, the clean-tree gate
+        // and check_topo's FEEDTHRU_RELAY say so LOUDLY, which beats a generator
+        // inventing a join across a gap the design declared open.
+        const std::vector<Segment> segs_before =
+            has_over_multirect ? topo.segments : std::vector<Segment>{};
+        const std::set<int> erase_before =
+            has_over_multirect ? to_erase : std::set<int>{};
+        const std::map<int, std::vector<Inc>> inc_before =
+            has_over_multirect ? incident : std::map<int, std::vector<Inc>>{};
+        const std::map<int, std::vector<Inc>> land_before =
+            has_over_multirect ? all_land : std::map<int, std::vector<Inc>>{};
         bool handled = true;
         if (A.seg_horiz != B.seg_horiz) {
             // ORTHOGONAL: extend to the corner (V's column, H's row).
@@ -2304,6 +2388,28 @@ static void complete_relay_junctions(Topology& topo,
                     repoint(all_land);
                     repoint(incident);
                 }
+            }
+        }
+        if (has_over_multirect && handled && !teg_attachments_follow) {
+            const auto was = over_rect_contacts(segs_before, blocks, erase_before);
+            const auto now = over_rect_contacts(topo.segments, blocks, to_erase);
+            bool lost = false;
+            for (size_t k = 0; k < was.size() && !lost; ++k)
+                if (was[k].touched && !now[k].touched) lost = true;
+            if (lost) {
+                // Undo, and leave the block its own taps.  Two alternatives were
+                // measured and both cost candidates: falling through to the GENERAL
+                // CHAINING (the `is_feedthru` remedy) dropped 7 hybrids across the
+                // two OVER geometries, since a chained relay is not the clean tree
+                // the hybrid gate demands; completing anyway and letting the rect go
+                // open is the defect itself.  Anything the skip leaves genuinely
+                // unjoined is caught LOUDLY by the caller's own gate.
+                topo.segments = segs_before;
+                to_erase      = erase_before;
+                for (auto& kv : incident) kv.second = inc_before.at(kv.first);
+                for (auto& kv : all_land) kv.second = land_before.at(kv.first);
+                otc_handled.insert(bi);
+                continue;
             }
         }
         if (!handled) continue;
@@ -4366,7 +4472,9 @@ void TopologyGenerator::add_mst_candidates(const std::vector<Busterm>& blocks,
             // relay busterm taps (single tap + SEG junctions) and annotates the
             // connectors it appends, so it must run after the baseline annotation.
             annotate_endpoints(mst, blocks);
-            complete_relay_junctions(mst, blocks, floorplan_, h_layer_, v_layer_, allow_spine_relays_, &n_collinear_merged);
+            complete_relay_junctions(mst, blocks, floorplan_, h_layer_, v_layer_,
+                                     allow_spine_relays_, &n_collinear_merged,
+                                     /*teg_attachments_follow=*/true);
             // TEG-over attachment: reach every OVER multi-rect endpoint's
             // still-unreached rects on the FINISHED tree (see the pass above —
             // running before completion would feed the relay machinery a
@@ -4515,14 +4623,41 @@ static void clip_spine_to_landings(Topology& t, int trunk_pos, bool dir_h,
     if (lo > hi) return;                      // no kept junctions -> leave spine as-is
 
     // Extend just enough to keep every pass-through block covered.
+    //
+    // COVERAGE UNIT.  The union bbox is what a block's own coverage needs (that is
+    // what `topology_is_clean_tree`'s spans_rect asks, and what every single-rect
+    // and THRU design has always got, byte for byte).  `teg_mode over` ADDS a
+    // requirement on top: TEG_OPEN reads contact PER RECT, so a spine that reaches
+    // only the union's near face leaves every farther rect open.  Measured
+    // (teg_multirect_status.md limitation 8): the seed TRUNK_H@y100 spans x
+    // 100..900, its far end anchored onto rect#1's facing face, and the hybrid came
+    // back clipped to x 100..500 — r2's UNION near face, i.e. rect#0 — with rect#1
+    // reached by nothing.  The per-rect pass is therefore ADDITIVE, never a
+    // substitute: both branches below only widen [lo,hi], so adding units can only
+    // extend the spine.  Swapping the union out for the rects was measured WRONG in
+    // the other direction — on an L-shaped OVER block only the arm straddling the
+    // trunk contributes, the extension shrinks below what block coverage needs, and
+    // six `flow/lShape1`-geometry hybrids failed the clean-tree gate and vanished.
+    // Same per-rect reading `PassthruCrossing::own_anchor` and the #514
+    // tap-overhang rule already take.
     for (const auto& b : blocks) {
-        bool straddle = dir_h ? (b.orig_bbox.y1 <= trunk_pos && trunk_pos <= b.orig_bbox.y2)
-                              : (b.orig_bbox.x1 <= trunk_pos && trunk_pos <= b.orig_bbox.x2);
-        if (!straddle) continue;
-        int b_lo = dir_h ? b.orig_bbox.x1 : b.orig_bbox.y1;
-        int b_hi = dir_h ? b.orig_bbox.x2 : b.orig_bbox.y2;
-        if (b_lo > hi)      hi = b_lo;        // block entirely past hi: reach its near face
-        else if (b_hi < lo) lo = b_hi;        // block entirely before lo: reach its near face
+        // The PHYSICAL spelling, like every other coverage/contact site: `rects` is
+        // margin-inset and `orig_rects` is populated only when a nonzero margin
+        // makes the two differ.
+        const std::vector<Rect>& phys =
+            (b.orig_rects.size() == b.rects.size()) ? b.orig_rects : b.rects;
+        std::vector<Rect> units{b.orig_bbox};       // the historical requirement
+        if (b.teg_mode == TegMode::OVER && b.rects.size() >= 2)
+            units.insert(units.end(), phys.begin(), phys.end());  // ADDED, not swapped
+        for (const Rect& u : units) {
+            bool straddle = dir_h ? (u.y1 <= trunk_pos && trunk_pos <= u.y2)
+                                  : (u.x1 <= trunk_pos && trunk_pos <= u.x2);
+            if (!straddle) continue;
+            int b_lo = dir_h ? u.x1 : u.y1;
+            int b_hi = dir_h ? u.x2 : u.y2;
+            if (b_lo > hi)      hi = b_lo;    // unit entirely past hi: reach its near face
+            else if (b_hi < lo) lo = b_hi;    // unit entirely before lo: reach its near face
+        }
     }
 
     // Clip to [lo,hi], never extending past the spine's current extent.

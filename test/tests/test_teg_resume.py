@@ -135,15 +135,19 @@ def _flat_setup_from_trace(trace_path, cut_verb):
 
 
 _MULTIRECT_LINE_L = "add_block L rect 0 0 100 400 rect 0 0 400 100 teg_mode over"
-# The still-DIRTY vehicle: a `TRUNK_*+MST` hybrid on an OVER multi-rect block
-# (Final-state limitation 8 — the hybrid re-derives its spine from the
-# SURVIVING branch blocks and drops the seed trunk's TEG connection metal with
-# it, so rect#1 at x 900..1000 is touched by no placed metal).  It has been
-# re-homed three times as the shapes under it were fixed: the MST shape
-# (limitation 1, 2026-08-25), the ADJACENT-rect Direct corner (limitation 2,
-# 2026-08-27) and BITRUNK (limitation 4, the same day) all became clean, and a
-# resume test whose vehicle audits clean proves nothing about the audit
-# staying armed.
+# The still-DIRTY vehicle.  It has been re-homed four times as the shapes under
+# it were fixed — the MST shape (Final-state limitation 1, 2026-08-25), the
+# ADJACENT-rect Direct corner (limitation 2), BITRUNK (limitation 4) and the
+# `TRUNK_*+MST` hybrid (limitation 8, all 2026-08-27) — and a resume test whose
+# vehicle audits clean proves nothing about the audit staying armed.  So the
+# home is no longer a GENERATED candidate at all: a HAND-EDITED (`edit_*`, type
+# USER) topology comes from no generator, so no generation improvement can
+# resolve it away, and TopoEdit's own verdict is `check_topo`, from which
+# TEG_OPEN is deliberately absent — the edit session calls it clean and only the
+# PLACED audit catches the open.  It also exercises MORE of the resume path than
+# the pinned generated candidate did: a USER candidate is rehydrated from the
+# BDB with its op-log provenance, and `edit_*` / `select_topology` are both on
+# the NEVER-replayed list, so the restored pin comes from load_pipeline alone.
 _MULTIRECT_LINE_R2 = ("add_block r2 rect 500 0 600 100 rect 900 0 1000 100 "
                       "teg_mode over")
 
@@ -242,23 +246,17 @@ def test_flat_resume_keeps_teg_open_audit_armed(tmp_path, monkeypatch):
         "def_track_pattern 4 0 (SIGNAL 2 2)x8",
         "def_track_pattern 5 0 (SIGNAL 2 2)x8",
     ]
+    # A trunk at y=150 clear of both of r2's rects, stubbed to every block:
+    # `best_rect` taps r2 on rect#0, so rect#1 at x 900..1000 is reached by
+    # nothing — see the vehicle note above.
+    edits = ["edit_topology 1 new", "edit_add_trunk H 150 50 600",
+             "edit_add_stub src 0", "edit_add_stub r1 0",
+             "edit_add_stub r2 0", "edit_add_stub r3 0", "edit_commit pin"]
 
-    # ── build session, RECORDED: a `TRUNK_*+MST` hybrid on the OVER block.
-    #    The hybrid re-derives its spine from the SURVIVING branch blocks and
-    #    drops the seed trunk's TEG connection metal with it, so rect#1 stays
-    #    untouched (Final-state limitation 8; pinned end to end by
-    #    test_teg_open.py::
-    #    test_trunk_mst_hybrid_on_over_block_still_fires_teg_open).  This
-    #    vehicle needs a DIRTY route and has been re-homed each time a shape
-    #    was resolved out from under it — BITRUNK's turn came 2026-08-27
-    #    (limitation 4). ──
+    # ── build session, RECORDED ──
     monkeypatch.setenv("BUDA_RECORD", trace)
-    s1 = _session(flow + ["run_bundler STRICT", "generate_topologies"])
-    pin = next((i + 1 for i, c in enumerate(s1.bundles[0].input.candidates)
-                if c.type == "TRUNK_H+MST@y100"), None)
-    assert pin is not None, "no TRUNK_H+MST@y100 candidate found"
-    for cmd in (f"select_topology 1 {pin}", "run_planner", "run_nuts"):
-        _run(s1, cmd)
+    s1 = _session(flow + ["run_bundler STRICT", "generate_topologies"]
+                  + edits + ["run_planner", "run_nuts"])
     monkeypatch.delenv("BUDA_RECORD")
     v1, out1 = _check(s1, "nuts")
     assert v1["by_kind"].get("TEG_OPEN", 0) >= 1, out1
@@ -269,9 +267,14 @@ def test_flat_resume_keeps_teg_open_audit_armed(tmp_path, monkeypatch):
     # ── resume session from the recorded trace: the audit must stay ARMED —
     #    detect_teg_open reads the FLOORPLAN's rects + teg_mode, which the
     #    setup replay re-declares; a resume that lost them would report
-    #    Success here ──
-    s2 = _session(_flat_setup_from_trace(trace, "run_nuts"))
-    _run(s2, "load_pipeline")
+    #    Success here.  The USER candidate and its pin come back from
+    #    load_pipeline alone: `edit_*` and `select_topology` are both on the
+    #    never-replayed list. ──
+    setup = _flat_setup_from_trace(trace, "run_nuts")
+    assert not any(ln.startswith("edit_") for ln in setup), setup
+    s2 = _session(setup)
+    restored = _run(s2, "load_pipeline")
+    assert "is USER" in restored, restored
     _run(s2, "run_nuts")
     v2, out2 = _check(s2, "nuts")
     assert v2["by_kind"].get("TEG_OPEN", 0) >= 1, (

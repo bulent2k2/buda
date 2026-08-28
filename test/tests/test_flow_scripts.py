@@ -1434,6 +1434,41 @@ def test_teg_bitrunk_flow_routes_clean():
     assert "TEG_OPEN" not in out, out
 
 
+def test_teg_hybrid_flow_routes_clean():
+    """flow/teg_hybrid.buda (teg_multirect_status.md Final-state limitation 8,
+    RESOLVED 2026-08-27): the TRUNK+MST-on-OVER firing repro as a checked-in
+    vehicle, EXPECTED CLEAN.
+
+    A hybrid COPIES its seed trunk, so the seed's OVER connection metal is
+    already in it — but three passes the hybrid path runs and `add_trunk` does
+    not were taking it back out, each on the premise that a block's rects are
+    interchangeable covers: `clip_spine_to_landings` re-derived the spine's
+    extent from each pass-through block's UNION bbox (clipping the seed's
+    spine-end anchoring from x=900 back to x=500), and inside
+    `complete_relay_junctions` the degenerate-collinear merge erased the
+    per-rect stub that lands on TWO of the block's rects while the OTC
+    extensions drag a landing endpoint off the face it taps.
+
+    Pinned by TYPE, since the fix re-sorts the WL-ordered pool on a multi-rect
+    design.  Pre-fix this route reported TEG_OPEN at both placed stages (1
+    bundle-level at nuts, 4 per-bit at dnuts)."""
+    out, rc = run_script("teg_hybrid.buda")
+    assert rc == 0, f"teg_hybrid.buda: non-zero exit {rc}\n{out}"
+    assert re.search(r"\[Planner\] Bundle 1 .*TRUNK_H\+MST@y100 \[pinned\]", out), (
+        "the type pin no longer lands on TRUNK_H+MST@y100 — the pool lost the "
+        f"candidate or the pin regressed:\n{out}")
+    # spine + r3's stub (r1 is reached through the MST edge), placed cleanly.
+    segs, viols, ovlps = nuts_summary(out)
+    assert (segs, viols, ovlps) == (2, 0, 0)
+    dm = re.search(
+        r"\[DetailedNUTS\] (\d+) net segments placed, (\d+) bits unplaced", out)
+    assert dm, "DetailedNUTS summary not found"
+    assert (int(dm.group(1)), int(dm.group(2))) == (8, 0)
+    # The point of the vehicle: BOTH placed audits clean.
+    assert out.count("Success: no violations found.") == 2, out
+    assert "TEG_OPEN" not in out, out
+
+
 def test_ndr_bottom_up_composition():
     """flow/ndr_bottom_up.buda (requirement R13): a governed cell template
     marked set_bottom_up is solved once and COPIED to every instance,
