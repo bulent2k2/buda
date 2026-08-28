@@ -1,0 +1,50 @@
+{
+  "_comment": [
+    "Web-client demo catalog.  Each entry names an EXISTING .buda flow; the",
+    "server (src/web/demos.py) derives everything else from that file, so a",
+    "demo cannot drift from the flow it claims to be:",
+    "  setup  — the commands above the first pipeline stage (shown in the",
+    "           command box and run by 'Run commands'),",
+    "  stages — the flow's OWN spelling of each pipeline stage, so the stage",
+    "           buttons drive a hier flow with run_hier_bundler / hier planner,",
+    "  flow   — the whole pipeline tail, which the 'Run flow' button replays",
+    "           minus the commands that make no sense in a browser (visualize*,",
+    "           exit).",
+    "Add a demo by adding an entry here — no server change.  A flow whose",
+    "require_file inputs are missing is listed as unavailable with its own",
+    "hint rather than failing when clicked."
+  ],
+  "demos": [
+    {"key": "flat", "flow": "demo/web/flat_b44.buda",
+     "label": "Flat — b44 bus (3 blocks, 52 bits)",
+     "note": "The starter: one fat bus, a rich candidate pool to step through."},
+
+    {"key": "hier", "flow": "flow/hbundles/06_multipin_stress.buda",
+     "label": "Hierarchical — multi-pin stress (35 buses, depth 2)",
+     "note": "Hierarchy-aware flow: cell-local templates + cross-level bundles."},
+
+    {"key": "user_guide", "flow": "demo/user_guide.buda",
+     "label": "User guide — 2 blocks, 1 bus + 1 net",
+     "note": "The smallest end-to-end design; pairs with docs/USER_GUIDE.md."},
+
+    {"key": "comprehensive", "flow": "demo/comprehensive_demo.buda",
+     "label": "Comprehensive — 6 layers, mixed buses + checks",
+     "note": "Six-layer stack, several bus shapes, check_design + report_wl."},
+
+    {"key": "congestion", "flow": "demo/congestion_demo.buda",
+     "label": "Congestion — three buses competing for one channel",
+     "note": "Per-bundle generation; watch the planner spread the load."},
+
+    {"key": "keepout", "flow": "demo/keepout_demo.buda",
+     "label": "Keep-outs — routing around blocked regions",
+     "note": "Keep-out zones as hard constraints through to detailed NUTS."},
+
+    {"key": "channel_stress", "flow": "flow/channel_stress.buda",
+     "label": "Channel stress — 16 blocks, post-NUTS replan + negotiate",
+     "note": "A healer flow: post_nuts layer reassignment then negotiate_congestion."},
+
+    {"key": "rv", "flow": "flow/rv/soc.buda",
+     "label": "RV SoC — imported DEF/LEF/Verilog (1230 nets, depth 4)",
+     "note": "A real imported design end to end; the full flow runs ~15s."}
+  ]
+}

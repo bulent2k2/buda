@@ -121,6 +121,71 @@ object Renderer {
   private def bundleAlpha(bid: Double, focus: Option[Int]): Double =
     if (focus.isEmpty || focus.contains(bid.toInt)) 1.0 else 0.1
 
+  /** A marker ring carrying a <title>, so hovering says which kind it is
+    * instead of leaving the colours to memory. */
+  private def ring(cx: Double, cy: Double, cls: String, tip: String,
+                   r: Double): dom.Element = {
+    val c = el("circle", "class" -> cls, "cx" -> cx, "cy" -> cy, "r" -> r)
+    val t = el("title")
+    t.textContent = tip
+    c.appendChild(t)
+    c
+  }
+
+  /** The view box for "zoom to this bundle": the geometry of the one bundle on
+    * screen.  None when nothing is isolated (NUTS/detailed showing ALL
+    * bundles), so the toggle then keeps the full floorplan rather than
+    * pretending to zoom.  Twin of the reference client's `zoomBox()`. */
+  private def zoomBox(payload: js.Dynamic, view: String, cand: Int,
+                      edit: js.Dynamic,
+                      focus: Option[Int]): Option[(Double, Double, Double, Double)] = {
+    val acc = scala.collection.mutable.ArrayBuffer[(Double, Double, Double, Double)]()
+    def add(ax1: Double, ay1: Double, ax2: Double, ay2: Double): Unit =
+      acc += ((math.min(ax1, ax2), math.min(ay1, ay2),
+               math.max(ax1, ax2), math.max(ay1, ay2)))
+    if (view == "generation") {
+      val editing = defined(edit) && edit.open.asInstanceOf[Boolean]
+      val bundles = arr(payload, "bundles")
+      val c: js.Dynamic =
+        if (editing) edit.topology
+        else if (bundles.isEmpty) null
+        else {
+          val cs = arr(bundles(0), "candidates")
+          if (cand >= 0 && cand < cs.length) cs(cand) else null
+        }
+      if (c == null) return None
+      arr(c, "segments").foreach { sg =>
+        add(d(sg.start, "x"), d(sg.start, "y"), d(sg.end, "x"), d(sg.end, "y"))
+      }
+      arr(c, "seg_busterms").foreach { bt =>
+        for (side <- Seq("start", "end")) {
+          val b = bt.selectDynamic(side)
+          if (defined(b))
+            add(d(b.bbox, "x1"), d(b.bbox, "y1"), d(b.bbox, "x2"), d(b.bbox, "y2"))
+        }
+      }
+    } else {
+      if (focus.isEmpty) return None
+      val segs =
+        if (view == "nuts") {
+          val n = payload.selectDynamic("nuts")
+          if (defined(n)) arr(n, "segments") else js.Array[js.Dynamic]()
+        } else {
+          val dd = payload.selectDynamic("detailed")
+          if (defined(dd)) arr(dd, "net_segments") else js.Array[js.Dynamic]()
+        }
+      segs.foreach { sg =>
+        if (focus.contains(d(sg, "bundle_id").toInt)) {
+          val (a, b, c, dd2) = placedLine(sg)
+          add(a, b, c, dd2)
+        }
+      }
+    }
+    if (acc.isEmpty) None
+    else Some((acc.map(_._1).min, acc.map(_._2).min,
+               acc.map(_._3).max, acc.map(_._4).max))
+  }
+
   /** Render `payload` into `svg` for the given `view` ("generation"/"nuts"/
     * "detailed").  For the generation view, shows candidate `cand` of the first
     * bundle, or the `edit` working copy when an edit session is open.  In the
@@ -128,7 +193,8 @@ object Renderer {
     * other bundle so one can be isolated.  Returns the candidate-bar label (empty
     * unless the generation view has something to show). */
   def draw(svg: dom.svg.SVG, payload: js.Dynamic, view: String, cand: Int,
-           edit: js.Dynamic, focus: Option[Int] = None): String = {
+           edit: js.Dynamic, focus: Option[Int] = None,
+           zoom: Boolean = false): String = {
     svg.innerHTML = ""
     if (js.isUndefined(payload) || payload == null) return ""
     val fp = payload.floorplan
@@ -140,6 +206,12 @@ object Renderer {
       x2 = math.max(x2, d(b.bbox, "x2")); y2 = math.max(y2, d(b.bbox, "y2"))
     }
     if (x1 > x2) { x1 = 0; y1 = 0; x2 = 1000; y2 = 1000 }
+    // Zoom to the ONE bundle on screen (the shown candidate in the generation
+    // view, the focused bundle's placed wires otherwise).  None when there is
+    // nothing isolated to zoom to, which keeps the full floorplan.
+    if (zoom) zoomBox(payload, view, cand, edit, focus).foreach { case (a, b, c, dd) =>
+      x1 = a; y1 = b; x2 = c; y2 = dd
+    }
     val pad = math.max(x2 - x1, y2 - y1) * 0.06 + 50
     x1 -= pad; y1 -= pad; x2 += pad; y2 += pad
     val (w, h) = (x2 - x1, y2 - y1)
@@ -242,10 +314,26 @@ object Renderer {
       for (side <- Seq("start", "end")) {
         val b = bt.selectDynamic(side)
         if (defined(b)) {
-          g.appendChild(el("circle", "class" -> "rcv",
-            "cx" -> ((d(b.bbox, "x1") + d(b.bbox, "x2")) / 2),
-            "cy" -> ((d(b.bbox, "y1") + d(b.bbox, "y2")) / 2), "r" -> r))
+          g.appendChild(ring((d(b.bbox, "x1") + d(b.bbox, "x2")) / 2,
+            (d(b.bbox, "y1") + d(b.bbox, "y2")) / 2, "rcv",
+            "busterm tap: " + b.block_name.asInstanceOf[String], r))
         }
+      }
+    }
+    // The bundle's own blocks this candidate passes THROUGH rather than taps
+    // (the serializer's `passthru_blocks`, derived by the same predicate
+    // `dump_topologies --conn` prints).  Dashed and slightly larger, so a block
+    // both tapped and crossed shows both rings.
+    val byName = scala.collection.mutable.Map[String, js.Dynamic]()
+    arr(payload.floorplan, "blocks").foreach { b =>
+      byName(b.name.asInstanceOf[String]) = b
+    }
+    val pt = c.selectDynamic("passthru_blocks")
+    if (defined(pt)) pt.asInstanceOf[js.Array[String]].foreach { name =>
+      byName.get(name).foreach { b =>
+        g.appendChild(ring((d(b.bbox, "x1") + d(b.bbox, "x2")) / 2,
+          (d(b.bbox, "y1") + d(b.bbox, "y2")) / 2, "passthru",
+          "pass-through (crossed, not tapped): " + name, r * 1.45))
       }
     }
     drawLegacyBridges(g, c.selectDynamic("bridge_segments"))

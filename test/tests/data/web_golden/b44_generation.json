@@ -82,6 +82,9 @@
      "estimated_wirelength": 3510,
      "feedthru_blocks": [],
      "pass_through_count": 1,
+     "passthru_blocks": [
+      "blk_23"
+     ],
      "seg_busterms": [
       {
        "end": {
@@ -295,6 +298,9 @@
      "estimated_wirelength": 3510,
      "feedthru_blocks": [],
      "pass_through_count": 1,
+     "passthru_blocks": [
+      "blk_23"
+     ],
      "seg_busterms": [
       {
        "end": null,
@@ -538,6 +544,9 @@
      "estimated_wirelength": 3510,
      "feedthru_blocks": [],
      "pass_through_count": 1,
+     "passthru_blocks": [
+      "blk_23"
+     ],
      "seg_busterms": [
       {
        "end": null,
@@ -781,6 +790,7 @@
      "estimated_wirelength": 3510,
      "feedthru_blocks": [],
      "pass_through_count": 1,
+     "passthru_blocks": [],
      "seg_busterms": [
       {
        "end": null,
@@ -1024,6 +1034,9 @@
      "estimated_wirelength": 3510,
      "feedthru_blocks": [],
      "pass_through_count": 1,
+     "passthru_blocks": [
+      "blk_23"
+     ],
      "seg_busterms": [
       {
        "end": null,
@@ -1267,6 +1280,7 @@
      "estimated_wirelength": 3510,
      "feedthru_blocks": [],
      "pass_through_count": 1,
+     "passthru_blocks": [],
      "seg_busterms": [
       {
        "end": null,
@@ -1578,6 +1592,9 @@
      "estimated_wirelength": 3510,
      "feedthru_blocks": [],
      "pass_through_count": 0,
+     "passthru_blocks": [
+      "blk_23"
+     ],
      "seg_busterms": [
       {
        "end": null,
@@ -1983,6 +2000,9 @@
      "estimated_wirelength": 3510,
      "feedthru_blocks": [],
      "pass_through_count": 0,
+     "passthru_blocks": [
+      "blk_23"
+     ],
      "seg_busterms": [
       {
        "end": null,
@@ -2358,6 +2378,7 @@
      "estimated_wirelength": 3595,
      "feedthru_blocks": [],
      "pass_through_count": 0,
+     "passthru_blocks": [],
      "seg_busterms": [
       {
        "end": null,
@@ -2687,6 +2708,7 @@
      "estimated_wirelength": 3640,
      "feedthru_blocks": [],
      "pass_through_count": 0,
+     "passthru_blocks": [],
      "seg_busterms": [
       {
        "end": null,
@@ -2982,6 +3004,7 @@
      "estimated_wirelength": 3680,
      "feedthru_blocks": [],
      "pass_through_count": 0,
+     "passthru_blocks": [],
      "seg_busterms": [
       {
        "end": null,
@@ -3247,6 +3270,7 @@
      "estimated_wirelength": 3770,
      "feedthru_blocks": [],
      "pass_through_count": 0,
+     "passthru_blocks": [],
      "seg_busterms": [
       {
        "end": null,
@@ -3546,6 +3570,9 @@
      "estimated_wirelength": 3800,
      "feedthru_blocks": [],
      "pass_through_count": 0,
+     "passthru_blocks": [
+      "blk_23"
+     ],
      "seg_busterms": [
       {
        "end": null,
@@ -3901,6 +3928,9 @@
      "estimated_wirelength": 3910,
      "feedthru_blocks": [],
      "pass_through_count": 0,
+     "passthru_blocks": [
+      "blk_23"
+     ],
      "seg_busterms": [
       {
        "end": null,
@@ -4170,6 +4200,9 @@
      "estimated_wirelength": 4010,
      "feedthru_blocks": [],
      "pass_through_count": 1,
+     "passthru_blocks": [
+      "blk_23"
+     ],
      "seg_busterms": [
       {
        "end": {
@@ -4383,6 +4416,9 @@
      "estimated_wirelength": 4010,
      "feedthru_blocks": [],
      "pass_through_count": 0,
+     "passthru_blocks": [
+      "blk_23"
+     ],
      "seg_busterms": [
       {
        "end": null,
@@ -4660,6 +4696,9 @@
      "estimated_wirelength": 4010,
      "feedthru_blocks": [],
      "pass_through_count": 0,
+     "passthru_blocks": [
+      "blk_23"
+     ],
      "seg_busterms": [
       {
        "end": {
@@ -4967,6 +5006,9 @@
      "estimated_wirelength": 4010,
      "feedthru_blocks": [],
      "pass_through_count": 0,
+     "passthru_blocks": [
+      "blk_23"
+     ],
      "seg_busterms": [
       {
        "end": null,
@@ -5308,6 +5350,9 @@
      "estimated_wirelength": 4010,
      "feedthru_blocks": [],
      "pass_through_count": 0,
+     "passthru_blocks": [
+      "blk_23"
+     ],
      "seg_busterms": [
       {
        "end": null,
@@ -5619,6 +5664,9 @@
      "estimated_wirelength": 4090,
      "feedthru_blocks": [],
      "pass_through_count": 0,
+     "passthru_blocks": [
+      "blk_23"
+     ],
      "seg_busterms": [
       {
        "end": {
@@ -5910,6 +5958,9 @@
      "estimated_wirelength": 4260,
      "feedthru_blocks": [],
      "pass_through_count": 0,
+     "passthru_blocks": [
+      "blk_23"
+     ],
      "seg_busterms": [
       {
        "end": {
@@ -6225,6 +6276,7 @@
      "estimated_wirelength": 4350,
      "feedthru_blocks": [],
      "pass_through_count": 1,
+     "passthru_blocks": [],
      "seg_busterms": [
       {
        "end": null,
@@ -6514,6 +6566,7 @@
      "estimated_wirelength": 4480,
      "feedthru_blocks": [],
      "pass_through_count": 0,
+     "passthru_blocks": [],
      "seg_busterms": [
       {
        "end": null,
@@ -6779,6 +6832,9 @@
      "estimated_wirelength": 4590,
      "feedthru_blocks": [],
      "pass_through_count": 0,
+     "passthru_blocks": [
+      "blk_23"
+     ],
      "seg_busterms": [
       {
        "end": {
@@ -7036,6 +7092,9 @@
      "estimated_wirelength": 4860,
      "feedthru_blocks": [],
      "pass_through_count": 0,
+     "passthru_blocks": [
+      "blk_23"
+     ],
      "seg_busterms": [
       {
        "end": null,
@@ -7287,6 +7346,7 @@
      "estimated_wirelength": 5470,
      "feedthru_blocks": [],
      "pass_through_count": 0,
+     "passthru_blocks": [],
      "seg_busterms": [
       {
        "end": null,
@@ -7586,6 +7646,7 @@
      "estimated_wirelength": 5848,
      "feedthru_blocks": [],
      "pass_through_count": 0,
+     "passthru_blocks": [],
      "seg_busterms": [
       {
        "end": null,
@@ -7915,6 +7976,9 @@
      "estimated_wirelength": 6005,
      "feedthru_blocks": [],
      "pass_through_count": 0,
+     "passthru_blocks": [
+      "blk_23"
+     ],
      "seg_busterms": [
       {
        "end": null,
@@ -8244,6 +8308,7 @@
      "estimated_wirelength": 6195,
      "feedthru_blocks": [],
      "pass_through_count": 0,
+     "passthru_blocks": [],
      "seg_busterms": [
       {
        "end": null,
@@ -8573,6 +8638,7 @@
      "estimated_wirelength": 8508,
      "feedthru_blocks": [],
      "pass_through_count": 0,
+     "passthru_blocks": [],
      "seg_busterms": [
       {
        "end": null,

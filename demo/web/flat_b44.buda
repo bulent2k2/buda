@@ -1,0 +1,29 @@
+# ============================================================
+# demo/web/flat_b44.buda — the web client's FLAT starter demo
+#
+#   bin/buda --no-viz demo/web/flat_b44.buda
+#
+# Three blocks and one 52-bit bus lifted from the b44 datapath: the
+# smallest design that still gives a bundle a rich candidate pool, so the
+# topology explorer's a/d stepping has something to show.  Also the flow
+# behind the web client's "Flat" demo — the catalog (demos.json) reads its
+# SETUP (everything above `run_bundler`) into the command box and drives
+# the pipeline tail below with the stage buttons, so this file is the one
+# place the demo is defined.
+#
+# No `visualize`: the web client IS the viewer here.
+# ============================================================
+
+source ../../flow/tracks/tracks4top.buda
+
+add_block blk_07     2960  9750  4660 10250
+add_block blk_23      200 10830  2700 11830
+add_block io_pad_tl   200 12000  1200 12800
+
+add_bus bus_060[52]  blk_23.p  blk_07.p,io_pad_tl.p
+
+run_bundler
+generate_topologies
+run_planner
+run_nuts
+run_detailed_nuts

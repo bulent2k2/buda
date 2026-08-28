@@ -27,8 +27,8 @@ import buda
 import buda_diag
 from comp_placement import is_placed
 from .util import (UNIT_PITCH_UM_MAX, UNIT_PITCH_UM_MIN, UNIT_TRACKS_MAX,
-                   UNIT_TRACKS_MIN, unit_consistency_signals,
-                   unit_plausibility_faults)
+                   UNIT_TRACKS_MIN, seg_crosses_rect, seg_spans_block,
+                   unit_consistency_signals, unit_plausibility_faults)
 
 
 def _fmt_pull_opt(cs):
@@ -304,33 +304,14 @@ class ReportsMixin:
     _SLIDE_SENTINEL = 1e8   # ConnTopology marks an unbounded slide with ~5e8
 
     def _seg_crosses_rect(self, cs, x1, y1, x2, y2):
-        """True iff ConnSeg `cs` crosses the rect's INTERIOR: perp coordinate
-        strictly inside the rect's perp extent, along overlap of positive
-        length.  A wire that merely rides a face line, or abuts the rect at a
-        single point (a trunk whose endpoint lands on the block face flanking
-        its junction), does not cross it.  Deliberately STRICTER than verify's
-        seg_spans_rect, whose inclusive bounds grant COVERAGE for bundle
-        blocks (full-edge abutment is load-bearing there — ABUT candidates)."""
-        if cs.horiz:   # perp = y (perp_pos), along = x
-            return (y1 < cs.perp_pos < y2
-                    and cs.along_lo < x2 and cs.along_hi > x1)
-        else:          # perp = x, along = y
-            return (x1 < cs.perp_pos < x2
-                    and cs.along_lo < y2 and cs.along_hi > y1)
+        """Delegates to the shared predicate (buda_session.util) — the web
+        client's pass-through markers read the same geometry, so the two
+        cannot drift on what "crosses a block" means."""
+        return seg_crosses_rect(cs, x1, y1, x2, y2)
 
     def _seg_spans_block(self, cs, name, ubbox, fp=None):
-        """True iff `cs` crosses block `name`'s SOLID geometry.  Multi-rect / TEG
-        blocks store their real rectangles in get_block_rects(); a segment through
-        a notch/gap between them does NOT cross the block even though it crosses the
-        union bbox.  Single-rect blocks have an empty rect list — fall back to the
-        union bbox (which is their solid extent)."""
-        if fp is None:
-            fp = self.fp
-        rects = fp.get_block_rects(name)   # [] for single-rect blocks
-        if rects:
-            return any(self._seg_crosses_rect(cs, x1, y1, x2, y2)
-                       for (x1, y1, x2, y2) in rects)
-        return self._seg_crosses_rect(cs, ubbox.x1, ubbox.y1, ubbox.x2, ubbox.y2)
+        """Delegates to the shared predicate (buda_session.util)."""
+        return seg_spans_block(cs, name, ubbox, fp if fp is not None else self.fp)
 
     def _dump_conn_detail(self, w, cand_idx, fp=None):
         """Print per-segment connectivity for one candidate of bundle `w`:

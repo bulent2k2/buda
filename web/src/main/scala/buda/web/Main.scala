@@ -24,6 +24,7 @@ object Main {
   private var active: js.Dynamic = null      // the selected demo {label, setup, stages}
   private var loadedDemo: String = null      // the demo key the SESSION was set up from
   private var bundleFocus: Option[Int] = None   // None = show all bundles (nuts/detailed)
+  private var zoom: Boolean = false             // zoom the view box to the shown bundle
   // The generation view renders ONE bundle at a time (?bundle=<id>): `bundleSel`
   // is which one, `bundleIds` the ring to step through (from /state's bundle
   // digests).  Unlike `bundleFocus` — a per-view dimming reset on every refresh —
@@ -47,6 +48,8 @@ object Main {
 
   def main(args: Array[String]): Unit = {
     wire("run", () => runCmds())
+    wire("run-flow", () => runFlow())              // the demo's whole .buda flow
+    wire("zoom", () => toggleZoom())
     wire("reset", () => ApiClient.reset().foreach { st => afterReset(st); draw() })
     wire("bundler", () => runDemoStage("bundler"))
     wire("topologies", () => runDemoStage("topologies"))
@@ -197,6 +200,39 @@ object Main {
     *
     * `prev == null` is the startup / page-reload call and must NOT reset:
     * reloading the page keeps the session you were working in. */
+  /** Run the demo's WHOLE .buda flow: its setup, then the pipeline tail the
+    * catalog derived from the flow file (minus viewers, `exit` and artifact
+    * writers — see src/web/demos.py).  From a CLEAN session always: a setup
+    * only ADDS, so replaying it over a loaded design is a duplicate-block
+    * error, and "show me this whole demo" means a fresh run.  Twin of the
+    * reference client's `runFlow()`. */
+  private def runFlow(): Unit = {
+    if (active == null) return
+    val un = active.selectDynamic("unavailable")
+    if (defined(un)) { log("demo unavailable: " + un.asInstanceOf[String]); return }
+    val tail = active.selectDynamic("flow")
+    if (!defined(tail)) { log("this demo declares no pipeline flow"); return }
+    val cmds = tail.asInstanceOf[js.Array[String]].toSeq
+    if (cmds.isEmpty) { log("this demo declares no pipeline flow"); return }
+    val setup = active.setup.asInstanceOf[String].split("\n")
+      .map(_.trim).filter(_.nonEmpty).toSeq
+    setRunning(Some(s"running ${active.key.asInstanceOf[String]} flow…"))
+    ApiClient.reset().foreach { st =>
+      afterReset(st)
+      ApiClient.command(setup ++ cmds).foreach { res =>
+        setRunning(None)
+        showResults(res)
+        refresh()
+      }
+    }
+  }
+
+  private def toggleZoom(): Unit = {
+    zoom = !zoom
+    Option(byId("zoom")).foreach(_.textContent = if (zoom) "Zoom ✓" else "Zoom")
+    draw()
+  }
+
   private def loadDemo(): Unit = {
     val prev = loadedDemo
     val i = Option(byId("demo")).map(_.asInstanceOf[dom.html.Select].value)
@@ -441,6 +477,7 @@ object Main {
       stepBundleSel(if (e.key == "]") 1 else -1)
       return
     }
+    if (e.key == "z") { e.preventDefault(); toggleZoom(); return }
     val fwd = e.key == "n" || e.key == "ArrowRight"
     val back = e.key == "p" || e.key == "ArrowLeft"
     if (!fwd && !back) return
@@ -542,7 +579,7 @@ object Main {
 
   // ── render ──────────────────────────────────────────────────────────────────
   private def draw(): Unit = {
-    val label = Renderer.draw(svg, render, view, cand, edit, bundleFocus)
+    val label = Renderer.draw(svg, render, view, cand, edit, bundleFocus, zoom)
     // Is the shown candidate the pinned one? (mirrors the reference client)
     pinnedHere = false
     if (render != null && view == "generation" && edit == null) {

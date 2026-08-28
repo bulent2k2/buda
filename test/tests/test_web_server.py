@@ -203,13 +203,13 @@ def test_render_endpoints_full_pipeline():
 
 
 def test_demos_catalog_lists_flat_and_hier():
-    """GET /api/demos returns both built-in demos, each with a setup script and
+    """GET /api/demos returns the manifest's demos, each with a setup script and
     a per-stage command map (flat vs hier drive the SAME buttons — the hier one
     maps to the run_hier_* variants)."""
     client = _client()
     body = client.get("/api/demos").json()
     demos = {d["key"]: d for d in body["demos"]}
-    assert set(demos) == {"flat", "hier"}
+    assert {"flat", "hier"} <= set(demos)
     for d in demos.values():
         assert d["label"] and d["setup"]
         assert set(d["stages"]) == {
