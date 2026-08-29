@@ -265,6 +265,14 @@ CORPUS = [
     # clips the placed span back and fires TEG_OPEN unless an OVER block's
     # crossings carry their own anchor.  ~0.01s.
     "flow/teg_bitrunk.buda",
+    # TRUNK+MST-hybrid-on-TEG-over guard (teg_multirect_status.md Final-state
+    # limitation 8, RESOLVED 2026-08-27): the SAME floorplan as the row above,
+    # pinning the other candidate family, so the two differ only in what they
+    # pin.  A hybrid COPIES its seed trunk, so the seed's per-rect metal is in
+    # it — and three passes the hybrid path runs and `add_trunk` does not were
+    # taking it back out (union-bbox spine clipping; the relay pass's collinear
+    # merge and OTC extensions).  EXPECTED CLEAN (0/0/0).  ~0.01s.
+    "flow/teg_hybrid.buda",
     # HIER multi-rect guard (teg_multirect_status.md limitation 5,
     # RESOLVED 2026-08-27): the first corpus design whose blocks get their
     # rects from a BDB CELL (`set_cell_rects`, schema v30) rather than from

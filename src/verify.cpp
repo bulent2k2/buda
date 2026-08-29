@@ -510,10 +510,15 @@ static void detect_bit_antennas(const std::vector<ConnSeg>& segs,
     (void)layers;
 }
 
+// `placed_groups`: label -> the segment indices that exist as PLACED metal for
+// that label — the same grouping detect_teg_open takes (-1 = the bundle-level
+// group at NUTS, a bit index at DNUTS).  See the tap-overhang block below for
+// what the audit does with it and, just as importantly, what it does NOT.
 static void detect_antennas(const std::vector<ConnSeg>& segs,
                             const Topology& topo, const Floorplan& fp,
                             int bundle_id, const char* stage,
-                            ConnResult& result)
+                            ConnResult& result,
+                            const std::map<int, std::set<int>>& placed_groups)
 {
     const int n = (int)segs.size();
     // A single-segment topology has no junctions by construction; a missing
@@ -563,6 +568,44 @@ static void detect_antennas(const std::vector<ConnSeg>& segs,
     //     ABUT shared-edge crossing — are their own contract);
     //   - declared feedthru blocks are exempt (their split-at-face landings
     //     are the feedthru contract, not overhang).
+    //
+    // Both redundancy tests below — the pre-existing BLOCK-level
+    // `covered_without_piece` (issue #482 / Codex #517) and the per-RECT OVER
+    // branch — ask "does something ELSE still hold this?", and the answer is
+    // only worth anything about metal that EXISTS.  Read off the nominal
+    // ConnTopology alone they credit a sibling that went UNPLACED, so a piece
+    // which is the only PLACED wire touching an OVER rect could be reported
+    // ANTENNA on the strength of a wire nobody built
+    // (teg_multirect_status.md limitation 0).  `placed_groups` supplies the
+    // missing half.
+    //
+    // The rule: the piece is redundant only if it is redundant in EVERY WORLD
+    // the placement defines, a world being the segments that exist alongside
+    // it.  At NUTS that is one world (the placed segments).  At DNUTS it is
+    // one per BIT — a sibling placed for some bits and not others is not
+    // "there" for the bits it is missing from, and a bit whose own wire
+    // reaches a rect only through this piece makes the piece load-bearing —
+    // and the verdict must hold for all of them, since removing the piece
+    // removes it for every bit at once.  Identical worlds collapse, so a
+    // fully-placed bundle costs exactly one evaluation, the same one the
+    // nominal audit did.  A piece with no placed existence at all (segment i
+    // in no group — an empty result, a hand-built checker fixture, a segment
+    // NUTS never emitted) keeps the nominal world, so this can only ever
+    // SUPPRESS a report that placement proves wrong, never manufacture one.
+    //
+    // Placement is used as an EXISTENCE test and deliberately not as GEOMETRY:
+    // a sibling that exists is still measured at its NOMINAL extent, as the
+    // whole audit is.  A bit-wire's placed span can differ from nominal (span
+    // adjustment), so judging the geometry per bit is a strictly larger change
+    // with its own corpus risk; that residual stays recorded rather than
+    // silently half-done.
+    //
+    // The ATTACHMENT-COUNT rule above is deliberately NOT made
+    // placement-aware.  It is documented structural — a generator-fault
+    // detector that "answers at every placed stage" — and gating its
+    // attachments on placement would ADD reports (a segment joined only to
+    // unplaced siblings would become an antenna), which is the opposite of
+    // the bounded, report-only defect being fixed here.
     for (int i = 0; i < n; ++i) {
         const ConnSeg& cs = segs[i];
         const SegConn* tap = nullptr;
@@ -597,80 +640,103 @@ static void detect_antennas(const std::vector<ConnSeg>& segs,
                 plo >= alo && phi <= ahi) { inside = true; break; }
         }
         if (!inside) continue;
-        // `teg_mode over` revokes exactly the assumption the redundancy test
-        // below makes.  "The block stays covered" is a BLOCK-level reading,
-        // and an OVER block's rects are NOT interchangeable: a piece tapping
-        // rect#1's face is that rect's OWN attachment even though the spine
-        // crosses rect#0, so the block-coverage test would call the one wire
-        // holding rect#1 an antenna (measured on the adjacent-rect Direct
-        // shape the moment generation started emitting that wire —
-        // teg_multirect_status.md limitation 2).  Judge per RECT instead, on
-        // the rects the piece touches, through the SAME contact predicate
-        // TEG_OPEN reads: a piece whose removal would leave any of them
-        // untouched is load-bearing.
-        if (fp.get_block_teg_mode(tap->block_name) == TegMode::OVER &&
-            rects.size() >= 2) {
-            ConnSeg rest = cs;
-            if (at_lo) rest.along_lo = (int)A; else rest.along_hi = (int)A;
-            bool load_bearing = false;
-            for (const Rect& r : rects) {
-                if (!axis_touches_rect(cs.horiz, (double)cs.perp_pos,
-                                       plo, phi, r)) continue;
-                bool still = axis_touches_rect(rest.horiz, (double)rest.perp_pos,
-                                               (double)rest.along_lo,
-                                               (double)rest.along_hi, r);
-                for (int j = 0; j < n && !still; ++j) {
-                    if (j == i) continue;
-                    still = axis_touches_rect(segs[j].horiz,
-                                              (double)segs[j].perp_pos,
-                                              (double)segs[j].along_lo,
-                                              (double)segs[j].along_hi, r);
-                }
-                if (!still) { load_bearing = true; break; }
-            }
-            if (load_bearing) continue;
-        }
-        // Redundancy: with the piece removed, the TAPPED block must remain
-        // covered — by this segment's trimmed remainder or by any sibling's
-        // tap / pass-through — and so must EVERY OTHER connected block the
-        // piece touches: overlapping or contained neighbours may be
-        // pass-through-covered ONLY by the piece, which makes it
-        // load-bearing metal even though the tapped block is fine without
-        // it (Codex #517).
         ConnSeg trimmed = cs;
         if (at_lo) trimmed.along_lo = (int)A; else trimmed.along_hi = (int)A;
-        auto covered_without_piece = [&](const std::string& bname,
-                                         const std::vector<Rect>& brs) {
-            for (const Rect& r : brs)
-                if (seg_spans_rect(trimmed, (double)cs.perp_pos, r)) return true;
-            for (int j = 0; j < n; ++j) {
-                if (j == i) continue;
-                for (const auto& c : segs[j].conns)
-                    if (c.kind == SegConn::BUSTERM && c.block_name == bname)
-                        return true;
+
+        // Is the piece load-bearing in ONE world?  `world` names the siblings
+        // that exist there; nullptr = the nominal world (every segment).
+        auto load_bearing_in = [&](const std::set<int>* world) {
+            auto present = [&](int j) {
+                return world == nullptr || world->count(j) != 0;
+            };
+            // `teg_mode over` revokes exactly the assumption the block-level
+            // redundancy test makes.  "The block stays covered" is a
+            // BLOCK-level reading, and an OVER block's rects are NOT
+            // interchangeable: a piece tapping rect#1's face is that rect's
+            // OWN attachment even though the spine crosses rect#0, so the
+            // block-coverage test would call the one wire holding rect#1 an
+            // antenna (measured on the adjacent-rect Direct shape the moment
+            // generation started emitting that wire —
+            // teg_multirect_status.md limitation 2).  Judge per RECT instead,
+            // on the rects the piece touches, through the SAME contact
+            // predicate TEG_OPEN reads: a piece whose removal would leave any
+            // of them untouched is load-bearing.
+            if (fp.get_block_teg_mode(tap->block_name) == TegMode::OVER &&
+                rects.size() >= 2) {
+                for (const Rect& r : rects) {
+                    if (!axis_touches_rect(cs.horiz, (double)cs.perp_pos,
+                                           plo, phi, r)) continue;
+                    bool still = axis_touches_rect(trimmed.horiz,
+                                                   (double)trimmed.perp_pos,
+                                                   (double)trimmed.along_lo,
+                                                   (double)trimmed.along_hi, r);
+                    for (int j = 0; j < n && !still; ++j) {
+                        if (j == i || !present(j)) continue;
+                        still = axis_touches_rect(segs[j].horiz,
+                                                  (double)segs[j].perp_pos,
+                                                  (double)segs[j].along_lo,
+                                                  (double)segs[j].along_hi, r);
+                    }
+                    if (!still) return true;
+                }
+            }
+            // Redundancy: with the piece removed, the TAPPED block must remain
+            // covered — by this segment's trimmed remainder or by any
+            // sibling's tap / pass-through — and so must EVERY OTHER connected
+            // block the piece touches: overlapping or contained neighbours may
+            // be pass-through-covered ONLY by the piece, which makes it
+            // load-bearing metal even though the tapped block is fine without
+            // it (Codex #517).
+            auto covered_without_piece = [&](const std::string& bname,
+                                             const std::vector<Rect>& brs) {
                 for (const Rect& r : brs)
-                    if (seg_spans_rect(segs[j], (double)segs[j].perp_pos, r))
+                    if (seg_spans_rect(trimmed, (double)cs.perp_pos, r))
                         return true;
+                for (int j = 0; j < n; ++j) {
+                    if (j == i || !present(j)) continue;
+                    for (const auto& c : segs[j].conns)
+                        if (c.kind == SegConn::BUSTERM && c.block_name == bname)
+                            return true;
+                    for (const Rect& r : brs)
+                        if (seg_spans_rect(segs[j], (double)segs[j].perp_pos, r))
+                            return true;
+                }
+                return false;
+            };
+            if (!covered_without_piece(tap->block_name, rects)) return true;
+            for (const auto& bname : topo.connected_block_names) {
+                if (bname == tap->block_name) continue;
+                auto brs = fp.get_block_rects(bname);
+                if (brs.empty()) brs.push_back(fp.get_block_bounds(bname));
+                bool touches = false;
+                for (const Rect& r : brs) {
+                    const int alo = cs.horiz ? r.x1 : r.y1;
+                    const int ahi = cs.horiz ? r.x2 : r.y2;
+                    const int blo = cs.horiz ? r.y1 : r.x1;
+                    const int bhi = cs.horiz ? r.y2 : r.x2;
+                    if (cs.perp_pos >= blo && cs.perp_pos <= bhi &&
+                        plo <= ahi && phi >= alo) { touches = true; break; }
+                }
+                if (touches && !covered_without_piece(bname, brs)) return true;
             }
             return false;
         };
-        bool redundant = covered_without_piece(tap->block_name, rects);
-        for (const auto& bname : topo.connected_block_names) {
-            if (!redundant) break;
-            if (bname == tap->block_name) continue;
-            auto brs = fp.get_block_rects(bname);
-            if (brs.empty()) brs.push_back(fp.get_block_bounds(bname));
-            bool touches = false;
-            for (const Rect& r : brs) {
-                const int alo = cs.horiz ? r.x1 : r.y1, ahi = cs.horiz ? r.x2 : r.y2;
-                const int blo = cs.horiz ? r.y1 : r.x1, bhi = cs.horiz ? r.y2 : r.x2;
-                if (cs.perp_pos >= blo && cs.perp_pos <= bhi &&
-                    plo <= ahi && phi >= alo) { touches = true; break; }
-            }
-            if (touches && !covered_without_piece(bname, brs))
-                redundant = false;
+
+        // The worlds this piece lives in: one per placed group containing
+        // segment i, deduplicated (a fully-placed bundle yields exactly one).
+        // None — the piece is nowhere placed — keeps the nominal world, so the
+        // verdict can only be suppressed by placement, never created by it.
+        std::set<std::set<int>> worlds;
+        for (const auto& [label, members] : placed_groups)
+            if (members.count(i)) worlds.insert(members);
+        bool load_bearing = false;
+        if (worlds.empty()) {
+            load_bearing = load_bearing_in(nullptr);
+        } else {
+            for (const auto& w : worlds)
+                if (load_bearing_in(&w)) { load_bearing = true; break; }
         }
-        if (!redundant) continue;          // the piece is load-bearing: keep it
+        if (load_bearing) continue;        // the piece is load-bearing: keep it
         ConnViolation v;
         v.kind       = ViolationKind::ANTENNA;
         v.bundle_id  = bundle_id;
@@ -1310,8 +1376,20 @@ ConnResult check_nuts(const ConnTopology& ct, const NUTSResult& nuts,
     // FEEDTHRU_RELAY (structural; see detect_feedthru_relay).
     detect_feedthru_relay(segs, topo, fp, bundle_id, "nuts", result);
     detect_disconnected(segs, bundle_id, "nuts", result);
+    // Which segments exist as PLACED metal — one bundle-level group, since
+    // bits do not exist at this stage.  Shared by the two audits below: the
+    // tap-overhang redundancy tests must not credit an unplaced sibling
+    // (teg_multirect_status.md limitation 0), and TEG_OPEN reads placed metal
+    // by construction.
+    std::map<int, std::set<int>> placed_segs;
+    {
+        auto& live = placed_segs[-1];
+        for (const auto& [si, tsp] : ts_map)
+            if (tsp->placed) live.insert(si);
+    }
+
     // Dangling wires (structural; see detect_antennas — issue #482).
-    detect_antennas(segs, topo, fp, bundle_id, "nuts", result);
+    detect_antennas(segs, topo, fp, bundle_id, "nuts", result, placed_segs);
 
     // TEG_OPEN: every rect of an OVER block must be touched — and joined —
     // by placed metal (see detect_teg_open — the missing-bridge audit).
@@ -1615,8 +1693,24 @@ ConnResult check_dnuts(const ConnTopology& ct, const DetailedNUTSResult& dnuts,
     detect_feedthru_relay(ct.segs(), topo, fp, bundle_id, "dnuts", result);
     // Whole-graph connectivity (structural; see detect_disconnected).
     detect_disconnected(ct.segs(), bundle_id, "dnuts", result);
+    // Which segments exist as a PLACED bit-wire, per BIT — a segment is
+    // "there" for a bit only when that bit's own wire is (an unplaced bit has
+    // no ns_map entry at all; DetailedNUTS emits nothing for it).  Shields
+    // carry a rail net rather than a signal bit and are excluded, as they are
+    // from the TEG_OPEN grouping below.  See detect_antennas on why the
+    // tap-overhang verdict must hold in every one of these worlds
+    // (teg_multirect_status.md limitation 0).
+    std::map<int, std::set<int>> placed_by_bit;
+    for (const auto& [key, nsp] : ns_map) {
+        const int si = key.first, bit = key.second;
+        if (si < 0 || si >= n || bit < 0) continue;
+        if (nsp->is_shield || !nsp->placed) continue;
+        placed_by_bit[bit].insert(si);
+    }
+
     // Dangling wires (structural; see detect_antennas — issue #482).
-    detect_antennas(ct.segs(), topo, fp, bundle_id, "dnuts", result);
+    detect_antennas(ct.segs(), topo, fp, bundle_id, "dnuts", result,
+                    placed_by_bit);
 
     // Per-BIT dangling metal, which the structural pass above cannot see.
     detect_bit_antennas(ct.segs(), dnuts, topo, fp, layers, bundle_id, result);

@@ -1282,26 +1282,214 @@ def test_bitrunk_per_rect_stubs_never_duplicate_collinearly():
         assert verdict["by_kind"].get("TEG_OPEN", 0) == 0, out
 
 
-def test_trunk_mst_hybrid_on_over_block_still_fires_teg_open():
-    # THE REMAINING LOUD SHAPE (teg_multirect_status.md Final-state
-    # limitation 8, opened by this work): a `TRUNK_*+MST` hybrid re-derives its
-    # spine from the SURVIVING branch blocks and drops the seed trunk's TEG
-    # connection metal with it — measured on this very geometry, the seed
-    # `TRUNK_H@y100` spans x 100..900 (spine-end anchored onto rect#1's face)
-    # while `TRUNK_H+MST@y100` spans x 100..500, and `TRUNK_V@x600`'s per-rect
-    # stub (900,50)-(600,50) is simply absent from `TRUNK_V+MST@x600`.  The
-    # route is LOUD, not silent — the same guarantee that made BITRUNK's
-    # bbox-only scoping acceptable — and this is where the two dirty vehicles
-    # (test_teg_resume, test_teg_thru_census) now sit.
+# ── TRUNK_*+MST hybrids inherit the seed trunk's TEG metal ───────────────────
+#    (teg_multirect_status.md Final-state limitation 8, RESOLVED 2026-08-27)
+#
+# The hybrid COPIES its seed trunk, so the seed's OVER connection metal is
+# already in it — the claim CLAUDE.md made and the code did not keep.  Three
+# shared passes were quietly removing it again, none of them the hybrid
+# generator: `clip_spine_to_landings` (union-bbox coverage) and, inside
+# `complete_relay_junctions`, the degenerate-collinear merge and the
+# parallel/orthogonal OTC extensions.  All three rest on a block's rects being
+# interchangeable covers, which is precisely what `teg_mode over` revokes.
+
+
+def test_trunk_mst_hybrid_inherits_the_seed_trunks_spine_anchoring():
+    # Half one, and the flip IS the proof.  A hybrid re-clips its spine from the
+    # SURVIVING branch blocks (`clip_spine_to_landings`, which removes the
+    # phantom overhang a dropped child stub leaves), and that pass required
+    # coverage of each pass-through block's UNION bbox — right for a THRU block
+    # and wrong for an OVER one.  Measured: the seed `TRUNK_H@y100` spans x
+    # 100..900, its far end anchored onto rect#1's facing face, and the hybrid
+    # came back clipped to x 100..500 — r2's UNION near face, i.e. rect#0 — with
+    # rect#1 reached by nothing and TEG_OPEN 1 at nuts / 4 at dnuts.  Each OVER
+    # rect is now its own coverage unit, ADDED to the union requirement and never
+    # a substitute for it: both branches of that loop only widen [lo,hi], so the
+    # per-rect pass can only extend the spine.
     s = _session(_BITRUNK_CMDS + ["generate_topologies"] + _TRACKS)
-    _pin_type(s, "TRUNK_H+MST@y100")
+    hyb = _pin_type(s, "TRUNK_H+MST@y100")
+    seed = next(c for c in s.bundles[0].input.candidates
+                if c.type == "TRUNK_H@y100")
+
+    def spine(cand):
+        return next((min(g.start.x, g.end.x), max(g.start.x, g.end.x))
+                    for g in cand.segments
+                    if g.start.y == 100 and g.end.y == 100)
+
+    assert spine(seed) == (100, 900), spine(seed)
+    assert spine(hyb) == (100, 900), (
+        "the hybrid must inherit the seed's spine-end anchoring onto rect#1's "
+        f"facing face; got {spine(hyb)}")
     _run_cmds(s, "run_planner", "run_nuts")
     verdict, out = _check(s, "nuts")
-    assert verdict["by_kind"].get("TEG_OPEN", 0) >= 1, out
+    assert verdict["by_kind"].get("TEG_OPEN", 0) == 0, out
+    _run_cmds(s, "run_detailed_nuts")
+    assert s.detailed_result.num_unplaced == 0
+    verdict, out = _check(s, "dnuts")
+    assert verdict["by_kind"].get("TEG_OPEN", 0) == 0, out
+
+
+def test_trunk_mst_hybrid_keeps_the_seed_trunks_per_rect_stub():
+    # Half two: the seed `TRUNK_V@x600` carries a per-rect stub (900,50)-(600,50)
+    # for rect#1 and `TRUNK_V+MST@x600` simply did not.  The cause is not the
+    # hybrid generator but `complete_relay_junctions`, which it (and not
+    # `add_trunk`) runs: that stub lands on rect#1's face at one end and, because
+    # the trunk sits on rect#0's far face x=600, on rect#0's at the other — so the
+    # block collected TWO landings from ONE segment, the degenerate-collinear
+    # "merge two collinear stubs" branch extended the segment into itself and
+    # ERASED it.  The pass now checks its own result and reverts a completion that
+    # would cost an OVER rect its last metal.
+    s = _session(_BITRUNK_CMDS + ["generate_topologies"] + _TRACKS)
+    hyb = _pin_type(s, "TRUNK_V+MST@x600")
+    stub = [g for g in hyb.segments
+            if {(g.start.x, g.start.y), (g.end.x, g.end.y)}
+            == {(900, 50), (600, 50)}]
+    assert stub, ("the seed's per-rect stub for rect#1 must survive into the "
+                  "hybrid: " + str([((g.start.x, g.start.y), (g.end.x, g.end.y))
+                                    for g in hyb.segments]))
+    _run_cmds(s, "run_planner", "run_nuts")
+    verdict, out = _check(s, "nuts")
+    assert verdict["by_kind"].get("TEG_OPEN", 0) == 0, out
+    _run_cmds(s, "run_detailed_nuts")
+    assert s.detailed_result.num_unplaced == 0
+    verdict, out = _check(s, "dnuts")
+    assert verdict["by_kind"].get("TEG_OPEN", 0) == 0, out
+
+
+# Two per-rect stubs into ONE OVER block, both rects LEFT of the trunk at the
+# same column, so the stubs are COLLINEAR (V, both at x=150).
+_PARALLEL_STUB_CMDS = [
+    "add_block src 900 900 1000 1000",
+    "add_block b1 700 500 800 600",
+    "add_block b2 700 100 800 200",
+    "add_block m rect 100 0 200 100 rect 100 300 200 400 teg_mode over",
+    "def_layer 4 M4 H TOP 0",
+    "def_layer 5 M5 V TOP 0",
+    "add_bus d[4] src.tx b1.a,b2.b,m.c",
+    "run_bundler STRICT",
+    "generate_topologies",
+]
+
+# The `teg_attachments_follow` control's geometry: an L-shaped OVER block with
+# enough endpoints (>= 4 blocks) for standalone MST candidates.
+_MST_GUARD_CONTROL_CMDS = [
+    "add_block src 500 150 600 250",
+    "add_block L rect 0 0 100 400 rect 0 0 400 100 teg_mode over",
+    "add_block p 700 500 800 600",
+    "add_block q 200 700 300 800",
+    "def_layer 4 M4 H TOP 0",
+    "def_layer 5 M5 V TOP 0",
+    "add_bus d[4] src.tx L.rx,p.a,q.b",
+    "run_bundler STRICT",
+    "generate_topologies",
+]
+
+
+def test_relay_completion_never_costs_an_over_rect_its_only_metal():
+    # The third form limitation 8 took, and the one a fuzz over 900 randomized
+    # OVER geometries turned up in bulk (95 dirty hybrids, 85 of them with a
+    # CLEAN seed): a relay whose two landings are an OVER block's two per-rect
+    # stubs.  Whichever branch fires — the collinear merge here, the parallel jog
+    # or the orthogonal corner elsewhere — it MOVES a landing endpoint off the
+    # face it taps, which is exactly the per-rect contact `teg_mode over` requires
+    # and TEG_OPEN audits.  Both stubs must survive and both rects keep metal.
+    s = _session(_PARALLEL_STUB_CMDS + _TRACKS)
+    hyb = _pin_type(s, "TRUNK_H+MST@y200")
+    pts = [((g.start.x, g.start.y), (g.end.x, g.end.y)) for g in hyb.segments]
+    assert ((150, 100), (150, 200)) in pts, pts     # rect#0's stub
+    assert ((150, 300), (150, 200)) in pts, pts     # rect#1's stub
+    _run_cmds(s, "run_planner", "run_nuts", "run_detailed_nuts")
+    assert s.detailed_result.num_unplaced == 0
+    for stage in ("nuts", "dnuts"):
+        verdict, out = _check(s, stage)
+        assert verdict["by_kind"].get("TEG_OPEN", 0) == 0, out
+
+
+def test_thru_twin_keeps_the_historical_relay_merge():
+    # The control that must NOT move: declare the SAME block `thru` and the relay
+    # behaves exactly as it always did — rect#0 is left to the block's own
+    # interior, which is what `thru` MEANS, so no stub is invented for it and no
+    # TEG_OPEN is raised (the BUDA-1907 census is thru's report — see
+    # test_teg_thru_census.py).  The guard is OVER-gated, so a THRU multi-rect
+    # design cannot reach it.
+    thru = [c.replace(" teg_mode over", "") for c in _PARALLEL_STUB_CMDS]
+    s = _session(thru + _TRACKS)
+    hyb = _pin_type(s, "TRUNK_H+MST@y300")
+    pts = [((g.start.x, g.start.y), (g.end.x, g.end.y)) for g in hyb.segments]
+    assert ((200, 300), (750, 300)) in pts, pts     # ONE tap, on rect#1's face
+    assert not any(p[0][0] == 150 or p[1][0] == 150 for p in pts), pts
+    _run_cmds(s, "run_planner", "run_nuts", "run_detailed_nuts")
+    for stage in ("nuts", "dnuts"):
+        verdict, out = _check(s, stage)
+        assert verdict["by_kind"].get("TEG_OPEN", 0) == 0, out
+
+
+def test_standalone_mst_pool_is_untouched_by_the_relay_guard():
+    # The `teg_attachments_follow` control.  The standalone-MST path runs
+    # `add_mst_teg_attachments` immediately after relay completion, so a rect that
+    # pass leaves without metal is repaired right there and the guard must not
+    # pre-empt it.  Measured when it did: reverting the relay left the tree
+    # DISCONNECTED and this geometry lost MST_HV from the pool entirely.
+    s = _session(_MST_GUARD_CONTROL_CMDS + _TRACKS)
+    types = [c.type for c in s.bundles[0].input.candidates]
+    assert "MST_HV" in types and "MST_VH" in types, types
+    # ... and MST_HV, the one this geometry routes cleanly, still does.  (MST_VH
+    # carries a pre-existing BUSTERM_OPEN here and is out of scope: the control
+    # is that the guard EVICTS NOTHING, which pool membership states exactly.)
+    _pin_type(s, "MST_HV")
+    _run_cmds(s, "run_planner", "run_nuts", "run_detailed_nuts")
+    for stage in ("nuts", "dnuts"):
+        verdict, out = _check(s, stage)
+        assert verdict["by_kind"].get("TEG_OPEN", 0) == 0, out
+
+
+# ── the still-dirty shape, and why this one is DURABLE ────────────────────────
+#
+# With limitation 8 resolved no GENERATED candidate leaves an OVER rect untouched
+# on any geometry measured (900 randomized ones plus every checked-in vehicle),
+# so the loud-audit vehicles that had been re-homed three times — this file's
+# hybrid pin, test_teg_resume.py's resume-armed audit and
+# test_teg_thru_census.py's OVER twin — needed a fourth home no generator
+# improvement can take away.  A HAND-EDITED (`edit_*`, type USER) candidate is
+# that home: it comes from no generator, so no generation gate applies to it
+# (`set_prune_dominated` and its siblings deliberately never evict a USER
+# candidate), and TopoEdit's own verdict is `check_topo`, from which TEG_OPEN is
+# deliberately ABSENT — check_topo feeds generation gates, dogleg trials and
+# healer metrics, which a reporting audit must not perturb.  So every edit step
+# below reports "clean" and only the PLACED audit catches the open: exactly the
+# arrangement TEG_OPEN exists for.  DISCONNECTED is already documented as "the
+# hand-edit escape"; this is its per-rect twin.
+_USER_EDIT_OPS = [
+    "edit_topology 1 new",
+    "edit_add_trunk H 150 50 600",
+    "edit_add_stub src 0",
+    "edit_add_stub r1 0",
+    "edit_add_stub r2 0",
+    "edit_add_stub r3 0",
+    "edit_commit pin",
+]
+
+
+def test_hand_edited_candidate_missing_a_rect_still_fires_teg_open():
+    s = _session(_BITRUNK_CMDS + ["generate_topologies"] + _TRACKS)
+    outs = []
+    for c in _USER_EDIT_OPS:
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            s.do_command(c)
+        outs.append(buf.getvalue())
+    # TopoEdit's own verdict is check_topo, which carries no TEG_OPEN: the
+    # session calls this rect-missing topology clean, which is exactly why the
+    # PLACED audit must not.
+    assert all("<< clean" in o for o in outs if "violations:" in o), outs
+    assert "type USER" in outs[-1], outs[-1]
+    _run_cmds(s, "run_planner", "run_nuts")
+    verdict, out = _check(s, "nuts")
+    assert verdict["by_kind"].get("TEG_OPEN", 0) == 1, out
     assert "rect#1 (900,0)-(1000,100)" in out, out
     _run_cmds(s, "run_detailed_nuts")
     verdict, out = _check(s, "dnuts")
-    assert verdict["by_kind"].get("TEG_OPEN", 0) >= 1, out
+    assert verdict["by_kind"].get("TEG_OPEN", 0) == 4, out   # one per bit
 
 
 def test_over_block_crossed_twice_keeps_both_pass_through_anchors():

@@ -73,11 +73,23 @@ along-centre, every other rect gets its own perpendicular stub.  Single-rect
 designs are unaffected by construction.  On a `thru` block the BUDA-1907
 census still names the rects left to the block's internal routing.
 
-The one shape that still leaves an OVER rect unreached is the
-`TRUNK_*+MST` **hybrid**, which re-derives its spine from the surviving
-branch blocks and loses the seed trunk's per-rect metal with it.  Where that
-bites it is loud, not silent: the routed result fires `TEG_OPEN` at the
-placed audits (measured end to end) naming the unreached rect.
+`TRUNK_*+MST` **hybrids** carry the metal too (2026-08-27).  A hybrid COPIES
+its seed trunk, so the seed's per-rect connection metal is already in it — but
+three passes the hybrid path runs and `add_trunk` does not were taking it back
+out, each on the premise that a block's rects are interchangeable covers, which
+is exactly what `teg_mode over` revokes.  The spine re-clip
+(`clip_spine_to_landings`, which removes the phantom overhang a replaced branch
+stub leaves) asked for coverage of each pass-through block's UNION bbox, so a
+seed's spine-end anchoring onto a far rect's face was clipped back to the
+union's near face; the relay completion's collinear merge read ONE segment
+landing on TWO of the block's rects as two collinear stubs, "merged" it into
+itself and erased it; and its over-the-cell extensions drag a landing endpoint
+off the face it taps.  Coverage is now asked PER RECT for an OVER block, ADDED
+to the union requirement rather than replacing it, and the relay pass checks its
+own RESULT — a completion that would leave an OVER rect without metal is
+reverted and the block keeps its taps.  Vehicle: `flow/teg_hybrid.buda` (same
+floorplan as `flow/teg_bitrunk.buda`, so the two vehicles differ only in which
+candidate family they pin).
 
 **TEG-over connection metal (`teg_mode over`):**
 
@@ -127,10 +139,14 @@ target shares its perp band — the same-band shape) stays metal-free and
 LOUD via `TEG_OPEN`, exactly like the trunk path's same-band sibling; an
 ADJACENT rect nothing touches gets its attachment like any other (2026-08-27,
 the adjacency suppression removed here too — one predicate, both sides).
-`TRUNK_*+MST` hybrids inherit the seed trunk's per-rect connection metal (a
-multi-rect branch block keeps its trunk stubs on the legacy hybrid path), so
-they need no separate attachment pass.  Vehicle: `flow/teg_mst_over.buda`
-(the fix plus its spanning-edge control).
+`TRUNK_*+MST` hybrids need no separate attachment pass: they INHERIT the seed
+trunk's per-rect connection metal, which is what the paragraph above is about
+keeping.  The relay guard that keeps it stands DOWN on this MST path, and that
+is deliberate — the attachment pass runs immediately after relay completion and
+repairs any rect the completion left without metal, so pre-empting it would
+refuse a relay the tree needs (measured: it cost an L-shaped OVER geometry its
+`MST_HV` candidate to the connectivity gate).  Vehicle:
+`flow/teg_mst_over.buda` (the fix plus its spanning-edge control).
 
 **Notes:**
 - Each call targets exactly one bundle. For N bundles, call N times.
