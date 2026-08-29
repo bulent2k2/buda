@@ -472,6 +472,37 @@ proc _preflight_scan {path depth} {
         unset _pf_visited($norm)
     }
 }
+# A checkpoint that NAMES one of the flow's own source files (Codex #868 P1).
+# Both redirects clear a stale checkpoint before building — a delete that is
+# safe for a checkpoint and catastrophic for a script, and `btcl -b f.buda
+# f.buda` is one fat-fingered argument away: it erased the flow and then
+# failed with "sourced file not found", the run's own input gone.
+#
+# Refused rather than tolerated, because there is no reading of `-b <flow>
+# <ckpt>` where the two are the same file: a checkpoint is a BDB the engine
+# writes, a flow is text the engine reads.  Checked against `_pf_files` —
+# the entry file AND everything it sources, which the pre-flight already
+# walked — so a checkpoint aliasing a SOURCED fixture is caught too, not
+# just the entry flow.  Paths are compared normalized, the spelling the scan
+# stores; the caller passes the normalized redirect.
+#
+# Pre-dates the `:memory:` redirect: the read-only-`.sql` door had the same
+# hazard (reproduced on main, `btcl -b ro.buda ro.buda` erased ro.buda), so
+# the guard sits where both pass through rather than beside one of them.
+proc _refuse_ckpt_aliasing_a_source {tag redirect} {
+    foreach src $::_pf_files {
+        if {$src eq $redirect} {
+            puts stderr "$tag: -b: the checkpoint $redirect is the flow's own\
+                  [expr {$src eq [file normalize $::flow] ? "script" :
+                  "sourced file"}] -- a checkpoint is a BDB this writes\
+                  (clearing any stale one first), so building onto a source\
+                  file would DELETE it.  Pick a checkpoint filename, or pass\
+                  none and let -b auto-name one."
+            exit 2
+        }
+    }
+}
+
 # {none} | {durable <path>} | {nondurable <path> <why> <file> <line>}
 proc _preflight_ckpt {flowpath} {
     global _pf_last _pf_visited _pf_files _pf_bdb _pf_nopens
@@ -794,6 +825,7 @@ if {$stage eq "build"} {
                               directory?) -- pick a checkpoint FILENAME"
                         exit 2
                     }
+                    _refuse_ckpt_aliasing_a_source $tag $redirect
                     if {[file isfile $redirect]} {
                         puts "$tag: -b rebuilding the checkpoint $redirect\
                               fresh -- this flow BUILDS its design, so a\
@@ -867,6 +899,7 @@ if {$stage eq "build"} {
                               directory?) -- pick a checkpoint FILENAME"
                         exit 2
                     }
+                    _refuse_ckpt_aliasing_a_source $tag $redirect
                     if {[file exists $redirect]} {
                         # Reuse keeps pins (they re-attach to the rebuilt
                         # pool), and is sound only while the checkpoint

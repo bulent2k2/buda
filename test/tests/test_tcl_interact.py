@@ -1670,3 +1670,47 @@ def test_a_multi_open_memory_flow_is_still_refused(tmp_path):
     # and it says WHY this one is not redirected
     assert "opens several BDBs" in r.stderr
     assert not (tmp_path / "multi.ckpt.bdb").exists()
+
+
+# ── a checkpoint that NAMES a flow source (Codex #868 P1) ─────────────────
+# Both redirects clear a stale checkpoint before building.  That delete is
+# safe for a checkpoint and catastrophic for a script, and `-b <flow> <ckpt>`
+# is one fat-fingered argument away from making them the same file: it erased
+# the flow and then failed with "sourced file not found", the run's own input
+# gone.  PRE-DATES the `:memory:` redirect — reproduced on the read-only-.sql
+# door too — so the guard sits where both pass through.
+
+def test_a_checkpoint_naming_the_flow_is_refused_not_deleted(tmp_path):
+    flow = tmp_path / "mem.buda"
+    flow.write_text(_MEMORY_FLOW)
+    before = flow.read_bytes()
+    r = _run(["tclsh", _DRIVER, "--build", flow, flow], tmp_path)
+    assert r.returncode == 2
+    assert "is the flow's own script" in r.stderr
+    assert "would DELETE it" in r.stderr
+    assert flow.read_bytes() == before          # THE property
+
+
+def test_a_checkpoint_naming_a_sourced_file_is_refused_too(tmp_path):
+    """`_pf_files` is the whole source tree, so a checkpoint aliasing an
+    INCLUDED fixture is caught as well — the entry file is not the only
+    thing a build reads."""
+    inc = tmp_path / "inc.buda"
+    inc.write_text("def_layer 4 M4 H TOP 0.0\n")
+    flow = tmp_path / "s.buda"
+    flow.write_text("source inc.buda\n" + _MEMORY_FLOW)
+    before = inc.read_bytes()
+    r = _run(["tclsh", _DRIVER, "--build", flow, inc], tmp_path)
+    assert r.returncode == 2
+    assert "is the flow's own sourced file" in r.stderr
+    assert inc.read_bytes() == before
+
+
+def test_the_readonly_sql_door_refuses_the_alias_too(tmp_path):
+    """The same guard on the OTHER redirect — this door had the bug first."""
+    flow, _inp = _readonly_input_flow(tmp_path)
+    before = flow.read_bytes()
+    r = _run(["tclsh", _DRIVER, "--build", flow, flow], tmp_path)
+    assert r.returncode == 2
+    assert "is the flow's own script" in r.stderr
+    assert flow.read_bytes() == before
