@@ -737,12 +737,15 @@ def test_resume_flag_defaults_to_deepest_stage(tmp_path):
 
 def test_build_flag_refuses_a_nondurable_checkpoint_before_running(tmp_path):
     # The non-durable shapes -b still refuses at t=0 — before an engine is
-    # spawned — naming the file and line of the open.  (The single-open
-    # read-only `.sql` shape is no longer among them: that one REDIRECTS —
-    # see test_build_redirects_a_readonly_sql_input.)  Here: a `.sql` input
-    # that does not exist (the build could only fail at the open, a route
-    # later), a MULTI-open flow ending non-durable (redirect could land on
-    # the wrong open, so those keep the refusal), and `:memory:`.
+    # spawned — naming the file and line of the open.  The two SINGLE-open
+    # shapes are no longer among them, because both REDIRECT: a read-only
+    # `.sql` input (test_build_redirects_a_readonly_sql_input) and
+    # `:memory:` (test_build_redirects_a_memory_flow_into_the_checkpoint).
+    # What is left, and tested here: a `.sql` input that does not exist (the
+    # build could only fail at the open, a route later), and a MULTI-open
+    # flow ending non-durable — where a redirect could land on the wrong
+    # open, so the refusal stands (the `:memory:` twin of that case is
+    # test_a_multi_open_memory_flow_is_still_refused).
     sub = tmp_path / "ck_open.buda"
     sub.write_text("# checkpoint half\nopen_bdb design.bdb.sql\n")
     flow = tmp_path / "mini.buda"
@@ -766,11 +769,14 @@ def test_build_flag_refuses_a_nondurable_checkpoint_before_running(tmp_path):
     assert "writeback" in r.stderr                     # the remedy
     assert "ONLY open_bdb" in r.stderr                 # the redirect boundary
 
-    # `:memory:` is the other non-durable spelling.
+    # A single-open `:memory:` flow used to be refused here too.  It now
+    # redirects instead — the change this case was updated for, not a
+    # weakened assertion: the refusal it made was the one being removed.
     flow.write_text(_FLAT_FLOW + "open_bdb :memory:\n")
     r = _run(["tclsh", _DRIVER, "--build", flow], tmp_path)
-    assert r.returncode == 2
-    assert "`:memory:` dies with the process" in r.stderr
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "building the flow's `:memory:` BDB in the checkpoint" in r.stdout
+    assert (tmp_path / "mini.ckpt.bdb").is_file()
 
 
 def test_build_flag_defers_to_the_flows_own_durable_checkpoint(tmp_path):
