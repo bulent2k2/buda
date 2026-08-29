@@ -36,7 +36,8 @@ Two things to know before the walkthroughs:
 * **`-b` pre-flights the flow text** before spending anything on it.  A
   flow whose last `open_bdb` is non-durable would route to the end and
   then discard everything — `-b` refuses that at t=0, naming the file and
-  line, except for the one shape it can fix (the read-only input, below).
+  line, except for the two shapes it can fix without touching the flow (a
+  read-only `.sql` input, and `:memory:` — both below).
 * **Resume replays the *recorded* build.**  If you edit the flow (or a
   sourced file, or a read-only input) after building, `-r` says so with a
   NOTE and the rebuild remedy; it never silently mixes old recipe with new
@@ -190,8 +191,10 @@ can replay on a rebuild — a hand-built (`USER`) candidate's op-log, a
 `group_uids` super-candidate pin, or an entry carrying a note — is kept,
 and the file is deleted only when it empties (a mixed sidecar is rewritten
 with just the kept entries, and the session says which).  A session with
-no durable checkpoint (`btcl -i` without one, a `:memory:` BDB) never
-retires — there the json *is* the persistence.
+no durable checkpoint (`btcl -i` without one, a `:memory:` BDB run
+without `-b`) never retires — there the json *is* the persistence.  Under
+`-b` a `:memory:` flow does have one (it is redirected into the checkpoint),
+so it retires like any other.
 
 Two prompt verbs round this out: **`pins`** prints the live pin inventory
 (one line per pinned bundle — candidate number, type, forced layers,
@@ -207,8 +210,16 @@ and **`save <path>`** snapshots the current state to a named file
 |---|---|
 | No `open_bdb` at all | Arms the auto checkpoint before the flow; a rerun re-arms the same file (pins re-attach) |
 | Own durable checkpoint (binary `.bdb`, or `.sql writeback`) | Uses it — arms nothing, and says so |
-| Only open is a read-only `.sql` input | **Redirects**: the materialized copy becomes the checkpoint; the input is never written |
-| Anything else non-durable (`:memory:`, several opens, missing input) | Refused at t=0, naming the file and line |
+| Only open is a read-only `.sql` input | **Redirects**: the materialized copy becomes the checkpoint; the input is never written.  A rerun REUSES it while the input is unchanged, so pins re-attach |
+| Only open is `:memory:` | **Redirects**: the same fresh database is built in the checkpoint (the flow's text is untouched — without `-b` it is `:memory:` again).  Rebuilt FRESH every `-b`, so pins survive a `-r` resume and not a rerun (see below) |
+| Anything else non-durable (several opens, missing input) | Refused at t=0, naming the file and line — and, for several opens, saying that is why it is not redirected |
+
+**Why `:memory:` rebuilds while a `.sql` input is reused.**  A `.sql` open
+READS a design, so reopening the copy simply resumes it.  A `:memory:` open
+BUILDS one: the flow's own `add_cell` / `add_inst` lines run again on the
+next `-b`, and against a populated checkpoint that is a duplicate-instance
+error.  So the two redirects make opposite promises about a rerun, and say
+so separately — to keep pins, RESUME (`btcl -r`) rather than rebuild.
 
 * `-r` finds the checkpoint itself (the auto name, the flow's own durable
   checkpoint, or any build trace naming this flow); zero found is a

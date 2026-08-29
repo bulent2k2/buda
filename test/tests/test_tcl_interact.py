@@ -737,12 +737,15 @@ def test_resume_flag_defaults_to_deepest_stage(tmp_path):
 
 def test_build_flag_refuses_a_nondurable_checkpoint_before_running(tmp_path):
     # The non-durable shapes -b still refuses at t=0 — before an engine is
-    # spawned — naming the file and line of the open.  (The single-open
-    # read-only `.sql` shape is no longer among them: that one REDIRECTS —
-    # see test_build_redirects_a_readonly_sql_input.)  Here: a `.sql` input
-    # that does not exist (the build could only fail at the open, a route
-    # later), a MULTI-open flow ending non-durable (redirect could land on
-    # the wrong open, so those keep the refusal), and `:memory:`.
+    # spawned — naming the file and line of the open.  The two SINGLE-open
+    # shapes are no longer among them, because both REDIRECT: a read-only
+    # `.sql` input (test_build_redirects_a_readonly_sql_input) and
+    # `:memory:` (test_build_redirects_a_memory_flow_into_the_checkpoint).
+    # What is left, and tested here: a `.sql` input that does not exist (the
+    # build could only fail at the open, a route later), and a MULTI-open
+    # flow ending non-durable — where a redirect could land on the wrong
+    # open, so the refusal stands (the `:memory:` twin of that case is
+    # test_a_multi_open_memory_flow_is_still_refused).
     sub = tmp_path / "ck_open.buda"
     sub.write_text("# checkpoint half\nopen_bdb design.bdb.sql\n")
     flow = tmp_path / "mini.buda"
@@ -766,11 +769,14 @@ def test_build_flag_refuses_a_nondurable_checkpoint_before_running(tmp_path):
     assert "writeback" in r.stderr                     # the remedy
     assert "ONLY open_bdb" in r.stderr                 # the redirect boundary
 
-    # `:memory:` is the other non-durable spelling.
+    # A single-open `:memory:` flow used to be refused here too.  It now
+    # redirects instead — the change this case was updated for, not a
+    # weakened assertion: the refusal it made was the one being removed.
     flow.write_text(_FLAT_FLOW + "open_bdb :memory:\n")
     r = _run(["tclsh", _DRIVER, "--build", flow], tmp_path)
-    assert r.returncode == 2
-    assert "`:memory:` dies with the process" in r.stderr
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "building the flow's `:memory:` BDB in the checkpoint" in r.stdout
+    assert (tmp_path / "mini.ckpt.bdb").is_file()
 
 
 def test_build_flag_defers_to_the_flows_own_durable_checkpoint(tmp_path):
@@ -1583,3 +1589,128 @@ def test_alias_typed_at_the_prompt_reaches_the_engine(tmp_path):
     assert "unknown command 'rd'" not in r.stdout, r.stdout
     # The alias reached the engine: report_wl ran on the routed design.
     assert "detailed WL" in r.stdout, r.stdout
+
+
+# ── the `:memory:` flow: -b redirect ───────────────────────────────────────
+# The commonest shape in the tree (30 checked-in flows): a hier design the
+# flow CONSTRUCTS, in a database it never meant to keep.  -b used to refuse
+# it outright — correctly, since the run would discard everything it routed
+# — which asked the user to edit a working flow to get a checkpoint.  Now the
+# same fresh database is built in the checkpoint instead
+# (BUDA_BDB_MEMORY_TO), and the flow's text is untouched.
+#
+# The sibling `.sql` redirect above REUSES its materialization; this one
+# cannot, and the difference is the point: a `.sql` open READS a design, so
+# reopening the copy resumes it, while `:memory:` BUILDS one — the flow's own
+# add_cell/add_inst lines run again on the next build.
+
+_MEMORY_FLOW = "open_bdb :memory:\nset_die 800 600\n" + _FLAT_FLOW
+
+
+def test_build_redirects_a_memory_flow_into_the_checkpoint(tmp_path):
+    flow = tmp_path / "mem.buda"
+    flow.write_text(_MEMORY_FLOW)
+
+    r = _run(["tclsh", _DRIVER, "--build", flow], tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "building the flow's `:memory:` BDB in the checkpoint" in r.stdout
+    assert "done -- 0 overlaps, 0 unplaced, 0 audit violations" in r.stdout
+    ckpt = tmp_path / "mem.ckpt.bdb"
+    assert ckpt.exists() and ckpt.stat().st_size > 0
+    assert (tmp_path / "mem.ckpt.bdb.trace").exists()
+    # The flow is UNCHANGED — the redirect is the launcher's, not an edit.
+    assert flow.read_text() == _MEMORY_FLOW
+
+    # And it resumes: the recorded `open_bdb :memory:` is rewritten onto the
+    # checkpoint (replaying it verbatim would open a fresh in-memory DB and
+    # restore nothing).  Same rewrite the .sql redirect uses — `:memory:` is
+    # stamped as the trace's `# input:`, which is what reaches it.
+    r = _run(["tclsh", _DRIVER, "--resume", flow], tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    replayed = [ln for ln in r.stdout.splitlines()
+                if ln.startswith("replay> open_bdb")]
+    assert replayed and all("mem.ckpt.bdb" in ln for ln in replayed), replayed
+    assert ":memory:" not in " ".join(replayed)
+    assert "done -- 0 overlaps, 0 unplaced, 0 audit violations" in r.stdout
+
+
+def test_a_memory_rebuild_is_fresh_and_says_the_pins_go(tmp_path):
+    """The honest half: a -b rerun REBUILDS, so pins do not survive it.
+
+    Reusing the checkpoint would re-run the flow's construction onto rows
+    already there, so the rebuild is not a choice — and a message promising
+    the .sql redirect's pin-reuse here would be simply false."""
+    flow = tmp_path / "mem.buda"
+    flow.write_text(_MEMORY_FLOW)
+    r = _run(["tclsh", _DRIVER, "--build", flow], tmp_path,
+             stdin="pin d1 3\ndone\n")
+    assert r.returncode == 0, r.stdout + r.stderr
+    # The banner must NOT make the .sql promise.
+    assert "rerun the flow (or\n" not in r.stdout
+    assert "A `btcl -b` rerun rebuilds this checkpoint fresh" in r.stdout
+    assert "run it without -b and its BDB is `:memory:` again" in r.stdout
+
+    r = _run(["tclsh", _DRIVER, "--build", flow], tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "rebuilding the checkpoint" in r.stdout
+    assert "cannot be reused" in r.stdout
+    # The rebuild really is clean — a reused checkpoint would duplicate-error.
+    assert "done -- 0 overlaps, 0 unplaced, 0 audit violations" in r.stdout
+    assert "duplicate" not in r.stdout.lower()
+
+
+def test_a_multi_open_memory_flow_is_still_refused(tmp_path):
+    """Only the SINGLE-open shape redirects: the request names one file, so
+    with several opens it could land on the wrong one."""
+    flow = tmp_path / "multi.buda"
+    flow.write_text("open_bdb first.bdb\n" + _MEMORY_FLOW)
+    r = _run(["tclsh", _DRIVER, "--build", flow], tmp_path)
+    assert r.returncode == 2
+    assert "last open_bdb is not durable" in r.stderr
+    # and it says WHY this one is not redirected
+    assert "opens several BDBs" in r.stderr
+    assert not (tmp_path / "multi.ckpt.bdb").exists()
+
+
+# ── a checkpoint that NAMES a flow source (Codex #868 P1) ─────────────────
+# Both redirects clear a stale checkpoint before building.  That delete is
+# safe for a checkpoint and catastrophic for a script, and `-b <flow> <ckpt>`
+# is one fat-fingered argument away from making them the same file: it erased
+# the flow and then failed with "sourced file not found", the run's own input
+# gone.  PRE-DATES the `:memory:` redirect — reproduced on the read-only-.sql
+# door too — so the guard sits where both pass through.
+
+def test_a_checkpoint_naming_the_flow_is_refused_not_deleted(tmp_path):
+    flow = tmp_path / "mem.buda"
+    flow.write_text(_MEMORY_FLOW)
+    before = flow.read_bytes()
+    r = _run(["tclsh", _DRIVER, "--build", flow, flow], tmp_path)
+    assert r.returncode == 2
+    assert "is the flow's own script" in r.stderr
+    assert "would DELETE it" in r.stderr
+    assert flow.read_bytes() == before          # THE property
+
+
+def test_a_checkpoint_naming_a_sourced_file_is_refused_too(tmp_path):
+    """`_pf_files` is the whole source tree, so a checkpoint aliasing an
+    INCLUDED fixture is caught as well — the entry file is not the only
+    thing a build reads."""
+    inc = tmp_path / "inc.buda"
+    inc.write_text("def_layer 4 M4 H TOP 0.0\n")
+    flow = tmp_path / "s.buda"
+    flow.write_text("source inc.buda\n" + _MEMORY_FLOW)
+    before = inc.read_bytes()
+    r = _run(["tclsh", _DRIVER, "--build", flow, inc], tmp_path)
+    assert r.returncode == 2
+    assert "is the flow's own sourced file" in r.stderr
+    assert inc.read_bytes() == before
+
+
+def test_the_readonly_sql_door_refuses_the_alias_too(tmp_path):
+    """The same guard on the OTHER redirect — this door had the bug first."""
+    flow, _inp = _readonly_input_flow(tmp_path)
+    before = flow.read_bytes()
+    r = _run(["tclsh", _DRIVER, "--build", flow, flow], tmp_path)
+    assert r.returncode == 2
+    assert "is the flow's own script" in r.stderr
+    assert flow.read_bytes() == before

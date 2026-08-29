@@ -71,12 +71,28 @@ flow: run it verbatim, then the pin/edit prompt, with hier/flat and the
 (`<flow_dir>/<stem>.ckpt.bdb`) and the flow text pre-flighted first (a flow
 whose own last `open_bdb` is non-durable is refused BEFORE the run, naming
 file+line, instead of discarding the route at the end — EXCEPT the
-read-only-input shape, which is redirected instead: a flow whose ONLY
+two SINGLE-open shapes, which are REDIRECTED instead — the refusal is
+about losing the route, and where a checkpoint can be supplied without
+touching the flow, it is.  (a) The read-only input: a flow whose ONLY
 `open_bdb` is a `.sql` without `writeback` has its materialization land IN
 the checkpoint (`BUDA_BDB_MATERIALIZE_TO`), so the input is never written,
 the copy survives as the checkpoint, an unchanged-input `-b` rerun reuses
 it with pins re-attaching, and a `-r` resume rewrites the recorded open
-onto it); `-r [-s <stage>]`
+onto it.  (b) **`:memory:`** — the commonest shape in the tree (30 flows):
+a hier design the flow CONSTRUCTS, in a database it never meant to keep.
+Nothing about it needs to be in memory; the author simply had no reason to
+name a file, and the refusal asked them to edit a working flow to get a
+checkpoint.  The same fresh database is built in the checkpoint instead
+(`BUDA_BDB_MEMORY_TO`), continuously written as the pipeline runs, with the
+flow's text UNCHANGED (run it without `-b` and it is `:memory:` again).
+Unlike (a) it is rebuilt FRESH every `-b`, and that asymmetry is forced: a
+`.sql` open READS a design, so reopening its copy resumes it, while
+`:memory:` BUILDS one — the flow's own `add_cell`/`add_inst` lines would run
+onto rows already there.  So pins survive a `-r` RESUME and not a `-b`
+rerun, which both the banner and the rebuild line say rather than inheriting
+(a)'s promise.  Only the single-open shape redirects in either case: the
+request names ONE file, so with several opens it could land on the wrong
+one, and those keep the refusal — which now says that is why.); `-r [-s <stage>]`
 resumes from the auto (or trace-discovered) checkpoint at the DEEPEST stage
 the build trace records, `-s` overriding (and implying `-r` alone), with a
 staleness NOTE when the flow's text changed since the stamped build; a

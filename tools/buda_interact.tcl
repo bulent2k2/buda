@@ -225,6 +225,12 @@ set inspect 0
 # lands in, and the .sql it derives from (both "" outside that mode).
 set redirect ""
 set redirect_input ""
+# 1 when the redirect is the `:memory:` kind, whose checkpoint is rebuilt
+# FRESH by every -b (the flow BUILDS its design; a populated checkpoint
+# cannot be reused).  The .sql kind REUSES its materialization, so the two
+# make opposite promises about what survives a rerun and must not share one
+# message.
+set redirect_memory 0
 
 # ── shared: analyze a recorded command list ───────────────────────────────
 # Sets the globals the banners, the prompt and the verdict read.  The engine
@@ -466,6 +472,37 @@ proc _preflight_scan {path depth} {
         unset _pf_visited($norm)
     }
 }
+# A checkpoint that NAMES one of the flow's own source files (Codex #868 P1).
+# Both redirects clear a stale checkpoint before building — a delete that is
+# safe for a checkpoint and catastrophic for a script, and `btcl -b f.buda
+# f.buda` is one fat-fingered argument away: it erased the flow and then
+# failed with "sourced file not found", the run's own input gone.
+#
+# Refused rather than tolerated, because there is no reading of `-b <flow>
+# <ckpt>` where the two are the same file: a checkpoint is a BDB the engine
+# writes, a flow is text the engine reads.  Checked against `_pf_files` —
+# the entry file AND everything it sources, which the pre-flight already
+# walked — so a checkpoint aliasing a SOURCED fixture is caught too, not
+# just the entry flow.  Paths are compared normalized, the spelling the scan
+# stores; the caller passes the normalized redirect.
+#
+# Pre-dates the `:memory:` redirect: the read-only-`.sql` door had the same
+# hazard (reproduced on main, `btcl -b ro.buda ro.buda` erased ro.buda), so
+# the guard sits where both pass through rather than beside one of them.
+proc _refuse_ckpt_aliasing_a_source {tag redirect} {
+    foreach src $::_pf_files {
+        if {$src eq $redirect} {
+            puts stderr "$tag: -b: the checkpoint $redirect is the flow's own\
+                  [expr {$src eq [file normalize $::flow] ? "script" :
+                  "sourced file"}] -- a checkpoint is a BDB this writes\
+                  (clearing any stale one first), so building onto a source\
+                  file would DELETE it.  Pick a checkpoint filename, or pass\
+                  none and let -b auto-name one."
+            exit 2
+        }
+    }
+}
+
 # {none} | {durable <path>} | {nondurable <path> <why> <file> <line>}
 proc _preflight_ckpt {flowpath} {
     global _pf_last _pf_visited _pf_files _pf_bdb _pf_nopens
@@ -747,7 +784,82 @@ if {$stage eq "build"} {
         switch -- [lindex $pf 0] {
             nondurable {
                 lassign $pf - p why where lno
-                if {$p ne ":memory:" && $::_pf_nopens == 1} {
+                if {$p eq ":memory:" && $::_pf_nopens == 1} {
+                    # THE `:memory:` flow — the commonest shape there is
+                    # (30 checked-in flows): a hier design CONSTRUCTED by
+                    # the flow itself, in a database it never meant to
+                    # keep.  Nothing about it needs to be in memory; the
+                    # author simply had no reason to name a file, and the
+                    # refusal asked them to edit a working flow to get a
+                    # checkpoint.  So -b names it: the same fresh database
+                    # is built in the checkpoint instead (BUDA_BDB_MEMORY_TO),
+                    # continuously written as the pipeline runs, so even a
+                    # killed run keeps its routed state.
+                    #
+                    # FRESH every build, unlike the .sql redirect below.
+                    # That one REUSES its materialization because a .sql
+                    # open READS a design; this flow BUILDS one, so its
+                    # add_cell/add_inst lines would run onto the rows a
+                    # previous checkpoint already holds — a duplicate-
+                    # instance error.  Pins in the old checkpoint go with
+                    # it, which is worth saying out loud rather than
+                    # discovering.
+                    #
+                    # Only the SINGLE-open shape redirects, for the .sql
+                    # reason: the request names one file, and with several
+                    # opens it could land on the wrong one.
+                    set redirect [expr {$armed ne "" ? $armed : $auto_ckpt}]
+                    if {[string match -nocase *.sql $redirect]} {
+                        puts stderr "$tag: -b: the checkpoint must be a\
+                              BINARY path (got $redirect) -- a `:memory:`\
+                              flow builds its design directly in the\
+                              checkpoint, and a .sql is a serialized text\
+                              fixture, not a database"
+                        exit 2
+                    }
+                    if {[file exists $redirect] && ![file isfile $redirect]} {
+                        # As in the .sql path: the delete below must never
+                        # meet a directory (Codex #796 P1).
+                        puts stderr "$tag: -b: the checkpoint $redirect\
+                              exists and is not a regular file (a\
+                              directory?) -- pick a checkpoint FILENAME"
+                        exit 2
+                    }
+                    _refuse_ckpt_aliasing_a_source $tag $redirect
+                    if {[file isfile $redirect]} {
+                        puts "$tag: -b rebuilding the checkpoint $redirect\
+                              fresh -- this flow BUILDS its design, so a\
+                              previous checkpoint's rows cannot be reused\
+                              (any pins in it are discarded; use\
+                              `btcl -r [_shell_word $flow]` to resume that\
+                              build instead of rebuilding)"
+                    }
+                    # Each victim individually and only when it is a
+                    # regular file — `-force` on a directory recurses.
+                    foreach victim [list $redirect \
+                            ${redirect}-wal ${redirect}-shm \
+                            ${redirect}.trace] {
+                        if {[file isfile $victim]} {
+                            file delete -force -- $victim
+                        }
+                    }
+                    puts "$tag: -b building the flow's `:memory:` BDB in the\
+                          checkpoint $redirect instead (the flow is\
+                          unchanged; without -b it still runs in memory)"
+                    set ::env(BUDA_BDB_MEMORY_TO) $redirect
+                    set redirect_memory 1
+                    # `:memory:` as the recorded "input" is what makes the
+                    # RESUME half work with no new code: the trace stamps
+                    # `# input: :memory:` (no crc — there is no file to
+                    # stamp, and the changed-input NOTE is guarded on one),
+                    # and the resume's open-rewrite already fires when the
+                    # recorded token resolves to the traced input, which
+                    # `_resolve_bdb :memory:` does exactly.
+                    set redirect_input ":memory:"
+                    # The flow's own open lands in the target — arming a
+                    # BDB of our own would just be replaced by it.
+                    set armed ""
+                } elseif {$p ne ":memory:" && $::_pf_nopens == 1} {
                     # THE read-only-input flow: the flow's ONLY open_bdb is
                     # a `.sql` without `writeback` — "read the design, never
                     # write it back".  The engine already copies that .sql
@@ -787,6 +899,7 @@ if {$stage eq "build"} {
                               directory?) -- pick a checkpoint FILENAME"
                         exit 2
                     }
+                    _refuse_ckpt_aliasing_a_source $tag $redirect
                     if {[file exists $redirect]} {
                         # Reuse keeps pins (they re-attach to the rebuilt
                         # pool), and is sound only while the checkpoint
@@ -849,8 +962,10 @@ if {$stage eq "build"} {
                           writeback`, or a binary `.bdb`), or drop the open\
                           and let -b arm its own checkpoint"
                     puts stderr "$tag: (a flow whose ONLY open_bdb is a\
-                          read-only .sql input is redirected instead: -b\
-                          materializes it into a durable checkpoint)"
+                          read-only .sql input, or `:memory:`, is redirected\
+                          instead -- -b gives it a durable checkpoint; this\
+                          flow opens several BDBs, so which one to redirect\
+                          is ambiguous)"
                     exit 2
                 }
             }
@@ -1530,7 +1645,19 @@ if {$ckpt ne "" && !$ckpt_live} {
     # durable checkpoint whose trace write failed keeps its pins across a
     # RERUN, but a `<stage>` resume reads the trace, so offering it would name
     # a command that refuses.
-    if {$trace_ok} {
+    if {$redirect_memory} {
+        # This checkpoint is rebuilt fresh by the next -b (see the redirect
+        # branch), so the shared "rerun the flow and they hold" promise is
+        # false here — the RESUME is what keeps pins, and saying so is the
+        # whole point of separating the two kinds.
+        set resume_hint [expr {$trace_ok ? "btcl -i [_shell_word $tag]\
+              [_shell_word $ckpt] plan" : "-- unavailable: the resume trace\
+              could not be written (above)"}]
+        puts "$tag: checkpoint $ckpt -- pins persist here; RESUME to keep\
+              them ($resume_hint).  A `btcl -b` rerun rebuilds this\
+              checkpoint fresh (the flow constructs its design in it), so\
+              pins do not survive one."
+    } elseif {$trace_ok} {
         puts "$tag: checkpoint $ckpt -- pins persist; rerun the flow (or\
               resume: btcl -i [_shell_word $tag] [_shell_word $ckpt] plan) and\
               they hold"
@@ -1548,7 +1675,7 @@ if {$ckpt ne "" && !$ckpt_live} {
         puts "$tag: NOTE -- the flow opened its own BDB after the armed\
               $armed; the flow's checkpoint above is the live one"
     }
-    if {$redirect ne "" && $ckpt eq $redirect} {
+    if {$redirect ne "" && $ckpt eq $redirect && !$redirect_memory} {
         # The generic banner says "rerun the flow and they hold", which for
         # a redirect session is true only of a -b rerun: a BARE rerun
         # re-materializes the input into a throwaway temp and never sees
@@ -1556,6 +1683,12 @@ if {$ckpt ne "" && !$ckpt_live} {
         puts "$tag: NOTE -- the input $redirect_input stays read-only; pins\
               hold across `btcl -b` reruns (which reuse this checkpoint),\
               not across a bare rerun"
+    } elseif {$redirect_memory && $ckpt eq $redirect} {
+        # The `:memory:` kind: a BARE rerun runs in memory as the flow
+        # always did and never sees this file at all.
+        puts "$tag: NOTE -- the flow itself is unchanged: run it without -b\
+              and its BDB is `:memory:` again, leaving this checkpoint\
+              untouched"
     }
     set snap_base $ckpt
 } else {

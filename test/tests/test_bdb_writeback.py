@@ -129,3 +129,59 @@ def test_writeback_on_binary_path_is_ignored(tmp_path):
         s.do_command(f"open_bdb {binp} writeback")
     assert "applies only to a serialized" in buf.getvalue()
     assert s._bdb_writeback_src is None       # not armed for a binary open
+
+
+# ── `:memory:` given a durable home (BUDA_BDB_MEMORY_TO) ──────────────────
+# `open_bdb :memory:` says two things: the design is BUILT here, and nothing
+# is kept.  Only the second is a problem for `btcl -b`, which refused such a
+# flow because the run would discard everything it routed.  The redirect
+# changes WHERE the same fresh database lives and nothing else.
+
+def test_memory_open_is_redirected_to_a_durable_file(tmp_path, monkeypatch):
+    ckpt = tmp_path / "sub" / "ck.bdb"          # parent created on demand
+    monkeypatch.setenv("BUDA_BDB_MEMORY_TO", str(ckpt))
+    s = buda_cli.BudaSession()
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        s.do_command("open_bdb :memory:")
+        s.do_command("set_die 800 600")
+    assert "redirected to" in buf.getvalue()
+    assert ckpt.is_file() and ckpt.stat().st_size > 0
+    # The session speaks about the FILE, so a later different open is a real
+    # BDB switch rather than a comparison against the `:memory:` token.
+    assert s._bdb_logical_path == str(ckpt)
+
+
+def test_the_memory_redirect_is_taken_by_one_open_only(tmp_path, monkeypatch):
+    """Popped, not read — the request names ONE file (its `.sql` sibling's
+    rule).  A second `:memory:` open is in memory, as written."""
+    ckpt = tmp_path / "ck.bdb"
+    monkeypatch.setenv("BUDA_BDB_MEMORY_TO", str(ckpt))
+    s = buda_cli.BudaSession()
+    with contextlib.redirect_stdout(io.StringIO()):
+        s.do_command("open_bdb :memory:")
+        s.do_command("open_bdb :memory:")
+    assert s._bdb_logical_path == ":memory:"
+
+
+def test_the_memory_redirect_refuses_an_existing_target(tmp_path, monkeypatch):
+    """The one place this differs from the `.sql` redirect, which REUSES its
+    materialization: a `.sql` open READS a design, so reopening the copy
+    resumes it; `:memory:` BUILDS one, so the flow's own add_cell/add_inst
+    would run onto rows already there.  Fresh or nothing."""
+    existing = tmp_path / "ck.bdb"
+    existing.write_bytes(b"")
+    monkeypatch.setenv("BUDA_BDB_MEMORY_TO", str(existing))
+    s = buda_cli.BudaSession()
+    with pytest.raises(RuntimeError, match="must not exist"):
+        s.do_command("open_bdb :memory:")
+
+
+def test_no_request_leaves_memory_in_memory(tmp_path, monkeypatch):
+    """The byte-identity claim: every existing flow is untouched."""
+    monkeypatch.delenv("BUDA_BDB_MEMORY_TO", raising=False)
+    s = buda_cli.BudaSession()
+    with contextlib.redirect_stdout(io.StringIO()):
+        s.do_command("open_bdb :memory:")
+    assert s._bdb_logical_path == ":memory:"
+    assert not list(tmp_path.iterdir())

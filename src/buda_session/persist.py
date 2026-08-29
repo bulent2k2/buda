@@ -116,6 +116,49 @@ class PersistMixin:
                   f"(changes not written back)")
         return out
 
+    def _redirect_memory_bdb(self):
+        """A launcher's request to give `open_bdb :memory:` a DURABLE home.
+
+        `:memory:` says two things at once: the design is BUILT here rather
+        than read from a file, and nothing is kept.  Only the second is a
+        problem — which is why `btcl -b` used to REFUSE such a flow outright,
+        since everything the build routed would die with the process.  The
+        redirect changes only WHERE that same fresh database lives: the
+        pipeline persists into it exactly as it persisted into memory, and
+        the file survives the session as a checkpoint.  Nothing about the
+        flow changes, so it stays a flow anyone can run without the redirect.
+
+        An EXISTING target is REFUSED rather than reused, and that is the one
+        place this differs from `_materialize_bdb_sql`.  A `.sql` open READS
+        a design, so reopening its materialization simply resumes it; a
+        `:memory:` open BUILDS one, and the flow's own `add_cell` /
+        `add_inst` lines run again on the next build — onto rows that are
+        already there, which is a duplicate-instance error.  So a `:memory:`
+        checkpoint is made fresh every build.  The launcher clears it for
+        that reason; a direct user of the env var is told to.
+
+        Popped, not read, like its `.sql` sibling: the request names ONE
+        file, so only the first `:memory:` open can take it (the launcher
+        pre-flights the flow and arms this only for a single-open flow).
+        """
+        out = os.environ.pop('BUDA_BDB_MEMORY_TO', None)
+        if not out:
+            return None
+        out = os.path.abspath(out)
+        if os.path.exists(out):
+            raise RuntimeError(
+                f"BUDA_BDB_MEMORY_TO names an existing path ({out}) -- "
+                f"`open_bdb :memory:` builds a FRESH database, so the "
+                f"target must not exist yet (delete it first; `btcl -b` "
+                f"does this before each build)")
+        parent = os.path.dirname(out)
+        if parent and not os.path.isdir(parent):
+            os.makedirs(parent, exist_ok=True)
+        print(f"open_bdb: :memory: redirected to {out} (durable: the design "
+              f"is built there instead of in memory, and survives as a "
+              f"checkpoint)")
+        return out
+
     def _write_bdb_sql(self):
         """Serialize the working (temp) binary back to its writeback source `.sql`.
 
