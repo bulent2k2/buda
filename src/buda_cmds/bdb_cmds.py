@@ -130,6 +130,12 @@ def cmd_open_bdb(session, cmd, args, cmd_line):
     # so `open_bdb foo.sql # no writeback` keeps 'writeback' as a token —
     # silently arming write-back on a fixture from a read-looking line.
     writeback = bool(opts) and opts[0] == "writeback"
+    # A launcher may redirect `:memory:` to a durable file so the run it
+    # routes survives (`btcl -b`).  Resolved BEFORE everything below, so the
+    # rest of this handler — the logical path, BUDA-1917, the open itself —
+    # sees the file the design is actually built in.
+    if bdb_path == ':memory:':
+        bdb_path = session._redirect_memory_bdb() or ':memory:'
     if bdb_path != ':memory:':
         bdb_path = resolve_script_path(session, bdb_path)
     # The LOGICAL path — what the author named, resolved but NOT yet

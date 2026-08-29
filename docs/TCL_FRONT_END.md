@@ -613,8 +613,10 @@ armed before it, and a re-run of `-b` re-arms the same file, so pins
 persisted there re-attach to the rebuilt pool.  A flow whose LAST
 `open_bdb` is **non-durable** (a `.sql` without `writeback`, or `:memory:`)
 would route to the end and then discard everything (measured the expensive
-way: a 2000-second heal, gone), so t=0 is where `-b` acts — and for the
-most common such shape it has something better than a refusal:
+way: a 2000-second heal, gone), so t=0 is where `-b` acts — and for the two
+commonest such shapes it has something better than a refusal.  Both are
+SINGLE-open only: the redirect request names one file, so with several opens
+it could land on the wrong one.
 
 **The read-only `.sql` input redirects.**  Many hier flows open an input
 `.bdb.sql` *without* `writeback` — "read the design, never write it back".
@@ -632,10 +634,38 @@ in the auto-armed case), a changed input re-materializes fresh — loudly,
 pins discarded, since they would pin a different design's candidates — and
 a `-r` resume rewrites the recorded open onto the checkpoint (re-opening
 the input would materialize a fresh throwaway copy and restore nothing),
-NOTing when the input changed since the build.  A missing input, a flow
-with **several** opens ending non-durable (the request could land on the
-wrong one), or `:memory:` are still refused at t=0, naming the file and
-line.  The build also stamps the flow text's checksum into the trace, and
+NOTing when the input changed since the build.  A missing input, or a flow
+with **several** opens ending non-durable, are still refused at t=0, naming
+the file and line — and the refusal now says which of the two it is, so a
+multi-open flow is not left wondering why its `:memory:` was not redirected.
+
+**`:memory:` redirects too** — the commonest shape in the tree (30 checked-in
+flows).  `open_bdb :memory:` says two things at once: the design is *built*
+here rather than read from a file, and nothing is kept.  Only the second is
+a problem, and nothing about the flow needs it: the author simply had no
+reason to name a file, and the refusal asked them to edit a working flow to
+get a checkpoint.  So when a flow's **only** `open_bdb` is `:memory:`, `-b`
+builds that same fresh database in the checkpoint instead
+(`BUDA_BDB_MEMORY_TO`, popped by the first `:memory:` open), continuously
+written as the pipeline runs, so even a killed run keeps its routed state.
+The flow's text is untouched — run it without `-b` and its BDB is `:memory:`
+again, leaving the checkpoint alone.
+
+Where this **differs from the `.sql` redirect** is the rerun, and the
+asymmetry is forced rather than chosen: a `.sql` open READS a design, so
+reopening its materialization resumes it, while `:memory:` BUILDS one — the
+flow's own `add_cell` / `add_inst` lines run again on the next `-b`, and
+against a populated checkpoint that is a duplicate-instance error.  So a
+`:memory:` checkpoint is rebuilt **fresh** every `-b`, its pins go with it,
+and to keep pins you RESUME (`btcl -r`) rather than rebuild.  Both the
+rebuild line and the closing banner say that outright instead of inheriting
+the `.sql` case's "rerun and they hold", which would be simply false here.
+The resume half needs no new machinery: the trace stamps `# input: :memory:`
+(no checksum — there is no file to stamp, and the changed-input NOTE is
+guarded on one), and the recorded `open_bdb :memory:` is rewritten onto the
+checkpoint by the same rule that rewrites a recorded `.sql` input.
+
+The build also stamps the flow text's checksum into the trace, and
 a later `-r` NOTEs when the flow changed since — the resume replays the
 *recorded* build — with `btcl -b` as the rebuild remedy.
 `-r` finds the checkpoint at the auto name first, else through any
