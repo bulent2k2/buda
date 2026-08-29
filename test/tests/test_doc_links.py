@@ -20,10 +20,16 @@ still read as if they point somewhere.  Moving the wishlist set into
 docs, code comments, tests and flow scripts, which is more than a careful
 reading can vouch for; this walks them instead.
 
-Two kinds of reference, because the docs use both:
+Three kinds of reference, because the docs use all three:
 
-  * a **markdown link** `](path.md)`, resolved relative to the file it is
-    written in — the one that breaks when a doc changes directory;
+  * an **inline markdown link** `](path.md)`, resolved relative to the file
+    it is written in — the one that breaks when a doc changes directory;
+  * a **reference-style definition** `[label]: path.md`, whose destination
+    lives on its own line far from the `[text][label]` that uses it — so it
+    is exactly the kind a reader is least likely to re-check by hand
+    (Codex #867 P2).  `docs/origin/paper.md` writes its figures this way;
+    every one of its ten definitions is a `data:` URI today, so this catches
+    nothing yet — which is the point of adding it before it has to;
   * a **repo-root path** written in prose or a code comment
     (`docs/internal/wishlist/wishlist-topo.md`), which is how a C++ or
     Python source points at the doc explaining it.
@@ -44,6 +50,9 @@ _ROOT = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", ".."))
 _SKIP_DIRS = ("build/", "log/")
 
 _LINK = re.compile(r"\]\(([^)\s]+)\)")
+# A reference-style destination: `[label]: path.md` (optionally `<bracketed>`,
+# optionally followed by a title).  Up to three leading spaces, per CommonMark.
+_REFDEF = re.compile(r"(?m)^ {0,3}\[[^\]]+\]:[ \t]*<?([^>\s]+)>?")
 # A repo-root reference to a DOC: `docs/internal/wishlist/wishlist-topo.md`
 # written in prose or a code comment.  Scoped to `docs/` on purpose — a
 # `test/…md` string is almost always a markdown link's DISPLAY text, which the
@@ -68,14 +77,24 @@ def _read(rel):
         return fh.read()
 
 
+def _local_targets(text):
+    """Every link destination in `text` that names a file rather than a URL —
+    inline `](…)` and reference-style `[label]: …` alike."""
+    for m in _LINK.finditer(text):
+        yield m.group(1)
+    for m in _REFDEF.finditer(text):
+        yield m.group(1)
+
+
 def test_every_markdown_link_resolves():
-    """`](path)` in any tracked `.md`, resolved from its own directory."""
+    """Every link destination in any tracked `.md`, resolved from its own
+    directory — inline and reference-style both."""
     bad, checked = [], 0
     for rel in _tracked((".md",)):
         base = os.path.dirname(os.path.join(_ROOT, rel))
-        for m in _LINK.finditer(_read(rel)):
-            target = m.group(1)
-            if target.startswith(("http://", "https://", "mailto:", "#")):
+        for target in _local_targets(_read(rel)):
+            if target.startswith(("http://", "https://", "mailto:",
+                                  "data:", "#")):
                 continue
             path = target.split("#")[0]
             if not path:                      # a pure `#anchor`
@@ -85,6 +104,20 @@ def test_every_markdown_link_resolves():
                 bad.append(f"{rel} -> {target}")
     assert checked > 300, f"only {checked} links seen — the walk found nothing"
     assert not bad, "broken markdown links:\n  " + "\n  ".join(sorted(bad))
+
+
+def test_reference_style_definitions_are_walked(tmp_path):
+    """The reference-style half, pinned on a fixture — because the repo's own
+    reference links all point at `data:` URIs, so the real corpus cannot yet
+    tell a guard that reads them from one that does not."""
+    good = tmp_path / "good.md"
+    good.write_text("see [the guide][g]\n\n[g]: good.md\n")
+    bad = tmp_path / "bad.md"
+    bad.write_text("see [the guide][g]\n\n[g]: moved.md\n")
+    assert [t for t in _local_targets(good.read_text())] == ["good.md"]
+    assert [t for t in _local_targets(bad.read_text())] == ["moved.md"]
+    assert (tmp_path / "good.md").exists()
+    assert not (tmp_path / "moved.md").exists()
 
 
 def test_every_repo_root_doc_path_resolves():
