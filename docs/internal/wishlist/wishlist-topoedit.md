@@ -4,7 +4,7 @@ Deferred follow-ups for the expert hand-editing surface: the explorer's
 TopoEdit mode (`src/buda_viz.py`, `TopologyExplorer._edit_*`) and the
 scriptable `edit_*` commands (`src/topo_edit.h/cpp`,
 `src/buda_cmds/edit_cmds.py`).  Index: [`wishlist.md`](wishlist.md).
-Key bindings: [`../KEY_BINDINGS.md`](../KEY_BINDINGS.md) → *TopoEdit mode*.
+Key bindings: [`../KEY_BINDINGS.md`](../../KEY_BINDINGS.md) → *TopoEdit mode*.
 
 ## Slide-window refine ('W') input precision — ✅ RESOLVED (all three variants)
 

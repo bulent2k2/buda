@@ -16,7 +16,7 @@
 """
 Per-seat FORENSICS for supply-doomed TOP seats — the build-decision instrument
 for the class-level TRACK negotiation open (issue #536's last residual; see
-docs/internal/wishlist-healer.md "Class-level TRACK negotiation").
+docs/internal/wishlist/wishlist-healer.md "Class-level TRACK negotiation").
 
 `check_design`'s doomed-seat census (`_report_doomed_seats`, PR #548) is the
 COARSE detector: it names every seat whose assigned layer cannot supply its

@@ -324,7 +324,7 @@ pass in a flow that has **no** healer ahead of it; set
 `_dead_span_auto_at_run_nuts = False` on the session to suppress the automatic
 path.
 
-See `docs/internal/wishlist-planner.md` → "dead-span discriminator" for the
+See `docs/internal/wishlist/wishlist-planner.md` → "dead-span discriminator" for the
 measurements behind the default.
 
 ---
@@ -647,7 +647,7 @@ stage b alone.
 > The residual opens that neither pass can clear are the pure capacity-mismatch
 > cases. Predicting them inside the planner (charging band capacity in
 > signal-track count rather than layout width) is a planned follow-on — see
-> *Gap A part 2* in `docs/internal/wishlist-planner.md`.
+> *Gap A part 2* in `docs/internal/wishlist/wishlist-planner.md`.
 
 ---
 
@@ -748,7 +748,7 @@ negotiate_congestion     # stage b: reprice the capacity-short bands
 ripup_reroute            # finish the residual DetailedNUTS opens
 ```
 
-See [wishlist-healer.md](../internal/wishlist-healer.md) (item 1) for the design
+See [wishlist-healer.md](../internal/wishlist/wishlist-healer.md) (item 1) for the design
 rationale and the measured negotiate-then-ripup results.
 
 ---

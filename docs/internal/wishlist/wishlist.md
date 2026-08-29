@@ -4,12 +4,19 @@ Tracked-but-not-yet-done items, organized by subsystem. Each entry records: what
 why deferred, and where to start. This page is the **index**; the entries live in
 per-subsystem files so each area stays scannable. For the **cross-subsystem
 priority view** — what's actually open right now, ranked by value/effort — see
-[`opens.md`](opens.md).
+[`opens.md`](../opens.md).
 
 ## History
 
+- **2026-08-28** — Moved the wishlist set into its own folder
+  (`docs/internal/wishlist/`) and added [`wishlist-ux.md`](wishlist-ux.md),
+  the first entry about DRIVING BUDA rather than about what it computes.
+  Filenames were kept, so every prose mention of `wishlist-topo.md` and its
+  siblings stays true; a link guard (`test_doc_links.py`) now walks every
+  markdown link in the repo, which is what makes a move of this size
+  verifiable rather than hopeful.
 - **2026-07-20** — Added
-  [`opens_topoedit_hier_2026-07-20.md`](opens_topoedit_hier_2026-07-20.md):
+  [`opens_topoedit_hier_2026-07-20.md`](../opens_topoedit_hier_2026-07-20.md):
   a focused snapshot of what remains open in topology editing and the
   hierarchical flows (verified against main post-#344), incl. the
   TopoEdit follow-on ranking and the hier bundler corners.
@@ -20,10 +27,10 @@ priority view** — what's actually open right now, ranked by value/effort — s
   parity.
 - **2026-07-13** — Added the **non-TOP pin-access stub span-stretched onto its
   endpoint leaf** open item ([`wishlist-nuts.md`](wishlist-nuts.md) +
-  [`opens.md`](opens.md) #4 + `../future/nuts_packing_gaps.md` §4): flow 10's
+  [`opens.md`](../opens.md) #4 + `../future/nuts_packing_gaps.md` §4): flow 10's
   host-sensitive `x_t*` DNUTS opens, diagnosed as a NUTS span-stretch (not a
   planner) fix. Refreshed `opens.md` verified date to 2026-07-13.
-- **2026-07-09** — Added [`opens.md`](opens.md), the ranked open-items snapshot
+- **2026-07-09** — Added [`opens.md`](../opens.md), the ranked open-items snapshot
   (verified against main: corner-touch + partial-overlap topologies, abutment
   Gap A, and `kHeight` all landed; refreshed the stale BDB/topo index lines here).
 - **2026-07-02** — Planner "coverage gate" resolved: superseded by a uniform
@@ -58,7 +65,7 @@ priority view** — what's actually open right now, ranked by value/effort — s
   planning first (PR #215 made the sentinel honest via a `free` display);
   corner-margin default `dx=dy=0` (MEASURED — keep 0; the corner-touch
   generation gap is ✅ resolved via `CORNER_HV`/`CORNER_VH` diagonal L's).
-  See [topo_conn_unification.md](topo_conn_unification.md).
+  See [topo_conn_unification.md](../topo_conn_unification.md).
 - **[wishlist-topoedit.md](wishlist-topoedit.md)** — Topology editor (TopoEdit).
   Slide-window refine ('W') input precision — snap-to-grid variant, echo
   marker at the marked bound, precise text entry — if the raw cursor-float
@@ -87,7 +94,17 @@ priority view** — what's actually open right now, ranked by value/effort — s
   solve it would skip).
 - **[wishlist-bundler.md](wishlist-bundler.md)** — Bundler.
   Multi-source (fan-in) topology to make CONVERGENT bundling sound.
-- **[track_density_doubling.md](track_density_doubling.md)** — the `_2x` clone
+- **[wishlist-ux.md](wishlist-ux.md)** — UX: the web client and the command
+  surface.  How a person DRIVES BUDA rather than what it computes — a
+  palette/marker legend derived from the live CSS (never a fourth hand-kept
+  copy of the palette), click-to-focus a bundle in the nuts/dnuts views (the
+  state, the bar and the stepper all exist; only the pointer path is
+  missing), and `check_design` violations as clickable markers (medium: the
+  design-stage audit reaches the browser as TEXT, so the server half — typed
+  violations as data — has to come first).  The per-user rc file and
+  user-remappable key-bindings are POINTED AT, not restated:
+  [`opens_ux.md`](../opens_ux.md) carries them.
+- **[track_density_doubling.md](../track_density_doubling.md)** — the `_2x` clone
   vehicles: doubling a flow's track density as an ADDED twin rather than an
   in-place edit, so the original keeps the congestion its healer and
   doomed-seat coverage depends on.
@@ -110,13 +127,13 @@ priority view** — what's actually open right now, ranked by value/effort — s
   casts at recycled heap addresses. `BundleInput.candidates` and
   `NUTSResult.dogleg_topologies` were converted to by-value getters after
   an actual intermittent use-after-free segfault
-  ([audit_2026-07.md](audit_2026-07.md), C7-04); sweeping the remaining
+  ([audit_2026-07.md](../audit_2026-07.md), C7-04); sweeping the remaining
   container members is a binding-breaking change to do deliberately, with
   a perf pass on the hot accessors.
 - **2026-07 audit report-only findings** — the deferred adversarial pass
   (2026-07-19) CONFIRMED 59 of the 60 tabled leads (27 silent-corruption,
   4 crash, 12 wrong-but-loud, 4 leak-perf, 12 cosmetic; P3-05 refuted) —
-  see [audit_2026-07.md](audit_2026-07.md). These are verified defects
+  see [audit_2026-07.md](../audit_2026-07.md). These are verified defects
   awaiting fixes, executed repros archived per finding.
 
 ## Conventions

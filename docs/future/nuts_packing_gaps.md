@@ -15,7 +15,7 @@ remaining open items are noted at the end of §3. Gap 4 (a non-TOP pin-access st
 span-stretched onto its endpoint leaf) now has **no live repro** (PR #307
 corrected `tracks.buda`'s M7→TOP, removing flow 10's M5-vs-M7 near-tie downgrade;
 a 109-flow full-corpus sweep finds 0 keepout culls) — the clamp below is a latent,
-deferred guard; see [`../internal/wishlist-nuts.md`](../internal/wishlist-nuts.md)
+deferred guard; see [`../internal/wishlist/wishlist-nuts.md`](../internal/wishlist/wishlist-nuts.md)
 and [`../internal/opens.md`](../internal/opens.md). Historically it was
 diagnosed as **open**, with the reason a
 planner-side cost term cannot fix it and the NUTS-side options in §4.

@@ -2,7 +2,7 @@
 
 Status: **IMPLEMENTED** (this branch/PR; see §6 for the as-built
 resolution and measurements).  Expands the
-[`wishlist-nuts.md`](wishlist-nuts.md) item of the same name into an
+[`wishlist/wishlist-nuts.md`](wishlist/wishlist-nuts.md) item of the same name into an
 implementable design.  Prerequisite work — the `LayerSolver` extraction that
 makes the dense repack machinery reachable from the repair pass — landed in
 the NUTS/DNUTS refactor (PR #205,
@@ -14,7 +14,7 @@ the NUTS/DNUTS refactor (PR #205,
 `run_planner signal_tracks` + `negotiate_congestion` + `ripup_reroute`,
 which clears every NUTS overlap on the full flow (the remaining DNUTS opens
 are a different, planner-side class — see the "LOW-layer abutment
-crossings" item in [`wishlist-planner.md`](wishlist-planner.md)).  The
+crossings" item in [`wishlist/wishlist-planner.md`](wishlist/wishlist-planner.md)).  The
 band-repack target is therefore the **pre-negotiation residue**: the same
 flow with the negotiation/ripup stages skipped leaves **8 overlaps in 3
 spread-fit clusters** (x86-64 measurement: sizes 3 + 2 on M6, 6 on M7 —
@@ -227,7 +227,7 @@ measurement on the way to green gates:
 | Flow | Metric | Before | After |
 |---|---|---|---|
 | big2 pre-negotiation | NUTS overlaps | 8 (3 clusters) | **5** (B79 star + 2 pairs) |
-| big2 full flow | NUTS overlaps / DNUTS opens | 0 / 72 | 0 / 72 (unchanged; the 72 opens were resolved separately afterwards — LOW-layer abutment fix, wishlist-planner.md → now 0 / 0) |
+| big2 full flow | NUTS overlaps / DNUTS opens | 0 / 72 | 0 / 72 (unchanged; the 72 opens were resolved separately afterwards — LOW-layer abutment fix, wishlist/wishlist-planner.md → now 0 / 0) |
 | big2 full flow | negotiate+ripup runtime | the flow's dominant cost | **~1.4s total** (residue mostly pre-cleared) |
 | rnr/mix full flow | DNUTS opens / NUTS overlaps | 0 / 1 | **0** / 3 |
 | rest of the golden corpus | placements | — | byte-identical (pass no-ops without residue) |

@@ -3,7 +3,7 @@
 What remains to focus on, ranked by value/effort. This page is a **snapshot
 index** (last verified against `main`: **2026-07-15**, post PR #298) —
 the details, evidence, and where-to-start notes live in the per-subsystem
-wishlist files ([`wishlist.md`](wishlist.md) is their index). When an item
+wishlist files ([`wishlist/wishlist.md`](wishlist/wishlist.md) is their index). When an item
 lands, mark it ✅ in its wishlist file, move it to a (possibly new) section below in this document, titled *Resolved (by \<date\>)*, re-verify the whole list against `main` when picking the next piece of work (parallel sessions land
 items this page doesn't see).
 
@@ -79,7 +79,7 @@ items this page doesn't see).
    plus smaller residuals.
 
 13. **Nominal-WL comparability across shape families (b44 follow-ons)** —
-   [`wishlist-topo.md`](wishlist-topo.md) → *"Nominal-WL comparability
+   [`wishlist/wishlist-topo.md`](wishlist/wishlist-topo.md) → *"Nominal-WL comparability
    across shape families"*. The generation-side residue of the b44 arc
    (PR #312 shipped the planner-side opt-in `kWLSpread`): the MST hybrid's
    nominal sits AT its envelope bottom by construction while plain trunks
@@ -105,7 +105,7 @@ items this page doesn't see).
    `topo_analysis` golden comparison made order-canonical so text goldens
    stay byte-owned by the reference host, digest goldens recomputed under
    the order-independent canonical hash with a baseline-equality proof —
-   audit table + measurements in wishlist-topo.md); 
+   audit table + measurements in wishlist/wishlist-topo.md); 
    ~~**(c)** dominance
    pruning~~ — ✅ SHIPPED as the opt-in `set_prune_dominated` (default off,
    bit-identical): drops a candidate whose `wl_lo` exceeds another's
@@ -116,9 +116,9 @@ items this page doesn't see).
    pairs refused per flow with identical endpoints — every dominated pair
    differs in shape family or corridor, so this is safety infrastructure
    for future pool-growing generation changes, not a QoR lever today;
-   details + gate definition in `wishlist-topo.md` piece (c). Also parked
+   details + gate definition in `wishlist/wishlist-topo.md` piece (c). Also parked
    there: the `kWLSpread` default-flip criteria
-   ([`wishlist-planner.md`](wishlist-planner.md) →
+   ([`wishlist/wishlist-planner.md`](wishlist/wishlist-planner.md) →
    *"Realization-risk WL"*).
 
 10. **The `bigHalf.buda` rr flip — ✅ DONE (2026-07-20).**  Both
@@ -136,7 +136,7 @@ items this page doesn't see).
    inject, robust whether the lines are enabled or reverted).
 
 8. **Bundler follow-on corners (hier)** —
-   [`wishlist-bundler.md`](wishlist-bundler.md) → *"Remaining corners"*.
+   [`wishlist/wishlist-bundler.md`](wishlist/wishlist-bundler.md) → *"Remaining corners"*.
    After the bundler subsystem went feature-complete across flat and hier
    (PRs #268/#273/#276), both follow-on corners are now ✅ CLOSED:
    ✅ **cross-level fan-in grouping** — CONVERGENT/COMBINED now group
@@ -156,14 +156,14 @@ items this page doesn't see).
 designs and fail LOUD, never silent:)*
 
 6. **True along-flex trunk DOF (Stage C)** —
-   [`wishlist-topo.md`](wishlist-topo.md) → *"True along-flex trunk DOF"*.
+   [`wishlist/wishlist-topo.md`](wishlist/wishlist-topo.md) → *"True along-flex trunk DOF"*.
    Stage A (ConnSeg `along_flex`/`along_pull`) landed; the always-on flip is
    **blocked** by regressions upstream of NUTS (far-face traversal inflates
    V-trunk WL and flips planner selections) — that investigation gates any
    NUTS-side work.
 6b. **Class-level TRACK negotiation — the #536 b61 residual** (added
    2026-07-31; **trigger UN-fired 2026-08-04 — do not build**) —
-   [`wishlist-healer.md`](wishlist-healer.md) → *"Class-level
+   [`wishlist/wishlist-healer.md`](wishlist/wishlist-healer.md) → *"Class-level
    TRACK negotiation"*. The last open of issue #536, after its census (PR
    #548) and TOP re-seat heal (PR #550) shipped. `mix2_fast_on_aligned_sql`
    sticks at 2 ov / 16 opens: b61 seg0's 16 bits sit on M6 (12 tracks in the
@@ -198,14 +198,14 @@ designs and fail LOUD, never silent:)*
    was traced and is **not** a heal defect — the heal proposes the move and
    the measured result is worse (unplaced 1658→1672, ovl 297→300), so the
    accept correctly refuses. Re-check with the tool before reviving.
-7. **OA bridge (import/export)** — [`wishlist-bdb.md`](wishlist-bdb.md) →
+7. **OA bridge (import/export)** — [`wishlist/wishlist-bdb.md`](wishlist/wishlist-bdb.md) →
    *"Persist the routing pipeline into the BDB"* (the export consumer) and
    `gds_oa_interchange.md`. Everything BDB-side is ✅ (persist stages 1–5,
    resume, GDS round-trip incl. rotation/mirror); the OA half is **gated on
    the proprietary Si2 OA C++ libraries** — waits on external access, then
    follows the documented pattern (own translation unit behind a CMake flag).
 8. **NUTS-side alignment pre-solve — the honest-books member (2) closer**
-   (added 2026-07-20) — [`wishlist-planner.md`](wishlist-planner.md) →
+   (added 2026-07-20) — [`wishlist/wishlist-planner.md`](wishlist/wishlist-planner.md) →
    *"The NUTS-side alignment pre-solve"*. `charge_pull_target` predicts 3 of
    NUTS's 4 placement members (pull target L1, junction anchor L2); the last,
    the **alignment sibling** (member 2), is charged wrong — the b44 seg3
@@ -236,7 +236,7 @@ designs and fail LOUD, never silent:)*
    flow pays nothing.  The partial/warm re-solve half stays unbuilt — only
    needed if the paying flows' solve cost ever matters.  The default flip
    stays refused on Bar 1, unchanged) —
-   [`wishlist-nuts.md`](wishlist-nuts.md)
+   [`wishlist/wishlist-nuts.md`](wishlist/wishlist-nuts.md)
    → *"Pairwise-overlap stub alignment"*. The measured-accept alignment heal
    shipped opt-in (`set_pair_align_heal`, PR #557: 0 better / 0 worse / 37
    unchanged — the accept rejects every regressor the unconditional form
@@ -312,7 +312,7 @@ designs and fail LOUD, never silent:)*
   normal rows, clobbering the `is_expanded` checkpoint in place).  Tests:
   `test_bdb_user_topo.py` (flat lock-in + 3 hier round trips).  Follow-ons
   (op-log provenance in BDB meta, GUI hier frames, per-instance pools) in
-  [`wishlist-topoedit.md`](wishlist-topoedit.md).
+  [`wishlist/wishlist-topoedit.md`](wishlist/wishlist-topoedit.md).
 
 - **Non-TOP pin-access stub span-stretched onto its endpoint leaf** ✅
   (as NO LIVE REPRO — effectively closed by config) — **DONE (2026-07-16)**.
@@ -334,7 +334,7 @@ designs and fail LOUD, never silent:)*
   span-stretch-onto-keepout event fires nowhere. The NUTS-side span-stretch
   clamp in `do_span_adjustments` (don't stretch a non-TOP segment onto a leaf
   keepout — clamp at the face) is kept as a **latent, deferred** guard in
-  [`wishlist-nuts.md`](wishlist-nuts.md): with no live repro it would touch the
+  [`wishlist/wishlist-nuts.md`](wishlist/wishlist-nuts.md): with no live repro it would touch the
   delicate span-adjust path (big2's coverage-invariant strand fix) with **no
   measurable win** and real host-sensitivity risk, against the measured-change
   discipline. If the class ever recurs it is still loudly reported
@@ -396,7 +396,7 @@ designs and fail LOUD, never silent:)*
   `_RR_WARM_TRIALS_DEFAULT = False`: default routes byte-identical,
   `warm_trials` opts in.  The flip bar (post-screen cold trials ≥3× the
   ~41–70ms warm eval — designs several times bigHalf's size) is recorded
-  in [`wishlist-healer.md`](wishlist-healer.md), which now carries the
+  in [`wishlist/wishlist-healer.md`](wishlist/wishlist-healer.md), which now carries the
   complete round 1–5 history including all measured negative results.
 
 ## Resolved (by 2026-07-14)
@@ -427,7 +427,7 @@ designs and fail LOUD, never silent:)*
   abort study (repair+corner are the PRIMARY overlap reducers — no
   post-fixpoint abort, no pass-skipping them) were the recorded
   constraints item 9 was then closed under — see *Resolved (by
-  2026-07-15)* above.  Details: [`wishlist-healer.md`](wishlist-healer.md).
+  2026-07-15)* above.  Details: [`wishlist/wishlist-healer.md`](wishlist/wishlist-healer.md).
 
 - **Hier bundler: CONVERGENT + COMBINED + fan-in bundles** ✅ — **DONE
   (2026-07-14, PR #276)**, closing the fan-in item's hier follow-on: the
@@ -505,7 +505,7 @@ designs and fail LOUD, never silent:)*
 
 - **Selection basis: rank on measured routability** ✅ — **SETTLED
   (2026-07-10..12)**, all levers shipped and every open question
-  decided; see [`wishlist-planner.md`](wishlist-planner.md) →
+  decided; see [`wishlist/wishlist-planner.md`](wishlist/wishlist-planner.md) →
   *"Selection basis … LEVERS 1+2 SHIPPED"* for the full record. Lever 1
   = opt-in `set_planner_param kPeak` (peak existing-band-utilization in
   segment scoring + the slide-window band choice) with the supply-aware
@@ -708,7 +708,7 @@ evidence in the per-subsystem wishlist files as cited.)*
   test call sites migrated; the check headers now read "Verifying …-level
   design" and the clean verdict "Success: no violations found." (layer-dir
   and keepout violations were never *opens*). See
-  [`wishlist-nuts.md`](wishlist-nuts.md).
+  [`wishlist/wishlist-nuts.md`](wishlist/wishlist-nuts.md).
 
 - **Verify keepout-blindness (`KEEPOUT_CROSS`)** ✅ — `check_nuts` flags a
   placed segment lying ON a keepout that overlaps its span (the live
@@ -718,7 +718,7 @@ evidence in the per-subsystem wishlist files as cited.)*
   engine placed against) so hier bundles' zone-less resolved floorplans
   can't mask real conflicts. See
   [`keepout_model_audit.md`](keepout_model_audit.md) class 4 and
-  [`wishlist-nuts.md`](wishlist-nuts.md).
+  [`wishlist/wishlist-nuts.md`](wishlist/wishlist-nuts.md).
 
 - **Abstract-vs-detailed keepout model audit** ✅ — the two stages now agree
   on what a keepout blocks: span-aware DNUTS track pools
@@ -736,7 +736,7 @@ evidence in the per-subsystem wishlist files as cited.)*
   cull → pinch → coverage fill).  Both golden corpora byte-identical; the
   n-pin path gains the keepout cull, closing a silent-open class (a dead
   stub/MST edge routed 0/0 at NUTS then stranded every bit at DNUTS, and
-  was reachable via stage-a ripup).  See [`wishlist-topo.md`](wishlist-topo.md)
+  was reachable via stage-a ripup).  See [`wishlist/wishlist-topo.md`](wishlist/wishlist-topo.md)
   → *"Unify the 2-pin vs n-pin filter ordering … ✅ IMPLEMENTED"*.
 
 - **Pre-planner hier slide columns** ✅ — `dump_topologies` now resolves each
@@ -745,24 +745,24 @@ evidence in the per-subsystem wishlist files as cited.)*
   shows real finite `mslide`/`wl[lo..hi]`/`--conn` slides before
   `run_planner hier`, matching the flat flow (the PR #215 `free` display
   remains for genuinely unresolvable slides). See
-  [`wishlist-topo.md`](wishlist-topo.md) → *"Resolve pre-planner hier slide
+  [`wishlist/wishlist-topo.md`](wishlist/wishlist-topo.md) → *"Resolve pre-planner hier slide
   columns … ✅ RESOLVED"*.
 
 - **Per-edge MST flip move-source** ✅ — already resolved as an **opt-in
   toggle** rather than a removal: `ripup_reroute [max_iter]
   [use_edge_candidates]` keeps the measured-redundant flip source off by
   default (zero trial cost, routes unaffected) while preserving it for
-  exploration. See [`wishlist-healer.md`](wishlist-healer.md) → *"Per-edge MST
+  exploration. See [`wishlist/wishlist-healer.md`](wishlist/wishlist-healer.md) → *"Per-edge MST
   flip move-source … ✅ RESOLVED (opt-in toggle)"*.
 - **Corner-touch generation gap** ✅ — rescued at generation independent of
   `corner_margin` via `CORNER_HV`/`CORNER_VH` diagonal L's (reusing the MST
   path's `corner_diagonal_L`); fully-coincident blocks correctly stay
-  candidate-free. See [`wishlist-topo.md`](wishlist-topo.md) corner-margin
+  candidate-free. See [`wishlist/wishlist-topo.md`](wishlist/wishlist-topo.md) corner-margin
   item, Experiment 2 follow-up.
 - **Partially-overlapping blocks** ✅ — free-corner `L_OVL` candidates
   (PR #221) and corner-wrapping `U_OVL_*`/`UU_OVL_*` with load-bearing
   per-segment perp clamps (PR #224), clamps persisted to BDB v16 and
-  restored by `load_pipeline`. See [`wishlist-topo.md`](wishlist-topo.md)
+  restored by `load_pipeline`. See [`wishlist/wishlist-topo.md`](wishlist/wishlist-topo.md)
   *"Persist the overlap-U perp clamps"* (✅).
 - **LOW-layer abutment crossings** ✅ (PR #225) — Gap A predicate flags an
   empty open interior between two distinct abutting endpoint cells; big2

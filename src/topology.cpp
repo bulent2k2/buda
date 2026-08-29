@@ -2428,7 +2428,7 @@ static void complete_relay_junctions(Topology& topo,
     // of a chain of bracket connectors.  The spine runs along the minority axis;
     // every majority stub T-taps it at its OWN perpendicular coordinate — the
     // parallels are never merged onto one shared track, so each keeps its full
-    // independent slide (docs/internal/wishlist-topo.md).
+    // independent slide (docs/internal/wishlist/wishlist-topo.md).
     //
     // Hub coverage is GEOMETRIC (issue #514): the spine stops AT the outermost
     // tap (J-anchor) and the block is covered by the spine's own crossing of
@@ -3855,7 +3855,7 @@ std::vector<Topology> TopologyGenerator::generate_npin(
     // that coincides with a channel midpoint; distinct-locus duplicates
     // downstream are caught by the content uid (topo_uid).  Opt-in because the
     // extra loci renumber the WL-sorted candidate pool checked-in flows and
-    // goldens pin by index.  See docs/internal/wishlist-topo.md "Nominal-WL
+    // goldens pin by index.  See docs/internal/wishlist/wishlist-topo.md "Nominal-WL
     // comparability across shape families", piece (a).
     // loci_only_* record the loci that exist ONLY because of the knob (a Hanan
     // line that coincides with a channel midpoint is a normal midpoint locus).

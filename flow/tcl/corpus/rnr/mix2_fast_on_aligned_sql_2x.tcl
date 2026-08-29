@@ -56,7 +56,7 @@ buda::run_hier_bundler {depth} {2}
 # `band_span_charge 0` pin is refused for at the top of
 # flow/rnr/mix2_topdown_refine.buda: do not silence a vehicle that exists to
 # report a known real residual.  See docs/script_reference/bundling.md
-# ("Scoped caps") and docs/internal/wishlist-healer.md.
+# ("Scoped caps") and docs/internal/wishlist/wishlist-healer.md.
 buda::generate_hier_topologies
 # NOTE: deliberately does NOT declare `set_planner_param healersAhead 1`
 # (mix2.buda, its parent, does) even though it heals below.  Measured

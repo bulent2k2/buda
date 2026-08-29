@@ -831,7 +831,7 @@ class PersistMixin:
         `bundle_id` is a hard FK to bundle(id): every bus row joins a persisted
         bundle. Before writing, ensure the referenced parents exist — if any are
         missing (e.g. run_nuts reached without a persisted run_planner), persist the
-        planner output first so the FK is satisfiable (see docs/internal/wishlist-bdb.md).
+        planner output first so the FK is satisfiable (see docs/internal/wishlist/wishlist-bdb.md).
         """
         if self.bdb is None or self.nuts_result is None:
             return (0, 0)
@@ -1713,7 +1713,7 @@ class PersistMixin:
         are ADDED as `is_replicated=1` bundle rows (parent_id = template) with
         their selected topology plus any per-instance USER candidates
         (TopoEdit follow-on #3), so `bus_segment` rows join back to a bundle. No-op
-        without an open BDB. See docs/internal/wishlist-bdb.md.
+        without an open BDB. See docs/internal/wishlist/wishlist-bdb.md.
 
         `selective=True` (the RE-persist sites: the run_nuts escalation
         re-persist, _checkpoint_routing, the FK fallbacks) rewrites only the

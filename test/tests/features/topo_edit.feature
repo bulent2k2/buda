@@ -2,7 +2,7 @@
 # Narrative spec (not pytest-bdd bound — see features/README.md). Executable
 # coverage lives in test_topo_explorer_edit_mode.py and test_c_double_detour.py.
 # Engine: topo_edit.h/cpp (the edit_* CLI ops) + the explorer edit mode. Design:
-# docs/wishlist-topoedit.md.
+# docs/internal/wishlist/wishlist-topoedit.md.
 Feature: TopoEdit — transactional expert editing of a candidate topology
   As an expert chip planner
   I want to open a working copy of a candidate and apply transactional edits,

@@ -18,6 +18,11 @@ behaviour is the conservative one — a flow's meaning is a property of its
 text, and nothing here silently makes the same text route differently on
 another machine.
 
+Both are also listed in
+[`wishlist/wishlist-ux.md`](wishlist/wishlist-ux.md) — the UX wishlist —
+which POINTS here rather than restating them, so this page stays the one
+place their design and their deferral reasoning live.
+
 ### What is left, in the order it is worth doing
 
 | | open | cost | gate |

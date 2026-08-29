@@ -15,14 +15,14 @@
 The GUI's Save re-serializes the working binary to a diffable *.bdb.sql (the
 same text form `bdb_serialize.dump` / the CLI's `open_bdb … writeback` write),
 and Save As targets a chosen .sql or a fresh binary — see
-docs/internal/wishlist-bdb.md.
+docs/internal/wishlist/wishlist-bdb.md.
 """
 
 import pytest
 
 # Moved to the mid tier: full-pipeline / BDB round-trip / interchange
 # integration (keeps the fast tier < 10s). See
-# docs/internal/test_runtime_analysis.md.
+# docs/internal/test/runtime_analysis.md.
 pytestmark = pytest.mark.mid
 
 import os

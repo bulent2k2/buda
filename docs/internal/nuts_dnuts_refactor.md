@@ -223,7 +223,7 @@ A private `LayerSolver` struct holds what the nested lambdas close over
 `try_repack`, `pack`, `place_phase0` and phases 0/1/2 become methods with
 verbatim bodies. 410 lines → ~5 × 60-line units. Also the enabler for the
 wishlist item "band-level repack for spread-fit overlap clusters"
-([`wishlist-nuts.md`](wishlist-nuts.md)): it explicitly wants `try_repack`
+([`wishlist/wishlist-nuts.md`](wishlist/wishlist-nuts.md)): it explicitly wants `try_repack`
 lifted into `repair_overlaps`, which requires exactly this extraction.
 
 ### Phase E — Dogleg extraction (`nuts_dogleg.{h,cpp}`) — ✅ DONE

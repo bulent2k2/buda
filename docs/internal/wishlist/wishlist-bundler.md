@@ -56,7 +56,7 @@ general-path only), each pinned by a seam-targeted regression test.
   congruent instance's child footprint, and a fan-in part re-scopes its
   per-net endpoints + FANIN reason to the leaves its bits touch
   (`test_hier_max_bundle_bits.py`).
-Details: [`convergent_bundling.md`](convergent_bundling.md).
+Details: [`convergent_bundling.md`](../convergent_bundling.md).
 
 **What (historical):** `run_bundler CONVERGENT` groups nets by shared receiver only, so a
 bundle can span several **different driver blocks** at different locations (a
@@ -84,7 +84,7 @@ prints a warning when `CONVERGENT` is selected, rather than misrouting silently.
 reuse the `trunk_mst` / `compute_mst` machinery in `src/conn_topology.cpp`),
 `src/verify.cpp` `check_topo` (add the driver-attachment check), and
 `src/bundler.cpp` (`generate_signature`). Full investigation, evidence, and
-verdict: [`convergent_bundling.md`](convergent_bundling.md). Pipeline test that
+verdict: [`convergent_bundling.md`](../convergent_bundling.md). Pipeline test that
 locks in the current behaviour: `test/tests/test_bundler_convergent_pipeline.py`.
 
 **Test vehicles (assessed 2026-07-10):** the pipeline test is an
@@ -95,7 +95,7 @@ mempool trio (cores→banks crossbar, all-to-all groups), ariane_core's
 writeback fan-in, large_scale_demo's 7-master NoC merge, and
 `ariane136_l2` (already CONVERGENT, 12 drivers / 1024 bits) as the QoR
 showcase. Details + incidental-collision exclusions:
-[`convergent_bundling.md`](convergent_bundling.md) → *"Test-case
+[`convergent_bundling.md`](../convergent_bundling.md) → *"Test-case
 assessment"* and *"Corpus scan"*.
 
 ---

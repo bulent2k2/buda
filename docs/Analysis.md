@@ -906,7 +906,7 @@ plan, whereas a final route with 252 unplaced bits is not a route.
 
 ## Current Improvement Directions
 
-Tracked in `docs/internal/wishlist-*.md`, `docs/internal/opens*.md`, and
+Tracked in `docs/internal/wishlist/wishlist-*.md`, `docs/internal/opens*.md`, and
 the per-arc notes; the active headline items (the risk-reduction plan
 itself is complete — see above):
 

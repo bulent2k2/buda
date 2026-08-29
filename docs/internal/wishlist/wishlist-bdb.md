@@ -200,7 +200,7 @@ Tests: `test/tests/test_bdb_dnuts_persist.py`,
 
 These persisted tables are the direct source for the planned **BDB → OA
 (`oaNet`/`oaTerm`/vias) / GDS** export; see
-[`../BDB_REFERENCE.md`](../BDB_REFERENCE.md) "Planned interchange formats".
+[`../BDB_REFERENCE.md`](../../BDB_REFERENCE.md) "Planned interchange formats".
 
 ## Resume / rehydrate the pipeline from the BDB (checkpoint & continue) — ✅ IMPLEMENTED
 

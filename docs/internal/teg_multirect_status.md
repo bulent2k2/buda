@@ -1083,7 +1083,7 @@ wrong.
   `docs/internal/teg.md` (origin transcript) ~~has a stale viz pointer
   (`_rects_disconnected` — now dead code in `viz_common.py:143`, no callers)
   and ends mid-task~~ *(carries a dated status note since open 12)*.
-  ~~`wishlist-bdb.md:271` ("bridge_segments remains
+  ~~`wishlist/wishlist-bdb.md:271` ("bridge_segments remains
   un-persisted") is superseded by v11 but sits in a kept-for-reference
   section.~~ *(struck with a pointer, open 12)*.  ~~CLAUDE.md's TEG section is
   accurate about generation and silent about the downstream absence.~~
@@ -1639,7 +1639,7 @@ wrong.
     xfail escape hatches are GONE — a missing expected candidate now fails
     loudly, so a generator regression can no longer hide as xfail;
     `feature_coverage_plan.md`'s mode-2 list updated to match);
-    ~~`docs/internal/teg.md:83` viz pointer; `wishlist-bdb.md:271`
+    ~~`docs/internal/teg.md:83` viz pointer; `wishlist/wishlist-bdb.md:271`
     superseded line~~ RESOLVED 2026-08-22 (teg.md carries a dated status
     note — the function moved to `viz_common.py`, is kept-as-reference dead
     code by its owner's own comment, and the promised connectivity gating

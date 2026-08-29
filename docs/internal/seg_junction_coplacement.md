@@ -253,7 +253,7 @@ Part A + Part B as the durable fix.
   `ConnTopology`/`check_topo` identical to today on the full flow corpus.
 - **Phase 2 — hard co-placement in NUTS.** Pin joined endpoints during placement;
   turn the coverage guarantee into a maintained invariant. Validate: bundle 48
-  (and the big2 spread-fit residuals, `wishlist-nuts.md`) show **no abstract-NUTS
+  (and the big2 spread-fit residuals, `wishlist/wishlist-nuts.md`) show **no abstract-NUTS
   open** regardless of host; DNUTS opens unchanged or better.
 - **Phase 3 — persist `seg_joins` logically** (`topology_seg_join`), completing
   the single-source guarantee for reload-and-route.

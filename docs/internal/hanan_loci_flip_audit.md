@@ -13,7 +13,7 @@ onto the same branch) — see
 below are kept as the audit record; the remap table reflects the FINAL
 applied indices.
 
-Context: docs/internal/wishlist-topo.md, "Nominal-WL comparability across
+Context: docs/internal/wishlist/wishlist-topo.md, "Nominal-WL comparability across
 shape families", piece (a).  The `hanan_loci` generation knob (opt-in,
 PR #328) also samples n-pin trunk loci ON the in-bbox Hanan lines, not just
 at channel midpoints.  Flipping it default-on grows every n-pin pool
@@ -187,7 +187,7 @@ their split-gap islands are bridged by the fed-through block).  The four
 category-(c) tests below pass under a scratch default-on;
 `test_topo_hanan_loci_degenerate.py` pins the repro fixtures permanently.
 Default-off measured bit-identical (fast+mid 100% green, goldens untouched).
-Stressed-corpus re-measurement + updated flip verdict: wishlist-topo.md
+Stressed-corpus re-measurement + updated flip verdict: wishlist/wishlist-topo.md
 piece (a).
 
 The extra loci are exactly the block-face/abutment Hanan lines, so a

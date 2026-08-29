@@ -119,7 +119,7 @@ Interconnect is currently in-memory only (`self.bundles`, `self.nuts_result`,
    `PRAGMA user_version` + an ordered `BDB::_migrate()` ladder run at open (the
    v0→v1 step absorbs the old ad-hoc `ALTER TABLE … rects`). `bdb_serialize.dump`
    emits `PRAGMA user_version=N;` so the version survives the round-trip. See
-   [`wishlist-bdb.md`](wishlist-bdb.md).
+   [`wishlist/wishlist-bdb.md`](wishlist/wishlist-bdb.md).
 2. **Provenance metadata.** ✅ Implemented — `schema_version` + `bdb_tool` in the
    `meta` table (via `BDB::_seed_provenance`), read with `BDB.meta_get`. Wall-clock
    timestamps deferred so they don't add diff noise to regenerated fixtures.
@@ -133,7 +133,7 @@ Interconnect is currently in-memory only (`self.bundles`, `self.nuts_result`,
    `net_segment` / `net_via` (v8, net identity via `net_id`). A singleton
    `route_snapshot` row fingerprints the routed output with a content hash
    (v7; v8 adds the detailed-row counts), so a routing change is a reviewable
-   single-line `.bdb.sql` diff. See [`wishlist-bdb.md`](wishlist-bdb.md).
+   single-line `.bdb.sql` diff. See [`wishlist/wishlist-bdb.md`](wishlist/wishlist-bdb.md).
    These tables are the direct
    source for the planned **BDB → OA (`oaNet`/`oaTerm`) / GDS** export
    (see [BDB Reference](../BDB_REFERENCE.md) "Planned interchange formats").

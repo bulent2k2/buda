@@ -302,7 +302,7 @@ explicitly out of scope for v1.
 
 **What.** Step 4b added a per-edge L/Z flip as a ripup move source alongside the
 index alternates (`_rr_flip_edges` / `_rr_apply_move('flip', …)`). Measured
-([`mst_edge_realization.md`](mst_edge_realization.md), step-4b section): the flip
+([`mst_edge_realization.md`](../mst_edge_realization.md), step-4b section): the flip
 is **correct but redundant** — across the corpus and constructed scenarios no
 flip ever clears an overlap, because (a) the datapath winners `BITRUNK_HVH/VHV`
 are not flippable (no `edge_id`, multi-tap legs) and (b) a flip only moves an
@@ -328,7 +328,7 @@ exploration path at zero default cost.
 overlap; negotiate only re-plans the bundles of measured overlaps. But a
 *non-contended* bundle can hold bands whose re-route lowers the **total**
 overlap count. Measured example
-([`mst_edge_realization.md`](mst_edge_realization.md), #178): big2 bundle 61
+([`mst_edge_realization.md`](../mst_edge_realization.md), #178): big2 bundle 61
 is not itself contended, yet pinning it to its (window-infeasible,
 STRICT-rejected) `TRUNK_H+MST` candidate routes the whole design at **8
 overlaps instead of 10** — a global win the greedy planner + contended-only
@@ -724,7 +724,7 @@ re-pin, one level coarser than the per-instance release:
    overlap/open windows), then clip + inverse-transform each instance's
    demand into the **cell-local frame** and sum across instances — the
    aggregation negotiate v2 already implements for class price translation
-   (§4.D of [`bottomup_healer_templates.md`](bottomup_healer_templates.md)).
+   (§4.D of [`bottomup_healer_templates.md`](../bottomup_healer_templates.md)).
 2. Re-run the cell-local **NUTS** solve for the class under that price
    field with the template's topology **pinned** (only the perpendicular
    track choice is free), so the reference copy vacates the contended
