@@ -320,7 +320,7 @@ b61 residual, where all 11 classes trial without improvement while the
 locked copies keep holding the only supply-adequate layer.  The sketch
 (cell-local NUTS re-solve with the topology pinned, under §4.D's
 instance-aggregated price field, propagated class-wide) and its
-trigger-gate live in [`wishlist-healer.md`](wishlist-healer.md) →
+trigger-gate live in [`wishlist/wishlist-healer.md`](wishlist/wishlist-healer.md) →
 *"Class-level TRACK negotiation"*.
 
 ## 5. Costs

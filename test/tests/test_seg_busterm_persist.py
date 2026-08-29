@@ -28,7 +28,7 @@ import pytest
 
 # Moved to the mid tier: full-pipeline / BDB round-trip / interchange
 # integration (keeps the fast tier < 10s). See
-# docs/internal/test_runtime_analysis.md.
+# docs/internal/test/runtime_analysis.md.
 pytestmark = pytest.mark.mid
 import contextlib
 import io
@@ -95,7 +95,7 @@ def test_busterm_rows_deduped_across_candidates(tmp_path):
     """A 'tb:<block>' busterm row is written ONCE per block even though many
     candidates (and both bus endpoints) tap it — the per-candidate work is only
     the cheap link row.  Regression for the generate-time persist cost
-    (docs/internal/wishlist-bdb.md): the heavy JSON-rects row is not rewritten
+    (docs/internal/wishlist/wishlist-bdb.md): the heavy JSON-rects row is not rewritten
     per candidate.  Correctness that the dedup preserves the round-trip is
     covered by the reload tests below (which run through the same persist)."""
     path = str(tmp_path / "sb.bdb")

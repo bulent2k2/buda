@@ -275,7 +275,7 @@ DNUTS-side mechanism, kept alive by pinning M3 manually).
 noted here was audited and closed (span-aware DNUTS track pools + final-span
 crossing cull + abstract `num_keepout_conflicts` report channel + empty-
 `layer_ids` unification). See
-[`keepout_model_audit.md`](keepout_model_audit.md) and
+[`keepout_model_audit.md`](../keepout_model_audit.md) and
 [`wishlist-nuts.md`](wishlist-nuts.md). The planner's own band sampling at
 cut coordinates remains a point-sample approximation (audit class 5) — a
 cost misestimate now surfaced downstream as honest DNUTS opens rather than
@@ -686,7 +686,7 @@ alignment residual matter (or when the reference host takes up the
 charge_pull_target default flip and wants member (2) closed for completeness).
 The `band_occupants` PLACED overlay already contains the downstream damage in the
 meantime.  Tracked as a **big open** on the planner/NUTS subsystem —
-[`opens.md`](opens.md) → *Big / blocked / conditional* item 8 — with the build
+[`opens.md`](../opens.md) → *Big / blocked / conditional* item 8 — with the build
 trigger (a bigger test case where the residual moves a corpus metric).
 
 **Cheap in-planner path re-confirmed insufficient (2026-07-20).**  Before
@@ -914,14 +914,14 @@ in test_refine_selection.py); recipe documented in
 vehicle's UNDECLARED configuration — since 2026-08-04 the flow declares
 `healersAhead` (same 0/0/0 at −5.2% detailed WL; the @mid test keeps the
 undeclared form deliberately), see
-[ksegs_default_audit.md](ksegs_default_audit.md).
+[ksegs_default_audit.md](../ksegs_default_audit.md).
 
 **`kPeak` default decision (2026-07-11): stays opt-in (default 0).
 Confirmed after the supply-aware follow-on shipped — the reopener premise
 was falsified by measurement.** The full experimental record (per-testcase
 corpus tables, value sweeps, healed endpoints, and the three
 implemented-and-rejected variants) lives in
-[kpeak_measurements.md](kpeak_measurements.md).
+[kpeak_measurements.md](../kpeak_measurements.md).
 - The big2 "double-steer" hypothesis was debugged and REJECTED first —
   big2_noviz runs the PLAIN pipeline (no negotiate/ripup at all). At every
   tested value (0.05/0.1/0.2) exactly two wide trunk segments (bundle 23

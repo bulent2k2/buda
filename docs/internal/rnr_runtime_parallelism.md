@@ -546,7 +546,7 @@ guards on overlap deltas (#506), cycle exit on exact repeated states
 `corner`/`repair` at scale is genuine packing work, recorded as three
 wishlist items (span-indexed repack occupancy, marginal-yield round
 stop, over-capacity classification) in
-[wishlist-nuts.md](wishlist-nuts.md).
+[wishlist/wishlist-nuts.md](wishlist/wishlist-nuts.md).
 
 ## Implemented — P1b: parallel PRIMARY screened scan (2026-08-06)
 

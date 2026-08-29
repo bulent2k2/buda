@@ -4,7 +4,7 @@ Design notes for two coupled improvements to MST-based topology generation
 (`src/topology.cpp`, `src/conn_topology.cpp`): (1) tighten the dangling
 "trunk tail" left on `TRUNK+MST` hybrids, and (2) give each MST **edge** its own
 choice of L/Z realization — resolved judiciously, without the 2ᴺ candidate
-explosion. Index: [`wishlist-topo.md`](wishlist-topo.md).
+explosion. Index: [`wishlist/wishlist-topo.md`](wishlist/wishlist-topo.md).
 
 Both are motivated by a measured fact (`tools/along_dof_probe.py`): across the
 corpus's **4539 candidate topologies there are ~790 k units of removable dead
@@ -117,7 +117,7 @@ variant.
 **Risk (measured, real).** Tightening an *unselected* candidate's wirelength makes
 it cheaper, which can flip planner selections — the same churn class as the
 always-on flexible-span experiment (which moved 15 goldens for no corpus WL gain,
-see `wishlist-topo.md`). Because `selDEAD = 0`, there is **no** WL improvement on
+see `wishlist/wishlist-topo.md`). Because `selDEAD = 0`, there is **no** WL improvement on
 currently-selected routes; the value is purely (a) fewer junk candidates
 (efficiency) and (b) honest rankings that let good MST candidates compete — which
 only pays off together with Part 2.

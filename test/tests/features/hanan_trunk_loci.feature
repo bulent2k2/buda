@@ -8,7 +8,7 @@ Feature: Hanan-line trunk loci (generation default; no_hanan_loci opt-out)
   channel midpoints by default,
   So that a block-edge-aligned trunk can nominal at the geometric wirelength
   floor instead of carrying a structural overshoot (the b44 +500 — see
-  docs/internal/wishlist-topo.md "Nominal-WL comparability", piece (a)),
+  docs/internal/wishlist/wishlist-topo.md "Nominal-WL comparability", piece (a)),
   while the no_hanan_loci opt-out restores the midpoint-only pool.
 
   # Fixture = the flow/big_data_test/b44.buda block layout: the WL-optimal

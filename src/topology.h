@@ -845,7 +845,7 @@ public:
     // sample n-pin trunk loci ON the in-bbox Hanan lines themselves, not just
     // at channel midpoints, so a block-edge-aligned trunk can nominal at the
     // geometric WL floor (the b44 +500 overshoot —
-    // docs/internal/wishlist-topo.md "Nominal-WL comparability", piece (a)).
+    // docs/internal/wishlist/wishlist-topo.md "Nominal-WL comparability", piece (a)).
     // Flipped default-on after the degenerate-loci gate landed (face-graze
     // junction repair + loci pinch gate + DISCONNECTED island gate — see
     // docs/internal/hanan_loci_flip_audit.md); scripts opt OUT per command
@@ -865,7 +865,7 @@ public:
     // busterm-conn and keeps a bounded slide, while every majority tap keeps its
     // OWN full perpendicular slide (never merged into one shared track).  Fewer
     // segments and more NUTS freedom at star hubs; see
-    // docs/internal/wishlist-topo.md "star→spine relay completion".
+    // docs/internal/wishlist/wishlist-topo.md "star→spine relay completion".
     void set_spine_relays(bool v) { allow_spine_relays_ = v; }
 
     // Shared-leg trim for MST edges (default false — byte-identical when off;

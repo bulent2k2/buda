@@ -1,7 +1,7 @@
 # Keepout-model audit — abstract vs detailed agreement
 
 **Status: CLOSED (classes 1–3 fixed; classes 4–5 noted, out of scope).**
-Follow-up promised in [`wishlist-planner.md`](wishlist-planner.md) → *"LOW-layer
+Follow-up promised in [`wishlist/wishlist-planner.md`](wishlist/wishlist-planner.md) → *"LOW-layer
 abutment crossings … ✅ RESOLVED"* ("the abstract/detailed keepout-model
 mismatch … is unchanged") and ranked as item 4 in [`opens.md`](opens.md).
 
@@ -148,7 +148,7 @@ different: a planner miss means a *cost* misestimate that classes 1–2 now
 surface downstream (honest DNUTS opens → `negotiate_congestion` /
 `ripup_reroute` feedback), not a silent illegal wire. Full span-aware band
 accounting is a planner-cost-model change with real churn — deferred,
-tracked in [`wishlist-planner.md`](wishlist-planner.md).
+tracked in [`wishlist/wishlist-planner.md`](wishlist/wishlist-planner.md).
 
 ## Corpus impact (golden re-baseline)
 

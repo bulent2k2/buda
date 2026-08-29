@@ -16,7 +16,7 @@ import pytest
 
 # Moved to the mid tier: full-pipeline / BDB round-trip / interchange
 # integration (keeps the fast tier < 10s). See
-# docs/internal/test_runtime_analysis.md.
+# docs/internal/test/runtime_analysis.md.
 pytestmark = pytest.mark.mid
 
 import os
@@ -1011,7 +1011,7 @@ def test_optimize_demo_tc1_overlap_storm(tmp_path):
     n_nets = 80 * 64
     # 12k iterations converge to overlap=0 for this seed (the floor is ~8k; 50k was
     # overkill).  Keeps a ~1.5x margin while cutting the test ~3.4x.  See
-    # docs/internal/test_runtime_analysis.md.
+    # docs/internal/test/runtime_analysis.md.
     result = opt.run_sa(max_iter=12_000, w_wl=1.0 / n_nets, seed=1)
 
     for pb in result.placements:
@@ -1062,7 +1062,7 @@ def test_optimize_demo_tc2_fixed_io(tmp_path):
 
     n_nets = 80 * 64
     # 12k iterations converge to overlap=0 for this seed (see tc1 above and
-    # docs/internal/test_runtime_analysis.md); 50k was overkill.
+    # docs/internal/test/runtime_analysis.md); 50k was overkill.
     result = opt.run_sa(max_iter=12_000, w_wl=1.0 / n_nets, seed=2)
 
     for pb in result.placements:

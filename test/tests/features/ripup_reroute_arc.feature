@@ -3,7 +3,7 @@
 # coverage lives in test_ripup_reroute.py (~59 functions across stage a/b, the
 # global pass, fast trials, the screen, and negotiate). The 3-scenario bound
 # smoke spec is ripup_reroute.feature; this file is the comprehensive narrative
-# for the whole RR speedup arc. Engine design: docs/internal/wishlist-healer.md.
+# for the whole RR speedup arc. Engine design: docs/internal/wishlist/wishlist-healer.md.
 Feature: ripup_reroute — feedback-driven rip-up & re-route (the full arc)
   As a chip planner
   I want a feedback pass that reads the ACTUAL NUTS overlaps / DetailedNUTS opens

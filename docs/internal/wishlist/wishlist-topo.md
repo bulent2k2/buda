@@ -3,7 +3,7 @@
 Deferred follow-ups for topology generation (`src/topology.cpp`) and the
 connectivity model (`src/conn_topology.cpp`). Index: [`wishlist.md`](wishlist.md).
 
-See also [`mst_edge_realization.md`](mst_edge_realization.md) — trunk-tail
+See also [`mst_edge_realization.md`](../mst_edge_realization.md) — trunk-tail
 tightening and the per-edge MST L/Z DOF (avoiding the 2ᴺ candidate explosion),
 grounded in the current generator code with a measured prototype result.
 
@@ -297,7 +297,7 @@ UPSTREAM facet of the same "fragile graze → DNUTS open" family is
 `annotate_endpoints` handing an endpoint face-tap to a block the segment *crosses*
 instead of the receiver that *abuts* the same face from outside (a `viol_bundles=1`
 open on `big2.buda`; see
-[`big2_b25_abutment_tap_dnuts_2026-07.md`](big2_b25_abutment_tap_dnuts_2026-07.md)).
+[`big2_b25_abutment_tap_dnuts_2026-07.md`](../big2_b25_abutment_tap_dnuts_2026-07.md)).
 That case wants a REAL face-tap (not a stub), so its fix is interior-side
 discrimination in `annotate_endpoints`, not the stub emission above — but both
 chase the same symptom. **SHIPPED 2026-07-26** (PR #448): the two-pass
@@ -520,7 +520,7 @@ same way and needs a fresh pin audit.
 
 **Default-flip prep for (a) — DONE (2026-07-18):** the INDEX/TEST audit gate
 for flipping `hanan_loci` default-on is prepared in
-[hanan_loci_flip_audit.md](hanan_loci_flip_audit.md): the full pin remap
+[hanan_loci_flip_audit.md](../hanan_loci_flip_audit.md): the full pin remap
 table (22 of 112 pins across 15 flows shift, identity checked by `topo_uid`,
 none go missing), the golden regen kit (6 files: four_blocks + dogleg2 fast,
 all four mid flows), 10 index-sensitive fast-tier tests made CONTENT-based
@@ -531,7 +531,7 @@ blocker the audit surfaced is FIXED — next paragraph.
 
 **Degenerate face/abutment-coincident loci — ✅ FIXED (2026-07-18, branch
 `claude/hanan-loci-degenerate-gate`; the flip-blocker gate from
-[hanan_loci_flip_audit.md](hanan_loci_flip_audit.md)).**  The extra loci are
+[hanan_loci_flip_audit.md](../hanan_loci_flip_audit.md)).**  The extra loci are
 exactly the block-face/abutment Hanan lines, and a trunk sampled ON such a
 line degenerated three ways: (1) an aligned column's shared face line made
 every stub's TRUNK-side endpoint land exactly on a face-riding block's face,
@@ -625,10 +625,10 @@ pool / among selected):*
 v15 knob memo round-trips the opt-out — encoding documented at
 `_record_gen_knob_memo`, src/buda_cmds/topologies_cmds.py); the 20-pin
 remap was re-collected against the gated pools and applied (all 112 pins
-uid-verified identical — [hanan_loci_flip_audit.md](hanan_loci_flip_audit.md),
+uid-verified identical — [hanan_loci_flip_audit.md](../hanan_loci_flip_audit.md),
 now APPLIED); the two opt-in spec tests were inverted.  Remaining: the
 6-golden regen on the reference host
-([hanan_loci_golden_regen.md](hanan_loci_golden_regen.md)).
+([hanan_loci_golden_regen.md](../hanan_loci_golden_regen.md)).
 
 *Final flip table (default-on vs `no_hanan_loci`, endpoints as checked in
 incl. remapped pins; ov = NUTS overlaps, opens = DNUTS unplaced bits):*
@@ -839,7 +839,7 @@ non-trivial modes — `clamp` (bound every unbounded slide window to the design
 extent, drop nothing), `clamp_drop` (clamp + drop only the truly-dangling
 candidates), and `drop`/`on` (drop any dangling/unbounded candidate).  The
 mode expansion (PR #391) and its full corpus sweep are recorded in
-[`drop_dangling_modes_2026-07.md`](drop_dangling_modes_2026-07.md).  The sweep's
+[`drop_dangling_modes_2026-07.md`](../drop_dangling_modes_2026-07.md).  The sweep's
 verdict: `clamp` is the low-risk bound (bit-identical to base on 32/34 flows,
 pin-safe), `drop` is a high-variance per-flow lever, and `clamp_drop` is not a
 good default (its truly-dangling drops perturb more than they save).  All three
@@ -878,7 +878,7 @@ stay opt-in.
    follow-up noted there — a generation-time tail trim may be the better fix
    than a post-hoc drop.
 
-See [`drop_dangling_modes_2026-07.md`](drop_dangling_modes_2026-07.md) for the
+See [`drop_dangling_modes_2026-07.md`](../drop_dangling_modes_2026-07.md) for the
 per-flow numbers behind each of these.
 
 **Partly overtaken by the seed-trunk work (issue #485).**  Item 4's
@@ -889,19 +889,19 @@ census 26 → 0 with no knob (default behaviour, not opt-in).  What that does
 NOT cover is a tail on a segment attached at two or more points — a trunk that
 overshoots its last junction while still being properly connected — so the
 along-DOF trim remains open.  See
-[`seed_trunk_antenna_2026-07.md`](seed_trunk_antenna_2026-07.md).
+[`seed_trunk_antenna_2026-07.md`](../seed_trunk_antenna_2026-07.md).
 
 ## Promote `set_dedup_loci` to default-on in generation — MEASURED, keep opt-in
 
 **Full root-cause + measurement:
-[`dedup_default_2026-07.md`](dedup_default_2026-07.md).**
+[`dedup_default_2026-07.md`](../dedup_default_2026-07.md).**
 
 `set_dedup_loci` (opt-in, default `off`) collapses candidates that are the same
 topological choice differing only in a nominal trunk locus WITHIN a shared slide
 window, keeping the best-estimated representative — the LOSSY sibling of the
 sound `set_prune_dominated` (piece (c) above).
 
-The [modes corpus sweep](drop_dangling_modes_2026-07.md) suggested dedup as a
+The [modes corpus sweep](../drop_dangling_modes_2026-07.md) suggested dedup as a
 runtime win at neutral-to-better QoR (`bigHalf` 84s→20s, `slowdown_rnr`
 0/32→0/0, `mix2` 73→13 opens) — a strong default-on case. **Investigated and
 rejected:**
@@ -1059,7 +1059,7 @@ larger effort can be measured from its first commit.
 `BITRUNK_HVH/VHV` datapath trees. On column/row-aligned datapaths the planner
 selects them and QoR improves substantially (col 3×5×6 WL −7.5 %, ov 3→1; col
 4×5×8 WL −31.9 %, ov 11→1; row 3×5×6 WL −17.7 %, ov 1→0; see
-[`mst_edge_realization.md`](mst_edge_realization.md)). Question: flip it on by
+[`mst_edge_realization.md`](../mst_edge_realization.md)). Question: flip it on by
 default?
 
 **Measured (default off vs on, over flows that do NOT already opt in).** The
@@ -1097,7 +1097,7 @@ datapath shapes. Revisit only if a datapath becomes a common default workload.
 ## Incremental re-analysis (topo/conn unification Phase D) — DEFERRED BY MEASUREMENT
 
 **Context.**  The topo/conn unification
-([`topo_conn_unification.md`](topo_conn_unification.md), all other phases
+([`topo_conn_unification.md`](../topo_conn_unification.md), all other phases
 implemented) cached the six-pass derived analysis on the `Topology` itself,
 validated by content fingerprint.  A mutation therefore costs exactly ONE full
 recompute of ONE candidate on its next build — measured at ~10µs for small
@@ -1144,7 +1144,7 @@ behaviour, now shared.  Tests: `test/tests/test_topo_filter_unify.py`.
 The original item follows.
 
 **Context.**  The two generation paths order their post-emission stages
-differently (mapped in [`topo_conn_unification.md`](topo_conn_unification.md)
+differently (mapped in [`topo_conn_unification.md`](../topo_conn_unification.md)
 §1 and called out as a deliberate non-goal in its §12): `generate_2pin` culls
 keepout-blocked candidates POST-emission (after sorting, before
 `filter_pinched`), while `generate_npin` pre-filters trunk LOCI and has no
@@ -1336,7 +1336,7 @@ lower-risk, self-documenting choice.
 
 ## Audit 2026-07: stub_suppressed TEG-over blocks skip the spine pre-extension — RESOLVED 2026-08-22 (with the open 1(a) bridge-emission redesign)
 
-Finding C4-01 of [audit_2026-07.md](audit_2026-07.md), refuted as a
+Finding C4-01 of [audit_2026-07.md](../audit_2026-07.md), refuted as a
 correctness bug on HEAD: the trunk generator's TEG-over pre-pass (which
 folds a gap block's near/far stub positions into the spine extent) skipped
 blocks whose normal stub is `stub_suppressed`, while the emission still

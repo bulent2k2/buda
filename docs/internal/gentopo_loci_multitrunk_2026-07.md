@@ -231,5 +231,5 @@ result.
 See also: [`qor_corpus.md`](qor_corpus.md) (the corpus + measurement method),
 [`healer_effectiveness_2026-07.md`](healer_effectiveness_2026-07.md) and
 [`drop_dangling_modes_2026-07.md`](drop_dangling_modes_2026-07.md) (same corpus,
-other sweeps), [`wishlist-topo.md`](wishlist-topo.md) (the Hanan-loci default-flip
+other sweeps), [`wishlist/wishlist-topo.md`](wishlist/wishlist-topo.md) (the Hanan-loci default-flip
 "Nominal-WL comparability" piece).

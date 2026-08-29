@@ -4,14 +4,14 @@ A focused snapshot of what remains open in two areas, verified against
 `main` on 2026-07-20 (refreshed end-of-day, post the TopoEdit closure
 batch #355/#357/#358/#363/#368/#371/#375).
 Sources: [`opens.md`](opens.md) (the ranked cross-subsystem view),
-[`wishlist-topoedit.md`](wishlist-topoedit.md),
-[`wishlist-bundler.md`](wishlist-bundler.md),
-[`wishlist-topo.md`](wishlist-topo.md).  When an item lands, mark it ✅
+[`wishlist/wishlist-topoedit.md`](wishlist/wishlist-topoedit.md),
+[`wishlist/wishlist-bundler.md`](wishlist/wishlist-bundler.md),
+[`wishlist/wishlist-topo.md`](wishlist/wishlist-topo.md).  When an item lands, mark it ✅
 here AND in its wishlist file, per the `opens.md` convention.
 
 ## Topology editing (TopoEdit) — ✅ NO TRACKED OPENS
 
-Every item in [`wishlist-topoedit.md`](wishlist-topoedit.md) is now
+Every item in [`wishlist/wishlist-topoedit.md`](wishlist/wishlist-topoedit.md) is now
 RESOLVED; the arc is effectively feature-complete.  What shipped:
 
 - `edit_set_slide` CLI parity, USER-topo persistence in the BDB for hier
@@ -51,7 +51,7 @@ resume/rehydrate, USER templates replicating to instances).  Genuinely
 open:
 
 1. ✅ **Cross-level fan-in grouping** (opens item 8,
-   [`wishlist-bundler.md`](wishlist-bundler.md)) — LANDED.
+   [`wishlist/wishlist-bundler.md`](wishlist/wishlist-bundler.md)) — LANDED.
    CONVERGENT/COMBINED now group cross-level nets by their shared receiver
    set into one fan-in bundle (per-net `net_drivers`/`net_receivers` +
    a persisted `FANIN:root|FROM:leaves` reason); generation roots the tree
@@ -79,7 +79,7 @@ open:
    regressed mix's healed endpoint (0/0 → 0 ov / 42 unplaced); the flow
    is pinned out with `no_hanan_loci` by owner decision, and the
    mix–loci root cause is an open follow-on in
-   [`wishlist-topo.md`](wishlist-topo.md) piece (a).
+   [`wishlist/wishlist-topo.md`](wishlist/wishlist-topo.md) piece (a).
 
 ## Standing big-ticket items (outside these two areas)
 

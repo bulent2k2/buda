@@ -14,7 +14,7 @@ For [Gemini.md](../../GEMINI.md) update
 	  • trunk_mst_and_feedthru_plan.md: Implementations for trunk+MST completion (acyclic spanning trees) and opt-in feedthrough rules ( set_feedthru  command with 4-tier precedence).
 	  • nuts_packing_gaps.md: Multi-bit corner overlaps, cross-layer trunk spacing bounds, and dogleg cyclic vertical constraints resolver.
 	  • planner_ripup_extensions.md: Rip-up strategies (rip-up and replan escalation ladder, smarter victim selection, PathFinder negotiated congestion).
-	  • wishlist.md & wishlist-bdb.md: Database schema migrations, metadata persistence, and the checkpoint resume pipeline ( load_pipeline ).
+	  • wishlist/wishlist.md & wishlist/wishlist-bdb.md: Database schema migrations, metadata persistence, and the checkpoint resume pipeline ( load_pipeline ).
 
   2. Rewrote and Updated GEMINI.md:
       • Transformed the small outline into a comprehensive, detailed reference guide.

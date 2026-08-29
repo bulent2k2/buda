@@ -15,7 +15,7 @@
 """The SUPPLY-DRIVEN bundle bit cap experiment — MEASURED AND REJECTED.
 
 Kept as the reproducible record behind
-docs/internal/wishlist-bundler.md "Supply-driven bundle bit cap": the loop
+docs/internal/wishlist/wishlist-bundler.md "Supply-driven bundle bit cap": the loop
 does NOT converge, its cost outgrows its benefit, and it degenerates to
 `cap 1` on a zero-supply seat.  Re-run it before reviving the idea.
 

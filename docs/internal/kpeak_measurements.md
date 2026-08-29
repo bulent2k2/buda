@@ -3,7 +3,7 @@
 The experimental record behind the `set_planner_param kPeak` knob: what it
 does per testcase, the mechanism findings, and the alternatives that were
 implemented, measured, and rejected. Companion to the *"Selection basis"*
-section of [wishlist-planner.md](wishlist-planner.md) (levers 1+2 and the
+section of [wishlist/wishlist-planner.md](wishlist/wishlist-planner.md) (levers 1+2 and the
 default decision) and the `kPeak` row in
 [../script_reference/planner.md](../script_reference/planner.md).
 

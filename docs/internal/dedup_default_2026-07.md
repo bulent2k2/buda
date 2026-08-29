@@ -1,7 +1,7 @@
 # `set_dedup_loci` default-on — MEASURED, keep opt-in (2026-07-22)
 
 Investigation of the wishlist item ["Promote `set_dedup_loci` to
-default-on"](wishlist-topo.md), motivated by the [`set_drop_dangling` modes
+default-on"](wishlist/wishlist-topo.md), motivated by the [`set_drop_dangling` modes
 corpus sweep](drop_dangling_modes_2026-07.md), which showed `dedup` as a
 runtime win at neutral-to-better QoR — but flagged two `hbundles` regressions
 as the gate.
@@ -105,7 +105,7 @@ for* `kSegsRel`, not dedup *on top of* it.
   the `mix2` mixed change and `bigHalf` 6× slowdown are blockers, not neutrals.
 - If the pool-persist size (not planner QoR) is the real motivation for large
   hier designs, measure that directly against the BDB persist path
-  ([`wishlist-bdb.md`](wishlist-bdb.md)) — it is independent of the planner
+  ([`wishlist/wishlist-bdb.md`](wishlist/wishlist-bdb.md)) — it is independent of the planner
   regime and may still justify a persist-time (not generation-time) dedup.
 
 Harnesses (measurement host, this session):

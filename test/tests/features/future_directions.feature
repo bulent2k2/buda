@@ -12,7 +12,7 @@ Feature: Roadmap — documented open items & future directions
   # ── Bundler follow-on corners (opens #8, wishlist-bundler.md) ──────────────
 
   Scenario: cross-level fan-in grouping
-    # see docs/internal/wishlist-bundler.md "Remaining corners" + opens.md #8
+    # see docs/internal/wishlist/wishlist-bundler.md "Remaining corners" + opens.md #8
     # Today cross-level nets keep STRICT/BIDIRECTIONAL grouping because their single
     # drv_spec_path metadata cannot describe a multi-driver group.
     Given cross-level nets that share a sink but have different drivers
@@ -20,7 +20,7 @@ Feature: Roadmap — documented open items & future directions
     Then they form one cross-level fan-in bundle instead of falling back to STRICT
 
   Scenario: hier set_max_bundle_bits propagates through template<->replica linkage
-    # see docs/internal/wishlist-bundler.md + opens.md #8
+    # see docs/internal/wishlist/wishlist-bundler.md + opens.md #8
     # The balanced split pass is flat-only today.
     Given a bottom-up cell template whose bundle exceeds the bit bound
     When set_max_bundle_bits splits it in the hier flow
@@ -38,7 +38,7 @@ Feature: Roadmap — documented open items & future directions
   # ── Topology along-flex (opens #6, wishlist-topo.md — BLOCKED) ─────────────
 
   Scenario: true along-flex trunk degree of freedom (Stage C)
-    # see docs/internal/wishlist-topo.md "True along-flex trunk DOF" + opens.md #6
+    # see docs/internal/wishlist/wishlist-topo.md "True along-flex trunk DOF" + opens.md #6
     # Stage A landed (ConnSeg along_flex/along_pull); the always-on flip is blocked
     # by upstream regressions (far-face traversal inflates V-trunk WL and flips
     # planner selections) — that investigation gates any NUTS-side work.
@@ -131,7 +131,7 @@ Feature: Roadmap — documented open items & future directions
   # ── Class-level TRACK negotiation (opens #6b, wishlist-healer.md) ───────────
 
   Scenario: a locked template class vacates tracks a top-level bus needs
-    # see docs/internal/wishlist-healer.md "Class-level TRACK negotiation" + opens.md #6b
+    # see docs/internal/wishlist/wishlist-healer.md "Class-level TRACK negotiation" + opens.md #6b
     # The last open of #536: class moves re-pin a template's TOPOLOGY, which cannot
     # shift the TRACKS its fixed copies occupy, so mix2_fast_on_aligned_sql sticks
     # at 2 ov / 16 opens with b61's only viable layer held by locked copies.
@@ -143,7 +143,7 @@ Feature: Roadmap — documented open items & future directions
   # ── Pair-align heal: the WL-gain predictor (opens #8b, wishlist-nuts.md) ───
 
   Scenario: the pair-align heal skips a solve it cannot win
-    # see docs/internal/wishlist-nuts.md "Pairwise-overlap stub alignment" + opens.md #8b
+    # see docs/internal/wishlist/wishlist-nuts.md "Pairwise-overlap stub alignment" + opens.md #8b
     # The default-flip is REFUSED today: every flow pays a full extra DNUTS solve
     # (+3.3% corpus wall) so 1 in 37 benefits, and a pair-PREDICATE pre-check was
     # measured and refuted (it does not discriminate; it costs 2.5-48x the solve).

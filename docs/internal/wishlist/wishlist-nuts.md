@@ -243,7 +243,7 @@ to the span-adjust path, gated on non-TOP + keepout — but it touches the same
 code that closed big2's strand, so it needs the full golden + fast/mid re-verify.
 Alternatives (respect the generator's TOP hint for leaf-tapping stubs;
 trunk-placement avoiding endpoint leaves) are noted in
-[`../future/nuts_packing_gaps.md`](../future/nuts_packing_gaps.md) §4. Until one
+[`../future/nuts_packing_gaps.md`](../../future/nuts_packing_gaps.md) §4. Until one
 lands the residual is bounded and loudly reported (`KEEPOUT_CROSS` +
 `placed ON keepout` + the DNUTS cull warning — never silent).
 
@@ -267,7 +267,7 @@ bits whose FINAL span crosses a keepout — zero false positives, counted in
 empty-`layer_ids` = blocks-all in `keepout_occupied`. The naive alternative
 (hard-filter on the abstract span) was measured and rejected: 495 corpus
 false positives vs the 3 real crossings. Full write-up:
-[`keepout_model_audit.md`](keepout_model_audit.md); tests in
+[`keepout_model_audit.md`](../keepout_model_audit.md); tests in
 `test/tests/test_keepout_model.py`.
 
 ## Rename `check_connectivity` → `check_design` — ✅ RESOLVED
@@ -309,7 +309,7 @@ segment); dnuts flags a bit inside a keepout with the cull's own predicate
 optional `zone_fp` (the floorplan the engine placed against) because a hier
 bundle's resolved generation floorplan has no zones and would silently
 bless real conflicts. Details:
-[`keepout_model_audit.md`](keepout_model_audit.md) class 4; tests in
+[`keepout_model_audit.md`](../keepout_model_audit.md) class 4; tests in
 `test/tests/test_keepout_model.py` + the hbundles/10 flow test.
 
 ## Band-level repack for spread-fit overlap clusters — ✅ IMPLEMENTED
@@ -341,7 +341,7 @@ algorithm. Out of scope for the current planner-fidelity branch, which is
 planner-only.
 
 **Where to start:** the detailed, implementable design now lives in
-[`nuts_band_repack.md`](nuts_band_repack.md) — cluster discovery over the
+[`nuts_band_repack.md`](../nuts_band_repack.md) — cluster discovery over the
 residual overlap graph, a `LayerSolver::repack_cluster` entry point over the
 existing `try_repack` body (reachable since the PR #205 LayerSolver
 extraction), guards, determinism, and the bounds-based gate plan.  In code:
@@ -367,7 +367,7 @@ deliberately stays the stage-9 input descriptor — merging it with
 TrackSegment would break bound names for zero behavior gain.
 
 **Design + as-built resolution:**
-[`placed_segment_preroutes.md`](placed_segment_preroutes.md).  Deferred
+[`placed_segment_preroutes.md`](../placed_segment_preroutes.md).  Deferred
 follow-ups tracked there: BDB pre-route rows / GDS rail export, exact
 global-band splitting at pattern-override regions, a per-type button row,
 and the binding-breaking Track/BusSegment merge.
@@ -401,7 +401,7 @@ partner's span already covers (junction-anchored preference in `place_seg`),
 and a junction closable only by a large partner stretch is surfaced as a
 structured `NUTSResult::junction_infeasibilities` entry consumed by
 `ripup_reroute` as a re-pin contender. Design + history in
-[`seg_junction_coplacement.md`](seg_junction_coplacement.md); tests in
+[`seg_junction_coplacement.md`](../seg_junction_coplacement.md); tests in
 `test/tests/test_junction_coplacement.py`.
 
 ## Override-boundary pattern resolution in span queries — ✅ RESOLVED
@@ -436,7 +436,7 @@ previously a full strand).
 
 ## Audit 2026-07: single-layer rerun placement drift vs the full solve — OPEN (observation)
 
-Seen while fixing C1-01 ([audit_2026-07.md](audit_2026-07.md), the
+Seen while fixing C1-01 ([audit_2026-07.md](../audit_2026-07.md), the
 compounding rerun-layer interval shrink): with the intervals now stable,
 `run_nuts_on_layer M4` on the 3-bus Z fixture still moves a trunk
 (212.03 → 225.00) and lands one M5 overlap the full solve doesn't have —
@@ -449,7 +449,7 @@ quality tool rather than a what-if probe.
 ## Corner/repair at scale — the residual after the runtime arc — OPEN (three items)
 
 Context: the 2026-07 runtime arc (PRs #506/#507/#509;
-[rnr_runtime_parallelism.md](rnr_runtime_parallelism.md)) made the
+[rnr_runtime_parallelism.md](../rnr_runtime_parallelism.md)) made the
 repair loop's bookkeeping fully move-scoped — accept guards on overlap
 DELTAS vs the pre-move snapshot, cycle exit on an exact repeated
 placement state, settles on the moved set's follower closure.  On the
@@ -536,7 +536,7 @@ wires and STARVES signal tracks on congested designs — every worse flow
 strands MORE bits (`big.buda` 0/0/0 → 0/8/1; `mix2_fast_on_aligned_sql`
 unplaced 16 → 68; four chip flows +8–12%) while corpus WL moves −0.04%.
 This is the DUAL of the documented concentration loss
-([`interval_pull_model.md`](interval_pull_model.md) "The spreader,
+([`interval_pull_model.md`](../interval_pull_model.md) "The spreader,
 resolved"): spreading manufactures no keepout-clear tracks, concentrating
 starves them.  With the accept the same mechanism measures **0 better / 0
 worse / 37 unchanged** — it rejects all 7 regressors — with one accepted win

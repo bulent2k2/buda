@@ -184,7 +184,7 @@ pass finds new doomed seats, including on buses it already capped), the cost
 outgrows the benefit (unplaced 1658 → 1386 → 1346 → 1330 while wirelength
 goes +7.6% → +24.3% → +25.6%), and it degenerates to `cap 1` on a
 zero-supply seat that no split can fix. Full record in
-[`wishlist-bundler.md`](../internal/wishlist-bundler.md) → *"Supply-driven
+[`wishlist-bundler.md`](../internal/wishlist/wishlist-bundler.md) → *"Supply-driven
 bundle bit cap"*.
 
 So: treat a scoped cap as an experiment to measure, not a fix to apply blind.

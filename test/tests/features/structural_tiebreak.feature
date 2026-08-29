@@ -9,7 +9,7 @@ Feature: Structural WL tie-break in candidate ranking
   So that a slide-coupled multi-junction staircase can no longer outrank a
   structurally-tight trunk at the same nominal WL just because ASCII
   '+' < '@' sorted its type name first (the b44 mis-pick — see
-  docs/internal/wishlist-topo.md "Nominal-WL comparability", piece (b)).
+  docs/internal/wishlist/wishlist-topo.md "Nominal-WL comparability", piece (b)).
 
   # Fixture = the flow/big_data_test/b44.buda block layout: the 3510 nominal
   # floor is shared by two 3-seg plain trunks AND the 6-seg TRUNK_H+MST
