@@ -65,7 +65,14 @@ _REFLABEL = re.compile(r"(?m)^ {0,3}\[([^\]]+)\]:")
 # matched — in this repo a bare bracket pair is almost never a link (`[0]`,
 # `[TOP]`, `[SIGNAL 1 0.5]`, a checkbox), so matching it would bury a real
 # finding under noise it can never distinguish.
-_REFUSE = re.compile(r"\[([^\]\n]*)\]\[([^\]\n]*)\]")
+# Newlines are ALLOWED inside both groups: CommonMark permits a soft line
+# break in the link text and in the label, and excluding it let a valid
+# `[the guide][setup\n instructions]` with no definition pass unseen (Codex
+# #870 P2).  The `][` stays adjacent — a full reference's label must follow
+# its text immediately — so this cannot start matching across paragraphs;
+# only the INSIDE of each group gains newlines, and labels are compared with
+# whitespace normalized.
+_REFUSE = re.compile(r"\[([^\]]*)\]\[([^\]]*)\]")
 # Fenced blocks and inline code spans, removed before any of the above is
 # applied to a USAGE.  This is not tidiness: the three `\w[1][0]` mentions in
 # CLAUDE.md, BDB_REFERENCE.md and opens_interchange.md are a 2-D Verilog
@@ -73,6 +80,7 @@ _REFUSE = re.compile(r"\[([^\]\n]*)\]\[([^\]\n]*)\]")
 # that string.  Scanning raw text reports all three as broken links.
 _FENCE = re.compile(r"(?ms)^ {0,3}(```|~~~).*?^ {0,3}\1[^\n]*$")
 _CODESPAN = re.compile(r"(`+)(?:.|\n)*?\1")
+_INDENTED = re.compile(r"^(?: {4}|\t)")
 # A repo-root reference to a DOC: `docs/internal/wishlist/wishlist-topo.md`
 # written in prose or a code comment.  Scoped to `docs/` on purpose — a
 # `test/…md` string is almost always a markdown link's DISPLAY text, which the
@@ -97,15 +105,49 @@ def _read(rel):
         return fh.read()
 
 
+def _blank_indented_blocks(text):
+    """Blank the four-space (or tab) indented code blocks.
+
+    CommonMark renders an indented run as code, so reference-shaped text in
+    one — `matrix[row][column]` — is not a link and must not be reported
+    (Codex #870 P2).  Run AFTER the fences, whose blanked lines read as
+    blank here, which is what a fence is to the block rule anyway.
+
+    A deeply-indented list CONTINUATION also matches this rule, so it is
+    blanked too.  That direction is the safe one: it can only silence a
+    finding, never invent one, and the alternative — tracking list context
+    to tell the two apart — is a markdown parser, which this is not.
+    """
+    out, prev_blank, in_block = [], True, False
+    for ln in text.split("\n"):
+        blank_line = (ln.strip() == "")
+        indented = bool(_INDENTED.match(ln)) and not blank_line
+        if in_block and not (indented or blank_line):
+            in_block = False
+        elif not in_block and indented and prev_blank:
+            in_block = True
+        out.append(re.sub(r"[^\n]", " ", ln) if (in_block and indented) else ln)
+        prev_blank = blank_line
+    return "\n".join(out)
+
+
 def _strip_code(text):
-    """`text` with fenced blocks and inline code spans blanked out.
+    """`text` with fenced blocks, indented blocks and inline code spans
+    blanked out.
 
     Blanked rather than deleted so nothing downstream needs to remap offsets;
     newlines are kept so any line-based reading still lines up.
     """
     def blank(m):
         return re.sub(r"[^\n]", " ", m.group(0))
-    return _CODESPAN.sub(blank, _FENCE.sub(blank, text))
+    return _CODESPAN.sub(blank, _blank_indented_blocks(_FENCE.sub(blank, text)))
+
+
+def _norm_label(s):
+    """A reference label, normalized for comparison: CommonMark matches them
+    case-insensitively and collapses internal whitespace, which is what makes
+    a label carrying a soft line break the same label."""
+    return re.sub(r"\s+", " ", s).strip().lower()
 
 
 def _local_targets(text):
@@ -147,17 +189,23 @@ def test_every_reference_style_usage_has_a_definition():
     """
     bad, checked = [], 0
     for rel in _tracked((".md",)):
-        text = _read(rel)
-        defined = {m.group(1).strip().lower()
-                   for m in _REFLABEL.finditer(text)}
-        for m in _REFUSE.finditer(_strip_code(text)):
+        # BOTH sides read the code-stripped text.  Collecting definitions
+        # from the raw text let a `[label]: …` inside a fenced EXAMPLE
+        # satisfy a real usage elsewhere in the file — CommonMark does not
+        # treat a definition in a code block as a definition, so the guard
+        # would have reported nothing while the link was dead (Codex #870
+        # P2).  An asymmetry between the two scans is a false NEGATIVE,
+        # which is the kind a guard never reports on itself.
+        text = _strip_code(_read(rel))
+        defined = {_norm_label(m.group(1)) for m in _REFLABEL.finditer(text)}
+        for m in _REFUSE.finditer(text):
             first, second = m.group(1), m.group(2)
             # `[label][]` is the collapsed form: the FIRST group is the label.
-            label = (second or first).strip()
+            label = _norm_label(second or first)
             if not label:
                 continue
             checked += 1
-            if label.lower() not in defined:
+            if label not in defined:
                 bad.append(f"{rel}: [{first}][{second}] -> no [{label}]: "
                            f"definition")
     assert checked, "the usage walk found nothing at all"
@@ -185,6 +233,42 @@ def test_a_bracket_pair_in_CODE_is_not_read_as_a_link():
         assert rel in raw_hits, f"{rel} no longer carries the code mention"
         assert rel not in stripped, f"{rel} leaked a code span into the scan"
     assert "docs/origin/paper.md" in stripped, "real refs were stripped too"
+
+
+def test_the_usage_scan_handles_the_three_shapes_that_fooled_it(tmp_path):
+    """One fixture, three findings from review (Codex #870), each of which
+    made the guard wrong rather than merely incomplete.
+
+    They fail in opposite directions, which is why all three are pinned
+    together: two were false NEGATIVES (a guard reporting nothing while a
+    link was dead — the kind that never reports on itself) and one a false
+    POSITIVE on ordinary code.
+    """
+    doc = tmp_path / "probe.md"
+    doc.write_text(
+        "[real usage][fenceonly]\n"
+        "\n"
+        "```\n"
+        "[fenceonly]: somewhere.md\n"      # a definition inside a FENCE...
+        "```\n"
+        "\n"
+        "    matrix[row][column] = 0;\n"   # ...an INDENTED code block...
+        "\n"
+        "[the guide][setup\n"              # ...and a label over a LINE BREAK
+        "instructions]\n")
+    text = _strip_code(doc.read_text())
+    defined = {_norm_label(m.group(1)) for m in _REFLABEL.finditer(text)}
+    found = [(m.group(1), m.group(2)) for m in _REFUSE.finditer(text)]
+    missing = [_norm_label(b or a) for a, b in found
+               if _norm_label(b or a) not in defined]
+
+    # 1. a definition inside a fence does NOT satisfy a real usage
+    assert "fenceonly" not in defined
+    assert "fenceonly" in missing
+    # 2. reference-shaped text in an indented block is not a usage at all
+    assert not any(lbl == "column" for lbl in missing), found
+    # 3. a label carrying a soft line break is seen, and normalized
+    assert "setup instructions" in missing, found
 
 
 def test_reference_style_definitions_are_walked(tmp_path):
