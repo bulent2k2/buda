@@ -30,6 +30,11 @@ Three kinds of reference, because the docs use all three:
     (Codex #867 P2).  `docs/origin/paper.md` writes its figures this way;
     every one of its ten definitions is a `data:` URI today, so this catches
     nothing yet — which is the point of adding it before it has to;
+  * a **reference-style USAGE** `[text][label]` whose definition is missing
+    entirely.  That one is not a dead link but a non-link: markdown renders
+    it as literal text, brackets and all, so it fails in the direction a
+    reader notices least — the sentence still reads, it just stopped being a
+    pointer;
   * a **repo-root path** written in prose or a code comment
     (`docs/internal/wishlist/wishlist-topo.md`), which is how a C++ or
     Python source points at the doc explaining it.
@@ -53,6 +58,21 @@ _LINK = re.compile(r"\]\(([^)\s]+)\)")
 # A reference-style destination: `[label]: path.md` (optionally `<bracketed>`,
 # optionally followed by a title).  Up to three leading spaces, per CommonMark.
 _REFDEF = re.compile(r"(?m)^ {0,3}\[[^\]]+\]:[ \t]*<?([^>\s]+)>?")
+# The label a definition BINDS, for checking usages against.
+_REFLABEL = re.compile(r"(?m)^ {0,3}\[([^\]]+)\]:")
+# A reference-style USAGE: the FULL form `[text][label]` and the COLLAPSED
+# form `[label][]`.  The SHORTCUT form (a bare `[label]`) is deliberately not
+# matched — in this repo a bare bracket pair is almost never a link (`[0]`,
+# `[TOP]`, `[SIGNAL 1 0.5]`, a checkbox), so matching it would bury a real
+# finding under noise it can never distinguish.
+_REFUSE = re.compile(r"\[([^\]\n]*)\]\[([^\]\n]*)\]")
+# Fenced blocks and inline code spans, removed before any of the above is
+# applied to a USAGE.  This is not tidiness: the three `\w[1][0]` mentions in
+# CLAUDE.md, BDB_REFERENCE.md and opens_interchange.md are a 2-D Verilog
+# array element written in backticks, and one of them is a doc EXPLAINING
+# that string.  Scanning raw text reports all three as broken links.
+_FENCE = re.compile(r"(?ms)^ {0,3}(```|~~~).*?^ {0,3}\1[^\n]*$")
+_CODESPAN = re.compile(r"(`+)(?:.|\n)*?\1")
 # A repo-root reference to a DOC: `docs/internal/wishlist/wishlist-topo.md`
 # written in prose or a code comment.  Scoped to `docs/` on purpose — a
 # `test/…md` string is almost always a markdown link's DISPLAY text, which the
@@ -75,6 +95,17 @@ def _tracked(suffixes=None):
 def _read(rel):
     with open(os.path.join(_ROOT, rel), encoding="utf-8", errors="replace") as fh:
         return fh.read()
+
+
+def _strip_code(text):
+    """`text` with fenced blocks and inline code spans blanked out.
+
+    Blanked rather than deleted so nothing downstream needs to remap offsets;
+    newlines are kept so any line-based reading still lines up.
+    """
+    def blank(m):
+        return re.sub(r"[^\n]", " ", m.group(0))
+    return _CODESPAN.sub(blank, _FENCE.sub(blank, text))
 
 
 def _local_targets(text):
@@ -104,6 +135,56 @@ def test_every_markdown_link_resolves():
                 bad.append(f"{rel} -> {target}")
     assert checked > 300, f"only {checked} links seen — the walk found nothing"
     assert not bad, "broken markdown links:\n  " + "\n  ".join(sorted(bad))
+
+
+def test_every_reference_style_usage_has_a_definition():
+    """`[text][label]` with no `[label]:` anywhere in the file.
+
+    Unlike a dead link this does not 404 — markdown renders it as literal
+    text, brackets and all — so it degrades in the direction a reader is
+    least likely to report.  Labels are matched case-insensitively, per
+    CommonMark.
+    """
+    bad, checked = [], 0
+    for rel in _tracked((".md",)):
+        text = _read(rel)
+        defined = {m.group(1).strip().lower()
+                   for m in _REFLABEL.finditer(text)}
+        for m in _REFUSE.finditer(_strip_code(text)):
+            first, second = m.group(1), m.group(2)
+            # `[label][]` is the collapsed form: the FIRST group is the label.
+            label = (second or first).strip()
+            if not label:
+                continue
+            checked += 1
+            if label.lower() not in defined:
+                bad.append(f"{rel}: [{first}][{second}] -> no [{label}]: "
+                           f"definition")
+    assert checked, "the usage walk found nothing at all"
+    assert not bad, ("reference-style links with no definition:\n  "
+                     + "\n  ".join(sorted(bad)))
+
+
+def test_a_bracket_pair_in_CODE_is_not_read_as_a_link():
+    """The regression this guard would otherwise BE.
+
+    `\\w[1][0]` — a 2-D Verilog array element — appears in three checked-in
+    docs, in backticks, and one of them is a doc explaining that exact
+    string.  A usage scan over raw text reports all three as broken links,
+    which is worse than not scanning: the finding is always wrong and always
+    there.  So code is stripped first, and this pins that it stays stripped.
+    """
+    raw_hits = [rel for rel in _tracked((".md",))
+                if _REFUSE.search(_read(rel))]
+    assert raw_hits, "expected the repo to contain reference-shaped text"
+    stripped = [rel for rel in raw_hits
+                if _REFUSE.search(_strip_code(_read(rel)))]
+    # The `\w[1][0]` docs must drop out; paper.md's real image refs stay.
+    for rel in ("CLAUDE.md", "docs/BDB_REFERENCE.md",
+                "docs/internal/opens_interchange.md"):
+        assert rel in raw_hits, f"{rel} no longer carries the code mention"
+        assert rel not in stripped, f"{rel} leaked a code span into the scan"
+    assert "docs/origin/paper.md" in stripped, "real refs were stripped too"
 
 
 def test_reference_style_definitions_are_walked(tmp_path):
