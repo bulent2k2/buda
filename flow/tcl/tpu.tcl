@@ -20,6 +20,7 @@
 #   btcl flow/tcl/tpu.tcl 8 -bottomup           # solve one row, copy it
 #   btcl flow/tcl/tpu.tcl 4 -PEW 80 -PPX 110 -PW 32 -PIPE 4
 #   btcl flow/tcl/tpu.tcl 8 -dry                # print the size, build nothing
+#   btcl flow/tcl/tpu.tcl 8 -emit flow/tpu      # write tpu.v/.def/.lef, stop
 #
 # EVERY knob in `tpu_vehicle::configure` is settable as `-<NAME> <value>`
 # (N, PEW/PEH, PPX/PPY, ROWM/ROWGAP, EDGEW/EDGEH/EDGEGAP, X0/Y0, AW/PW/WW,
@@ -46,6 +47,7 @@ source [file join $repo flow tcl tpu_lib.tcl]
 set overrides {}
 set bottomup 0
 set dry 0
+set emit ""
 set argi 0
 if {$argc > 0 && [string is integer -strict [lindex $argv 0]]} {
     lappend overrides N [lindex $argv 0]
@@ -56,6 +58,11 @@ while {$argi < $argc} {
     switch -- $opt {
         -bottomup { set bottomup 1; incr argi }
         -dry      { set dry 1; incr argi }
+        -emit {
+            if {$argi + 1 >= $argc} { error "tpu.tcl: -emit needs a directory" }
+            set emit [lindex $argv [expr {$argi+1}]]
+            incr argi 2
+        }
         default {
             if {[string index $opt 0] ne "-"} {
                 error "tpu.tcl: unexpected argument '$opt' (N comes first)"
@@ -75,6 +82,14 @@ while {$argi < $argc} {
 if {$bottomup} { lappend overrides ALIGN 1 }
 tpu_vehicle::configure $overrides
 puts "tpu.tcl: [tpu_vehicle::describe]"
+
+# `-emit` writes the design as Verilog + DEF + LEF and stops: the point is
+# the IMPORT path (`flow/tpu/tpu.buda`), which no other vehicle reaches with
+# an arrayed design.  Same `P` the flow builds from, so the two cannot drift.
+if {$emit ne ""} {
+    tpu_vehicle::emit_all $emit
+    exit 0
+}
 if {$dry} { exit 0 }
 
 buda::start
