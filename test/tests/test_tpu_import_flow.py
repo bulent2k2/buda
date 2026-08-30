@@ -53,12 +53,37 @@ def _bundles(out):
     return int(m.group(1)) if m else -1
 
 
+def _sandbox(tmp_path):
+    """A private copy of the flow and the fixture it sources.
+
+    The flow log's path is derived from the SCRIPT, not the cwd, so running
+    the checked-in flow writes `flow/tpu/log/tpu_flow.log` no matter where it
+    is launched from.  Three tests here read that log, and under `-n 4` they
+    can run at once — one worker rotating or truncating the file another is
+    reading, which is a flake that would appear as a missing wirelength line
+    and be blamed on anything but this (Codex #871 P1).
+
+    Copying is the fix rather than parsing stdout alone: the per-bundle
+    detail this asserts on is only in the log, by design.  It also stops the
+    suite writing into the source tree at all.
+    """
+    root = tmp_path / "flow"
+    shutil.copytree(_FLOW, root / "tpu",
+                    ignore=shutil.ignore_patterns("log", "out"))
+    # `source ../tracks/tracks.buda` — resolved against the SCRIPT's
+    # directory, so the fixture has to keep its position relative to it.
+    shutil.copytree(_ROOT / "flow" / "tracks", root / "tracks",
+                    ignore=shutil.ignore_patterns("log"))
+    return root / "tpu"
+
+
 def _run_buda(tmp_path):
-    r = subprocess.run([str(_ROOT / "bin" / "buda"), str(_FLOW / "tpu.buda")],
+    flow = _sandbox(tmp_path) / "tpu.buda"
+    r = subprocess.run([str(_ROOT / "bin" / "buda"), str(flow)],
                        capture_output=True, encoding="utf-8",
                        errors="replace", cwd=tmp_path, timeout=900)
     assert r.returncode == 0, r.stdout + r.stderr
-    log = (_FLOW / "log" / "tpu_flow.log").read_text(errors="replace")
+    log = (flow.parent / "log" / "tpu_flow.log").read_text(errors="replace")
     return r.stdout + log
 
 
@@ -109,6 +134,48 @@ def test_both_representations_route_to_the_same_number(tmp_path):
     assert _bundles(out) == _bundles(r.stdout) > 0, (
         f"imported {_bundles(out)} bundles vs Tcl-built "
         f"{_bundles(r.stdout)}")
+
+
+def test_the_derived_containers_match_the_tcl_cell(tmp_path):
+    """The container geometry, which the wirelength cannot see.
+
+    A DEF is flat, so `row_*` has no box until `derive_container_bboxes`
+    invents one — and the margin it uses is not free: the Tcl design's
+    `row_cell` is the PE union plus `ROWM` on every side.  With any other
+    margin this path carries containers the other path does not have, and
+    the equal WL does NOT expose it, because the cell-local routing lives
+    inside the PE union and never reaches the margin (Codex #871 P2).  So
+    the equivalence claim is checked where it is actually weak.
+    """
+    import buda_cli                                  # noqa: E402
+    import contextlib
+    import io
+    flow = _sandbox(tmp_path)
+    sess = buda_cli.BudaSession()
+    with contextlib.redirect_stdout(io.StringIO()):
+        sess.do_command("open_bdb :memory:")
+        sess.do_command(f"import_def_lef {flow/'tpu.def'} {flow/'tpu.lef'}")
+        sess.do_command(f"import_verilog {flow/'tpu.v'}")
+        sess.do_command("derive_container_bboxes margin 12")
+    # CONTAINERS only: `row_0` is the derived box, `row_0/pe_3` is a leaf
+    # the DEF placed and both names start the same way.
+    boxes = {c.name: (c.x2 - c.x1, c.y2 - c.y1)
+             for c in sess.bdb.all_components()
+             if re.fullmatch(r"row_\d+", c.name)}
+    assert len(boxes) == _N, sorted(boxes)
+
+    r = subprocess.run(
+        ["tclsh"], input=(
+            f"source [file join {_ROOT} flow tcl tpu_lib.tcl]\n"
+            f"tpu_vehicle::configure {{N {_N}}}\n"
+            "puts \"[tpu_vehicle::get RW] [tpu_vehicle::get RH]\"\n"),
+        capture_output=True, encoding="utf-8", timeout=60)
+    assert r.returncode == 0, r.stderr
+    rw, rh = (float(v) for v in r.stdout.split())
+    for name, box in sorted(boxes.items()):
+        assert box == (rw, rh), (
+            f"{name} is {box}, the Tcl row_cell is {(rw, rh)} — the derived "
+            f"margin no longer matches ROWM")
 
 
 def test_the_checked_in_inputs_match_the_emitter(tmp_path):

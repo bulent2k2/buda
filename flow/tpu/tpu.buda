@@ -46,7 +46,16 @@ import_verilog tpu.v
 
 # A DEF is FLAT — its COMPONENTS are leaf instances only — so the `row_*`
 # containers the Verilog introduces have no geometry until this runs.
-derive_container_bboxes margin 4
+#
+# The margin is `ROWM`, the row-cell margin the Tcl design uses — NOT an
+# arbitrary standoff.  A `row_cell` there is the PE union plus ROWM on every
+# side (1576x80 against a 1552x56 union at N=8), so any other value gives
+# this path a container geometry the other path does not have.  With 4 every
+# imported container came out 16 units small, and the equal wirelength did
+# not expose it because the cell-local routing lives inside the PE union and
+# never reaches the margin (Codex #871 P2) — so the test now compares the
+# container BOXES too, rather than trusting a number that cannot see them.
+derive_container_bboxes margin 12
 
 derive_busterms 2
 
