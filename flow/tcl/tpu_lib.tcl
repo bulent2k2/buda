@@ -40,6 +40,13 @@
 # coverage `flow/ariane133` remains the vehicle, precisely because it is
 # somebody else's file.
 #
+# A PE is a PROCESSING ELEMENT: the single multiply-accumulate cell the
+# array is tiled from, and the unit N counts.  Weight-stationary, so each PE
+# holds one weight and every cycle multiplies the ACTIVATION arriving from
+# its WEST neighbour by it, adds the PARTIAL SUM arriving from its NORTH
+# neighbour, then passes the activation EAST and the new partial sum SOUTH.
+# N x N of them is the matrix-multiply unit; here a PE is `pe_cell`.
+#
 # THE SHAPE, and why it maps onto the hier flow so cleanly:
 #
 #            wbuf_0  wbuf_1  ...  wbuf_{N-1}      <- north edge: weights in

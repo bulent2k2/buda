@@ -24,6 +24,27 @@ btcl flow/tcl/tpu.tcl 4 -PW 32 -PIPE 4    # wider psum, deeper tail
 btcl flow/tcl/tpu.tcl 32 -dry             # print the size model, build nothing
 ```
 
+## What a PE is
+
+A **PE** is a *processing element* — the single multiply-accumulate cell a
+systolic array is tiled from, and the unit `N` counts. In a TPU-style
+weight-stationary array each PE holds one weight and, every cycle:
+
+* multiplies the **activation** arriving from its **west** neighbour by that
+  weight, and adds the **partial sum** (psum) arriving from its **north**
+  neighbour;
+* passes the activation on **east** and the new partial sum **south**.
+
+So an N×N grid of them is the matrix-multiply unit, data marches through it
+rather than being fetched per operation, and *every wire is to a neighbour* —
+which is the property this vehicle exists to put in front of the router. Here
+a PE is the `pe_cell` block: `PEW`/`PEH` size it, `PPX`/`PPY` place it, and at
+N=32 there are 1024 of them.
+
+The other blocks are the array's edges: `feed_*` (west, activations in),
+`wbuf_*` (north, weights in), `acc_*` (south, partial sums out) and the
+`pipe_*` tail.
+
 ## Why it exists
 
 The corpus had no genuine **mesh**. `flow/chip` is arrayed but assembled from
