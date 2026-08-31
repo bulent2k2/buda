@@ -2,8 +2,15 @@
 
 ```bash
 bin/buda flow/tpu/tpu.buda                    # route the imported array
+bin/buda flow/tpu/tpu2.buda                   # the same array on TWO layers
 btcl flow/tcl/tpu.tcl 8 -emit flow/tpu        # regenerate the three inputs
 ```
+
+`tpu2.buda` is `tpu.buda` cut down to a **two-layer stack** (M5 V + M6 H) and
+no healers -- the same 104 imported instances routed against the thinnest
+stack that still has one direction each. It declares no `open_bdb` of its
+own, so it is also the shape that gets its checkpoint from the command line
+(`btcl -b flow/tpu/tpu2`, then `btcl -r flow/tpu/tpu2` to resume).
 
 [`flow/tcl/tpu.tcl`](../tcl/tpu.tcl) builds this same array straight into the
 BDB, which exercises the **engine**. This imports it from Verilog + DEF + LEF,

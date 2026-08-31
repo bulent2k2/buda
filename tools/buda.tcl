@@ -77,7 +77,7 @@ namespace eval ::buda {
     # `info procs`, which would also capture the generated procs if this
     # file were ever sourced twice.  Pinned by the test suite.
     variable reserved {start stop query output commands aliases stream viz vizfinal
-                       log endreport onprogress async wait running cancel do}
+                       log script endreport onprogress async wait running cancel do}
     # Captured HERE, at source time.  Inside a proc `info script` names the
     # script being RUN, not the one the proc was defined in, so resolving the
     # server relative to it would look for it beside the site's flow script.
@@ -236,6 +236,25 @@ proc ::buda::aliases {} {
 # one-line abstract.  A re-arm appends, so one session is one log file.
 proc ::buda::log {{arg ""}} {
     return [string trim [buda::_request [string trim "__log $arg"]]]
+}
+
+# Declare which SCRIPT's commands are being sent, so the engine's own path
+# rule applies to them: a relative path resolves against the script's
+# directory, and only against the CWD when no script is running.
+#
+# A driver that replays a flow's recorded lines one at a time IS running no
+# script, so without this every relative path in them resolves against the
+# CWD -- a different file from the one the build opened, or none.  `btcl -r`
+# arms it around each replay; `buda::script off` drops it, and a bare
+# `buda::script` reports the current root ("" when none).
+#
+# Separate from `buda::log`, which also learns the flow: arming a LOG must
+# not change what a path MEANS.
+proc ::buda::script {{arg ""}} {
+    if {$arg eq ""} { return [string trim [buda::_request "__script"]] }
+    if {$arg eq "off"} { return [string trim [buda::_request "__script off"]] }
+    return [string trim [buda::_request \
+            "__script [::buda::_join_args [list $arg]]"]]
 }
 
 # The runtime summary + "Full per-command detail → <path>" line `bin/buda`

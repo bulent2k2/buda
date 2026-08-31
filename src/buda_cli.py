@@ -331,6 +331,7 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
        # last track pitch used by run_nuts
         self._planner_iterations = 5 # last iteration count used by run_planner
         self._script_stack = []      # stack of absolute paths of sourced scripts
+        self._record_origin = None   # last `# origin:` written to the record
         self.script_path = None      # set when a .buda script is sourced
         self.routing_grid = None     # RoutingGridStack (stage 8)
         # Unit-plausibility guard (Phase 1d): 'on' (hard error) | 'warn' | 'off'
@@ -858,6 +859,19 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
         line = _strip_inline_comment(cmd_line).strip()
         if cmd == "open_bdb":
             line = self._record_open_bdb_resolved(line)
+        # WHICH script this command came from, whenever it changes.  The
+        # record FLATTENS the source tree, and a relative path was resolved
+        # against the INNERMOST script's directory -- so a flattened line
+        # alone cannot say what its own paths meant, and a reader that
+        # assumes one root is wrong for every sourced file (#796 hit this
+        # for `open_bdb` and resolved that ONE command at record time; a
+        # path token cannot be told from an option token generically, so
+        # the general answer is to record the root and let each reader
+        # resolve).  A comment, so the record stays a replayable `.buda`.
+        origin = self._script_stack[-1] if self._script_stack else ""
+        if origin != self._record_origin:
+            self._record_origin = origin
+            self._record_fh.write(f"# origin: {origin}\n")
         self._record_fh.write(line + "\n")
         self._record_fh.flush()
 

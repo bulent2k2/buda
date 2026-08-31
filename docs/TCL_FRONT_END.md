@@ -330,10 +330,30 @@ per command, and a reply of `<STATUS> <n_chars>\n` followed by that many
 characters of output, where `STATUS` is `OK`, `ERR`, `BYE` or `FATAL`.
 Character counts, not bytes: both sides speak UTF-8 and count code points.
 
-Seven requests are the server's own rather than script commands:
+Eight requests are the server's own rather than script commands:
 `__commands` (the registry, which is how `buda::<name>` procs are minted
 with no second list to keep in step), `__query <name>`, `__stream on|off`,
-`__viz [on|off]`, `__log <flow>|off`, `__end_report`, and `__exit`.
+`__viz [on|off]`, `__log <flow>|off`, `__script <path>|off`, `__end_report`,
+and `__exit`.
+
+`__script` (`buda::script`) declares **which script's commands are being
+sent**, so the engine's own path rule applies to them: a relative path
+resolves against that script's directory, and against the CWD only when no
+script is running.  A driver that REPLAYS a flow's recorded lines one at a
+time — `btcl -r`, whose whole job is that — is running no script, so
+without it every relative path in them silently re-rooted at the CWD and
+named a different file, or none.  It is deliberately separate from
+`buda::log`, which also learns the flow: arming a *log* must not change what
+a *path* means.
+
+The root is armed **per line**, not once per replay, because a build trace
+FLATTENS the source tree: a relative path in a `source`d file was resolved
+against *that* file's directory.  So the recorder writes a `# origin:`
+marker whenever the running script changes (a comment, so a recording stays
+a replayable `.buda`), the trace carries them, and the replay arms each
+line's own root.  A line whose text was recorded from two different roots
+has no single right answer and falls back to the entry flow, as does any
+trace written before the markers existed.
 
 With streaming opted in (`__stream on`), a reply is zero or more
 `OUT <n_chars>\n<payload>` progress frames followed by exactly one final

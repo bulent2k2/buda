@@ -80,13 +80,17 @@ while one long C++ call (a single `run_planner` on a huge design) returns
 before the interrupt lands.  SIGINT is blocked while a frame is being
 written, so a cancel cannot tear a frame in half.
 
-Seven requests are the server's own rather than script commands:
+Eight requests are the server's own rather than script commands:
 
     __commands           the command registry, space-separated
     __query <name>       one scalar about the session (see `_QUERIES`)
     __stream on|off      stream command output as OUT frames (default off)
     __viz [on|off]       may `visualize` open a window (default on); no
                          argument reports the current setting
+    __script <p>|off     declare which script's commands are being sent, so
+                         a relative path in them resolves against ITS
+                         directory (the engine's rule) rather than the CWD.
+                         No argument reports the current one
     __log <flow>|off     summarize the run the way `bin/buda` does: full
                          per-command detail to the flow log, one line per
                          command on the terminal.  Replies with the log path
@@ -103,6 +107,16 @@ whose CLI run is fifty — and no log afterwards to read the detail in.  It is
 a REQUEST rather than the default so an existing Tcl flow's output does not
 change under it: a driver that wants the summarized shape asks (`btcl -i`
 does), and one that wants each command's output as it comes says nothing.
+
+`__script` exists because a driver that REPLAYS a flow — `btcl -r`, whose
+whole job is re-sending a recorded build's setup — is running no script, and
+the engine resolves a relative path against the running script's directory.
+So the same `require_file tpu.def` that resolved against `flow/tpu/` during
+the build resolved against the CWD on the resume and reported the file
+missing.  `open_bdb` had been special-cased in the driver against exactly
+this, one command at a time; a path token cannot be told from an option token
+generically (`export_gds out.gds bogus_option 1`), so the fix is to state the
+ROOT once and let each command's own resolution do the rest.
 
 `__viz` exists because a window BLOCKS — `visualize` in a `.buda` script
 holds the run until the viewer is closed, and it means the same thing here.
@@ -182,6 +196,7 @@ import buda_cli                                             # noqa: E402
 import buda                                                 # noqa: E402
 import buda_diag                                            # noqa: E402
 from buda_cmds import COMMANDS                              # noqa: E402
+from buda_script import unquote                             # noqa: E402
 
 
 def _n_bundles(s):
@@ -431,6 +446,36 @@ class Server:
                 self._reply("OK", mode)
             else:
                 self._reply("ERR", "usage: __viz_final [on|off]")
+            return True
+        if req == "__script" or req.startswith("__script "):
+            # Exact-or-with-argument, for the `__viz` reason: a mistyped
+            # `__scriptt` must be refused, not silently answered.
+            #
+            # DECLARE which script's commands are being sent, so the engine's
+            # own path rule applies to them.  A relative path resolves against
+            # the SCRIPT's directory (CWD only when no script is running), and
+            # a driver that replays a flow's recorded lines one at a time is
+            # running no script — so every relative path in them resolved
+            # against the CWD instead of the directory the build resolved it
+            # against.  That is not a logging or cosmetic difference: it opens
+            # a different file, or none.
+            #
+            # Deliberately NOT folded into `__log`, which already learns the
+            # flow: arming a LOG must not change what a path MEANS.  The two
+            # facts travel separately because a driver may want either alone.
+            parts = req.split(None, 1)
+            arg = parts[1].strip() if len(parts) > 1 else ""
+            stack = self.session._script_stack
+            if arg == "":
+                self._reply("OK", stack[-1] if stack else "")
+            elif arg == "off":
+                self._reply("OK", stack.pop() if stack else "")
+            else:
+                # Absolute here, once: `resolve` takes the dirname of this
+                # entry, and a relative one would make the root depend on the
+                # CWD at every later command rather than at this one.
+                stack.append(os.path.abspath(unquote(arg)))
+                self._reply("OK", stack[-1])
             return True
         if req == "__commands":
             self._reply("OK", " ".join(sorted(COMMANDS)))

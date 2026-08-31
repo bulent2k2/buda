@@ -1,0 +1,42 @@
+# from tpu.buda
+# restrict to only two metal layers:
+
+def_layer 5 M5 V TOP 50
+def_layer 6 M6 H TOP 52.94
+def_track_pattern 5    0  POWER 3 1  (SIGNAL 2 1)x4  GROUND 3 1  (SIGNAL 2 1)x4
+def_track_pattern 6 -400  POWER 4 1  (SIGNAL 2 1)x4  GROUND 4 1  (SIGNAL 2 1)x4
+report_overhead
+
+corner_margin dx 5 dy 5
+set_min_stub_length 2
+
+# open_bdb :memory:
+
+require_file tpu.def tpu.lef tpu.v hint regenerate with: btcl flow/tcl/tpu.tcl 8 -emit flow/tpu
+
+import_def_lef tpu.def tpu.lef
+import_verilog tpu.v
+
+derive_container_bboxes margin 12
+
+derive_busterms 2
+
+add_blocks_from_bdb 0
+add_blocks_from_bdb 1 skip
+add_blocks_from_bdb 2 skip
+
+run_hier_bundler depth 2
+dump_hbundles
+
+generate_hier_topologies
+
+# set_planner_param healersAhead 1
+run_planner hier
+
+run_nuts
+check_design
+
+run_detailed_nuts
+check_design
+
+report_wirelength
