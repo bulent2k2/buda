@@ -203,6 +203,16 @@ CORPUS = [
     # derive_container_bboxes / save_bdb / def_gds_layer).  `flow/def/chip`
     # is the SMALLEST vehicle that exercises the path — built for that.
     "flow/def/chip.buda",
+    # The only imported design in the corpus with a REPEATED CELL.  Every
+    # real netlist available is uniquified — NVDLA 307 modules / 306
+    # instances, ariane 127 / 125, ZERO module types instantiated twice — so
+    # until this the reader had never seen an array, and neither had the
+    # bundler's cell-local templating on imported data.  Here `pe_cell` is
+    # instantiated 8 times inside `row_cell` and `row_cell` 8 times at the
+    # top, giving 56 `cell:row_cell` template bundles off a DEF+Verilog
+    # merge.  Generated from the same source as `flow/tcl/tpu.tcl`, so the
+    # two paths are comparable by construction (and measured identical).
+    "flow/tpu/tpu.buda",
     # add_keepout and set_track_pitch: a user-declared keepout ZONE had no
     # corpus flow, which is the constraint KEEPOUT_CROSS, the DNUTS crossing
     # cull and the cull heal all exist for.
