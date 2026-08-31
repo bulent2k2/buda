@@ -30,6 +30,11 @@ Three kinds of reference, because the docs use all three:
     (Codex #867 P2).  `docs/origin/paper.md` writes its figures this way;
     every one of its ten definitions is a `data:` URI today, so this catches
     nothing yet — which is the point of adding it before it has to;
+  * a **reference-style USAGE** `[text][label]` whose definition is missing
+    entirely.  That one is not a dead link but a non-link: markdown renders
+    it as literal text, brackets and all, so it fails in the direction a
+    reader notices least — the sentence still reads, it just stopped being a
+    pointer;
   * a **repo-root path** written in prose or a code comment
     (`docs/internal/wishlist/wishlist-topo.md`), which is how a C++ or
     Python source points at the doc explaining it.
@@ -53,6 +58,29 @@ _LINK = re.compile(r"\]\(([^)\s]+)\)")
 # A reference-style destination: `[label]: path.md` (optionally `<bracketed>`,
 # optionally followed by a title).  Up to three leading spaces, per CommonMark.
 _REFDEF = re.compile(r"(?m)^ {0,3}\[[^\]]+\]:[ \t]*<?([^>\s]+)>?")
+# The label a definition BINDS, for checking usages against.
+_REFLABEL = re.compile(r"(?m)^ {0,3}\[([^\]]+)\]:")
+# A reference-style USAGE: the FULL form `[text][label]` and the COLLAPSED
+# form `[label][]`.  The SHORTCUT form (a bare `[label]`) is deliberately not
+# matched — in this repo a bare bracket pair is almost never a link (`[0]`,
+# `[TOP]`, `[SIGNAL 1 0.5]`, a checkbox), so matching it would bury a real
+# finding under noise it can never distinguish.
+# Newlines are ALLOWED inside both groups: CommonMark permits a soft line
+# break in the link text and in the label, and excluding it let a valid
+# `[the guide][setup\n instructions]` with no definition pass unseen (Codex
+# #870 P2).  The `][` stays adjacent — a full reference's label must follow
+# its text immediately — so this cannot start matching across paragraphs;
+# only the INSIDE of each group gains newlines, and labels are compared with
+# whitespace normalized.
+_REFUSE = re.compile(r"\[([^\]]*)\]\[([^\]]*)\]")
+# Fenced blocks and inline code spans, removed before any of the above is
+# applied to a USAGE.  This is not tidiness: the three `\w[1][0]` mentions in
+# CLAUDE.md, BDB_REFERENCE.md and opens_interchange.md are a 2-D Verilog
+# array element written in backticks, and one of them is a doc EXPLAINING
+# that string.  Scanning raw text reports all three as broken links.
+_FENCE = re.compile(r"(?ms)^ {0,3}(```|~~~).*?^ {0,3}\1[^\n]*$")
+_CODESPAN = re.compile(r"(`+)(?:.|\n)*?\1")
+_INDENTED = re.compile(r"^(?: {4}|\t)")
 # A repo-root reference to a DOC: `docs/internal/wishlist/wishlist-topo.md`
 # written in prose or a code comment.  Scoped to `docs/` on purpose — a
 # `test/…md` string is almost always a markdown link's DISPLAY text, which the
@@ -75,6 +103,51 @@ def _tracked(suffixes=None):
 def _read(rel):
     with open(os.path.join(_ROOT, rel), encoding="utf-8", errors="replace") as fh:
         return fh.read()
+
+
+def _blank_indented_blocks(text):
+    """Blank the four-space (or tab) indented code blocks.
+
+    CommonMark renders an indented run as code, so reference-shaped text in
+    one — `matrix[row][column]` — is not a link and must not be reported
+    (Codex #870 P2).  Run AFTER the fences, whose blanked lines read as
+    blank here, which is what a fence is to the block rule anyway.
+
+    A deeply-indented list CONTINUATION also matches this rule, so it is
+    blanked too.  That direction is the safe one: it can only silence a
+    finding, never invent one, and the alternative — tracking list context
+    to tell the two apart — is a markdown parser, which this is not.
+    """
+    out, prev_blank, in_block = [], True, False
+    for ln in text.split("\n"):
+        blank_line = (ln.strip() == "")
+        indented = bool(_INDENTED.match(ln)) and not blank_line
+        if in_block and not (indented or blank_line):
+            in_block = False
+        elif not in_block and indented and prev_blank:
+            in_block = True
+        out.append(re.sub(r"[^\n]", " ", ln) if (in_block and indented) else ln)
+        prev_blank = blank_line
+    return "\n".join(out)
+
+
+def _strip_code(text):
+    """`text` with fenced blocks, indented blocks and inline code spans
+    blanked out.
+
+    Blanked rather than deleted so nothing downstream needs to remap offsets;
+    newlines are kept so any line-based reading still lines up.
+    """
+    def blank(m):
+        return re.sub(r"[^\n]", " ", m.group(0))
+    return _CODESPAN.sub(blank, _blank_indented_blocks(_FENCE.sub(blank, text)))
+
+
+def _norm_label(s):
+    """A reference label, normalized for comparison: CommonMark matches them
+    case-insensitively and collapses internal whitespace, which is what makes
+    a label carrying a soft line break the same label."""
+    return re.sub(r"\s+", " ", s).strip().lower()
 
 
 def _local_targets(text):
@@ -104,6 +177,98 @@ def test_every_markdown_link_resolves():
                 bad.append(f"{rel} -> {target}")
     assert checked > 300, f"only {checked} links seen — the walk found nothing"
     assert not bad, "broken markdown links:\n  " + "\n  ".join(sorted(bad))
+
+
+def test_every_reference_style_usage_has_a_definition():
+    """`[text][label]` with no `[label]:` anywhere in the file.
+
+    Unlike a dead link this does not 404 — markdown renders it as literal
+    text, brackets and all — so it degrades in the direction a reader is
+    least likely to report.  Labels are matched case-insensitively, per
+    CommonMark.
+    """
+    bad, checked = [], 0
+    for rel in _tracked((".md",)):
+        # BOTH sides read the code-stripped text.  Collecting definitions
+        # from the raw text let a `[label]: …` inside a fenced EXAMPLE
+        # satisfy a real usage elsewhere in the file — CommonMark does not
+        # treat a definition in a code block as a definition, so the guard
+        # would have reported nothing while the link was dead (Codex #870
+        # P2).  An asymmetry between the two scans is a false NEGATIVE,
+        # which is the kind a guard never reports on itself.
+        text = _strip_code(_read(rel))
+        defined = {_norm_label(m.group(1)) for m in _REFLABEL.finditer(text)}
+        for m in _REFUSE.finditer(text):
+            first, second = m.group(1), m.group(2)
+            # `[label][]` is the collapsed form: the FIRST group is the label.
+            label = _norm_label(second or first)
+            if not label:
+                continue
+            checked += 1
+            if label not in defined:
+                bad.append(f"{rel}: [{first}][{second}] -> no [{label}]: "
+                           f"definition")
+    assert checked, "the usage walk found nothing at all"
+    assert not bad, ("reference-style links with no definition:\n  "
+                     + "\n  ".join(sorted(bad)))
+
+
+def test_a_bracket_pair_in_CODE_is_not_read_as_a_link():
+    """The regression this guard would otherwise BE.
+
+    `\\w[1][0]` — a 2-D Verilog array element — appears in three checked-in
+    docs, in backticks, and one of them is a doc explaining that exact
+    string.  A usage scan over raw text reports all three as broken links,
+    which is worse than not scanning: the finding is always wrong and always
+    there.  So code is stripped first, and this pins that it stays stripped.
+    """
+    raw_hits = [rel for rel in _tracked((".md",))
+                if _REFUSE.search(_read(rel))]
+    assert raw_hits, "expected the repo to contain reference-shaped text"
+    stripped = [rel for rel in raw_hits
+                if _REFUSE.search(_strip_code(_read(rel)))]
+    # The `\w[1][0]` docs must drop out; paper.md's real image refs stay.
+    for rel in ("CLAUDE.md", "docs/BDB_REFERENCE.md",
+                "docs/internal/opens_interchange.md"):
+        assert rel in raw_hits, f"{rel} no longer carries the code mention"
+        assert rel not in stripped, f"{rel} leaked a code span into the scan"
+    assert "docs/origin/paper.md" in stripped, "real refs were stripped too"
+
+
+def test_the_usage_scan_handles_the_three_shapes_that_fooled_it(tmp_path):
+    """One fixture, three findings from review (Codex #870), each of which
+    made the guard wrong rather than merely incomplete.
+
+    They fail in opposite directions, which is why all three are pinned
+    together: two were false NEGATIVES (a guard reporting nothing while a
+    link was dead — the kind that never reports on itself) and one a false
+    POSITIVE on ordinary code.
+    """
+    doc = tmp_path / "probe.md"
+    doc.write_text(
+        "[real usage][fenceonly]\n"
+        "\n"
+        "```\n"
+        "[fenceonly]: somewhere.md\n"      # a definition inside a FENCE...
+        "```\n"
+        "\n"
+        "    matrix[row][column] = 0;\n"   # ...an INDENTED code block...
+        "\n"
+        "[the guide][setup\n"              # ...and a label over a LINE BREAK
+        "instructions]\n")
+    text = _strip_code(doc.read_text())
+    defined = {_norm_label(m.group(1)) for m in _REFLABEL.finditer(text)}
+    found = [(m.group(1), m.group(2)) for m in _REFUSE.finditer(text)]
+    missing = [_norm_label(b or a) for a, b in found
+               if _norm_label(b or a) not in defined]
+
+    # 1. a definition inside a fence does NOT satisfy a real usage
+    assert "fenceonly" not in defined
+    assert "fenceonly" in missing
+    # 2. reference-shaped text in an indented block is not a usage at all
+    assert not any(lbl == "column" for lbl in missing), found
+    # 3. a label carrying a soft line break is seen, and normalized
+    assert "setup instructions" in missing, found
 
 
 def test_reference_style_definitions_are_walked(tmp_path):
