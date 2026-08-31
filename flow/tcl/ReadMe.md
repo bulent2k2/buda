@@ -22,7 +22,13 @@ btcl flow/tcl/tpu.tcl 16                  # 16x16 = 256 PEs
 btcl flow/tcl/tpu.tcl 8 -bottomup         # solve ONE row, copy it to the rest
 btcl flow/tcl/tpu.tcl 4 -PW 32 -PIPE 4    # wider psum, deeper tail
 btcl flow/tcl/tpu.tcl 32 -dry             # print the size model, build nothing
+btcl flow/tcl/tpu.tcl 8 -emit flow/tpu    # write tpu.v/.def/.lef, then stop
 ```
+
+`-emit` writes the same array as **Verilog + DEF + LEF** for the import path
+([`flow/tpu/`](../tpu/ReadMe.md)) — from the same parameters this flow builds
+from, so the two cannot drift. Both route to detailed WL **197,376** at N=8,
+which is what makes "authored once, elaborated into both" checkable.
 
 ## What a PE is
 

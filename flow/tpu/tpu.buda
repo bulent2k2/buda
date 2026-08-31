@@ -1,0 +1,80 @@
+# ============================================================
+# flow/tpu/tpu.buda — the systolic array through the IMPORT path.
+#
+# `flow/tcl/tpu.tcl` builds this same array straight into the BDB, which
+# exercises the ENGINE.  This one imports it from Verilog + DEF + LEF, which
+# exercises the READER — and it is the only vehicle here that hands the
+# reader an ARRAY.
+#
+# That matters because every real netlist available is UNIQUIFIED: NVDLA
+# (307 modules / 306 instances) and ariane (127 / 125) each have ZERO module
+# types instantiated more than once, so no imported design in this repo has
+# ever had a repeated cell.  Here `pe_cell` is instantiated 8 times inside
+# `row_cell`, and `row_cell` 8 times at the top.
+#
+#   tpu_top                                  depth 0
+#     row_0 .. row_7      row_cell           one template, EIGHT times
+#       pe_0 .. pe_7      pe_cell    LEAF    one template, EIGHT times each
+#     feed_*  wbuf_*  acc_*  pipe_*   LEAF   the array's edges and tail
+#
+# The three input files are GENERATED, and from the same source the Tcl flow
+# builds from, so the netlist and the floorplan cannot drift into silently
+# dropped connections.  Regenerate with:
+#
+#     btcl flow/tcl/tpu.tcl 8 -emit flow/tpu
+#
+# ONE WARNING IS EXPECTED, and it is the design rather than a defect: 256
+# nets are reported as carried by no bundle.  They are `row_0/p_in_*` (the
+# first row has no partial sum arriving from the north) and `row_7/w_out_*`
+# (the last row passes no weight on).  Every row is the SAME `row_cell`
+# module, so those ports must be declared even where the edge instance
+# leaves them unconnected — the Tcl path has no such nets because it wires
+# pins directly, which is the one place the two representations differ.
+# ============================================================
+
+source ../tracks/tracks.buda
+
+corner_margin dx 5 dy 5
+set_min_stub_length 2
+
+open_bdb :memory:
+
+require_file tpu.def tpu.lef tpu.v hint regenerate with: btcl flow/tcl/tpu.tcl 8 -emit flow/tpu
+
+import_def_lef tpu.def tpu.lef
+import_verilog tpu.v
+
+# A DEF is FLAT — its COMPONENTS are leaf instances only — so the `row_*`
+# containers the Verilog introduces have no geometry until this runs.
+#
+# The margin is `ROWM`, the row-cell margin the Tcl design uses — NOT an
+# arbitrary standoff.  A `row_cell` there is the PE union plus ROWM on every
+# side (1576x80 against a 1552x56 union at N=8), so any other value gives
+# this path a container geometry the other path does not have.  With 4 every
+# imported container came out 16 units small, and the equal wirelength did
+# not expose it because the cell-local routing lives inside the PE union and
+# never reaches the margin (Codex #871 P2) — so the test now compares the
+# container BOXES too, rather than trusting a number that cannot see them.
+derive_container_bboxes margin 12
+
+derive_busterms 2
+
+add_blocks_from_bdb 0
+add_blocks_from_bdb 1 skip
+add_blocks_from_bdb 2 skip
+
+run_hier_bundler depth 2
+dump_hbundles
+
+generate_hier_topologies
+
+set_planner_param healersAhead 1
+run_planner hier 5
+
+run_nuts
+check_design nuts
+
+run_detailed_nuts
+check_design dnuts
+
+report_wirelength
