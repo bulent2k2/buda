@@ -688,12 +688,33 @@ proc _fail_line {text} {
 set replay_failed 0
 proc _replay {lines} {
     set ::replay_failed 1
-    foreach ln $lines {
-        puts "replay> $ln"
-        if {[catch {buda::do $ln} err]} {
-            error "replay stopped at `$ln`: $err"
+    # The engine resolves a relative path against the RUNNING SCRIPT's
+    # directory, and against the CWD only when no script is running.  A
+    # replay sends the flow's recorded lines one at a time, so it is running
+    # no script -- and every relative path in them was silently re-rooted at
+    # the CWD, naming a different file from the one the build opened, or
+    # none (`require_file tpu.def` in flow/tpu/ reported the file missing
+    # from the repo root, which is the directory the build itself ran in --
+    # so matching the recorded `# cwd:` was never sufficient).  `open_bdb`
+    # had been rewritten against exactly this, one command at a time; a path
+    # token cannot be told from an option token generically, so the ROOT is
+    # declared once here and each command's own resolution does the rest.
+    #
+    # Dropped after the replay, failures included: what a line MEANS must
+    # not depend on where a replay stopped, and the prompt that may follow
+    # is not running a script -- a path typed there means what the shell
+    # would mean by it.
+    catch {buda::script $::flow}
+    set rc [catch {
+        foreach ln $lines {
+            puts "replay> $ln"
+            if {[catch {buda::do $ln} err]} {
+                error "replay stopped at `$ln`: $err"
+            }
         }
-    }
+    } err opts]
+    catch {buda::script off}
+    if {$rc} { return -options $opts $err }
     set ::replay_failed 0
 }
 proc replay_tail {} {
@@ -1303,12 +1324,22 @@ if {$stage eq "build"} {
               rerun a build session for THIS flow (or resume that one)"
         exit 2
     }
-    if {$traced_cwd ne "" && $traced_cwd ne [pwd]} {
-        # Recorded relative paths only replay from the directory the build
-        # ran in (the recorder's own `# cwd:` rule, tools/tcl2buda.py).
-        puts "$tag: NOTE -- the build ran in $traced_cwd, this session in\
-              [pwd]; recorded relative paths resolve differently"
-    }
+    # No CWD note: a replay declares the flow as its script root (`_replay`),
+    # so a recorded relative path resolves against the FLOW's directory --
+    # what the build resolved it against -- from any directory.  This used to
+    # warn that "recorded relative paths resolve differently" when the CWDs
+    # differed, which was doubly wrong: the resolution root was never the CWD
+    # to begin with, so a MATCHING CWD was no safer (it is how the tpu2 resume
+    # failed), and now neither is a differing one.  `# cwd:` stays in the
+    # trace as provenance.
+    #
+    # The residual, unreachable by any checked-in flow (no sourced file here
+    # takes a path) and so recorded rather than warned about: the trace
+    # FLATTENS the source tree, so a relative path recorded from a sourced
+    # file was resolved against THAT file's directory and is re-rooted at the
+    # entry flow's.  Nothing in the flattened line says where it came from --
+    # the same ambiguity #796 resolved for `open_bdb` by resolving at RECORD
+    # time, which is where a general fix would have to go too.
     # The staleness stamp (written at build): a resume replays the RECORDED
     # lines, so an edit to the flow's text since then does not take effect
     # here — worth one NOTE, not a refusal (the recorded build is a

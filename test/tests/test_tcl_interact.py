@@ -1714,3 +1714,69 @@ def test_the_readonly_sql_door_refuses_the_alias_too(tmp_path):
     assert r.returncode == 2
     assert "is the flow's own script" in r.stderr
     assert flow.read_bytes() == before
+
+
+def test_a_replay_resolves_relative_paths_against_the_flow_not_the_cwd(tmp_path):
+    """A replayed setup command means what it meant during the build.
+
+    The engine resolves a relative path against the RUNNING SCRIPT's
+    directory, and only against the CWD when no script is running.  A resume
+    replays the recorded lines one at a time, so it runs no script -- and
+    every relative path in them was silently re-rooted at the CWD.  A
+    `require_file tpu.def` that passed during the build then reported the
+    file missing on the resume, with the remedy for regenerating an input
+    the resume does not even read.
+
+    Matching the build's CWD was never a fix, which is what makes this a
+    resolution bug rather than an invocation one: the flow lives in `sub/`
+    and the build ran from `tmp_path`, so the file resolves under NEITHER
+    CWD.  The build and both resumes run from `tmp_path` here, and the
+    pre-fix failure reproduces exactly that way.
+    """
+    sub = tmp_path / "sub"
+    sub.mkdir()
+    (sub / "beside.txt").write_text("an input that lives beside the flow\n")
+    flow = sub / "mini.buda"
+    # `require_file` is a session verb, so it replays in setup -- and it is
+    # the loud one: a mis-rooted path here is FATAL rather than silent.
+    flow.write_text("open_bdb ckpt.bdb\n"
+                    "require_file beside.txt\n" + _FLAT_FLOW)
+
+    r = _run(["tclsh", _DRIVER, "--build", flow], tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "BUDA-1905" not in r.stdout                  # the build's own root
+
+    r = _run(["tclsh", _DRIVER, "--resume", flow], tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "BUDA-1905" not in r.stdout, "the replay re-rooted a relative path"
+    assert "required input file(s) not found" not in r.stdout
+    assert "done -- 0 overlaps, 0 unplaced, 0 audit violations" in r.stdout
+
+
+def test_a_replay_root_is_dropped_for_what_you_type_at_the_prompt(tmp_path):
+    """The root is armed for the REPLAY, not for the session.
+
+    A command typed at the prompt is not part of any script, so a relative
+    path in it means what the shell would mean by it.  Leaving the flow's
+    directory armed would quietly redirect a typed path to somewhere the
+    user is not standing -- so this pins the boundary, not just the fix.
+    """
+    sub = tmp_path / "sub"
+    sub.mkdir()
+    (sub / "beside.txt").write_text("beside the flow, not the cwd\n")
+    flow = sub / "mini.buda"
+    flow.write_text("open_bdb ckpt.bdb\n"
+                    "require_file beside.txt\n" + _FLAT_FLOW)
+
+    r = _run(["tclsh", _DRIVER, "--build", flow], tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+
+    # Typed from tmp_path, where `beside.txt` is NOT: the CWD is the root,
+    # so this must fail -- while the identical token replayed above passed.
+    r = _run(["tclsh", _DRIVER, "--resume", flow], tmp_path,
+             stdin="require_file beside.txt\ndone\n")
+    assert "BUDA-1905" in r.stdout, "a typed path was resolved against the flow"
+    # ...and the CWD-relative spelling of the very same file passes.
+    r = _run(["tclsh", _DRIVER, "--resume", flow], tmp_path,
+             stdin="require_file sub/beside.txt\ndone\n")
+    assert "BUDA-1905" not in r.stdout, r.stdout

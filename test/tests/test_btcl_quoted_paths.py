@@ -276,3 +276,32 @@ def test_buda2tcl_does_not_re_split_a_backslash_path():
         r'open_bdb "C:\Program Files\ck.bdb" writeback', ".", ".", ".")
     assert line == [r"buda::open_bdb C:\\Program\ Files\\ck.bdb {writeback}"], \
         line
+
+
+def test_a_replay_roots_relative_paths_in_a_spaced_flow_directory(tmp_path):
+    """The replay's script root survives the quoting round trip.
+
+    The root is declared over the wire (`__script`), so it is quoted by the
+    bridge and unquoted by the server exactly like any other path argument —
+    which means a flow living in a spaced directory is the case where a
+    mis-quote would silently re-root every relative path in the replay at
+    the CWD, or at a fragment of the directory name.
+
+    `require_file` is the loud probe: it names the file it could not find,
+    so a root that arrived split reports a failure rather than passing by
+    luck.  Built and resumed from `tmp_path`, never from the flow's own
+    directory, so the flow dir is the only root under which it can pass.
+    """
+    d = tmp_path / "my designs"
+    d.mkdir()
+    (d / "beside.txt").write_text("an input beside the flow\n")
+    (d / "flow.buda").write_text("require_file beside.txt\n" + _FLOW)
+    ck = "my designs/ck.bdb"
+
+    out = _btcl_i(tmp_path, "my designs/flow.buda", ck)
+    assert (tmp_path / (ck + ".trace")).exists(), out
+
+    out2 = _btcl_i(tmp_path, "my designs/flow.buda", ck, "plan")
+    assert "BUDA-1905" not in out2, out2
+    assert "required input file(s) not found" not in out2, out2
+    assert "pin/edit prompt" in out2, out2
