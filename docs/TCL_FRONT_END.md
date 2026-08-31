@@ -346,6 +346,15 @@ named a different file, or none.  It is deliberately separate from
 `buda::log`, which also learns the flow: arming a *log* must not change what
 a *path* means.
 
+The root is armed **per line**, not once per replay, because a build trace
+FLATTENS the source tree: a relative path in a `source`d file was resolved
+against *that* file's directory.  So the recorder writes a `# origin:`
+marker whenever the running script changes (a comment, so a recording stays
+a replayable `.buda`), the trace carries them, and the replay arms each
+line's own root.  A line whose text was recorded from two different roots
+has no single right answer and falls back to the entry flow, as does any
+trace written before the markers existed.
+
 With streaming opted in (`__stream on`), a reply is zero or more
 `OUT <n_chars>\n<payload>` progress frames followed by exactly one final
 status frame carrying the not-yet-streamed tail — concatenating them yields

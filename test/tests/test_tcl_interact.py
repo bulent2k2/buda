@@ -1780,3 +1780,67 @@ def test_a_replay_root_is_dropped_for_what_you_type_at_the_prompt(tmp_path):
     r = _run(["tclsh", _DRIVER, "--resume", flow], tmp_path,
              stdin="require_file sub/beside.txt\ndone\n")
     assert "BUDA-1905" not in r.stdout, r.stdout
+
+
+def test_a_replay_roots_a_sourced_files_lines_in_ITS_directory(tmp_path):
+    """The trace FLATTENS the source tree, so one root is not enough.
+
+    A relative path in a sourced file was resolved against THAT file's
+    directory at build time, and nothing in a flattened line says where it
+    came from.  Arming the entry flow for every line fixes the common case
+    and breaks exactly this one -- which the pre-fix CWD fallback happened
+    to get right whenever the resume ran from the sourced file's directory,
+    so a blanket root was a REGRESSION there (Codex #874 P2).
+
+    So the recorder writes `# origin:` markers and the replay arms per
+    line.  Checked from BOTH directories, since each is what the other
+    approach got wrong: the entry flow's (where the CWD fallback failed)
+    and the sourced file's (where it accidentally worked).
+    """
+    sub = tmp_path / "sub"
+    sub.mkdir()
+    (sub / "data.txt").write_text("beside the SOURCED file\n")
+    (sub / "inc.buda").write_text("require_file data.txt\n"
+                                  "def_layer 4 M4 H TOP 30\n"
+                                  "def_layer 5 M5 V TOP 30\n")
+    flow = tmp_path / "top.buda"
+    flow.write_text("open_bdb ck.bdb\nsource sub/inc.buda\n"
+                    + "\n".join(_FLAT_FLOW.splitlines()[6:]) + "\n")
+
+    r = _run(["tclsh", _DRIVER, "--build", flow], tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    trace = (tmp_path / "ck.bdb.trace").read_text()
+    assert f"# origin: {sub / 'inc.buda'}" in trace, trace
+
+    for cwd, where in ((tmp_path, "the entry flow's directory"),
+                       (sub, "the sourced file's directory")):
+        r = _run(["tclsh", _DRIVER, "--resume", flow], cwd)
+        assert "BUDA-1905" not in r.stdout, f"resumed from {where}:\n{r.stdout}"
+        assert "done --" in r.stdout, f"resumed from {where}:\n{r.stdout}"
+
+
+def test_a_trace_without_origin_markers_still_resumes(tmp_path):
+    """Backward compatibility: a checkpoint built before the markers.
+
+    Its lines carry no recorded root, so each falls back to the entry
+    flow -- which is right for any flow that sources nothing, i.e. every
+    trace that could exist and every checked-in flow.
+    """
+    sub = tmp_path / "sub"
+    sub.mkdir()
+    (sub / "beside.txt").write_text("x\n")
+    flow = sub / "mini.buda"
+    flow.write_text("open_bdb ckpt.bdb\nrequire_file beside.txt\n" + _FLAT_FLOW)
+
+    r = _run(["tclsh", _DRIVER, "--build", flow], tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+
+    tf = sub / "ckpt.bdb.trace"
+    tf.write_text("".join(ln for ln in tf.read_text().splitlines(keepends=True)
+                          if not ln.startswith("# origin:")))
+    assert "# origin:" not in tf.read_text()
+
+    r = _run(["tclsh", _DRIVER, "--resume", flow], tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "BUDA-1905" not in r.stdout, r.stdout
+    assert "done -- 0 overlaps, 0 unplaced, 0 audit violations" in r.stdout

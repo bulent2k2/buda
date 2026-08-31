@@ -698,22 +698,49 @@ proc _replay {lines} {
     # so matching the recorded `# cwd:` was never sufficient).  `open_bdb`
     # had been rewritten against exactly this, one command at a time; a path
     # token cannot be told from an option token generically, so the ROOT is
-    # declared once here and each command's own resolution does the rest.
+    # DECLARED and each command's own resolution does the rest.
+    #
+    # Per line, from the trace's `# origin:` markers: the trace flattens the
+    # source tree, so lines from a sourced file were resolved against THAT
+    # file's directory.  Arming the entry flow for all of them fixed the
+    # common case and broke the sourced one -- which the old CWD fallback
+    # happened to get right whenever the resume ran from the sourced file's
+    # directory (Codex #874 P2, reproduced both ways).
     #
     # Dropped after the replay, failures included: what a line MEANS must
     # not depend on where a replay stopped, and the prompt that may follow
     # is not running a script -- a path typed there means what the shell
     # would mean by it.
-    catch {buda::script $::flow}
+    set armed_root ""
     set rc [catch {
         foreach ln $lines {
+            # PER LINE, because the trace flattens the source tree: a line
+            # recorded from a sourced file had its paths resolved against
+            # THAT file's directory, and arming the entry flow for all of
+            # them is wrong for exactly those lines.  Falls back to the
+            # entry flow when the trace records no origin for this text (a
+            # pre-`# origin:` trace) or records two (the same text from two
+            # roots -- no single root is right, so use the flow's).
+            set root $::flow
+            if {[info exists ::origin_of] && [dict exists $::origin_of $ln]} {
+                set o [dict get $::origin_of $ln]
+                if {$o ne ""} { set root $o }
+            }
+            if {$root ne $armed_root} {
+                # Pop BEFORE pushing: the engine keeps a STACK, so arming
+                # the new root first would leave the old one buried under
+                # it and `off` would restore the wrong one.
+                if {$armed_root ne ""} { catch {buda::script off} }
+                catch {buda::script $root}
+                set armed_root $root
+            }
             puts "replay> $ln"
             if {[catch {buda::do $ln} err]} {
                 error "replay stopped at `$ln`: $err"
             }
         }
     } err opts]
-    catch {buda::script off}
+    if {$armed_root ne ""} { catch {buda::script off} }
     if {$rc} { return -options $opts $err }
     set ::replay_failed 0
 }
@@ -1075,11 +1102,19 @@ if {$stage eq "build"} {
     # just run.  The recorder file is written per-command and flushed by the
     # child, so it survives the flow's own `exit`.
     set lines {}
+    set origins {}
+    set cur_origin ""
     set f [open $recpath]
     foreach ln [split [read $f] \n] {
         set ln [string trim $ln]
+        # `# origin:` says which SCRIPT the lines after it came from -- the
+        # root their relative paths were resolved against.  Kept parallel to
+        # `$lines` rather than in it, so every classifier below still sees a
+        # pure command list.
+        if {[regexp {^# origin: ?(.*)$} $ln -> p]} { set cur_origin $p; continue }
         if {$ln eq "" || [string index $ln 0] eq "#"} continue
         lappend lines $ln
+        lappend origins $cur_origin
     }
     close $f
     # `catch`, because a delete is not always PERMITTED: the engine child
@@ -1161,7 +1196,11 @@ if {$stage eq "build"} {
                 puts $f "# input: $redirect_input"
                 catch {puts $f "# input_crc32: [_file_crc $redirect_input]"}
             }
-            foreach ln $lines { puts $f $ln }
+            set prev "\u0000"
+            foreach ln $lines org $origins {
+                if {$org ne $prev} { puts $f "# origin: $org" ; set prev $org }
+                puts $f $ln
+            }
             close $f
         } err]} {
             puts "$tag: NOTE -- could not write the resume trace $tf ($err);\
@@ -1292,9 +1331,19 @@ if {$stage eq "build"} {
     set traced_crc ""; set traced_size ""
     set traced_input ""; set traced_input_crc ""
     set lines {}
+    # text -> the script root that line's relative paths were resolved
+    # against at BUILD time.  Keyed by text because the classifiers below
+    # FILTER and reorder the lines, so an index-parallel list would not
+    # survive to the replay; a text that ran from TWO different roots is
+    # marked ambiguous (empty) and falls back, since no single root is
+    # right for it.  A pre-`# origin:` trace leaves this empty and every
+    # line falls back, which is exactly the behaviour it was built under.
+    set ::origin_of [dict create]
+    set cur_origin ""
     set f [open $tf]
     foreach ln [split [read $f] \n] {
         set ln [string trim $ln]
+        if {[regexp {^# origin: ?(.*)$} $ln -> p]} { set cur_origin $p; continue }
         if {[regexp {^# flow: (.*)$} $ln -> p]} { set traced_flow $p; continue }
         if {[regexp {^# cwd: (.*)$} $ln -> p]}  { set traced_cwd $p; continue }
         if {[regexp {^# flow_crc32: (\S+)$} $ln -> p]} {
@@ -1315,6 +1364,13 @@ if {$stage eq "build"} {
         }
         if {$ln eq "" || [string index $ln 0] eq "#"} continue
         lappend lines $ln
+        if {[dict exists $::origin_of $ln]} {
+            if {[dict get $::origin_of $ln] ne $cur_origin} {
+                dict set ::origin_of $ln ""       ;# ambiguous
+            }
+        } else {
+            dict set ::origin_of $ln $cur_origin
+        }
     }
     close $f
     if {$traced_flow ne "" && $traced_flow ne $flow} {
@@ -1333,13 +1389,13 @@ if {$stage eq "build"} {
     # failed), and now neither is a differing one.  `# cwd:` stays in the
     # trace as provenance.
     #
-    # The residual, unreachable by any checked-in flow (no sourced file here
-    # takes a path) and so recorded rather than warned about: the trace
-    # FLATTENS the source tree, so a relative path recorded from a sourced
-    # file was resolved against THAT file's directory and is re-rooted at the
-    # entry flow's.  Nothing in the flattened line says where it came from --
-    # the same ambiguity #796 resolved for `open_bdb` by resolving at RECORD
-    # time, which is where a general fix would have to go too.
+    # The FLATTENED source tree is handled where it has to be -- at RECORD
+    # time, the answer #796 reached for `open_bdb` alone: the recorder emits
+    # `# origin:` whenever the running script changes, so a line from a
+    # sourced file carries the root its paths were resolved against and the
+    # replay arms that one (`_replay`).  What remains is one text recorded
+    # from TWO roots, where no single root is right; it falls back to the
+    # entry flow.
     # The staleness stamp (written at build): a resume replays the RECORDED
     # lines, so an edit to the flow's text since then does not take effect
     # here — worth one NOTE, not a refusal (the recorded build is a
