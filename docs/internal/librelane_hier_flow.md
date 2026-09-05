@@ -175,6 +175,17 @@ A passes ⇒ mechanism A is the phase-1 handoff.  B passes ⇒ FIXED pre-routes
 are available for phase 3.  Either failing is a result, not a blocker: the
 scripts print what the router did instead.
 
+**Phase 0 ran on 2026-09-05 (macOS, Docker Desktop 4.12, LibreLane 3.0.11,
+sky130A) and all five held** — the numbers are under each recipe in §8.
+A: the router seats the bus inside a supplied corridor to within a gcell
+(98.1 % of wire inside the as-routed corridor at 1 µm slack, 96.3 % inside
+one shifted a gcell away that the router would not have chosen).  B: a
+FIXED bus survives both routers byte-identical while the other nets route
+around it.  What it cost to get there is the useful part: nine "bites",
+every one a fact about the tool rather than a bug in the plan, and each is
+now in the script or the recipe that needed it — the macro-vs-PDN phase
+requirement of step 4 being the one that reaches into phase 1's design.
+
 ## 7. The benchmark
 
 ### 7.1 Vehicles — a ladder, not one design
@@ -299,7 +310,7 @@ librelane --dockerized --run-tag phase0 config.json
 ls runs/phase0/final/gds runs/phase0/final/lef runs/phase0/final/nl runs/phase0/final/spef/*
 ```
 
-Pass: `reg32.gds`, `reg32.lef`, `reg32.nl.v`, and `nom_/min_/max_`
+Pass: `reg32.gds`, `reg32.lef`, `reg32.nl.v`, and `nom/min/max`
 SPEFs — the paths `two_reg32/config.json` names.
 
 **3. Harden it again with a pin DEF template** — the block-side handoff.
@@ -307,14 +318,21 @@ SPEFs — the paths `two_reg32/config.json` names.
 ```bash
 python3 gen_pins_def.py > pins.def          # d[*] west, q[*] east, clk/rst south, on tracks
 librelane --dockerized --run-tag phase0_pins config_pins.json
-grep -A2 '^- d\[0\]' runs/phase0_pins/final/def/reg32.def
-grep -A2 '^- d\[0\]' pins.def
+grep -A3 -E '^\s*- d\[0\] ' runs/phase0_pins/final/def/reg32.def
+grep -A3 -E '^\s*- d\[0\] ' pins.def
 ```
 
-Pass: the run completes (`Odb.ApplyDEFTemplate` reports the die bbox and
-relocates 66 pins), and `d[0]`'s `+ PLACED ( 0 <y> )` in the final DEF is the
-template's.  If the template is refused for an off-track or off-grid pin, the
-generator's `--h-pitch/--h-offset/--v-pitch/--v-offset` take the PDK's real
+Pass: the run completes (`Odb.ApplyDEFTemplate` relocates 66 pins, warning
+only that VPWR/VGND are power pins it ignores), and `d[0]`'s ABSOLUTE
+rectangle — `LAYER` offsets added to the `PLACED` point — is the template's.
+Compare rectangles, not origins: OpenROAD writes every pin back with its
+origin at the rect's CENTRE, so the template's `LAYER met3 ( 0 -150 ) ( 2000
+150 ) + PLACED ( 0 8500 )` comes out as `LAYER met3 ( -1000 -150 ) ( 1000
+150 ) + PLACED ( 1000 8500 )` — the same 2 x 0.3 um of metal, and a check
+on the `PLACED` point alone reports all 66 pins moved (measured 2026-09-05:
+66 of 66 rectangles identical, 0 of 66 origins).  Phase 1's pin writer and
+any verifier of it must read the geometry the same way.  If the template is
+refused for an off-track or off-grid pin, the generator's `--h-pitch/--h-offset/--v-pitch/--v-offset` take the PDK's real
 values from the tech LEF; if `resolved.json` shows different pin layers, pass
 `--h-layer/--v-layer`.
 
@@ -326,11 +344,33 @@ librelane --dockerized --run-tag phase0 config.json
 grep -c 'mid\[' runs/phase0/final/def/two_reg32.def
 ```
 
-Pass: `Flow complete`, 32 `mid[*]` nets routed between `u0` and `u1`.  If
-the PDN step cannot find the macros' power pins, add
-`"PDN_MACRO_CONNECTIONS": ["u[01] VPWR VGND VPWR VGND"]` (the format is
-`<instance_rx> <vdd_net> <gnd_net> <vdd_pin> <gnd_pin>`; the pin names are in
-`../reg32/runs/phase0/final/lef/reg32.lef`).
+Pass: `Flow complete`, `All shapes on net VPWR are connected` (and VGND),
+32 `mid[*]` nets routed between `u0` and `u1` (measured 2026-09-05: 100 std
+cells, DRC/LVS/antenna 0, IR drop worst 0.12 mV).  The first draft of this
+toy did NOT pass, and the way it failed is a phase-1 requirement, so it is
+kept here.  `OpenROAD.IRDropReport` stopped the run with `[PSM-0069] Check
+connectivity failed on VPWR` — after routing, which was already clean — and
+the unconnected shapes were `u0`'s OWN power pins while `u1`'s were fine,
+same cell, same y.  `PDN_MACRO_CONNECTIONS` (the guess this paragraph used
+to make) is not it: both macro grids were inserted.  The cause is the
+macro's x-PHASE against the top's strap grid.  The core met4 straps sit at
+x = core origin + `PDN_VOFFSET` + k·`PDN_VPITCH` (5.52 + 30k); with `u0` at
+x = 20 its VGND met4 pin (cell-local 13.22–15.22) lands at 33.22–35.22, under
+the VPWR strap at 34.72–36.32, and pdngen CLIPS the strap to above the
+macro rather than short the two nets — so the strap never reaches the met5
+pins it was to feed, and the one surviving strap over `u0` (95.52) misses
+the macro's met5 pin, which ends at 94.06, by 0.66 µm.  `u1` at x = 160 has
+the same pins at 169.52/173.22, clear of the 185.52 strap.  A second
+failure mode hid behind it: a die that leaves a sliver of standard-cell
+rows outside a macro halo (9 sites at 250.24–254.38 on the first 260-wide
+die) whose rails no strap crosses.  Both are geometry.  The toy now places
+`u0` at x = 10 (10 ≡ 160 mod 30, so both macros see the straps in the same
+phase) on a 250-wide die (each halo reaches its die edge, so every standard
+cell sits in the channel).  For phase 1 this means BUDA's block placer must
+know the top's PDN grid — pitch, offset and the macro's own pin pattern —
+and either place each macro at a phase its pins clear, or derive
+`PDN_VOFFSET` from the placement; an x that is legal for placement can still
+be one no PDN connects, and nothing before signoff says so.
 
 **5. Measurement A — guides.**
 
@@ -340,45 +380,77 @@ ODB=$(ls ../two_reg32/runs/phase0/*-openroad-cts/two_reg32.odb)
 ./run_or.sh ../two_reg32/runs/phase0 guide_ref.tcl  ODB=$ODB OUT=$PWD/out      # reference: route all, keep guides
 python3 extract_bus_guides.py out/all.guide out/bus.guide                       # the bus's guides, as routed
 ./run_or.sh ../two_reg32/runs/phase0 guide_test.tcl ODB=$ODB OUT=$PWD/out      # withhold bus, read_guides, drt
-python3 check_inside.py out/guided.def out/bus.guide
+python3 check_inside.py out/guided.def out/bus.guide --slack 1.0
 ```
 
-Pass: `nobus.guide` has no `mid[*]` entry, `merged.guide` has them and the
-other nets' entries unchanged (`diff <(grep -v … ) …` if you want it exact),
-`check_inside.py` exits 0 (`… 0 outside their guides`).  Then the sharper
-form — a corridor the router did NOT choose:
+Pass: `guide_test.tcl` prints `A: 32 bus net(s), 101 other net(s)`,
+`nobus.guide` has no `mid[*]` entry, `merged.guide` has all 133, detailed
+routing ends at `Number of violations = 0`, and `check_inside.py` reports
+the bus wire inside its guides.  Measured 2026-09-05: 280 segments, 6108 µm
+of bus wire, **98.1 % inside its own layer's boxes at 1 µm slack** (1.2 %
+on another layer inside the corridor's xy footprint, 0.7 % outside it; at a
+whole gcell of slack, 6.9 µm, 0.2 % outside).  The exits are gcell-edge
+overshoots and pin-access legs, never a run leaving the corridor.
+
+Three things the first attempt got wrong, each now baked into the scripts:
+the database spells the bus nets DEF-escaped (`mid\[0\]`, backslashes
+included), `write_guides` spells them the same way, and `set_nets_to_route`
+matches either that or the plain `mid[0]` — but NOT the doubled backslashes
+a Tcl list gives such a string, and a call that matches nothing routes
+EVERYTHING silently, so `guide_test.tcl` finds and passes the bus by its
+plain name; `read_guides` REPLACES the guide set rather than adding to it
+(after it, `write_guides` held only the bus and DRT routed only the bus), so
+the merge is done in the file; and a guide is a set of GCELLS — 6.9 µm here,
+the `GCELLGRID` DRT prints — so every box the scripts write is gcell-aligned
+(`[ERROR DRT-0229] genGuides_split split_indices is empty` on anything
+else).  Then the sharper form — a corridor the router did NOT choose:
 
 ```bash
-python3 extract_bus_guides.py out/all.guide out/bus.guide --dy 3     # shift 3 µm inside the channel
+python3 extract_bus_guides.py out/all.guide out/bus.guide --dy 6.9   # shift the channel one gcell
 ./run_or.sh ../two_reg32/runs/phase0 guide_test.tcl ODB=$ODB OUT=$PWD/out
-python3 check_inside.py out/guided.def out/bus.guide
+python3 check_inside.py out/guided.def out/bus.guide --slack 1.0
 ```
 
-Pass: still 0 outside.  That is the result that makes mechanism A the
-phase-1 handoff.  Only the CHANNEL rectangles move (those between the
-macros, `--channel 100 160` µm by default — u0 ends at x = 100, u1 starts at
-160); the terminal boxes over the pins stay put, since the pins do not move,
-and each shifted box is re-connected to them with a riser on `--riser-layer`
-(met2) so the guide stays one connected set of boxes.  `check_inside.py`
-checks every SEGMENT along its length on its own layer, not just the
-vertices, and a bus bit with no wiring at all is a failure, never a pass.
+Pass: still inside.  Measured: 390 segments, 6350 µm, **96.3 % inside the
+SHIFTED corridor** (2.4 % layer change, 1.3 % outside; 0.2 % beyond one
+gcell) — while checked against the AS-ROUTED guides the same wire is 21.2 %
+outside.  It went where the guide said, not where the router would have
+gone.  That is the result that makes mechanism A the phase-1 handoff.  Only
+the CHANNEL moves — the part of each box between the macros (`--channel 90
+160` µm by default, snapped inward to the gcell grid: 96.6..158.7) is CLIPPED
+out and shifted, the metal over the macros stays, since the pins do not
+move; each cut is bridged by a RISER on the vertical layer next to the cut
+box's layer, two gcell columns wide, because adjacent-layer guides connect
+only where they SHARE a gcell (a riser that merely abutted its pieces gave
+`DRT-0218 Guide is not connected to design`).  `--dy` must be a whole
+number of gcells — a box moved by less still overlaps the gcell it came
+from, so the router may stay and the check cannot tell following from
+agreeing — and `extract_bus_guides.py` refuses anything else.
+`check_inside.py` checks every SEGMENT along its length on its own layer,
+says which kind of miss each is (another layer inside the corridor, or
+outside it), weighs both by wire length, and counts a bus bit with no
+wiring as a failure, never a pass.
 
 **6. Measurement B — FIXED wires.**
 
 ```bash
-python3 mark_fixed.py out/guided.def out/fixed.def                    # bus: + ROUTED → + FIXED
+python3 mark_fixed.py out/guided.def out/fixed.def --strip-others         # bus: + ROUTED → + FIXED; others: unrouted
 MACRO_LEF=$(cd ../reg32 && pwd)/runs/phase0/final/lef/reg32.lef
 ./run_or.sh ../two_reg32/runs/phase0 fixed_test.tcl DEF=$PWD/out/fixed.def MACRO_LEF=$MACRO_LEF OUT=$PWD/out
 python3 compare_bus_wires.py out/fixed.def out/fixed_after.def
 ```
 
-Pass: `32 bus net(s): 32 unchanged, 0 changed`.  `mark_fixed.py` refuses a
-bus bit that had no wiring to mark, so an unrouted bit cannot come out of the
-comparison as "unchanged".  If `global_route` objects
-to the OTHER nets already carrying wiring, re-make the input with
-`mark_fixed.py --strip-others` (the bus stays FIXED, everything else is
-re-routed from scratch) and rerun.  A `CHANGED` result is the finding that
-keeps FIXED pre-routes out of phase 1.
+Pass: `Routed nets: 101` from global routing (the 32 FIXED nets skipped),
+`Number of violations = 0` from detailed routing, and `32 bus net(s): 32
+unchanged, 0 changed`.  Measured 2026-09-05: exactly that — the routers
+route the other 101 nets around a FIXED bus and leave its wiring
+byte-identical.  `--strip-others` is not optional in practice: with the
+other nets still carrying `+ ROUTED` wiring, `global_route` routed 0 nets
+and `detailed_route` re-derived guides from the existing wires, so the
+"unchanged" verdict would have measured a session that re-routed nothing.
+`mark_fixed.py` refuses a bus bit that had no wiring to mark, so an
+unrouted bit cannot come out of the comparison as "unchanged".  A `CHANGED`
+result is the finding that keeps FIXED pre-routes out of phase 1.
 
 Keep `out/` — its files are the evidence the write-up cites.
 
