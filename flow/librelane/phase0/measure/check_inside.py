@@ -31,7 +31,7 @@ footprint on every layer is the router leaving the corridor.  The strict
 count is the verdict; the split is what it means.
 """
 import argparse
-from def_wires import net_entries, paths
+from def_wires import net_entries, paths, patches
 from guide_io import read_guides
 
 DBU = 1000
@@ -127,6 +127,14 @@ def main():
         if sum(len(pts) for _, pts in net_paths) < 2:
             unrouted.append(net)
             continue
+        for layer, x1, y1, x2, y2 in patches(text):
+            # A via's patch metal counts as metal (Codex #877): each corner
+            # must sit in the net's guide on that layer, like a path point.
+            if not all(point_inside(x, y, [r for r in rects if r[4] == layer], slack)
+                       for x, y in ((x1, y1), (x2, y2))):
+                n_corridor += 1
+                bad.append((net, f"patch ({x1 / DBU:.3f}, {y1 / DBU:.3f})-({x2 / DBU:.3f}, {y2 / DBU:.3f}) "
+                                 f"on {layer} [corridor]"))
         for layer, pts in net_paths:
             for x, y in pts:
                 if not point_inside(x, y, rects, slack):

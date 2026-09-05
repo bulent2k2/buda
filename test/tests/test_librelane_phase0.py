@@ -188,6 +188,10 @@ def test_the_def_wire_reader_finds_bus_points_with_their_layers(helpers):
     # it became a wire to (-0.39, -0.15) um, outside every guide).
     e = "- x + ROUTED met3 ( 100 200 ) ( 100 300 ) NEW met3 ( 100 300 ) RECT ( -390 -150 0 150 ) ;"
     assert dw.paths(e) == [("met3", [(100, 200), (100, 300)]), ("met3", [(100, 300)])]
+    # ... but it IS metal, resolved against that point (Codex #877).
+    assert dw.patches(e) == [("met3", -290, 150, 100, 450)]
+    with pytest.raises(ValueError, match="RECT with no previous point"):
+        dw.paths("- x + ROUTED met3 RECT ( 0 0 1 1 ) ;")
     assert dw.paths("- x ( u0 q[0] ) ( u1 d[0] ) + USE SIGNAL ;") == []   # unrouted
     # OpenROAD writes a routed DEF with the names DEF-escaped (`mid\\[0\\]`),
     # and its guide file with them plain (`mid[0]`).  The reader keys on the
@@ -241,6 +245,13 @@ def test_check_inside_passes_within_guides_and_names_the_offender(tmp_path):
     r = subprocess.run([sys.executable, str(_M / "check_inside.py"), str(d), str(g)],
                        capture_output=True, text=True)
     assert r.returncode == 1 and "OUTSIDE: mid[0] point (160.000, 45.000) on met2" in r.stdout
+    # A RECT patch is metal too: one poking out of the guide is a miss even
+    # when every path point is inside (Codex #877).
+    g.write_text("mid[0]\n(\n99000 40000 161000 42000 met3\n159000 40000 161000 46000 met2\n)\n")
+    d.write_text(_DEF.replace("( 160000 45000 ) ;", "( 160000 45000 ) NEW met3 ( 160000 41000 ) RECT ( -200 -100 3000 100 ) ;"))
+    r = subprocess.run([sys.executable, str(_M / "check_inside.py"), str(d), str(g)],
+                       capture_output=True, text=True)
+    assert r.returncode == 1 and "OUTSIDE: mid[0] patch (159.800, 40.900)-(163.000, 41.100) on met3 [corridor]" in r.stdout
 
 
 def test_check_inside_refuses_an_unrouted_net_and_a_gap_crossing_segment(tmp_path):

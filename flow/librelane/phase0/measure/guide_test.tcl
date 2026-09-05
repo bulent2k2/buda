@@ -38,8 +38,17 @@ global_route -congestion_iterations 50 -verbose
 write_guides $::env(OUT)/nobus.guide        ;# EXPECT: no bus entries
 
 # 2. Merge the bus guides IN THE FILE (read_guides replaces, see above), read.
-exec sh -c "cat $::env(OUT)/nobus.guide $::env(OUT)/bus.guide > $::env(OUT)/merged.guide"
-read_guides $::env(OUT)/merged.guide
+#    Tcl channels, not `exec sh -c "cat ..."`: a path with a space would be
+#    split by the shell (Codex #877), and this tree's rule is that paths may
+#    contain spaces.
+set merged [open [file join $::env(OUT) merged.guide] w]
+foreach part {nobus.guide bus.guide} {
+    set in [open [file join $::env(OUT) $part] r]
+    fcopy $in $merged
+    close $in
+}
+close $merged
+read_guides [file join $::env(OUT) merged.guide]
 
 # 3. Detailed-route under the merged guides (LibreLane's drt.tcl arguments).
 detailed_route -droute_end_iter 64 -or_seed 42 -verbose 1 \
