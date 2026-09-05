@@ -52,7 +52,9 @@ def test_the_top_names_the_blocks_final_views_and_places_both_instances():
     assert set(macro["instances"]) == {"u0", "u1"}
     for name, inst in macro["instances"].items():
         assert inst["orientation"] == "N" and len(inst["location"]) == 2, name
-    # Two 80x80 macros inside a 260x120 die, side by side, no overlap.
+    # Two 80x80 macros inside a 250x120 die, side by side, no overlap;
+    # each macro's 10 um halo reaches its die edge, so every standard cell
+    # sits in the channel and no strip of rows is left for the PDN to miss.
     (x0, y0), (x1, y1) = (macro["instances"]["u0"]["location"],
                           macro["instances"]["u1"]["location"])
     die = _cfg("reg32/config.json")["DIE_AREA"]
@@ -142,6 +144,26 @@ END NETS
 """
 
 
+def test_the_guide_reader_keys_by_net_name_and_writes_the_files_spelling(tmp_path, helpers):
+    """OpenROAD's write_guides spelled the 32 bus nets `mid\\[0\\]` and the
+    port nets `d[0]` in the same file (two_reg32, 2026-09-05), so the reader
+    keys by the plain name -- the key def_wires uses, so the containment
+    check can pair a net's guides with its wiring -- and the writer gives
+    each name back as the file spelled it, escaping `[`/`]` only for a name
+    it never read (what OpenROAD did for every non-port net)."""
+    gio, _ = helpers
+    src = tmp_path / "a.guide"
+    src.write_text("mid\\[0\\]\n(\n0 0 10 10 met3\n)\nd[0]\n(\n0 0 5 5 met2\n)\n")
+    g = gio.read_guides(src)
+    assert list(g) == ["mid[0]", "d[0]"]
+    assert g.spelling == {"mid[0]": "mid\\[0\\]", "d[0]": "d[0]"}
+    dst = tmp_path / "b.guide"
+    gio.write_guides(dst, {"mid[0]": g["mid[0]"], "d[0]": g["d[0]"], "new[1]": [(1, 1, 2, 2, "met1")]},
+                     g.spelling)
+    assert dst.read_text().splitlines()[::4] == ["mid\\[0\\]", "d[0]", "new\\[1\\]"]
+    assert gio.read_guides(dst)["mid[0]"] == g["mid[0]"]     # round trip by name
+
+
 def test_the_def_wire_reader_finds_bus_points_with_their_layers(helpers):
     _, dw = helpers
     ents = dw.net_entries(_DEF, "mid[")
@@ -161,7 +183,26 @@ def test_the_def_wire_reader_finds_bus_points_with_their_layers(helpers):
                            ("met4", [(100, 300), (500, 300)])]
     with pytest.raises(ValueError, match="no previous point"):
         dw.paths("- x + ROUTED met3 ( * 300 ) ;")
+    # A via's patch metal, `RECT ( dx1 dy1 dx2 dy2 )` relative to the point
+    # before it, is not a point on the path (the first real DEF: read as one,
+    # it became a wire to (-0.39, -0.15) um, outside every guide).
+    e = "- x + ROUTED met3 ( 100 200 ) ( 100 300 ) NEW met3 ( 100 300 ) RECT ( -390 -150 0 150 ) ;"
+    assert dw.paths(e) == [("met3", [(100, 200), (100, 300)]), ("met3", [(100, 300)])]
+    # ... but it IS metal, resolved against that point (Codex #877).
+    assert dw.patches(e) == [("met3", -290, 150, 100, 450)]
+    with pytest.raises(ValueError, match="RECT with no previous point"):
+        dw.paths("- x + ROUTED met3 RECT ( 0 0 1 1 ) ;")
     assert dw.paths("- x ( u0 q[0] ) ( u1 d[0] ) + USE SIGNAL ;") == []   # unrouted
+    # OpenROAD writes a routed DEF with the names DEF-escaped (`mid\\[0\\]`),
+    # and its guide file with them plain (`mid[0]`).  The reader keys on the
+    # plain name, so a `mid[` prefix finds the bus in BOTH files -- it found
+    # 0 of 32 in the first real DEF -- while the entry text is kept verbatim
+    # for mark_fixed's byte-preserving rewrite.
+    esc = _DEF.replace("- mid[0]", "- mid\\[0\\]")
+    ents = dw.net_entries(esc, "mid[")
+    assert list(ents) == ["mid[0]"]
+    assert ents["mid[0]"].lstrip().startswith("- mid\\[0\\]")
+    assert dw.net_entries(esc, "mid\\[") == {}
 
 
 def test_mark_fixed_changes_only_the_bus_entries(tmp_path):
@@ -204,6 +245,13 @@ def test_check_inside_passes_within_guides_and_names_the_offender(tmp_path):
     r = subprocess.run([sys.executable, str(_M / "check_inside.py"), str(d), str(g)],
                        capture_output=True, text=True)
     assert r.returncode == 1 and "OUTSIDE: mid[0] point (160.000, 45.000) on met2" in r.stdout
+    # A RECT patch is metal too: one poking out of the guide is a miss even
+    # when every path point is inside (Codex #877).
+    g.write_text("mid[0]\n(\n99000 40000 161000 42000 met3\n159000 40000 161000 46000 met2\n)\n")
+    d.write_text(_DEF.replace("( 160000 45000 ) ;", "( 160000 45000 ) NEW met3 ( 160000 41000 ) RECT ( -200 -100 3000 100 ) ;"))
+    r = subprocess.run([sys.executable, str(_M / "check_inside.py"), str(d), str(g)],
+                       capture_output=True, text=True)
+    assert r.returncode == 1 and "OUTSIDE: mid[0] patch (159.800, 40.900)-(163.000, 41.100) on met3 [corridor]" in r.stdout
 
 
 def test_check_inside_refuses_an_unrouted_net_and_a_gap_crossing_segment(tmp_path):
@@ -261,30 +309,44 @@ def test_read_resolved_matches_the_corner_against_wildcard_keys(tmp_path):
 
 
 def test_a_shifted_corridor_keeps_terminal_boxes_and_adds_risers(tmp_path):
-    """`--dy` moves only the channel rectangles -- the terminal boxes over the
-    macros stay where the pins are (Codex #875 P2) -- and re-connects each
-    moved box with a riser at both ends on a vertical layer, so the guide is
-    still one connected set of boxes."""
+    """`--dy` moves only the channel -- the metal over the macros stays where
+    the pins are (Codex #875 P2) -- and bridges each CUT with a riser on the
+    vertical layer next to the cut box, two gcell columns wide, so the guide
+    stays one connected set of boxes.  All of it in gcell units, which is
+    what a guide is to the router (DRT-0229 on anything else, measured)."""
     src, dst = tmp_path / "all.guide", tmp_path / "bus.guide"
-    src.write_text("mid[0]\n(\n"
-                   "98000 40000 102000 42000 met3\n"      # terminal over u0's pin
-                   "100000 40000 160000 42000 met3\n"     # the channel run
-                   "158000 40000 162000 42000 met3\n"     # terminal over u1's pin
-                   ")\nclk\n(\n0 0 10 10 met1\n)\n")
-    r = subprocess.run([sys.executable, str(_M / "extract_bus_guides.py"), str(src), str(dst), "--dy", "3"],
-                       check=True, capture_output=True, text=True)
-    assert "1 channel rect(s) shifted 3.0 um" in r.stdout and "2 terminal rect(s) kept" in r.stdout
     sys.path.insert(0, str(_M))
     import guide_io
+    # The real shape: OpenROAD's boxes are gcell-aligned (6.9 um) and merged
+    # along a run, so the channel run is ONE box overhanging both macro edges
+    # (89.7..165.6 for a 90..160 channel).  The channel snaps INWARD to the
+    # gcell grid (96.6..158.7), the overhangs stay, the inside shifts by a
+    # whole gcell, and a met4 riser straddles each cut.
+    src.write_text("mid[0]\n(\n89700 41400 165600 48300 met3\n)\nclk\n(\n0 0 6900 6900 met1\n)\n")
+    r = subprocess.run([sys.executable, str(_M / "extract_bus_guides.py"), str(src), str(dst), "--dy", "6.9"],
+                       check=True, capture_output=True, text=True)
+    assert "1 channel piece(s) shifted 6.9 um in y within x=96.6..158.7 (1 of them clipped" in r.stdout
+    assert "2 riser(s) at the cuts" in r.stdout
     g = guide_io.read_guides(dst)
     assert list(g) == ["mid[0]"]                       # clk is not a bus net
-    rects = set(g["mid[0]"])
-    assert (98000, 40000, 102000, 42000, "met3") in rects    # terminals untouched
-    assert (158000, 40000, 162000, 42000, "met3") in rects
-    assert (100000, 43000, 160000, 45000, "met3") in rects   # the channel, shifted
-    assert (99500, 40000, 100500, 45000, "met2") in rects    # risers span old..new y
-    assert (159500, 40000, 160500, 45000, "met2") in rects
-    # A shift that would move nothing is refused rather than silently a no-op.
+    assert set(g["mid[0]"]) == {
+        (89700, 41400, 96600, 48300, "met3"), (158700, 41400, 165600, 48300, "met3"),   # kept
+        (96600, 48300, 158700, 55200, "met3"),                                          # shifted
+        (89700, 41400, 103500, 55200, "met4"), (151800, 41400, 165600, 55200, "met4")}  # risers
+    # A box wholly inside the channel moves with its neighbours and gets no
+    # riser; a met5 run is bridged on met4 (met2 is not adjacent to met5).
+    src.write_text("mid[0]\n(\n89700 41400 165600 48300 met5\n103500 41400 110400 62100 met4\n)\n")
+    subprocess.run([sys.executable, str(_M / "extract_bus_guides.py"), str(src), str(dst), "--dy", "6.9"],
+                   check=True, capture_output=True, text=True)
+    rects = set(guide_io.read_guides(dst)["mid[0]"])
+    assert (103500, 48300, 110400, 69000, "met4") in rects           # shifted, no riser of its own
+    assert (89700, 41400, 103500, 55200, "met4") in rects            # the met5 run's riser, on met4
+    assert not [r for r in rects if r[4] == "met2"]
+    # A shift that is not a whole gcell is refused (the box would straddle
+    # the gcell it left), and so is one that would move nothing.
+    r = subprocess.run([sys.executable, str(_M / "extract_bus_guides.py"), str(src), str(dst), "--dy", "3"],
+                       capture_output=True, text=True)
+    assert r.returncode == 1 and "not a whole number of gcells" in r.stderr
     r = subprocess.run([sys.executable, str(_M / "extract_bus_guides.py"), str(src), str(dst),
-                        "--dy", "3", "--channel", "300", "400"], capture_output=True, text=True)
+                        "--dy", "6.9", "--channel", "300", "400"], capture_output=True, text=True)
     assert r.returncode == 1 and "nothing to shift" in r.stderr
