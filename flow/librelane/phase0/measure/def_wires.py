@@ -1,4 +1,4 @@
-"""The routed wiring of named nets, out of a DEF `NETS` section (shared).
+r"""The routed wiring of named nets, out of a DEF `NETS` section (shared).
 
 `net_entries(text, prefix)` -> {net: entry_text}: each net's whole
 `- name ... ;` entry, keyed by the net's NAME rather than its DEF spelling:

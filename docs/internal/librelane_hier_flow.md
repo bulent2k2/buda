@@ -252,6 +252,13 @@ breakdown, `route__wirelength`, `route__drc_errors` + signoff DRC, plus
 BUDA's end-of-run triple for H+B.  Output: one table per N and a crossover
 plot — runtime and each PPA metric versus N, three lines each.
 
+The H arms also report each hardened block's `route__wirelength` and
+`timing__setup__ws` from ITS OWN run, beside the top's: a pin assignment is
+not free inside the block — phase 0 measured `reg32` at +60 % internal
+wirelength (3937 → 6303) under the d-west/q-east template — and the top's
+bus buys that back or it does not.  A comparison that reads only the top's
+metrics would credit BUDA with a saving it charged to the block.
+
 ### 7.4 Success criterion — proposed, to confirm before any benchmark run
 
 * **H+B ≥ H on every PPA metric at every N.**  BUDA must never make
@@ -380,17 +387,25 @@ ODB=$(ls ../two_reg32/runs/phase0/*-openroad-cts/two_reg32.odb)
 ./run_or.sh ../two_reg32/runs/phase0 guide_ref.tcl  ODB=$ODB OUT=$PWD/out      # reference: route all, keep guides
 python3 extract_bus_guides.py out/all.guide out/bus.guide                       # the bus's guides, as routed
 ./run_or.sh ../two_reg32/runs/phase0 guide_test.tcl ODB=$ODB OUT=$PWD/out      # withhold bus, read_guides, drt
-python3 check_inside.py out/guided.def out/bus.guide --slack 1.0
+python3 check_inside.py out/guided.def out/bus.guide --slack 1.0 --max-outside-pct 5
 ```
 
 Pass: `guide_test.tcl` prints `A: 32 bus net(s), 101 other net(s)`,
 `nobus.guide` has no `mid[*]` entry, `merged.guide` has all 133, detailed
-routing ends at `Number of violations = 0`, and `check_inside.py` reports
-the bus wire inside its guides.  Measured 2026-09-05: 280 segments, 6108 µm
-of bus wire, **98.1 % inside its own layer's boxes at 1 µm slack** (1.2 %
-on another layer inside the corridor's xy footprint, 0.7 % outside it; at a
+routing ends at `Number of violations = 0`, and `check_inside.py` exits 0
+with a `PASS:` line.  Measured 2026-09-05: 280 segments, 6108 µm of bus
+wire, **98.1 % inside its own layer's boxes at 1 µm slack** (1.2 % on
+another layer inside the corridor's xy footprint, 0.7 % outside it; at a
 whole gcell of slack, 6.9 µm, 0.2 % outside).  The exits are gcell-edge
-overshoots and pin-access legs, never a run leaving the corridor.
+overshoots and pin-access legs, never a run leaving the corridor.  The
+threshold is what makes the exit code the verdict: without
+`--max-outside-pct` any miss exits 1, which is the right rule for a
+synthetic DEF and the wrong one for a routed design, where the first run
+exited 1 on the result this paragraph calls a pass — a script no harness
+could gate on.  5 % is chosen ABOVE both measured numbers (1.9 % and 3.7 %
+below) and well under the 21.2 % of a corridor the wire did not follow, so
+it separates following from not following; an unrouted bit fails at any
+threshold.
 
 Three things the first attempt got wrong, each now baked into the scripts:
 the database spells the bus nets DEF-escaped (`mid\[0\]`, backslashes
@@ -408,13 +423,14 @@ else).  Then the sharper form — a corridor the router did NOT choose:
 ```bash
 python3 extract_bus_guides.py out/all.guide out/bus.guide --dy 6.9   # shift the channel one gcell
 ./run_or.sh ../two_reg32/runs/phase0 guide_test.tcl ODB=$ODB OUT=$PWD/out
-python3 check_inside.py out/guided.def out/bus.guide --slack 1.0
+python3 check_inside.py out/guided.def out/bus.guide --slack 1.0 --max-outside-pct 5
 ```
 
-Pass: still inside.  Measured: 390 segments, 6350 µm, **96.3 % inside the
+Pass: still exit 0.  Measured: 390 segments, 6350 µm, **96.3 % inside the
 SHIFTED corridor** (2.4 % layer change, 1.3 % outside; 0.2 % beyond one
 gcell) — while checked against the AS-ROUTED guides the same wire is 21.2 %
-outside.  It went where the guide said, not where the router would have
+outside (run the check against `out/all.guide`'s bus entries to see the
+same script FAIL on it).  It went where the guide said, not where the router would have
 gone.  That is the result that makes mechanism A the phase-1 handoff.  Only
 the CHANNEL moves — the part of each box between the macros (`--channel 90
 160` µm by default, snapped inward to the gcell grid: 96.6..158.7) is CLIPPED
@@ -484,7 +500,24 @@ LibreLane on the generated `Mesh` with `mesh_config.json`, and the same
 guide writers, an `optimize_placement` command (or a Python driver), sky130
 via `import_lef_tech`; one orchestrator (`tools/librelane_hier.py`: S0 →
 BUDA → S1 in parallel → S2); proven end to end on the phase-0 toy and
-`salsa20` with `check_design` clean and LibreLane signoff clean.
+`salsa20` with `check_design` clean and LibreLane signoff clean.  Two
+requirements phase 0 measured go into the writers rather than the recipe:
+
+* **A macro is placed at a PDN PHASE its power pins clear** (§8 step 4: at
+  x = 20 `u0`'s VGND pin sat under the top's VPWR strap, pdngen clipped the
+  strap, and signoff — nothing earlier — refused the design; at x = 10 ≡
+  160 mod 30 both macros connect).  BUDA already has the shape of this
+  machinery: `align_bottom_up` nudges congruent instances onto a common
+  TRACK phase (coordinate mod the LCM of the layer pitches), and a PDN grid
+  is one more period — `PDN_VPITCH`/`PDN_HPITCH` with `PDN_VOFFSET`/
+  `PDN_HOFFSET` from the top's config, tested against the macro's own
+  pin rectangles from its LEF rather than against the cell bbox.  Either
+  the placer snaps each macro to a clearing phase, or the placement writer
+  derives `PDN_*OFFSET` from where the macros landed; the toy's fix was the
+  former by hand.  The check belongs in the writer, not in signoff.
+* **The pin verifier compares RECTANGLES, not `PLACED` origins** (§8 step
+  3: OpenROAD re-centres every pin's origin; 66/66 rects identical, 0/66
+  origins).
 
 **Phase 2 — the benchmark.**  PE RTL for the systolic vehicle; the three arms
 across N; the §7.3 table and crossover plot; a write-up that states the §2.1
@@ -510,3 +543,15 @@ have: every netlist here is either authored or uniquified.
 3. ~~Vehicle~~ — decided: the ladder in §7.1, tiers 1a and 1b first, both
    for concrete runtime numbers; Chisel is acceptable.  Open: the tier-2
    config size, once the 1b numbers say what the laptop affords.
+4. **The PDN-phase placement rule** (§9, phase 1): snap-to-phase in the
+   placer, or derive the offsets from the placement?  Snapping keeps the
+   top's PDN config authoritative (what a real flow has) and costs each
+   macro up to half a pitch of movement; deriving the offsets moves the
+   whole grid for one macro's sake and cannot serve two macros at
+   incompatible phases.  Snapping is the proposal; the two_reg32 toy at a
+   deliberately wrong phase is the test either way.
+5. **The 5 % pass threshold of measurement A** (§8 step 5) is a number
+   read off two runs of one toy.  It should be re-read on the first real
+   vehicle (tier 1a, N=4): if the gcell-edge and pin-access share does not
+   scale with the design, 5 % stays; if it does, the threshold is the wrong
+   shape and the check should exclude the terminal gcell at each pin.

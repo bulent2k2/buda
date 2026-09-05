@@ -29,6 +29,17 @@ router changing LAYER within the corridor (measured 2026-09-05: a 23 um
 vertical run on met2 where the guide box was met4), while one outside the
 footprint on every layer is the router leaving the corridor.  The strict
 count is the verdict; the split is what it means.
+
+The EXIT CODE is the verdict, and `--max-outside-pct` says what a pass is.
+Without it every miss fails (the strict rule, right for a synthetic DEF).
+With it the run passes when the STRICT measure -- wire length outside its
+own layer's boxes, layer changes and corridor exits both, as a percentage
+of the bus's wire -- is at or under the number, which is what a real
+routed DEF needs: the real result is 1.9 % (as-routed corridor) and 3.7 %
+(the corridor shifted a gcell), all of it gcell-edge overshoot and
+pin-access legs, and a script that exits 1 on the run the recipe calls a
+pass is one no harness can gate on.  An unrouted bus bit fails under
+either rule: no threshold makes missing wire a pass.
 """
 import argparse
 from def_wires import net_entries, paths, patches
@@ -111,7 +122,12 @@ def main():
     ap.add_argument("def_file"); ap.add_argument("guide")
     ap.add_argument("--prefix", default="mid[")
     ap.add_argument("--slack", type=float, default=0.5)
+    ap.add_argument("--max-outside-pct", type=float, default=None, metavar="PCT",
+                    help="pass when at most PCT %% of the bus wire (by length) lies outside "
+                         "its own layer's guide boxes; default: any miss fails")
     a = ap.parse_args()
+    if a.max_outside_pct is not None and not 0 <= a.max_outside_pct <= 100:
+        raise SystemExit(f"--max-outside-pct {a.max_outside_pct}: a percentage, 0..100")
     slack = int(a.slack * DBU)
 
     entries = net_entries(open(a.def_file).read(), a.prefix)
@@ -170,7 +186,15 @@ def main():
         print(f"  UNROUTED: {net} -- an entry with no wiring is not a pass")
     for net, what in bad[:10]:
         print(f"  OUTSIDE: {net} {what}")
-    raise SystemExit(1 if (bad or unrouted) else 0)
+    outside_pct = 100 * (wl_layer + wl_corridor) / max(wl, 1)
+    if a.max_outside_pct is None:
+        ok = not (bad or unrouted)
+    else:
+        ok = not unrouted and outside_pct <= a.max_outside_pct
+        print(f"  {'PASS' if ok else 'FAIL'}: {outside_pct:.1f}% of the bus wire outside its own "
+              f"layer's guides, threshold {a.max_outside_pct:g}%"
+              + (f", {len(unrouted)} unrouted" if unrouted else ""))
+    raise SystemExit(0 if ok else 1)
 
 
 if __name__ == "__main__":

@@ -254,6 +254,50 @@ def test_check_inside_passes_within_guides_and_names_the_offender(tmp_path):
     assert r.returncode == 1 and "OUTSIDE: mid[0] patch (159.800, 40.900)-(163.000, 41.100) on met3 [corridor]" in r.stdout
 
 
+def test_check_inside_exit_code_is_the_verdict_at_a_stated_threshold(tmp_path):
+    """The recipe's pass is "98.1 % inside" on a real routed DEF, and the
+    strict rule exits 1 on it -- a script no harness can gate on.  With
+    `--max-outside-pct` the exit code IS the verdict: the strict measure
+    (wire length outside its own layer's boxes, as a share of the bus) at
+    or under the number passes, over it fails, and an unrouted bit fails
+    at any threshold, since no threshold makes missing wire a pass."""
+    d = tmp_path / "g.def"
+    d.write_text(_DEF)
+    g = tmp_path / "bus.guide"
+    # The met3 run 100..160 is covered; the 5 um met2 leg at x=160 is not:
+    # 4 of 64 um = 6.2 % of the wire outside its own layer's boxes.
+    g.write_text("mid[0]\n(\n99000 40000 161000 42000 met3\n)\n")
+    run = lambda *extra: subprocess.run([sys.executable, str(_M / "check_inside.py"), str(d), str(g), *extra],
+                                        capture_output=True, text=True)
+    r = run()
+    assert r.returncode == 1 and "OUTSIDE:" in r.stdout            # strict: any miss fails
+    r = run("--max-outside-pct", "10")
+    assert r.returncode == 0, r.stdout
+    assert "PASS: 6.2% of the bus wire outside its own layer's guides, threshold 10%" in r.stdout
+    r = run("--max-outside-pct", "5")
+    assert r.returncode == 1 and "FAIL: 6.2%" in r.stdout
+    r = run("--max-outside-pct", "0")                               # 0 is a real threshold, not "unset"
+    assert r.returncode == 1 and "FAIL: 6.2%" in r.stdout
+    r = run("--max-outside-pct", "120")
+    assert r.returncode == 1 and "a percentage, 0..100" in r.stderr
+    # An unrouted bit fails at any threshold.
+    head, tail = _DEF.index("+ ROUTED met3"), _DEF.index("- clk")
+    d.write_text(_DEF[:head] + ";\n" + _DEF[tail:])              # mid[0]: an entry with no wiring
+    r = run("--max-outside-pct", "100")
+    assert r.returncode == 1 and "UNROUTED: mid[0]" in r.stdout and "1 unrouted" in r.stdout
+
+
+def test_the_measure_scripts_compile_without_escape_warnings():
+    """`mid\\[0\\]` in a non-raw docstring is an invalid escape -- a
+    DeprecationWarning today and an error in a later Python.  Every
+    measure script must compile clean under -W error."""
+    for f in sorted(_M.glob("*.py")):
+        r = subprocess.run([sys.executable, "-W", "error", "-c",
+                            f"compile(open({str(f)!r}).read(), {str(f)!r}, 'exec')"],
+                           capture_output=True, text=True)
+        assert r.returncode == 0, f"{f.name}: {r.stderr}"
+
+
 def test_check_inside_refuses_an_unrouted_net_and_a_gap_crossing_segment(tmp_path):
     """The two vacuous passes Codex #875 named, each pinned as a refusal.
 

@@ -1,4 +1,4 @@
-"""Read/write the OpenROAD route-guide file (shared by the measure scripts).
+r"""Read/write the OpenROAD route-guide file (shared by the measure scripts).
 
 Format, as `write_guides` emits it (the ISPD-contest form TritonRoute reads):
 
