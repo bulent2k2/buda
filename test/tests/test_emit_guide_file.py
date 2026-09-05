@@ -31,7 +31,8 @@ import pytest
 
 import buda
 import buda_cli
-from buda_session.advisory import GcellGrid, gcell_from_def, merge_boxes
+from buda_session.advisory import (GcellGrid, gcell_from_def, guide_components,
+                                   merge_boxes)
 
 _ROOT = Path(__file__).resolve().parents[2]
 _MEASURE = _ROOT / "flow" / "librelane" / "phase0" / "measure"
@@ -258,6 +259,74 @@ def test_two_runs_write_the_same_bytes(tmp_path):
     assert a.read_bytes() == b.read_bytes() and a.stat().st_size > 0
 
 
+def _components(s, g, grid):
+    names = _layer_names(s)
+    stack = sorted(names)
+    return {net: guide_components(bx, grid, stack, names) for net, bx in g.items()}
+
+
+def test_every_nets_guide_is_one_connected_set_of_gcells(tmp_path):
+    """The router's own predicate (DRT-0218), applied to every net: gcells
+    side by side on a layer, or the same gcell on ADJACENT layers.  Every
+    Codex finding on #880 was a way to fail it -- a terminal strip on met5
+    and met3 with nothing on met4 between them, a pin's lone gcell beside an
+    abstract corridor -- so it is held here in every mode."""
+    p = tmp_path / "bus.guide"
+    grid = GcellGrid(0, GC * DBU, 0, GC * DBU)
+    for extra in ("", " terminal met3", " terminal met3,met5"):
+        s, out = _routed(tmp_path, [f"emit_guides {p} gcell {GC}{extra}"])
+        assert "every net's guide is one connected set" in out, out
+        comps = _components(s, guide_io.read_guides(p), grid)
+        assert comps and all(n == 1 for n in comps.values()), (extra, comps)
+        # A landing on met5 with `terminal met3` gets its strip on met4 too.
+        if extra == " terminal met3":
+            g = guide_io.read_guides(p)
+            layers = {b[4] for bx in g.values() for b in bx}
+            assert "met4" in layers
+    # The predicate itself, on hand-made boxes.
+    names = {3: "met3", 4: "met4", 5: "met5"}
+    stack = [3, 4, 5]
+    one = [(0, 0, 100, 50, "met3"), (50, 0, 100, 200, "met4")]           # share gcell (1, 0)
+    assert guide_components(one, GcellGrid(0, 50, 0, 50), stack, names) == 1
+    gap = [(0, 0, 100, 50, "met3"), (50, 0, 100, 200, "met5")]           # met4 missing between
+    assert guide_components(gap, GcellGrid(0, 50, 0, 50), stack, names) == 2
+    apart = [(0, 0, 50, 50, "met3"), (100, 0, 150, 50, "met3")]          # a gcell between
+    assert guide_components(apart, GcellGrid(0, 50, 0, 50), stack, names) == 2
+
+
+def test_a_pin_with_unknown_position_is_not_a_pin():
+    """A placed component whose LEF lacks a pin still gets the connection
+    row at (-1, -1); a strip toward that point reaches nothing."""
+    from buda_session.advisory import _pin_positions
+
+    class Pin:
+        def __init__(self, net_id, px, py):
+            self.net_id, self.px, self.py = net_id, px, py
+
+    class Comp:
+        def __init__(self, cid, x1, x2):
+            self.id, self.x1, self.x2 = cid, x1, x2
+
+    class Net:
+        def __init__(self, nid, name):
+            self.id, self.name = nid, name
+
+    class Bdb:
+        def all_nets(self):
+            return [Net(1, "mid[0]")]
+
+        def all_components(self):
+            return [Comp(1, 0, 80), Comp(2, -1, -1)]
+
+        def pins_by_comp(self, cid):
+            return {1: [Pin(1, 10.0, 20.0), Pin(1, -1, -1)], 2: [Pin(1, 5.0, 5.0)]}[cid]
+
+    class S:
+        bdb = Bdb()
+
+    assert _pin_positions(S()) == {"mid[0]": [(10.0, 20.0)]}
+
+
 # ── with a DEF-imported design: gcells from the DEF, strips to the pins ────
 
 _CHIP = """open_bdb :memory:
@@ -306,3 +375,12 @@ def test_a_def_imported_design_uses_its_gcellgrid_and_joins_landings_to_pins(tmp
                    for b in bx):
                 joined += 1
     assert joined, "no pin gcell found in any net's M3 boxes"
+    assert all(n == 1 for n in _components(s, g, grid).values())
+    # The ABSTRACT fallback joins the corridor to each pin as well (a lone
+    # pin gcell beside the corridor was two regions, Codex #880).
+    flow_abs = flow.replace("run_detailed_nuts\n", "")
+    s2, out2 = _run(flow_abs, [f"emit_guides {p} terminal M3"])
+    assert "from ABSTRACT" in out2 and "every net's guide is one connected set" in out2, out2
+    g2 = guide_io.read_guides(p)
+    assert all(n == 1 for n in _components(s2, g2, s2._def_gcell).values())
+    assert "joined to a pin" in out2 and " 0 joined to a pin" not in out2

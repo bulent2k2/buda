@@ -446,6 +446,11 @@ def _pin_positions(session):
                 nm = net_name.get(pin.net_id)
                 if nm is None:
                     continue
+                if pin.px < 0 and pin.py < 0:
+                    # The pin's OWN unknown-position sentinel: a placed
+                    # component whose LEF lacks this pin still gets the
+                    # connection row, at (-1, -1) (Codex #880).
+                    continue
                 out.setdefault(nm, []).append((float(pin.px), float(pin.py)))
         return out
     except Exception:
@@ -554,6 +559,21 @@ def build_guides(session, grid, terminal_layers=(), escape=True):
                 rep["wires"] += 1
 
     term_ids = [int(l) for l in terminal_layers]
+    stack = sorted(int(l) for l in names_by_id)      # the declared layers, bottom to top
+
+    def between(a, b):
+        """Every declared layer from a to b inclusive: a strip must be on
+        each of them, since adjacent-layer boxes connect only where they
+        share a gcell (Codex #880 — met5 to met3 needs met4 too)."""
+        lo, hi = min(a, b), max(a, b)
+        return [l for l in stack if lo <= l <= hi] or [a, b]
+
+    def strip_layers(lid):
+        out = {lid}
+        for t in term_ids:
+            out.update(between(lid, t))
+        return sorted(out)
+
     if rep["source"] == "detailed":
         for net, lid, x, y in free_ends:
             gx1, gy1, gx2, gy2 = grid.cell(dbu(x), dbu(y))
@@ -565,21 +585,80 @@ def build_guides(session, grid, terminal_layers=(), escape=True):
                 rep["pin_strips"] += 1
             else:
                 strip = (gx1, gy1, gx2, gy2)
-            for l in {lid, *term_ids}:
+            for l in strip_layers(lid):
                 add(net, strip, l)
                 rep["terminals"] += 1
-    elif term_ids:
+    else:
+        # Abstract corridors know no free ends; the corridor itself is
+        # joined to each pin: from the pin's gcell to the gcell of the
+        # nearest point of the net's nearest box, on that box's layer, the
+        # terminal layers and everything between (a lone pin gcell was two
+        # disconnected regions, Codex #880).
+        ids_by_name = {n: l for l, n in names_by_id.items()}
         for net in list(guides):
             for px, py in pins.get(net, []):
-                for l in term_ids:
-                    add(net, grid.cell(dbu(px), dbu(py)), l)
+                pxd, pyd = dbu(px), dbu(py)
+                px1, py1, px2, py2 = grid.cell(pxd, pyd)
+                best = None
+                for b in guides[net]:
+                    cx = min(max(pxd, b[0]), b[2] - 1)   # the box's point nearest the pin
+                    cy = min(max(pyd, b[1]), b[3] - 1)
+                    d = abs(cx - pxd) + abs(cy - pyd)
+                    if best is None or d < best[0]:
+                        best = (d, cx, cy, ids_by_name.get(b[4], stack[0] if stack else 0))
+                if best is None:
+                    continue
+                _d, cx, cy, lid = best
+                bx1, by1, bx2, by2 = grid.cell(cx, cy)
+                strip = (min(bx1, px1), min(by1, py1), max(bx2, px2), max(by2, py2))
+                for l in strip_layers(lid):
+                    add(net, strip, l)
                     rep["terminals"] += 1
+                rep["pin_strips"] += 1
 
     guides = {net: merge_boxes(bx) for net, bx in guides.items()}
     rep["nets"] = len(guides)
     rep["boxes"] = sum(len(b) for b in guides.values())
     rep["escape"] = escape
+    rep["disconnected"] = [net for net in sorted(guides)
+                           if guide_components(guides[net], grid, stack, names_by_id) > 1]
     return guides, rep
+
+
+def guide_components(boxes, grid, stack, names_by_id):
+    """How many connected sets of gcells a net's guide is, under the
+    router's rule: two gcells connect when they are side by side on one
+    layer, or the SAME gcell on two ADJACENT layers of the stack.  One is a
+    guide the router accepts; more is DRT-0218 waiting to happen — every
+    finding on #880 was a case of it, so the writer checks the predicate
+    itself rather than each cause separately."""
+    ids_by_name = {n: l for l, n in names_by_id.items()}
+    rank = {l: i for i, l in enumerate(stack)}
+    cells = set()
+    for x1, y1, x2, y2, ln in boxes:
+        r = rank.get(ids_by_name.get(ln, -1))
+        if r is None:
+            continue
+        i0, i1 = grid.index(x1, "x"), grid.index(x2 - 1, "x")
+        j0, j1 = grid.index(y1, "y"), grid.index(y2 - 1, "y")
+        for i in range(i0, i1 + 1):
+            for j in range(j0, j1 + 1):
+                cells.add((i, j, r))
+    parent = {c: c for c in cells}
+
+    def find(c):
+        while parent[c] != c:
+            parent[c] = parent[parent[c]]
+            c = parent[c]
+        return c
+
+    for (i, j, r) in cells:
+        for n in ((i + 1, j, r), (i, j + 1, r), (i, j, r + 1)):
+            if n in cells:
+                a, b = find((i, j, r)), find(n)
+                if a != b:
+                    parent[a] = b
+    return len({find(c) for c in cells})
 
 
 def merge_boxes(boxes):
@@ -675,6 +754,13 @@ class AdvisoryMixin:
               f"{rep['terminals']} terminal box(es), {rep['pin_strips']} joined to a pin"
               + (f", {rep['shields']} shield wire(s) not guided" if rep["shields"] else "")
               + ("" if rep["escape"] else "; names plain"))
+        if rep["disconnected"]:
+            d = rep["disconnected"]
+            print(f"WARNING: emit_guides: {len(d)} net(s) whose guide is not ONE connected "
+                  f"set of gcells (side-by-side on a layer, or the same gcell on adjacent "
+                  f"layers) — the router will report DRT-0218; first: {d[0]}")
+        else:
+            print(f"[Advisory] guides: every net's guide is one connected set of gcells")
         if rep["source"] == "detailed":
             bad = rep["vias_unshared"]
             if bad:

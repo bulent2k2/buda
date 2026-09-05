@@ -434,15 +434,21 @@ study measured about that reader
 - **Adjacent layers connect only where they SHARE a gcell** (`DRT-0218`
   otherwise). Every box is derived by one rule — the gcells CONTAINING each
   point, floor at both ends — so a stub and its trunk hold the junction
-  gcell in both layers by construction, and a self-check over every per-bit
-  via reports the first one that does not.
+  gcell in both layers by construction, and the writer checks the predicate
+  itself on every net's finished guide — one connected set of gcells, side
+  by side on a layer or the same gcell on adjacent layers of the stack — and
+  names the first net whose guide is not (plus a per-via self-check on the
+  detailed path).
 - **Net names are DEF-escaped** (`mid\[0\]`), as a routed OpenROAD database
   and its own `write_guides` spell a non-port net; `plain_names` turns that
   off.
 - **The router must reach the pins.** A wire end that is not a via is a
   block landing; with a BDB imported from DEF+LEF, each landing is joined to
-  the net's nearest pin by a strip of gcells on the wire's layer and on each
-  `terminal` layer (the pin's layer, which BUDA does not model — name it).
+  the net's nearest pin by a strip of gcells on the wire's layer, each
+  `terminal` layer (the pin's layer, which BUDA does not model — name it),
+  and every layer between them. The abstract fallback joins the corridor
+  itself to each pin the same way. A pin at the unknown-position sentinel
+  is not a pin.
 
 After `run_detailed_nuts` each bit gets its own gcell row (the corridor at
 track resolution); after `run_nuts` alone every net a corridor names gets
