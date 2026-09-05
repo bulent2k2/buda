@@ -252,12 +252,16 @@ breakdown, `route__wirelength`, `route__drc_errors` + signoff DRC, plus
 BUDA's end-of-run triple for H+B.  Output: one table per N and a crossover
 plot — runtime and each PPA metric versus N, three lines each.
 
-The H arms also report each hardened block's `route__wirelength` and
-`timing__setup__ws` from ITS OWN run, beside the top's: a pin assignment is
-not free inside the block — phase 0 measured `reg32` at +60 % internal
-wirelength (3937 → 6303) under the d-west/q-east template — and the top's
-bus buys that back or it does not.  A comparison that reads only the top's
-metrics would credit BUDA with a saving it charged to the block.
+An H arm's wirelength is the top's PLUS every block's, counted once per
+placed instance (a cell hardened once and placed eight times has eight
+times the wire on silicon), and the block-internal part is its own column
+rather than folded into the total.  That is where the block-side handoff
+is paid for: on the phase-0 block the pin template that straightens the
+top-level bus costs the block **+60 % of its own wire** (`reg32`, 3937 →
+6303 µm, LibreLane's placer vs d-west/q-east, measured 2026-09-05 — §8
+steps 2–3), and H+B minus H on the arm total alone would net that against
+the bus it buys without saying which side moved.  `tier1a/runtimes.py
+<top_run> --block <block_run>[:<instances>] …` writes the row that way.
 
 ### 7.4 Success criterion — proposed, to confirm before any benchmark run
 
