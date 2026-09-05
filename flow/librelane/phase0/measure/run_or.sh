@@ -14,16 +14,13 @@ run_dir=$(cd "$1" && pwd); script=$(cd "$(dirname "$2")" && pwd)/$(basename "$2"
 : "${PDK_ROOT:=$HOME/.ciel}"
 resolved="$run_dir/resolved.json"
 [ -f "$resolved" ] || { echo "no $resolved -- is $run_dir a LibreLane run directory?" >&2; exit 2; }
-# One value per line: RT_MIN_LAYER RT_MAX_LAYER TECH_LEF CELL_LEFS(space-joined) DESIGN_NAME
-readarray -t cfg < <(python3 - "$resolved" <<'PY'
-import json, sys
-c = json.load(open(sys.argv[1]))
-print(c["RT_MIN_LAYER"]); print(c["RT_MAX_LAYER"])
-tl = c["TECH_LEFS"]; print(tl[c.get("DEFAULT_CORNER", "nom_tt_025C_1v80")] if isinstance(tl, dict) else tl)
-cl = c["CELL_LEFS"]; print(" ".join(cl) if isinstance(cl, list) else cl)
-print(c["DESIGN_NAME"])
-PY
-)
+# One value per line: RT_MIN_LAYER RT_MAX_LAYER TECH_LEF CELL_LEFS DESIGN_NAME.
+# A separate script rather than an inline heredoc, and run BEFORE the array
+# is read: inside `readarray < <(...)` a failure is silent and leaves a short
+# array, which then surfaces as an unbound element at the docker line, far
+# from the cause.  Here a failure stops the script with the reader's message.
+cfg_text=$(python3 "$(dirname "$script")/read_resolved.py" "$resolved") || exit $?
+readarray -t cfg <<< "$cfg_text"
 extra=(); for kv in "$@"; do extra+=(-e "$kv"); done
 docker run --rm -t \
   -v "$HOME:$HOME" -v "$PDK_ROOT:$PDK_ROOT" -e "PDK_ROOT=$PDK_ROOT" \

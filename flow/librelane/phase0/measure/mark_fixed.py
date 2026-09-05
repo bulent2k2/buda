@@ -3,7 +3,10 @@
 
     mark_fixed.py guided.def fixed.def [--prefix 'mid[']
 
-Only the named nets' entries change; the rest of the file is byte-identical.
+Only the named nets' entries change; the rest of the file is byte-identical,
+and EVERY named net must have had wiring to mark -- a net without any is
+refused (see below), because its untouched entry would later compare as
+"unchanged" and pass for surviving FIXED wiring it never had.
 This is the input of measurement B (fixed_test.tcl): a DEF whose bus carries
 pre-routes the router is asked to leave alone.
 
@@ -26,10 +29,23 @@ ents = net_entries(text, a.prefix)
 if not ents:
     raise SystemExit(f"no {a.prefix!r} nets with wiring in {a.src}")
 n = 0
+unrouted = []
 for name, entry in ents.items():
     new, k = re.subn(r"\+\s*ROUTED\b", "+ FIXED", entry)
+    if k == 0:
+        # The entry exists for every LOGICAL net; only a routed one carries a
+        # `+ ROUTED` statement.  A net that gets no substitution here would
+        # come out of the comparison "unchanged" -- and be counted as FIXED
+        # wiring the routers honoured, when there was never any wiring at
+        # all (Codex #875 P1).  So it is a refusal, not a pass-through.
+        unrouted.append(name)
+        continue
     n += k
     text = text.replace(entry, new, 1)
+if unrouted:
+    raise SystemExit(f"{len(unrouted)} of {len(ents)} bus net(s) have NO routed "
+                     f"wiring to mark FIXED -- measurement B has no subject: "
+                     + ", ".join(unrouted[:8]) + (" ..." if len(unrouted) > 8 else ""))
 stripped = 0
 if a.strip_others:
     for name, entry in net_entries(text, "").items():

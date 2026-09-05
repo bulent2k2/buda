@@ -226,7 +226,10 @@ Desktop.  `--dockerized` makes LibreLane run inside
 `ghcr.io/librelane/librelane:3.0.11` with your home directory, the PDK root
 (`~/.ciel`) and the current directory mounted at the same paths, and prints
 the exact `docker run` it uses; `phase0/measure/run_or.sh` mirrors that
-command with `openroad` as the entrypoint.  The BUDA checkout is assumed at
+command with `openroad` as the entrypoint, reading the layer names and LEF
+paths from the run's `resolved.json` (`read_resolved.py`, which matches the
+default corner against LibreLane's wildcard-keyed `TECH_LEFS` the way its
+own steps do).  The BUDA checkout is assumed at
 `~/src/buda` (any path under your home works).
 
 **0. Install, once.**
@@ -318,7 +321,13 @@ python3 check_inside.py out/guided.def out/bus.guide
 ```
 
 Pass: still 0 outside.  That is the result that makes mechanism A the
-phase-1 handoff.
+phase-1 handoff.  Only the CHANNEL rectangles move (those between the
+macros, `--channel 100 160` µm by default — u0 ends at x = 100, u1 starts at
+160); the terminal boxes over the pins stay put, since the pins do not move,
+and each shifted box is re-connected to them with a riser on `--riser-layer`
+(met2) so the guide stays one connected set of boxes.  `check_inside.py`
+checks every SEGMENT along its length on its own layer, not just the
+vertices, and a bus bit with no wiring at all is a failure, never a pass.
 
 **6. Measurement B — FIXED wires.**
 
@@ -329,7 +338,9 @@ MACRO_LEF=$(cd ../reg32 && pwd)/runs/phase0/final/lef/reg32.lef
 python3 compare_bus_wires.py out/fixed.def out/fixed_after.def
 ```
 
-Pass: `32 bus net(s): 32 unchanged, 0 changed`.  If `global_route` objects
+Pass: `32 bus net(s): 32 unchanged, 0 changed`.  `mark_fixed.py` refuses a
+bus bit that had no wiring to mark, so an unrouted bit cannot come out of the
+comparison as "unchanged".  If `global_route` objects
 to the OTHER nets already carrying wiring, re-make the input with
 `mark_fixed.py --strip-others` (the bus stays FIXED, everything else is
 re-routed from scratch) and rerun.  A `CHANGED` result is the finding that

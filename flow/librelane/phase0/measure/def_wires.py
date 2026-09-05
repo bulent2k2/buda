@@ -1,16 +1,27 @@
 """The routed wiring of named nets, out of a DEF `NETS` section (shared).
 
-Returns {net: entry_text} where entry_text is the net's whole `- name ... ;`
-entry, and, via `points`, every `( x y )` coordinate the entry carries with
-the layer in force at that point.  Deliberately shallow: it does not model
-DEF wiring fully (no `NEW`/via/extension semantics), it answers "where is
-this net's metal" for a containment check and "did this text change" for a
-before/after diff, which is all the two measurements ask.
+`net_entries(text, prefix)` -> {net: entry_text}: each net's whole
+`- name ... ;` entry.  `paths(entry_text)` -> the entry's wiring as a list
+of (layer, [(x, y), ...]) -- one item per DEF path, i.e. per `+ ROUTED` /
+`+ FIXED` / `+ COVER` statement and per `NEW` inside it, so a segment is
+only ever drawn between consecutive points of ONE path.  A `*` coordinate
+repeats the previous point's (DEF's "unchanged" shorthand), a trailing
+extension value is accepted, and a via name after a point is skipped.
+
+Deliberately shallow otherwise: no wire widths, no via geometry, no
+`SHAPE`/`TAPER`.  It answers "where is this net's metal, layer by layer" for
+a containment check and "did this text change" for a before/after diff,
+which is what the two measurements ask.  A malformed point raises with the
+offending text rather than dropping it: a point the reader skipped would
+make a wire look shorter than it is, which is the failure mode the
+containment check exists to catch.
 """
 import re
 
 _ENTRY = re.compile(r"^\s*-\s+(\S+)(.*?);", re.S | re.M)
-_LAYER_OR_PT = re.compile(r"\b(met\d|li1|mcon|via\d*)\b|\(\s*(-?\d+)\s+(-?\d+)\s*\)")
+_WIRING = re.compile(r"\+\s*(ROUTED|FIXED|COVER)\b(.*?)(?=\+\s*(?:ROUTED|FIXED|COVER)\b|$)", re.S)
+_TOKEN = re.compile(r"\(\s*([^()]*?)\s*\)|\bNEW\b|(\S+)")
+_LAYER = re.compile(r"^(met\d+|li1|M\d+)$")
 
 
 def net_entries(def_text, prefix):
@@ -25,12 +36,44 @@ def net_entries(def_text, prefix):
     return out
 
 
+def _point(inner, prev):
+    p = inner.split()
+    if len(p) < 2:
+        raise ValueError(f"malformed DEF point '( {inner} )'")
+    if (p[0] == "*" or p[1] == "*") and prev is None:
+        raise ValueError(f"'*' with no previous point in '( {inner} )'")
+    x = prev[0] if p[0] == "*" else int(p[0])
+    y = prev[1] if p[1] == "*" else int(p[1])
+    return (x, y)
+
+
+def paths(entry_text):
+    out = []
+    for w in _WIRING.finditer(entry_text):
+        body = w.group(2)
+        layer, pts, prev = None, [], None
+        expect_layer = True
+        for t in _TOKEN.finditer(body):
+            if t.group(0) == "NEW":
+                if pts:
+                    out.append((layer, pts))
+                pts, prev, expect_layer = [], None, True
+            elif t.group(1) is not None:
+                pt = _point(t.group(1), prev)
+                pts.append(pt)
+                prev = pt
+            else:
+                word = t.group(2)
+                if expect_layer and _LAYER.match(word):
+                    layer = word
+                    expect_layer = False
+                # anything else after the layer (a via name, TAPER, a width
+                # number, a mask) carries no geometry this reader models
+        if pts:
+            out.append((layer, pts))
+    return out
+
+
 def points(entry_text):
-    layer, pts = None, []
-    for m in _LAYER_OR_PT.finditer(entry_text):
-        if m.group(1):
-            if m.group(1).startswith("met") or m.group(1) == "li1":
-                layer = m.group(1)
-        else:
-            pts.append((int(m.group(2)), int(m.group(3)), layer))
-    return pts
+    """Every point with its layer, flattened -- for callers that only count."""
+    return [(x, y, layer) for layer, pts in paths(entry_text) for x, y in pts]
