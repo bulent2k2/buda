@@ -1,0 +1,25 @@
+{
+    "meta": {"version": 2},
+    "DESIGN_NAME": "reg32",
+    "VERILOG_FILES": ["dir::src/reg32.v"],
+    "CLOCK_PORT": "clk",
+    "CLOCK_PERIOD": 10,
+
+    "FP_SIZING": "absolute",
+    "DIE_AREA": [0, 0, 80, 80],
+    "FP_CORE_UTIL": 45,
+    "PL_TARGET_DENSITY_PCT": 50,
+
+    "RT_MAX_LAYER": "met4",
+
+    "FP_DEF_TEMPLATE": "dir::pins.def",
+    "FP_TEMPLATE_MATCH_MODE": "strict",
+
+    "PDN_VOFFSET": 5,
+    "PDN_HOFFSET": 5,
+    "PDN_VWIDTH": 2,
+    "PDN_HWIDTH": 2,
+    "PDN_VPITCH": 30,
+    "PDN_HPITCH": 30,
+    "PDN_SKIPTRIM": true
+}
