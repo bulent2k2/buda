@@ -52,11 +52,15 @@ def test_gen_sh_emits_a_complete_flat_design_at_n(tmp_path):
 
 
 def _fake_run(root):
-    steps = {"01-verilator-lint": "0:0:1:500", "02-yosys-synthesis": "0:1:2:250",
-             "03-openroad-floorplan": "0:0:10:0", "04-openroad-globalplacement": "0:0:30:0",
-             "05-openroad-cts": "0:0:20:0", "06-openroad-globalrouting": "0:0:40:0",
-             "07-openroad-detailedrouting": "1:0:0:0", "08-magic-streamout": "0:0:5:0",
-             "09-checker-lvs": "0:0:1:0"}
+    # What LibreLane 3.0.11 WRITES is HH:MM:SS.mmm (its formatter's docstring
+    # says h:m:s:ms, and a parser written to the docstring refused every real
+    # run -- measured 2026-09-05); one step keeps the documented form, which
+    # is accepted too.
+    steps = {"01-verilator-lint": "00:00:01.500", "02-yosys-synthesis": "0:1:2:250",
+             "03-openroad-floorplan": "00:00:10.000", "04-openroad-globalplacement": "00:00:30.000",
+             "05-openroad-cts": "00:00:20.000", "06-openroad-globalrouting": "00:00:40.000",
+             "07-openroad-detailedrouting": "01:00:00.000", "08-magic-streamout": "00:00:05.000",
+             "09-checker-lvs": "00:00:01.000"}
     for name, t in steps.items():
         (root / name).mkdir(parents=True)
         (root / name / "runtime.txt").write_text(t)
@@ -66,6 +70,39 @@ def _fake_run(root):
         "timing__setup__ws": 1.23, "power__total": 0.0042, "power__internal__total": 0.0030,
         "power__switching__total": 0.0011, "power__leakage__total": 0.0001,
         "route__wirelength": 1234567, "route__drc_errors": 0}))
+
+
+def test_runtimes_accounts_a_hierarchical_arms_blocks(tmp_path):
+    """An H arm's row carries its blocks: wire per PLACED instance (a cell
+    hardened once and placed twice is twice the wire), block time as the
+    longest one (parallel) and as the sum, and the top-plus-blocks totals.
+    The block-internal wire stays its own column -- it is where the pin
+    template's cost shows (+60 % on the phase-0 block)."""
+    top, b1, b2 = tmp_path / "top", tmp_path / "b1", tmp_path / "b2"
+    for d in (top, b1, b2):
+        _fake_run(d)
+    (b1 / "final" / "metrics.json").write_text(json.dumps({"route__wirelength": 1000, "route__drc_errors": 0}))
+    (b2 / "final" / "metrics.json").write_text(json.dumps({"route__wirelength": 50, "route__drc_errors": 2}))
+    (b2 / "07-openroad-detailedrouting" / "runtime.txt").write_text("00:30:00.000")   # b2: 1969.8 s, b1: 3769.8 s
+    r = subprocess.run([sys.executable, str(_T1A / "runtimes.py"), str(top),
+                        "--block", f"{b1}:3", "--block", str(b2), "--json"],
+                       check=True, capture_output=True, text=True)
+    row = json.loads(r.stdout)
+    assert row["total_s"] == 3769.8                                  # the top alone, unchanged
+    assert [b["instances"] for b in row["blocks"]] == [3, 1]
+    assert row["route__wirelength__blocks"] == 3 * 1000 + 50
+    assert row["route__wirelength__arm"] == 1234567 + 3050
+    assert row["route__drc_errors__blocks"] == 2
+    assert row["blocks_wall_s"] == 3769.8 and row["blocks_cpu_s"] == 3769.8 + 1969.8
+    assert row["arm_wall_s"] == 2 * 3769.8 and row["arm_cpu_s"] == round(3769.8 * 2 + 1969.8, 1)
+    # A block that never finished routing has no wire to account: refused.
+    (b2 / "final" / "metrics.json").write_text(json.dumps({"route__drc_errors": 2}))
+    r = subprocess.run([sys.executable, str(_T1A / "runtimes.py"), str(top), "--block", str(b2)],
+                       capture_output=True, text=True)
+    assert r.returncode != 0 and "no route__wirelength" in r.stderr
+    r = subprocess.run([sys.executable, str(_T1A / "runtimes.py"), str(top), "--block", f"{b1}:two"],
+                       capture_output=True, text=True)
+    assert r.returncode != 0 and "must be an integer" in r.stderr
 
 
 def test_runtimes_reads_librelane_time_format_and_groups_stages(tmp_path):
@@ -85,8 +122,8 @@ def test_runtimes_reads_librelane_time_format_and_groups_stages(tmp_path):
     # The power BREAKDOWN, not just the total: the plan's tables need it.
     assert (row["power__internal__total"], row["power__switching__total"],
             row["power__leakage__total"]) == (0.0030, 0.0011, 0.0001)
-    # A runtime.txt not in LibreLane's format is an error, not a zero.
+    # A runtime.txt in neither shape is an error, not a zero.
     (tmp_path / "03-openroad-floorplan" / "runtime.txt").write_text("10s")
     r = subprocess.run([sys.executable, str(_T1A / "runtimes.py"), str(tmp_path)],
                        capture_output=True, text=True)
-    assert r.returncode != 0 and "not h:m:s:ms" in r.stderr
+    assert r.returncode != 0 and "not HH:MM:SS.mmm" in r.stderr
