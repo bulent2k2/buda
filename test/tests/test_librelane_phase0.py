@@ -280,6 +280,26 @@ def test_check_inside_exit_code_is_the_verdict_at_a_stated_threshold(tmp_path):
     assert r.returncode == 1 and "FAIL: 6.2%" in r.stdout
     r = run("--max-outside-pct", "120")
     assert r.returncode == 1 and "a percentage, 0..100" in r.stderr
+    # Everything the strict rule sees is in the measure (Codex #879): a RECT
+    # patch enters as the length of its long axis -- 3.2 um here, 1.5 of it
+    # past the met3 box + slack -- so `--max-outside-pct 0` fails on it ...
+    g.write_text("mid[0]\n(\n99000 40000 161000 42000 met3\n159000 40000 161000 46000 met2\n)\n")
+    d.write_text(_DEF.replace("( 160000 45000 ) ;", "( 160000 45000 ) NEW met3 ( 160000 41000 ) RECT ( -200 -100 3000 100 ) ;"))
+    r = run("--max-outside-pct", "0")
+    assert r.returncode == 1 and "FAIL: 2.2%" in r.stdout and "patch (159.800, 40.900)" in r.stdout
+    r = run("--max-outside-pct", "10")
+    assert r.returncode == 0 and "67.2 um of bus wire" in r.stdout        # 64 of wire + 3.2 of patch
+    # ... and a LONE point (a one-point path: a via with no wire on that
+    # layer) has no length to weigh, so one outside the corridor's footprint
+    # fails the threshold verdict separately, at any threshold; one inside
+    # the footprint on a layer with no box is a via doing what a via does.
+    d.write_text(_DEF.replace("( 160000 45000 ) ;", "( 160000 45000 ) NEW met2 ( 170000 45000 ) ;"))
+    r = run("--max-outside-pct", "100")
+    assert r.returncode == 1 and "lone point (170.000, 45.000) on met2 [corridor]" in r.stdout
+    assert "FAIL: 0.0% of the bus wire outside its own layer's guides, threshold 100%, 1 lone point(s) outside the corridor" in r.stdout
+    d.write_text(_DEF.replace("( 160000 45000 ) ;", "( 160000 45000 ) NEW met4 ( 160000 45000 ) ;"))
+    r = run("--max-outside-pct", "100")
+    assert r.returncode == 0 and "0 outside their guides" in r.stdout
     # An unrouted bit fails at any threshold.
     head, tail = _DEF.index("+ ROUTED met3"), _DEF.index("- clk")
     d.write_text(_DEF[:head] + ";\n" + _DEF[tail:])              # mid[0]: an entry with no wiring

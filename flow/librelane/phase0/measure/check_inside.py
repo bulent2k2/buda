@@ -38,8 +38,13 @@ of the bus's wire -- is at or under the number, which is what a real
 routed DEF needs: the real result is 1.9 % (as-routed corridor) and 3.7 %
 (the corridor shifted a gcell), all of it gcell-edge overshoot and
 pin-access legs, and a script that exits 1 on the run the recipe calls a
-pass is one no harness can gate on.  An unrouted bus bit fails under
-either rule: no threshold makes missing wire a pass.
+pass is one no harness can gate on.  Everything the strict rule sees is
+in that measure (Codex #879): a RECT patch is metal and enters as the
+length of its long axis, checked along it like a segment; a LONE point --
+a one-point path, a via with no wire on that layer -- has no length, so
+one outside the corridor's footprint on every layer fails the threshold
+verdict separately rather than vanishing from it.  An unrouted bus bit
+fails under either rule: no threshold makes missing wire a pass.
 """
 import argparse
 from def_wires import net_entries, paths, patches
@@ -137,6 +142,7 @@ def main():
     bad, n_seg, unrouted = [], 0, []
     n_layer = n_corridor = 0          # the two kinds of miss (docstring)
     wl = wl_layer = wl_corridor = 0   # the same, weighted by wire LENGTH
+    lone_exits = 0                    # one-point paths outside the footprint: no length to weigh
     for net, text in entries.items():
         rects = guides.get(net, [])
         net_paths = paths(text)
@@ -145,17 +151,38 @@ def main():
             continue
         for layer, x1, y1, x2, y2 in patches(text):
             # A via's patch metal counts as metal (Codex #877): each corner
-            # must sit in the net's guide on that layer, like a path point.
+            # must sit in the net's guide on that layer, like a path point --
+            # and it enters the LENGTH measure as its long axis (Codex #879),
+            # so threshold mode weighs it like the wire it is.
+            cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+            p, q = ((x1, cy), (x2, cy)) if x2 - x1 >= y2 - y1 else ((cx, y1), (cx, y2))
+            lo, hi, own = segment_spans(p, q, layer, rects, slack)
+            _, _, anyl = segment_spans(p, q, "*", rects, slack)
+            wl += hi - lo
+            out_any = uncovered_length(lo, hi, anyl)
+            wl_corridor += out_any
+            wl_layer += uncovered_length(lo, hi, own) - out_any
             if not all(point_inside(x, y, [r for r in rects if r[4] == layer], slack)
                        for x, y in ((x1, y1), (x2, y2))):
-                n_corridor += 1
+                kind = "corridor" if any(not point_inside(x, y, rects, slack)
+                                         for x, y in ((x1, y1), (x2, y2))) else "layer"
+                if kind == "layer":
+                    n_layer += 1
+                else:
+                    n_corridor += 1
                 bad.append((net, f"patch ({x1 / DBU:.3f}, {y1 / DBU:.3f})-({x2 / DBU:.3f}, {y2 / DBU:.3f}) "
-                                 f"on {layer} [corridor]"))
+                                 f"on {layer} [{kind}]"))
         for layer, pts in net_paths:
             for x, y in pts:
+                # `rects` unfiltered: a point outside EVERY layer's box is a
+                # corridor exit; a point on a segment is weighed by the
+                # segment's length below, a lone one has none to weigh.
                 if not point_inside(x, y, rects, slack):
                     n_corridor += 1
-                    bad.append((net, f"point ({x / DBU:.3f}, {y / DBU:.3f}) on {layer} [corridor]"))
+                    lone = len(pts) == 1
+                    lone_exits += lone
+                    bad.append((net, f"{'lone point' if lone else 'point'} ({x / DBU:.3f}, {y / DBU:.3f}) "
+                                     f"on {layer} [corridor]"))
             for p, q in zip(pts, pts[1:]):
                 n_seg += 1
                 lo, hi, own = segment_spans(p, q, layer, rects, slack)
@@ -190,10 +217,11 @@ def main():
     if a.max_outside_pct is None:
         ok = not (bad or unrouted)
     else:
-        ok = not unrouted and outside_pct <= a.max_outside_pct
+        ok = not unrouted and not lone_exits and outside_pct <= a.max_outside_pct
         print(f"  {'PASS' if ok else 'FAIL'}: {outside_pct:.1f}% of the bus wire outside its own "
               f"layer's guides, threshold {a.max_outside_pct:g}%"
-              + (f", {len(unrouted)} unrouted" if unrouted else ""))
+              + (f", {len(unrouted)} unrouted" if unrouted else "")
+              + (f", {lone_exits} lone point(s) outside the corridor" if lone_exits else ""))
     raise SystemExit(0 if ok else 1)
 
 
