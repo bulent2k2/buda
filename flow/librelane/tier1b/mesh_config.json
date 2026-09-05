@@ -1,0 +1,18 @@
+{
+    "meta": {"version": 2},
+    "DESIGN_NAME": "Mesh",
+    "VERILOG_FILES": ["dir::gen-collateral/*.sv"],
+    "USE_SYNLIG": true,
+    "SYNTH_HIERARCHY_MODE": "flatten",
+    "CLOCK_PORT": "clock",
+    "CLOCK_PERIOD": 20,
+
+    "FP_SIZING": "relative",
+    "FP_CORE_UTIL": 40,
+    "PL_TARGET_DENSITY_PCT": 45,
+
+    "RT_MAX_LAYER": "met5",
+    "RUN_KLAYOUT_XOR": false,
+    "RUN_MAGIC_DRC": false,
+    "RUN_KLAYOUT_DRC": true
+}

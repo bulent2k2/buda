@@ -6,6 +6,13 @@ bin/buda flow/tpu/tpu2.buda                   # the same array on TWO layers
 btcl flow/tcl/tpu.tcl 8 -emit flow/tpu        # regenerate the three inputs
 ```
 
+`tpu_rtl.v` is the **synthesizable twin** of `tpu.v` — same modules,
+instances and widths, with a streaming-MAC datapath inside (a clock and reset
+on every module, pins on the top) — for a synthesis flow
+([tier 1a of the LibreLane study](../../docs/internal/librelane_hier_flow.md));
+`tpu.v` stays the shell BUDA reads, byte-identical.  Both come out of the
+same `-emit`.
+
 `tpu2.buda` is `tpu.buda` cut down to a **two-layer stack** (M5 V + M6 H) and
 no healers -- the same 104 imported instances routed against the thinnest
 stack that still has one direction each. It declares no `open_bdb` of its

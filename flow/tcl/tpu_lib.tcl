@@ -575,6 +575,174 @@ proc tpu_vehicle::emit_verilog {path} {
     close $f
 }
 
+# ── Verilog, SYNTHESIZABLE: the same array with a datapath inside ─────────
+# `tpu.v` above is what BUDA READS: shells with ports and no bodies, no
+# clock, a top with no pins — the interface and the hierarchy, which is all
+# a routing planner needs, and byte-identical run to run (a QoR-corpus row).
+# `tpu_rtl.v` is the same array with real logic in every cell, for a
+# synthesis flow (docs/internal/librelane_hier_flow.md, tier 1a): each PE is
+# a registered streaming MAC — activation passes east, weight passes south,
+# psum accumulates south (p_out <= p_in + a_in*w_in, truncated to the psum
+# width) — the feeders and weight buffers are registers off the top-level
+# ports, the accumulators/pipe stages accumulate, and everything runs on one
+# clk with a synchronous rst.  A SECOND file rather than a mode switch on
+# the first, because the clock net alone would change every bundle count
+# the corpus pins: clk fans out to every instance and is exactly the kind
+# of net `set_bundling clk strict` exists for.
+#
+# Module and instance names, and the widths, are the ones the DEF/LEF
+# carry, so the physical shell and the RTL describe one design; the LEF
+# does not yet list clk/rst pins (a hierarchical hardening of these cells is
+# phase 1's business, and it regenerates the LEF from LibreLane's own
+# hardened views anyway).  Every module port is a bus of the declared width,
+# and the top exposes one activation port per row, one weight port per
+# column and one result port per column.
+proc tpu_vehicle::emit_verilog_rtl {path} {
+    variable P
+    set N $P(N)
+    set aw [expr {$P(AW)-1}]; set pw [expr {$P(PW)-1}]; set ww [expr {$P(WW)-1}]
+    set f [open $path w]
+    puts $f [string map {"\n " "\n"} [_banner "tpu_rtl.v"]]
+    puts $f "// SYNTHESIZABLE twin of tpu.v: same modules, instances and widths, with a"
+    puts $f "// streaming-MAC datapath inside (see tpu_lib.tcl emit_verilog_rtl)."
+    puts $f "`default_nettype none\n"
+
+    puts $f "module pe_cell (clk, rst, a_in, a_out, p_in, p_out, w_in, w_out);"
+    puts $f "  input  wire        clk;"
+    puts $f "  input  wire        rst;"
+    puts $f "  input  wire \[$aw:0\] a_in;"
+    puts $f "  output reg  \[$aw:0\] a_out;"
+    puts $f "  input  wire \[$pw:0\] p_in;"
+    puts $f "  output reg  \[$pw:0\] p_out;"
+    puts $f "  input  wire \[$ww:0\] w_in;"
+    puts $f "  output reg  \[$ww:0\] w_out;"
+    puts $f "  wire \[[expr {$P(AW)+$P(WW)-1}]:0\] prod = \$signed(a_in) * \$signed(w_in);"
+    puts $f "  always @(posedge clk) begin"
+    puts $f "    if (rst) begin"
+    puts $f "      a_out <= [expr {$aw+1}]'d0; p_out <= [expr {$pw+1}]'d0; w_out <= [expr {$ww+1}]'d0;"
+    puts $f "    end else begin"
+    puts $f "      a_out <= a_in;"
+    puts $f "      w_out <= w_in;"
+    puts $f "      p_out <= p_in + {{[expr {$P(PW)-$P(AW)-$P(WW)}]{prod\[[expr {$P(AW)+$P(WW)-1}]\]}}, prod};"
+    puts $f "    end"
+    puts $f "  end"
+    puts $f "endmodule\n"
+
+    # feed / wbuf: a register off a top-level port.  acc: an accumulator,
+    # used for the accumulator row AND the pipe stages (one cell in the
+    # DEF/LEF, so one module here).
+    foreach {cell w} [list feed_cell $aw wbuf_cell $ww] {
+        puts $f "module $cell (clk, rst, in, out);"
+        puts $f "  input  wire       clk;"
+        puts $f "  input  wire       rst;"
+        puts $f "  input  wire \[$w:0\] in;"
+        puts $f "  output reg  \[$w:0\] out;"
+        puts $f "  always @(posedge clk) out <= rst ? [expr {$w+1}]'d0 : in;"
+        puts $f "endmodule\n"
+    }
+    puts $f "module acc_cell (clk, rst, in, out);"
+    puts $f "  input  wire        clk;"
+    puts $f "  input  wire        rst;"
+    puts $f "  input  wire \[$pw:0\] in;"
+    puts $f "  output reg  \[$pw:0\] out;"
+    puts $f "  always @(posedge clk) out <= rst ? [expr {$pw+1}]'d0 : out + in;"
+    puts $f "endmodule\n"
+
+    # the ROW, as in tpu.v plus clk/rst.
+    set ports {clk rst a_in}
+    for {set c 0} {$c < $N} {incr c} {
+        lappend ports p_in_$c p_out_$c w_in_$c w_out_$c
+    }
+    puts $f "module row_cell ([join $ports ", "]);"
+    puts $f "  input  wire        clk;"
+    puts $f "  input  wire        rst;"
+    puts $f "  input  wire \[$aw:0\] a_in;"
+    for {set c 0} {$c < $N} {incr c} {
+        puts $f "  input  wire \[$pw:0\] p_in_$c;"
+        puts $f "  output wire \[$pw:0\] p_out_$c;"
+        puts $f "  input  wire \[$ww:0\] w_in_$c;"
+        puts $f "  output wire \[$ww:0\] w_out_$c;"
+    }
+    for {set c 1} {$c <= $N} {incr c} {
+        puts $f "  wire \[$aw:0\] a_$c;"
+    }
+    for {set c 0} {$c < $N} {incr c} {
+        set ain "a_in"
+        if {$c != 0} { set ain "a_$c" }
+        # Every port CONNECTED here: the last PE's activation goes to a
+        # sink wire a_N (the same omission tpu.v makes for the reader's
+        # sake is a dangling output here, which a lint would flag).
+        set conns [list ".clk(clk)" ".rst(rst)" ".a_in($ain)" ".a_out(a_[expr {$c+1}])"]
+        lappend conns ".p_in(p_in_$c)" ".p_out(p_out_$c)"
+        lappend conns ".w_in(w_in_$c)" ".w_out(w_out_$c)"
+        puts $f "  pe_cell pe_$c ([join $conns ", "]);"
+    }
+    puts $f "endmodule\n"
+
+    # the TOP: real ports.
+    set ports {clk rst}
+    for {set r 0} {$r < $N} {incr r} { lappend ports a_$r }
+    for {set c 0} {$c < $N} {incr c} { lappend ports w_$c }
+    for {set c 0} {$c < $N} {incr c} { lappend ports p_$c }
+    puts $f "module tpu_top ([join $ports ", "]);"
+    puts $f "  input  wire        clk;"
+    puts $f "  input  wire        rst;"
+    for {set r 0} {$r < $N} {incr r} { puts $f "  input  wire \[$aw:0\] a_$r;" }
+    for {set c 0} {$c < $N} {incr c} { puts $f "  input  wire \[$ww:0\] w_$c;" }
+    for {set c 0} {$c < $N} {incr c} { puts $f "  output wire \[$pw:0\] p_$c;" }
+    for {set r 0} {$r < $N} {incr r} { puts $f "  wire \[$aw:0\] fa_$r;" }
+    for {set c 0} {$c < $N} {incr c} {
+        puts $f "  wire \[$ww:0\] fw_$c;"
+        puts $f "  wire \[$pw:0\] fp_$c;"
+        for {set s 0} {$s <= $P(PIPE)} {incr s} { puts $f "  wire \[$pw:0\] tp_${s}_$c;" }
+        # the north edge: the first row accumulates onto zero, and the last
+        # row's weights go to a sink wire — real nets, both, in RTL.
+        puts $f "  wire \[$pw:0\] pz_$c = [expr {$pw+1}]'d0;"
+        puts $f "  wire \[$ww:0\] wz_$c;"
+    }
+    for {set r 0} {$r < $N - 1} {incr r} {
+        for {set c 0} {$c < $N} {incr c} {
+            puts $f "  wire \[$pw:0\] p_${r}_$c;"
+            puts $f "  wire \[$ww:0\] w_${r}_$c;"
+        }
+    }
+    for {set r 0} {$r < $N} {incr r} {
+        puts $f "  feed_cell feed_$r (.clk(clk), .rst(rst), .in(a_$r), .out(fa_$r));"
+    }
+    for {set c 0} {$c < $N} {incr c} {
+        puts $f "  wbuf_cell wbuf_$c (.clk(clk), .rst(rst), .in(w_$c), .out(fw_$c));"
+    }
+    for {set r 0} {$r < $N} {incr r} {
+        set conns [list ".clk(clk)" ".rst(rst)" ".a_in(fa_$r)"]
+        set up [expr {$r - 1}]
+        for {set c 0} {$c < $N} {incr c} {
+            set pin "pz_$c"
+            if {$r != 0} { set pin "p_${up}_$c" }
+            lappend conns ".p_in_${c}($pin)"
+            set pout "p_${r}_$c"
+            if {$r == $N-1} { set pout "fp_$c" }
+            lappend conns ".p_out_${c}($pout)"
+            set win "fw_$c"
+            if {$r != 0} { set win "w_${up}_$c" }
+            lappend conns ".w_in_${c}($win)"
+            set wout "w_${r}_$c"
+            if {$r == $N-1} { set wout "wz_$c" }
+            lappend conns ".w_out_${c}($wout)"
+        }
+        puts $f "  row_cell row_$r ([join $conns ", "]);"
+    }
+    for {set c 0} {$c < $N} {incr c} {
+        puts $f "  acc_cell acc_$c (.clk(clk), .rst(rst), .in(fp_$c), .out(tp_0_$c));"
+        for {set s 0} {$s < $P(PIPE)} {incr s} {
+            puts $f "  acc_cell pipe_${s}_$c (.clk(clk), .rst(rst), .in(tp_${s}_$c), .out(tp_[expr {$s+1}]_$c));"
+        }
+        puts $f "  assign p_$c = tp_$P(PIPE)_$c;"
+    }
+    puts $f "endmodule"
+    puts $f "`default_nettype wire"
+    close $f
+}
+
 # ── DEF: the placement, flat ──────────────────────────────────────────────
 # A DEF's COMPONENTS are leaf instances only — a hierarchical instance has no
 # row anywhere, which is exactly why the import flow needs
@@ -635,8 +803,9 @@ proc tpu_vehicle::emit_lef {path} {
 
 proc tpu_vehicle::emit_all {dir} {
     file mkdir $dir
-    emit_verilog [file join $dir tpu.v]
-    emit_def     [file join $dir tpu.def]
-    emit_lef     [file join $dir tpu.lef]
-    puts "tpu: emitted tpu.v / tpu.def / tpu.lef into $dir"
+    emit_verilog     [file join $dir tpu.v]
+    emit_verilog_rtl [file join $dir tpu_rtl.v]
+    emit_def         [file join $dir tpu.def]
+    emit_lef         [file join $dir tpu.lef]
+    puts "tpu: emitted tpu.v / tpu_rtl.v / tpu.def / tpu.lef into $dir"
 }
