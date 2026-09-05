@@ -616,14 +616,25 @@ proc tpu_vehicle::emit_verilog_rtl {path} {
     puts $f "  output reg  \[$pw:0\] p_out;"
     puts $f "  input  wire \[$ww:0\] w_in;"
     puts $f "  output reg  \[$ww:0\] w_out;"
-    puts $f "  wire \[[expr {$P(AW)+$P(WW)-1}]:0\] prod = \$signed(a_in) * \$signed(w_in);"
+    set prodw [expr {$P(AW)+$P(WW)}]
+    puts $f "  wire \[[expr {$prodw-1}]:0\] prod = \$signed(a_in) * \$signed(w_in);"
+    # The product is AW+WW bits; the psum is PW.  Wider: sign-extend.  Not
+    # wider: TRUNCATE to the psum width -- a replication count of zero or
+    # less is not Verilog (`{{-8{...}}, prod}` on `-PW 8`, Codex #876 P2),
+    # and PW == AW+WW is the one case where `{{0{x}}, prod}` would appear.
+    if {$P(PW) > $prodw} {
+        set ext [expr {$P(PW)-$prodw}]
+        set term "{{${ext}{prod\[[expr {$prodw-1}]\]}}, prod}"
+    } else {
+        set term "prod\[[expr {$P(PW)-1}]:0\]"
+    }
     puts $f "  always @(posedge clk) begin"
     puts $f "    if (rst) begin"
     puts $f "      a_out <= [expr {$aw+1}]'d0; p_out <= [expr {$pw+1}]'d0; w_out <= [expr {$ww+1}]'d0;"
     puts $f "    end else begin"
     puts $f "      a_out <= a_in;"
     puts $f "      w_out <= w_in;"
-    puts $f "      p_out <= p_in + {{[expr {$P(PW)-$P(AW)-$P(WW)}]{prod\[[expr {$P(AW)+$P(WW)-1}]\]}}, prod};"
+    puts $f "      p_out <= p_in + $term;"
     puts $f "    end"
     puts $f "  end"
     puts $f "endmodule\n"

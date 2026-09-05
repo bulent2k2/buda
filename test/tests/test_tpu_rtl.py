@@ -97,13 +97,40 @@ def test_the_twin_is_what_the_emitter_writes(tmp_path):
     assert (tmp_path / "tpu.v").read_text() == (_TPU / "tpu.v").read_text()
 
 
+def _emit(tmp_path, *args):
+    from wrapper_select import wrapper_command
+    btcl = wrapper_command(_ROOT, "btcl")
+    subprocess.run([*btcl, str(_ROOT / "flow/tcl/tpu.tcl"), *map(str, args), "-emit", str(tmp_path)],
+                   check=True, capture_output=True, timeout=600)
+    return (tmp_path / "tpu_rtl.v").read_text()
+
+
+@pytest.mark.parametrize("pw, term", [
+    (8, "prod[7:0]"),                      # narrower than the product: truncate
+    (16, "prod[15:0]"),                    # equal: `{{0{x}}, prod}` is not Verilog either
+    (24, "{{8{prod[15]}}, prod}"),         # wider: sign-extend (the default)
+])
+def test_the_product_fits_the_psum_at_every_width(tmp_path, pw, term):
+    """`-PW` below (or equal to) AW+WW used to emit a replication count of
+    -8 (or 0), which is not Verilog: the emitter succeeded and synthesis
+    failed on the file (Codex #876 P2)."""
+    rtl = _emit(tmp_path, 4, "-PW", pw)
+    line = re.search(r"p_out <= p_in \+ (.*);", rtl).group(1)
+    assert line == term, line
+    assert "{{-" not in rtl and "{{0{" not in rtl
+
+
 _YOSYS = shutil.which("yosys") or shutil.which("yowasp-yosys")
 
 
 @pytest.mark.skipif(_YOSYS is None, reason="no yosys on PATH (pip install yowasp-yosys)")
-def test_the_twin_synthesizes(tmp_path):
+@pytest.mark.parametrize("pw", [None, 8, 16])
+def test_the_twin_synthesizes(tmp_path, pw):
     # Run from tmp_path with relative paths: the WASM build only sees its cwd.
-    shutil.copy(_TPU / "tpu_rtl.v", tmp_path / "tpu_rtl.v")
+    if pw is None:
+        shutil.copy(_TPU / "tpu_rtl.v", tmp_path / "tpu_rtl.v")
+    else:
+        _emit(tmp_path, 4, "-PW", pw)          # the truncating widths, end to end
     (tmp_path / "s.ys").write_text(
         "read_verilog tpu_rtl.v\nhierarchy -check -top tpu_top\nsynth -top tpu_top\n"
         "tee -o stat.txt stat\n")

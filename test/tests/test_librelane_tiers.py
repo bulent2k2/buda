@@ -63,8 +63,9 @@ def _fake_run(root):
     (root / "final").mkdir()
     (root / "final" / "metrics.json").write_text(json.dumps({
         "design__instance__area": 273115.69, "design__die__area": 700000.0,
-        "timing__setup__ws": 1.23, "power__total": 0.0042, "route__wirelength": 1234567,
-        "route__drc_errors": 0}))
+        "timing__setup__ws": 1.23, "power__total": 0.0042, "power__internal__total": 0.0030,
+        "power__switching__total": 0.0011, "power__leakage__total": 0.0001,
+        "route__wirelength": 1234567, "route__drc_errors": 0}))
 
 
 def test_runtimes_reads_librelane_time_format_and_groups_stages(tmp_path):
@@ -81,6 +82,9 @@ def test_runtimes_reads_librelane_time_format_and_groups_stages(tmp_path):
     assert row["other_s"] == 0.0
     assert row["total_s"] == 3769.8
     assert row["design__instance__area"] == 273115.69 and row["route__drc_errors"] == 0
+    # The power BREAKDOWN, not just the total: the plan's tables need it.
+    assert (row["power__internal__total"], row["power__switching__total"],
+            row["power__leakage__total"]) == (0.0030, 0.0011, 0.0001)
     # A runtime.txt not in LibreLane's format is an error, not a zero.
     (tmp_path / "03-openroad-floorplan" / "runtime.txt").write_text("10s")
     r = subprocess.run([sys.executable, str(_T1A / "runtimes.py"), str(tmp_path)],

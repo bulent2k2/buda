@@ -32,8 +32,13 @@ STAGES = [
                  "openroad-irdrop", "magic-", "klayout-", "netgen-", "checker-",
                  "misc-", "yosys-eqy")),
 ]
+# The columns docs/internal/librelane_hier_flow.md §7.3 tabulates -- the
+# power BREAKDOWN included (Codex #876 P2: only the total was kept, so the
+# per-metric tables the plan prescribes could not be built from saved rows).
 METRICS = ["design__instance__area", "design__die__area", "design__instance__utilization",
-           "timing__setup__ws", "timing__setup__tns", "timing__hold__ws", "power__total",
+           "timing__setup__ws", "timing__setup__tns", "timing__hold__ws",
+           "power__total", "power__internal__total", "power__switching__total",
+           "power__leakage__total",
            "route__wirelength", "route__drc_errors", "magic__drc_error__count",
            "klayout__drc_error__count", "design__instance__count"]
 
