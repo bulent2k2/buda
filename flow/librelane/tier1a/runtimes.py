@@ -125,15 +125,21 @@ def main():
     for spec in a.block:
         bdir, count = parse_block(spec)
         _, _, _, btotal, bm = read_run(bdir)
-        if bm.get("route__wirelength") is None:
-            raise SystemExit(f"--block {bdir}: no route__wirelength in its final/metrics.json "
-                             f"-- a block that did not finish routing has no wire to account")
+        for key in ("route__wirelength", "route__drc_errors"):
+            if bm.get(key) is None:
+                raise SystemExit(f"--block {bdir}: no {key} in its final/metrics.json -- a block "
+                                 f"that did not get that far has nothing to account, and a zero "
+                                 f"there would read as a clean one (Codex #878)")
         blocks.append({"run": bdir, "instances": count, "total_s": round(btotal, 1),
                        "route__wirelength": bm["route__wirelength"],
                        "route__wirelength__placed": bm["route__wirelength"] * count,
                        "route__drc_errors": bm.get("route__drc_errors")})
     if blocks:
-        top_wl = metrics.get("route__wirelength") or 0
+        if metrics.get("route__wirelength") is None:
+            raise SystemExit(f"{a.run_dir}: no route__wirelength in its final/metrics.json -- an arm "
+                             f"total over the blocks alone would be a plausible, incomplete number "
+                             f"(Codex #878)")
+        top_wl = metrics["route__wirelength"]
         row["blocks"] = blocks
         row["blocks_wall_s"] = max(b["total_s"] for b in blocks)
         row["blocks_cpu_s"] = round(sum(b["total_s"] for b in blocks), 1)
@@ -141,7 +147,7 @@ def main():
         row["arm_cpu_s"] = round(total + row["blocks_cpu_s"], 1)
         row["route__wirelength__blocks"] = sum(b["route__wirelength__placed"] for b in blocks)
         row["route__wirelength__arm"] = top_wl + row["route__wirelength__blocks"]
-        row["route__drc_errors__blocks"] = sum(b["route__drc_errors"] or 0 for b in blocks)
+        row["route__drc_errors__blocks"] = sum(b["route__drc_errors"] for b in blocks)
     if a.json:
         print(json.dumps(row))
         return

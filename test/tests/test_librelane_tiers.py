@@ -95,11 +95,23 @@ def test_runtimes_accounts_a_hierarchical_arms_blocks(tmp_path):
     assert row["route__drc_errors__blocks"] == 2
     assert row["blocks_wall_s"] == 3769.8 and row["blocks_cpu_s"] == 3769.8 + 1969.8
     assert row["arm_wall_s"] == 2 * 3769.8 and row["arm_cpu_s"] == round(3769.8 * 2 + 1969.8, 1)
-    # A block that never finished routing has no wire to account: refused.
+    # A block that never finished routing has no wire to account, one that
+    # never reached the DRC step has no violation count, and a top without
+    # wire would make an arm total out of the blocks alone: all refused --
+    # "not measured" must never read as zero (Codex #878).
     (b2 / "final" / "metrics.json").write_text(json.dumps({"route__drc_errors": 2}))
     r = subprocess.run([sys.executable, str(_T1A / "runtimes.py"), str(top), "--block", str(b2)],
                        capture_output=True, text=True)
     assert r.returncode != 0 and "no route__wirelength" in r.stderr
+    (b2 / "final" / "metrics.json").write_text(json.dumps({"route__wirelength": 50}))
+    r = subprocess.run([sys.executable, str(_T1A / "runtimes.py"), str(top), "--block", str(b2)],
+                       capture_output=True, text=True)
+    assert r.returncode != 0 and "no route__drc_errors" in r.stderr
+    (top / "final" / "metrics.json").write_text(json.dumps({"route__drc_errors": 0}))
+    r = subprocess.run([sys.executable, str(_T1A / "runtimes.py"), str(top), "--block", f"{b1}:3"],
+                       capture_output=True, text=True)
+    assert r.returncode != 0 and "no route__wirelength" in r.stderr and str(top) in r.stderr
+    _fake_run(top := tmp_path / "top2")                      # a top without --block still reports
     r = subprocess.run([sys.executable, str(_T1A / "runtimes.py"), str(top), "--block", f"{b1}:two"],
                        capture_output=True, text=True)
     assert r.returncode != 0 and "must be an integer" in r.stderr
