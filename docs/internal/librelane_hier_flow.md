@@ -177,15 +177,49 @@ scripts print what the router did instead.
 
 ## 7. The benchmark
 
-### 7.1 Vehicle
+### 7.1 Vehicles — a ladder, not one design
 
-A design whose scale is a parameter: a **systolic array with real MAC PEs**.
-`flow/tcl/tpu.tcl` already generates the physical shell (Verilog + DEF + LEF
-at any N, buses derived from the datapath widths) and is a QoR-corpus row;
-it lacks synthesizable PE RTL (a multiply-accumulate with the
-weight/psum/activation pipeline — small).  N = 2, 4, 8, (16), each run three
-ways.  64 PEs is ONE hardening.  Smoke vehicles needing no authoring:
-`manual_macro_placement_test`, `salsa20`.
+No single open-source RTL has CPU + GPU + TPU + I/O integrated (surveyed
+2026-09-05: Chipyard is the integrated CPU + accelerator + I/O platform;
+Vortex is the open GPU, standalone; the ETH SystemVerilog family — Cheshire,
+Ara, Snitch/Occamy — is the alternative without Chisel).  For the
+CROSSOVER measurement, controllability beats realism: the size must be a
+dial or the benchmark yields one point instead of a curve.  So:
+
+| Tier | Vehicle | Why | Where |
+|---|---|---|---|
+| **1a** | the systolic array, `flow/tcl/tpu.tcl` at N | size is a dial; the cheapest iteration | `flow/librelane/tier1a/` |
+| **1b** | a **Gemmini** mesh (Chipyard) at N = 4, 8, 16 | the same shape from somebody else's real RTL: `Mesh` → `Tile` → `PE`, repeated modules | `flow/librelane/tier1b/` |
+| **2** | Chipyard **Rocket + Gemmini + peripherals** (`ChipTop`) | CPU + TPU + I/O on one chip, with SRAM macros | tier-1b recipe, `DESIGN_NAME: ChipTop` |
+| **3**, optional | **Vortex**, multi-core | the only open GPU; repeated cores; standalone | — |
+
+**Tier 1a is synthesizable now.**  `tpu.tcl -emit` writes `tpu_rtl.v` beside
+`tpu.v`: the same modules, instances and widths, with a streaming-MAC
+datapath inside every PE (`p_out <= p_in + a_in*w_in`, activation east,
+weight south, all registered), registered feeders and weight buffers, and
+accumulating output stages; `tpu.v` stays the byte-identical shell BUDA
+plans against (the clock net alone would change every corpus count).
+Synthesized here with Yosys against sky130_fd_sc_hd (`tt_025C_1v80`, the
+liberty OpenROAD-flow-scripts ships) — **cell area, not P&R**: it sizes the
+die and says which N a laptop flow can afford, and it is what a LibreLane
+run will reproduce to within its own ABC script:
+
+| N | PEs | cells | flops | cell area (µm²) | core at 45 % util (mm²) | synth (Yosys-WASM, 1 thread) |
+|---|---|---|---|---|---|---|
+| 2 | 4 | 2,660 | 274 | 21,534 | 0.05 | 3 s |
+| 4 | 16 | 9,105 | 844 | 73,269 | 0.16 | 7 s |
+| 8 | 64 | 34,194 | 2,968 | 273,116 | 0.61 | 26 s |
+| 16 | 256 | 133,332 | 11,056 | 1,067,325 | 2.4 | 106 s |
+
+Area grows 3.6–3.9× per doubling (the array is quadratic; the edges are
+linear), and 64 PEs is ONE hardening in the H arms.  For scale: LibreLane's
+own Sky130 tutorial pushes `TinyRocketConfig` "to minimize tool runtime", so
+N = 8 is a comfortable laptop design and N = 16 is the size at which a flat
+sky130 route becomes an hours-long run — exactly the range a crossover would
+have to sit in.
+
+Smoke vehicles needing no authoring: `manual_macro_placement_test`,
+`salsa20`.
 
 ### 7.2 Three arms
 
@@ -348,6 +382,30 @@ keeps FIXED pre-routes out of phase 1.
 
 Keep `out/` — its files are the evidence the write-up cites.
 
+**7. Tier 1a — the array, flat, at N.**  One directory per N; the DEF and
+LEF the H arms will use are written beside the RTL.
+
+```bash
+cd ~/src/buda
+for N in 2 4 8; do flow/librelane/tier1a/gen.sh $N; done        # + 16 when the small ones are in
+cd flow/librelane/tier1a/n4 && librelane --dockerized --run-tag flat config.json
+python3 ../runtimes.py runs/flat                # per-stage seconds + area/timing/power/WL/DRC
+python3 ../runtimes.py runs/flat --json >> ../results.jsonl     # one row per run, for the table
+```
+
+Pass: `Flow complete`; `runtimes.py` prints the stage split and the metrics
+row.  The numbers to keep per N: the stage seconds, `design__die__area`,
+`timing__setup__ws`, `power__total`, `route__wirelength`, DRC count.  `N=16`
+last — it is the run that tells you the laptop's ceiling.
+
+**8. Tier 1b — a Gemmini mesh at N = 4, 8, 16.**  Chipyard needs Linux; on
+the Mac that is a Linux container with the BUDA checkout mounted.  The full
+recipe, with the two places it is guessing, is
+[`flow/librelane/tier1b/README.md`](../../flow/librelane/tier1b/README.md):
+drop `BudaGemminiConfigs.scala` into Chipyard, `make verilog` per N, then
+LibreLane on the generated `Mesh` with `mesh_config.json`, and the same
+`runtimes.py` on each run so the 1a and 1b rows land in one table.
+
 ## 9. Phases 1–3
 
 **Phase 1 — plumbing.**  The NEW rows of §5: placement / size / pin-DEF /
@@ -377,4 +435,6 @@ have: every netlist here is either authored or uniquified.
 
 1. The **success criterion** in §7.4 — confirm or replace the numbers.
 2. **sky130A** unless told otherwise.
-3. **Vehicle**: PE RTL for `tpu.tcl` (recommended), or an existing design?
+3. ~~Vehicle~~ — decided: the ladder in §7.1, tiers 1a and 1b first, both
+   for concrete runtime numbers; Chisel is acceptable.  Open: the tier-2
+   config size, once the 1b numbers say what the laptop affords.

@@ -79,3 +79,10 @@ flow/tcl/out/
 flow/**/_no_trim_*.buda
 flow/**/_trunk_trim_on_*.buda
 flow/**/_mst_trim_off_*.buda
+
+# LibreLane study (docs/internal/librelane_hier_flow.md): generated designs and run dirs
+flow/librelane/tier1a/n*/
+flow/librelane/tier1b/n*/
+flow/librelane/**/runs/
+flow/librelane/phase0/measure/out/
+flow/librelane/phase0/reg32/pins.def
