@@ -57,7 +57,20 @@ report_wirelength
 # One fragment per leaf cell type.  `util 46` is arm F's own utilization
 # (§8 step 7d), so the two arms size their logic by the same standard and
 # the comparison is about hierarchy rather than about density.
-emit_block_size out/pe_cell.json   pe_cell   area 3900 util 46
-emit_block_size out/feed_cell.json feed_cell area 900  util 46
-emit_block_size out/wbuf_cell.json wbuf_cell area 900  util 46
-emit_block_size out/acc_cell.json  acc_cell  area 1200 util 46
+# The AREAS are `harm.py`'s (`cell_area_estimate`): pe_cell's is MEASURED
+# from the N=4 hardening run, the other three are §7.1's Yosys totals
+# scaled by the 1.7x LibreLane ratio that section records.  The first cut
+# here guessed 3900 for the PE against a measured 5964 and predicted a die
+# 39 % too small (Codex #890) — so these come from the one place that has
+# run the tool, and `apply_sizes.py` re-checks whatever they give against
+# the placer's own bar.
+#
+# `util 46` is arm F's, so the two arms size their logic by the same
+# standard.  It is measured against the DIE, while the placer measures the
+# CORE (the die minus LibreLane's margins, rounded to whole rows) — a gap
+# that is small on a big block and enormous on a small one, and the reason
+# `apply_sizes.py` and not this file has the last word on a size.
+emit_block_size out/pe_cell.json   pe_cell   area 5964 util 46
+emit_block_size out/feed_cell.json feed_cell area 425  util 46
+emit_block_size out/wbuf_cell.json wbuf_cell area 425  util 46
+emit_block_size out/acc_cell.json  acc_cell  area 1275 util 46

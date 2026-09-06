@@ -53,6 +53,10 @@ import os
 import re
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import harm                                  # noqa: E402  (same directory)
+import pdn_phase as pp                       # noqa: E402
+
 # flow/tcl/tpu_lib.tcl's defaults for everything this does not resize.
 CHAN, ROWM, EDGEGAP, X0, Y0 = 48, 12, 48, 60, 120
 PIPE, PIPEGAP = 2, 48
@@ -75,27 +79,62 @@ def die(n, pew, peh, edgew, edgeh, chan=CHAN, rowm=ROWM):
     return w, h, ppx, ppy
 
 
-def best_aspect(area_um2, util_pct, face_w, face_h, n, edgew, edgeh,
-                lo=0.05, hi=20.0, steps=4000):
-    """The PE shape that minimises the ARRAY's die, not the cell's own.
+def usable_core(w, h):
+    """The core area a `w x h` block actually offers, from `harm.py`'s own
+    `block_core` and row snapping — NOT the nominal die.
 
-    `emit_block_size` shapes a block by its faces' ratio, which is the right
-    default for ONE block and not what the array wants: the emitter spends
-    `PPX = PEW + CHAN` once per column, so a wide PE costs N times its width
-    and only once its height.  The cell's AREA and its FACE floors are fixed
-    by the rule; the aspect between them is free, and this spends that free
-    variable on the die.  Returns (w, h, aspect)."""
-    core = area_um2 / (util_pct / 100.0)
+    This is the distinction that made the first cut of this tool wrong
+    (Codex #890): `emit_block_size` divides the cell area by a utilization
+    to get a DIE, while the placer measures utilization against the CORE,
+    which is the die minus LibreLane's margins and rounded down to whole
+    standard-cell rows.  On a small block the two differ enormously — a
+    128 x 67 PE is 8576 um2 of die and 5090 of core."""
+    c = harm.block_core(w, h)
+    rows = int(math.floor((c[3] - c[1]) / pp.SITE_H + 1e-9))
+    return max(0.0, (c[2] - c[0]) * rows * pp.SITE_H)
+
+
+def clears_bar(cell, w, h):
+    """(ok, utilization, core) against the bar `harm.py` predicts a refusal
+    at: `PL_TARGET_DENSITY_PCT` with its own advisory margin.  A cell whose
+    area is unknown clears by default — there is nothing to check it with."""
+    area, _how = harm.cell_area_estimate(cell)
+    core = usable_core(w, h)
+    if area is None:
+        return True, None, core
+    if core <= 0:
+        return False, math.inf, core
+    util = 100.0 * area / core
+    bar = harm.BLOCK_SETTINGS["PL_TARGET_DENSITY_PCT"]
+    return util * harm.ADVICE_MARGIN <= bar, util, core
+
+
+def best_aspect(cell, face_w, face_h, n, edgew, edgeh, hi=600):
+    """The PE shape that minimises the ARRAY's die, subject to BOTH floors.
+
+    `emit_block_size` shapes a block by its faces' ratio, which is right for
+    one block and not for an array: the emitter spends `PPX = PEW + CHAN`
+    once per COLUMN, so a wide PE costs N times its width and only once its
+    height.  That is the free variable.  What is NOT free is the placer's
+    bar — the block has to hold its own cells in its CORE — so the search
+    is constrained by `clears_bar` rather than by nominal area, which is
+    what the first cut got wrong (Codex #890: 128 x 67 is 117 % utilised
+    and `harm.py` predicts GPL-0301 on it).
+
+    Returns (w, h) or None when nothing inside `hi` clears."""
     best = None
-    for i in range(steps + 1):
-        r = lo * (hi / lo) ** (i / steps)
-        w = max(math.sqrt(core * r), face_w)
-        h = max(math.sqrt(core / r), face_h)
-        dw, dh, _px, _py = die(n, int(math.ceil(w)), int(math.ceil(h)),
-                               edgew, edgeh)
-        if best is None or dw * dh < best[0]:
-            best = (dw * dh, int(math.ceil(w)), int(math.ceil(h)), r)
-    return best[1], best[2], best[3]
+    w0 = max(1, int(math.ceil(face_w)))
+    h0 = max(1, int(math.ceil(face_h)))
+    for w in range(w0, hi + 1):
+        for h in range(h0, hi + 1):
+            ok, _u, _c = clears_bar(cell, w, h)
+            if not ok:
+                continue
+            dw, dh, _px, _py = die(n, w, h, edgew, edgeh)
+            if best is None or dw * dh < best[0]:
+                best = (dw * dh, w, h)
+            break            # h is monotone in core: the first that fits is best
+    return (best[1], best[2]) if best else None
 
 
 def read_sizes(d):
@@ -160,19 +199,38 @@ def main(argv=None):
         edgew, edgeh = pew, peh
     rule_pew, rule_peh, aspect_note = pew, peh, None
     if a.optimize_aspect:
-        frag = os.path.join(a.sizes, "pe_cell.json")
-        d = json.load(open(frag)).get("derivation", {})
-        ar = d.get("area")
-        if not ar:
-            sys.exit("apply_sizes: --optimize-aspect needs pe_cell's AREA "
-                     "demand — re-run size.buda with `area` or `metrics`")
-        pew, peh, r = best_aspect(ar["instance_area"], ar["utilization_pct"],
-                                  d.get("face_needs", {}).get("w", 0.0),
-                                  d.get("face_needs", {}).get("h", 0.0),
-                                  a.n, edgew, edgeh)
+        d = json.load(open(os.path.join(a.sizes, "pe_cell.json"))).get("derivation", {})
+        fn = d.get("face_needs", {})
+        got = best_aspect("pe_cell", fn.get("w", 0.0), fn.get("h", 0.0),
+                          a.n, edgew, edgeh)
+        if got is None:
+            sys.exit("apply_sizes: no PE size within 600 um clears the "
+                     "placer's bar — check harm.cell_area_estimate('pe_cell')")
+        pew, peh = got
         aspect_note = (f"PE reshaped {rule_pew} x {rule_peh} -> {pew} x {peh} "
-                       f"(aspect {r:.2f}, same area and the same face floors) "
-                       f"to minimise the ARRAY's die")
+                       f"to minimise the ARRAY's die, subject to the placer's "
+                       f"bar on its own core")
+    if a.optimize_aspect:
+        # The edge knob has to clear too, or the recipe still cannot harden:
+        # grow it (keeping it one size for all three, as the emitter demands)
+        # to the smallest that holds every edge cell's own core.
+        grown = False
+        while any(not clears_bar(c, edgew, edgeh)[0]
+                  for c in EDGE_CELLS if c in sizes) and edgeh < 600:
+            edgeh += 1
+            grown = True
+        if grown:
+            aspect_note += (f"; edge grown to {edgew} x {edgeh} for the same "
+                            f"reason")
+    # BOTH paths are checked: a size the placer refuses is not a size, and
+    # the rule's own die is measured against the DIE while the placer
+    # measures the CORE (Codex #890).
+    checks = []
+    for cell, (cw, ch) in (("pe_cell", (pew, peh)),) + tuple(
+            (c, (edgew, edgeh)) for c in EDGE_CELLS if c in sizes):
+        ok, util, core = clears_bar(cell, cw, ch)
+        checks.append((cell, cw, ch, ok, util, core))
+
     args = f"-PEW {pew} -PEH {peh} -EDGEW {edgew} -EDGEH {edgeh}"
     if a.args:
         print(args)
@@ -180,6 +238,9 @@ def main(argv=None):
 
     w, h, ppx, ppy = die(a.n, pew, peh, edgew, edgeh)
     result = {"n": a.n, "gen_args": args, "aspect_note": aspect_note,
+              "checks": [{"cell": c, "w": w, "h": h, "clears": ok,
+                          "utilization_pct": u, "core_um2": round(cr, 1)}
+                         for c, w, h, ok, u, cr in checks],
               "pe": {"w": pew, "h": peh}, "edge": {"w": edgew, "h": edgeh},
               "predicted_die": {"w": w, "h": h, "mm2": round(w * h / 1e6, 4)},
               "pitch": {"x": ppx, "y": ppy}}
@@ -217,6 +278,19 @@ def main(argv=None):
         print(f"  {cell:<10} rule {cw:7.1f} x {ch:6.1f}  binds {b}{note}")
     if aspect_note:
         print(f"apply_sizes: {aspect_note}")
+    for cell, cw, ch, ok, util, core in checks:
+        if util is None:
+            continue
+        verdict = "ok" if ok else "REFUSED by the placer"
+        print(f"  {cell:<10} {cw} x {ch}: {core:.0f} um2 of core, "
+              f"{util:.0f} % utilised -- {verdict}")
+    bad = [c for c in checks if not c[3]]
+    if bad:
+        print(f"apply_sizes: WARNING: {len(bad)} cell(s) above the placer's "
+              f"bar (PL_TARGET_DENSITY_PCT "
+              f"{harm.BLOCK_SETTINGS['PL_TARGET_DENSITY_PCT']} with harm.py's "
+              f"{harm.ADVICE_MARGIN}x margin) -- `--optimize-aspect` picks a "
+              f"size that clears it, or give the cell more area")
     print(f"apply_sizes: predicted die {w} x {h} um = {w * h / 1e6:.3f} mm2 "
           f"(PE pitch {ppx} x {ppy})")
     if a.baseline:

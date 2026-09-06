@@ -1090,10 +1090,19 @@ it.  The array is RE-EMITTED at BUDA's sizes:
 ```bash
 cd ~/src/buda && bin/buda --no-viz flow/librelane/tier1a/size.buda
 cd flow/librelane/tier1a
-python3 apply_sizes.py out --n 8 --baseline n8 --optimize-aspect
+python3 apply_sizes.py out --n 8 --baseline n8 --optimize-aspect   # read it before running it
 ./gen.sh 8 $(python3 apply_sizes.py out --n 8 --optimize-aspect --args)
-./harm.sh 8 && # harden the four cells and the top as in steps 7a-7c
-python3 runtimes.py top/runs/h --set N=8 --set arm=H+B --blocks-from top/config.json --json >> results.jsonl
+./harm.sh 8
+```
+
+`harm.sh` only WRITES `n8/h`; the hardening is steps 7a-7c, run from
+`n8/h` exactly as the generated `README.md` there spells them out (the four
+blocks in parallel, `pdn_phase.py`, then the top).  Only then:
+
+```bash
+cd n8/h
+python3 ../../runtimes.py top/runs/h --set N=8 --set arm=H+B \
+        --blocks-from top/config.json --json >> ../../results.jsonl
 ```
 
 `apply_sizes.py` turns the fragments into the emitter's knobs and predicts
@@ -1107,21 +1116,32 @@ cannot promise a saving nobody can collect.
 | PE size | source | die | vs arm H | vs arm F (1.032 mm²) |
 |---|---|---|---|---|
 | 228 x 132 | `PEPAD 100` (arm H, measured) | **6.347 mm²** | — | 6.15x |
-| 179 x 48 | the rule, its own face-ratio shape | 3.183 mm² | 0.50x | 3.08x |
-| 128 x 67 | the rule, `--optimize-aspect` | **2.802 mm²** | **0.44x** | 2.72x |
+| 128 x 150 | the rule, `--optimize-aspect` | **3.935 mm²** | **0.62x** | 3.81x |
 
-Two things the table says.  The rule roughly HALVES the die on its own, and
-reshaping the PE takes another 12 %: the rule shapes a block by its own
+The saving is real and it is smaller than the geometry alone suggests,
+because a block answers to a THIRD demand neither `emit_block_size` nor the
+emitter knows about: **the placer measures utilization against the CORE,
+not the die.**  The core is the die minus LibreLane's margins, rounded down
+to whole standard-cell rows, and on a small block the two differ
+enormously — a 128 x 67 PE is 8576 µm² of die and 5090 of core, so it is
+117 % utilised and `harm.py` predicts `GPL-0301` on it (Codex #890 caught
+exactly this in the first cut of the tool, which had claimed 2.802 mm²).
+`apply_sizes.py` therefore searches subject to `harm.py`'s own bar rather
+than to nominal area, and it grows the edge knob for the same reason —
+`acc_cell` at the rule's 96 x 52 is refused too.
+
+What `--optimize-aspect` is still for: the rule shapes a block by its own
 faces, which is right for one block and not for an array, where `PPX` is
 spent once per COLUMN so a wide PE costs N times its width and only once
-its height.  `--optimize-aspect` spends that free variable — the same area,
-the same face floors, a different aspect — and the 128 it lands on is
-exactly the PE's north/south face demand, i.e. the floor.
+its height.  The 128 the search lands on is exactly the PE's north/south
+face demand, i.e. the face floor binds the width while the placer's bar
+binds the height.
 
-The honest caveats.  These are PREDICTIONS from the emitter's geometry, not
-a run: they say nothing about whether the blocks still meet timing at a
-different aspect, whether the top still routes at half the die, or what the
-hold violation §8 step 7d found does when the boundaries move.  And the
+The honest caveats.  These are PREDICTIONS from the emitter's geometry plus
+`harm.py`'s placement bar, not a run: they say nothing about whether the
+blocks still meet timing at a different aspect, whether the top still
+routes at 0.62x the die, or what the hold violation §8 step 7d found does
+when the boundaries move.  And the
 edge cells are coarsened on the way out — the emitter has ONE `EDGEW`/
 `EDGEH`, so `feed_cell` and `wbuf_cell` (44.2 x 44.2 by the rule) are
 emitted at `acc_cell`'s 96 x 52.  Making them independent is an emitter

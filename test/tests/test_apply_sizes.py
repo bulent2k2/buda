@@ -113,29 +113,46 @@ def test_the_baseline_comparison_reads_the_emitted_lef(tmp_path):
     assert r.returncode != 0 and "is --baseline an emitted" in r.stderr
 
 
+def test_a_size_the_placer_would_refuse_is_reported_and_never_recommended(tmp_path):
+    """The demand neither `emit_block_size` nor the emitter knows about: the
+    placer measures utilization against the CORE — the die minus margins,
+    rounded to whole rows — not the die.  A 128 x 67 PE is 8576 um2 of die
+    and 5090 of core, so it is 117 % utilised and `harm.py` predicts
+    GPL-0301 (Codex #890, which the first cut of this tool recommended)."""
+    assert A.usable_core(128, 67) < 128 * 67 * 0.62
+    ok, util, core = A.clears_bar("pe_cell", 128, 67)
+    assert not ok and util > 100 and abs(core - 5090) < 50
+    assert A.clears_bar("pe_cell", 228, 132)[0]           # the PEPAD-100 size
+    # The rule's own numbers are reported with the verdict, not silently used.
+    d = _sizes_dir(tmp_path, [_frag("pe_cell", 128, 67, area=5964, util=46.0,
+                                    face_w=128.0, face_h=34.0)])
+    r = _run(d, "--n", "8")
+    assert "REFUSED by the placer" in r.stdout and "% utilised" in r.stdout
+    assert "above the placer's bar" in r.stdout and "--optimize-aspect" in r.stdout
+
+
 def test_optimize_aspect_spends_the_free_variable_on_the_array(tmp_path):
     """The rule shapes a block by its own faces; the array spends `PPX` once
-    per COLUMN, so a wide PE costs N times its width.  Same area, same face
-    floors, a different aspect — and never a bigger die."""
+    per COLUMN, so a wide PE costs N times its width.  The search is
+    constrained by the face floors AND the placer's bar."""
     d = _sizes_dir(tmp_path, [
-        _frag("pe_cell", 178.7, 47.5, area=3900, util=46.0,
+        _frag("pe_cell", 221, 59, area=5964, util=46.0,
               face_w=128.0, face_h=34.0),
         _frag("acc_cell", 96.0, 51.1), _frag("feed_cell", 44.2, 44.2)])
-    plain = json.loads(_run(d, "--n", "8", "--json").stdout)
     opt = json.loads(_run(d, "--n", "8", "--optimize-aspect", "--json").stdout)
-    assert opt["predicted_die"]["mm2"] < plain["predicted_die"]["mm2"]
-    assert opt["aspect_note"] and "same face floors" in opt["aspect_note"]
-    # The face floor is a floor: the PE never goes below the 128 um its own
-    # north/south face needs.
-    assert opt["pe"]["w"] >= 128 and opt["pe"]["h"] >= 34
-    # The area is preserved to within the integer rounding.
-    core = 3900 / 0.46
-    assert opt["pe"]["w"] * opt["pe"]["h"] >= core * 0.98
-    # Without an area demand there is nothing to reshape, and it says so.
-    (tmp_path / "b").mkdir()
-    d2 = _sizes_dir(tmp_path / "b", [_frag("pe_cell", 178.7, 47.5)])
-    r = _run(d2, "--n", "8", "--optimize-aspect")
-    assert r.returncode != 0 and "needs pe_cell's AREA demand" in r.stderr
+    # Every cell it recommends clears the bar -- that is the point.
+    assert all(c["clears"] for c in opt["checks"]), opt["checks"]
+    assert opt["pe"]["w"] >= 128                       # the face floor binds the width
+    assert opt["aspect_note"] and "placer's bar" in opt["aspect_note"]
+    # The edge knob is grown for the same reason (acc_cell at 96 x 52 is
+    # refused), and says so.
+    assert "edge grown" in opt["aspect_note"]
+    assert opt["edge"]["h"] > 52
+    # It beats the PEPAD-100 die it exists to beat, and by less than the
+    # unconstrained geometry would have claimed.
+    pepad100 = A.die(8, *PEPAD100, *PEPAD100)
+    assert opt["predicted_die"]["mm2"] < pepad100[0] * pepad100[1] / 1e6
+    assert opt["predicted_die"]["mm2"] > 3.0           # not the 2.802 of the first cut
 
 
 def test_the_refusals(tmp_path):
@@ -180,5 +197,7 @@ def test_it_runs_on_the_checked_in_arrays_own_fragments(tmp_path):
     r = _run(out, "--n", "8", "--baseline", _T1A.parents[1] / "tpu", "--json")
     assert r.returncode == 0, r.stderr
     j = json.loads(r.stdout)
-    assert j["gen_args"] == "-PEW 179 -PEH 48 -EDGEW 96 -EDGEH 52"
+    # From the areas size.buda declares (harm.py's own: pe_cell MEASURED at
+    # 5964, the others §7.1's Yosys totals x 1.7).
+    assert j["gen_args"] == "-PEW 221 -PEH 59 -EDGEW 96 -EDGEH 53"
     assert abs(j["baseline"]["die"]["mm2"] - 3.079) < 5e-3      # the PEPAD-24 set
