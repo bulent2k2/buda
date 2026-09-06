@@ -261,6 +261,15 @@ def cmd_import_def_lef(session, cmd, args, cmd_line):
     # importer keeps only the pins the DEF's nets reach (a port on no net —
     # clk on a design whose clock the top routes elsewhere — has no pin row).
     session._pin_def_lef_path = lef_path
+    # The DEF's GCELLGRID, for `emit_guides <file.guide>`: a guide is a set
+    # of the ROUTER's gcells, and the DEF is where their size and origin are
+    # stated.  Kept on the session (not the BDB — it is a fact about the
+    # router's view of this DEF, not about the design).
+    try:
+        from buda_session.advisory import gcell_from_def
+        session._def_gcell = gcell_from_def(def_path)
+    except Exception:
+        session._def_gcell = None
 
     def _line(what, got, declared):
         if declared is None or declared < 0:

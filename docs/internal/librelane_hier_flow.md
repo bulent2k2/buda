@@ -139,7 +139,7 @@ solve-once-copy premise as BUDA's bottom-up planning (`set_bottom_up`,
 | Block size | `DIE_AREA` + `FP_SIZING absolute` | rule in `flow/tcl/tpu_lib.tcl` (face-capacity aware); a command, NEW |
 | Block pins at exact positions | `FP_DEF_TEMPLATE` — the shape `phase0/reg32/gen_pins_def.py` writes by hand | NEW writer: per net bit landing on a block, face + coordinate + layer from the DNUTS `net_segment` endpoint at the busterm, transformed to block-local through the instance orientation (`orient_rect.py`) |
 | Block pins from the plan, written | `FP_DEF_TEMPLATE` — the same file, from BUDA | **`emit_pin_def <file.def> <block-or-cell> [unrouted <edge> [<layer>]] [depth <um>] [grid <dbu>] [lef <file>]`** (`buda_session/pin_def.py`): after `run_detailed_nuts`, one pin per net bit where its bit-wire meets the block face, on the bit-wire's layer (a track by construction), rectangle SYMMETRIC about the PLACED point, DEF-escaped names, UNITS from `lu_per_um`; a cell in a hier session is a TEMPLATE (every instance must agree in cell-local coordinates, `N` only for now); nets on no bus are spread on one edge's tracks; verifier `tools/pin_def_verify.py` (absolute rectangles, never origins). Vehicle: `phase0/two_reg32/pins.buda` (§8 step 3b) |
-| Bus corridors | `read_guides` after `set_nets_to_route` | `emit_guides` has the content (per-bit tapered); the OpenROAD guide format (`phase0/measure/guide_io.py`) is NEW |
+| Bus corridors | `read_guides` after `set_nets_to_route` | **EXISTS**: `emit_guides <file.guide>` writes the OpenROAD guide file — gcells from the DEF's `GCELLGRID`, the floor-at-both-ends junction rule, DEF-escaped names, pin-access strips on the `terminal` layers (§8 step 5b; the phase-0 lessons of step 5 are the rules it is built from) |
 | Placement keep-out under corridors | `PL_SOFT_OBSTRUCTIONS` | `export_def_blockages density`; the tuple list is NEW |
 | Bus wiring as FIXED pre-routes | DEF `NETS … + FIXED` | NEW, gated on measurement B |
 | Per-pin timing budgets | `set_input_delay`/`set_output_delay` in `PNR_SDC_FILE` | NEW capability, phase 3 |
@@ -496,6 +496,40 @@ agreeing — and `extract_bus_guides.py` refuses anything else.
 says which kind of miss each is (another layer inside the corridor, or
 outside it), weighs both by wire length, and counts a bus bit with no
 wiring as a failure, never a pass.
+
+**5b. Measurement A with BUDA's guides** — phase 1's first closed loop.
+Step 5 proved the router follows a guide; the guides were the router's own.
+This step routes the bus in BUDA and hands the router BUDA's guide file.
+
+```bash
+cd flow/librelane/phase0/two_reg32 && mkdir -p out
+cp runs/phase0/*-odb-manualmacroplacement/two_reg32.def out/placed.def      # u0/u1 FIXED, std cells unplaced
+ln -sf $PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hd/techlef/sky130_fd_sc_hd__nom.tlef out/tech.tlef
+../../../../bin/buda buda_route.buda --no-viz                                 # -> out/buda_bus.guide
+cd ../measure
+python3 extract_bus_guides.py ../two_reg32/out/buda_bus.guide out/bus.guide  # the bus entries, as BUDA wrote them
+./run_or.sh ../two_reg32/runs/phase0 guide_test.tcl ODB=$ODB OUT=$PWD/out
+python3 check_inside.py out/guided.def out/bus.guide --slack 1.0 --max-outside-pct 5
+python3 check_inside.py out/guided.def out/all_bus.guide --slack 1.0 --max-outside-pct 5   # control: the ROUTER's corridor
+```
+
+(`out/all_bus.guide` is step 5's `extract_bus_guides.py out/all.guide …`
+output, kept under another name.)  Pass: `buda_route.buda` ends with
+`check_design dnuts` clean and `emit_guides` reporting every via in a gcell
+its net holds on both layers; `guide_test.tcl` reaches
+`Number of violations = 0`; the first `check_inside.py` exits 0 — the wire
+is inside BUDA's corridor — and the control against the router's own
+corridor FAILS wherever BUDA's corridor differs from it, which is the
+evidence that the router followed BUDA rather than agreeing with it.  A
+`DRT-0218 Guide is not connected to design` here is a pin the guide did not
+reach: check that `terminal met3` names the pin layer reg32's LEF actually
+uses, and that `out/placed.def` carries the `PINS` the LEF pins map to.
+Record the same three numbers step 5 records (segments, µm, % outside).
+
+What `buda_route.buda` does and why is written in the file; the guide
+writer's rules are §8 step 5's four lessons, each now enforced in
+`emit_guides` and pinned by `test/tests/test_emit_guide_file.py` with the
+phase-0 measure scripts as the reader.
 
 **6. Measurement B — FIXED wires.**
 

@@ -396,6 +396,7 @@ identity, so it is a picture; these two carry the identity.
 
 ```
 emit_guides <file.json> [margin <n>] [csv <file.csv>] [tcl <file.tcl>]
+emit_guides <file.guide> [gcell <um>] [terminal <layer,...>] [plain_names]
 ```
 
 Write the **corridor manifest** — the positive intent, "route these nets
@@ -418,6 +419,42 @@ Run it **after** `run_nuts` (or `run_detailed_nuts`): an unplaced plan
 reserves nothing, and emitting it would advertise corridors that do not
 exist. Emitting early prints `no placed bus segments` and writes an empty
 manifest rather than a plausible-looking one.
+
+**The `.guide` form** is the same intent in the file a router READS —
+OpenROAD's `read_guides` (the ISPD-contest form: a net name, then one
+`x1 y1 x2 y2 layer` box per line between parentheses, coordinates in DEF
+database units). It is built around four things phase 0 of the LibreLane
+study measured about that reader
+([librelane_hier_flow.md](../internal/librelane_hier_flow.md) §8 step 5):
+
+- **A guide is a set of GCELLS.** A box that covers no whole gcell stops the
+  router (`DRT-0229`), so every box is gcell-aligned. The gcell size and
+  origin come from the imported DEF's `GCELLGRID` (kept at `import_def_lef`)
+  or from `gcell <um>`; without either the command refuses and says so.
+- **Adjacent layers connect only where they SHARE a gcell** (`DRT-0218`
+  otherwise). Every box is derived by one rule — the gcells CONTAINING each
+  point, floor at both ends — so a stub and its trunk hold the junction
+  gcell in both layers by construction, and the writer checks the predicate
+  itself on every net's finished guide — one connected set of gcells, side
+  by side on a layer or the same gcell on adjacent layers of the stack — and
+  names the first net whose guide is not (plus a per-via self-check on the
+  detailed path).
+- **Net names are DEF-escaped** (`mid\[0\]`), as a routed OpenROAD database
+  and its own `write_guides` spell a non-port net; `plain_names` turns that
+  off.
+- **The router must reach the pins.** A wire end that is not a via is a
+  block landing; with a BDB imported from DEF+LEF, each landing is joined to
+  the net's nearest pin by a strip of gcells on the wire's layer, each
+  `terminal` layer (the pin's layer, which BUDA does not model — name it),
+  and every layer between them. The abstract fallback joins the corridor
+  itself to each pin the same way. A pin at the unknown-position sentinel
+  is not a pin.
+
+After `run_detailed_nuts` each bit gets its own gcell row (the corridor at
+track resolution); after `run_nuts` alone every net a corridor names gets
+the corridor's gcells (the taper rule above applies). `margin`, `csv` and
+`tcl` belong to the manifest and are refused on a `.guide` output; `gcell`,
+`terminal` and `plain_names` are refused on any other.
 
 ### `export_def_blockages`
 

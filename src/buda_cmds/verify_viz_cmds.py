@@ -501,23 +501,44 @@ COMMANDS = {
 def cmd_emit_guides(session, cmd, args, cmd_line):
     # Usage: emit_guides <file.json|.csv> [margin <n>] [tcl <file.tcl>]
     #                                     [csv <file.csv>]
+    #        emit_guides <file.guide> [gcell <um>] [terminal <layer,...>]
+    #                                 [plain_names]
     #
     # Phase 4a: the corridor manifest — the PRIMARY artifact, and the one
     # that carries positive intent ("route these nets here").  DEF cannot say
     # that, which is why this leads and the DEF (4b) follows.
+    #
+    # A `.guide` output is the same intent in the form a router READS —
+    # OpenROAD's `read_guides` (docs/internal/librelane_hier_flow.md,
+    # mechanism A): per net, gcell-aligned boxes (`gcell` from the imported
+    # DEF's GCELLGRID or the option), DEF-escaped names unless `plain_names`,
+    # and pin-access strips on the `terminal` layers.
     if not args:
         print("Error: emit_guides requires an output path "
-              "(<file.json> or <file.csv>)")
+              "(<file.json>, <file.csv> or <file.guide>)")
         return
     # A QUOTED path may contain spaces — for the output AND for the `tcl` /
     # `csv` values, which are paths too.  Unquoted, this is the old
     # args[0]/args[1:] split exactly.
     path, opts = leading_path_and_options(cmd_line, ("margin", "tcl", "csv"))
     margin, tcl, csv_path = 0.0, None, None
+    gcell, terminal, escape, guide_opts = None, (), True, False
     i = 0
     while i < len(opts):
         kw = opts[i].lower()
-        if kw == "margin" and i + 1 < len(opts):
+        if kw == "gcell" and i + 1 < len(opts):
+            try:
+                gcell = float(opts[i + 1])
+            except ValueError:
+                print(f"Error: emit_guides gcell must be a length in um, "
+                      f"got '{opts[i + 1]}'"); return
+            guide_opts, i = True, i + 2
+        elif kw == "terminal" and i + 1 < len(opts):
+            terminal = tuple(t for t in opts[i + 1].split(",") if t)
+            guide_opts, i = True, i + 2
+        elif kw == "plain_names":
+            escape, guide_opts, i = False, True, i + 1
+        elif kw == "margin" and i + 1 < len(opts):
             try:
                 margin = float(opts[i + 1])
             except ValueError:
@@ -532,8 +553,23 @@ def cmd_emit_guides(session, cmd, args, cmd_line):
             csv_path, i = opts[i + 1], i + 2
         else:
             reject_unknown_options("emit_guides", [kw],
-                                   ("margin", "tcl", "csv"))
+                                   ("margin", "tcl", "csv", "gcell", "terminal",
+                                    "plain_names"))
             return
+    is_guide = path.lower().endswith(".guide")
+    if is_guide and (margin or tcl or csv_path):
+        print("Error: emit_guides: `margin`, `tcl` and `csv` belong to the "
+              "manifest, not to a .guide file (a guide is gcells, and a "
+              "margin in layout units has no meaning on that grid)")
+        return
+    if guide_opts and not is_guide:
+        print("Error: emit_guides: `gcell`, `terminal` and `plain_names` "
+              "apply to a .guide output only")
+        return
+    if is_guide:
+        session._emit_guide_file(resolve_script_path(session, path),
+                                 gcell_um=gcell, terminal=terminal, escape=escape)
+        return
     session._emit_guides(resolve_script_path(session, path), margin=margin,
                          tcl=resolve_script_path(session, tcl),
                          csv_path=resolve_script_path(session, csv_path))
