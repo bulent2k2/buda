@@ -11,7 +11,7 @@ shape it did not expect.
 | `gen.sh N` | emits the array at N (`btcl flow/tcl/tpu.tcl N -emit`) into `n<N>/`: `tpu_rtl.v` (synthesizable), `tpu.v` (BUDA's shell), `tpu.def` + `tpu.lef` (the placement), and `config.json` for **arm F** (flat, relative sizing).  Extra arguments go to `tpu.tcl` (`gen.sh 4 -PEPAD 56` makes every cell 32 um larger each way -- see the utilization note below) |
 | `harm.sh N` | from `n<N>/` writes `n<N>/h/`, **arm H** (hierarchical, no BUDA): a block-hardening directory per leaf cell type, `top/` with the macros placed where the DEF placed them and the PDN derived from the array pitch, `predicted_lef/` for a dry run, and a `README.md` with the exact commands in order.  The logic and every rule is `harm.py` |
 | `pdn_phase.py <top config.json> [<cell>.lef ...]` | the check to run AFTER hardening and BEFORE the top: reads the hardened macros' VPWR/VGND pin rectangles and the top's PDN config, reports every pin under a strap of the other net and every macro no strap feeds, and the smallest shift (or the equivalent PDN_VOFFSET/PDN_HOFFSET) that clears it.  §8 step 4's PSM-0069 lesson, made a step instead of a signoff surprise |
-| `runtimes.py <run> [--block <run>[:<n>] ...] [--blocks-from <top config.json>] [--json]` | the row for the table: per-stage seconds and the §7.3 metrics; an H arm's row carries its blocks (wall = the longest, cpu = the sum, wire per PLACED instance), derived from the top's MACROS entry with `--blocks-from` |
+| `runtimes.py <run> [--set KEY=VALUE ...] [--block <run>[:<n>] ...] [--blocks-from <top config.json>] [--json]` | the row for the table: per-stage seconds and the §7.3 metrics; an H arm's row carries its blocks (wall = the longest, cpu = the sum, wire per PLACED instance), derived from the top's MACROS entry with `--blocks-from` |
 
 ## Arm F (flat) at N
 
@@ -19,7 +19,7 @@ shape it did not expect.
 cd ~/src/buda
 for N in 2 4 8; do flow/librelane/tier1a/gen.sh $N; done
 cd flow/librelane/tier1a/n4 && librelane --dockerized --run-tag flat config.json
-python3 ../runtimes.py runs/flat --json >> ../results.jsonl
+python3 ../runtimes.py runs/flat --set N=4 --set arm=F --json >> ../results.jsonl
 ```
 
 ## Arm H (hierarchical, no BUDA) at N
@@ -34,8 +34,9 @@ Then the generated README's four steps, in order: **dry-run** `pdn_phase.py`
 on the predicted LEFs (no tools), **harden** the four cells in parallel
 (`librelane --dockerized --run-tag h config.json` in each, timing the batch for
 the wall figure), **check** `pdn_phase.py` on the hardened LEFs, run the
-**top**, and take the **row** with `runtimes.py top/runs/h --blocks-from
-top/config.json --json >> ../../results.jsonl`.
+**top**, and take the **row** with `runtimes.py top/runs/h --set N=4 --set arm=H --blocks-from
+top/config.json --json >> ../../results.jsonl` (`--set` stamps the row with
+its coordinates, as the flat arm's row is stamped).
 
 What `harm.sh` decided, and why (the full statement is `harm.py`'s docstring):
 

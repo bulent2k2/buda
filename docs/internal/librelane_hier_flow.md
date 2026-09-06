@@ -138,7 +138,7 @@ solve-once-copy premise as BUDA's bottom-up planning (`set_bottom_up`,
 | Block placement | `MACROS.<cell>.instances.<inst>.location/orientation` | trivial writer, NEW |
 | Block size | `DIE_AREA` + `FP_SIZING absolute` | rule in `flow/tcl/tpu_lib.tcl` (face-capacity aware); a command, NEW |
 | Block pins at exact positions | `FP_DEF_TEMPLATE` — the shape `phase0/reg32/gen_pins_def.py` writes by hand | NEW writer: per net bit landing on a block, face + coordinate + layer from the DNUTS `net_segment` endpoint at the busterm, transformed to block-local through the instance orientation (`orient_rect.py`) |
-| Bus corridors | `read_guides` after `set_nets_to_route` | `emit_guides` has the content (per-bit tapered); the OpenROAD guide format (`phase0/measure/guide_io.py`) is NEW |
+| Bus corridors | `read_guides` after `set_nets_to_route` | **EXISTS**: `emit_guides <file.guide>` writes the OpenROAD guide file — gcells from the DEF's `GCELLGRID`, the floor-at-both-ends junction rule, DEF-escaped names, pin-access strips on the `terminal` layers (§8 step 5b; the phase-0 lessons of step 5 are the rules it is built from) |
 | Placement keep-out under corridors | `PL_SOFT_OBSTRUCTIONS` | `export_def_blockages density`; the tuple list is NEW |
 | Bus wiring as FIXED pre-routes | DEF `NETS … + FIXED` | NEW, gated on measurement B |
 | Per-pin timing budgets | `set_input_delay`/`set_output_delay` in `PNR_SDC_FILE` | NEW capability, phase 3 |
@@ -228,6 +228,32 @@ own Sky130 tutorial pushes `TinyRocketConfig` "to minimize tool runtime", so
 N = 8 is a comfortable laptop design and N = 16 is the size at which a flat
 sky130 route becomes an hours-long run — exactly the range a crossover would
 have to sit in.
+
+**Measured — arm F, this machine** (2026-09-05, recipe 7 as written: Intel
+Mac, Docker Desktop 4.89 at 8 CPUs / 8 GB, LibreLane 3.0.11, sky130A,
+`FP_CORE_UTIL 40`, 20 ns clock; rows in `flow/librelane/tier1a/results.jsonl`,
+one run each, an otherwise idle box):
+
+| N | wall | synth | fp+place | CTS | route | signoff | std cells (comb / flops) | die (mm²) | util | setup WS (ns) | WL (mm) | DRC |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 2 | 8.8 min | 25 s | 87 s | 79 s | 166 s | 172 s | 4,410 (2,660 / 274) | 0.087 | 46.7 % | +4.65 | 64 | 0 |
+| 4 | 20.2 min | 34 s | 118 s | 77 s | 482 s | 500 s | 14,997 (9,153 / 860) | 0.280 | 46.5 % | +1.81 | 227 | 0 |
+| 8 | 75.7 min | 123 s | 338 s | 252 s | 1,754 s | 2,074 s | 56,471 (34,375 / 3,000) | 1.032 | 46.3 % | **−0.55** | 935 | 0 |
+
+The synthesis table above is confirmed by the runs (2,660 / 9,153 / 34,375
+combinational cells against its 2,660 / 9,105 / 34,194; the flop counts
+grow by the hold buffers), and its cell area maps onto LibreLane's std-cell
+area by ~1.7× (taps and timing-repair buffers).  The factors per doubling
+are NOT constant: wall 2.3× then **3.7×**, route 2.9× then 3.6×, signoff
+2.9× then 4.2×, wire 3.5× then 4.1× — the flat run turns superlinear
+between N = 4 and N = 8, and signoff (RCX, STA over nine corners, KLayout
+DRC, LVS) is the largest stage at N = 8, not routing.  Read forward, N = 16
+is a 5–6 h flat run on this box (~200 k std cells, ~4 mm²).  And N = 8 is
+the first size that MISSES timing at 20 ns (−0.55 ns WS, −1.44 ns TNS,
+every DRC clean) — the flat arm's own timing wall, before any hierarchy is
+involved, which is the baseline the H arms' timing column will be read
+against (§2.4).  Every run left ~3 GB of run directory at N = 8 (1 GB at 4);
+`runs/` is git-ignored.
 
 Smoke vehicles needing no authoring: `manual_macro_placement_test`,
 `salsa20`.
@@ -464,6 +490,40 @@ says which kind of miss each is (another layer inside the corridor, or
 outside it), weighs both by wire length, and counts a bus bit with no
 wiring as a failure, never a pass.
 
+**5b. Measurement A with BUDA's guides** — phase 1's first closed loop.
+Step 5 proved the router follows a guide; the guides were the router's own.
+This step routes the bus in BUDA and hands the router BUDA's guide file.
+
+```bash
+cd flow/librelane/phase0/two_reg32 && mkdir -p out
+cp runs/phase0/*-odb-manualmacroplacement/two_reg32.def out/placed.def      # u0/u1 FIXED, std cells unplaced
+ln -sf $PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hd/techlef/sky130_fd_sc_hd__nom.tlef out/tech.tlef
+../../../../bin/buda buda_route.buda --no-viz                                 # -> out/buda_bus.guide
+cd ../measure
+python3 extract_bus_guides.py ../two_reg32/out/buda_bus.guide out/bus.guide  # the bus entries, as BUDA wrote them
+./run_or.sh ../two_reg32/runs/phase0 guide_test.tcl ODB=$ODB OUT=$PWD/out
+python3 check_inside.py out/guided.def out/bus.guide --slack 1.0 --max-outside-pct 5
+python3 check_inside.py out/guided.def out/all_bus.guide --slack 1.0 --max-outside-pct 5   # control: the ROUTER's corridor
+```
+
+(`out/all_bus.guide` is step 5's `extract_bus_guides.py out/all.guide …`
+output, kept under another name.)  Pass: `buda_route.buda` ends with
+`check_design dnuts` clean and `emit_guides` reporting every via in a gcell
+its net holds on both layers; `guide_test.tcl` reaches
+`Number of violations = 0`; the first `check_inside.py` exits 0 — the wire
+is inside BUDA's corridor — and the control against the router's own
+corridor FAILS wherever BUDA's corridor differs from it, which is the
+evidence that the router followed BUDA rather than agreeing with it.  A
+`DRT-0218 Guide is not connected to design` here is a pin the guide did not
+reach: check that `terminal met3` names the pin layer reg32's LEF actually
+uses, and that `out/placed.def` carries the `PINS` the LEF pins map to.
+Record the same three numbers step 5 records (segments, µm, % outside).
+
+What `buda_route.buda` does and why is written in the file; the guide
+writer's rules are §8 step 5's four lessons, each now enforced in
+`emit_guides` and pinned by `test/tests/test_emit_guide_file.py` with the
+phase-0 measure scripts as the reader.
+
 **6. Measurement B — FIXED wires.**
 
 ```bash
@@ -494,14 +554,18 @@ LEF the H arms will use are written beside the RTL.
 cd ~/src/buda
 for N in 2 4 8; do flow/librelane/tier1a/gen.sh $N; done        # + 16 when the small ones are in
 cd flow/librelane/tier1a/n4 && librelane --dockerized --run-tag flat config.json
-python3 ../runtimes.py runs/flat                # per-stage seconds + area/timing/power/WL/DRC
-python3 ../runtimes.py runs/flat --json >> ../results.jsonl     # one row per run, for the table
+python3 ../runtimes.py runs/flat --set N=4 --set arm=F        # per-stage seconds + area/timing/power/WL/DRC
+python3 ../runtimes.py runs/flat --set N=4 --set arm=F --json >> ../results.jsonl   # one row per run, saying which
 ```
 
 Pass: `Flow complete`; `runtimes.py` prints the stage split and the metrics
 row.  The numbers to keep per N: the stage seconds, `design__die__area`,
-`timing__setup__ws`, `power__total`, `route__wirelength`, DRC count.  `N=16`
-last — it is the run that tells you the laptop's ceiling.
+`timing__setup__ws`, `power__total`, `route__wirelength`, DRC count.  Done
+for N = 2, 4, 8 on 2026-09-05 (8.8 / 20.2 / 75.7 min, all DRC-clean; the
+table and the reading are in §7.1) — run the three SEQUENTIALLY on an idle
+box, since the stage seconds are the point and a second run on the same
+cores is a confound.  `N=16` last — read forward from the three, it is a
+5–6 h run here.
 
 **7a. Tier 1a — arm H, the blocks.**  `harm.sh N` reads the set step 7
 emitted and writes `n<N>/h/`: one hardening directory per leaf cell (its
@@ -569,11 +633,11 @@ is the smallest that brings every halo inside the die
 **7d. Arm H — the row.**
 
 ```bash
-python3 ../../runtimes.py top/runs/h --blocks-from top/config.json
-python3 ../../runtimes.py top/runs/h --blocks-from top/config.json --json >> ../../results.jsonl
+python3 ../../runtimes.py top/runs/h --set N=4 --set arm=H --blocks-from top/config.json
+python3 ../../runtimes.py top/runs/h --set N=4 --set arm=H --blocks-from top/config.json --json >> ../../results.jsonl
 ```
 
-`--blocks-from` reads each block's run directory and instance count off the
+`--set` stamps the row with its coordinates (step 7's rule); `--blocks-from` reads each block's run directory and instance count off the
 top's own `MACROS` entry, so the H row (§7.3: wall AND cpu-sum for the
 blocks, wire per PLACED instance, the block-internal wire its own column)
 cannot disagree with the config the top was built from.
@@ -633,8 +697,14 @@ have: every netlist here is either authored or uniquified.
 1. The **success criterion** in §7.4 — confirm or replace the numbers.
 2. **sky130A** unless told otherwise.
 3. ~~Vehicle~~ — decided: the ladder in §7.1, tiers 1a and 1b first, both
-   for concrete runtime numbers; Chisel is acceptable.  Open: the tier-2
-   config size, once the 1b numbers say what the laptop affords.
+   for concrete runtime numbers; Chisel is acceptable.  ~~Open: the tier-2
+   config size~~ — the 1a flat numbers (§7.1) say what this box affords:
+   **~55 k std cells / 1 mm² is a 76-minute flat run, and the next doubling
+   is 5–6 h.**  So tier 2's `ChipTop` should be sized to the N = 8 point
+   (a Rocket + a Gemmini mesh at 4 or 8, ~50–100 k cells) if its F arm is
+   to be run at all on a laptop — a bigger config still has an H+B arm but
+   no flat baseline to compare against, which is the one thing the
+   crossover needs.  Confirm against tier 1b's numbers when they exist.
 4. **The PDN-phase placement rule** (§9, phase 1): snap-to-phase in the
    placer, or derive the offsets from the placement?  Snapping keeps the
    top's PDN config authoritative (what a real flow has) and costs each

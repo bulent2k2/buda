@@ -86,3 +86,4 @@ flow/librelane/tier1b/n*/
 flow/librelane/**/runs/
 flow/librelane/phase0/measure/out/
 flow/librelane/phase0/reg32/pins.def
+flow/librelane/phase0/two_reg32/out/

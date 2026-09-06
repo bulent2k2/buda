@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The numbers the benchmark wants, out of LibreLane run directories.
 
-    runtimes.py runs/<tag> [--block <run_dir>[:<instances>] ...] [--blocks-from <top config.json>] [--json]
+    runtimes.py runs/<tag> [--set KEY=VALUE ...] [--block <run_dir>[:<instances>] ...] [--blocks-from <top config.json>] [--json]
 
 Per-step wall time from each step's `runtime.txt` (what LibreLane writes when
 a step finishes), grouped into the stages the plan reports on -- synthesis,
@@ -9,6 +9,11 @@ floorplan+placement, CTS, routing, signoff -- plus the PPA metrics from the
 run's final `metrics.json`: instance/die area, utilization, setup/hold
 slack, power, wirelength, DRC counts.  One row per run, so three arms at
 one N are three lines of a table, and `--json` is the machine-readable row.
+A row must say WHICH point it is on its own: `--set N=8 --set arm=F` puts
+the benchmark coordinates into it (any KEY=VALUE, merged in verbatim), and
+`run` is the run directory relative to the repository root -- three rows
+that each said `runs/flat` because recipe 7 invokes this from each `n<N>`
+directory were usable only by line order (Codex #881).
 
 A HIERARCHICAL arm is one top run plus the hardening of each distinct
 block, and its row must carry both (docs/internal/librelane_hier_flow.md
@@ -151,6 +156,8 @@ def blocks_from_config(path):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("run_dir")
+    ap.add_argument("--set", action="append", default=[], metavar="KEY=VALUE",
+                    help="benchmark coordinates to record in the row, e.g. N=8 arm=F")
     ap.add_argument("--block", action="append", default=[], metavar="RUN_DIR[:INSTANCES]",
                     help="a hardened block's run directory and how many times the top places it")
     ap.add_argument("--blocks-from", metavar="CONFIG_JSON",
@@ -159,8 +166,17 @@ def main():
     a = ap.parse_args()
     if a.blocks_from:
         a.block = blocks_from_config(a.blocks_from) + a.block
+    coords = {}
+    for kv in a.set:
+        key, sep, value = kv.partition("=")
+        if not sep or not key:
+            raise SystemExit(f"--set {kv}: expected KEY=VALUE")
+        coords[key] = int(value) if value.isdigit() else value
     n_steps, per_stage, unassigned, total, metrics = read_run(a.run_dir)
-    row = {"run": a.run_dir, "steps": n_steps, "total_s": round(total, 1),
+    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+    run_abs = os.path.abspath(a.run_dir)
+    run_id = os.path.relpath(run_abs, root) if run_abs.startswith(root + os.sep) else run_abs
+    row = {**coords, "run": run_id, "steps": n_steps, "total_s": round(total, 1),
            **{f"{k}_s": round(v, 1) for k, v in per_stage.items()},
            "other_s": round(unassigned, 1),
            **{k: metrics.get(k) for k in METRICS}}
@@ -194,7 +210,7 @@ def main():
     if a.json:
         print(json.dumps(row))
         return
-    print(f"{a.run_dir}: {n_steps} steps, {total:.0f}s total")
+    print(f"{run_id}{''.join(f' {k}={v}' for k, v in coords.items())}: {n_steps} steps, {total:.0f}s total")
     for name, _ in STAGES:
         print(f"  {name:<16} {per_stage[name]:8.1f}s")
     print(f"  {'other':<16} {unassigned:8.1f}s")

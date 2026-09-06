@@ -688,6 +688,7 @@ def write_h(n_dir, out_dir, halo):
 
 def render_readme(n_dir, out_dir, cells, counts, sizes, D, dx, dy, vplan, hplan, advice):
     blocks = " ".join(f"--block ../{c}/runs/h:{counts[c]}" for c in cells)
+    n_arr = int(round(math.sqrt(counts.get("pe_cell", 0)))) or "?"   # the array's N: N*N PEs
     harden = "\n".join(f"(cd {c} && librelane --dockerized --run-tag h config.json > h.log 2>&1) &" for c in cells)
     lefs = " ".join(f"../{c}/runs/h/final/lef/{c}.lef" for c in cells)
     plef = " ".join(f"predicted_lef/{c}.lef" for c in cells)
@@ -738,9 +739,10 @@ flattened netlist does not have exits 1 there -- that is the `row_0/pe_0` to `ro
 
 ## 4. The row for the table (§7.3: top plus every block, wire per PLACED instance)
 
-    python3 ../../runtimes.py top/runs/h --blocks-from top/config.json
-    python3 ../../runtimes.py top/runs/h --blocks-from top/config.json --json >> ../../results.jsonl
+    python3 ../../runtimes.py top/runs/h --set N={n_arr} --set arm=H --blocks-from top/config.json
+    python3 ../../runtimes.py top/runs/h --set N={n_arr} --set arm=H --blocks-from top/config.json --json >> ../../results.jsonl
 
+`--set` puts the benchmark coordinates into the row (a row must say which point it is on its own, #881);
 `--blocks-from` reads the block run directories and instance counts off the MACROS entry; the explicit form is
 `python3 ../../runtimes.py top/runs/h {blocks}`.
 """
@@ -770,7 +772,7 @@ def main(argv=None):
     for line in r["advice"]:
         print("harm: " + line)
     print(f"harm: next steps in {r['out']}/README.md (dry-run check, harden the blocks in parallel, "
-          f"pdn_phase.py on the hardened LEFs, the top, runtimes.py --blocks-from)")
+          f"pdn_phase.py on the hardened LEFs, the top, runtimes.py --set N= --set arm=H --blocks-from)")
     return 0
 
 

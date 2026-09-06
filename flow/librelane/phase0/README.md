@@ -11,6 +11,7 @@ document's §8; this is the file map.
 | `two_reg32/` | the top: `u0 -> u1` chained by one 32-bit bus `mid[31:0]`, both instances hardened `reg32` macros (paths point at `reg32/runs/phase0/final/`) |
 | `measure/run_or.sh` | runs an OpenROAD script inside the LibreLane container on a run directory, mirroring `librelane --dockerized`'s mounts |
 | `measure/guide_ref.tcl` → `extract_bus_guides.py` → `guide_test.tcl` → `check_inside.py` | **measurement A**: `set_nets_to_route` + `read_guides` -- does detailed routing seat the bus inside guides BUDA would write?  (`--dy` shifts the channel a whole gcell for the sharp form) |
+| `two_reg32/buda_route.buda` | **phase 1, mechanism A with BUDA in the loop**: BUDA routes the bus from the phase-0 placement and writes `out/buda_bus.guide` (`emit_guides <file.guide>`, gcells from the DEF's GCELLGRID); measurement A then runs on BUDA's guides instead of the router's (§8 step 5b) |
 | `measure/mark_fixed.py` → `fixed_test.tcl` → `compare_bus_wires.py` | **measurement B**: does a `+ FIXED` pre-routed bus survive `global_route` + `detailed_route` untouched? |
 
 Authored against LibreLane 3.0.11 and first RUN on 2026-09-05 (macOS, Docker
