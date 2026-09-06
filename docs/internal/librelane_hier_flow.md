@@ -237,10 +237,23 @@ Smoke vehicles needing no authoring: `manual_macro_placement_test`,
 | Arm | Synthesis | Blocks | Placement | Pins | Buses |
 |---|---|---|---|---|---|
 | **F** flat | `flatten` | none | GPL | `IOPlacement` | GRT |
-| **H** hierarchical, no BUDA | `keep` → harden | per cell | `ManualMacroPlacement`, simple grid | per-block `IOPlacement` | GRT |
+| **H** hierarchical, no BUDA | the leaf modules the RTL declares, each hardened from its own module text; the top `flatten`ed over the hardened netlists as black boxes | one per leaf cell type (`pe_cell`, `feed_cell`, `wbuf_cell`, `acc_cell`), die = the emitter's LEF `SIZE` | `ManualMacroPlacement` at the emitter's DEF locations (the whole placement translated once to fit the die), PDN pitch/offset derived from the array pitch | per-block `IOPlacement` | GRT |
 | **H+B** hierarchical with BUDA | `keep` → harden | per cell, BUDA-sized | BUDA `PlacementOptimizer` | BUDA `FP_DEF_TEMPLATE` | BUDA guides (A) |
 
 H isolates what hierarchy alone costs; H+B minus H is BUDA's contribution.
+Arm H is what `flow/librelane/tier1a/harm.sh N` writes (§8 steps 7a–7d),
+and it differs from the first draft's row in two ways that are the point:
+the partition is not a `SYNTH_KEEP_HIERARCHY_MIN_COST` threshold but the
+four leaf modules of `tpu_rtl.v`, cut out of the file one per block run
+(`row_cell` stays soft), and the block placement is not a "simple grid" but
+the emitter's own DEF — the same placement the H+B arm starts from — so
+the two hierarchical arms differ only in what BUDA adds (sizes, pins,
+corridors), never in where the macros sit.  The one thing H decides that
+the DEF does not say is the top's PDN phase (§8 step 4's lesson): `harm.sh`
+picks `PDN_VPITCH` as a divisor of the PE column pitch and `PDN_VOFFSET`
+so that every macro of a cell sees the straps at one phase, predicted from
+the block config it writes, and `pdn_phase.py` verifies the prediction on
+the hardened LEFs before the top runs.
 
 ### 7.3 Metrics — all from LibreLane's own `metrics.json`
 
@@ -489,6 +502,81 @@ Pass: `Flow complete`; `runtimes.py` prints the stage split and the metrics
 row.  The numbers to keep per N: the stage seconds, `design__die__area`,
 `timing__setup__ws`, `power__total`, `route__wirelength`, DRC count.  `N=16`
 last — it is the run that tells you the laptop's ceiling.
+
+**7a. Tier 1a — arm H, the blocks.**  `harm.sh N` reads the set step 7
+emitted and writes `n<N>/h/`: one hardening directory per leaf cell (its
+module cut out of `tpu_rtl.v`, a fixed die of exactly its `tpu.lef` SIZE,
+pins by LibreLane's placer, the `reg32` block settings), `top/`, the
+predicted LEFs, and a README with these commands filled in for that N.
+The four cells are independent, so they harden in parallel; the wall time
+of the batch and the cpu-sum are BOTH recorded (§7.3).
+
+```bash
+cd ~/src/buda && flow/librelane/tier1a/harm.sh 4         # prints the PDN plan and the utilization estimate
+cd flow/librelane/tier1a/n4/h
+python3 ../../pdn_phase.py top/config.json predicted_lef/*.lef     # dry run, no tools: must PASS
+date +%s > blocks.start
+for c in pe_cell feed_cell wbuf_cell acc_cell; do
+  (cd $c && librelane --dockerized --run-tag h config.json > h.log 2>&1) &
+done; wait; date +%s > blocks.end
+```
+
+Pass: `Flow complete` in each `<cell>/h.log` and `<cell>/runs/h/final/{gds,lef,nl,spef/nom}`
+present — the paths `top/config.json` names.  If `OpenROAD.GlobalPlacement`
+refuses `pe_cell` on utilization, the die is the emitter's bus-face size
+(152 x 56 um, 12 rows) and the RTL's PE is ~85 % of it (`harm.sh` prints
+the estimate): regenerate the whole set with `gen.sh 4 -PEPAD 56` and rerun
+`harm.sh 4`; arm F is unaffected.  The first real run decides the PEPAD.
+
+**7b. Arm H — the PDN-phase check, before the top.**
+
+```bash
+python3 ../../pdn_phase.py top/config.json */runs/h/final/lef/*.lef
+```
+
+Pass: `PASS: 36 instances, ... 0 collisions, every instance connected on
+VPWR and VGND`, exit 0.  This is step 4's lesson as a step: the top's
+straps sit at core origin + `PDN_VOFFSET` + k·`PDN_VPITCH`, a hardened
+macro's power pins are wherever its own PDN put them, and where a pin of
+one net lies under a strap of the other on the same layer, pdngen clips
+the strap and IR-drop signoff — the last step — is the first to say so.
+`harm.sh` chose the pitch as a divisor of the PE column pitch (100 =
+PPX/2 with the defaults) and the offset so that every macro of a cell sees
+the straps at one phase, clear of the pins its block config PREDICTS
+(straps at core + 5 + 30k, width 2) and with a VPWR+VGND pair in every
+standard-cell row fragment the halos leave (the toy's sliver failure);
+this run replaces the prediction with the LEFs.  A `COLLISION` or
+`UNCONNECTED` line names the instance, the pin rectangle, the strap and the
+smallest x- or y-shift that clears it, and the equivalent
+`PDN_VOFFSET`/`PDN_HOFFSET` for the whole placement: change the offsets
+in `top/config.json`, rerun the check, and only then the top.
+
+**7c. Arm H — the top.**
+
+```bash
+(cd top && librelane --dockerized --run-tag h config.json)
+```
+
+Pass: `Odb.ManualMacroPlacement` prints `Successfully placed 36 instances`
+— the instance-name rule (`row_0/pe_0` in the DEF, `row_0.pe_0` in the
+flattened netlist) fails HERE, with exit 1, if it is wrong for this
+LibreLane — then `Flow complete`, `All shapes on net VPWR are connected`
+(and VGND).  The placement is the DEF's translated by (150, 0) um: the
+emitter puts `feed_*` at x = −140, outside its own DIEAREA, and the shift
+is the smallest that brings every halo inside the die
+(`top/placement.json` has both coordinates of every instance).
+
+**7d. Arm H — the row.**
+
+```bash
+python3 ../../runtimes.py top/runs/h --blocks-from top/config.json
+python3 ../../runtimes.py top/runs/h --blocks-from top/config.json --json >> ../../results.jsonl
+```
+
+`--blocks-from` reads each block's run directory and instance count off the
+top's own `MACROS` entry, so the H row (§7.3: wall AND cpu-sum for the
+blocks, wire per PLACED instance, the block-internal wire its own column)
+cannot disagree with the config the top was built from.
 
 **8. Tier 1b — a Gemmini mesh at N = 4, 8, 16.**  Chipyard needs Linux; on
 the Mac that is a Linux container with the BUDA checkout mounted.  The full
