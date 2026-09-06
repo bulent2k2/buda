@@ -10,8 +10,7 @@ Writes, beside this script:
                      header, DIEAREA, TRACKS, the reg32 macro instances, and
                      the `mid` bus nets with their wiring stripped.
   reg32_macro.lef    the hardened block's LEF (../reg32/runs/phase0/final/lef/
-                     reg32.lef), copied; any signal port the LEF marks `USE
-                     CLOCK` is rewritten `USE SIGNAL` (said below).
+                     reg32.lef), copied verbatim.
   sky130_tech.lef    the PDK's tech LEF the run resolved (`TECH_LEFS` in
                      runs/phase0/resolved.json, matched by corner the way
                      ../measure/read_resolved.py does), copied.
@@ -36,11 +35,15 @@ are dropped with those nets.  clk and rst still reach the template: the
 writer reads the cell's port list from the macro LEF and spreads the ports
 no bus reaches on the south edge, which is where the hand template put them.
 
-WHY USE CLOCK -> USE SIGNAL.  BUDA's LEF reader treats a `USE CLOCK` pin as
-a pre-route, like POWER, and drops it from the cell's pin list; a template
-without `clk` is refused by `FP_TEMPLATE_MATCH_MODE strict`.  The rewrite
-touches the COPY only and changes nothing about the block; the count of
-rewritten pins is printed so it cannot pass unnoticed.
+WHY THE LEF IS COPIED VERBATIM.  `emit_pin_def` reads the cell's pin set
+from the LEF itself (`buda.read_lef`, dropping only POWER/GROUND), so a
+`USE CLOCK` port reaches the template as it is; nothing needs rewriting.
+The importer's own pin rows are a different matter (it keeps only the pins
+the DEF's nets reach), and the writer does not depend on them.
+
+GCELLGRID IS KEPT so this one staged DEF also serves `buda_route.buda`
+(#880's guide writer takes the router's gcell size from it): one staging
+recipe for the toy instead of two.
 
 A pass prints one line per output with the counts, ending `prep_pins: ok`.
 It fails LOUDLY — non-zero, naming the file and the shape — when a run
@@ -62,7 +65,7 @@ _SECTION = re.compile(r"^(\w+)\s+(\d+)\s*;\s*\n(.*?)^END \1\s*$", re.S | re.M)
 _ENTRY = re.compile(r"^\s*-\s+(\S+)(.*?);", re.S | re.M)
 _CONN = re.compile(r"\(\s*(\S+)\s+(\S+)\s*\)")
 _HEADER_KEEP = ("VERSION", "DIVIDERCHAR", "BUSBITCHARS", "DESIGN", "UNITS",
-                "DIEAREA", "TRACKS")
+                "DIEAREA", "TRACKS", "GCELLGRID")
 
 
 def fail(msg):
@@ -168,10 +171,7 @@ def main():
     macros = set(macro_names(lef_text))
     if not macros:
         fail(f"{a.macro_lef} declares no MACRO")
-    n_clock = len(re.findall(r"^\s*USE\s+CLOCK\s*;", lef_text, re.M))
-    lef_out = re.sub(r"^(\s*)USE\s+CLOCK\s*;", r"\1USE SIGNAL ;", lef_text,
-                     flags=re.M)
-    n_pins = len(re.findall(r"^\s*PIN\s+\S+", lef_out, re.M))
+    n_pins = len(re.findall(r"^\s*PIN\s+\S+", lef_text, re.M))
 
     reduced, n_inst, n_nets, n_tracks = reduce_def(open(def_path).read(),
                                                    macros, a.bus)
@@ -191,13 +191,12 @@ def main():
     p_lef = os.path.join(a.out_dir, "reg32_macro.lef")
     p_tech = os.path.join(a.out_dir, "sky130_tech.lef")
     open(p_def, "w").write(reduced)
-    open(p_lef, "w").write(lef_out)
+    open(p_lef, "w").write(lef_text)
     shutil.copyfile(tl, p_tech)
     print(f"{p_def}: {n_inst} instance(s) of {'/'.join(sorted(macros))}, "
-          f"{n_nets} {a.bus}* net(s), {n_tracks} TRACKS statement(s); "
-          f"other components, nets, PINS and wiring dropped")
-    print(f"{p_lef}: {n_pins} pin(s); {n_clock} USE CLOCK pin(s) rewritten "
-          f"USE SIGNAL so the template carries them")
+          f"{n_nets} {a.bus}* net(s), {n_tracks} TRACKS statement(s), "
+          f"GCELLGRID kept; other components, nets, PINS and wiring dropped")
+    print(f"{p_lef}: {n_pins} pin(s), copied verbatim")
     print(f"{p_tech}: copied from {tl}")
     print("prep_pins: ok")
 

@@ -485,7 +485,7 @@ byte-deterministic.
 ### `emit_pin_def`
 
 ```
-emit_pin_def <file.def> <block-or-cell> [unrouted <N|S|E|W> [<layer>]] [depth <um>] [grid <dbu>] [lef <file.lef>]
+emit_pin_def <file.def> <block-or-cell> [unrouted <N|S|E|W> [<layer>]] [depth <um>] [grid <dbu>] [lef <file.lef>] [snap] [plain_names]
 ```
 
 Write a **pin-DEF template** for one block — the block-side handoff of the
@@ -516,11 +516,26 @@ direction, or the named one — and the report says how many pins came
 from the plan and how many were spread.  Coordinates snap to `grid` DBU
 (default 5 at a DBU scale, the manufacturing grid; 1 at the nominal scale).
 
+**The pin sits on the BLOCK's track grid, not the top's.** The routed
+bit-wire is on one of the top's tracks, while the block is hardened alone
+with tracks at `OFFSET + k*PITCH` from its own origin — the same grid only
+when the instance origin is a whole number of that layer's track period.
+An off-period origin is refused, naming each instance's residue and the
+smallest clearing shift (move the instance and re-route, the phase rule
+`align_bottom_up` implements); `snap` is the fallback for a placement that
+cannot move — every pin goes to the nearest block-frame track and
+BUDA-1713 reports the largest shift. Pins spread on the `unrouted` edge
+are on the block's own tracks by construction.
+
+`plain_names` writes `d[0]` instead of the DEF-escaped `d\[0\]`, for a
+consumer whose strict name matching wants the unescaped spelling.
+
 In a hier session naming a **cell** builds one template from every
 instance (template semantics): each instance contributes the pins it
 routes, in cell-local coordinates; two instances routing the same pin to
-different places is a hard error naming both; an instance in any
-orientation but `N` is refused.  The cell's full port list comes from its
+different places is refused naming both; an instance in any orientation
+but `N` is refused. Every refusal prints an `Error:` line and writes no
+file — one convention for the command.  The cell's full port list comes from its
 LEF (the one `import_def_lef` read, or `lef <file>`) so a port on no net is
 in the template too.  Naming an **instance** (or a flat block) emits that
 block alone.

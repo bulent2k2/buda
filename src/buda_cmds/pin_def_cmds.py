@@ -20,17 +20,18 @@ from buda_script import leading_path_and_options
 
 from ._options import reject_unknown_options
 
-_OPTS = ("unrouted", "depth", "grid", "lef")
+_OPTS = ("unrouted", "depth", "grid", "lef", "snap", "plain_names")
 
 
 def cmd_emit_pin_def(session, cmd, args, cmd_line):
     # Usage: emit_pin_def <file.def> <block-or-cell> [unrouted <N|S|E|W> [<layer>]]
-    #                     [depth <um>] [grid <dbu>] [lef <file.lef>]
+    #                     [depth <um>] [grid <dbu>] [lef <file.lef>] [snap]
+    #                     [plain_names]
     if len(args) < 2:
         print("Error: emit_pin_def requires an output path and a block or "
               "cell name: emit_pin_def <file.def> <block-or-cell> "
               "[unrouted <N|S|E|W> [<layer>]] [depth <um>] [grid <dbu>] "
-              "[lef <file.lef>]")
+              "[lef <file.lef>] [snap] [plain_names]")
         return
     # A QUOTED path may contain spaces; unquoted this is the old split.
     path, rest = leading_path_and_options(cmd_line, _OPTS)
@@ -40,6 +41,7 @@ def cmd_emit_pin_def(session, cmd, args, cmd_line):
         return
     target, opts = rest[0], rest[1:]
     unrouted, unrouted_layer, depth, grid, lef = "S", None, None, None, None
+    snap, plain = False, False
     i = 0
     while i < len(opts):
         kw = opts[i].lower()
@@ -62,6 +64,14 @@ def cmd_emit_pin_def(session, cmd, args, cmd_line):
             # token, so this is the same indexing as `depth`).
             lef, i = resolve_script_path(session, opts[i + 1],
                                          is_read=True), i + 2
+        elif kw == "snap":
+            # The fallback for a placement that cannot move onto the track
+            # period: each pin to the nearest BLOCK-frame track, LOUD.
+            snap, i = True, i + 1
+        elif kw == "plain_names":
+            # `d[0]` rather than `d\[0\]` — which spelling strict template
+            # matching wants is settled on the first real run.
+            plain, i = True, i + 1
         elif kw == "grid" and i + 1 < len(opts):
             try:
                 grid = int(opts[i + 1])
@@ -76,7 +86,8 @@ def cmd_emit_pin_def(session, cmd, args, cmd_line):
     from buda_session.pin_def import emit_pin_def
     emit_pin_def(session, resolve_script_path(session, path), target,
                  unrouted=unrouted, unrouted_layer=unrouted_layer,
-                 depth_um=depth, grid=grid, lef_path=lef)
+                 depth_um=depth, grid=grid, lef_path=lef, snap=snap,
+                 plain_names=plain)
 
 
 COMMANDS = {"emit_pin_def": cmd_emit_pin_def}

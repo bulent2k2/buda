@@ -316,7 +316,12 @@ def _hier(tmp_path, instances, nets, tail, lef_pins=None):
     return _session(cmds + _HIER_ROUTE + tail)
 
 
-_TWO = [("u0", 10000, 20000, "N"), ("u1", 160000, 20000, "N")]
+# Origins on the TRACK PERIOD of every pin layer (x: met2 460 / met4 920;
+# y: met1 340 / met3 680), so a top-frame track is a block-frame track —
+# the placement rule the writer checks.  (10000, 20000) is 340 past a met2
+# period in x and 280 past a met3 period in y: the phase-0 placement.
+_TWO = [("u0", 9200, 20400, "N"), ("u1", 160080, 20400, "N")]
+_OFF = [("u0", 10000, 20000, "N"), ("u1", 160000, 20000, "N")]
 
 
 def test_a_cell_template_merges_what_each_instance_routes(tmp_path):
@@ -338,13 +343,16 @@ def test_a_cell_template_merges_what_each_instance_routes(tmp_path):
         assert d[2] == q[2] == "met3" and d[1] == "INPUT" and q[1] == "OUTPUT"
         assert d[4][0] == 1000 and q[4][0] == 79000          # W and E faces, depth 2 um
         assert d[4][1] == q[4][1], "the straight bus lands at one local y"
-        assert (d[4][1] + 20000 - 340) % 680 == 0, "not on a met3 track"
+        # On a met3 track of the BLOCK's frame (340 + 680k from ITS origin):
+        # the block is hardened alone, so this is the grid its router has.
+        assert (d[4][1] - 340) % 680 == 0, "not on a block-frame met3 track"
         assert d[3] == (-1000, -150, 1000, 150)             # met3 min width 0.30
         assert d[4][0] % 5 == 0 and d[4][1] % 5 == 0
     for n in ("clk", "rst"):
         assert pins[n][2] == "met2" and pins[n][4][1] == 1000 and pins[n][1] == "INPUT"
-        assert (pins[n][4][0] + 10000 - 230) % 460 == 0, "not on a met2 track"
+        assert (pins[n][4][0] - 230) % 460 == 0, "not on a block-frame met2 track"
         assert pins[n][3] == (-70, -1000, 70, 1000)
+    assert "snapped" not in log
     assert "VPWR" not in text                                 # a power pin is the PDN's
     assert "8 from the plan" in log and "2 spread on edge S on met2" in log
     assert "2 instance(s)" in log
@@ -352,16 +360,50 @@ def test_a_cell_template_merges_what_each_instance_routes(tmp_path):
     assert pdv.compare(text, text)[0] == []
 
 
-def test_instances_that_disagree_on_a_pin_are_a_hard_error(tmp_path):
+def test_instances_that_disagree_on_a_pin_are_refused(tmp_path):
     """u1 drives a second bus to a u2 placed higher up, so u1's q lands at a
     different local y than u0's q does: one cell, two answers — refused,
-    naming the instances and the pin."""
-    three = _TWO + [("u2", 310000, 90000, "N")]
+    naming the instances and the pin (an `Error:` line and no file, the
+    one convention every refusal of the command follows)."""
+    three = _TWO + [("u2", 310040, 90440, "N")]         # on the period too
     nets = _bus("mid", "u0", "u1") + _bus("mid2", "u1", "u2")
     out = tmp_path / "blk.def"
-    with pytest.raises(SystemExit):
-        _hier(tmp_path, three, nets, [f"emit_pin_def {out} blk"])
+    _s, log = _hier(tmp_path, three, nets, [f"emit_pin_def {out} blk"])
+    assert "Error:" in log and "disagree on pin 'q[" in log
+    assert "u0 puts it on met3" in log and "u1 on met3" in log
     assert not out.exists()
+
+
+def test_an_off_period_origin_is_refused_and_snap_is_the_loud_fallback(tmp_path):
+    """The phase-0 placement, (10, 20) um: 280 DBU past a met3 period in y
+    and 340 past a met2 period in x, so every pin taken from the top's
+    tracks misses the BLOCK's tracks (measured: d[0] 400 off, clk 120 off).
+    Refused with the residues and the smallest clearing shifts; `snap`
+    moves each pin to the nearest block-frame track and says by how much."""
+    out = tmp_path / "blk.def"
+    _s, log = _hier(tmp_path, _OFF, _bus("mid", "u0", "u1"),
+                    [f"emit_pin_def {out} blk"])
+    assert "Error:" in log and "not a whole number of track periods" in log
+    assert ("u0: origin y on met3 is 280 past a track period of 680 — move "
+            "it by -280 or +400") in log
+    assert "u1: origin y on met3 is 280" in log
+    assert "pass `snap`" in log and not out.exists()
+    # (met2 is not a PLANNED pin layer here — clk/rst are spread on the
+    # block's own tracks — so only met3 is named.)
+    assert "met2" not in log.split("Error: emit_pin_def")[1].split("remedy")[0]
+    _s2, log2 = _hier(tmp_path, _OFF, _bus("mid", "u0", "u1"),
+                      [f"emit_pin_def {out} blk snap"])
+    assert "BUDA-1713: WARNING" in log2 and "largest shift" in log2
+    pins = _pins(out.read_text())
+    assert len(pins) == 10
+    for i in range(4):
+        d, q = pins[f"d[{i}]"], pins[f"q[{i}]"]
+        assert (d[4][1] - 340) % 680 == 0 and d[4][1] == q[4][1]
+    for n in ("clk", "rst"):
+        assert (pins[n][4][0] - 230) % 460 == 0
+    m = re.search(r"largest shift (\d+)", log2)
+    assert m and 0 < int(m.group(1)) <= 340                   # within half a met3 period
+    assert "8 snapped" in log2
 
 
 def test_a_non_n_instance_is_refused_loud(tmp_path):
@@ -489,7 +531,8 @@ def _synth_runs(root, nbits=32):
                     ("met3", 340, 680), ("met4", 460, 920), ("met5", 1700, 3400)):
         d += [f"TRACKS X {o} DO {250000 // p} STEP {p} LAYER {n} ;",
               f"TRACKS Y {o} DO {120000 // p} STEP {p} LAYER {n} ;"]
-    d += ["VIAS 1 ;", "  - via2_3 + VIARULE M2M3 ;", "END VIAS", "COMPONENTS 12 ;",
+    d += ["GCELLGRID X 0 DO 37 STEP 6900 ;", "GCELLGRID Y 0 DO 18 STEP 6900 ;",
+          "VIAS 1 ;", "  - via2_3 + VIARULE M2M3 ;", "END VIAS", "COMPONENTS 12 ;",
           "  - u0 reg32 + SOURCE DIST + FIXED ( 10000 20000 ) N ;",
           "  - u1 reg32 + SOURCE DIST + FIXED ( 160000 20000 ) N ;"]
     d += [f"  - TAP_{k} sky130_fd_sc_hd__tapvpwrvgnd_1 + FIXED ( {100000 + k * 460} 5000 ) N ;"
@@ -536,12 +579,13 @@ def test_the_vehicle_runs_on_the_shape_the_phase0_runs_have(tmp_path):
     assert r.returncode == 0, r.stderr
     assert r.stdout.rstrip().endswith("prep_pins: ok")
     assert "2 instance(s) of reg32, 32 mid* net(s), 12 TRACKS" in r.stdout
-    assert "1 USE CLOCK pin(s) rewritten" in r.stdout
+    assert "GCELLGRID kept" in r.stdout and "copied verbatim" in r.stdout
     fp = (top / "two_reg32_fp.def").read_text()
     assert "TAP_" not in fp and "ROUTED" not in fp and "SPECIALNETS" not in fp
     assert "PINS" not in fp and "SOURCE" not in fp and fp.count("- mid") == 32
+    assert fp.count("GCELLGRID") == 2                    # for buda_route.buda too
     assert "( u0 q\\[0\\] ) ( u1 d\\[0\\] ) + USE SIGNAL ;" in fp
-    assert "USE CLOCK" not in (top / "reg32_macro.lef").read_text()
+    assert "USE CLOCK" in (top / "reg32_macro.lef").read_text()   # verbatim
     # The flow itself, verbatim, on those inputs: the pass its comments name.
     r = subprocess.run([sys.executable, str(_ROOT / "src" / "buda_cli.py"),
                         "--no-viz", str(top / "pins.buda")],
@@ -553,12 +597,22 @@ def test_the_vehicle_runs_on_the_shape_the_phase0_runs_have(tmp_path):
             "(detailed; E 32, W 32), 2 spread on edge S on met2" in log), log[-3000:]
     assert log.count("Success: no violations found.") == 2
     assert "0 error line(s)" in r.stdout
+    assert "snapped" not in log, "the vehicle's placement is on the period"
     pins = _pins((top / "reg32_pins.def").read_text())
     assert len(pins) == 66
     for i in range(32):
         assert pins[f"d[{i}]"][4][1] == pins[f"q[{i}]"][4][1]     # one y per bit
         assert pins[f"d[{i}]"][2] == pins[f"q[{i}]"][2] == "met3"
+        assert (pins[f"d[{i}]"][4][1] - 340) % 680 == 0      # the BLOCK's met3 track
     assert pins["clk"][2] == pins["rst"][2] == "met2"
+    for n in ("clk", "rst"):
+        assert (pins[n][4][0] - 230) % 460 == 0              # the BLOCK's met2 track
+    # The flow's own placement fix: the DEF's (10, 20) um origins are off
+    # the pin layers' track periods, so the vehicle moves both macros onto
+    # them before routing (without it the writer refuses, tested above).
+    vehicle = (_P0 / "two_reg32" / "pins.buda").read_text()
+    assert "move_comp u0 9200 20400" in vehicle
+    assert "move_comp u1 160080 20400" in vehicle
     # The template checked against itself as OpenROAD would write it back.
     t = (top / "reg32_pins.def").read_text()
     assert pdv.compare(t, _recentred(t)) == ([], [], 66, 66)

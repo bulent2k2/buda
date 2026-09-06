@@ -40,8 +40,23 @@ def_layer 5 met5 H TOP 30
 import_lef_tech sky130_tech.lef
 
 # The top as LibreLane placed it: u0 at (10, 20) um, u1 at (160, 20) um on a
-# 250 x 120 um die — the same PDN-phase-safe placement §8 step 4 arrived at.
+# 250 x 120 um die — the PDN-phase-safe placement §8 step 4 arrived at.
 import_def_lef two_reg32_fp.def reg32_macro.lef
+
+# ... moved onto the TRACK PERIOD.  The block is hardened alone with tracks
+# at OFFSET + k*PITCH from ITS origin, so a pin taken from the top's routed
+# wire is on the block's grid only when the instance origin is a whole
+# number of periods on the pin layer: x on met2 (0.46 um), y on met3 (0.68).
+# (10, 20) is 0.34 past a met2 period and 0.28 past a met3 one — measured
+# on this toy, d[0] lands 0.40 um off the block's met3 track and clk 0.12
+# off met2 — and `emit_pin_def` refuses it (or, with `snap`, moves every
+# pin and says by how much).  9.2 / 160.08 are the nearest multiples of
+# 0.46 that keep both macros clear of the 30 um PDN straps (VGND met4 pin
+# at cell-local 13.22..15.22 against straps at 5.52 + 30k, width 1.6); 20.4
+# is the nearest multiple of 0.68.  Step 3b carries these into the top's
+# MACROS locations for the re-run.
+move_comp u0 9200 20400
+move_comp u1 160080 20400
 
 derive_busterms
 add_blocks_from_bdb 0
@@ -57,5 +72,7 @@ check_design dnuts
 report_wirelength
 
 # 66 pins: 32 d (W face, met3, from u1), 32 q (E face, met3, from u0), clk +
-# rst on the S edge on met2 tracks.  UNITS 1000 (dbu), DIEAREA 80000 x 80000.
+# rst on the S edge on met2 tracks — every one on the BLOCK's own track
+# grid (no `snap`, nothing reported snapped).  UNITS 1000 (dbu), DIEAREA
+# 80000 x 80000.
 emit_pin_def reg32_pins.def reg32 unrouted S met2

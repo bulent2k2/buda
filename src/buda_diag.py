@@ -135,6 +135,9 @@ MESSAGES = {
     "BUDA-1712": (WARNING, "A pin whose net is on a routed bundle was reached "
                            "by no bit-wire at the block face; it is spread "
                            "with the unrouted pins."),
+    "BUDA-1713": (WARNING, "emit_pin_def snapped pins onto the block-frame "
+                           "tracks because the instance origin is off the "
+                           "track period; the largest shift is reported."),
     # ── session / units ────────────────────────────────────────────────────
     "BUDA-1901": (FATAL,  "The design's coordinates and its track patterns "
                           "are on implausibly different scales."),

@@ -53,7 +53,6 @@ wrong transform would place every pin of that instance on the wrong face
 with nothing saying so.
 """
 import re
-import sys
 
 import buda
 import buda_diag
@@ -301,17 +300,43 @@ def _plan_block(session, block, bx, pins_on_block, wires, net_of, depth,
     return out, missed, notes
 
 
-def _free_tracks(session, edge, lid, bx, taken):
-    """Block-local SIGNAL track coordinates of `lid` along `edge`, minus
+def _free_tracks(session, lid, extent, taken):
+    """BLOCK-FRAME signal track coordinates of `lid` over [0, extent], minus
     `taken` (local coordinates already holding a planned pin on that
-    edge+layer).  `bx` is the block's absolute bbox — tracks are absolute."""
-    x1, y1, x2, y2 = bx
-    if edge in ("S", "N"):
-        pos = [p - x1 for p in _signal_tracks(session, lid, x1, x2)]
-    else:
-        pos = [p - y1 for p in _signal_tracks(session, lid, y1, y2)]
-    pos = [p for p in pos if all(abs(p - t) > 1e-6 for t in taken)]
-    return pos
+    edge+layer).  The block is hardened in its own run with tracks at
+    `OFFSET + k*PITCH` from ITS origin, which is the pattern read in its own
+    frame — so a spread pin never depends on where the instance sits."""
+    pos = _signal_tracks(session, lid, 0.0, extent)
+    return [p for p in pos if all(abs(p - t) > 1e-6 for t in taken)]
+
+
+def _phase(session, lid, origin):
+    """(residue, period) of an instance ORIGIN against `lid`'s track period,
+    or None when the layer has no pattern.  A top-frame track `t` is a
+    block-frame track iff `t - origin` is one, i.e. iff the origin is a
+    whole number of periods — the rule `align_bottom_up` nudges congruent
+    instances onto.  A residue of 0 means every top-frame track on that
+    layer IS a block-frame track."""
+    g = getattr(session, "routing_grid", None)
+    if g is None or not g.has_layer(lid):
+        return None
+    period = g.get_layer_grid(lid).global_pattern().unit_pitch()
+    if period <= 0:
+        return None
+    r = origin % period
+    if r > period - 1e-6:
+        r = 0.0
+    return (0.0 if r < 1e-6 else r), period
+
+
+def _snap_track(session, lid, local, extent):
+    """The nearest block-frame SIGNAL track of `lid` to `local` (within the
+    block's extent) and the shift to reach it; (local, 0) with no pattern."""
+    pos = _signal_tracks(session, lid, 0.0, extent)
+    if not pos:
+        return local, 0.0
+    best = min(pos, key=lambda t: abs(t - local))
+    return best, abs(best - local)
 
 
 # ── the writer ────────────────────────────────────────────────────────────
@@ -348,10 +373,12 @@ def _lef_cell_pins(session, target, lef_path):
 
 
 def emit_pin_def(session, path, target, unrouted="S", unrouted_layer=None,
-                 depth_um=None, grid=None, lef_path=None):
+                 depth_um=None, grid=None, lef_path=None, snap=False,
+                 plain_names=False):
     """Write `path`.  Returns the list of (name, planned) written, or None
-    when the command refused (an `Error:` line says why).  Disagreeing
-    instances and non-N orientations are hard errors (SystemExit)."""
+    when the command refused — every refusal prints an `Error:` line and
+    returns, one convention for the command (disagreeing instances, an
+    off-phase origin, a non-N orientation included)."""
     if unrouted not in _FACES:
         print(f"Error: emit_pin_def unrouted edge must be one of "
               f"{'/'.join(_FACES)}, got '{unrouted}'")
@@ -501,6 +528,7 @@ def emit_pin_def(session, path, target, unrouted="S", unrouted_layer=None,
     merged = {}          # pin -> _Pin (block-local, unsnapped)
     all_pins = dict(cell_pins)   # pin -> dir over every source
     missed_all, notes = [], []
+    per_inst = []
     for name, bx, comp in instances:
         on_block = _block_pins(session, name, comp)
         for pn, (_net, d) in on_block.items():
@@ -509,6 +537,67 @@ def emit_pin_def(session, path, target, unrouted="S", unrouted_layer=None,
                                            net_of, depth, min_w)
         notes += nts
         missed_all += [f"{name}.{m}" for m in missed]
+        per_inst.append((name, bx, planned))
+
+    # ── the block's OWN track grid ─────────────────────────────────────────
+    # A planned pin sits where the TOP's bit-wire meets the face, on one of
+    # the top's tracks.  The block is hardened in its own run with tracks
+    # anchored at ITS origin, so a top-frame track is a block-frame track
+    # only when the instance origin is a whole number of that layer's track
+    # periods (measured on the phase-0 fixture at (10000, 20000) DBU: d[0]
+    # 400 DBU off the block-frame met3 track, clk 120 off met2 — pins the
+    # block's router cannot reach without a jog, and a template it may
+    # refuse as off-track).  Per instance and pin layer the residue is
+    # checked; the honest fix is a placement on the period (the same rule
+    # `align_bottom_up` implements), and `snap` is the fallback for a
+    # placement that cannot move: each pin moves to the nearest block-frame
+    # track and the largest shift is reported LOUD.
+    off = []
+    for name, bx, planned in per_inst:
+        for lid in sorted({p.layer for p in planned.values()}):
+            h = _layer_is_h(session, lid)
+            ph = _phase(session, lid, bx[1] if h else bx[0])
+            if ph is None or ph[0] == 0.0:
+                continue
+            r, period = ph
+            off.append((name, lid, "y" if h else "x", r, period))
+    n_snapped, max_shift = 0, 0.0
+    if off and not snap:
+        lines = [f"  {name}: origin {axis} on {names_for(lid)} is {r:g} past "
+                 f"a track period of {period:g} — move it by -{r:g} or "
+                 f"+{period - r:g}"
+                 for name, lid, axis, r, period in off]
+        print(f"Error: emit_pin_def: the pins of '{target}' would sit on the "
+              f"TOP's track grid, not the block's — the instance origin is "
+              f"not a whole number of track periods on the pin layer(s):\n"
+              + "\n".join(lines)
+              + "\n  remedy: place the instance(s) at an origin that is a "
+              "multiple of every pin layer's period (align_bottom_up's "
+              "phase rule) and re-route, or pass `snap` to move each pin "
+              "to the nearest block-frame track (reported)")
+        return None
+    if off:
+        off_layers = {(name, lid) for name, lid, _a, _r, _p in off}
+        for name, bx, planned in per_inst:
+            for p in planned.values():
+                if (name, p.layer) not in off_layers:
+                    continue
+                if p.face in ("W", "E"):
+                    p.cy, sh = _snap_track(session, p.layer, p.cy, bh)
+                else:
+                    p.cx, sh = _snap_track(session, p.layer, p.cx, bw)
+                if sh > 1e-6:
+                    n_snapped += 1
+                    max_shift = max(max_shift, sh)
+        buda_diag.emit("BUDA-1713",
+                       f"emit_pin_def: {n_snapped} pin(s) of '{target}' "
+                       f"snapped onto the block-frame tracks, the largest "
+                       f"shift {max_shift:g} layout units — the top's "
+                       f"bit-wire and the block's pin differ by that much "
+                       f"and the top's router will jog to meet it; a "
+                       f"placement on the track period removes the shift")
+
+    for name, _bx, planned in per_inst:
         for pn, p in planned.items():
             q = merged.get(pn)
             if q is None:
@@ -525,7 +614,7 @@ def emit_pin_def(session, path, target, unrouted="S", unrouted_layer=None,
                       f"({p.cx:g}, {p.cy:g}) — a cell is hardened once, so "
                       f"every instance must route the pin to the same place; "
                       f"re-plan (or pin the topology) until they agree")
-                sys.exit(1)
+                return None
     if not all_pins:
         print(f"Error: emit_pin_def: '{target}' has no pins — no net reaches "
               f"it and (in a hier session) its cell declares no port")
@@ -574,11 +663,11 @@ def emit_pin_def(session, path, target, unrouted="S", unrouted_layer=None,
                       f"{unrouted}; declare one (def_layer) or pick another "
                       f"edge")
                 return None
-        bx0 = instances[0][1]
         taken = [(p.cx if unrouted in ("S", "N") else p.cy)
                  for p in merged.values()
                  if p.face == unrouted and p.layer == lid]
-        pos = _free_tracks(session, unrouted, lid, bx0, taken)
+        pos = _free_tracks(session, lid, bw if unrouted in ("S", "N") else bh,
+                           taken)
         n = len(unrouted_names)
         on_tracks = bool(pos)
         if not on_tracks:
@@ -643,7 +732,7 @@ def emit_pin_def(session, path, target, unrouted="S", unrouted_layer=None,
         f"PINS {len(rows)} ;",
     ]
     for p, cx, cy, (x1r, y1r, x2r, y2r) in rows:
-        nm = def_escape(p.name)
+        nm = p.name if plain_names else def_escape(p.name)
         out.append(
             f"  - {nm} + NET {nm} + DIRECTION {p.dir} + USE SIGNAL"
             f" + LAYER {names_for(p.layer)} ( {x1r} {y1r} ) ( {x2r} {y2r} )"
@@ -662,7 +751,9 @@ def emit_pin_def(session, path, target, unrouted="S", unrouted_layer=None,
           f"{n_spread} spread on edge {unrouted}"
           f"{' on ' + names_for(spread[0].layer) if spread else ''}; "
           f"UNITS {units}, die {snap(bw)} x {snap(bh)}, "
-          f"{len(instances)} instance(s)")
+          f"{len(instances)} instance(s)"
+          + (f"; {n_snapped} snapped, largest shift {max_shift:g}"
+             if n_snapped else ""))
     for n in notes[:8]:
         print(f"[PinDEF] note: {n}")
     return [(p.name, p.planned) for p, _cx, _cy, _r in rows]

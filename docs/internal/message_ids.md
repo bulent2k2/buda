@@ -121,6 +121,7 @@ updating this table, which is exactly the drift the guard now prevents):
 | BUDA-1701 | WARNING | nothing to emit: no placed bus segments |
 | BUDA-1711 | WARNING | `emit_pin_def` has no detailed-NUTS result: pins are placed from the abstract bus positions, which are not on signal tracks |
 | BUDA-1712 | WARNING | a pin whose net is on a routed bundle was reached by no bit-wire at the block face; it is spread with the unrouted pins |
+| BUDA-1713 | WARNING | `emit_pin_def snap` moved pins onto the block-frame tracks because the instance origin is off the track period; the largest shift is reported |
 | BUDA-1901 | FATAL | coordinates and track patterns are on different scales |
 | BUDA-1902 | ERROR | a design audit reported violations and `--strict-check` is on |
 | BUDA-1903 | WARNING | a `visualize` command opened no window (INFO when the suppression was asked for: `--no-viz` / `buda::start -viz 0`) |
