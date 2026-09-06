@@ -10,7 +10,7 @@
 # the LibreLane config beside it.  Then:
 #
 #   cd flow/librelane/tier1a/n<N> && librelane --dockerized --run-tag flat config.json
-#   python3 ../runtimes.py runs/flat          # per-stage runtime + the PPA metrics
+#   python3 ../runtimes.py runs/flat --set N=<N> --set arm=F   # per-stage runtime + the PPA metrics
 #
 # Sizing is RELATIVE (FP_CORE_UTIL): the flat arm gets to choose its own die
 # from the cell area, which is what a flat flow does; the DEF the emitter
