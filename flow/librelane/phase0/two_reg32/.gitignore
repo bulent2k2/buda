@@ -1,0 +1,7 @@
+# prep_pins.py's outputs (copied / reduced from the phase-0 runs) and the
+# template pins.buda writes; the runs themselves are LibreLane's.
+two_reg32_fp.def
+reg32_macro.lef
+sky130_tech.lef
+reg32_pins.def
+runs/

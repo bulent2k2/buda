@@ -257,6 +257,10 @@ def cmd_import_def_lef(session, cmd, args, cmd_line):
     def_path = resolve_script_path(session, argv[0], is_read=True)
     lef_path = resolve_script_path(session, argv[1], is_read=True)
     st = session.bdb.import_def_lef(def_path, lef_path)
+    # Remembered for `emit_pin_def`: a cell's PIN SET is its LEF's, and the
+    # importer keeps only the pins the DEF's nets reach (a port on no net —
+    # clk on a design whose clock the top routes elsewhere — has no pin row).
+    session._pin_def_lef_path = lef_path
     # The DEF's GCELLGRID, for `emit_guides <file.guide>`: a guide is a set
     # of the ROUTER's gcells, and the DEF is where their size and origin are
     # stated.  Kept on the session (not the BDB — it is a fact about the

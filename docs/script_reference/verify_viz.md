@@ -482,11 +482,86 @@ routing-density concept at all — the routing reservation lives in the
 The emitted file round-trips through BUDA's own DEF reader and is
 byte-deterministic.
 
+### `emit_pin_def`
+
+```
+emit_pin_def <file.def> <block-or-cell> [unrouted <N|S|E|W> [<layer>]] [depth <um>] [grid <dbu>] [lef <file.lef>] [snap] [escaped_names]
+```
+
+Write a **pin-DEF template** for one block — the block-side handoff of the
+LibreLane hierarchical flow (`docs/internal/librelane_hier_flow.md` §5, §8
+step 3b), the file `FP_DEF_TEMPLATE` consumes: DEF 5.8 with `DESIGN` = the
+block or cell name, `UNITS DISTANCE MICRONS` = the session's `lu_per_um`
+(`set_import_scale dbu` for an exact-DBU template; the nominal default
+writes `1` and says so), `DIEAREA` = the block's size, and one `PINS` entry
+per pin, placed where that pin's routed bit-wire MEETS the block face, on
+the bit-wire's layer — so on a signal track by construction — sized the
+layer's minimum width across the wire by `depth` (default 2 um) into the
+block, `DIRECTION` from the net's driver/receiver role (the LEF's when the
+cell has one), `+ USE SIGNAL`, names PLAIN (`d[0]`).
+
+The rectangle is written **symmetric about the `PLACED` point** because
+that is how OpenROAD writes every pin back (it re-centres the origin), and
+`tools/pin_def_verify.py template.def final.def` compares the ABSOLUTE
+rectangles — never the origins — exiting 0 when every template pin kept
+its metal, naming each mismatch otherwise, and refusing a final DEF with no
+`PINS`.
+
+Run it after `run_detailed_nuts`.  With only `run_nuts` it falls back to
+the abstract bus position with a WARNING (BUDA-1711: not on tracks); with
+neither it refuses.  Pins whose net reaches the block on no bus (`clk`,
+`rst`) are spread evenly on the `unrouted` edge (default `S`) on that
+edge's pin layer's tracks — the lowest patterned layer of the edge's
+direction, or the named one — and the report says how many pins came
+from the plan and how many were spread.  Coordinates snap to `grid` DBU
+(default 5 at a DBU scale, the manufacturing grid; 1 at the nominal scale).
+
+**The pin sits on the BLOCK's track grid, not the top's.** The routed
+bit-wire is on one of the top's tracks, while the block is hardened alone
+with tracks at `OFFSET + k*PITCH` from its own origin — the same grid only
+when the instance origin is a whole number of that layer's track period.
+An off-period origin is refused, naming each instance's residue and the
+smallest clearing shift (move the instance and re-route, the phase rule
+`align_bottom_up` implements); `snap` is the fallback for a placement that
+cannot move — every pin goes to the nearest block-frame track and
+BUDA-1713 reports the largest shift. Pins spread on the `unrouted` edge
+are on the block's own tracks by construction.
+
+**The bit PITCH is the plan's question, not the writer's.**  A pin goes
+where the bit was routed, so a bus planned on consecutive tracks yields a
+block face with no track left for the global router's
+`GRT_LAYER_ADJUSTMENTS` reserve, and the hardening run ends in `GRT-0116`
+overflow.  Plan the bus at a coarser pitch instead — a `def_track_pattern`
+alternating one `SIGNAL` slot with one the router keeps — and note that the
+pattern's origin is a slot START, so a track centre at `c` needs
+`origin = c - width/2` (§8 step 3b has the worked sky130 numbers).
+
+**Names are written PLAIN**, not in the escaped spelling OpenROAD uses when
+it WRITES a DEF, and that is measured rather than chosen: odb reads a
+template name `d\[16\]` back as `d[16\]` — it consumes the leading escape
+and keeps the trailing one — so `Odb.ApplyDEFTemplate` reported all 66 pins
+of the phase-0 block "not found in design layout" and exited 2.
+`escaped_names` writes `d\[0\]` for a consumer that wants the other
+spelling; `tools/pin_def_verify.py` compares names unescaped, so either
+spelling verifies.
+
+In a hier session naming a **cell** builds one template from every
+instance (template semantics): each instance contributes the pins it
+routes, in cell-local coordinates; two instances routing the same pin to
+different places is refused naming both; an instance in any orientation
+but `N` is refused. Every refusal prints an `Error:` line and writes no
+file — one convention for the command.  The cell's full port list comes from its
+LEF (the one `import_def_lef` read, or `lef <file>`) so a port on no net is
+in the template too.  Naming an **instance** (or a flat block) emits that
+block alone.
+
 **Example:**
 ```
 run_nuts
 emit_guides out/guides.json margin 2 csv out/guides.csv tcl out/guides.tcl
 export_def_blockages out/advisory.def density 0.6
+run_detailed_nuts
+emit_pin_def reg32_pins.def reg32 unrouted S met2
 ```
 
 ---

@@ -22,11 +22,11 @@ if it is dispatchable — the two can no longer drift.
 """
 from . import (setup_cmds, bundling_cmds, topologies_cmds, edit_cmds,
                planner_cmds, nuts_cmds, grid_cmds, verify_viz_cmds,
-               bdb_cmds, control_cmds, ndr_cmds)
+               bdb_cmds, control_cmds, ndr_cmds, pin_def_cmds)
 
 MODULES = (setup_cmds, bundling_cmds, topologies_cmds, edit_cmds,
            planner_cmds, nuts_cmds, grid_cmds, verify_viz_cmds,
-           bdb_cmds, control_cmds, ndr_cmds)
+           bdb_cmds, control_cmds, ndr_cmds, pin_def_cmds)
 
 COMMANDS = {}
 for _m in MODULES:
