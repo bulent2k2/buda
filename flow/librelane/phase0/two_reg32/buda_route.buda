@@ -44,6 +44,15 @@ def_layer 4 met4 V TOP 30
 def_layer 5 met5 H TOP 30
 import_lef_tech out/tech.tlef
 
+# The SAME met3 pattern `pins.buda` declares, and for the same reason: the
+# bus takes every SECOND met3 track, because one packed on every track is
+# 100 % of a band the global router derates to 70 % (GRT-0116, measured).
+# It has to be declared HERE too or the guide rows sit between the pins the
+# other flow placed.  The origin is a slot START, not a track centre, so
+# 190 = 340 - 300/2 puts the signal centres on the PDK's own 340 + 1360k
+# (see pins.buda's note; 340 here would be 150 DBU off every track).
+def_track_pattern 3 190 SIGNAL 300 380 CUSTOM 300 380
+
 # The placed top.  `allow_missing_footprints`: the DEF lists the top's
 # standard cells, which are in the PDK's cell LEF and not in reg32.lef; at
 # this stage they are UNPLACED (bbox -1) and the routing never sees them,

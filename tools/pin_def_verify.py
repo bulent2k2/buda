@@ -126,7 +126,15 @@ def compare(template_text, final_text):
     """(mismatches, notes, n_ok, n_template) — the verdict as data."""
     mismatches, notes = [], []
     tu, fu = _units(template_text), _units(final_text)
-    if tu is not None and fu is not None and tu != fu:
+    # Both files must SAY what a coordinate means, and say the same thing.
+    # Skipping the check when one is silent compared raw integers and could
+    # report PASS for a 1000-DBU template against a DEF with no declared
+    # scale, whose rectangles are not the same rectangles (Codex #885).
+    if tu is None or fu is None:
+        which = " and ".join(n for n, v in (("template", tu), ("final", fu)) if v is None)
+        mismatches.append(f"no UNITS DISTANCE MICRONS in the {which} DEF — "
+                          f"without it the coordinates cannot be compared")
+    elif tu != fu:
         mismatches.append(f"UNITS differ: template {tu}, final {fu} — the "
                           f"coordinates are not comparable")
     t = read_pins(template_text, "template")

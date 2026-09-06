@@ -492,6 +492,24 @@ def test_the_verifier_names_each_moved_or_missing_pin(tmp_path):
     assert "MISMATCH: d_1" in buf.getvalue()
 
 
+def test_the_verifier_requires_units_in_both_defs(tmp_path):
+    """A coordinate means nothing without the scale that reads it.  Skipping
+    the check when one file is silent compared raw integers, so a template
+    at 1000 DBU/um could PASS against a final DEF with no declared scale
+    whose rectangles are not the same rectangles (Codex #885)."""
+    _s, _log, out = _flat(tmp_path, _DNUTS)
+    t = out.read_text()
+    assert "UNITS DISTANCE MICRONS" in t
+    silent = "\n".join(ln for ln in t.splitlines() if "UNITS DISTANCE MICRONS" not in ln)
+    for a, b, who in ((t, silent, "final"), (silent, t, "template"), (silent, silent, "template and final")):
+        mism, _n, _ok, _tot = pdv.compare(a, b)
+        assert any(f"no UNITS DISTANCE MICRONS in the {who} DEF" in m for m in mism), (who, mism)
+    # and a real disagreement still reads as one
+    scaled = t.replace("UNITS DISTANCE MICRONS 1 ;", "UNITS DISTANCE MICRONS 1000 ;")
+    mism, _n, _ok, _tot = pdv.compare(t, scaled)
+    assert any("UNITS differ: template 1, final 1000" in m for m in mism), mism
+
+
 def test_the_verifier_refuses_a_final_def_with_no_pins(tmp_path):
     _s, _log, out = _flat(tmp_path, _DNUTS)
     (tmp_path / "nopins.def").write_text("VERSION 5.8 ;\nDESIGN b ;\nEND DESIGN\n")
@@ -643,19 +661,24 @@ def test_the_vehicle_runs_on_the_shape_the_phase0_runs_have(tmp_path):
     assert pdv.compare(t, _recentred(t)) == ([], [], 66, 66)
 
 
-def test_the_hardening_config_differs_from_the_hand_one_only_by_the_template():
-    """The two configs harden the SAME block, so the wirelength comparison in
-    §8 step 3b is only a comparison if nothing else differs.
+def test_the_hardening_config_differs_from_the_hand_one_by_the_template_alone():
+    """The two configs harden the SAME block, so everything that is not the
+    template must match — otherwise the wirelength comparison in §8 step 3b
+    is measuring two different runs.
 
-    `RT_MAX_LAYER met3` must be in BOTH, and it is measured rather than
-    tidiness: a block allowed to route on the top's PDN layers hands the top a
-    met4 `OBS`, pdngen drops every strap crossing it, and every macro power pin
-    comes out unconnected (step 5b).  It arrived in the two configs from two
-    directions — step 5b put it in the hand one, step 3b in the BUDA one — so
-    this asserts the VALUE in both rather than which of them carries it."""
+    `RT_MAX_LAYER met3` was the second key while only the BUDA-template
+    hardening carried it.  It is on BOTH now: §8 step 5b measured that ANY
+    block routing on the top's PDN layers hands the top a met4 `OBS`,
+    pdngen drops every strap crossing it, and the macro's power pins come
+    out unconnected — a rule about blocks, not about templates (§9).  With
+    both capped the comparison is cleaner, not weaker: the template is the
+    only thing left that differs.  (Between them #882 and #884 briefly left
+    main red here — each passed CI against a main without the other, the
+    one shape a per-branch gate cannot see.)"""
     a = json.loads((_P0 / "reg32" / "config_pins.json").read_text())
     b = json.loads((_P0 / "reg32" / "config_buda_pins.json").read_text())
     assert set(a) == set(b)
     assert {k for k in a if a[k] != b[k]} == {"FP_DEF_TEMPLATE"}
-    assert b["FP_DEF_TEMPLATE"] == "dir::../two_reg32/reg32_pins.def"
     assert a["RT_MAX_LAYER"] == b["RT_MAX_LAYER"] == "met3"
+    assert b["FP_DEF_TEMPLATE"] == "dir::../two_reg32/reg32_pins.def"
+    assert b["RT_MAX_LAYER"] == "met3"

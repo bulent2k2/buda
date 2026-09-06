@@ -507,9 +507,21 @@ def shifted_obs(obs, dx, dy):
     return out
 
 
-def clean_at(inst, rects, obs, top, vstraps, hstraps, spacing, via_min, dx, dy):
+def clean_at(inst, rects, obs, top, vstraps, hstraps, spacing, via_min, dx, dy, axis=None):
+    """Clip-free and connected on both nets after (dx, dy).
+
+    With `axis` given, only the clips THAT axis controls are judged and
+    connectivity is left to the joint check.  A shift along x moves a
+    vertical-layer pin across the vertical straps and can do nothing about
+    a horizontal-layer clip, so requiring the other axis to be clean here
+    rejects every x candidate while the y search rejects every y one, and
+    an instance violated on both axes is reported as having no remedy --
+    though applying the two shifts TOGETHER clears it (Codex #885).
+    """
     clips, con, _, _, _ = eval_instance(inst, shifted(rects, dx, dy), shifted_obs(obs, dx, dy),
                                         top, vstraps, hstraps, spacing, via_min)
+    if axis is not None:
+        return not [c for c in clips if c["axis"] == axis]
     return not clips and all(con.values())
 
 
@@ -559,9 +571,11 @@ def shift_candidates(rects_list, obs_list, top, vstraps, hstraps, spacing, via_m
 
 
 def smallest_shift(insts, rects_by, obs_by, top, vstraps, hstraps, spacing, via_min, axis, limit):
-    """The smallest |shift| along `axis` (within +-limit) after which EVERY
-    instance in `insts` is collision-free on both layers and connected on
-    both nets; None when no candidate within the limit does it."""
+    """The smallest |shift| along `axis` (within +-limit) after which every
+    instance in `insts` is free of the clips THAT AXIS controls; None when
+    no candidate within the limit does it.  Whether the design is then
+    clean is `joint_clean`'s question -- the two axes are searched
+    independently and applied together."""
     cands = shift_candidates([rects_by[i["name"]] for i in insts], [obs_by[i["name"]] for i in insts],
                              top, vstraps, hstraps, spacing, via_min, axis)
     for d in cands:
@@ -569,9 +583,17 @@ def smallest_shift(insts, rects_by, obs_by, top, vstraps, hstraps, spacing, via_
             break
         dx, dy = (d, 0.0) if axis == "x" else (0.0, d)
         if all(clean_at(i, rects_by[i["name"]], obs_by[i["name"]], top, vstraps, hstraps,
-                        spacing, via_min, dx, dy) for i in insts):
+                        spacing, via_min, dx, dy, axis) for i in insts):
             return d
     return None
+
+
+def joint_clean(insts, rects_by, obs_by, top, vstraps, hstraps, spacing, via_min, dx, dy):
+    """Does applying BOTH shifts leave every instance clean and connected?
+    The per-axis searches answer only about their own clips, so the pair is
+    verified before it is offered as the remedy."""
+    return all(clean_at(i, rects_by[i["name"]], obs_by[i["name"]], top, vstraps, hstraps,
+                        spacing, via_min, dx, dy) for i in insts)
 
 
 def run_check(top, lefs, spacing=None, via_min=VIA_MIN):
@@ -610,6 +632,9 @@ def run_check(top, lefs, spacing=None, via_min=VIA_MIN):
                                        "x", g["PDN_VPITCH"] / 2)
             row["dy"] = smallest_shift([inst], rects_by, obs_by, top, vstraps, hstraps, spacing, via_min,
                                        "y", g["PDN_HPITCH"] / 2)
+            row["clean_at_dxdy"] = (row["dx"] is not None and row["dy"] is not None
+                                    and joint_clean([inst], rects_by, obs_by, top, vstraps, hstraps,
+                                                    spacing, via_min, row["dx"], row["dy"]))
         per_inst.append(row)
     result = {"config": top["path"], "instances": len(top["instances"]), "pin_rects": n_rects,
               "clips": all_clips, "unconnected": unconnected, "per_instance": per_inst,
@@ -627,6 +652,11 @@ def run_check(top, lefs, spacing=None, via_min=VIA_MIN):
             result["voffset_for_dx"] = round((g["PDN_VOFFSET"] - dx) % g["PDN_VPITCH"], 3)
         if dy is not None:
             result["hoffset_for_dy"] = round((g["PDN_HOFFSET"] - dy) % g["PDN_HPITCH"], 3)
+        # Each axis was searched against its OWN clips, so the pair is
+        # verified before the offsets are offered as the fix (Codex #885).
+        result["global_clean_at_dxdy"] = (
+            dx is not None and dy is not None
+            and joint_clean(insts, rects_by, obs_by, top, vstraps, hstraps, spacing, via_min, dx, dy))
     return result
 
 
@@ -686,7 +716,8 @@ def report(top, lefs, res, out=sys.stdout):
     bad = [r for r in res["per_instance"] if r["clips"] or not all(r["connected"].values())]
     for r in bad:
         fmt = lambda v: "none within half a pitch" if v is None else f"{v:+.3f} um"
-        p(f"  {r['instance']}: smallest x-shift {fmt(r['dx'])}, smallest y-shift {fmt(r['dy'])}")
+        both = ("" if not r.get("clean_at_dxdy") else "; together they clear it")
+        p(f"  {r['instance']}: smallest x-shift {fmt(r['dx'])}, smallest y-shift {fmt(r['dy'])}{both}")
     if res["pass"]:
         p(f"PASS: {res['instances']} instances, {res['pin_rects']} power-pin rects, 0 clips, "
           f"every instance connected on {g['VDD_NET']} and {g['GND_NET']}")
@@ -699,8 +730,13 @@ def report(top, lefs, res, out=sys.stdout):
                      f"(equivalently PDN_VOFFSET={res['voffset_for_dx']})")
         if res.get("global_dy") is not None:
             line += (f"; dy={res['global_dy']:+.3f} the y-axis (PDN_HOFFSET={res['hoffset_for_dy']})")
+        if res.get("global_clean_at_dxdy"):
+            line += "; TOGETHER they leave every instance clean and connected"
+        elif res.get("global_dx") is not None and res.get("global_dy") is not None:
+            line += ("; together they do NOT clear it -- each axis's shift removes only that axis's "
+                     "clips, so a placement or pitch change is needed")
         if res.get("global_dx") is None and res.get("global_dy") is None:
-            line += "; no single shift within half a pitch clears every instance -- see the per-instance shifts"
+            line += "; no single shift within half a pitch clears either axis -- see the per-instance shifts"
         p(line)
 
 
