@@ -1075,6 +1075,58 @@ headroom H+B has to recover — not what hierarchy costs.  Timing now has a
 number behind §2.4's caveat: +0.89 ns against F's +1.81 at the slow corner,
 every block boundary budgeted by one `IO_DELAY_CONSTRAINT`.
 
+**7e. Arm H+B — the block sizes come from BUDA.**  Steps 3c and 7a-7d
+leave one number on the table: arm H's die is 8.66x arm F's at N = 4 and
+6.15x at N = 8, and §8 step 3c measured that as a SIZING artifact — the
+emitter pads every cell with one `PEPAD` while `emit_block_size` sizes each
+by the larger of its face and area demands.  This is the arm that collects
+it.
+
+Feeding the sizes back is not a re-hardening: the emitter derives the PE
+pitch from `PEW` (`PPX = PEW + CHAN`), the row from the pitch and the die
+from the row, so a block that shrinks moves every instance and the die with
+it.  The array is RE-EMITTED at BUDA's sizes:
+
+```bash
+cd ~/src/buda && bin/buda --no-viz flow/librelane/tier1a/size.buda
+cd flow/librelane/tier1a
+python3 apply_sizes.py out --n 8 --baseline n8 --optimize-aspect
+./gen.sh 8 $(python3 apply_sizes.py out --n 8 --optimize-aspect --args)
+./harm.sh 8 && # harden the four cells and the top as in steps 7a-7c
+python3 runtimes.py top/runs/h --set N=8 --set arm=H+B --blocks-from top/config.json --json >> results.jsonl
+```
+
+`apply_sizes.py` turns the fragments into the emitter's knobs and predicts
+the die with the emitter's own arithmetic — transcribed, and pinned by a
+test that reproduces BOTH measured arm-H dies (2.427 mm² at N = 4 and
+6.347 at N = 8) from the parameters alone, so a drifted transcription
+cannot promise a saving nobody can collect.
+
+**Predicted at N = 8** (`PEPAD 100` is what the measured H run used):
+
+| PE size | source | die | vs arm H | vs arm F (1.032 mm²) |
+|---|---|---|---|---|
+| 228 x 132 | `PEPAD 100` (arm H, measured) | **6.347 mm²** | — | 6.15x |
+| 179 x 48 | the rule, its own face-ratio shape | 3.183 mm² | 0.50x | 3.08x |
+| 128 x 67 | the rule, `--optimize-aspect` | **2.802 mm²** | **0.44x** | 2.72x |
+
+Two things the table says.  The rule roughly HALVES the die on its own, and
+reshaping the PE takes another 12 %: the rule shapes a block by its own
+faces, which is right for one block and not for an array, where `PPX` is
+spent once per COLUMN so a wide PE costs N times its width and only once
+its height.  `--optimize-aspect` spends that free variable — the same area,
+the same face floors, a different aspect — and the 128 it lands on is
+exactly the PE's north/south face demand, i.e. the floor.
+
+The honest caveats.  These are PREDICTIONS from the emitter's geometry, not
+a run: they say nothing about whether the blocks still meet timing at a
+different aspect, whether the top still routes at half the die, or what the
+hold violation §8 step 7d found does when the boundaries move.  And the
+edge cells are coarsened on the way out — the emitter has ONE `EDGEW`/
+`EDGEH`, so `feed_cell` and `wbuf_cell` (44.2 x 44.2 by the rule) are
+emitted at `acc_cell`'s 96 x 52.  Making them independent is an emitter
+change; `apply_sizes.py` names every cell it oversizes for that reason.
+
 **8. Tier 1b — a Gemmini mesh at N = 4, 8, 16.**  Chipyard needs Linux; on
 the Mac that is a Linux container with the BUDA checkout mounted.  The full
 recipe, with the two places it is guessing, is
