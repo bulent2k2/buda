@@ -643,17 +643,19 @@ def test_the_vehicle_runs_on_the_shape_the_phase0_runs_have(tmp_path):
     assert pdv.compare(t, _recentred(t)) == ([], [], 66, 66)
 
 
-def test_the_hardening_config_differs_from_the_hand_one_by_two_keys():
-    """The two configs harden the SAME block, so everything that is not the
-    template or the router's ceiling must match — otherwise the wirelength
-    comparison in §8 step 3b is measuring two different runs.
+def test_the_hardening_config_differs_from_the_hand_one_only_by_the_template():
+    """The two configs harden the SAME block, so the wirelength comparison in
+    §8 step 3b is only a comparison if nothing else differs.
 
-    `RT_MAX_LAYER met3` is the second key and is measured, not tidiness: the
-    BUDA template puts the bus on met3, and leaving the router met4 lets it
-    escape the pin layer, which is not the corridor the template asks for."""
+    `RT_MAX_LAYER met3` must be in BOTH, and it is measured rather than
+    tidiness: a block allowed to route on the top's PDN layers hands the top a
+    met4 `OBS`, pdngen drops every strap crossing it, and every macro power pin
+    comes out unconnected (step 5b).  It arrived in the two configs from two
+    directions — step 5b put it in the hand one, step 3b in the BUDA one — so
+    this asserts the VALUE in both rather than which of them carries it."""
     a = json.loads((_P0 / "reg32" / "config_pins.json").read_text())
     b = json.loads((_P0 / "reg32" / "config_buda_pins.json").read_text())
     assert set(a) == set(b)
-    assert {k for k in a if a[k] != b[k]} == {"FP_DEF_TEMPLATE", "RT_MAX_LAYER"}
+    assert {k for k in a if a[k] != b[k]} == {"FP_DEF_TEMPLATE"}
     assert b["FP_DEF_TEMPLATE"] == "dir::../two_reg32/reg32_pins.def"
-    assert b["RT_MAX_LAYER"] == "met3"
+    assert a["RT_MAX_LAYER"] == b["RT_MAX_LAYER"] == "met3"

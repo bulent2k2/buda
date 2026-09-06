@@ -519,12 +519,12 @@ at the die margin and are the next thing to chase — the off-track 340 origin
 above is a candidate cause, since a pin 150 DBU off the grid is one the
 router must jog to reach.
 
-`config_buda_pins.json` differs from `config_pins.json` in exactly two
-keys, so the two hardenings are comparable: where `FP_DEF_TEMPLATE` points,
-and **`RT_MAX_LAYER met3`**.  The second is not tidiness — a block allowed
-to route on the top's PDN layers hands the top a met4 `OBS`, pdngen drops
-every strap crossing it, and every macro power pin comes out unconnected
-(measured at step 5b; §9 carries the rule).
+`config_buda_pins.json` differs from `config_pins.json` only in where
+`FP_DEF_TEMPLATE` points, so the two hardenings are comparable.  **Both
+carry `RT_MAX_LAYER met3`**, and that is not tidiness — a block allowed to
+route on the top's PDN layers hands the top a met4 `OBS`, pdngen drops every
+strap crossing it, and every macro power pin comes out unconnected (measured
+at step 5b; §9 carries the rule).
 
 **4. The top with two hardened macros and a bus between them.**
 
