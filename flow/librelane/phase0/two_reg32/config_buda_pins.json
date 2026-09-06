@@ -25,15 +25,15 @@
             "instances": {
                 "u0": {
                     "location": [
-                        10,
-                        20
+                        9.2,
+                        20.4
                     ],
                     "orientation": "N"
                 },
                 "u1": {
                     "location": [
-                        160,
-                        20
+                        160.08,
+                        20.4
                     ],
                     "orientation": "N"
                 }

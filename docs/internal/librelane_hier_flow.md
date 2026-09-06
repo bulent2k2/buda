@@ -324,11 +324,13 @@ An H arm's wirelength is the top's PLUS every block's, counted once per
 placed instance (a cell hardened once and placed eight times has eight
 times the wire on silicon), and the block-internal part is its own column
 rather than folded into the total.  That is where the block-side handoff
-is paid for: on the phase-0 block the pin template that straightens the
-top-level bus costs the block **+60 % of its own wire** (`reg32`, 3937 →
-6303 µm, LibreLane's placer vs d-west/q-east, measured 2026-09-05 — §8
-steps 2–3), and H+B minus H on the arm total alone would net that against
-the bus it buys without saying which side moved.  `tier1a/runtimes.py
+is paid for: on the phase-0 block a pin template that straightens the
+top-level bus costs the block **+49 % of its own wire** when BUDA writes it
+(`reg32`, 3937 → 5879 µm) and **+61 %** by hand (→ 6358 µm) — §8 steps 2, 3
+and 3b, re-measured 2026-09-06 on the vehicle as it stands; the +26 % once
+recorded here came from a template `emit_pin_def` now refuses, and step 3b
+says why.  H+B minus H on the arm total alone would net that against the
+bus it buys without saying which side moved.  `tier1a/runtimes.py
 <top_run> --block <block_run>[:<instances>] …` writes the row that way.
 
 ### 7.4 Success criterion — proposed, to confirm before any benchmark run
@@ -505,19 +507,43 @@ measured 2026-09-06 on the phase-0 toy:
 | pins placed by | reg32 `route__wirelength` | vs the free placer | outcome |
 |---|---|---|---|
 | LibreLane's own `IOPlacement` | 3937 µm | — | the block alone, no bus to serve |
-| the hand template (`gen_pins_def.py`) | 6358 µm | +62 % | clean (§7.3's +60 % is the same run at 6303 µm, before `RT_MAX_LAYER met3`) |
+| the hand template (`gen_pins_def.py`) | 6358 µm | +61 % | clean (6303 µm before `RT_MAX_LAYER met3`, the same run) |
 | BUDA, every met3 track | 5789 µm | +47 % | **refused**: GRT-0116, 69 overflow |
-| BUDA, every SECOND met3 track | **4966 µm** | **+26 %** | clean but for 4 residual overflow at the die margin |
+| BUDA, every SECOND met3 track | 4966 µm | +26 % | **not reproducible** — see below |
+| **BUDA, the vehicle as it stands** | **5879 µm** | **+49 %** | clean; 17 overflow at the top, DRC/LVS 0 |
 
-So the planned template costs the block **+26 %** where the hand one costs
-+60-62 %, and that is the §7.3 trade measured rather than assumed: BUDA lands
-`d` and `q` on the y the top's bus was ROUTED at, which is a better row for
-the block's own logic than the convention the hand template followed.  The
-verifier reports `PASS: 66 of 66` on the hardened result, and at the top the
-§5b containment falls from **30.4 % to 0.4 %**.  The 4 residual overflow are
-at the die margin and are the next thing to chase — the off-track 340 origin
-above is a candidate cause, since a pin 150 DBU off the grid is one the
-router must jog to reach.
+**The 4966 µm / +26 % row is history, not a result the vehicle produces.**
+It was measured before `move_comp` was added, i.e. with the pins 0.40 µm off
+the block's own met3 track — the configuration `emit_pin_def` now REFUSES
+(verified 2026-09-06: delete the two `move_comp` lines and it refuses,
+correctly, naming the residue).  Re-measured on the vehicle as it stands the
+number is **5879 µm, +49 %**: still better than the hand template's +61 %,
+by 12 points rather than 35.
+
+**And the reason is that the bus is no longer on met3.**  With the macros on
+the track period the planner puts it on **met1**, at the met1 pitch (340
+DBU), and the template's 64 `d`/`q` pins come out on met1 — not the
+`IO_PIN_H_LAYER` the hand template used.  The origin is not the trigger
+(340 and 190 both give met1 once the macros move); the 0.8 µm move is, which
+says the choice was marginal.  The mechanism is visible in the declared
+patterns: halving met3 to give the router its adjustment margin left met3 at
+1360 DBU per bit against met1's 340, so **met3 became 4× more expensive per
+bit than the layer below it**, and nothing in the flow REQUIRES the pin
+layer — `TOP` is a preference the cost function can outvote.  Both layers
+can host the bus (met1 235 bits per 80 µm face, met3 78), so this is cost,
+not capacity.
+
+The off-grid pins were also NOT the cause of the 4 residual overflow: with
+the corrected, on-grid template the top's global routing reports **17**
+(met2 7, met3 5, met4 4, met5 1) and still signs off clean, DRC and LVS 0,
+because detailed routing resolves them.
+
+**What this asks of phase 1** (§9): the writer must CONSTRAIN the bus to the
+intended pin layer rather than leave the layer to the planner's cost — a
+template whose layer can flip on a sub-micron placement change is not a
+handoff anyone can build on.  Until it does, the §7.3 block-internal column
+is +49 %, and the layer the template lands on has to be read off the run
+rather than assumed.
 
 `config_buda_pins.json` differs from `config_pins.json` only in where
 `FP_DEF_TEMPLATE` points, so the two hardenings are comparable.  **Both
@@ -959,6 +985,82 @@ step 7's row stands without a re-run:
 | setup WS (worst corner) | +1.81 ns | +0.89 ns | — |
 | DRC / LVS / antenna | 0 | 0 | — |
 
+**N = 8, and the H/F gap is closing** (2026-09-06).  Arm H at the next
+size, same recipe.  This is NOT §7.4's crossover — that one is about
+**H+B**, which does not exist yet — see the reading below the table:
+
+| | F N=4 | H N=4 | F N=8 | H N=8 |
+|---|---|---|---|---|
+| wall | 1,211 s | 3,296 s | 4,541 s | **6,208 s** |
+| CPU | 1,211 s | 4,327 s | 4,541 s | 6,996 s |
+| blocks (wall, parallel) | — | 423 s | — | **326 s** |
+| top alone | 1,211 s | 2,873 s | 4,541 s | 5,882 s |
+| die | 0.280 mm² | 2.427 mm² | 1.032 mm² | 6.347 mm² |
+| wire | 227 mm | 582 mm | 935 mm | 1,980 mm |
+| setup WS | +1.81 ns | +0.89 ns | **−0.55 ns** | +0.39 ns |
+| hold WS | +0.103 ns | +0.11 ns | +0.091 ns | **−1.075 ns** |
+| DRC / LVS / antenna | 0 | 0 | 0 | 0 |
+
+**H/F on wall time goes 2.72× → 1.37×** — measured, at two points.  The
+per-doubling growth behind it is F **3.75×** against H **1.88×**, but each
+of those is a SINGLE interval (two points, no third to check the shape) and
+the wall figures carry ±25 % noise (below), so they are a trend, not a law.
+
+**What this is not.**  §7.4's crossover asks for an N at which **H+B** beats
+F on wall time by **≥ 2×** while holding die area within 10 % of F's and
+setup slack within 0.5 ns.  Nothing here bears on it:
+
+* the arm measured is **H**, without BUDA — H+B does not exist yet, and
+  §7.2 defines H as the control that isolates what hierarchy alone costs;
+* H is **slower than F at both measured N** (2.72× and 1.37×), so no
+  crossover has been observed on either side of anything;
+* extending the single-interval rates to N = 16 gives F ≈ 4.7 h against
+  H ≈ 3.2 h — a 1.47× advantage, still short of the 2× the criterion asks,
+  and an extrapolation rather than a measurement;
+* and H's die is **6.15× F's** at N = 8, nowhere near the 10 % the same
+  criterion requires, for the sizing reason in reading 2 below.
+
+So the honest statement is the trend: H's wall-time disadvantage shrinks as
+N grows, which is what the solve-once premise predicts, and N = 16 is the
+first run that could show H reaching parity with F.  Whether §7.4's
+crossover exists is a question about H+B and stays open.
+
+Where H's slower growth comes from is measured, not inferred: the blocks
+cost **326 s against 423 s** — the same work, so the difference is noise
+(below) — and H's TOP grows 2.05× where F's whole run grows 3.75×, because
+the PE logic is inside the macros and the top places 35 k standard cells
+against F's 56 k.
+
+**The block artifacts at N = 8 are BYTE-IDENTICAL to N = 4** — every LEF,
+every `route__wirelength`, every cell count, every DRC number.  So the
+solve-once premise holds in the strongest available form: not merely
+constant in N, but the same output, which means a production flow would
+CACHE them and pay **zero** for blocks at every N after the first.  It also
+bounds the noise on these wall figures: identical work took 423 s and 326 s
+on the same machine, so read ±25 % into every runtime here.  The premise is
+scoped, though — it holds because this vehicle's CELL-TYPE SET is fixed as
+N grows (36 → 104 instances of the same four cells).  A design whose block
+CONTENT grows with N would not behave this way.
+
+**Both arms fail timing at N = 8, in different places**, which is the
+sharpest thing the pair says: F misses SETUP (−0.55 ns, §7.1) while H makes
+setup (+0.39 ns) and misses **HOLD** by 1.075 ns at the three slow corners
+— LibreLane raises it as a deferred error and the run ends non-zero with
+routing and DRC otherwise clean.  Hold at a hardened boundary is §2.4's
+caveat arriving: every block I/O is budgeted by one `IO_DELAY_CONSTRAINT`,
+and no arm can fix that from the top.  Per-pin budgets (phase 3) are what
+this asks for.
+
+**Two caveats on the runtimes.**  The N = 8 top needed the container's
+memory raised from 8.2 to 20 GB: nine parallel STA corners at ~800 MiB each
+overran it, and Magic's abstract-LEF write peaked at 6 GiB, was killed
+mid-write, and left a 0-byte LEF that `Odb.CheckDesignAntennaProperties`
+turned into an unhandled `StopIteration` rather than "the design LEF is
+empty".  So N = 4's H top ran under 8.2 GB and N = 8's under 20; the
+comparison slightly favours N = 8.  And 6.35 mm² is the largest design
+here — the memory ceiling, not the algorithm, is what a bigger N will hit
+first.
+
 Two readings, and the second is the one that matters for §3.  **The blocks
 cost 423 s of wall and are CONSTANT in N** — four cell types whether the
 array is 2 × 2 or 32 × 32 — which is §4's solve-once premise visible in a
@@ -1013,6 +1115,13 @@ requirements phase 0 measured go into the writers rather than the recipe:
   only on the block whose pin layout had cost it enough wire to reach
   met4.  BUDA's `reserve_top_layers` is the same rule from the other side;
   the block-config writer emits it.
+* **The pin-DEF writer constrains the bus to the intended pin layer.**
+  Measured 2026-09-06 (§8 step 3b): once the macros sit on the track period,
+  the planner moves the bus from met3 to met1 — 4× cheaper per bit under the
+  declared patterns — and the template's pins follow it off the layer the
+  block-side handoff is supposed to use.  A 0.8 µm placement change was
+  enough to flip it.  `TOP` is a preference, not a constraint; the writer (or
+  the flow that calls it) has to say which layer the bus is planned on.
 * **The pin-DEF writer places each block pin on the row BUDA's bit lands
   on** (§8 step 5b): with pins from a hand template, only 11 of 32 bits had
   their pin inside their BUDA row (31 µm off at worst), and the router paid
@@ -1043,7 +1152,13 @@ have: every netlist here is either authored or uniquified.
 1. The **success criterion** in §7.4 — confirm or replace the numbers.
 2. **sky130A** unless told otherwise.
 3. ~~Vehicle~~ — decided: the ladder in §7.1, tiers 1a and 1b first, both
-   for concrete runtime numbers; Chisel is acceptable.  ~~Open: the tier-2
+   for concrete runtime numbers; Chisel is acceptable.  **H's wall-time gap
+   to F is closing as N grows** (§8 step 7d: H/F 2.72× at N = 4, 1.37× at
+   N = 8), which is what solve-once predicts.  That is NOT §7.4's crossover
+   — that one is about H+B beating F by ≥ 2× within 10 % die area, and the
+   arm measured is H, slower than F at both points and at 6.15× its die.
+   N = 16 would show whether H reaches parity, and is the run the 20 GB
+   container was raised for; §7.4 stays open until H+B exists.  ~~Open: the tier-2
    config size~~ — the 1a flat numbers (§7.1) say what this box affords:
    **~55 k std cells / 1 mm² is a 76-minute flat run, and the next doubling
    is 5–6 h.**  So tier 2's `ChipTop` should be sized to the N = 8 point
@@ -1058,7 +1173,20 @@ have: every netlist here is either authored or uniquified.
    whole grid for one macro's sake and cannot serve two macros at
    incompatible phases.  Snapping is the proposal; the two_reg32 toy at a
    deliberately wrong phase is the test either way.
-5. **The 5 % pass threshold of measurement A** (§8 step 5) is a number
+5. **The container needs ~20 GB for N = 8 and above** (§8 step 7d): nine
+   parallel STA corners and Magic's abstract-LEF write each want several
+   GB, and at 8.2 GB both are killed — Magic silently, leaving a 0-byte LEF
+   that a later step reports as an unhandled `StopIteration`.  Raised here;
+   a machine running the benchmark needs it set before N = 16.
+6. **H fails HOLD at N = 8** (−1.075 ns, three slow corners) while F fails
+   SETUP (−0.55 ns).  Both are the clock being too fast for the PE's
+   single-cycle MAC at this corner set, but H's is at the hardened
+   boundaries, which is §2.4's uniform `IO_DELAY_CONSTRAINT` arriving as a
+   number.  Decide before the benchmark: relax the sweep clock so both arms
+   are clean at every N (the F rows at 20 ns would want re-running), or
+   keep 20 ns and report a sweep in which both arms miss timing at N = 8 for
+   different reasons.  Per-pin budgets (phase 3) address H's half only.
+7. **The 5 % pass threshold of measurement A** (§8 step 5) is a number
    read off two runs of one toy.  It should be re-read on the first real
    vehicle (tier 1a, N=4): if the gcell-edge and pin-access share does not
    scale with the design, 5 % stays; if it does, the threshold is the wrong
