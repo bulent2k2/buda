@@ -113,6 +113,24 @@ def test_top_is_the_highest_layer_per_direction(tmp_path):
     assert s.layers.get_top_layer(buda.LayerDir.VERTICAL) == 2
 
 
+def test_a_property_definitions_block_is_skipped_as_statements(tmp_path):
+    """sky130's tech LEF opens with `PROPERTYDEFINITIONS … LAYER LEF58_TYPE
+    STRING ; … END PROPERTYDEFINITIONS`: the object TYPE is spelled with the
+    block keyword.  Read by the LAYER branch that line became a layer block
+    named LEF58_TYPE and the section's END was reported as mismatched --
+    the first real tech LEF the command met refused to load (2026-09-06).
+    The section is statements, so it is read as statements."""
+    tech = _TECH.replace("VERSION 5.8 ;\n", (
+        "VERSION 5.8 ;\nUNITS\n  DATABASE MICRONS 1000 ;\nEND UNITS\n"
+        "MANUFACTURINGGRID 0.005 ;\nUSEMINSPACING OBS OFF ;\n"
+        "PROPERTYDEFINITIONS\n  LAYER LEF58_TYPE STRING ;\n  MACRO foo INTEGER RANGE 0 10 ;\n"
+        "END PROPERTYDEFINITIONS\n"
+        "SITE unithd\n  SYMMETRY Y ;\n  CLASS CORE ;\n  SIZE 0.46 BY 2.72 ;\nEND unithd\n"))
+    s, out = _run(tmp_path, "import_lef_tech @TECH@", tech)
+    assert s._layer_name_map == {"M1": 1, "M2": 2, "M3": 3}
+    assert "LEF58_TYPE" not in s._layer_name_map and "imported 3 routing layer(s)" in out
+
+
 def test_a_layer_without_a_direction_is_skipped_loudly(tmp_path):
     """BUDA has no undirected layer, so there is nothing to import — and
     silently dropping it would leave a hole in the stack the script never

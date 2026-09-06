@@ -369,6 +369,25 @@ LefLibrary parse_lef(const std::string& text, const std::string& where) {
             lib.macros.push_back(read_macro(lx, lib, name));
             continue;
         }
+        if (u == "PROPERTYDEFINITIONS") {
+            // A block of STATEMENTS, each `<objectType> <propName> <propType>
+            // [RANGE …] [value] ;` — and the object type is spelled with the
+            // block keywords: `LAYER LEF58_TYPE STRING ;` is what sky130's
+            // tech LEF carries.  Handed to the LAYER branch below, that line
+            // read as a LAYER block named LEF58_TYPE and the section's END
+            // then reported a mismatched END (measured 2026-09-06, the first
+            // real tech LEF `import_lef_tech` met).  A statement loop, not
+            // skip_block's opener heuristic, which resolves a keyword by
+            // what follows its name and would misfire the same way.
+            const int pline = lx.line();
+            lx.next(t);
+            while (!at_end(lx)) {
+                if (!lx.statement(st)) lx.fail("unterminated PROPERTYDEFINITIONS");
+            }
+            take_end(lx, "PROPERTYDEFINITIONS", "PROPERTYDEFINITIONS");
+            lib.unmodelled.push_back({"PROPERTYDEFINITIONS", "", pline});
+            continue;
+        }
         if (u == "LAYER") {
             lx.next(t);
             const std::string name = lx.expect("LAYER name");

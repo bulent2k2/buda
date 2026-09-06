@@ -30,7 +30,11 @@ vertical run on met2 where the guide box was met4), while one outside the
 footprint on every layer is the router leaving the corridor.  The strict
 count is the verdict; the split is what it means.
 
-The EXIT CODE is the verdict, and `--max-outside-pct` says what a pass is.
+The EXIT CODE is the verdict, and `--max-outside-pct` says what a pass is
+by the STRICT measure (outside the net's own-layer boxes); the corridor
+measure has its own, `--max-corridor-outside-pct` (outside the guide's
+footprint on every layer), for the question a single-layer corridor plan
+can answer while the router still has to change layers inside it.
 Without it every miss fails (the strict rule, right for a synthetic DEF).
 With it the run passes when the STRICT measure -- wire length outside its
 own layer's boxes, layer changes and corridor exits both, as a percentage
@@ -130,9 +134,15 @@ def main():
     ap.add_argument("--max-outside-pct", type=float, default=None, metavar="PCT",
                     help="pass when at most PCT %% of the bus wire (by length) lies outside "
                          "its own layer's guide boxes; default: any miss fails")
+    ap.add_argument("--max-corridor-outside-pct", type=float, default=None, metavar="PCT",
+                    help="pass when at most PCT %% of the bus wire lies outside the guide's "
+                         "xy footprint on EVERY layer -- the corridor measure, blind to layer "
+                         "changes inside it; with --max-outside-pct too, both must pass")
     a = ap.parse_args()
-    if a.max_outside_pct is not None and not 0 <= a.max_outside_pct <= 100:
-        raise SystemExit(f"--max-outside-pct {a.max_outside_pct}: a percentage, 0..100")
+    for opt, val in (("--max-outside-pct", a.max_outside_pct),
+                     ("--max-corridor-outside-pct", a.max_corridor_outside_pct)):
+        if val is not None and not 0 <= val <= 100:
+            raise SystemExit(f"{opt} {val}: a percentage, 0..100")
     slack = int(a.slack * DBU)
 
     entries = net_entries(open(a.def_file).read(), a.prefix)
@@ -214,12 +224,29 @@ def main():
     for net, what in bad[:10]:
         print(f"  OUTSIDE: {net} {what}")
     outside_pct = 100 * (wl_layer + wl_corridor) / max(wl, 1)
-    if a.max_outside_pct is None:
+    corridor_pct = 100 * wl_corridor / max(wl, 1)
+    if a.max_outside_pct is None and a.max_corridor_outside_pct is None:
         ok = not (bad or unrouted)
     else:
-        ok = not unrouted and not lone_exits and outside_pct <= a.max_outside_pct
-        print(f"  {'PASS' if ok else 'FAIL'}: {outside_pct:.1f}% of the bus wire outside its own "
-              f"layer's guides, threshold {a.max_outside_pct:g}%"
+        # Two thresholds for two questions.  The STRICT one asks whether the
+        # wire is where the guide said, layer included; the CORRIDOR one
+        # asks only whether it stayed inside the guide's footprint, which is
+        # what a corridor handoff promises when the guide's layer is a
+        # single-layer plan and the router must change layers inside it to
+        # reach pins (§8 step 5b: 7.7 % outside the corridor, 22.7 % on
+        # another layer inside it -- a pin-row disagreement, not a corridor
+        # one).  Both, when both are given.
+        ok = not unrouted and not lone_exits
+        verdicts = []
+        if a.max_outside_pct is not None:
+            ok = ok and outside_pct <= a.max_outside_pct
+            verdicts.append(f"{outside_pct:.1f}% of the bus wire outside its own layer's guides, "
+                            f"threshold {a.max_outside_pct:g}%")
+        if a.max_corridor_outside_pct is not None:
+            ok = ok and corridor_pct <= a.max_corridor_outside_pct
+            verdicts.append(f"{corridor_pct:.1f}% outside the corridor on every layer, "
+                            f"threshold {a.max_corridor_outside_pct:g}%")
+        print(f"  {'PASS' if ok else 'FAIL'}: " + "; ".join(verdicts)
               + (f", {len(unrouted)} unrouted" if unrouted else "")
               + (f", {lone_exits} lone point(s) outside the corridor" if lone_exits else ""))
     raise SystemExit(0 if ok else 1)
