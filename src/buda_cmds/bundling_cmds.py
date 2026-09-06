@@ -776,6 +776,11 @@ def cmd_run_bundler(session, cmd, args, cmd_line):
     # Stamp resolved NDR specs onto the fresh wrappers (inactive when no
     # scope is declared — the R12 byte-identity path).
     ndr_cmds.apply_ndr_specs(session)
+    # A bus-layer scope intersects whatever else governs the bundle;
+    # for the FLAT flow this is the one-shot application (the hier
+    # resolver re-applies it, as it does the NDR restriction).
+    from buda_session.bus_layers import apply_bus_layer_restrictions
+    apply_bus_layer_restrictions(session)
     session._bu_clone_from = {}   # fresh ids: drop stale clone provenance
     print(f"Bundler created {len(session.bundles)} hbundles.")
     if dump:
@@ -993,6 +998,11 @@ def cmd_run_hier_bundler(session, cmd, args, cmd_line):
     # replicas — the congruence check above guarantees one rule per
     # class), before _persist_bundles stamps the governing fingerprints.
     ndr_cmds.apply_ndr_specs(session)
+    # A bus-layer scope intersects whatever else governs the bundle;
+    # for the FLAT flow this is the one-shot application (the hier
+    # resolver re-applies it, as it does the NDR restriction).
+    from buda_session.bus_layers import apply_bus_layer_restrictions
+    apply_bus_layer_restrictions(session)
     session._hier_bundles_orig = list(session.bundles)  # snapshot for dump_hbundles
     # Fresh bundles reuse small integer ids: stale id-keyed clone provenance
     # from a previous split would stamp a bogus cloned_from on an unrelated

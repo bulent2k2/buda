@@ -20,7 +20,8 @@ from buda_script import leading_path_and_options
 
 from ._options import reject_unknown_options
 
-_OPTS = ("unrouted", "depth", "grid", "lef", "snap", "escaped_names")
+_OPTS = ("unrouted", "depth", "grid", "lef", "snap", "escaped_names",
+         "expect_layer")
 
 
 def cmd_emit_pin_def(session, cmd, args, cmd_line):
@@ -31,7 +32,8 @@ def cmd_emit_pin_def(session, cmd, args, cmd_line):
         print("Error: emit_pin_def requires an output path and a block or "
               "cell name: emit_pin_def <file.def> <block-or-cell> "
               "[unrouted <N|S|E|W> [<layer>]] [depth <um>] [grid <dbu>] "
-              "[lef <file.lef>] [snap] [escaped_names]")
+              "[lef <file.lef>] [snap] [escaped_names] "
+              "[expect_layer <csv>]")
         return
     # A QUOTED path may contain spaces; unquoted this is the old split.
     path, rest = leading_path_and_options(cmd_line, _OPTS)
@@ -41,7 +43,7 @@ def cmd_emit_pin_def(session, cmd, args, cmd_line):
         return
     target, opts = rest[0], rest[1:]
     unrouted, unrouted_layer, depth, grid, lef = "S", None, None, None, None
-    snap, escaped = False, False
+    snap, escaped, expect_layer = False, False, None
     i = 0
     while i < len(opts):
         kw = opts[i].lower()
@@ -64,6 +66,12 @@ def cmd_emit_pin_def(session, cmd, args, cmd_line):
             # token, so this is the same indexing as `depth`).
             lef, i = resolve_script_path(session, opts[i + 1],
                                          is_read=True), i + 2
+        elif kw == "expect_layer" and i + 1 < len(opts):
+            expect_layer = tuple(t.strip() for t in opts[i + 1].split(",") if t.strip())
+            if not expect_layer:
+                print("Error: emit_pin_def expect_layer needs a layer name")
+                return
+            i += 2
         elif kw == "snap":
             # The fallback for a placement that cannot move onto the track
             # period: each pin to the nearest BLOCK-frame track, LOUD.
@@ -89,7 +97,7 @@ def cmd_emit_pin_def(session, cmd, args, cmd_line):
     emit_pin_def(session, resolve_script_path(session, path), target,
                  unrouted=unrouted, unrouted_layer=unrouted_layer,
                  depth_um=depth, grid=grid, lef_path=lef, snap=snap,
-                 escaped_names=escaped)
+                 escaped_names=escaped, expect_layer=expect_layer)
 
 
 COMMANDS = {"emit_pin_def": cmd_emit_pin_def}

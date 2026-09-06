@@ -1115,13 +1115,23 @@ requirements phase 0 measured go into the writers rather than the recipe:
   only on the block whose pin layout had cost it enough wire to reach
   met4.  BUDA's `reserve_top_layers` is the same rule from the other side;
   the block-config writer emits it.
-* **The pin-DEF writer constrains the bus to the intended pin layer.**
-  Measured 2026-09-06 (§8 step 3b): once the macros sit on the track period,
-  the planner moves the bus from met3 to met1 — 4× cheaper per bit under the
-  declared patterns — and the template's pins follow it off the layer the
-  block-side handoff is supposed to use.  A 0.8 µm placement change was
-  enough to flip it.  `TOP` is a preference, not a constraint; the writer (or
-  the flow that calls it) has to say which layer the bus is planned on.
+* ~~**The pin-DEF writer constrains the bus to the intended pin layer.**~~
+  RESOLVED, and in the PLAN rather than the writer, which is where a layer
+  is decided.  Measured 2026-09-06 (§8 step 3b): once the macros sit on the
+  track period, the planner moves the bus from met3 to met1 — 4× cheaper per
+  bit under the declared patterns — and the template's pins follow it off
+  the layer the block-side handoff is supposed to use.  A 0.8 µm placement
+  change was enough to flip it, and the block's own wire went +26 % → +49 %.
+  `TOP` is a PREFERENCE the cost function outvotes, and neither existing
+  layer constraint reaches one bus (`set_cell_layer_cap` governs everything
+  a cell routes; an NDR `layers` restriction needs a rule that also
+  constrains width, spacing or shielding, which `def_ndr` enforces).  So
+  **`set_bus_layers <prefix>|* <layers>`** is the knob — longest prefix
+  wins, intersected with whatever else governs the bundle, applied at
+  bundling for flat and re-applied after every hier policy resolution — and
+  **`emit_pin_def … expect_layer <csv>`** is the check that it held,
+  refusing to write a template whose pins left the layer.  `pins.buda`
+  declares both; §8 step 3b's number wants re-measuring with them.
 * **The pin-DEF writer places each block pin on the row BUDA's bit lands
   on** (§8 step 5b): with pins from a hand template, only 11 of 32 bits had
   their pin inside their BUDA row (31 µm off at worst), and the router paid

@@ -1792,6 +1792,8 @@ class HierMixin:
             # docs/internal/ndr_architecture.md.
             from buda_cmds import ndr_cmds
             ndr_cmds.reapply_ndr_layer_restrictions(self, wrappers)
+            from .bus_layers import apply_bus_layer_restrictions
+            apply_bus_layer_restrictions(self, wrappers)
             return
         all_lids = sorted(
             list(self.layers.get_layer_ids_by_dir(buda.LayerDir.HORIZONTAL)) +
@@ -1877,6 +1879,11 @@ class HierMixin:
         # hard-errors there (R2d).
         from buda_cmds import ndr_cmds
         ndr_cmds.reapply_ndr_layer_restrictions(self, wrappers)
+        # Same ownership rule as the NDR restriction above: this
+        # resolver rewrites allowed_layers, so a bus-layer scope is
+        # RE-APPLIED after it rather than assumed to survive.
+        from .bus_layers import apply_bus_layer_restrictions
+        apply_bus_layer_restrictions(self, wrappers)
         # This resolver is the moment a hier wrapper's reachable layer set
         # becomes final, and the NDR no-op verdict is a statement ABOUT that
         # set — so it waits for this flag rather than judging a capped bundle

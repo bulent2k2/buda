@@ -109,6 +109,15 @@ def cmd_run_planner(session, cmd, args, cmd_line):
         # A no-op for a flow that declares its patterns later — `run_nuts`
         # is the second hook, and the check reports once either way.
         session._check_unit_plausibility("run_planner")
+        # A `set_bus_layers` scope declared (or cleared) AFTER run_bundler
+        # reaches the wrappers here: the bundling hook is one-shot, and the
+        # plan is where a layer is settled, so it is re-applied before every
+        # full plan (Codex #889).  Idempotent — it restarts from each
+        # bundle's pre-restriction mask — and a no-op when nothing is
+        # declared.  The hier path re-applies it again through the layer
+        # policy resolver, which owns allowed_layers on its wrappers.
+        from buda_session.bus_layers import apply_bus_layer_restrictions
+        apply_bus_layer_restrictions(session)
     if args and args[0] == "post_nuts":
         # Stage 4c: post-NUTS stub layer reassignment.
         # Syntax: post_nuts [V [short [long]]] [H [short [long]]]

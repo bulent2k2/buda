@@ -379,7 +379,7 @@ def _lef_cell_pins(session, target, lef_path):
 
 def emit_pin_def(session, path, target, unrouted="S", unrouted_layer=None,
                  depth_um=None, grid=None, lef_path=None, snap=False,
-                 escaped_names=False):
+                 escaped_names=False, expect_layer=None):
     """Write `path`.  Returns the list of (name, planned) written, or None
     when the command refused — every refusal prints an `Error:` line and
     returns, one convention for the command (disagreeing instances, an
@@ -388,6 +388,17 @@ def emit_pin_def(session, path, target, unrouted="S", unrouted_layer=None,
         print(f"Error: emit_pin_def unrouted edge must be one of "
               f"{'/'.join(_FACES)}, got '{unrouted}'")
         return None
+    expect_lids = None
+    if expect_layer:
+        expect_lids = []
+        for nm in expect_layer:
+            lid = getattr(session, "_layer_name_map", {}).get(nm)
+            if lid is None:
+                known = ", ".join(sorted(getattr(session, "_layer_name_map", {}))) or "none"
+                print(f"Error: emit_pin_def: unknown expect_layer '{nm}' "
+                      f"(declared: {known})")
+                return None
+            expect_lids.append(lid)
     # ── units: 1 DEF database unit = 1 layout unit, so UNITS is lu_per_um ──
     lu_per_um = 1.0
     bdb = getattr(session, "bdb", None)
@@ -705,6 +716,30 @@ def emit_pin_def(session, path, target, unrouted="S", unrouted_layer=None,
     for p in merged.values():
         if p.name in cell_pins:
             p.dir = cell_pins[p.name]
+
+    # The layer the block-side handoff is built around.  `TOP` is only a
+    # PREFERENCE, so a planned pin can land somewhere else and the template
+    # then hands the block a pin map for a layer it was not designed for —
+    # measured on the phase-0 toy, where the bus moved met3 -> met1 after a
+    # 0.8 um placement change and the block's own wire went +26 % -> +49 %
+    # (docs/internal/librelane_hier_flow.md §8 step 3b).  Constrain the PLAN
+    # with `set_bus_layers`; this is the check that the constraint held.
+    if expect_lids is not None:
+        off = sorted(((p.name, p.layer) for p in merged.values()
+                      if p.layer not in expect_lids),
+                     key=lambda t: _natural_key(t[0]))
+        if off:
+            want = ", ".join(names_for(l) for l in expect_lids)
+            got = ", ".join(sorted({names_for(l) for _n, l in off}))
+            shown = ", ".join(f"{n} on {names_for(l)}" for n, l in off[:6])
+            print(f"Error: emit_pin_def: {len(off)} of {len(merged)} planned "
+                  f"pin(s) are not on the expected layer(s) {want} — they are "
+                  f"on {got} ({shown}{' …' if len(off) > 6 else ''}).  The "
+                  f"plan put the bus somewhere else; constrain it with "
+                  f"`set_bus_layers <prefix> {want}` before routing, or drop "
+                  f"`expect_layer` if the block takes whatever the plan "
+                  f"chooses.")
+            return None
 
     # ── snap, write ────────────────────────────────────────────────────────
     def snap(v):
