@@ -1,0 +1,71 @@
+# ============================================================
+# flow/librelane/phase0/two_reg32/buda_route.buda
+#
+# Phase 1 of docs/internal/librelane_hier_flow.md, mechanism A with BUDA
+# in the loop: route the phase-0 toy's bus in BUDA and write the guide
+# file the router reads, so that measurement A can be re-run with guides
+# BUDA wrote instead of guides the router chose (§8 step 5b).
+#
+# Inputs are the phase-0 run's own outputs, staged into out/ by the
+# recipe (they live under runs/, which is git-ignored):
+#
+#   out/placed.def   the top after Odb.ManualMacroPlacement -- u0/u1 FIXED,
+#                    every std cell still UNPLACED, the netlist's NETS, and
+#                    the TRACKS + GCELLGRID the router will use
+#   out/tech.tlef    the PDK's tech LEF (sky130_fd_sc_hd__nom.tlef): the
+#                    layers' widths and pitches
+#   ../reg32/runs/phase0/final/lef/reg32.lef   the hardened block
+#
+# Every path here resolves against THIS file's directory.
+# ============================================================
+
+require_file out/placed.def out/tech.tlef ../reg32/runs/phase0/final/lef/reg32.lef hint stage the inputs first: see docs/internal/librelane_hier_flow.md section 8, step 5b (cp the manual-macro-placement DEF to out/placed.def; ln -s the PDK tech LEF to out/tech.tlef; run steps 2 and 4)
+
+open_bdb :memory:
+
+# One layout unit = one DEF database unit (an EXACT import) -- so every
+# distance below is in DBU: 2000 is 2 um.
+set_import_scale dbu
+set_unit_check on
+corner_margin dx 1000 dy 1000
+set_min_stub_length 1000
+
+# The layers by NAME and DIRECTION, declared before the tech LEF so the
+# identity is ours and the geometry (width, pitch) is the file's.  Declared
+# because sky130's tech LEF also has `li1`, whose trailing digit collides
+# with met1's id; an explicit declaration wins over an imported layer in
+# either order, and the collision is reported for li1, which we never route.
+def_layer 1 met1 H 30
+def_layer 2 met2 V 30
+def_layer 3 met3 H 30
+def_layer 4 met4 V TOP 30
+def_layer 5 met5 H TOP 30
+import_lef_tech out/tech.tlef
+
+# The placed top.  `allow_missing_footprints`: the DEF lists the top's
+# standard cells, which are in the PDK's cell LEF and not in reg32.lef; at
+# this stage they are UNPLACED (bbox -1) and the routing never sees them,
+# so the LOUD fallback is the right one here and its warnings are expected.
+import_def_lef out/placed.def ../reg32/runs/phase0/final/lef/reg32.lef allow_missing_footprints
+
+# u0 and u1 are the only placed components: a flat design of two blocks.
+derive_busterms
+add_blocks_from_bdb 0
+
+run_hier_bundler
+dump_hbundles
+generate_hier_topologies
+run_planner hier 3
+run_nuts
+check_design nuts
+run_detailed_nuts
+check_design dnuts
+report_wirelength
+
+# The guide file: gcells from the DEF's own GCELLGRID (no `gcell` needed),
+# per-bit boxes from the detailed result, and pin-access strips on met3 --
+# reg32's d/q pins are met3 (gen_pins_def.py / the block's LEF), a layer
+# BUDA does not associate with the pin, so it is named here.
+emit_guides out/buda_bus.guide terminal met3
+# The same corridors as data, for the record.
+emit_guides out/buda_guides.json
