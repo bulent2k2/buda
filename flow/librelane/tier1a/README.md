@@ -26,7 +26,8 @@ python3 ../runtimes.py runs/flat --set N=4 --set arm=F --json >> ../results.json
 
 ```bash
 cd ~/src/buda
-flow/librelane/tier1a/harm.sh 4              # after gen.sh 4; writes n4/h/ and prints the plan
+flow/librelane/tier1a/gen.sh 4 -PEPAD 100     # the PEPAD the first real run settled on
+flow/librelane/tier1a/harm.sh 4              # writes n4/h/ and prints the plan
 cd flow/librelane/tier1a/n4/h && cat README.md
 ```
 
@@ -70,14 +71,18 @@ What `harm.sh` decided, and why (the full statement is `harm.py`'s docstring):
   `harm.sh` writes (met4 straps at core + 5 + 30k width 2, and the OBS the
   bloating will add), which is what `pdn_phase.py` on the hardened LEFs
   verifies.
-* **Utilization.**  The emitter sizes a PE for the bus faces BUDA routes to
-  (152 x 56 um = 12 standard-cell rows), and the RTL's PE synthesizes to
-  roughly 3.9k um^2 (§7.1's totals), about 85 % of that core -- above the
-  block's `PL_TARGET_DENSITY_PCT` 50, so expect `OpenROAD.GlobalPlacement` to
-  refuse.  `harm.sh` prints the estimate and the remedy: regenerate the whole
-  set with `gen.sh N -PEPAD 56` (DEF, LEF and the H arm scale together; arm F
-  is unaffected, it sizes itself from the RTL).  The first real run should
-  settle which PEPAD the benchmark uses at every N.
+* **Utilization: the PEPAD is 100.**  The emitter sizes a PE for the bus faces
+  BUDA routes to (152 x 56 um = 12 standard-cell rows) and the RTL's PE
+  measures **5,964 um^2 / 624 cells** (the first real run at N = 4), so at the
+  default `OpenROAD.GlobalPlacement` refuses with `GPL-0301 Utilization
+  152.234 %`.  Two bars apply in turn -- GPL-0301 at 100 %, then
+  `PL_TARGET_DENSITY_PCT` 50 via GPL-0302 -- and PEPAD 56 clears only the
+  first (~68 %), 88 lands on the line (49.8 %), 100 gives 228 x 132 um at
+  ~25-30 %.  So the benchmark uses `gen.sh N -PEPAD 100`; DEF, LEF and the H
+  arm scale together, and arm F is unaffected (it sizes itself from the RTL).
+  `harm.sh` prints the estimate per cell -- measured where a run has measured
+  it, else §7.1's Yosys total times the ~1.7x LibreLane ratio that section
+  records -- and names the PEPAD to regenerate with.
 
 `test/tests/test_librelane_tiers.py` pins all of this at N = 2 and 4 --
 every location, the die sizes, the name rule, the removed bodies, the pitch

@@ -293,7 +293,19 @@ that net with room for a via — a gate, not a preference — and
 of a cell at one phase) to put a full VPWR+VGND pair in every standard-cell
 row fragment the halos leave, which is what met4 still does here.
 `pdn_phase.py` verifies all of it on the hardened LEFs — pins AND
-obstructions — before the top runs.
+obstructions — before the top runs.  The `PDN_MULTILAYER` choice does not
+rest on the obstruction argument alone: a block met5 PIN would cut the very
+top met5 strap that is meant to cross it, since a same-layer meeting is a cut
+either way.  Which layers the obstruction actually covers is the one part
+worth measuring rather than assuming — the abstract-LEF writer collects
+special wires with no filter for the power nets, which would obstruct met4 on
+every block, while step 7a's run saw a met4 `OBS` only on the block that
+ROUTES on met4.  `harm.sh` predicts the conservative case and the check reads
+the real file.  If met4 straps do turn out to survive over the sparse blocks,
+the lever the other way is `RT_MAX_LAYER met3` in the block config (BUDA's
+`reserve_top_layers` from the other side; measured on the phase-0 toy at
++0.9 % block wire) — arm H does not need it, because the met5 crossing feeds
+the macros whether or not met4 is obstructed.
 
 ### 7.3 Metrics — all from LibreLane's own `metrics.json`
 
@@ -602,11 +614,30 @@ done; wait; date +%s > blocks.end
 ```
 
 Pass: `Flow complete` in each `<cell>/h.log` and `<cell>/runs/h/final/{gds,lef,nl,spef/nom}`
-present — the paths `top/config.json` names.  If `OpenROAD.GlobalPlacement`
-refuses `pe_cell` on utilization, the die is the emitter's bus-face size
-(152 x 56 um, 12 rows) and the RTL's PE is ~85 % of it (`harm.sh` prints
-the estimate): regenerate the whole set with `gen.sh 4 -PEPAD 56` and rerun
-`harm.sh 4`; arm F is unaffected.  The first real run decides the PEPAD.
+present — the paths `top/config.json` names.
+
+**The PEPAD is 100**, settled by the first real run (2026-09-06, N = 4,
+LibreLane 3.0.11 / sky130A).  At the emitter's default the PE die is its
+bus-face size (152 × 56 µm, 12 rows) and `OpenROAD.GlobalPlacement` refuses
+with `GPL-0301 Utilization 152.234 % exceeds 100%`: the RTL's PE synthesizes
+to **5,964 µm² of standard cells (624 cells)**, which is §7.1's ~1.7×
+Yosys-to-LibreLane ratio applied to its share of the synthesis table — the
+ratio `harm.py`'s estimate now applies, having read ~40 % low without it.
+Two bars apply in turn, `GPL-0301` at 100 % and then
+`PL_TARGET_DENSITY_PCT 50` via `GPL-0302`: PEPAD 56 clears the first and not
+the second (~68 %), 88 lands on the line (49.8 %), and **100** (228 × 132 µm,
+23,605 µm² of core, ~25–30 %) is the honest margin.  So:
+
+```bash
+flow/librelane/tier1a/gen.sh 4 -PEPAD 100 && flow/librelane/tier1a/harm.sh 4
+```
+
+which moves the top die to 1476 × 1644 µm and re-derives the PDN.  Arm F is
+unaffected (it sizes itself from the RTL).  Measured at PEPAD 100: all four
+cells `Flow complete`, **batch wall 440 s** (`pe_cell` the long pole, the
+other three ~4.5 min), DRC and KLayout 0 each, route wirelength pe 15,576 /
+feed 1,259 / wbuf 1,259 / acc 6,643.  `harm.sh` prints its own estimate per
+cell and names the PEPAD to regenerate with when either bar is at risk.
 
 **7b. Arm H — the PDN-phase check, before the top.**
 

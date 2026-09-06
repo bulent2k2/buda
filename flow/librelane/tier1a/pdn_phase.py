@@ -19,10 +19,14 @@ measured on the phase-0 toy), which is the LAST step of the run:
   * the macro's own OBSTRUCTION: LibreLane writes each hardened block's
     abstract LEF with `write_abstract_lef -bloat_occupied_layers`
     (`OPENROAD_LEF_BLOAT_OCCUPIED_LAYERS`, default True), a WHOLE-BLOCK cover
-    rectangle on every layer the block drew anything on -- its own PDN straps
-    included.  pdngen bloats it by the macro halo
-    (`InstanceGrid::getInstanceObstructions`) and subtracts it, so EVERY strap
-    on that layer is gone over the macro and its halo.
+    rectangle per occupied layer, which pdngen bloats by the macro halo
+    (`InstanceGrid::getInstanceObstructions`) and subtracts -- so EVERY strap
+    on that layer is gone over the macro and its halo.  Which layers are
+    covered is read from the file rather than assumed: the writer
+    (`lefout::getObstructions`) collects special wires with no filter for the
+    power nets, which would obstruct the PDN layers on every block, while the
+    first real run saw a met4 OBS only on the block that ROUTES on met4.  That
+    is exactly why this reads the LEF instead of predicting it.
 
 What is left to feed the macro is the CROSS-layer crossing that the macro
 grid's `add_pdn_connect -layers {met4 met5}` turns into vias -- on a strap

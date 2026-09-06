@@ -62,23 +62,34 @@ What it writes, and the rule behind each piece:
 
   h/top/pdn_plan.json, and the PDN_* values in top/config.json
       What actually feeds a hardened macro decides this, and it is not what
-      the toy's geometry suggested.  LibreLane writes each block's abstract
-      LEF with `write_abstract_lef -bloat_occupied_layers`
-      (`OPENROAD_LEF_BLOAT_OCCUPIED_LAYERS`, default True), which emits a
-      WHOLE-BLOCK cover obstruction on every layer the block drew anything
-      on -- its own PDN straps included, since the abstract writer collects
-      special wires as obstructions.  pdngen then bloats that obstruction by
-      the macro halo (`InstanceGrid::getInstanceObstructions`) and SUBTRACTS
-      it from the core grid's straps (`Shape::cut`).  So:
+      the toy's geometry suggested.  pdngen never SHORTS a strap to a macro's
+      power pin -- it CUTS the strap (`Shape::cut`, whose same-net exception
+      spares it only when the strap CONTAINS the pin across its width, which
+      a 2 um block pin in a 1.6 um top strap never is).  So:
 
-      * every top met4 strap is cut over each macro and its halo -- met4
-        cannot feed a macro at all, whatever the phase;
-      * a macro hardened MULTILAYER would obstruct met5 the same way and
-        could not be fed by anything, which is why the block config sets
-        PDN_MULTILAYER false.  With no met5 of its own the block leaves the
-        top's met5 straps whole over it, and the macro grid's
-        `add_pdn_connect -layers {met4 met5}` vias them onto the block's
-        met4 pins.  That crossing is the macro's whole supply.
+      * a SAME-LAYER meeting is never a connection.  A macro is fed only by
+        the CROSS-layer crossing the macro grid vias
+        (`add_pdn_connect -layers {met4 met5}`): a top met5 strap over a
+        block met4 pin.
+      * therefore the block must have met4 pins (it does) and must draw NO
+        met5 -- a block met5 pin would cut the very top met5 strap that is
+        supposed to cross it.  Hence PDN_MULTILAYER false, which is also
+        what LibreLane documents that variable for.
+      * on top of that, the block's abstract LEF carries an OBSTRUCTION,
+        which removes straps outright: `write_abstract_lef
+        -bloat_occupied_layers` (`OPENROAD_LEF_BLOAT_OCCUPIED_LAYERS`,
+        default True) emits a whole-block cover rectangle per occupied
+        layer, and pdngen bloats it by the macro halo
+        (`InstanceGrid::getInstanceObstructions`) and subtracts it.  WHICH
+        layers it covers is worth measuring rather than assuming: the writer
+        (`lefout::getObstructions`) collects special wires with no filter for
+        the power nets, which would put met4 on every block, but the first
+        real run at N=4 observed a met4 OBS only on the one cell that ROUTES
+        on met4 (`RT_MAX_LAYER met4`), not on the three sparse ones.  Either
+        way met4 cannot be relied on to feed a macro, so the prediction below
+        writes the obstruction for every layer up to RT_MAX_LAYER -- the
+        conservative side -- and `pdn_phase.py` reads the REAL OBS off the
+        hardened LEF, which is the only reading that settles it.
 
       Hence the two axes have different jobs and different rules:
       * PDN_HPITCH = RPY / k, RPY the pe_cell row pitch, and PDN_HOFFSET
@@ -161,10 +172,27 @@ TOP_DENSITY = 35             # the two_reg32 toy: a top whose cells are CTS buff
 TOP_STRAP_W, TOP_STRAP_SP = pp.SKY130["PDN_VWIDTH"], pp.SKY130["PDN_VSPACING"]
 PDK_VPITCH, PDK_HPITCH = pp.SKY130["PDN_VPITCH"], pp.SKY130["PDN_HPITCH"]
 MIN_PITCH = 10.0
-# ROUGH cell areas (um^2) fitted to §7.1's Yosys totals at N=2/4/8 -- advisory
+# ROUGH cell areas (um^2) fitted to §7.1's YOSYS totals at N=2/4/8 -- advisory
 # only, for the utilization warning; the real number is the block's stat.json.
 ROUGH_AREA = {"pe_cell": 3900.0, "acc_cell": 750.0, "feed_cell": 250.0, "wbuf_cell": 250.0}
+# §7.1: Yosys cell area maps onto LibreLane's std-cell area by ~1.7x (taps and
+# timing-repair buffers).  An estimate that skips this reads ~40 % low, which
+# is how the first advice here recommended a PEPAD two steps too small.
+YOSYS_TO_LIBRELANE = 1.7
+# ... and where the real run has MEASURED a block, that beats any ratio.
+# pe_cell: 5,964 um^2 / 624 cells, measured at N=4 (LibreLane 3.0.11, sky130A,
+# 2026-09-06, step 7a).  The same run showed OpenROAD's own utilization figure
+# running ~1.2x above what this core-area arithmetic gives (GPL-0301 reported
+# 152.2 % where this reads ~130 %), so ADVICE_MARGIN keeps the recommendation
+# on the safe side of both bars rather than on the line.
+MEASURED_AREA = {"pe_cell": 5964.0}
+ADVICE_MARGIN = 1.25
+# The PEPAD the first real run settled on at N=4: PEPAD 56 clears GPL-0301 but
+# not PL_TARGET_DENSITY_PCT (~68 %), 88 lands on the line (49.8 %), 100 gives
+# 228 x 132 um at ~30 % -- the honest margin.
+MEASURED_PEPAD = 100
 ORIENTS_RUN = ("N",)
+BASE_PEPAD = 24            # flow/tcl/tpu_lib.tcl's default: PEW/PEH = bits*pitch + PEPAD
 
 
 class Shape(Exception):
@@ -287,9 +315,12 @@ def write_predicted_lef(path, cell, w, h, pins):
             L += [f"      LAYER {layer} ;", f"      RECT {x1:.3f} {y1:.3f} {x2:.3f} {y2:.3f} ;"]
         L += ["    END", f"  END {net}"]
     # what `write_abstract_lef -bloat_occupied_layers` will emit: a whole-block
-    # cover rectangle per occupied layer.  met5 is absent BY CONSTRUCTION
-    # (PDN_MULTILAYER false) and that absence is the macro's only supply route,
-    # so the prediction has to carry it or the dry run would not be testing it.
+    # cover rectangle per occupied layer.  Predicted for EVERY layer up to
+    # RT_MAX_LAYER, which is the conservative side of the open question in the
+    # docstring (a sparse block may well come back without a met4 OBS); met5 is
+    # absent BY CONSTRUCTION (PDN_MULTILAYER false) and that absence is the
+    # macro's only supply route, so the prediction has to carry it or the dry
+    # run would not be testing it.
     L += ["  OBS"]
     for layer in BLOCK_OBS_LAYERS:
         L += [f"    LAYER {layer} ;", f"      RECT 0.000 0.000 {w:.3f} {h:.3f} ;"]
@@ -529,28 +560,51 @@ def top_instance_name(def_name, divider):
     return def_name.replace(divider, ".")
 
 
+def cell_area_estimate(cell):
+    """(um^2, provenance) for a leaf cell's standard cells: the real run's
+    measurement where there is one, else §7.1's Yosys total scaled by the
+    ~1.7x LibreLane ratio that section records."""
+    if cell in MEASURED_AREA:
+        return MEASURED_AREA[cell], "MEASURED at N=4"
+    rough = ROUGH_AREA.get(cell)
+    if rough is None:
+        return None, None
+    return rough * YOSYS_TO_LIBRELANE, "ROUGH: §7.1's Yosys total x %.1f" % YOSYS_TO_LIBRELANE
+
+
 def utilization_advice(cell, w, h):
+    """One line per cell: how full its die will be, against BOTH bars the
+    placer applies in turn -- `GPL-0301 Utilization exceeds 100%` first, then
+    `PL_TARGET_DENSITY_PCT` (GPL-0302) -- and, when either is at risk, the
+    PEPAD to regenerate the whole set with."""
     c = block_core(w, h)
     rows = int(math.floor((c[3] - c[1]) / pp.SITE_H + 1e-9))
     core_area = (c[2] - c[0]) * rows * pp.SITE_H
-    area = ROUGH_AREA.get(cell)
+    area, how = cell_area_estimate(cell)
     if area is None:
         return f"{cell}: {w:g} x {h:g}, {rows} rows, {core_area:.0f} um^2 of core"
     util = 100.0 * area / core_area if core_area > 0 else math.inf
-    line = (f"{cell}: {w:g} x {h:g}, {rows} rows = {core_area:.0f} um^2 of core; ~{area:.0f} um^2 of cells "
-            f"(ROUGH, from §7.1's totals) = ~{util:.0f} % utilization")
-    if util > BLOCK_SETTINGS["PL_TARGET_DENSITY_PCT"]:
-        pad = 0
-        while pad < 400:
-            pad += 8
-            c2 = block_core(w + pad, h + pad)
-            r2 = int(math.floor((c2[3] - c2[1]) / pp.SITE_H + 1e-9))
-            if 100.0 * area / ((c2[2] - c2[0]) * r2 * pp.SITE_H) <= BLOCK_SETTINGS["PL_TARGET_DENSITY_PCT"] - 10:
-                break
-        line += (f" -- ABOVE PL_TARGET_DENSITY_PCT {BLOCK_SETTINGS['PL_TARGET_DENSITY_PCT']}: expect "
-                 f"OpenROAD.GlobalPlacement to refuse; regenerate the set with `gen.sh N -PEPAD "
-                 f"{24 + pad}` (the emitter pads PEW and PEH by PEPAD, default 24; DEF and LEF "
-                 f"scale together and harm.sh reads whatever it emitted)")
+    density = BLOCK_SETTINGS["PL_TARGET_DENSITY_PCT"]
+    line = (f"{cell}: {w:g} x {h:g}, {rows} rows = {core_area:.0f} um^2 of core; ~{area:.0f} um^2 of "
+            f"cells ({how}) = ~{util:.0f} % utilization")
+    if util * ADVICE_MARGIN <= density:
+        return line
+    bar = "GPL-0301 (utilization over 100 %)" if util >= 100 else \
+          f"PL_TARGET_DENSITY_PCT {density} (GPL-0302)"
+    pad = 0
+    while pad < 600:
+        pad += 4
+        c2 = block_core(w + pad, h + pad)
+        r2 = int(math.floor((c2[3] - c2[1]) / pp.SITE_H + 1e-9))
+        a2 = (c2[2] - c2[0]) * r2 * pp.SITE_H
+        if a2 > 0 and ADVICE_MARGIN * 100.0 * area / a2 <= density:
+            break
+    pepad = max(BASE_PEPAD + pad, MEASURED_PEPAD if cell in MEASURED_AREA else 0)
+    line += (f" -- expect OpenROAD.GlobalPlacement to refuse at {bar}; regenerate the whole set with "
+             f"`gen.sh N -PEPAD {pepad}` (the emitter pads PEW and PEH by PEPAD, default "
+             f"{BASE_PEPAD}; DEF and LEF scale together and harm.sh reads whatever it emitted)")
+    if cell in MEASURED_AREA:
+        line += f" -- {MEASURED_PEPAD} is what the first real run at N=4 settled on"
     return line
 
 

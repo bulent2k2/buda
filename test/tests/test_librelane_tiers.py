@@ -482,6 +482,28 @@ def test_harm_sh_measures_the_die_fit_shift_from_the_dies_own_origin(tmp_path):
         assert die[1] <= c["y"] and c["y"] + c["size"][1] <= die[3]
 
 
+def test_utilization_advice_names_the_bar_and_the_measured_pepad():
+    """The estimate is what tells a user to regenerate the set, so it has to be
+    right about the number AND about which bar the placer trips on.  The first
+    real run measured the PE at 5,964 um^2 against a ~3,900 Yosys-derived guess
+    -- section 7.1's ~1.7x ratio, which the estimate now applies to the cells
+    no run has measured -- and refused at GPL-0301, not at the density bar."""
+    sys.path.insert(0, str(_T1A))
+    import harm
+    area, how = harm.cell_area_estimate("pe_cell")
+    assert area == 5964.0 and "MEASURED" in how
+    sparse, how2 = harm.cell_area_estimate("feed_cell")
+    assert sparse == pytest.approx(250.0 * 1.7) and "1.7" in how2
+    line = harm.utilization_advice("pe_cell", 152, 56)          # the emitter's default
+    assert "GPL-0301" in line and "-PEPAD 100" in line
+    assert "PL_TARGET_DENSITY_PCT" not in line                  # the FIRST bar it hits
+    ok = harm.utilization_advice("pe_cell", 228, 132)           # at PEPAD 100
+    assert "PEPAD" not in ok and "23605" in ok.replace(",", "")
+    # a cell that clears 100 % but not the density bar names that one instead
+    mid = harm.utilization_advice("pe_cell", 184, 88)
+    assert "PL_TARGET_DENSITY_PCT" in mid and "GPL-0302" in mid
+
+
 def test_runtimes_blocks_from_the_top_config(tmp_path):
     """`--blocks-from top/config.json` yields the row the explicit --block
     form yields: run dir three levels above each cell's lef view, instance
