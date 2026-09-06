@@ -212,6 +212,10 @@ def test_harm_sh_writes_the_h_arm_from_the_emitted_set(tmp_path, n):
         for k, v in {"RT_MAX_LAYER": "met4", "PDN_VPITCH": 30, "PDN_VOFFSET": 5, "PDN_VWIDTH": 2,
                      "PDN_SKIPTRIM": True, "PL_TARGET_DENSITY_PCT": 50}.items():   # reg32/config.json's
             assert cfg[k] == v, k
+        # the block must draw NO met5: its abstract LEF gets a whole-block cover
+        # obstruction per occupied layer (`-bloat_occupied_layers`), so a
+        # multilayer block would obstruct met5 too and nothing could feed it
+        assert cfg["PDN_MULTILAYER"] is False
         assert "FP_DEF_TEMPLATE" not in cfg                                         # LibreLane's own placer
         src = (h / cell / "src" / f"{cell}.v").read_text()
         assert re.findall(r"^module (\w+)", src, re.M) == [cell]
@@ -227,7 +231,8 @@ def test_harm_sh_writes_the_h_arm_from_the_emitted_set(tmp_path, n):
     # the shift rule, recomputed here from the DEF: the emitter puts feed_* at
     # x = -140, outside its own die, so the whole placement moves right by
     # halo - min x and not at all in y
-    shift = [max(0.0, halo[0] - min(c[2] for c in comps)), max(0.0, halo[1] - min(c[3] for c in comps))]
+    shift = [max(0.0, die[0] + halo[0] - min(c[2] for c in comps)),
+             max(0.0, die[1] + halo[1] - min(c[3] for c in comps))]
     assert pl["shift_um"] == shift and shift[0] > 0 and shift[1] == 0
     placed = {}
     for cell, m in cfg["MACROS"].items():
@@ -260,12 +265,24 @@ def test_harm_sh_writes_the_h_arm_from_the_emitted_set(tmp_path, n):
     assert (ys[1] - ys[0]) % cfg["PDN_HPITCH"] == 0
     lefs = sorted(str(p) for p in (h / "predicted_lef").glob("*.lef"))
     assert len(lefs) == 4
+    for lef in lefs:
+        txt = Path(lef).read_text()
+        pins, obs = txt.split("  OBS")[0], txt.split("  OBS")[1]
+        assert "LAYER met4 ;" in pins and "LAYER met5 ;" not in pins       # met4 pins only
+        assert "LAYER met4 ;" in obs and "LAYER met5 ;" not in obs         # and met5 unobstructed
+    # every macro's met4 pins must be crossed by a met5 pair of the right net:
+    # with met4 obstructed over each macro that crossing is its whole supply
+    plan = json.loads((h / "top" / "pdn_plan.json").read_text())
+    assert plan["horizontal"]["every_macro_crossed_on_both_nets"] is True
+    assert plan["horizontal"]["via_overlap_met5_to_met4"] >= 1.4
     r = subprocess.run([sys.executable, str(_T1A / "pdn_phase.py"), str(h / "top" / "config.json"), *lefs],
                        capture_output=True, text=True)
     assert r.returncode == 0 and f"PASS: {len(comps)} instances" in r.stdout, r.stdout + r.stderr
     readme = (h / "README.md").read_text()
     assert f"runtimes.py top/runs/h --set N={n} --set arm=H --blocks-from top/config.json" in readme
-    assert f"--block ../pe_cell/runs/h:{n * n}" in readme
+    assert f"--block pe_cell/runs/h:{n * n}" in readme
+    assert "--block ../pe_cell" not in readme          # ../pe_cell is n<N>/pe_cell, which does not exist
+    assert (h / "pe_cell").is_dir() and not (h.parent / "pe_cell").exists()
 
 
 @pytest.mark.skipif(not _HAS_TCLSH, reason="gen.sh emits the set through tclsh")
@@ -289,11 +306,12 @@ def test_harm_sh_fails_loudly_on_the_shape_it_did_not_expect(tmp_path):
     assert r.returncode != 0 and "defines no module sum_cell" in r.stderr, r.stderr
 
 
-def _toy_lef(path, met5_x_hi=74.06):
+def _toy_lef(path, met5_x_hi=74.06, obs=()):
     """The phase-0 block as its hardened LEF would show it: 80 x 80, met4
     straps at 5.52 + 5 + 30k (VGND 3.7 after, width 2), met5 straps at
     10.88 + 5 + 30k over the row extent -- the toy's measured 10.52 / 14.22
-    / 74.06."""
+    / 74.06.  `obs` writes the OBS block LibreLane's `-bloat_occupied_layers`
+    abstract LEF carries: a whole-block cover rectangle per occupied layer."""
     L = ["VERSION 5.8 ;", "MACRO reg32", "  CLASS BLOCK ;", "  ORIGIN 0 0 ;", "  SIZE 80 BY 80 ;"]
     for net, off, use in (("VPWR", 0.0, "POWER"), ("VGND", 3.7, "GROUND")):
         L += [f"  PIN {net}", "    DIRECTION INOUT ;", f"    USE {use} ;", "    PORT"]
@@ -304,6 +322,11 @@ def _toy_lef(path, met5_x_hi=74.06):
         c = 10.88 + 5 + off
         L += ["      LAYER met5 ;", f"      RECT 5.52 {c - 1:.3f} {met5_x_hi} {c + 1:.3f} ;"]
         L += ["    END", f"  END {net}"]
+    if obs:
+        L += ["  OBS"]
+        for layer in obs:
+            L += [f"    LAYER {layer} ;", "      RECT 0.000 0.000 80.000 80.000 ;"]
+        L += ["  END"]
     L += ["END reg32", "END LIBRARY"]
     path.write_text("\n".join(L) + "\n")
 
@@ -318,30 +341,33 @@ def _toy_config(path, x0, x1=160, **extra):
     path.write_text(json.dumps(cfg))
 
 
-def test_pdn_phase_finds_the_toys_collision_and_the_shift_that_clears_it(tmp_path):
+def test_pdn_phase_finds_the_toys_clip_and_the_shift_that_clears_it(tmp_path):
     """The phase-0 toy's failure, recomputed: with u0 at x = 20 its VGND met4
-    pin (33.22-35.22) sits under the top's VPWR strap (34.72-36.32, offset 0
-    pitch 30 from the 5.52 core origin) -- the doc's own numbers -- and the
-    smallest clearing shift is 0.8 um west; at x = 10 (10 = 160 mod 30) the
-    same check passes.  A macro whose met5 pins no strap crosses is
-    UNCONNECTED, and a top without a fixed die is refused (exit 2)."""
+    pin (33.22-35.22) meets the top's VPWR strap (34.72-36.32, offset 0 pitch
+    30 from the 5.52 core origin) -- the doc's own numbers -- so pdngen CUTS
+    that strap over the macro, and with all three cut u0's VPWR has nothing
+    left to feed it.  The smallest clearing shift is 0.8 um west; at x = 10
+    (10 = 160 mod 30) the same check passes.  A macro whose pins no strap
+    crosses is UNCONNECTED, and a top without a fixed die is refused
+    (exit 2)."""
     _toy_lef(tmp_path / "reg32.lef")
     _toy_config(tmp_path / "bad.json", 20)
     r = subprocess.run([sys.executable, str(_T1A / "pdn_phase.py"), str(tmp_path / "bad.json"),
                         "--json", str(tmp_path / "bad.out")], capture_output=True, text=True)
     assert r.returncode == 1, r.stdout + r.stderr
-    assert "COLLISION u0 VGND pin VGND on met4 [33.220,35.220]" in r.stdout
-    assert "under VPWR strap k=1 [34.720,36.320]" in r.stdout
-    assert "FAIL: 2 instances, 3 collisions in 1 instances, 0 unconnected" in r.stdout
+    assert "CLIP u0 VGND pin VGND on met4 [33.220,35.220]" in r.stdout
+    assert "cuts VPWR strap k=1 [34.720,36.320]" in r.stdout
+    assert "FAIL: 2 instances, 3 clips in 1 instances, 1 unconnected" in r.stdout
+    assert "UNCONNECTED u0 VPWR" in r.stdout          # the clips are why
     out = json.loads((tmp_path / "bad.out").read_text())
     assert out["global_dx"] == -0.8 and out["voffset_for_dx"] == 0.8
     u0 = next(p for p in out["per_instance"] if p["instance"] == "u0")
-    assert u0["dx"] == -0.8 and u0["collisions"] == 3
-    assert all(p["collisions"] == 0 for p in out["per_instance"] if p["instance"] == "u1")
+    assert u0["dx"] == -0.8 and u0["clips"] == 3
+    assert all(p["clips"] == 0 for p in out["per_instance"] if p["instance"] == "u1")
     _toy_config(tmp_path / "good.json", 10)                     # the toy's fix
     r = subprocess.run([sys.executable, str(_T1A / "pdn_phase.py"), str(tmp_path / "good.json")],
                        capture_output=True, text=True)
-    assert r.returncode == 0 and "PASS: 2 instances, 16 power-pin rects, 0 collisions" in r.stdout, r.stdout
+    assert r.returncode == 0 and "PASS: 2 instances, 16 power-pin rects, 0 clips" in r.stdout, r.stdout
     assert "ASSUMED" in r.stdout and "PDN_HPITCH=153.18" in r.stdout   # what it took from the defaults
     # the LEF passed explicitly wins over the config's path
     r = subprocess.run([sys.executable, str(_T1A / "pdn_phase.py"), str(tmp_path / "good.json"),
@@ -355,7 +381,7 @@ def test_pdn_phase_finds_the_toys_collision_and_the_shift_that_clears_it(tmp_pat
     r = subprocess.run([sys.executable, str(_T1A / "pdn_phase.py"), str(tmp_path / "unc.json")],
                        capture_output=True, text=True)
     assert r.returncode == 1 and "UNCONNECTED u0 VPWR" in r.stdout and "UNCONNECTED u0 VGND" in r.stdout
-    assert "0 collisions in 0 instances, 2 unconnected" in r.stdout
+    assert "0 clips in 0 instances, 2 unconnected" in r.stdout
     _toy_config(tmp_path / "rel.json", 10, FP_SIZING="relative")
     r = subprocess.run([sys.executable, str(_T1A / "pdn_phase.py"), str(tmp_path / "rel.json")],
                        capture_output=True, text=True)
@@ -363,6 +389,97 @@ def test_pdn_phase_finds_the_toys_collision_and_the_shift_that_clears_it(tmp_pat
     r = subprocess.run([sys.executable, str(_T1A / "pdn_phase.py"), str(tmp_path / "good.json"),
                         str(tmp_path / "missing.lef")], capture_output=True, text=True)
     assert r.returncode == 2 and "no such LEF" in r.stderr
+
+
+def test_pdn_phase_reads_the_obstruction_that_removes_the_straps(tmp_path):
+    """The block's own OBS decides what can feed it, so the check reads it.
+    LibreLane writes each hardened block's abstract LEF with
+    `-bloat_occupied_layers` (default on) -- a whole-block cover rectangle per
+    occupied layer -- and pdngen bloats it by the macro halo and subtracts it
+    from the top's straps.  A macro obstructing met4 alone is still fed by the
+    met5 straps crossing its met4 pins; one obstructing BOTH is unreachable,
+    and the remedy is named rather than left to IR-drop signoff."""
+    _toy_lef(tmp_path / "met4_obs.lef", obs=("met1", "met2", "met3", "met4"))
+    _toy_config(tmp_path / "m4.json", 10, **{"MACROS": {"reg32": {
+        "instances": {"u0": {"location": [10, 20], "orientation": "N"}}, "lef": ["dir::met4_obs.lef"]}}})
+    r = subprocess.run([sys.executable, str(_T1A / "pdn_phase.py"), str(tmp_path / "m4.json")],
+                       capture_output=True, text=True)
+    assert "OBSTRUCTED reg32 (e.g. u0) on met4" in r.stdout, r.stdout
+    assert "on met5" not in r.stdout.split("OBSTRUCTED")[-1].split("\n")[0]
+    # met4 is gone over the macro, so the met4 pins can only be fed across
+    # layers -- and here the default met5 grid misses them
+    assert r.returncode == 1 and "UNCONNECTED u0" in r.stdout
+    _toy_lef(tmp_path / "sealed.lef", obs=("met4", "met5"))
+    _toy_config(tmp_path / "sealed.json", 10, **{"MACROS": {"reg32": {
+        "instances": {"u0": {"location": [10, 20], "orientation": "N"}}, "lef": ["dir::sealed.lef"]}}})
+    r = subprocess.run([sys.executable, str(_T1A / "pdn_phase.py"), str(tmp_path / "sealed.json")],
+                       capture_output=True, text=True)
+    assert r.returncode == 1
+    assert "obstructs BOTH met4 and met5: nothing can reach it" in r.stdout, r.stdout
+    assert "PDN_MULTILAYER false" in r.stdout
+    # an OBS drawn as a polygon is refused rather than read as nothing
+    (tmp_path / "poly.lef").write_text((tmp_path / "sealed.lef").read_text().replace(
+        "      RECT 0.000 0.000 80.000 80.000 ;", "      POLYGON 0 0 80 0 80 80 ;", 1))
+    _toy_config(tmp_path / "poly.json", 10, **{"MACROS": {"reg32": {
+        "instances": {"u0": {"location": [10, 20], "orientation": "N"}}, "lef": ["dir::poly.lef"]}}})
+    r = subprocess.run([sys.executable, str(_T1A / "pdn_phase.py"), str(tmp_path / "poly.json")],
+                       capture_output=True, text=True)
+    assert r.returncode == 2 and "OBS as a POLYGON" in r.stderr, r.stderr
+
+
+def test_strap_enumeration_is_pdngens_own_loop():
+    """`Straps::makeStraps` is not "every k the pitch allows": the period loop
+    runs while `pos <= pos_end` so a centre ON the core edge still counts, each
+    NET's strap is dropped once its own centre passes the end (the last period
+    can be a lone VPWR), and a strap whose rectangle leaves the die is skipped.
+    Latent on the emitted sets -- their last straps are far from the edge -- so
+    it is pinned here instead."""
+    sys.path.insert(0, str(_T1A))
+    import pdn_phase as pp
+    straps = pp.straps_along(5.52, 244.48, 8.48, 46, 1.6, 1.7, "VPWR", "VGND", 0.0, 250.0)
+    last = [(s["net"], round(s["lo"], 3), round(s["hi"], 3)) for s in straps[-2:]]
+    # the VPWR of the last period is kept (its centre 244.0 <= 244.48); its
+    # VGND partner would centre at 247.3, past the end, so pdngen drops it
+    assert last[-1] == ("VPWR", 243.2, 244.8), straps[-3:]
+    assert len(straps) % 2 == 1 and straps[-1]["net"] == "VPWR"
+    assert not any(s["net"] == "VGND" and s["lo"] > 245 for s in straps)
+    # a centre landing exactly on the core edge is still generated
+    on_edge = pp.straps_along(0.0, 100.0, 0.0, 50.0, 1.6, 1.7, "VPWR", "VGND", -10.0, 110.0)
+    assert [round(s["c"], 3) for s in on_edge if s["net"] == "VPWR"] == [0.0, 50.0, 100.0]
+    # ... and a strap whose rect leaves the DIE is skipped without stopping
+    clipped = pp.straps_along(0.0, 100.0, 0.0, 50.0, 1.6, 1.7, "VPWR", "VGND", 0.0, 110.0)
+    assert [round(s["c"], 3) for s in clipped if s["net"] == "VPWR"] == [50.0, 100.0]
+
+
+@pytest.mark.skipif(not _HAS_TCLSH, reason="gen.sh emits the set through gen.sh/tclsh")
+def test_harm_sh_measures_the_die_fit_shift_from_the_dies_own_origin(tmp_path):
+    """The shift is the smallest translation putting every macro halo inside
+    the die, and "inside" is measured from the DIE's origin, not from zero: a
+    DEF whose DIEAREA starts at (10, 10) needs 10 um more, not 10 um less.
+    The macro BODY is what must fit -- a halo reaching past the die edge only
+    means no other cell fits beside it there."""
+    d = _emit(tmp_path, 2)
+    defp = d / "tpu.def"
+    txt = defp.read_text()
+    m = re.search(r"DIEAREA \( (\d+) (\d+) \) \( (\d+) (\d+) \) ;", txt)
+    x0, y0, x1, y1 = (int(v) for v in m.groups())
+    off = 10000                                             # 10 um at 1000 dbu
+    defp.write_text(txt.replace(m.group(0),
+                    f"DIEAREA ( {x0 + off} {y0 + off} ) ( {x1 + off} {y1 + off} ) ;"))
+    r = subprocess.run(["bash", str(_T1A / "harm.sh"), "2"], env={**os.environ, "T1A_DIR": str(tmp_path)},
+                       capture_output=True, text=True, timeout=600)
+    assert r.returncode == 0, r.stdout + r.stderr
+    pl = json.loads((d / "h" / "top" / "placement.json").read_text())
+    die, comps = pl["die_um"], pl["instances"]
+    halo = pl["halo_um"]
+    assert die[0] == 10.0 and die[1] == 10.0
+    assert pl["shift_um"] == [max(0.0, die[0] + halo[0] - min(c["def_location"][0] for c in comps)),
+                              max(0.0, die[1] + halo[1] - min(c["def_location"][1] for c in comps))]
+    assert min(c["x"] for c in comps) == die[0] + halo[0]   # the leftmost halo touches the die edge
+    assert min(c["y"] for c in comps) >= die[1]
+    for c in comps:                                        # every BODY inside the die
+        assert die[0] <= c["x"] and c["x"] + c["size"][0] <= die[2]
+        assert die[1] <= c["y"] and c["y"] + c["size"][1] <= die[3]
 
 
 def test_runtimes_blocks_from_the_top_config(tmp_path):

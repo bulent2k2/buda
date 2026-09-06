@@ -10,7 +10,7 @@ shape it did not expect.
 |---|---|
 | `gen.sh N` | emits the array at N (`btcl flow/tcl/tpu.tcl N -emit`) into `n<N>/`: `tpu_rtl.v` (synthesizable), `tpu.v` (BUDA's shell), `tpu.def` + `tpu.lef` (the placement), and `config.json` for **arm F** (flat, relative sizing).  Extra arguments go to `tpu.tcl` (`gen.sh 4 -PEPAD 56` makes every cell 32 um larger each way -- see the utilization note below) |
 | `harm.sh N` | from `n<N>/` writes `n<N>/h/`, **arm H** (hierarchical, no BUDA): a block-hardening directory per leaf cell type, `top/` with the macros placed where the DEF placed them and the PDN derived from the array pitch, `predicted_lef/` for a dry run, and a `README.md` with the exact commands in order.  The logic and every rule is `harm.py` |
-| `pdn_phase.py <top config.json> [<cell>.lef ...]` | the check to run AFTER hardening and BEFORE the top: reads the hardened macros' VPWR/VGND pin rectangles and the top's PDN config, reports every pin under a strap of the other net and every macro no strap feeds, and the smallest shift (or the equivalent PDN_VOFFSET/PDN_HOFFSET) that clears it.  §8 step 4's PSM-0069 lesson, made a step instead of a signoff surprise |
+| `pdn_phase.py <top config.json> [<cell>.lef ...]` | the check to run AFTER hardening and BEFORE the top: reads the hardened macros' VPWR/VGND pin rectangles **and their `OBS` blocks** and the top's PDN config, reports every strap a macro's pin CUTS, every layer a macro obstructs outright, every macro no surviving strap feeds, and the smallest shift (or the equivalent PDN_VOFFSET/PDN_HOFFSET) that clears it.  §8 step 4's PSM-0069 lesson, made a step instead of a signoff surprise |
 | `runtimes.py <run> [--set KEY=VALUE ...] [--block <run>[:<n>] ...] [--blocks-from <top config.json>] [--json]` | the row for the table: per-stage seconds and the §7.3 metrics; an H arm's row carries its blocks (wall = the longest, cpu = the sum, wire per PLACED instance), derived from the top's MACROS entry with `--blocks-from` |
 
 ## Arm F (flat) at N
@@ -45,18 +45,31 @@ What `harm.sh` decided, and why (the full statement is `harm.py`'s docstring):
   `row_0.pe_0`.  `Odb.ManualMacroPlacement` exits 1 on a declared instance the
   netlist lacks, so a wrong rule fails there, not at signoff.
 * **The die-fit shift.**  The emitter places `feed_*` at x = -140, outside the
-  DEF's own die.  Every instance is translated by one (dx, dy) = (max(0, halo -
-  min x), max(0, halo - min y)) -- (150, 0) for the default set -- and the die
-  is the DEF's; `top/placement.json` holds both coordinates of every instance.
-  A DEF that already fits is not moved.
-* **The PDN phase.**  `PDN_VPITCH` is the PE column pitch over the smallest k
-  (PPX/2 = 100 with the defaults) whose offset clears every cell's PREDICTED
-  met4 pins, crosses every cell's met5 pins (that crossing feeds the macro) and
-  puts a VPWR+VGND pair in every standard-cell row fragment the halos leave;
-  `PDN_HPITCH` is the row pitch (128) with the offset farthest from every
-  macro's predicted met5 pins.  The prediction is the block config `harm.sh`
-  writes (straps at core + 5 + 30k, width 2), which is what `pdn_phase.py` on
-  the hardened LEFs verifies.
+  DEF's own die.  Every instance is translated by one (dx, dy) = (max(0, die x0
+  + halo - min x), max(0, die y0 + halo - min y)) -- (150, 0) for the default
+  set, measured from the DIE's own origin, so a DEF whose DIEAREA does not
+  start at (0, 0) shifts by more, not less -- and the die is the DEF's;
+  `top/placement.json` holds both coordinates of every instance.  A DEF that
+  already fits is not moved.  What must fit is the macro BODY; a halo poking
+  past the die edge only means no other cell fits beside it there.
+* **What feeds a macro, and therefore the PDN.**  A hardened block's abstract
+  LEF carries a whole-block cover obstruction on every layer it drew anything
+  on (`write_abstract_lef -bloat_occupied_layers`, default on), and pdngen
+  bloats that by the macro halo and subtracts it from the top's straps.  So
+  the top's met4 straps are CUT over every macro whatever their phase, and a
+  block hardened multilayer would obstruct met5 too and could not be fed at
+  all.  Hence: the blocks are hardened `PDN_MULTILAYER` **false** (LibreLane's
+  own setting for a macro meant for integration), `PDN_HPITCH`/`PDN_HOFFSET`
+  are chosen so a met5 strap of each net crosses every macro's met4 pins of
+  that net with room for a via -- that crossing, vias by the macro grid's
+  `add_pdn_connect {met4 met5}`, is the macro's whole supply, so it is a GATE
+  -- and `PDN_VPITCH`/`PDN_VOFFSET` (the PE column pitch over the smallest k,
+  PPX/2 = 100 with the defaults, every macro of a cell at one phase) put a
+  full VPWR+VGND pair in every standard-cell row fragment the halos leave,
+  which is what met4 still does here.  The prediction is the block config
+  `harm.sh` writes (met4 straps at core + 5 + 30k width 2, and the OBS the
+  bloating will add), which is what `pdn_phase.py` on the hardened LEFs
+  verifies.
 * **Utilization.**  The emitter sizes a PE for the bus faces BUDA routes to
   (152 x 56 um = 12 standard-cell rows), and the RTL's PE synthesizes to
   roughly 3.9k um^2 (§7.1's totals), about 85 % of that core -- above the
@@ -68,6 +81,9 @@ What `harm.sh` decided, and why (the full statement is `harm.py`'s docstring):
 
 `test/tests/test_librelane_tiers.py` pins all of this at N = 2 and 4 --
 every location, the die sizes, the name rule, the removed bodies, the pitch
-rule, the predicted-pin dry run -- plus `pdn_phase.py` on the phase-0 toy's
-own geometry (u0 at x = 20 collides at 33.22-35.22 under the 34.72-36.32
-strap, 0.8 um clears it, x = 10 passes) and `runtimes.py --blocks-from`.
+rule, the met5 crossing, the predicted-pin dry run, the shift measured from
+a moved die origin -- plus `pdn_phase.py` on the phase-0 toy's own geometry
+(u0 at x = 20 puts its VGND pin at 33.22-35.22 under the 34.72-36.32 strap,
+pdngen cuts that strap and u0's VPWR is left unfed, 0.8 um clears it, x = 10
+passes), a macro that obstructs both PDN layers, pdngen's strap loop at the
+far core edge, and `runtimes.py --blocks-from`.

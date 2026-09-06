@@ -5,32 +5,55 @@ and §9, phase 1).
 
     pdn_phase.py <top config.json> [<cell.lef> ...] [--json out.json]
 
-A macro is fed by the top's power straps, and where its own power PINS sit
-under a strap of the OTHER net on the SAME layer, pdngen clips the strap
-rather than short the two -- the strap then never reaches the pins it was to
-feed and nothing before IR-drop signoff says so (`[PSM-0069] Check
-connectivity failed`, measured on the phase-0 toy).  The pin positions are a
-property of the HARDENED cell, so this reads them from the block's final
-LEF (the VPWR/VGND pin rectangles) and the top's PDN config (pitch, offset,
-width, spacing, layers, core margins), places every macro instance the way
-`Odb.ManualMacroPlacement` will, and reports:
+A macro is fed by the top's power straps, and pdngen never SHORTS a strap to
+a macro's power pin -- it CUTS the strap.  Two things cut it, and neither is
+visible before IR-drop signoff (`[PSM-0069] Check connectivity failed`,
+measured on the phase-0 toy), which is the LAST step of the run:
 
-  * every (instance, pin rect, strap) COLLISION -- a pin under a strap of
-    the other net on the same layer, minimum spacing included;
-  * every (instance, net) with NO connection -- no strap of that net either
-    overlaps a same-layer pin or crosses a pin on the other layer with room
-    for a via (a strap that misses a pin by 0.66 um is the second way the
-    toy failed);
+  * a same-layer MEETING: where a strap comes within spacing of any power pin
+    of the macro, `Shape::cut` (OpenROAD src/pdn/src/shape.cpp) removes the
+    strap over the macro.  The same-net exception spares it only when the
+    strap CONTAINS the pin across its width, which a 2 um block pin inside a
+    1.6 um top strap never is -- so a same-layer overlap is a clip whatever
+    the two nets are, and never a connection;
+  * the macro's own OBSTRUCTION: LibreLane writes each hardened block's
+    abstract LEF with `write_abstract_lef -bloat_occupied_layers`
+    (`OPENROAD_LEF_BLOAT_OCCUPIED_LAYERS`, default True), a WHOLE-BLOCK cover
+    rectangle on every layer the block drew anything on -- its own PDN straps
+    included.  pdngen bloats it by the macro halo
+    (`InstanceGrid::getInstanceObstructions`) and subtracts it, so EVERY strap
+    on that layer is gone over the macro and its halo.
+
+What is left to feed the macro is the CROSS-layer crossing that the macro
+grid's `add_pdn_connect -layers {met4 met5}` turns into vias -- on a strap
+that survived.  So this reads the hardened block's final LEF (its VPWR/VGND
+pin rectangles AND its OBS blocks) and the top's PDN config (pitch, offset,
+width, spacing, layers, core margins, halo), places every macro instance the
+way `Odb.ManualMacroPlacement` will, and reports:
+
+  * every (instance, pin rect, strap) CLIP -- a strap this macro's pin cuts
+    (suppressed where the macro's OBS has already removed that strap: pdngen
+    got there first);
+  * every layer a macro leaves OBSTRUCTED, since no strap on it can feed that
+    macro -- and a macro that obstructs BOTH PDN layers is unreachable, whose
+    remedy is named (harden the block with `PDN_MULTILAYER` false, LibreLane's
+    own setting for a macro meant for integration);
+  * every (instance, net) with NO connection -- no surviving strap of that net
+    on the other layer crosses a pin of that net with room for a via (a strap
+    that misses a pin by 0.66 um is the second way the toy failed);
   * per instance, and for the whole placement, the SMALLEST x-shift (and
     y-shift for the horizontal straps) that clears it, the whole-placement
     one restated as the PDN_VOFFSET/PDN_HOFFSET that would do the same.
 
-PASS looks like `PASS: <n> instances, <m> power-pin rects, 0 collisions,
-every instance connected on VPWR and VGND` and exit 0.  Any collision or
-unconnected net is a FAIL (exit 1) with every offender listed; an input of
-a shape this did not expect -- a config without DIE_AREA, a LEF without the
-macro, a power pin drawn as a POLYGON, an instance with no location -- is
+PASS looks like `PASS: <n> instances, <m> power-pin rects, 0 clips, every
+instance connected on VPWR and VGND` and exit 0.  Any clip or unconnected net
+is a FAIL (exit 1) with every offender listed; an input of a shape this did
+not expect -- a config without DIE_AREA, a LEF without the macro, a power pin
+or an obstruction drawn as a POLYGON, an instance with no location -- is
 exit 2, because a check that guessed would be worse than none.
+
+The strap positions are pdngen's own loop (`Straps::makeStraps`), which is
+not simply "every k the pitch allows": see `straps_along`.
 
 What is ASSUMED rather than read (sky130A, LibreLane 3.0.11; every value is
 overridable from the config, and the report names each default it used):
@@ -138,47 +161,80 @@ def read_top_config(path):
 
 
 # ── the straps ────────────────────────────────────────────────────────────
-def strap_centres(lo, hi, offset, pitch):
-    """VPWR strap centres: lo + offset + k*pitch while < hi (pdngen's loop)."""
+def straps_along(lo, hi, offset, pitch, width, spacing, vdd, gnd, die_lo=None, die_hi=None):
+    """The strap intervals along one axis: [{net,k,lo,hi,c}], pdngen's own loop
+    (`Straps::makeStraps`, OpenROAD src/pdn/src/straps.cpp).
+
+    Each PERIOD starts at lo + offset + k*pitch and each NET in turn takes the
+    running position, advancing it by width+spacing -- VPWR first
+    (`-starts_with POWER`), VGND after it.  Three details are pdngen's and each
+    of them decides a strap at the far core edge:
+
+      * the period loop runs while `pos <= pos_end`, so a period whose centre
+        lands exactly ON the core edge is still generated;
+      * each net's strap is dropped, and the WHOLE loop stops, once that
+        strap's own centre passes the end or its near edge reaches it -- so
+        the last period can be a lone VPWR with no VGND partner;
+      * a strap whose rectangle leaves the DIE is skipped (that one alone does
+        not stop the loop).
+    """
     out, k = [], 0
-    while True:
-        c = lo + offset + k * pitch
-        if c >= hi - EPS:
-            return out
-        out.append((k, c))
+    pos = lo + offset
+    while pos <= hi + EPS:
+        group_pos = pos
+        for net in (vdd, gnd):
+            s_lo = group_pos - width / 2
+            if s_lo >= hi - EPS or group_pos > hi + EPS:
+                return out                      # pdngen returns, it does not continue
+            s_hi = s_lo + width
+            group_pos += width + spacing
+            if (die_lo is not None and s_lo < die_lo - EPS) or \
+               (die_hi is not None and s_hi > die_hi + EPS):
+                continue                        # outside the die
+            out.append({"net": net, "k": k, "c": (s_lo + s_hi) / 2, "lo": s_lo, "hi": s_hi})
         k += 1
-
-
-def straps_along(lo, hi, offset, pitch, width, spacing, vdd, gnd):
-    """The strap intervals along one axis: [{net,k,lo,hi,c}] -- VPWR centred at
-    each centre, VGND one width-plus-spacing after it (`-starts_with POWER`)."""
-    out = []
-    for k, c in strap_centres(lo, hi, offset, pitch):
-        out.append({"net": vdd, "k": k, "c": c, "lo": c - width / 2, "hi": c + width / 2})
-        cg = c + width + spacing
-        out.append({"net": gnd, "k": k, "c": cg, "lo": cg - width / 2, "hi": cg + width / 2})
+        pos += pitch
     return out
+
+
+def strap_centres(lo, hi, offset, pitch, width=0.0, spacing=0.0, die_lo=None, die_hi=None):
+    """The (k, centre) of every VPWR strap `straps_along` emits -- the periods
+    that survive pdngen's loop, which is not every k the pitch would allow."""
+    return [(s["k"], s["c"]) for s in
+            straps_along(lo, hi, offset, pitch, width, spacing, "VPWR", "VGND", die_lo, die_hi)
+            if s["net"] == "VPWR"]
 
 
 def top_straps(top, dx=0.0, dy=0.0):
     """(vertical straps as x-intervals, horizontal straps as y-intervals) on
     the top's core, the core shifted by (-dx,-dy) so a placement shift of
     (dx,dy) reads as the straps moving the other way."""
-    g, c = top["g"], top["core"]
+    g, c, d = top["g"], top["core"], top["die"]
     v = straps_along(c[0] - dx, c[2] - dx, g["PDN_VOFFSET"], g["PDN_VPITCH"], g["PDN_VWIDTH"],
-                     g["PDN_VSPACING"], g["VDD_NET"], g["GND_NET"])
+                     g["PDN_VSPACING"], g["VDD_NET"], g["GND_NET"], d[0] - dx, d[2] - dx)
     h = straps_along(c[1] - dy, c[3] - dy, g["PDN_HOFFSET"], g["PDN_HPITCH"], g["PDN_HWIDTH"],
-                     g["PDN_HSPACING"], g["VDD_NET"], g["GND_NET"])
+                     g["PDN_HSPACING"], g["VDD_NET"], g["GND_NET"], d[1] - dy, d[3] - dy)
     return v, h
 
 
 # ── the LEF ───────────────────────────────────────────────────────────────
 def read_lef(path):
     """{macro: {size:(w,h), origin:(x,y), class:str, pins:{pin:{use:str,
-    rects:[(layer,x1,y1,x2,y2)]}}}} -- the MACRO/SIZE/PIN/PORT/LAYER/RECT
-    subset; a POLYGON inside a power pin is refused (exit 2) rather than
-    approximated, and a RECT whose layer has not been named is an error."""
-    macros, cur, pin, layer, in_port = {}, None, None, None, False
+    rects:[(layer,x1,y1,x2,y2)]}}, obs:[(layer,x1,y1,x2,y2)]}} -- the
+    MACRO/SIZE/PIN/PORT/LAYER/RECT/OBS subset; a POLYGON inside a power pin is
+    refused (exit 2) rather than approximated, and a RECT whose layer has not
+    been named is an error.
+
+    The OBS block matters as much as the pins: LibreLane writes each hardened
+    block's abstract LEF with `write_abstract_lef -bloat_occupied_layers`
+    (`OPENROAD_LEF_BLOAT_OCCUPIED_LAYERS`, default True), which emits a
+    WHOLE-BLOCK cover rectangle on every layer the block drew anything on --
+    its own PDN straps included -- and pdngen cuts the top's straps against it
+    (`InstanceGrid::getInstanceObstructions` bloats it by the macro halo,
+    `Shape::cut` subtracts it).  A strap that is cut over the macro cannot
+    feed it, so a checker that read only the pins would pass a design whose
+    macros no strap reaches."""
+    macros, cur, pin, layer, in_port, in_obs = {}, None, None, None, False, False
     with open(path) as f:
         txt = f.read()
     # statements end in ';' except the block openers/closers
@@ -204,31 +260,41 @@ def read_lef(path):
         elif t[0] == "PIN" and len(t) >= 2:
             pin = {"use": None, "rects": []}
             cur["pins"][t[1]] = pin
-            layer = None
+            layer, in_obs = None, False
         elif t[0] == "USE" and pin is not None and len(t) >= 2:
             pin["use"] = t[1]
         elif t[0] == "PORT":
             in_port = True
             layer = None
+        elif t[0] == "OBS":
+            in_obs, pin, in_port, layer = True, None, False, None
         elif t[0] == "LAYER" and len(t) >= 2:
             layer = t[1]
-        elif t[0] == "RECT" and (pin is not None and in_port):
+        elif t[0] == "RECT" and ((pin is not None and in_port) or in_obs):
             nums = [x for x in t[1:] if re.fullmatch(r"-?\d+(\.\d+)?", x)]
+            where = "OBS" if in_obs else f"PIN of MACRO {name}"
             if layer is None or len(nums) < 4:
-                raise InputShape(f"{path}: RECT before a LAYER, or short, in PIN of MACRO {name}: {line}")
+                raise InputShape(f"{path}: RECT before a LAYER, or short, in {where} of MACRO {name}: {line}")
             x1, y1, x2, y2 = (float(v) for v in nums[:4])
-            pin["rects"].append((layer, min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2)))
+            r = (layer, min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2))
+            (cur["obs"] if in_obs else pin["rects"]).append(r)
+        elif t[0] == "POLYGON" and in_obs:
+            raise InputShape(f"{path}: MACRO {name} draws an OBS as a POLYGON; this check reads "
+                             f"RECTs only -- an unread obstruction would pass straps pdngen cuts")
         elif t[0] == "POLYGON" and pin is not None and in_port:
             if (pin["use"] or "").upper() in ("POWER", "GROUND"):
                 raise InputShape(f"{path}: MACRO {name} draws a power pin as a POLYGON; this check "
                                  f"reads RECTs only -- write the LEF with rectangles or extend the reader")
         elif t[0] == "END":
             if len(t) == 1 or t[1] == "PORT":
-                in_port = False
+                if in_obs and (len(t) == 1):
+                    in_obs, layer = False, None
+                else:
+                    in_port = False
             elif pin is not None and len(t) >= 2 and t[1] in cur["pins"]:
                 pin = None
             elif len(t) >= 2 and t[1] in macros:
-                cur = None
+                cur, in_obs = None, False
     for m, d in macros.items():
         if d["size"] is None:
             raise InputShape(f"{path}: MACRO {m} has no SIZE")
@@ -289,64 +355,112 @@ def instance_rects(inst, macro, top):
     return out
 
 
-def eval_instance(inst, rects, top, vstraps, hstraps, spacing, via_min):
-    """(collisions, connected-by-net, connections) for one placed instance;
-    `rects` already in top coordinates (shift applied by the caller)."""
+def instance_obstructions(inst, macro, top, spacing):
+    """The instance's LEF OBS rectangles in TOP coordinates, bloated the way
+    pdngen bloats them (`InstanceGrid::getInstanceObstructions`): by the
+    layer's minimum spacing and by the macro halo, the union of the two."""
+    g = top["g"]
+    hx, hy = g["FP_MACRO_HORIZONTAL_HALO"], g["FP_MACRO_VERTICAL_HALO"]
+    w, h = macro["size"]
+    out = []
+    for (layer, x1, y1, x2, y2) in macro.get("obs", []):
+        r = orient_rect((x1, y1, x2, y2), inst["orient"], w, h)
+        bx, by = max(spacing.get(layer, 0.0), hx), max(spacing.get(layer, 0.0), hy)
+        out.append((layer, r[0] + inst["x"] - bx, r[1] + inst["y"] - by,
+                    r[2] + inst["x"] + bx, r[3] + inst["y"] + by))
+    return out
+
+
+def eval_instance(inst, rects, obs, top, vstraps, hstraps, spacing, via_min):
+    """(clips, connected-by-net, connections, obstructed-layers) for one placed
+    instance; `rects` and `obs` already in top coordinates.
+
+    pdngen never SHORTS two nets -- it CUTS.  Where a macro's power pin or its
+    OBS meets a top strap on the same layer, `Shape::cut` removes the strap
+    over the macro, and the same-net exception spares it only when the strap
+    CONTAINS the pin across its width (a 2 um block pin never fits inside a
+    1.6 um top strap, and an obstruction copied into a grid carries no net at
+    all).  So a same-layer meeting is a CLIP whatever the nets are, never a
+    connection, and what actually feeds a macro is the CROSS-layer crossing
+    that `add_pdn_connect -layers {met4 met5}` vias -- on a strap that is
+    still there to cross it.
+    """
     g, core = top["g"], top["core"]
     lv, lh = g["PDN_VERTICAL_LAYER"], g["PDN_HORIZONTAL_LAYER"]
-    collisions, connections = [], []
+    clips, connections = [], []
     connected = {g["VDD_NET"]: False, g["GND_NET"]: False}
+    cut = {lv: set(), lh: set()}
+    obs_cut = {lv: set(), lh: set()}
+    obstructed = {}
+
+    # (a) the straps this macro removes over itself, and why
+    for (layer, ox1, oy1, ox2, oy2) in obs:
+        if layer not in cut:
+            continue
+        straps, lo, hi = (vstraps, ox1, ox2) if layer == lv else (hstraps, oy1, oy2)
+        hit = [j for j, s in enumerate(straps) if overlap(s["lo"], s["hi"], lo, hi) > EPS]
+        cut[layer].update(hit)
+        obs_cut[layer].update(hit)
+        if hit:
+            obstructed[layer] = {"rect": [round(v, 3) for v in (ox1, oy1, ox2, oy2)], "straps": len(hit)}
+    for (net, layer, x1, y1, x2, y2, pname) in rects:
+        if layer not in cut:
+            continue
+        if layer == lv and overlap(y1, y2, core[1], core[3]) <= 0:
+            continue
+        if layer == lh and overlap(x1, x2, core[0], core[2]) <= 0:
+            continue
+        sp = spacing.get(layer, 0.0)
+        straps, lo, hi = (vstraps, x1, x2) if layer == lv else (hstraps, y1, y2)
+        for j, s in enumerate(straps):
+            ov = overlap(lo, hi, s["lo"], s["hi"])
+            if ov > -sp + EPS:
+                cut[layer].add(j)
+                if j in obs_cut[layer]:
+                    continue          # the OBS already removed this strap here
+                clips.append({"instance": inst["name"], "pin": pname, "net": net, "layer": layer,
+                              "rect": [x1, y1, x2, y2], "strap_net": s["net"], "strap_k": s["k"],
+                              "strap": [s["lo"], s["hi"]], "overlap": round(ov, 4),
+                              "axis": "x" if layer == lv else "y"})
+
+    # (b) what still feeds it: a SURVIVING strap of the same net on the other layer
     for (net, layer, x1, y1, x2, y2, pname) in rects:
         if layer == lv:
-            # vertical straps span the core's height: only a rect inside it meets them
-            if overlap(y1, y2, core[1], core[3]) <= 0:
-                continue
-            sp = spacing.get(layer, 0.0)
-            for s in vstraps:
-                ov = overlap(x1, x2, s["lo"], s["hi"])
-                if s["net"] != net:
-                    if ov > -sp + EPS:
-                        collisions.append({"instance": inst["name"], "pin": pname, "net": net, "layer": layer,
-                                           "rect": [x1, y1, x2, y2], "strap_net": s["net"], "strap_k": s["k"],
-                                           "strap": [s["lo"], s["hi"]], "overlap": round(ov, 4), "axis": "x"})
-                elif ov > EPS:
-                    connected[net] = True
-                    connections.append((inst["name"], pname, layer, "overlaps", s["net"], s["k"]))
-            for s in hstraps:
-                if s["net"] == net and min(overlap(y1, y2, s["lo"], s["hi"]), x2 - x1) >= via_min - EPS:
-                    connected[net] = True
-                    connections.append((inst["name"], pname, layer, "crossed by", s["net"], s["k"]))
+            other, straps = lh, hstraps
         elif layer == lh:
-            if overlap(x1, x2, core[0], core[2]) <= 0:
+            other, straps = lv, vstraps
+        else:
+            continue
+        for j, s in enumerate(straps):
+            if s["net"] != net or j in cut[other]:
                 continue
-            sp = spacing.get(layer, 0.0)
-            for s in hstraps:
-                ov = overlap(y1, y2, s["lo"], s["hi"])
-                if s["net"] != net:
-                    if ov > -sp + EPS:
-                        collisions.append({"instance": inst["name"], "pin": pname, "net": net, "layer": layer,
-                                           "rect": [x1, y1, x2, y2], "strap_net": s["net"], "strap_k": s["k"],
-                                           "strap": [s["lo"], s["hi"]], "overlap": round(ov, 4), "axis": "y"})
-                elif ov > EPS:
-                    connected[net] = True
-                    connections.append((inst["name"], pname, layer, "overlaps", s["net"], s["k"]))
-            for s in vstraps:
-                if s["net"] == net and min(overlap(x1, x2, s["lo"], s["hi"]), y2 - y1) >= via_min - EPS:
-                    connected[net] = True
-                    connections.append((inst["name"], pname, layer, "crossed by", s["net"], s["k"]))
-    return collisions, connected, connections
+            if other == lh:      # horizontal strap: spans the core in x
+                ovx = min(x2, core[2]) - max(x1, core[0])
+                ovy = overlap(y1, y2, s["lo"], s["hi"])
+            else:                # vertical strap: spans the core in y
+                ovx = overlap(x1, x2, s["lo"], s["hi"])
+                ovy = min(y2, core[3]) - max(y1, core[1])
+            if min(ovx, ovy) >= via_min - EPS:
+                connected[net] = True
+                connections.append((inst["name"], pname, layer, "crossed by", s["net"], s["k"], other))
+    return clips, connected, connections, obstructed
 
 
 def shifted(rects, dx, dy):
     return [(n, l, x1 + dx, y1 + dy, x2 + dx, y2 + dy, p) for (n, l, x1, y1, x2, y2, p) in rects]
 
 
-def clean_at(inst, rects, top, vstraps, hstraps, spacing, via_min, dx, dy):
-    col, con, _ = eval_instance(inst, shifted(rects, dx, dy), top, vstraps, hstraps, spacing, via_min)
-    return not col and all(con.values())
+def shifted_obs(obs, dx, dy):
+    return [(l, x1 + dx, y1 + dy, x2 + dx, y2 + dy) for (l, x1, y1, x2, y2) in obs]
 
 
-def shift_candidates(rects_list, top, vstraps, hstraps, spacing, via_min, axis):
+def clean_at(inst, rects, obs, top, vstraps, hstraps, spacing, via_min, dx, dy):
+    clips, con, _, _ = eval_instance(inst, shifted(rects, dx, dy), shifted_obs(obs, dx, dy),
+                                     top, vstraps, hstraps, spacing, via_min)
+    return not clips and all(con.values())
+
+
+def shift_candidates(rects_list, obs_list, top, vstraps, hstraps, spacing, via_min, axis):
     """The dx (axis x) or dy (axis y) values at which some constraint changes
     state -- a pin edge meeting a strap edge plus spacing, or a crossing
     reaching via size -- for the given instances' rects.  The smallest
@@ -355,18 +469,25 @@ def shift_candidates(rects_list, top, vstraps, hstraps, spacing, via_min, axis):
     lv, lh = g["PDN_VERTICAL_LAYER"], g["PDN_HORIZONTAL_LAYER"]
     same_layer, cross_layer, straps = (lv, lh, vstraps) if axis == "x" else (lh, lv, hstraps)
     cands = {0.0}
+    for obs in obs_list:
+        for (layer, x1, y1, x2, y2) in obs:
+            lo, hi = (x1, x2) if axis == "x" else (y1, y2)
+            if layer not in (same_layer, cross_layer):
+                continue
+            for s in (straps if layer == same_layer else
+                      (hstraps if straps is vstraps else vstraps)):
+                cands.add(s["lo"] - hi)
+                cands.add(s["hi"] - lo)
     for rects in rects_list:
         for (net, layer, x1, y1, x2, y2, _) in rects:
             lo, hi = (x1, x2) if axis == "x" else (y1, y2)
             if layer == same_layer:
+                # every same-layer meeting is a clip now, whatever the nets, so
+                # both nets' straps contribute the same CLEARING candidates
                 sp = spacing.get(layer, 0.0)
                 for s in straps:
-                    if s["net"] != net:
-                        cands.add(s["lo"] - sp - hi)
-                        cands.add(s["hi"] + sp - lo)
-                    else:
-                        cands.add(s["lo"] - hi + GRID)
-                        cands.add(s["hi"] - lo - GRID)
+                    cands.add(s["lo"] - sp - hi)
+                    cands.add(s["hi"] + sp - lo)
             elif layer == cross_layer:
                 for s in straps:
                     if s["net"] == net:
@@ -380,16 +501,18 @@ def shift_candidates(rects_list, top, vstraps, hstraps, spacing, via_min, axis):
     return sorted(out, key=lambda v: (abs(v), v))
 
 
-def smallest_shift(insts, rects_by, top, vstraps, hstraps, spacing, via_min, axis, limit):
+def smallest_shift(insts, rects_by, obs_by, top, vstraps, hstraps, spacing, via_min, axis, limit):
     """The smallest |shift| along `axis` (within +-limit) after which EVERY
     instance in `insts` is collision-free on both layers and connected on
     both nets; None when no candidate within the limit does it."""
-    cands = shift_candidates([rects_by[i["name"]] for i in insts], top, vstraps, hstraps, spacing, via_min, axis)
+    cands = shift_candidates([rects_by[i["name"]] for i in insts], [obs_by[i["name"]] for i in insts],
+                             top, vstraps, hstraps, spacing, via_min, axis)
     for d in cands:
         if abs(d) > limit + EPS:
             break
         dx, dy = (d, 0.0) if axis == "x" else (0.0, d)
-        if all(clean_at(i, rects_by[i["name"]], top, vstraps, hstraps, spacing, via_min, dx, dy) for i in insts):
+        if all(clean_at(i, rects_by[i["name"]], obs_by[i["name"]], top, vstraps, hstraps,
+                        spacing, via_min, dx, dy) for i in insts):
             return d
     return None
 
@@ -397,41 +520,50 @@ def smallest_shift(insts, rects_by, top, vstraps, hstraps, spacing, via_min, axi
 def run_check(top, lefs, spacing=None, via_min=VIA_MIN):
     spacing = dict(MIN_SPACING, **(spacing or {}))
     g = top["g"]
+    lv, lh = g["PDN_VERTICAL_LAYER"], g["PDN_HORIZONTAL_LAYER"]
     vstraps, hstraps = top_straps(top)
     for inst in top["instances"]:
         if inst["cell"] not in lefs:
             raise InputShape(f"no LEF defines MACRO {inst['cell']} (instance {inst['name']}); LEFs read: "
                              f"{sorted(lefs)}")
-    rects_by, per_inst, all_col, unconnected, n_rects = {}, [], [], [], 0
+    rects_by, obs_by, per_inst, all_clips, unconnected, n_rects = {}, {}, [], [], [], 0
+    sealed = []
     for inst in top["instances"]:
         macro = lefs[inst["cell"]]
         rects = instance_rects(inst, macro, top)
         if not rects:
             raise InputShape(f"MACRO {inst['cell']}: no {g['VDD_NET']}/{g['GND_NET']} pin rectangles in its "
                              f"LEF -- a macro with no power pins cannot be fed; is this the FINAL lef?")
-        rects_by[inst["name"]] = rects
+        obs = instance_obstructions(inst, macro, top, spacing)
+        rects_by[inst["name"]], obs_by[inst["name"]] = rects, obs
         n_rects += len(rects)
-        col, con, cons = eval_instance(inst, rects, top, vstraps, hstraps, spacing, via_min)
-        all_col.extend(col)
+        clips, con, cons, obstructed = eval_instance(inst, rects, obs, top, vstraps, hstraps, spacing, via_min)
+        all_clips.extend(clips)
         for net, ok in con.items():
             if not ok:
                 unconnected.append({"instance": inst["name"], "net": net})
-        row = {"instance": inst["name"], "cell": inst["cell"], "collisions": len(col),
-               "connected": con, "connections": len(cons)}
-        if col or not all(con.values()):
-            row["dx"] = smallest_shift([inst], rects_by, top, vstraps, hstraps, spacing, via_min, "x",
-                                       g["PDN_VPITCH"] / 2)
-            row["dy"] = smallest_shift([inst], rects_by, top, vstraps, hstraps, spacing, via_min, "y",
-                                       g["PDN_HPITCH"] / 2)
+        if lv in obstructed and lh in obstructed:
+            sealed.append({"instance": inst["name"], "cell": inst["cell"]})
+        row = {"instance": inst["name"], "cell": inst["cell"], "clips": len(clips),
+               "connected": con, "connections": len(cons),
+               "obstructed": sorted(obstructed)}
+        if clips or not all(con.values()):
+            row["dx"] = smallest_shift([inst], rects_by, obs_by, top, vstraps, hstraps, spacing, via_min,
+                                       "x", g["PDN_VPITCH"] / 2)
+            row["dy"] = smallest_shift([inst], rects_by, obs_by, top, vstraps, hstraps, spacing, via_min,
+                                       "y", g["PDN_HPITCH"] / 2)
         per_inst.append(row)
     result = {"config": top["path"], "instances": len(top["instances"]), "pin_rects": n_rects,
-              "collisions": all_col, "unconnected": unconnected, "per_instance": per_inst,
-              "used_defaults": top["used_defaults"], "vstraps": len(vstraps), "hstraps": len(hstraps),
-              "pass": not all_col and not unconnected}
+              "clips": all_clips, "unconnected": unconnected, "per_instance": per_inst,
+              "sealed": sealed, "used_defaults": top["used_defaults"],
+              "vstraps": len(vstraps), "hstraps": len(hstraps),
+              "pass": not all_clips and not unconnected}
     if not result["pass"]:
         insts = top["instances"]
-        dx = smallest_shift(insts, rects_by, top, vstraps, hstraps, spacing, via_min, "x", g["PDN_VPITCH"] / 2)
-        dy = smallest_shift(insts, rects_by, top, vstraps, hstraps, spacing, via_min, "y", g["PDN_HPITCH"] / 2)
+        dx = smallest_shift(insts, rects_by, obs_by, top, vstraps, hstraps, spacing, via_min, "x",
+                            g["PDN_VPITCH"] / 2)
+        dy = smallest_shift(insts, rects_by, obs_by, top, vstraps, hstraps, spacing, via_min, "y",
+                            g["PDN_HPITCH"] / 2)
         result["global_dx"], result["global_dy"] = dx, dy
         if dx is not None:
             result["voffset_for_dx"] = round((g["PDN_VOFFSET"] - dx) % g["PDN_VPITCH"], 3)
@@ -442,11 +574,12 @@ def run_check(top, lefs, spacing=None, via_min=VIA_MIN):
 
 def report(top, lefs, res, out=sys.stdout):
     g, core = top["g"], top["core"]
+    lv, lh = g["PDN_VERTICAL_LAYER"], g["PDN_HORIZONTAL_LAYER"]
     p = lambda *a: print(*a, file=out)
     p(f"pdn_phase: {top['path']}: die {top['die']}, core {[round(v, 3) for v in core]}")
-    p(f"  {g['PDN_VERTICAL_LAYER']} straps: {res['vstraps']} at x = {core[0]:.3f} + {g['PDN_VOFFSET']} + k*{g['PDN_VPITCH']}"
+    p(f"  {lv} straps: {res['vstraps']} at x = {core[0]:.3f} + {g['PDN_VOFFSET']} + k*{g['PDN_VPITCH']}"
       f" (VPWR first, VGND +{g['PDN_VWIDTH'] + g['PDN_VSPACING']:.2f}; width {g['PDN_VWIDTH']})")
-    p(f"  {g['PDN_HORIZONTAL_LAYER']} straps: {res['hstraps']} at y = {core[1]:.3f} + {g['PDN_HOFFSET']} + k*{g['PDN_HPITCH']}"
+    p(f"  {lh} straps: {res['hstraps']} at y = {core[1]:.3f} + {g['PDN_HOFFSET']} + k*{g['PDN_HPITCH']}"
       f" (width {g['PDN_HWIDTH']}, VGND +{g['PDN_HWIDTH'] + g['PDN_HSPACING']:.2f})")
     if res["used_defaults"]:
         p("  ASSUMED (not in the config; sky130A/LibreLane 3.0.11 defaults): " +
@@ -458,26 +591,42 @@ def report(top, lefs, res, out=sys.stdout):
             if pname in (g["VDD_NET"], g["GND_NET"]):
                 for (layer, *_r) in pin["rects"]:
                     counts[(pname, layer)] = counts.get((pname, layer), 0) + 1
+        obs_layers = sorted({l for (l, *_r) in m.get("obs", [])})
         p(f"  MACRO {cell}: {m['size'][0]} x {m['size'][1]}, power-pin rects " +
-          ", ".join(f"{n}/{l}: {c}" for (n, l), c in sorted(counts.items())))
-    for c in res["collisions"]:
-        p(f"COLLISION {c['instance']} {c['net']} pin {c['pin']} on {c['layer']} "
+          ", ".join(f"{n}/{l}: {c}" for (n, l), c in sorted(counts.items())) +
+          (f"; OBS on {', '.join(obs_layers)}" if obs_layers else "; no OBS"))
+    seen = set()
+    for r in res["per_instance"]:
+        for layer in r["obstructed"]:
+            if (r["cell"], layer) in seen:
+                continue
+            seen.add((r["cell"], layer))
+            p(f"OBSTRUCTED {r['cell']} (e.g. {r['instance']}) on {layer}: the block's own OBS, bloated by "
+              f"the macro halo, removes every {layer} strap over it -- pdngen cuts them "
+              f"(`Shape::cut` against `InstanceGrid::getInstanceObstructions`), so no {layer} strap "
+              f"can feed this macro")
+    for c in res["clips"]:
+        p(f"CLIP {c['instance']} {c['net']} pin {c['pin']} on {c['layer']} "
           f"[{c['rect'][0]:.3f},{c['rect'][2]:.3f}]x[{c['rect'][1]:.3f},{c['rect'][3]:.3f}] "
-          f"under {c['strap_net']} strap k={c['strap_k']} [{c['strap'][0]:.3f},{c['strap'][1]:.3f}] "
+          f"cuts {c['strap_net']} strap k={c['strap_k']} [{c['strap'][0]:.3f},{c['strap'][1]:.3f}] "
           f"(overlap {c['overlap']:.3f} um along {c['axis']}; spacing counted)")
     for u in res["unconnected"]:
-        p(f"UNCONNECTED {u['instance']} {u['net']}: no strap of that net overlaps a same-layer pin or "
-          f"crosses a pin on the other layer with room for a via")
-    bad = [r for r in res["per_instance"] if r["collisions"] or not all(r["connected"].values())]
+        p(f"UNCONNECTED {u['instance']} {u['net']}: no surviving strap of that net on the other layer "
+          f"crosses a pin of that net with room for a via")
+    for sd in res["sealed"]:
+        p(f"  {sd['instance']} ({sd['cell']}) obstructs BOTH {lv} and {lh}: nothing can reach it. "
+          f"Harden the block with PDN_MULTILAYER false -- LibreLane's own setting for a macro meant "
+          f"for integration -- so it draws no {lh}, and the top's {lh} straps stay whole over it")
+    bad = [r for r in res["per_instance"] if r["clips"] or not all(r["connected"].values())]
     for r in bad:
         fmt = lambda v: "none within half a pitch" if v is None else f"{v:+.3f} um"
         p(f"  {r['instance']}: smallest x-shift {fmt(r['dx'])}, smallest y-shift {fmt(r['dy'])}")
     if res["pass"]:
-        p(f"PASS: {res['instances']} instances, {res['pin_rects']} power-pin rects, 0 collisions, "
+        p(f"PASS: {res['instances']} instances, {res['pin_rects']} power-pin rects, 0 clips, "
           f"every instance connected on {g['VDD_NET']} and {g['GND_NET']}")
     else:
-        line = (f"FAIL: {res['instances']} instances, {len(res['collisions'])} collisions in "
-                f"{len({c['instance'] for c in res['collisions']})} instances, "
+        line = (f"FAIL: {res['instances']} instances, {len(res['clips'])} clips in "
+                f"{len({c['instance'] for c in res['clips']})} instances, "
                 f"{len(res['unconnected'])} unconnected instance-nets")
         if res.get("global_dx") is not None:
             line += (f"; shifting EVERY macro by dx={res['global_dx']:+.3f} clears the x-axis "

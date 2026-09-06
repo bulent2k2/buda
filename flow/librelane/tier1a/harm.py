@@ -18,8 +18,11 @@ What it writes, and the rule behind each piece:
       LibreLane's own placer (no template -- that is the pin-DEF writer's
       job); CLOCK_PORT clk; the block-level settings of
       flow/librelane/phase0/reg32/config.json (PDN at pitch 30 / offset 5 /
-      width 2 on met4+met5, RT_MAX_LAYER met4, density 50) plus gen.sh's
-      signoff toggles so the arm's DRC column means what the flat arm's does.
+      width 2, RT_MAX_LAYER met4, density 50) plus gen.sh's signoff toggles
+      so the arm's DRC column means what the flat arm's does, and
+      PDN_MULTILAYER FALSE -- LibreLane's own setting for "hardening a macro
+      for integrating into a larger top-level design", and the one that makes
+      the arm connectable (see the PDN section below).
 
   h/top/src/tpu_top_h.v, h/top/config.json
       tpu_rtl.v with the four leaf module bodies REMOVED entirely --
@@ -47,37 +50,58 @@ What it writes, and the rule behind each piece:
       PLACEMENT SHIFT: the emitter places `feed_*` at x = X0 - EDGEW -
       EDGEGAP = -140, OUTSIDE the DEF's own DIEAREA; a macro outside the
       die cannot be floorplanned.  Rather than refuse the whole set, every
-      instance is translated by ONE (dx, dy) = (max(0, halo - min x),
-      max(0, halo - min y)) -- the smallest shift that puts every macro
-      halo inside the die, the leftmost halo touching the die edge as the
-      toy's does -- and the die is then checked to hold the shifted
-      placement plus halos (else exit 1).  A DEF whose placement already
-      fits is NOT moved (dx = dy = 0).  `placement.json` records both
-      coordinates for every instance and the rule.
+      instance is translated by ONE (dx, dy) = (max(0, die_x0 + halo - min x),
+      max(0, die_y0 + halo - min y)) -- the smallest shift that puts every
+      macro halo inside the die, measured from the die's OWN origin, the
+      leftmost halo touching the die edge as the toy's does -- and every
+      macro BODY is then checked to be inside the die (else exit 1; a halo
+      poking past the die edge is not an error, it only means no other cell
+      fits beside the macro there).  A DEF whose placement already fits is
+      NOT moved (dx = dy = 0).  `placement.json` records both coordinates
+      for every instance and the rule.
 
   h/top/pdn_plan.json, and the PDN_* values in top/config.json
-      Chosen so that with the DEF's placement the array's regular pitch
-      lands every macro at ONE phase against the top's straps -- the toy's
-      `10 = 160 mod 30` rule generalized (§8 step 4):
+      What actually feeds a hardened macro decides this, and it is not what
+      the toy's geometry suggested.  LibreLane writes each block's abstract
+      LEF with `write_abstract_lef -bloat_occupied_layers`
+      (`OPENROAD_LEF_BLOAT_OCCUPIED_LAYERS`, default True), which emits a
+      WHOLE-BLOCK cover obstruction on every layer the block drew anything
+      on -- its own PDN straps included, since the abstract writer collects
+      special wires as obstructions.  pdngen then bloats that obstruction by
+      the macro halo (`InstanceGrid::getInstanceObstructions`) and SUBTRACTS
+      it from the core grid's straps (`Shape::cut`).  So:
+
+      * every top met4 strap is cut over each macro and its halo -- met4
+        cannot feed a macro at all, whatever the phase;
+      * a macro hardened MULTILAYER would obstruct met5 the same way and
+        could not be fed by anything, which is why the block config sets
+        PDN_MULTILAYER false.  With no met5 of its own the block leaves the
+        top's met5 straps whole over it, and the macro grid's
+        `add_pdn_connect -layers {met4 met5}` vias them onto the block's
+        met4 pins.  That crossing is the macro's whole supply.
+
+      Hence the two axes have different jobs and different rules:
+      * PDN_HPITCH = RPY / k, RPY the pe_cell row pitch, and PDN_HOFFSET
+        chosen so that a met5 strap of EACH net crosses EVERY macro's met4
+        power pins of that net with room for a via (1.4 um).  This is a
+        GATE: an offset that fails it leaves macros unfed.  The offset with
+        the largest via overlap wins.  With the emitter's defaults that is
+        32 = RPY/4 at offset 0, the full 1.6 um strap width inside the pin
+        band on every one of the four cell types.
       * PDN_VPITCH = PPX / k, PPX the pitch of the pe_cell columns (every
         instance's x must be congruent mod it, checked), the smallest k
-        whose pitch is at most the PDK default (153.6) and admits a phase
-        in which (a) no strap of one net lies within spacing of a
-        PREDICTED block pin of the other net on met4, (b) some strap pair
-        of the period crosses the block's met5 pins (that crossing is
-        what connects the macro), and (c) every standard-cell row fragment
-        the macro halos leave -- the channels between columns, the edge
-        slivers -- is crossed by a full VPWR+VGND pair, which is the
-        second way the toy failed (PSM-0069 on a sliver no strap reached).
-        PDN_VOFFSET is the phase with the largest clearance.  With the
-        emitter's defaults that is 100 = PPX/2: one pair over each macro
-        between its own straps, one in each 48 um channel.
-      * PDN_HPITCH = RPY / k, RPY the pe_cell row pitch, and PDN_HOFFSET
-        the offset at which no met5 strap sits within spacing of any
-        macro's predicted met5 pins (the rows are NOT all at one phase --
-        wbuf, acc and the pipe rows sit at their own -- so the offset is
-        searched over every instance; a macro needs no met5 crossing
-        because the vertical straps feed it).
+        whose pitch is at most the PDK default (153.6) and whose offset puts
+        a full VPWR+VGND pair in every standard-cell row fragment the macro
+        halos leave -- the channels between columns, the edge slivers.  That
+        is the toy's SECOND failure (PSM-0069 on a sliver no strap reached)
+        and, with met4 cut over every macro, the only thing met4 still does
+        here.  Among the offsets that satisfy it, the one whose straps stay
+        farthest from the blocks' predicted met4 pins is taken: that
+        clearance no longer decides anything (pdngen has already cut those
+        straps over the macro) but it is what the plan falls back on if a
+        block is ever hardened with the LEF bloating turned off.  With the
+        emitter's defaults that is 100 = PPX/2 at offset 96.2.
+
       The block pins are PREDICTED from the block config this same script
       writes (core margin 12 sites x 4 rows = 5.52 x 10.88, straps at
       core + 5 + 30k, width 2, spacing 1.7 -- the toy's measured 10.52 /
@@ -115,7 +139,19 @@ BLOCK_SETTINGS = {
     "PDN_VPITCH": 30,
     "PDN_HPITCH": 30,
     "PDN_SKIPTRIM": True,
+    # LibreLane's own setting for a block meant to be integrated: "only the
+    # lower layer will be used, which is useful when hardening a macro for
+    # integrating into a larger top-level design".  It is what makes the arm
+    # connectable at all.  The hardened block's abstract LEF is written with
+    # `write_abstract_lef -bloat_occupied_layers` (default True), a WHOLE-BLOCK
+    # cover obstruction on every layer the block drew anything on, and pdngen
+    # cuts the top's straps against it -- so a multilayer block would obstruct
+    # met4 AND met5 and NOTHING could reach its pins.  Without met5 of its own
+    # the top's met5 straps stay whole over the macro and feed its met4 pins
+    # through the macro grid's `add_pdn_connect -layers {met4 met5}`.
+    "PDN_MULTILAYER": False,
 }
+BLOCK_OBS_LAYERS = ("met1", "met2", "met3", "met4")   # rails + routing to RT_MAX_LAYER + its own PDN
 BLOCK_SPACING = 1.7          # PDN_VSPACING/HSPACING the block inherits (sky130A)
 # gen.sh's signoff toggles: the H arm's DRC column must mean what F's does
 SIGNOFF = {"GRT_ALLOW_CONGESTION": False, "RUN_KLAYOUT_XOR": False,
@@ -222,21 +258,21 @@ def block_core(w, h):
 
 
 def predicted_pins(w, h):
-    """The block's own PDN straps as they will come back as VPWR/VGND pins
-    of its LEF (block-local rects), from BLOCK_SETTINGS: met4 straps run the
-    core height at x = 5.52 + 5 + 30k (VGND 3.7 after), met5 straps run the
-    ROW extent at y = 10.88 + 5 + 30k -- the toy's 10.52/14.22 and its met5
-    pin ending at 74.06 = 5.52 + 149 sites."""
+    """The block's own PDN straps as they will come back as VPWR/VGND pins of
+    its LEF (block-local rects), from BLOCK_SETTINGS: met4 straps running the
+    core height at x = 5.52 + 5 + 30k, VGND one width-plus-spacing after each
+    (the toy's measured 10.52 / 14.22).  met4 ONLY -- `PDN_MULTILAYER` false,
+    so the block draws no met5, which is what leaves the top's met5 straps
+    whole over the macro to feed these pins.  The strap list is pdngen's own
+    (`straps_along`), so a period the block's core edge cuts short is absent
+    here too."""
     c = block_core(w, h)
     rows_hi = c[0] + math.floor((c[2] - c[0]) / pp.SITE_W + 1e-9) * pp.SITE_W
     B = BLOCK_SETTINGS
     pins = {"VPWR": [], "VGND": []}
-    for k, cx in pp.strap_centres(c[0], c[2], B["PDN_VOFFSET"], B["PDN_VPITCH"]):
-        for net, cc in (("VPWR", cx), ("VGND", cx + B["PDN_VWIDTH"] + BLOCK_SPACING)):
-            pins[net].append(("met4", cc - B["PDN_VWIDTH"] / 2, c[1], cc + B["PDN_VWIDTH"] / 2, c[3]))
-    for k, cy in pp.strap_centres(c[1], c[3], B["PDN_HOFFSET"], B["PDN_HPITCH"]):
-        for net, cc in (("VPWR", cy), ("VGND", cy + B["PDN_HWIDTH"] + BLOCK_SPACING)):
-            pins[net].append(("met5", c[0], cc - B["PDN_HWIDTH"] / 2, rows_hi, cc + B["PDN_HWIDTH"] / 2))
+    for st in pp.straps_along(c[0], c[2], B["PDN_VOFFSET"], B["PDN_VPITCH"], B["PDN_VWIDTH"],
+                              BLOCK_SPACING, "VPWR", "VGND", 0.0, w):
+        pins[st["net"]].append(("met4", st["lo"], c[1], st["hi"], c[3]))
     return pins, (c[0], rows_hi)
 
 
@@ -250,6 +286,14 @@ def write_predicted_lef(path, cell, w, h, pins):
         for (layer, x1, y1, x2, y2) in pins[net]:
             L += [f"      LAYER {layer} ;", f"      RECT {x1:.3f} {y1:.3f} {x2:.3f} {y2:.3f} ;"]
         L += ["    END", f"  END {net}"]
+    # what `write_abstract_lef -bloat_occupied_layers` will emit: a whole-block
+    # cover rectangle per occupied layer.  met5 is absent BY CONSTRUCTION
+    # (PDN_MULTILAYER false) and that absence is the macro's only supply route,
+    # so the prediction has to carry it or the dry run would not be testing it.
+    L += ["  OBS"]
+    for layer in BLOCK_OBS_LAYERS:
+        L += [f"    LAYER {layer} ;", f"      RECT 0.000 0.000 {w:.3f} {h:.3f} ;"]
+    L += ["  END"]
     L += [f"END {cell}", "", "END LIBRARY", ""]
     with open(path, "w") as f:
         f.write("\n".join(L))
@@ -299,17 +343,22 @@ def gap(a_lo, a_hi, b_lo, b_hi):
 
 
 def vertical_clearance(voffset, pitch, cells, refs, core_x0):
-    """(min clearance, connected-for-every-cell) of vertical straps whose VPWR
-    centres sit at x = core_x0 + voffset + k*pitch, seen by each cell type at
-    its own block-local phase (core_x0 + voffset - refs[cell]) mod pitch:
-    clearance against the cell's predicted met4 pins of the other net
-    (spacing counted), connection = some pair inside its met5 pin x-span."""
+    """The min clearance of vertical straps whose VPWR centres sit at
+    x = core_x0 + voffset + k*pitch against each cell's PREDICTED met4 pins of
+    the OTHER net, seen at that cell's own block-local phase.
+
+    It is a PREFERENCE, not a gate: the hardened block obstructs met4 over its
+    whole area, so pdngen cuts these straps over the macro and its halo
+    whatever the phase, and what feeds the macro is the met5 crossing
+    (`choose_horizontal`).  A positive clearance is still worth having -- it is
+    what the plan is left with if a block is ever hardened with the abstract
+    LEF's bloating turned off, and a clip there would cost the standard-cell
+    rows beside the macro their met4 supply."""
     sp4 = pp.MIN_SPACING["met4"]
     w2, gnd_off = TOP_STRAP_W / 2, TOP_STRAP_W + TOP_STRAP_SP
     clearance = math.inf
     for cell, (w, h, pins, rows) in cells.items():
         phase = (core_x0 + voffset - refs[cell]) % pitch
-        connected = False
         j = math.floor((-pp.SKY130["FP_MACRO_HORIZONTAL_HALO"] - phase) / pitch) - 1
         while True:
             X = phase + j * pitch
@@ -318,17 +367,13 @@ def vertical_clearance(voffset, pitch, cells, refs, core_x0):
                 continue
             if X - w2 > w + 1:
                 break
-            straps = (("VPWR", X - w2, X + w2), ("VGND", X + gnd_off - w2, X + gnd_off + w2))
-            for net, slo, shi in straps:
+            for net, slo, shi in (("VPWR", X - w2, X + w2),
+                                  ("VGND", X + gnd_off - w2, X + gnd_off + w2)):
                 other = "VGND" if net == "VPWR" else "VPWR"
                 for (layer, x1, y1, x2, y2) in pins[other]:
                     if layer == "met4":
                         clearance = min(clearance, gap(slo, shi, x1, x2) - sp4)
-            if X - w2 >= rows[0] - 1e-9 and X + gnd_off + w2 <= rows[1] + 1e-9:
-                connected = True
-        if not connected:
-            return -math.inf, False
-    return clearance, True
+    return clearance
 
 
 def cell_phase_refs(insts, pitch):
@@ -346,7 +391,7 @@ def cell_phase_refs(insts, pitch):
     return refs, bad
 
 
-def choose_vertical(insts, sizes, cells, core, halo, ppx):
+def choose_vertical(insts, sizes, cells, core, die, halo, ppx):
     """PDN_VPITCH/VOFFSET by the rule in the module docstring.  Returns the
     plan dict; raises Shape when no pitch/offset satisfies the three tests."""
     frags = row_fragments(insts, sizes, core, halo)
@@ -369,13 +414,14 @@ def choose_vertical(insts, sizes, cells, core, halo, ppx):
             phases = {c: round((core[0] - refs[c]) % pitch, 3) for c in refs}
 
             def score(voff):
-                cl, ok = vertical_clearance(voff, pitch, cells, refs, core[0])
-                if not ok or cl < 0:
-                    return None
-                centres = [c for _, c in pp.strap_centres(core[0], core[2], voff, pitch)]
+                # the GATE is the standard-cell rows: every fragment the macro
+                # halos leave must hold a full VPWR+VGND pair, which is the
+                # toy's sliver failure and the one thing met4 still does here.
+                centres = [c for _, c in pp.strap_centres(core[0], core[2], voff, pitch,
+                                                          TOP_STRAP_W, TOP_STRAP_SP, die[0], die[2])]
                 if not all(pair_fits(f[2], f[3], centres) for f in rows):
                     return None
-                return cl
+                return vertical_clearance(voff, pitch, cells, refs, core[0])
 
             best, step = None, 0.05
             for i in range(int(round(pitch / step))):
@@ -388,11 +434,10 @@ def choose_vertical(insts, sizes, cells, core, halo, ppx):
                     if s_ is not None and s_ > best[0]:
                         best = (s_, v % pitch)
             if best is None:
-                tried.append((pitch, "no offset clears the predicted met4 pins of every cell, connects every cell "
-                                     "AND puts a strap pair in every row fragment"))
+                tried.append((pitch, "no offset puts a full VPWR+VGND pair in every standard-cell row fragment"))
                 continue
             voff = round(round(best[1] / pp.GRID) * pp.GRID, 3) % pitch
-            cl, _ = vertical_clearance(voff, pitch, cells, refs, core[0])
+            cl = vertical_clearance(voff, pitch, cells, refs, core[0])
             return {"PDN_VPITCH": pitch, "PDN_VOFFSET": voff, "k": k - 1, "ppx": ppx,
                     "cell_x_ref": refs, "cell_phase_at_offset_0": phases,
                     "phase_block_local": {c: round((core[0] + voff - refs[c]) % pitch, 3) for c in refs},
@@ -402,35 +447,40 @@ def choose_vertical(insts, sizes, cells, core, halo, ppx):
     raise Shape("no PDN_VPITCH = PPX/k admits an offset: " + "; ".join(f"{p}: {why}" for p, why in tried))
 
 
-def horizontal_clearance(offset, pitch, insts, cells, core):
-    """min clearance of met5 straps at y = core_y0 + offset + k*pitch against
-    every instance's predicted met5 pins (spacing counted); also whether
-    every instance's met4 pins get crossed too (a bonus, reported)."""
-    sp5 = pp.MIN_SPACING["met5"]
-    w2, gnd_off = TOP_STRAP_W / 2, TOP_STRAP_W + TOP_STRAP_SP
-    clearance = math.inf
-    crossed_all = True
-    centres = [c for _, c in pp.strap_centres(core[1], core[3], offset, pitch)]
+
+def horizontal_crossing(offset, pitch, insts, cells, core, die):
+    """(smallest via overlap, ok) for met5 straps whose VPWR centres sit at
+    y = core_y0 + offset + k*pitch: EVERY instance must have a met5 strap of
+    EACH net crossing a met4 power pin of that same net with room for a via.
+
+    This is the gate, not a bonus.  The hardened block carries a whole-area
+    met4 obstruction, so the top's met4 straps are cut over the macro and its
+    halo and cannot feed it; the macro grid's
+    `add_pdn_connect -layers {met4 met5}` vias from the top's met5 straps onto
+    the block's met4 pins are what is left, and they exist only where a strap
+    of the right net actually runs over those pins."""
+    straps = pp.straps_along(core[1], core[3], offset, pitch, TOP_STRAP_W, TOP_STRAP_SP,
+                             "VPWR", "VGND", die[1], die[3])
+    worst = math.inf
     for i in insts:
-        w, h, pins, _ = cells[i["cell"]]
-        crossed = False
-        for Y in centres:
-            y = Y - i["y"]
-            if y + gnd_off + w2 < -1 or y - w2 > h + 1:
-                continue
-            for net, slo, shi in (("VPWR", y - w2, y + w2), ("VGND", y + gnd_off - w2, y + gnd_off + w2)):
-                other = "VGND" if net == "VPWR" else "VPWR"
-                for (layer, x1, y1, x2, y2) in pins[other]:
-                    if layer == "met5":
-                        clearance = min(clearance, gap(slo, shi, y1, y2) - sp5)
-                for (layer, x1, y1, x2, y2) in pins[net]:
-                    if layer == "met4" and min(shi, y2) - max(slo, y1) >= pp.VIA_MIN - 1e-9:
-                        crossed = True
-        crossed_all = crossed_all and crossed
-    return clearance, crossed_all
+        w, h, pins, rows = cells[i["cell"]]
+        for net in ("VPWR", "VGND"):
+            best = -math.inf
+            for (layer, x1, y1, x2, y2) in pins[net]:
+                if layer != "met4":
+                    continue
+                Y1, Y2 = y1 + i["y"], y2 + i["y"]
+                for s in straps:
+                    if s["net"] != net:
+                        continue
+                    best = max(best, min(min(Y2, s["hi"]) - max(Y1, s["lo"]), x2 - x1))
+            if best < pp.VIA_MIN - 1e-9:
+                return best, False
+            worst = min(worst, best)
+    return worst, True
 
 
-def choose_horizontal(insts, cells, core, rpy):
+def choose_horizontal(insts, cells, core, die, rpy):
     tried = []
     for pass_ in ("<= PDK default", "any"):
         k = 1
@@ -445,29 +495,29 @@ def choose_horizontal(insts, cells, core, rpy):
             best, step = None, 0.05
             for i in range(int(round(pitch / step))):
                 off = i * step
-                cl, _ = horizontal_clearance(off, pitch, insts, cells, core)
-                if cl >= 0 and (best is None or cl > best[0]):
-                    best = (cl, off)
+                ov, ok = horizontal_crossing(off, pitch, insts, cells, core, die)
+                if ok and (best is None or ov > best[0]):
+                    best = (ov, off)
             if best is None:
-                tried.append((pitch, "every offset puts a met5 strap within spacing of some macro's predicted met5 pins"))
+                tried.append((pitch, "no offset crosses every macro's met4 pins on both nets with "
+                                     "room for a via"))
                 continue
             for off in [best[1] + i * pp.GRID for i in range(-10, 11)]:
-                cl, _ = horizontal_clearance(off % pitch, pitch, insts, cells, core)
-                if cl >= 0 and cl > best[0]:
-                    best = (cl, off % pitch)
-            hoff = round(round(best[1] / pp.GRID) * pp.GRID, 3)
-            cl, crossed = horizontal_clearance(hoff, pitch, insts, cells, core)
-            # inf = no met5 strap comes near any macro's met5 pins at all (the
-            # straps run in the channels between macro rows): nothing to clear
+                ov, ok = horizontal_crossing(off % pitch, pitch, insts, cells, core, die)
+                if ok and ov > best[0]:
+                    best = (ov, off % pitch)
+            hoff = round(round(best[1] / pp.GRID) * pp.GRID, 3) % pitch
+            ov, ok = horizontal_crossing(hoff, pitch, insts, cells, core, die)
+            if not ok:                      # the grid snap moved it off a feasible offset
+                hoff = round(best[1], 3) % pitch
+                ov, ok = horizontal_crossing(hoff, pitch, insts, cells, core, die)
             return {"PDN_HPITCH": pitch, "PDN_HOFFSET": hoff, "k": k - 1, "rpy": rpy,
-                    "clearance_met5": None if cl == math.inf else round(cl, 3),
-                    "met5_straps_over_macros": cl != math.inf,
-                    "met4_pins_also_crossed_everywhere": crossed,
+                    "via_overlap_met5_to_met4": round(ov, 3),
+                    "every_macro_crossed_on_both_nets": ok,
                     "tried": tried, "rule": pass_}
     raise Shape("no PDN_HPITCH = RPY/k admits an offset: " + "; ".join(f"{p}: {why}" for p, why in tried))
 
 
-# ── the writer ────────────────────────────────────────────────────────────
 def views(cell):
     base = f"dir::../{cell}/runs/h/final"
     return {"gds": [f"{base}/gds/{cell}.gds"], "lef": [f"{base}/lef/{cell}.lef"],
@@ -541,17 +591,20 @@ def write_h(n_dir, out_dir, halo):
     # ── the placement shift (see the docstring) ──
     xs = [c["x"] for c in D["comps"]]
     ys = [c["y"] for c in D["comps"]]
-    dx = max(0.0, hx - min(xs) - D["die"][0])
-    dy = max(0.0, hy - min(ys) - D["die"][1])
+    dx = max(0.0, D["die"][0] + hx - min(xs))
+    dy = max(0.0, D["die"][1] + hy - min(ys))
     dx, dy = round(dx, 3), round(dy, 3)
     insts = []
     for c in D["comps"]:
         w, h = pp.placed_size(c["orient"], *sizes[c["cell"]])
         x, y = round(c["x"] + dx, 3), round(c["y"] + dy, 3)
-        if x + w + hx > D["die"][2] + 1e-9 or y + h + hy > D["die"][3] + 1e-9 or x - hx < D["die"][0] - 1e-9 \
-                or y - hy < D["die"][1] - 1e-9:
-            raise Shape(f"tpu.def: {c['name']} at ({x},{y}) + halo {hx}/{hy} does not fit the DEF's DIEAREA "
-                        f"{D['die']} even after the ({dx},{dy}) shift -- the die is too small for its own placement")
+        # the MACRO must be inside the die; its HALO reaching past the die edge
+        # only means no other cell fits beside it there, which is not an error
+        if x < D["die"][0] - 1e-9 or y < D["die"][1] - 1e-9 or \
+                x + w > D["die"][2] + 1e-9 or y + h > D["die"][3] + 1e-9:
+            raise Shape(f"tpu.def: {c['name']} at ({x},{y}) size {w}x{h} is not inside the DEF's DIEAREA "
+                        f"{D['die']} even after the ({dx},{dy}) shift -- the die is too small for its own "
+                        f"placement")
         insts.append({"def_name": c["name"], "name": top_instance_name(c["name"], D["divider"]), "cell": c["cell"],
                       "def_location": [c["x"], c["y"]], "x": x, "y": y, "orient": c["orient"], "size": [w, h]})
     names = [i["name"] for i in insts]
@@ -574,8 +627,8 @@ def write_h(n_dir, out_dir, halo):
         max(leaf_cells, key=lambda c: sum(1 for i in insts if i["cell"] == c))
     ppx = grid_pitch(insts, array_cell, "x")
     rpy = grid_pitch(insts, array_cell, "y")
-    vplan = choose_vertical(insts, sizes, cells, core, halo, ppx)
-    hplan = choose_horizontal(insts, cells, core, rpy)
+    vplan = choose_vertical(insts, sizes, cells, core, D["die"], halo, ppx)
+    hplan = choose_horizontal(insts, cells, core, D["die"], rpy)
 
     # ── write ──
     os.makedirs(out_dir, exist_ok=True)
@@ -655,8 +708,9 @@ def write_h(n_dir, out_dir, halo):
                    "dbu": D["dbu"], "die_um": D["die"], "divider": D["divider"],
                    "instance_name_rule": "DEF name with the DIVIDERCHAR replaced by '.' (Yosys flatten)",
                    "shift_um": [dx, dy],
-                   "shift_rule": "(max(0, halo_x - min x), max(0, halo_y - min y)): the smallest translation "
-                                 "putting every macro halo inside the die; 0 when the DEF's placement already fits",
+                   "shift_rule": "(max(0, die_x0 + halo_x - min x), max(0, die_y0 + halo_y - min y)): the "
+                                 "smallest translation putting every macro halo inside the die, measured from "
+                                 "the die's OWN origin; 0 when the DEF's placement already fits",
                    "halo_um": [hx, hy], "instances": insts}, f, indent=1)
         f.write("\n")
     plan = {"array_cell": array_cell, "vertical": vplan, "horizontal": hplan,
@@ -687,7 +741,7 @@ def write_h(n_dir, out_dir, halo):
 
 
 def render_readme(n_dir, out_dir, cells, counts, sizes, D, dx, dy, vplan, hplan, advice):
-    blocks = " ".join(f"--block ../{c}/runs/h:{counts[c]}" for c in cells)
+    blocks = " ".join(f"--block {c}/runs/h:{counts[c]}" for c in cells)
     n_arr = int(round(math.sqrt(counts.get("pe_cell", 0)))) or "?"   # the array's N: N*N PEs
     harden = "\n".join(f"(cd {c} && librelane --dockerized --run-tag h config.json > h.log 2>&1) &" for c in cells)
     lefs = " ".join(f"../{c}/runs/h/final/lef/{c}.lef" for c in cells)
@@ -699,7 +753,10 @@ top die {D['die'][2]:g} x {D['die'][3]:g} um, {sum(counts.values())} macro insta
 (see top/placement.json for the rule and every instance's both coordinates).
 PDN: met4 straps at pitch {vplan['PDN_VPITCH']} = PPX {vplan['ppx']} / {vplan['k']}, offset {vplan['PDN_VOFFSET']} (block-local phase per cell
 {vplan['phase_block_local']}, {vplan['clearance_met4']} um clear of the predicted met4 pins, a pair in every one of the {vplan['row_fragments']} row
-fragments); met5 straps at pitch {hplan['PDN_HPITCH']} = RPY {hplan['rpy']} / {hplan['k']}, offset {hplan['PDN_HOFFSET']} ({('%s um clear of the predicted met5 pins' % hplan['clearance_met5']) if hplan['met5_straps_over_macros'] else 'no met5 strap over any macro: they run between the macro rows'}).  The reasoning is in top/pdn_plan.json and harm.py's docstring.
+fragments); met5 straps at pitch {hplan['PDN_HPITCH']} = RPY {hplan['rpy']} / {hplan['k']}, offset {hplan['PDN_HOFFSET']}, crossing every macro's
+met4 power pins on both nets with {hplan['via_overlap_met5_to_met4']} um of via overlap to spare -- that crossing is what FEEDS each
+macro, since the block's own met4 obstruction has pdngen cut the met4 straps over it.  The reasoning is
+in top/pdn_plan.json and harm.py's docstring.
 
 Utilization (rough): {'; '.join(advice)}
 
@@ -768,7 +825,7 @@ def main(argv=None):
     print(f"harm: PDN_VPITCH {v['PDN_VPITCH']} = PPX {v['ppx']}/{v['k']}, PDN_VOFFSET {v['PDN_VOFFSET']} "
           f"(met4 clearance {v['clearance_met4']} um, {v['row_fragments']} row fragments each crossed by a pair); "
           f"PDN_HPITCH {h['PDN_HPITCH']} = RPY {h['rpy']}/{h['k']}, PDN_HOFFSET {h['PDN_HOFFSET']} "
-          f"(met5: {'clearance %s um' % h['clearance_met5'] if h['met5_straps_over_macros'] else 'no strap over any macro'})")
+          f"(a met5 pair crosses every macro's met4 pins, {h['via_overlap_met5_to_met4']} um of via overlap)")
     for line in r["advice"]:
         print("harm: " + line)
     print(f"harm: next steps in {r['out']}/README.md (dry-run check, harden the blocks in parallel, "

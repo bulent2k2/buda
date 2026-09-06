@@ -263,7 +263,7 @@ Smoke vehicles needing no authoring: `manual_macro_placement_test`,
 | Arm | Synthesis | Blocks | Placement | Pins | Buses |
 |---|---|---|---|---|---|
 | **F** flat | `flatten` | none | GPL | `IOPlacement` | GRT |
-| **H** hierarchical, no BUDA | the leaf modules the RTL declares, each hardened from its own module text; the top `flatten`ed over the hardened netlists as black boxes | one per leaf cell type (`pe_cell`, `feed_cell`, `wbuf_cell`, `acc_cell`), die = the emitter's LEF `SIZE` | `ManualMacroPlacement` at the emitter's DEF locations (the whole placement translated once to fit the die), PDN pitch/offset derived from the array pitch | per-block `IOPlacement` | GRT |
+| **H** hierarchical, no BUDA | the leaf modules the RTL declares, each hardened from its own module text (`PDN_MULTILAYER` false, so a block draws no met5); the top `flatten`ed over the hardened netlists as black boxes | one per leaf cell type (`pe_cell`, `feed_cell`, `wbuf_cell`, `acc_cell`), die = the emitter's LEF `SIZE` | `ManualMacroPlacement` at the emitter's DEF locations (the whole placement translated once to fit the die), PDN pitch/offset derived from the array pitch | per-block `IOPlacement` | GRT |
 | **H+B** hierarchical with BUDA | `keep` → harden | per cell, BUDA-sized | BUDA `PlacementOptimizer` | BUDA `FP_DEF_TEMPLATE` | BUDA guides (A) |
 
 H isolates what hierarchy alone costs; H+B minus H is BUDA's contribution.
@@ -275,11 +275,25 @@ four leaf modules of `tpu_rtl.v`, cut out of the file one per block run
 the emitter's own DEF — the same placement the H+B arm starts from — so
 the two hierarchical arms differ only in what BUDA adds (sizes, pins,
 corridors), never in where the macros sit.  The one thing H decides that
-the DEF does not say is the top's PDN phase (§8 step 4's lesson): `harm.sh`
-picks `PDN_VPITCH` as a divisor of the PE column pitch and `PDN_VOFFSET`
-so that every macro of a cell sees the straps at one phase, predicted from
-the block config it writes, and `pdn_phase.py` verifies the prediction on
-the hardened LEFs before the top runs.
+the DEF does not say is the top's PDN, and step 4's lesson turned out to
+have a second half.  A hardened block's abstract LEF is written with
+`-bloat_occupied_layers` (`OPENROAD_LEF_BLOAT_OCCUPIED_LAYERS`, default
+true): a whole-block cover obstruction on EVERY layer the block drew
+anything on, its own PDN straps included.  pdngen bloats that by the macro
+halo and subtracts it from the core grid, so the top's met4 straps are cut
+over every macro whatever their phase — and a block hardened MULTILAYER
+would obstruct met5 the same way and could not be fed at all.  So arm H
+hardens its blocks with `PDN_MULTILAYER` false (LibreLane's own setting for
+a macro meant for integration), and what feeds each macro is the top's met5
+straps crossing its met4 pins through the macro grid's
+`add_pdn_connect {met4 met5}`.  `harm.sh` therefore picks `PDN_HPITCH`/
+`PDN_HOFFSET` so that a strap of each net crosses every macro's pins of
+that net with room for a via — a gate, not a preference — and
+`PDN_VPITCH`/`PDN_VOFFSET` (a divisor of the PE column pitch, every macro
+of a cell at one phase) to put a full VPWR+VGND pair in every standard-cell
+row fragment the halos leave, which is what met4 still does here.
+`pdn_phase.py` verifies all of it on the hardened LEFs — pins AND
+obstructions — before the top runs.
 
 ### 7.3 Metrics — all from LibreLane's own `metrics.json`
 
@@ -570,8 +584,10 @@ cores is a confound.  `N=16` last — read forward from the three, it is a
 **7a. Tier 1a — arm H, the blocks.**  `harm.sh N` reads the set step 7
 emitted and writes `n<N>/h/`: one hardening directory per leaf cell (its
 module cut out of `tpu_rtl.v`, a fixed die of exactly its `tpu.lef` SIZE,
-pins by LibreLane's placer, the `reg32` block settings), `top/`, the
-predicted LEFs, and a README with these commands filled in for that N.
+pins by LibreLane's placer, the `reg32` block settings plus
+`PDN_MULTILAYER` false — see §7.2, it is what leaves met5 free to feed the
+macro), `top/`, the predicted LEFs, and a README with these commands
+filled in for that N.
 The four cells are independent, so they harden in parallel; the wall time
 of the batch and the cpu-sum are BOTH recorded (§7.3).
 
@@ -598,22 +614,29 @@ the estimate): regenerate the whole set with `gen.sh 4 -PEPAD 56` and rerun
 python3 ../../pdn_phase.py top/config.json */runs/h/final/lef/*.lef
 ```
 
-Pass: `PASS: 36 instances, ... 0 collisions, every instance connected on
-VPWR and VGND`, exit 0.  This is step 4's lesson as a step: the top's
-straps sit at core origin + `PDN_VOFFSET` + k·`PDN_VPITCH`, a hardened
-macro's power pins are wherever its own PDN put them, and where a pin of
-one net lies under a strap of the other on the same layer, pdngen clips
-the strap and IR-drop signoff — the last step — is the first to say so.
-`harm.sh` chose the pitch as a divisor of the PE column pitch (100 =
-PPX/2 with the defaults) and the offset so that every macro of a cell sees
-the straps at one phase, clear of the pins its block config PREDICTS
-(straps at core + 5 + 30k, width 2) and with a VPWR+VGND pair in every
-standard-cell row fragment the halos leave (the toy's sliver failure);
-this run replaces the prediction with the LEFs.  A `COLLISION` or
-`UNCONNECTED` line names the instance, the pin rectangle, the strap and the
-smallest x- or y-shift that clears it, and the equivalent
-`PDN_VOFFSET`/`PDN_HOFFSET` for the whole placement: change the offsets
-in `top/config.json`, rerun the check, and only then the top.
+Pass: `PASS: 36 instances, ... 0 clips, every instance connected on VPWR
+and VGND`, exit 0.  This is step 4's lesson as a step, and the reading of
+it that survived contact with pdngen's source.  pdngen never SHORTS a
+strap to a macro's pin — it CUTS the strap, in two ways.  Where a strap
+comes within spacing of any power pin of a macro, `Shape::cut` removes it
+over that macro (the same-net exception spares it only when the strap
+CONTAINS the pin across its width, which a 2 µm block pin in a 1.6 µm
+strap never is), which is what the toy measured.  And the hardened block's
+abstract LEF carries a whole-block cover obstruction per occupied layer
+(`-bloat_occupied_layers`, default on), which pdngen bloats by the macro
+halo and subtracts — so met4 is gone over every macro regardless.  What is
+left is the cross-layer crossing (`add_pdn_connect {met4 met5}`), which is
+why the blocks are hardened `PDN_MULTILAYER` false and why `harm.sh`'s
+`PDN_HOFFSET` is chosen to put a met5 strap of each net over every macro's
+met4 pins of that net; `PDN_VOFFSET` puts a VPWR+VGND pair in every
+standard-cell row fragment the halos leave (the toy's sliver failure).
+This run replaces the predicted pins and obstructions with the real ones.
+A `CLIP`, `OBSTRUCTED` or `UNCONNECTED` line names the instance, the pin
+rectangle, the strap and the smallest x- or y-shift that clears it, and
+the equivalent `PDN_VOFFSET`/`PDN_HOFFSET` for the whole placement: change
+the offsets in `top/config.json`, rerun the check, and only then the top.
+A macro that obstructs BOTH PDN layers is unreachable by construction and
+the report says so, naming `PDN_MULTILAYER` as the remedy.
 
 **7c. Arm H — the top.**
 
