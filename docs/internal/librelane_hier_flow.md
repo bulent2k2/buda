@@ -229,6 +229,32 @@ N = 8 is a comfortable laptop design and N = 16 is the size at which a flat
 sky130 route becomes an hours-long run — exactly the range a crossover would
 have to sit in.
 
+**Measured — arm F, this machine** (2026-09-05, recipe 7 as written: Intel
+Mac, Docker Desktop 4.89 at 8 CPUs / 8 GB, LibreLane 3.0.11, sky130A,
+`FP_CORE_UTIL 40`, 20 ns clock; rows in `flow/librelane/tier1a/results.jsonl`,
+one run each, an otherwise idle box):
+
+| N | wall | synth | fp+place | CTS | route | signoff | std cells (comb / flops) | die (mm²) | util | setup WS (ns) | WL (mm) | DRC |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 2 | 8.8 min | 25 s | 87 s | 79 s | 166 s | 172 s | 4,410 (2,660 / 274) | 0.087 | 46.7 % | +4.65 | 64 | 0 |
+| 4 | 20.2 min | 34 s | 118 s | 77 s | 482 s | 500 s | 14,997 (9,153 / 860) | 0.280 | 46.5 % | +1.81 | 227 | 0 |
+| 8 | 75.7 min | 123 s | 338 s | 252 s | 1,754 s | 2,074 s | 56,471 (34,375 / 3,000) | 1.032 | 46.3 % | **−0.55** | 935 | 0 |
+
+The synthesis table above is confirmed by the runs (2,660 / 9,153 / 34,375
+combinational cells against its 2,660 / 9,105 / 34,194; the flop counts
+grow by the hold buffers), and its cell area maps onto LibreLane's std-cell
+area by ~1.7× (taps and timing-repair buffers).  The factors per doubling
+are NOT constant: wall 2.3× then **3.7×**, route 2.9× then 3.6×, signoff
+2.9× then 4.2×, wire 3.5× then 4.1× — the flat run turns superlinear
+between N = 4 and N = 8, and signoff (RCX, STA over nine corners, KLayout
+DRC, LVS) is the largest stage at N = 8, not routing.  Read forward, N = 16
+is a 5–6 h flat run on this box (~200 k std cells, ~4 mm²).  And N = 8 is
+the first size that MISSES timing at 20 ns (−0.55 ns WS, −1.44 ns TNS,
+every DRC clean) — the flat arm's own timing wall, before any hierarchy is
+involved, which is the baseline the H arms' timing column will be read
+against (§2.4).  Every run left ~3 GB of run directory at N = 8 (1 GB at 4);
+`runs/` is git-ignored.
+
 Smoke vehicles needing no authoring: `manual_macro_placement_test`,
 `salsa20`.
 
@@ -487,8 +513,12 @@ python3 ../runtimes.py runs/flat --json >> ../results.jsonl     # one row per ru
 
 Pass: `Flow complete`; `runtimes.py` prints the stage split and the metrics
 row.  The numbers to keep per N: the stage seconds, `design__die__area`,
-`timing__setup__ws`, `power__total`, `route__wirelength`, DRC count.  `N=16`
-last — it is the run that tells you the laptop's ceiling.
+`timing__setup__ws`, `power__total`, `route__wirelength`, DRC count.  Done
+for N = 2, 4, 8 on 2026-09-05 (8.8 / 20.2 / 75.7 min, all DRC-clean; the
+table and the reading are in §7.1) — run the three SEQUENTIALLY on an idle
+box, since the stage seconds are the point and a second run on the same
+cores is a confound.  `N=16` last — read forward from the three, it is a
+5–6 h run here.
 
 **8. Tier 1b — a Gemmini mesh at N = 4, 8, 16.**  Chipyard needs Linux; on
 the Mac that is a Linux container with the BUDA checkout mounted.  The full
@@ -545,8 +575,14 @@ have: every netlist here is either authored or uniquified.
 1. The **success criterion** in §7.4 — confirm or replace the numbers.
 2. **sky130A** unless told otherwise.
 3. ~~Vehicle~~ — decided: the ladder in §7.1, tiers 1a and 1b first, both
-   for concrete runtime numbers; Chisel is acceptable.  Open: the tier-2
-   config size, once the 1b numbers say what the laptop affords.
+   for concrete runtime numbers; Chisel is acceptable.  ~~Open: the tier-2
+   config size~~ — the 1a flat numbers (§7.1) say what this box affords:
+   **~55 k std cells / 1 mm² is a 76-minute flat run, and the next doubling
+   is 5–6 h.**  So tier 2's `ChipTop` should be sized to the N = 8 point
+   (a Rocket + a Gemmini mesh at 4 or 8, ~50–100 k cells) if its F arm is
+   to be run at all on a laptop — a bigger config still has an H+B arm but
+   no flat baseline to compare against, which is the one thing the
+   crossover needs.  Confirm against tier 1b's numbers when they exist.
 4. **The PDN-phase placement rule** (§9, phase 1): snap-to-phase in the
    placer, or derive the offsets from the placement?  Snapping keeps the
    top's PDN config authoritative (what a real flow has) and costs each
