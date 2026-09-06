@@ -943,8 +943,9 @@ step 7's row stands without a re-run:
 | setup WS (worst corner) | +1.81 ns | +0.89 ns | — |
 | DRC / LVS / antenna | 0 | 0 | — |
 
-**N = 8, and the crossover is bracketed** (2026-09-06).  Arm H at the next
-size, same recipe:
+**N = 8, and the H/F gap is closing** (2026-09-06).  Arm H at the next
+size, same recipe.  This is NOT §7.4's crossover — that one is about
+**H+B**, which does not exist yet — see the reading below the table:
 
 | | F N=4 | H N=4 | F N=8 | H N=8 |
 |---|---|---|---|---|
@@ -958,11 +959,29 @@ size, same recipe:
 | hold WS | +0.103 ns | +0.11 ns | +0.091 ns | **−1.075 ns** |
 | DRC / LVS / antenna | 0 | 0 | 0 | 0 |
 
-**H/F on wall time goes 2.72× → 1.37×.**  F grows **3.75×** per doubling and
-H **1.88×**, so one more doubling puts them level and then past each other:
-F ≈ 4.7 h at N = 16 against H ≈ 3.2 h.  The crossover the benchmark exists
-to find is therefore between N = 8 and N = 16 on this box — the first
-version of §7.4's third bullet with measurements on both sides of it.
+**H/F on wall time goes 2.72× → 1.37×** — measured, at two points.  The
+per-doubling growth behind it is F **3.75×** against H **1.88×**, but each
+of those is a SINGLE interval (two points, no third to check the shape) and
+the wall figures carry ±25 % noise (below), so they are a trend, not a law.
+
+**What this is not.**  §7.4's crossover asks for an N at which **H+B** beats
+F on wall time by **≥ 2×** while holding die area within 10 % of F's and
+setup slack within 0.5 ns.  Nothing here bears on it:
+
+* the arm measured is **H**, without BUDA — H+B does not exist yet, and
+  §7.2 defines H as the control that isolates what hierarchy alone costs;
+* H is **slower than F at both measured N** (2.72× and 1.37×), so no
+  crossover has been observed on either side of anything;
+* extending the single-interval rates to N = 16 gives F ≈ 4.7 h against
+  H ≈ 3.2 h — a 1.47× advantage, still short of the 2× the criterion asks,
+  and an extrapolation rather than a measurement;
+* and H's die is **6.15× F's** at N = 8, nowhere near the 10 % the same
+  criterion requires, for the sizing reason in reading 2 below.
+
+So the honest statement is the trend: H's wall-time disadvantage shrinks as
+N grows, which is what the solve-once premise predicts, and N = 16 is the
+first run that could show H reaching parity with F.  Whether §7.4's
+crossover exists is a question about H+B and stays open.
 
 Where H's slower growth comes from is measured, not inferred: the blocks
 cost **326 s against 423 s** — the same work, so the difference is noise
@@ -1091,11 +1110,13 @@ have: every netlist here is either authored or uniquified.
 1. The **success criterion** in §7.4 — confirm or replace the numbers.
 2. **sky130A** unless told otherwise.
 3. ~~Vehicle~~ — decided: the ladder in §7.1, tiers 1a and 1b first, both
-   for concrete runtime numbers; Chisel is acceptable.  **The crossover is
-   now bracketed between N = 8 and N = 16** (§8 step 7d: H/F wall 2.72× at
-   N = 4, 1.37× at N = 8, F growing 3.75× per doubling against H's 1.88×),
-   so N = 16 is the run that settles §7.4's third bullet — and it is the
-   one the 20 GB container was raised for.  ~~Open: the tier-2
+   for concrete runtime numbers; Chisel is acceptable.  **H's wall-time gap
+   to F is closing as N grows** (§8 step 7d: H/F 2.72× at N = 4, 1.37× at
+   N = 8), which is what solve-once predicts.  That is NOT §7.4's crossover
+   — that one is about H+B beating F by ≥ 2× within 10 % die area, and the
+   arm measured is H, slower than F at both points and at 6.15× its die.
+   N = 16 would show whether H reaches parity, and is the run the 20 GB
+   container was raised for; §7.4 stays open until H+B exists.  ~~Open: the tier-2
    config size~~ — the 1a flat numbers (§7.1) say what this box affords:
    **~55 k std cells / 1 mm² is a 76-minute flat run, and the next doubling
    is 5–6 h.**  So tier 2's `ChipTop` should be sized to the N = 8 point
