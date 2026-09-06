@@ -564,6 +564,42 @@ run_detailed_nuts
 emit_pin_def reg32_pins.def reg32 unrouted S met2
 ```
 
+### `emit_block_size`
+
+```
+emit_block_size <file.json> <block-or-cell> [area <um2>] [util <pct>] [aspect <w/h>] [margin <um>] [metrics <file.json>] [inst <name>]
+```
+
+How big a block has to be, as a LibreLane `DIE_AREA` + `FP_SIZING absolute`
+fragment. A hierarchical block answers to **two** demands and the size is
+the larger of them **per axis**:
+
+- **FACE** — every bit that reaches a face needs its own signal track
+  there, so the face must span `eff_bus_width(bits)` on the layer the bits
+  arrive on (BUDA's own width model, the one the planner charges with, so
+  the size and the route agree by construction). West/east faces constrain
+  the block's HEIGHT, north/south its WIDTH. Read off the ROUTED plan —
+  the same landings `emit_pin_def` writes pins at — so a design routed with
+  different bundling or a different stack re-sizes itself.
+- **AREA** — the logic has to fit: `area / util`, shaped by `aspect`
+  (default: the faces' own ratio). `area` is `design__instance__area` in
+  µm², given directly or read from a LibreLane `metrics.json` with
+  `metrics`; giving both when they differ is refused.
+
+The report says **which demand binds on each axis**, which is the number a
+sizing decision needs, and how the design's current block compares
+(`the design's current 152 x 56 is 4.35x this area`). With no `area` the
+result is the face demand alone — a floor, not a size — and the command
+says so; an axis with neither demand is refused rather than guessed. A CELL
+takes the worst face over all its placed instances, so one size holds for
+every occurrence; `inst` restricts it to one.
+
+**Example:**
+```
+run_detailed_nuts
+emit_block_size out/pe_cell.json pe_cell area 3900 util 46
+```
+
 ---
 
 ## Diagnostics

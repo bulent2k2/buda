@@ -1,0 +1,63 @@
+# ============================================================
+# flow/librelane/tier1a/size.buda — what the tpu's cells SHOULD be.
+#
+# The first F-vs-H pair (docs/internal/librelane_hier_flow.md §8 step 7d)
+# measured arm H's die at 8.66x arm F's, and named the cause: the emitter
+# sizes each cell to its bus FACES and pads it (`PEPAD`), while the flat
+# arm derives its die from cell AREA at 46 % utilization.  Block sizing is
+# one of the four decisions §3 assigns to BUDA, so that 8.66x is H+B's
+# headroom rather than a cost of hierarchy — and this flow is the writer
+# that takes it back.
+#
+# It routes the emitted array through the IMPORT path (the same inputs
+# `flow/tpu/tpu.buda` reads) and asks `emit_block_size` for each leaf cell
+# type, giving each the AREA its own hardening run measured.  The output
+# JSON is a LibreLane `DIE_AREA` + `FP_SIZING absolute` fragment plus the
+# derivation, so `harm.py` can take the size from a file instead of from
+# `PEPAD`, and the report says WHICH DEMAND BINDS on each axis — the number
+# a sizing decision needs.
+#
+#   bin/buda --no-viz flow/librelane/tier1a/size.buda
+#
+# The AREA values below are `design__instance__area` from the four block
+# runs of §8 step 7a, at N = 4 (they are a property of the CELL, so they do
+# not change with N — which is the same solve-once premise step 7d measured
+# as the blocks' constant 423 s).  Re-run step 7a and pass the new numbers
+# if the RTL changes; with no `area` a cell is sized by its faces alone,
+# which is a floor rather than a size, and the command says so.
+# ============================================================
+
+source ../../tracks/tracks.buda
+
+corner_margin dx 5 dy 5
+set_min_stub_length 2
+
+open_bdb :memory:
+
+require_file ../../tpu/tpu.def ../../tpu/tpu.lef ../../tpu/tpu.v hint regenerate with: btcl flow/tcl/tpu.tcl 8 -emit flow/tpu
+
+import_def_lef ../../tpu/tpu.def ../../tpu/tpu.lef
+import_verilog ../../tpu/tpu.v
+derive_container_bboxes margin 12
+derive_busterms 2
+
+add_blocks_from_bdb 0
+add_blocks_from_bdb 1 skip
+add_blocks_from_bdb 2 skip
+
+run_hier_bundler depth 2
+generate_hier_topologies
+set_planner_param healersAhead 1
+run_planner hier 5
+run_nuts
+run_detailed_nuts
+check_design dnuts
+report_wirelength
+
+# One fragment per leaf cell type.  `util 46` is arm F's own utilization
+# (§8 step 7d), so the two arms size their logic by the same standard and
+# the comparison is about hierarchy rather than about density.
+emit_block_size out/pe_cell.json   pe_cell   area 3900 util 46
+emit_block_size out/feed_cell.json feed_cell area 900  util 46
+emit_block_size out/wbuf_cell.json wbuf_cell area 900  util 46
+emit_block_size out/acc_cell.json  acc_cell  area 1200 util 46

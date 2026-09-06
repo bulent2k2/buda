@@ -136,7 +136,7 @@ solve-once-copy premise as BUDA's bottom-up planning (`set_bottom_up`,
 | BUDA output | LibreLane input | Exists? |
 |---|---|---|
 | Block placement | `MACROS.<cell>.instances.<inst>.location/orientation` | trivial writer, NEW |
-| Block size | `DIE_AREA` + `FP_SIZING absolute` | rule in `flow/tcl/tpu_lib.tcl` (face-capacity aware); a command, NEW |
+| Block size | `DIE_AREA` + `FP_SIZING absolute` | **EXISTS**: `emit_block_size <file.json> <block-or-cell> [area <um2>] [util <pct>] [aspect <w/h>] [margin <um>] [metrics <file.json>] [inst <name>]` (`buda_session/block_size.py`) — the larger of the FACE demand (`eff_bus_width` of the bits the routed plan lands on each face, W/E constraining height and N/S width) and the AREA demand (`area / util`, shaped by `aspect`), per axis, reporting WHICH BINDS. Vehicle: `tier1a/size.buda` (§8 step 3c) |
 | Block pins at exact positions | `FP_DEF_TEMPLATE` — the shape `phase0/reg32/gen_pins_def.py` writes by hand | NEW writer: per net bit landing on a block, face + coordinate + layer from the DNUTS `net_segment` endpoint at the busterm, transformed to block-local through the instance orientation (`orient_rect.py`) |
 | Block pins from the plan, written | `FP_DEF_TEMPLATE` — the same file, from BUDA | **`emit_pin_def <file.def> <block-or-cell> [unrouted <edge> [<layer>]] [depth <um>] [grid <dbu>] [lef <file>]`** (`buda_session/pin_def.py`): after `run_detailed_nuts`, one pin per net bit where its bit-wire meets the block face, on the bit-wire's layer (a track by construction), rectangle SYMMETRIC about the PLACED point, PLAIN names (odb reads an escaped `d\[16\]` back as `d[16\]` and matches nothing; `escaped_names` opts in), UNITS from `lu_per_um`; a cell in a hier session is a TEMPLATE (every instance must agree in cell-local coordinates, `N` only for now); nets on no bus are spread on one edge's tracks; a pin is on the BLOCK's track grid, so an instance origin off the pin layer's track period is REFUSED with the residue and the clearing shift (`snap` moves each pin to the nearest block-frame track and reports the largest, BUDA-1713); verifier `tools/pin_def_verify.py` (absolute rectangles, never origins). Vehicle: `phase0/two_reg32/pins.buda` (§8 step 3b) |
 | Bus corridors | `read_guides` after `set_nets_to_route` | **EXISTS**: `emit_guides <file.guide>` writes the OpenROAD guide file — gcells from the DEF's `GCELLGRID`, the floor-at-both-ends junction rule, DEF-escaped names, pin-access strips on the `terminal` layers (§8 step 5b; the phase-0 lessons of step 5 are the rules it is built from) |
@@ -525,6 +525,48 @@ carry `RT_MAX_LAYER met3`**, and that is not tidiness — a block allowed to
 route on the top's PDN layers hands the top a met4 `OBS`, pdngen drops every
 strap crossing it, and every macro power pin comes out unconnected (measured
 at step 5b; §9 carries the rule).
+
+**3c. How big should the block have been?**  Steps 3/3b place the pins;
+this sizes the die they sit on, which is the OTHER half of the block-side
+handoff and the one §8 step 7d's 8.66x hangs on.  It needs no tools — the
+routed plan supplies the faces and a previous hardening run the area:
+
+```bash
+cd ~/src/buda && bin/buda --no-viz flow/librelane/tier1a/size.buda
+python3 -c "import json;d=json.load(open('flow/librelane/tier1a/out/pe_cell.json'));print(d['DIE_AREA'],d['derivation']['binds'])"
+```
+
+Pass: four `[BlockSize]` lines, each naming the die, which demand binds on
+each axis, and how the emitted cell compares.  **Measured 2026-09-06** on
+the checked-in N = 8 array (`PEPAD 24`, every cell 152 x 56) with each
+cell's `design__instance__area` from step 7a:
+
+| cell | rule says | binds (w, h) | faces | emitted / rule |
+|---|---|---|---|---|
+| `pe_cell` | 144.5 x 58.7 | area, area | N/S 32b on M5 need 128; E/W 16b on M4 need 52 | **1.00x** |
+| `acc_cell` | 96.0 x 51.1 | **face**, area | N/S 24b on M5 need 96 | 1.74x |
+| `feed_cell` | 44.2 x 44.2 | area, area | E 8b on M4 needs 18 | **4.35x** |
+| `wbuf_cell` | 44.2 x 44.2 | area, area | N 8b on M5 needs 32 | **4.35x** |
+
+The reading is sharper than "everything is too big".  At `PEPAD 24` the PE
+is *already right* — its area demand at 46 % and its face demand agree to
+1 % — so the emitter's face-aware rule is sound FOR THE CELL IT WAS WRITTEN
+FOR.  What is 4.35x oversized is every EDGE cell, because `EDGEW`/`EDGEH`
+default to `PEW`/`PEH`: a `feed_cell` carrying 8 bits is given a die sized
+for a PE's 32.  And `acc_cell` is the one cell whose WIDTH is face-bound,
+so no area target can shrink it — the 24-bit psum on M5 is the floor.
+
+That also says where the step-7d 8.66x actually comes from.  It is not the
+PE (1.00x at PEPAD 24) but the run's `PEPAD 100`, which pads every cell to
+228 x 132: 3.55x the PE's own demand, applied to all four types.  So the
+headroom is real and it is a SIZING knob, not a property of hierarchy —
+which is what arm H+B is for.
+
+**Feeding it back** is the next step and deliberately not this one:
+`harm.py` takes its `DIE_AREA` from `PEPAD`, and taking it from these
+fragments instead changes the emitted DEF (block sizes move the pitches,
+which move the die), so it wants its own before/after H row rather than
+riding in with the writer.
 
 **4. The top with two hardened macros and a bus between them.**
 
