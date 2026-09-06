@@ -212,10 +212,6 @@ def test_harm_sh_writes_the_h_arm_from_the_emitted_set(tmp_path, n):
         for k, v in {"RT_MAX_LAYER": "met4", "PDN_VPITCH": 30, "PDN_VOFFSET": 5, "PDN_VWIDTH": 2,
                      "PDN_SKIPTRIM": True, "PL_TARGET_DENSITY_PCT": 50}.items():   # reg32/config.json's
             assert cfg[k] == v, k
-        # the block must draw NO met5: its abstract LEF gets a whole-block cover
-        # obstruction per occupied layer (`-bloat_occupied_layers`), so a
-        # multilayer block would obstruct met5 too and nothing could feed it
-        assert cfg["PDN_MULTILAYER"] is False
         assert "FP_DEF_TEMPLATE" not in cfg                                         # LibreLane's own placer
         src = (h / cell / "src" / f"{cell}.v").read_text()
         assert re.findall(r"^module (\w+)", src, re.M) == [cell]
@@ -265,16 +261,20 @@ def test_harm_sh_writes_the_h_arm_from_the_emitted_set(tmp_path, n):
     assert (ys[1] - ys[0]) % cfg["PDN_HPITCH"] == 0
     lefs = sorted(str(p) for p in (h / "predicted_lef").glob("*.lef"))
     assert len(lefs) == 4
+    sys.path.insert(0, str(_T1A))
+    import pdn_phase as pp
     for lef in lefs:
-        txt = Path(lef).read_text()
-        pins, obs = txt.split("  OBS")[0], txt.split("  OBS")[1]
-        assert "LAYER met4 ;" in pins and "LAYER met5 ;" not in pins       # met4 pins only
-        assert "LAYER met4 ;" in obs and "LAYER met5 ;" not in obs         # and met5 unobstructed
-    # every macro's met4 pins must be crossed by a met5 pair of the right net:
-    # with met4 obstructed over each macro that crossing is its whole supply
+        m = list(pp.read_lef(lef).values())[0]
+        pin_rects = {r for pin in m["pins"].values() for r in pin["rects"]}
+        assert {l for (l, *_r) in pin_rects} == {"met4", "met5"}
+        # the predicted OBS on the PDN layers is the block's OWN power metal --
+        # the very rectangles its pins are, which is why the phase search clears
+        # the obstruction by clearing the pins
+        assert m["obs"] and set(m["obs"]) == pin_rects
     plan = json.loads((h / "top" / "pdn_plan.json").read_text())
-    assert plan["horizontal"]["every_macro_crossed_on_both_nets"] is True
-    assert plan["horizontal"]["via_overlap_met5_to_met4"] >= 1.4
+    # the horizontal offset is ordered by distance from the macro BOXES, so the
+    # straps land mid-channel rather than on the first offset that ties at inf
+    assert plan["horizontal"]["gap_from_macro_boxes"] > 5.0
     r = subprocess.run([sys.executable, str(_T1A / "pdn_phase.py"), str(h / "top" / "config.json"), *lefs],
                        capture_output=True, text=True)
     assert r.returncode == 0 and f"PASS: {len(comps)} instances" in r.stdout, r.stdout + r.stderr
@@ -322,7 +322,17 @@ def _toy_lef(path, met5_x_hi=74.06, obs=()):
         c = 10.88 + 5 + off
         L += ["      LAYER met5 ;", f"      RECT 5.52 {c - 1:.3f} {met5_x_hi} {c + 1:.3f} ;"]
         L += ["    END", f"  END {net}"]
-    if obs:
+    if obs == "pins":                       # the block's own power metal, as Magic writes it
+        L += ["  OBS"]
+        for net, off in (("VPWR", 0.0), ("VGND", 3.7)):
+            for k in range(3):
+                c = 5.52 + 5 + 30 * k + off
+                if c < 80 - 5.52:
+                    L += ["    LAYER met4 ;", f"      RECT {c - 1:.3f} 10.88 {c + 1:.3f} 69.12 ;"]
+            c = 10.88 + 5 + off
+            L += ["    LAYER met5 ;", f"      RECT 5.52 {c - 1:.3f} {met5_x_hi} {c + 1:.3f} ;"]
+        L += ["  END"]
+    elif obs:
         L += ["  OBS"]
         for layer in obs:
             L += [f"    LAYER {layer} ;", "      RECT 0.000 0.000 80.000 80.000 ;"]
@@ -392,20 +402,34 @@ def test_pdn_phase_finds_the_toys_clip_and_the_shift_that_clears_it(tmp_path):
 
 
 def test_pdn_phase_reads_the_obstruction_that_removes_the_straps(tmp_path):
-    """The block's own OBS decides what can feed it, so the check reads it.
-    LibreLane writes each hardened block's abstract LEF with
-    `-bloat_occupied_layers` (default on) -- a whole-block cover rectangle per
-    occupied layer -- and pdngen bloats it by the macro halo and subtracts it
-    from the top's straps.  A macro obstructing met4 alone is still fed by the
-    met5 straps crossing its met4 pins; one obstructing BOTH is unreachable,
-    and the remedy is named rather than left to IR-drop signoff."""
+    """The block's OBS decides what can feed it, so the check reads it -- and
+    what matters is WHOSE metal it is.  `final/lef/<cell>.lef` is MAGIC's LEF,
+    so its obstruction is the block's actual metal, and on the PDN layers that
+    metal IS the block's own grid: the same rectangles as its power pins, which
+    the phase search clears by clearing them.  Obstruction that is NOT the
+    block's own power metal is the dangerous kind -- signal routing pushed onto
+    a PDN layer, wherever the router put it -- and it is what made pdngen drop
+    straps and fail IR-drop signoff on the phase-0 toy."""
+    # (a) the block's OWN power metal as OBS -- what Magic's LEF actually
+    # carries on the PDN layers -- says nothing the pins did not, so it must
+    # neither cut nor be reported as an obstruction
+    _toy_lef(tmp_path / "own.lef", obs="pins")
+    _toy_config(tmp_path / "own.json", 10, **{"MACROS": {"reg32": {
+        "instances": {"u0": {"location": [10, 20], "orientation": "N"}}, "lef": ["dir::own.lef"]}}})
+    r = subprocess.run([sys.executable, str(_T1A / "pdn_phase.py"), str(tmp_path / "own.json")],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "OBSTRUCTED" not in r.stdout and "own-power OBS" in r.stdout
+    assert "PASS: 1 instances" in r.stdout
+    # (b) FOREIGN metal on a PDN layer -- signal routing pushed onto met4 --
+    # is the dangerous one: no phase search cleared it
     _toy_lef(tmp_path / "met4_obs.lef", obs=("met1", "met2", "met3", "met4"))
     _toy_config(tmp_path / "m4.json", 10, **{"MACROS": {"reg32": {
         "instances": {"u0": {"location": [10, 20], "orientation": "N"}}, "lef": ["dir::met4_obs.lef"]}}})
     r = subprocess.run([sys.executable, str(_T1A / "pdn_phase.py"), str(tmp_path / "m4.json")],
                        capture_output=True, text=True)
     assert "OBSTRUCTED reg32 (e.g. u0) on met4" in r.stdout, r.stdout
-    assert "on met5" not in r.stdout.split("OBSTRUCTED")[-1].split("\n")[0]
+    assert "RT_MAX_LAYER" in r.stdout          # the remedy, named
     # met4 is gone over the macro, so the met4 pins can only be fed across
     # layers -- and here the default met5 grid misses them
     assert r.returncode == 1 and "UNCONNECTED u0" in r.stdout
@@ -415,8 +439,8 @@ def test_pdn_phase_reads_the_obstruction_that_removes_the_straps(tmp_path):
     r = subprocess.run([sys.executable, str(_T1A / "pdn_phase.py"), str(tmp_path / "sealed.json")],
                        capture_output=True, text=True)
     assert r.returncode == 1
-    assert "obstructs BOTH met4 and met5: nothing can reach it" in r.stdout, r.stdout
-    assert "PDN_MULTILAYER false" in r.stdout
+    assert "carries foreign metal on BOTH met4 and met5: nothing can reach it" in r.stdout, r.stdout
+    assert "RT_MAX_LAYER" in r.stdout
     # an OBS drawn as a polygon is refused rather than read as nothing
     (tmp_path / "poly.lef").write_text((tmp_path / "sealed.lef").read_text().replace(
         "      RECT 0.000 0.000 80.000 80.000 ;", "      POLYGON 0 0 80 0 80 80 ;", 1))

@@ -53,24 +53,29 @@ What `harm.sh` decided, and why (the full statement is `harm.py`'s docstring):
   `top/placement.json` holds both coordinates of every instance.  A DEF that
   already fits is not moved.  What must fit is the macro BODY; a halo poking
   past the die edge only means no other cell fits beside it there.
-* **What feeds a macro, and therefore the PDN.**  A hardened block's abstract
-  LEF carries a whole-block cover obstruction on every layer it drew anything
-  on (`write_abstract_lef -bloat_occupied_layers`, default on), and pdngen
-  bloats that by the macro halo and subtracts it from the top's straps.  So
-  the top's met4 straps are CUT over every macro whatever their phase, and a
-  block hardened multilayer would obstruct met5 too and could not be fed at
-  all.  Hence: the blocks are hardened `PDN_MULTILAYER` **false** (LibreLane's
-  own setting for a macro meant for integration), `PDN_HPITCH`/`PDN_HOFFSET`
-  are chosen so a met5 strap of each net crosses every macro's met4 pins of
-  that net with room for a via -- that crossing, vias by the macro grid's
-  `add_pdn_connect {met4 met5}`, is the macro's whole supply, so it is a GATE
-  -- and `PDN_VPITCH`/`PDN_VOFFSET` (the PE column pitch over the smallest k,
-  PPX/2 = 100 with the defaults, every macro of a cell at one phase) put a
-  full VPWR+VGND pair in every standard-cell row fragment the halos leave,
-  which is what met4 still does here.  The prediction is the block config
-  `harm.sh` writes (met4 straps at core + 5 + 30k width 2, and the OBS the
-  bloating will add), which is what `pdn_phase.py` on the hardened LEFs
-  verifies.
+* **The PDN phase.**  pdngen never SHORTS a strap to a macro's power pin, it
+  CUTS the strap, so a same-layer meeting is a clip and what FEEDS a macro is
+  the cross-layer crossing the macro grid vias (`add_pdn_connect {met4 met5}`):
+  a top met4 strap over the block's met5 pin.  `PDN_VPITCH` is the PE column
+  pitch over the smallest k (PPX/2 = 100 with the defaults) whose offset clears
+  every cell's PREDICTED met4 pins, crosses every cell's met5 pins, and puts a
+  VPWR+VGND pair in every standard-cell row fragment the halos leave;
+  `PDN_HPITCH` is the row pitch with the offset whose met5 straps clear every
+  macro's predicted met5 pins -- and since that clearance is `inf` for every
+  offset whose straps miss the macros entirely, the tie is broken by distance
+  from the macro BOXES, so the straps land mid-channel.  The prediction is the
+  block config `harm.sh` writes (straps at core + 5 + 30k, width 2), which is
+  what `pdn_phase.py` on the hardened LEFs verifies.
+* **Whose metal the obstruction is.**  `final/lef/<cell>.lef` is MAGIC's LEF
+  (OpenROAD's `-bloat_occupied_layers` one is the separate
+  `<cell>.openroad.lef`, which nothing here reads), so its OBS is the block's
+  actual metal -- and on the PDN layers that is the block's own grid, the same
+  rectangles as its power pins, which the phase search clears by clearing the
+  pins.  FOREIGN metal on a PDN layer is the dangerous kind: signal routing
+  pushed up there by a pin layout, wherever the router put it, which no phase
+  search cleared and which pdngen's cut then removes -- the phase-0 toy's
+  IR-drop failure.  `pdn_phase.py` classifies every OBS rect and reports that
+  case, naming `RT_MAX_LAYER` as the lever.
 * **Utilization: the PEPAD is 100.**  The emitter sizes a PE for the bus faces
   BUDA routes to (152 x 56 um = 12 standard-cell rows) and the RTL's PE
   measures **5,964 um^2 / 624 cells** (the first real run at N = 4), so at the
@@ -90,5 +95,6 @@ rule, the met5 crossing, the predicted-pin dry run, the shift measured from
 a moved die origin -- plus `pdn_phase.py` on the phase-0 toy's own geometry
 (u0 at x = 20 puts its VGND pin at 33.22-35.22 under the 34.72-36.32 strap,
 pdngen cuts that strap and u0's VPWR is left unfed, 0.8 um clears it, x = 10
-passes), a macro that obstructs both PDN layers, pdngen's strap loop at the
-far core edge, and `runtimes.py --blocks-from`.
+passes), a block whose OBS is its own power metal against one carrying
+foreign metal on a PDN layer, pdngen's strap loop at the far core edge, and
+`runtimes.py --blocks-from`.

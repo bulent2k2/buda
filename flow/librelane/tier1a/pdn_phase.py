@@ -16,17 +16,19 @@ measured on the phase-0 toy), which is the LAST step of the run:
     strap CONTAINS the pin across its width, which a 2 um block pin inside a
     1.6 um top strap never is -- so a same-layer overlap is a clip whatever
     the two nets are, and never a connection;
-  * the macro's own OBSTRUCTION: LibreLane writes each hardened block's
-    abstract LEF with `write_abstract_lef -bloat_occupied_layers`
-    (`OPENROAD_LEF_BLOAT_OCCUPIED_LAYERS`, default True), a WHOLE-BLOCK cover
-    rectangle per occupied layer, which pdngen bloats by the macro halo
-    (`InstanceGrid::getInstanceObstructions`) and subtracts -- so EVERY strap
-    on that layer is gone over the macro and its halo.  Which layers are
-    covered is read from the file rather than assumed: the writer
-    (`lefout::getObstructions`) collects special wires with no filter for the
-    power nets, which would obstruct the PDN layers on every block, while the
-    first real run saw a met4 OBS only on the block that ROUTES on met4.  That
-    is exactly why this reads the LEF instead of predicting it.
+  * an OBSTRUCTION, which pdngen bloats by the macro grid's halo
+    (`InstanceGrid::getInstanceObstructions`) and subtracts, removing every
+    strap it covers.  The `lef` view a top reads (`final/lef/<cell>.lef`) is
+    MAGIC's (`Magic.WriteLEF`; OpenROAD's `-bloat_occupied_layers` abstract
+    LEF is the separate `<cell>.openroad.lef`), so the OBS is the block's
+    ACTUAL metal, and WHOSE metal it is decides whether it matters.  On the
+    PDN layers it is normally the block's own grid -- the same rectangles as
+    its power pins -- which a phase search clears by clearing the pins,
+    because they are the same metal.  FOREIGN metal on a PDN layer is the
+    dangerous kind: signal routing pushed up there by a pin layout, sitting
+    wherever the router put it, which no phase search can have cleared.  That
+    is the shape that made pdngen drop straps and fail IR-drop signoff on the
+    phase-0 toy, so it is reported and it is what cuts here.
 
 What is left to feed the macro is the CROSS-layer crossing that the macro
 grid's `add_pdn_connect -layers {met4 met5}` turns into vias -- on a strap
@@ -38,10 +40,11 @@ way `Odb.ManualMacroPlacement` will, and reports:
   * every (instance, pin rect, strap) CLIP -- a strap this macro's pin cuts
     (suppressed where the macro's OBS has already removed that strap: pdngen
     got there first);
-  * every layer a macro leaves OBSTRUCTED, since no strap on it can feed that
-    macro -- and a macro that obstructs BOTH PDN layers is unreachable, whose
-    remedy is named (harden the block with `PDN_MULTILAYER` false, LibreLane's
-    own setting for a macro meant for integration);
+  * every layer a macro obstructs with metal that is NOT its own power grid,
+    since no phase search cleared it and the straps it covers are gone -- with
+    the remedy named (cap the block below that layer with `RT_MAX_LAYER`, or
+    keep the layer for the block's own grid).  Own-power obstruction is
+    counted and reported as such rather than treated as a finding;
   * every (instance, net) with NO connection -- no surviving strap of that net
     on the other layer crosses a pin of that net with room for a via (a strap
     that misses a pin by 0.66 um is the second way the toy failed);
@@ -88,7 +91,12 @@ SKY130 = {
     "LEFT_MARGIN_MULT": 12, "RIGHT_MARGIN_MULT": 12, "BOTTOM_MARGIN_MULT": 4, "TOP_MARGIN_MULT": 4,
     "VDD_NET": "VPWR", "GND_NET": "VGND",
     "FP_MACRO_HORIZONTAL_HALO": 10.0, "FP_MACRO_VERTICAL_HALO": 10.0,
+    # pdngen's macro grid takes its OWN halo (`define_pdn_grid -macro -halo
+    # "$PDN_HORIZONTAL_HALO $PDN_VERTICAL_HALO"`), not the floorplan's; both
+    # default to 10 in LibreLane, but they are different knobs
+    "PDN_HORIZONTAL_HALO": 10.0, "PDN_VERTICAL_HALO": 10.0,
 }
+OWN_METAL_TOL = 1.0        # how far an OBS rect may exceed the pin it covers
 SITE_W, SITE_H = 0.46, 2.72          # sky130_fd_sc_hd unithd
 MIN_SPACING = {"met4": 0.3, "met5": 1.6}
 VIA_MIN = 1.4
@@ -136,7 +144,7 @@ def read_top_config(path):
     for k in ("PDN_VWIDTH", "PDN_HWIDTH", "PDN_VSPACING", "PDN_HSPACING", "PDN_VPITCH", "PDN_HPITCH",
               "PDN_VOFFSET", "PDN_HOFFSET", "LEFT_MARGIN_MULT", "RIGHT_MARGIN_MULT",
               "BOTTOM_MARGIN_MULT", "TOP_MARGIN_MULT", "FP_MACRO_HORIZONTAL_HALO",
-              "FP_MACRO_VERTICAL_HALO"):
+              "FP_MACRO_VERTICAL_HALO", "PDN_HORIZONTAL_HALO", "PDN_VERTICAL_HALO"):
         g[k] = float(g[k])
     if g["PDN_VPITCH"] <= 0 or g["PDN_HPITCH"] <= 0:
         raise InputShape(f"{path}: PDN pitches must be positive")
@@ -359,19 +367,43 @@ def instance_rects(inst, macro, top):
     return out
 
 
-def instance_obstructions(inst, macro, top, spacing):
-    """The instance's LEF OBS rectangles in TOP coordinates, bloated the way
-    pdngen bloats them (`InstanceGrid::getInstanceObstructions`): by the
-    layer's minimum spacing and by the macro halo, the union of the two."""
+def instance_obstructions(inst, macro, top, spacing, rects):
+    """The instance's LEF OBS rectangles in TOP coordinates, each classified as
+    the block's OWN power metal or as FOREIGN, and bloated the way pdngen
+    bloats an obstruction (`InstanceGrid::getInstanceObstructions`: by the
+    layer's spacing and by the macro grid's halo, the union of the two).
+
+    The classification is the whole point, and it is the rule the first real
+    run taught.  A hardened block's `final/lef/<cell>.lef` is MAGIC's LEF, so
+    its OBS is the block's actual metal -- and on the PDN layers that metal IS
+    the block's own power grid, the same rectangles as its power pins.  The
+    phase search clears those when it clears the pins, because they are the
+    same metal, so an obstruction that coincides with a pin says nothing new.
+    What is dangerous is obstruction on a PDN layer that is NOT the block's own
+    power metal -- signal routing pushed up onto met4 by a pin layout, say,
+    which sits wherever the router put it and which no phase search can have
+    cleared.  That is the shape that made pdngen drop straps and fail IR-drop
+    signoff on the phase-0 toy.  So the cut is modelled for foreign metal and
+    the own-power rectangles are reported as what they are."""
     g = top["g"]
-    hx, hy = g["FP_MACRO_HORIZONTAL_HALO"], g["FP_MACRO_VERTICAL_HALO"]
+    hx = max(g["PDN_HORIZONTAL_HALO"], 0.0)
+    hy = max(g["PDN_VERTICAL_HALO"], 0.0)
     w, h = macro["size"]
+    own = {}
+    for (net, layer, x1, y1, x2, y2, _p) in rects:
+        own.setdefault(layer, []).append((x1, y1, x2, y2))
     out = []
     for (layer, x1, y1, x2, y2) in macro.get("obs", []):
         r = orient_rect((x1, y1, x2, y2), inst["orient"], w, h)
+        rx1, ry1 = r[0] + inst["x"], r[1] + inst["y"]
+        rx2, ry2 = r[2] + inst["x"], r[3] + inst["y"]
+        t = OWN_METAL_TOL
+        is_own = any(px1 - t <= rx1 and py1 - t <= ry1 and rx2 <= px2 + t and ry2 <= py2 + t
+                     for (px1, py1, px2, py2) in own.get(layer, []))
         bx, by = max(spacing.get(layer, 0.0), hx), max(spacing.get(layer, 0.0), hy)
-        out.append((layer, r[0] + inst["x"] - bx, r[1] + inst["y"] - by,
-                    r[2] + inst["x"] + bx, r[3] + inst["y"] + by))
+        out.append({"layer": layer, "own_power_metal": is_own,
+                    "rect": [rx1, ry1, rx2, ry2],
+                    "bloated": [rx1 - bx, ry1 - by, rx2 + bx, ry2 + by]})
     return out
 
 
@@ -397,16 +429,26 @@ def eval_instance(inst, rects, obs, top, vstraps, hstraps, spacing, via_min):
     obs_cut = {lv: set(), lh: set()}
     obstructed = {}
 
-    # (a) the straps this macro removes over itself, and why
-    for (layer, ox1, oy1, ox2, oy2) in obs:
+    # (a) the straps this macro removes over itself, and why.  Only FOREIGN
+    # metal cuts here: an obstruction that IS the block's own power grid is the
+    # same metal as its pins, so the pin rule below governs it and counting it
+    # twice would refuse plans that demonstrably route.
+    own_power = {}
+    for ob in obs:
+        layer = ob["layer"]
         if layer not in cut:
             continue
+        if ob["own_power_metal"]:
+            own_power[layer] = own_power.get(layer, 0) + 1
+            continue
+        ox1, oy1, ox2, oy2 = ob["bloated"]
         straps, lo, hi = (vstraps, ox1, ox2) if layer == lv else (hstraps, oy1, oy2)
         hit = [j for j, s in enumerate(straps) if overlap(s["lo"], s["hi"], lo, hi) > EPS]
         cut[layer].update(hit)
         obs_cut[layer].update(hit)
         if hit:
-            obstructed[layer] = {"rect": [round(v, 3) for v in (ox1, oy1, ox2, oy2)], "straps": len(hit)}
+            e = obstructed.setdefault(layer, {"rect": [round(v, 3) for v in ob["rect"]], "straps": 0})
+            e["straps"] += len(hit)
     for (net, layer, x1, y1, x2, y2, pname) in rects:
         if layer not in cut:
             continue
@@ -447,7 +489,7 @@ def eval_instance(inst, rects, obs, top, vstraps, hstraps, spacing, via_min):
             if min(ovx, ovy) >= via_min - EPS:
                 connected[net] = True
                 connections.append((inst["name"], pname, layer, "crossed by", s["net"], s["k"], other))
-    return clips, connected, connections, obstructed
+    return clips, connected, connections, obstructed, own_power
 
 
 def shifted(rects, dx, dy):
@@ -455,12 +497,19 @@ def shifted(rects, dx, dy):
 
 
 def shifted_obs(obs, dx, dy):
-    return [(l, x1 + dx, y1 + dy, x2 + dx, y2 + dy) for (l, x1, y1, x2, y2) in obs]
+    out = []
+    for ob in obs:
+        o = dict(ob)
+        o["rect"] = [ob["rect"][0] + dx, ob["rect"][1] + dy, ob["rect"][2] + dx, ob["rect"][3] + dy]
+        o["bloated"] = [ob["bloated"][0] + dx, ob["bloated"][1] + dy,
+                        ob["bloated"][2] + dx, ob["bloated"][3] + dy]
+        out.append(o)
+    return out
 
 
 def clean_at(inst, rects, obs, top, vstraps, hstraps, spacing, via_min, dx, dy):
-    clips, con, _, _ = eval_instance(inst, shifted(rects, dx, dy), shifted_obs(obs, dx, dy),
-                                     top, vstraps, hstraps, spacing, via_min)
+    clips, con, _, _, _ = eval_instance(inst, shifted(rects, dx, dy), shifted_obs(obs, dx, dy),
+                                        top, vstraps, hstraps, spacing, via_min)
     return not clips and all(con.values())
 
 
@@ -474,7 +523,11 @@ def shift_candidates(rects_list, obs_list, top, vstraps, hstraps, spacing, via_m
     same_layer, cross_layer, straps = (lv, lh, vstraps) if axis == "x" else (lh, lv, hstraps)
     cands = {0.0}
     for obs in obs_list:
-        for (layer, x1, y1, x2, y2) in obs:
+        for ob in obs:
+            if ob["own_power_metal"]:
+                continue
+            layer = ob["layer"]
+            x1, y1, x2, y2 = ob["bloated"]
             lo, hi = (x1, x2) if axis == "x" else (y1, y2)
             if layer not in (same_layer, cross_layer):
                 continue
@@ -538,10 +591,11 @@ def run_check(top, lefs, spacing=None, via_min=VIA_MIN):
         if not rects:
             raise InputShape(f"MACRO {inst['cell']}: no {g['VDD_NET']}/{g['GND_NET']} pin rectangles in its "
                              f"LEF -- a macro with no power pins cannot be fed; is this the FINAL lef?")
-        obs = instance_obstructions(inst, macro, top, spacing)
+        obs = instance_obstructions(inst, macro, top, spacing, rects)
         rects_by[inst["name"]], obs_by[inst["name"]] = rects, obs
         n_rects += len(rects)
-        clips, con, cons, obstructed = eval_instance(inst, rects, obs, top, vstraps, hstraps, spacing, via_min)
+        clips, con, cons, obstructed, own_power = eval_instance(inst, rects, obs, top, vstraps, hstraps,
+                                                                spacing, via_min)
         all_clips.extend(clips)
         for net, ok in con.items():
             if not ok:
@@ -550,7 +604,7 @@ def run_check(top, lefs, spacing=None, via_min=VIA_MIN):
             sealed.append({"instance": inst["name"], "cell": inst["cell"]})
         row = {"instance": inst["name"], "cell": inst["cell"], "clips": len(clips),
                "connected": con, "connections": len(cons),
-               "obstructed": sorted(obstructed)}
+               "obstructed": sorted(obstructed), "own_power_obs": own_power}
         if clips or not all(con.values()):
             row["dx"] = smallest_shift([inst], rects_by, obs_by, top, vstraps, hstraps, spacing, via_min,
                                        "x", g["PDN_VPITCH"] / 2)
@@ -585,6 +639,13 @@ def report(top, lefs, res, out=sys.stdout):
       f" (VPWR first, VGND +{g['PDN_VWIDTH'] + g['PDN_VSPACING']:.2f}; width {g['PDN_VWIDTH']})")
     p(f"  {lh} straps: {res['hstraps']} at y = {core[1]:.3f} + {g['PDN_HOFFSET']} + k*{g['PDN_HPITCH']}"
       f" (width {g['PDN_HWIDTH']}, VGND +{g['PDN_HWIDTH'] + g['PDN_HSPACING']:.2f})")
+    own = {}
+    for r in res["per_instance"]:
+        for layer, n in (r.get("own_power_obs") or {}).items():
+            own[layer] = own.get(layer, 0) + n
+    if own:
+        p("  own-power OBS (the block's grid, the same metal as its pins -- the pin rule below governs "
+          "it): " + ", ".join(f"{l}: {n} rects" for l, n in sorted(own.items())))
     if res["used_defaults"]:
         p("  ASSUMED (not in the config; sky130A/LibreLane 3.0.11 defaults): " +
           ", ".join(f"{k}={SKY130[k]}" for k in res["used_defaults"]))
@@ -605,10 +666,11 @@ def report(top, lefs, res, out=sys.stdout):
             if (r["cell"], layer) in seen:
                 continue
             seen.add((r["cell"], layer))
-            p(f"OBSTRUCTED {r['cell']} (e.g. {r['instance']}) on {layer}: the block's own OBS, bloated by "
-              f"the macro halo, removes every {layer} strap over it -- pdngen cuts them "
-              f"(`Shape::cut` against `InstanceGrid::getInstanceObstructions`), so no {layer} strap "
-              f"can feed this macro")
+            p(f"OBSTRUCTED {r['cell']} (e.g. {r['instance']}) on {layer}: an OBS rectangle that is NOT "
+              f"the block's own power metal, so no phase search cleared it; bloated by the macro grid's "
+              f"halo it removes {layer} straps over this macro (`Shape::cut` against "
+              f"`InstanceGrid::getInstanceObstructions`).  Signal routing on a PDN layer does this -- "
+              f"cap the block below it (RT_MAX_LAYER) or keep that layer for the block's own grid")
     for c in res["clips"]:
         p(f"CLIP {c['instance']} {c['net']} pin {c['pin']} on {c['layer']} "
           f"[{c['rect'][0]:.3f},{c['rect'][2]:.3f}]x[{c['rect'][1]:.3f},{c['rect'][3]:.3f}] "
@@ -618,9 +680,9 @@ def report(top, lefs, res, out=sys.stdout):
         p(f"UNCONNECTED {u['instance']} {u['net']}: no surviving strap of that net on the other layer "
           f"crosses a pin of that net with room for a via")
     for sd in res["sealed"]:
-        p(f"  {sd['instance']} ({sd['cell']}) obstructs BOTH {lv} and {lh}: nothing can reach it. "
-          f"Harden the block with PDN_MULTILAYER false -- LibreLane's own setting for a macro meant "
-          f"for integration -- so it draws no {lh}, and the top's {lh} straps stay whole over it")
+        p(f"  {sd['instance']} ({sd['cell']}) carries foreign metal on BOTH {lv} and {lh}: nothing can "
+          f"reach it. Cap the block below them (`RT_MAX_LAYER`) so those layers hold only its own "
+          f"power grid, which the phase search can clear")
     bad = [r for r in res["per_instance"] if r["clips"] or not all(r["connected"].values())]
     for r in bad:
         fmt = lambda v: "none within half a pitch" if v is None else f"{v:+.3f} um"
