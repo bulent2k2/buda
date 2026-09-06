@@ -480,31 +480,79 @@ wiring as a failure, never a pass.
 **5b. Measurement A with BUDA's guides** — phase 1's first closed loop.
 Step 5 proved the router follows a guide; the guides were the router's own.
 This step routes the bus in BUDA and hands the router BUDA's guide file.
+The block is the TEMPLATE-hardened one (step 3): with LibreLane's own pin
+placement 0 of 32 bits have `u0.q` on the east face AND `u1.d` on the
+west, so no corridor between the blocks' facing edges can reach them —
+measured first (53 % of the bus wire outside BUDA's corridor, `q[0]` on
+u0's WEST face), which is the H+B premise stated the other way round: the
+pin template is what makes BUDA's corridor reachable at all.
 
 ```bash
-cd flow/librelane/phase0/two_reg32 && mkdir -p out
-cp runs/phase0/*-odb-manualmacroplacement/two_reg32.def out/placed.def      # u0/u1 FIXED, std cells unplaced
+cd flow/librelane/phase0/two_reg32
+librelane --dockerized --run-tag phase0_pins config_pins.json               # the top against the TEMPLATE block
+mkdir -p out
+cp runs/phase0_pins/*-odb-manualmacroplacement/two_reg32.def out/placed.def  # u0/u1 FIXED, std cells unplaced
 ln -sf $PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hd/techlef/sky130_fd_sc_hd__nom.tlef out/tech.tlef
+ln -sf $PWD/../reg32/runs/phase0_pins/final/lef/reg32.lef out/block.lef      # the block BUDA routes between
 ../../../../bin/buda buda_route.buda --no-viz                                 # -> out/buda_bus.guide
 cd ../measure
+ODB=$(ls ../two_reg32/runs/phase0_pins/*-openroad-cts/two_reg32.odb)
+./run_or.sh ../two_reg32/runs/phase0_pins guide_ref.tcl ODB=$ODB OUT=$PWD/out   # the ROUTER's corridor on this run
+python3 extract_bus_guides.py out/all.guide out/all_bus.guide                # …kept as the control
 python3 extract_bus_guides.py ../two_reg32/out/buda_bus.guide out/bus.guide  # the bus entries, as BUDA wrote them
-./run_or.sh ../two_reg32/runs/phase0 guide_test.tcl ODB=$ODB OUT=$PWD/out
+./run_or.sh ../two_reg32/runs/phase0_pins guide_test.tcl ODB=$ODB OUT=$PWD/out
 python3 check_inside.py out/guided.def out/bus.guide --slack 1.0 --max-outside-pct 5
 python3 check_inside.py out/guided.def out/all_bus.guide --slack 1.0 --max-outside-pct 5   # control: the ROUTER's corridor
 ```
 
-(`out/all_bus.guide` is step 5's `extract_bus_guides.py out/all.guide …`
-output, kept under another name.)  Pass: `buda_route.buda` ends with
-`check_design dnuts` clean and `emit_guides` reporting every via in a gcell
-its net holds on both layers; `guide_test.tcl` reaches
-`Number of violations = 0`; the first `check_inside.py` exits 0 — the wire
-is inside BUDA's corridor — and the control against the router's own
-corridor FAILS wherever BUDA's corridor differs from it, which is the
-evidence that the router followed BUDA rather than agreeing with it.  A
-`DRT-0218 Guide is not connected to design` here is a pin the guide did not
-reach: check that `terminal met3` names the pin layer reg32's LEF actually
-uses, and that `out/placed.def` carries the `PINS` the LEF pins map to.
-Record the same three numbers step 5 records (segments, µm, % outside).
+Pass: `buda_route.buda` ends with `check_design dnuts` clean and
+`emit_guides` reporting every via in a gcell its net holds on both layers;
+`guide_test.tcl` reaches `Number of violations = 0`; the first
+`check_inside.py` exits 0 — the wire is inside BUDA's corridor — and the
+control against the router's own corridor FAILS wherever BUDA's corridor
+differs from it, which is the evidence that the router followed BUDA
+rather than agreeing with it.  Record the same three numbers step 5
+records (segments, µm, % outside).
+
+**Measured 2026-09-06.**  BUDA: 1 bundle, 32 bits on one met3 segment, 0
+unplaced, 2,240 µm; 32 guide entries, per-bit rows, terminal strips on 21.
+Detailed routing under them: 0 violations.  The bus, 3,105 µm: **7.7 %
+outside BUDA's corridor, 22.7 % on another layer inside it** — against the
+router's own corridor the same wire is **58.1 % outside**, so the router
+went where BUDA said (92 % inside by length) and not where it would have
+gone.  The strict verdict still FAILS the 5 % threshold, and the failing
+share is 81 % vertical wire on met2/met4: jogs between the row BUDA gave a
+bit and the row its pins sit on.  BUDA packed the 32 bits into y 48–76 µm
+of the channel; the template put the pins at y 28–71 µm (every second
+track from track 12, by hand), and only 11 of 32 bits have their pin
+inside their BUDA row — the worst is 31 µm off.  That is the one direction
+this loop does not close yet: the pins were not written from BUDA's route,
+so BUDA's rows and the pins disagree and the router pays the difference.
+Phase 1's pin-DEF writer (§5) is exactly that direction — pins placed on
+the rows BUDA's bits land on — after which the jogs, and the "another
+layer inside the corridor" share, should vanish; until then the threshold
+measures the hand template, not the guide writer.
+
+Three things bit on the way, all now in the files.  (1) `import_lef_tech`
+refused sky130's tech LEF: its `PROPERTYDEFINITIONS` block holds `LAYER
+LEF58_TYPE STRING ;`, which the reader took for a LAYER block, and `END
+PROPERTYDEFINITIONS` then read as a mismatched END — the first real tech
+LEF the command met (fixed in `lef_io.cpp`, pinned).  (2) A DEF written
+before global routing carries no `GCELLGRID` (OpenROAD defines the grid at
+`global_route`; the first DEF here with one is `39-openroad-globalrouting`'s),
+so `buda_route.buda` passes `gcell 6.9` — the router's `GCELLGRID STEP` —
+rather than reading it off `placed.def`.  (3) **The template-hardened block
+failed the top's PDN check with EVERY macro pin unconnected** (`PSM-0069`),
+where the own-placer block at the same placement had passed: the +60 %
+internal wire of the d-west/q-east layout put some of the block's routing
+on met4, its LEF then carried a met4 `OBS`, and pdngen drops any core met4
+strap that would cross an obstruction — so no strap ever reached the
+macros' met5 pins.  The block is hardened with `RT_MAX_LAYER met3` now
+(both reg32 configs): met4/met5 are the top's PDN and routing layers and
+not the block's to use — the same idea as BUDA's `reserve_top_layers`,
+and a rule for phase 1's block-config writer (§9).  It cost the block
++0.9 % wire (6,303 → 6,358 µm), nothing else, and every template pin
+stayed put.
 
 What `buda_route.buda` does and why is written in the file; the guide
 writer's rules are §8 step 5's four lessons, each now enforced in
@@ -586,6 +634,21 @@ requirements phase 0 measured go into the writers rather than the recipe:
 * **The pin verifier compares RECTANGLES, not `PLACED` origins** (§8 step
   3: OpenROAD re-centres every pin's origin; 66/66 rects identical, 0/66
   origins).
+* **A block is hardened with its routing capped BELOW the top's PDN
+  layers** (`RT_MAX_LAYER met3` on sky130, where the top's straps are met4
+  and met5; §8 step 5b): a block that routes on met4 hands the top a LEF
+  with a met4 `OBS`, pdngen drops every core strap that would cross it,
+  and the macro's power pins go unconnected — found only at signoff, and
+  only on the block whose pin layout had cost it enough wire to reach
+  met4.  BUDA's `reserve_top_layers` is the same rule from the other side;
+  the block-config writer emits it.
+* **The pin-DEF writer places each block pin on the row BUDA's bit lands
+  on** (§8 step 5b): with pins from a hand template, only 11 of 32 bits had
+  their pin inside their BUDA row (31 µm off at worst), and the router paid
+  the difference in vertical jogs — 22.7 % of the bus wire — which the
+  strict containment verdict counts against the guide.  The corridor is
+  followed (92 % by length); the rows have to agree with the pins, and the
+  writer is where they are made to.
 
 **Phase 2 — the benchmark.**  PE RTL for the systolic vehicle; the three arms
 across N; the §7.3 table and crossover plot; a write-up that states the §2.1

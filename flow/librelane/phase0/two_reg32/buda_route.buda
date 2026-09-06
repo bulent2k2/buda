@@ -14,12 +14,14 @@
 #                    the TRACKS + GCELLGRID the router will use
 #   out/tech.tlef    the PDK's tech LEF (sky130_fd_sc_hd__nom.tlef): the
 #                    layers' widths and pitches
-#   ../reg32/runs/phase0/final/lef/reg32.lef   the hardened block
+#   out/block.lef    the hardened block's LEF (a link to ../reg32/runs/<tag>/final/lef/reg32.lef
+#                    -- phase0 for LibreLane's own pin placement, phase0_pins for the
+#                    pin template, so one flow serves both blocks)
 #
 # Every path here resolves against THIS file's directory.
 # ============================================================
 
-require_file out/placed.def out/tech.tlef ../reg32/runs/phase0/final/lef/reg32.lef hint stage the inputs first: see docs/internal/librelane_hier_flow.md section 8, step 5b (cp the manual-macro-placement DEF to out/placed.def; ln -s the PDK tech LEF to out/tech.tlef; run steps 2 and 4)
+require_file out/placed.def out/tech.tlef out/block.lef hint stage the inputs first: see docs/internal/librelane_hier_flow.md section 8, step 5b (cp the manual-macro-placement DEF to out/placed.def; ln -s the PDK tech LEF to out/tech.tlef and the block's LEF to out/block.lef; run steps 2 and 4)
 
 open_bdb :memory:
 
@@ -46,7 +48,7 @@ import_lef_tech out/tech.tlef
 # standard cells, which are in the PDK's cell LEF and not in reg32.lef; at
 # this stage they are UNPLACED (bbox -1) and the routing never sees them,
 # so the LOUD fallback is the right one here and its warnings are expected.
-import_def_lef out/placed.def ../reg32/runs/phase0/final/lef/reg32.lef allow_missing_footprints
+import_def_lef out/placed.def out/block.lef allow_missing_footprints
 
 # u0 and u1 are the only placed components: a flat design of two blocks.
 derive_busterms
@@ -62,10 +64,14 @@ run_detailed_nuts
 check_design dnuts
 report_wirelength
 
-# The guide file: gcells from the DEF's own GCELLGRID (no `gcell` needed),
-# per-bit boxes from the detailed result, and pin-access strips on met3 --
-# reg32's d/q pins are met3 (gen_pins_def.py / the block's LEF), a layer
-# BUDA does not associate with the pin, so it is named here.
-emit_guides out/buda_bus.guide terminal met3
+# The guide file: per-bit boxes from the detailed result, and pin-access
+# strips on met3 -- reg32's d/q pins are met3 (gen_pins_def.py / the
+# block's LEF), a layer BUDA does not associate with the pin, so it is
+# named here.  The gcell is given, not read off the DEF: a DEF written
+# BEFORE global routing carries no GCELLGRID (OpenROAD defines the grid at
+# `global_route`; in this run the first DEF with one is
+# 39-openroad-globalrouting's), and out/placed.def is the pre-route DEF by
+# design.  6.9 um is that GCELLGRID's STEP (measured 2026-09-06).
+emit_guides out/buda_bus.guide gcell 6.9 terminal met3
 # The same corridors as data, for the record.
 emit_guides out/buda_guides.json
