@@ -507,8 +507,8 @@ LEF the H arms will use are written beside the RTL.
 cd ~/src/buda
 for N in 2 4 8; do flow/librelane/tier1a/gen.sh $N; done        # + 16 when the small ones are in
 cd flow/librelane/tier1a/n4 && librelane --dockerized --run-tag flat config.json
-python3 ../runtimes.py runs/flat                # per-stage seconds + area/timing/power/WL/DRC
-python3 ../runtimes.py runs/flat --json >> ../results.jsonl     # one row per run, for the table
+python3 ../runtimes.py runs/flat --set N=4 --set arm=F        # per-stage seconds + area/timing/power/WL/DRC
+python3 ../runtimes.py runs/flat --set N=4 --set arm=F --json >> ../results.jsonl   # one row per run, saying which
 ```
 
 Pass: `Flow complete`; `runtimes.py` prints the stage split and the metrics
