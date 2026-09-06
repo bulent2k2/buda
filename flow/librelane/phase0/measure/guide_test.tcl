@@ -34,7 +34,11 @@ foreach n [[ord::get_db_block] getNets] {
 puts "A: [llength $bus] bus net(s), [llength $others] other net(s)"
 if {[llength $bus] == 0} { error "A: no net starts with '$bus_prefix' -- nothing to withhold" }
 set_nets_to_route $others
-global_route -congestion_iterations 50 -verbose
+# -allow_congestion: a gcell over by one is DRT's to resolve, and refusing
+# here would end the measurement before it starts -- the two_reg32 top
+# with BUDA's pin template ends global routing with 4 overflow units at
+# the die's east margin and detailed-routes DRC-clean (2026-09-06).
+global_route -congestion_iterations 50 -allow_congestion -verbose
 write_guides $::env(OUT)/nobus.guide        ;# EXPECT: no bus entries
 
 # 2. Merge the bus guides IN THE FILE (read_guides replaces, see above), read.

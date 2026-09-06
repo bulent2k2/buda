@@ -1,0 +1,58 @@
+{
+    "meta": {
+        "version": 2
+    },
+    "DESIGN_NAME": "two_reg32",
+    "VERILOG_FILES": [
+        "dir::src/two_reg32.v"
+    ],
+    "CLOCK_PORT": "clk",
+    "CLOCK_PERIOD": 10,
+    "FP_SIZING": "absolute",
+    "DIE_AREA": [
+        0,
+        0,
+        250,
+        120
+    ],
+    "FP_CORE_UTIL": 35,
+    "PL_TARGET_DENSITY_PCT": 35,
+    "FP_PDN_VOFFSET": 0,
+    "FP_PDN_VPITCH": 30,
+    "ERROR_ON_PDN_VIOLATIONS": false,
+    "MACROS": {
+        "reg32": {
+            "instances": {
+                "u0": {
+                    "location": [
+                        10,
+                        20
+                    ],
+                    "orientation": "N"
+                },
+                "u1": {
+                    "location": [
+                        160,
+                        20
+                    ],
+                    "orientation": "N"
+                }
+            },
+            "gds": [
+                "dir::../reg32/runs/phase0_buda_pins/final/gds/reg32.gds"
+            ],
+            "lef": [
+                "dir::../reg32/runs/phase0_buda_pins/final/lef/reg32.lef"
+            ],
+            "nl": [
+                "dir::../reg32/runs/phase0_buda_pins/final/nl/reg32.nl.v"
+            ],
+            "spef": {
+                "nom_*": "dir::../reg32/runs/phase0_buda_pins/final/spef/nom/reg32.nom.spef",
+                "min_*": "dir::../reg32/runs/phase0_buda_pins/final/spef/min/reg32.min.spef",
+                "max_*": "dir::../reg32/runs/phase0_buda_pins/final/spef/max/reg32.max.spef"
+            }
+        }
+    },
+    "GRT_ALLOW_CONGESTION": true
+}
