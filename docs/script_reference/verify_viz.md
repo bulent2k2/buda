@@ -485,7 +485,7 @@ byte-deterministic.
 ### `emit_pin_def`
 
 ```
-emit_pin_def <file.def> <block-or-cell> [unrouted <N|S|E|W> [<layer>]] [depth <um>] [grid <dbu>] [lef <file.lef>] [snap] [escaped_names]
+emit_pin_def <file.def> <block-or-cell> [unrouted <N|S|E|W> [<layer>]] [depth <um>] [grid <dbu>] [lef <file.lef>] [snap] [escaped_names] [expect_layer <csv>]
 ```
 
 Write a **pin-DEF template** for one block — the block-side handoff of the
@@ -563,6 +563,14 @@ export_def_blockages out/advisory.def density 0.6
 run_detailed_nuts
 emit_pin_def reg32_pins.def reg32 unrouted S met2
 ```
+
+`expect_layer <csv>` refuses to write a template whose planned pins are
+not on the named layer(s), listing the offenders. `TOP` is a preference the
+cost function can outvote, so a bus can move layer under a small placement
+change and take the block's pin map with it (measured: met3 to met1 on a
+0.8 µm move, +26 % to +49 % on the block's own wire). Constrain the plan
+with [`set_bus_layers`](planner.md#set_bus_layers); this is the check
+that the constraint held.
 
 ### `emit_block_size`
 

@@ -69,6 +69,16 @@ def_layer 5 met5 H TOP 30
 # 20400 = 15 x 1360.
 def_track_pattern 3 190 SIGNAL 300 380 CUSTOM 300 380
 
+# ... and the bus has to STAY on met3, which halving met3 above makes it
+# stop wanting to do: at 1360 DBU per bit met3 is 4x met1's 340, and `TOP`
+# is a PREFERENCE the cost function outvotes, so the planner moved the bus
+# to met1 and the template's 64 pins followed it off the layer this whole
+# handoff is built around (§8 step 3b, measured: the block's own wire went
+# +26 % -> +49 %, and a 0.8 um placement change was enough to flip it).
+# The plan is where that is settled, so it is settled here; `expect_layer`
+# on the emit below is the check that it held.
+set_bus_layers mid met3
+
 import_lef_tech sky130_tech.lef
 
 # The top as LibreLane placed it: u0 at (10, 20) um, u1 at (160, 20) um on a
@@ -108,4 +118,4 @@ report_wirelength
 # rst on the S edge on met2 tracks — every one on the BLOCK's own track
 # grid (no `snap`, nothing reported snapped).  UNITS 1000 (dbu), DIEAREA
 # 80000 x 80000.
-emit_pin_def reg32_pins.def reg32 unrouted S met2
+emit_pin_def reg32_pins.def reg32 unrouted S met2 expect_layer met3

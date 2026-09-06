@@ -563,3 +563,46 @@ visualize
 ```
 
 ---
+
+### `set_bus_layers`
+
+```
+set_bus_layers <prefix>|* <layer csv>|off
+set_bus_layers                              # list the declared scopes
+```
+
+Restrict a named bus to specific routing layers. Longest matching prefix
+wins and `*` is the global default, outranked by any real prefix — the same
+resolution [`set_bundling`](bundling.md#set_bundling) and `set_ndr` use.
+
+`TOP` is a **preference** the cost function can outvote, and the two other
+layer constraints do not reach a single bus: `set_cell_layer_cap` governs
+everything a CELL routes, and an NDR rule's `layers` restriction rides on a
+rule that must also constrain width, spacing or shielding (`def_ndr`
+refuses one that "constrains nothing"). This is the knob for "this bus
+routes here".
+
+Measured on the phase-0 toy of the LibreLane study
+([librelane_hier_flow.md](../internal/librelane_hier_flow.md) §8 step 3b):
+after a 0.8 µm placement change the planner moved a 32-bit bus from met3 to
+met1 — 4× cheaper per bit under the declared patterns — and the block's pin
+template followed it off the layer the block-side handoff is built around,
+costing the block +49 % of its own wire instead of +26 %.
+
+The restriction **intersects** whatever else governs the bundle (a cell
+band, an NDR rule's layers), and is applied where those are: once at
+bundling for the flat flow, and re-applied after every hier policy
+resolution, since that resolver owns `allowed_layers` and rewrites it at
+each wrapper-set transition. An empty intersection is a hard error naming
+both constraints — an empty mask means "route anywhere", the opposite of
+what either knob asked for. A bundle whose nets resolve to *different*
+scopes is refused too: a bundle routes as one bus, so its bits cannot take
+different layers.
+
+Declaring nothing leaves every route untouched.
+
+**Example:**
+```
+set_bus_layers mid met3          # the bus the block's pins are built around
+set_bus_layers * met4,met5       # everything else prefers the upper pair
+```
