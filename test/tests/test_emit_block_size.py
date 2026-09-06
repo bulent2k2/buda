@@ -165,6 +165,95 @@ def test_a_cell_takes_the_worst_face_over_its_instances(tmp_path):
     assert "'nope' is not a placed instance" in log
 
 
+def test_layout_units_become_microns_before_anything_compares_them(tmp_path):
+    """The routed plan is in LAYOUT units — at `set_import_scale dbu` those
+    are DBU — while `area`, `margin` and a LibreLane `DIE_AREA` are MICRONS.
+    Unconverted, a 1000-DBU/um design emits a 20 um face as 20000 and the
+    area demand can never bind (Codex #887).  The hier fixture is at dbu
+    scale and its blk is 80 x 80 um, so every number below is microns."""
+    j, log = _size(tmp_path, tail_target="blk", extra="area 4000", flat=False)
+    d = j["derivation"]
+    assert d["current"] == {"w": 80.0, "h": 80.0, "area_ratio": d["current"]["area_ratio"]}
+    # The E/W faces carry 4 bits of a bus whose met3 pitch is 0.68 um, so
+    # the demand is a few microns — not a few thousand.
+    assert 0 < d["face_needs"]["h"] < 80.0, d["face_needs"]
+    for f in d["face"].values():
+        assert 0 < f["needs"] < 80.0, f
+    # 4000 um2 at 50 % is 8000 um2 of core: the die is microns, so tens.
+    assert 10.0 < j["DIE_AREA"][2] < 1000.0 and 10.0 < j["DIE_AREA"][3] < 1000.0
+    assert d["binds"]["w"] == "area"                 # reachable only in um
+    # The margin is microns too, on both scales.
+    j2, _ = _size(tmp_path, tail_target="blk", extra="area 4000 margin 5", flat=False)
+    assert abs(j2["derivation"]["face_needs"]["h"]
+               - d["face_needs"]["h"] - 10.0) < 1e-6
+
+
+def test_a_rotated_instance_is_refused_rather_than_transposed(tmp_path):
+    """`_plan_block` reports faces in the TOP's frame, so a 90-degree
+    instance's N/S are the cell's E/W and the emitted die would come out
+    transposed.  The guard `emit_pin_def` already applies (Codex #887)."""
+    insts = [("u0", 10000, 20000, "N"), ("u1", 160000, 20000, "FS")]
+    out = tmp_path / "size.json"
+    _s, log = _hier(tmp_path, insts, _bus("mid", "u0", "u1"),
+                    [f"emit_block_size {out} blk area 4000"])
+    assert "only N is handled" in log and "has orientation F" in log and not out.exists()
+    # Naming an N instance is the documented way through.
+    _s, log = _hier(tmp_path, insts, _bus("mid", "u0", "u1"),
+                    [f"emit_block_size {out} blk area 4000 inst u0"])
+    assert "[BlockSize]" in log and out.exists()
+
+
+def test_a_faces_per_layer_maximum_would_invent_a_demand_no_instance_has(tmp_path):
+    """The aggregation rule: each instance's COMPLETE per-face extent first,
+    then the max across instances.  Taking a per-LAYER maximum and summing
+    charges 10 M3 + 1 M4 against 1 M3 + 10 M4 as twenty bits when the worst
+    real face is eleven (Codex #887)."""
+    from buda_session.block_size import _face_extent
+    s, _log = _size(tmp_path, extra="area 1")          # any routed session
+    s = _session(_SETUP)[0]
+    a, b = {3: 10, 4: 1}, {3: 1, 4: 10}
+    ea, _bits, _l = _face_extent(s, a)
+    eb, _bits, _l = _face_extent(s, b)
+    per_layer_max = _face_extent(s, {3: 10, 4: 10})[0]
+    assert abs(ea - eb) < 1e-9                          # the same eleven bits
+    assert per_layer_max > ea * 1.5                     # what summing maxima charges
+    # And the emitted face names WHICH instance was worst, so the reader can
+    # see the max is across instances rather than across layers.
+    j, _log = _size(tmp_path, tail_target="blk", extra="area 4000", flat=False)
+    for f in j["derivation"]["face"].values():
+        assert f["worst_instance"] in j["derivation"]["instances"], f
+
+
+def test_an_impossible_area_is_refused_before_the_square_root(tmp_path):
+    """A negative area reaches sqrt() and aborts with a traceback; a
+    non-finite one writes JSON no config can read (Codex #887)."""
+    for bad in ("area -1", "area 0", "area inf", "area nan"):
+        _j, log = _size(tmp_path, extra=bad)
+        assert "must be a finite positive number" in log, (bad, log)
+    m = tmp_path / "neg.json"
+    m.write_text(json.dumps({"design__instance__area": -5.0}))
+    _j, log = _size(tmp_path, extra=f"metrics {m}")
+    assert "must be a finite positive number" in log
+
+
+def test_faces_off_sizes_by_area_alone_and_says_what_it_skipped(tmp_path):
+    """The recovery the no-plan refusal names, which has to exist for the
+    advice to be true (Codex #887): a block with no routed plan yet."""
+    out = tmp_path / "size.json"
+    unrouted = [c for c in _SETUP if not c.startswith(("run_nuts", "run_detailed"))]
+    _s, log = _session(unrouted + [f"emit_block_size {out} b faces off area 4000"])
+    assert "[BlockSize]" in log and "`faces off`" in log and "none (faces off)" in log
+    j = json.loads(out.read_text())
+    assert j["derivation"]["binds"] == {"w": "area", "h": "area"}
+    assert j["derivation"]["face"] == {} and j["derivation"]["source"] == "none"
+    assert j["derivation"]["instances"] == ["b"]
+    # Area-only with no area is nothing at all.
+    _s, log = _session(unrouted + [f"emit_block_size {out} b faces off"])
+    assert "has no demand on one axis" in log
+    _s, log = _session(unrouted + [f"emit_block_size {out} b faces sideways"])
+    assert "faces must be on or off" in log
+
+
 def test_the_refusals(tmp_path):
     _j, log = _size(tmp_path, tail_target="nope")
     assert "no cell or block named 'nope'" in log
