@@ -280,6 +280,22 @@ def test_check_inside_exit_code_is_the_verdict_at_a_stated_threshold(tmp_path):
     assert r.returncode == 1 and "FAIL: 6.2%" in r.stdout
     r = run("--max-outside-pct", "120")
     assert r.returncode == 1 and "a percentage, 0..100" in r.stderr
+    # The CORRIDOR measure is the other question: of the met2 leg at x=160,
+    # the part past the met3 box's footprint (+ slack) leaves the guide on
+    # EVERY layer -- 2.5 of 64 um, 3.9 % -- while the rest is a layer change
+    # inside it; a met3 box UNDER the leg makes all of it a layer change --
+    # strict still 6.2 %, corridor 0 % -- which is the shape a single-layer
+    # corridor plan produces when the router must change layers inside it
+    # to reach a pin (step 5b).  Both thresholds together must both pass.
+    r = run("--max-corridor-outside-pct", "3")
+    assert r.returncode == 1 and "3.9% outside the corridor on every layer, threshold 3%" in r.stdout
+    g.write_text("mid[0]\n(\n99000 40000 161000 42000 met3\n159000 40000 161000 46000 met3\n)\n")
+    r = run("--max-corridor-outside-pct", "5")
+    assert r.returncode == 0 and "PASS: 0.0% outside the corridor" in r.stdout
+    r = run("--max-outside-pct", "5", "--max-corridor-outside-pct", "5")
+    assert r.returncode == 1 and "FAIL: 6.2% of the bus wire outside its own layer's guides, threshold 5%; 0.0% outside the corridor" in r.stdout
+    r = run("--max-corridor-outside-pct", "120")
+    assert r.returncode == 1 and "--max-corridor-outside-pct 120.0: a percentage" in r.stderr
     # Everything the strict rule sees is in the measure (Codex #879): a RECT
     # patch enters as the length of its long axis -- 3.2 um here, 1.5 of it
     # past the met3 box + slack -- so `--max-outside-pct 0` fails on it ...

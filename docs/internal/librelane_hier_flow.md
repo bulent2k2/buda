@@ -501,18 +501,33 @@ ODB=$(ls ../two_reg32/runs/phase0_pins/*-openroad-cts/two_reg32.odb)
 python3 extract_bus_guides.py out/all.guide out/all_bus.guide                # …kept as the control
 python3 extract_bus_guides.py ../two_reg32/out/buda_bus.guide out/bus.guide  # the bus entries, as BUDA wrote them
 ./run_or.sh ../two_reg32/runs/phase0_pins guide_test.tcl ODB=$ODB OUT=$PWD/out
-python3 check_inside.py out/guided.def out/bus.guide --slack 1.0 --max-outside-pct 5
-python3 check_inside.py out/guided.def out/all_bus.guide --slack 1.0 --max-outside-pct 5   # control: the ROUTER's corridor
+python3 check_inside.py out/guided.def out/bus.guide --slack 1.0 --max-corridor-outside-pct 10             # the verdict
+python3 check_inside.py out/guided.def out/all_bus.guide --slack 1.0 --max-corridor-outside-pct 10         # control: the ROUTER's corridor
+python3 check_inside.py out/guided.def out/bus.guide --slack 1.0 --max-outside-pct 5                       # strict: fails until the pin writer exists
 ```
 
 Pass: `buda_route.buda` ends with `check_design dnuts` clean and
 `emit_guides` reporting every via in a gcell its net holds on both layers;
 `guide_test.tcl` reaches `Number of violations = 0`; the first
-`check_inside.py` exits 0 — the wire is inside BUDA's corridor — and the
-control against the router's own corridor FAILS wherever BUDA's corridor
-differs from it, which is the evidence that the router followed BUDA
-rather than agreeing with it.  Record the same three numbers step 5
-records (segments, µm, % outside).
+`check_inside.py` exits 0 — the wire stayed inside BUDA's corridor by the
+CORRIDOR measure (`--max-corridor-outside-pct`: outside the guide's
+footprint on every layer; a one-point path outside it, a via with no
+wire, fails at any threshold) — and the control against the router's own
+corridor FAILS, which is the evidence that the router followed BUDA
+rather than agreeing with it.  The third line is the STRICT measure of
+step 5 (`--max-outside-pct`: outside the net's own-layer boxes), which a
+single-layer corridor plan cannot meet while the router changes layers
+inside it to reach pins whose rows the guide did not set.
+
+**Today neither verdict passes, for one known reason, and the recipe says
+so rather than lowering the bar** (next paragraph): the corridor verdict
+fails on 15 vias outside the corridor — every one of them at a jog
+between a bit's BUDA row and its pin row — with 7.7 % of the wire length
+outside, and the strict verdict fails at 30.4 %.  What the run DOES
+establish is the comparison: against the router's own corridor the same
+wire is 58.1 % outside.  The pass above is the criterion the pin-DEF
+writer (§9) has to meet; the three numbers to record are step 5's
+(segments, µm, % outside) for both guide files.
 
 **Measured 2026-09-06.**  BUDA: 1 bundle, 32 bits on one met3 segment, 0
 unplaced, 2,240 µm; 32 guide entries, per-bit rows, terminal strips on 21.
@@ -520,8 +535,11 @@ Detailed routing under them: 0 violations.  The bus, 3,105 µm: **7.7 %
 outside BUDA's corridor, 22.7 % on another layer inside it** — against the
 router's own corridor the same wire is **58.1 % outside**, so the router
 went where BUDA said (92 % inside by length) and not where it would have
-gone.  The strict verdict still FAILS the 5 % threshold, and the failing
-share is 81 % vertical wire on met2/met4: jogs between the row BUDA gave a
+gone.  The corridor verdict still FAILS — on 15 lone vias outside the
+footprint, 11 below and 4 above their bit's BUDA row, all within x = 77–157
+µm, i.e. at the channel ends where the jogs are — and the strict one at
+30.4 %; the failing share is
+81 % vertical wire on met2/met4: jogs between the row BUDA gave a
 bit and the row its pins sit on.  BUDA packed the 32 bits into y 48–76 µm
 of the channel; the template put the pins at y 28–71 µm (every second
 track from track 12, by hand), and only 11 of 32 bits have their pin
