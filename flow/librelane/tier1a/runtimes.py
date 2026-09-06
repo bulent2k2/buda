@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The numbers the benchmark wants, out of LibreLane run directories.
 
-    runtimes.py runs/<tag> [--set KEY=VALUE ...] [--block <run_dir>[:<instances>] ...] [--json]
+    runtimes.py runs/<tag> [--set KEY=VALUE ...] [--block <run_dir>[:<instances>] ...] [--blocks-from <top config.json>] [--json]
 
 Per-step wall time from each step's `runtime.txt` (what LibreLane writes when
 a step finishes), grouped into the stages the plan reports on -- synthesis,
@@ -29,6 +29,13 @@ where the block-side handoff is paid for: on the phase-0 block, the pin
 template that straightens the top-level bus costs the block +60 % of its
 own wire (3937 -> 6303 um, measured 2026-09-05), and an arm's total alone
 would hide that trade against the bus it buys.
+
+`--blocks-from <config.json>` derives that list from the top's own MACROS
+entry -- one block per cell, its run directory three levels above the `lef`
+view the config names (`../pe_cell/runs/h/final/lef/pe_cell.lef` is the run
+`../pe_cell/runs/h`) and its instance count the number of `instances` --
+so the row cannot disagree with the config the top was actually built
+from; `harm.sh` writes such a config.  Explicit `--block`s are appended.
 """
 import argparse
 import glob
@@ -114,6 +121,38 @@ def parse_block(spec):
     return run_dir, int(count) if count else 1
 
 
+def blocks_from_config(path):
+    """`--block` specs derived from a top config's MACROS: per cell, the run
+    directory three levels above its first `lef` view (resolved against the
+    config's directory) and the number of placed instances."""
+    cfg = json.load(open(path))
+    base = os.path.dirname(os.path.abspath(path))
+    macros = cfg.get("MACROS")
+    if not macros:
+        raise SystemExit(f"--blocks-from {path}: no MACROS entry -- nothing to account")
+    specs = []
+    for cell, m in macros.items():
+        lefs = m.get("lef") or []
+        if not lefs:
+            raise SystemExit(f"--blocks-from {path}: MACROS.{cell} names no lef view, so its run "
+                             f"directory cannot be derived; pass --block for it")
+        lef = lefs[0]
+        if lef.startswith("dir::"):
+            lef = os.path.join(base, lef[len("dir::"):])
+        run_dir = os.path.normpath(os.path.join(os.path.dirname(lef), "..", ".."))
+        if os.path.basename(os.path.dirname(lef)) != "lef" or os.path.basename(run_dir) == "":
+            raise SystemExit(f"--blocks-from {path}: MACROS.{cell}.lef {lefs[0]} is not <run>/final/lef/<x>.lef, "
+                             f"so its run directory cannot be derived; pass --block for it")
+        if not os.path.isdir(run_dir):
+            raise SystemExit(f"--blocks-from {path}: MACROS.{cell}: derived run directory {run_dir} does not "
+                             f"exist -- was the block hardened with that run tag?")
+        count = len(m.get("instances") or {})
+        if count == 0:
+            raise SystemExit(f"--blocks-from {path}: MACROS.{cell} places no instances")
+        specs.append(f"{run_dir}:{count}")
+    return specs
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("run_dir")
@@ -121,8 +160,12 @@ def main():
                     help="benchmark coordinates to record in the row, e.g. N=8 arm=F")
     ap.add_argument("--block", action="append", default=[], metavar="RUN_DIR[:INSTANCES]",
                     help="a hardened block's run directory and how many times the top places it")
+    ap.add_argument("--blocks-from", metavar="CONFIG_JSON",
+                    help="derive the --block list from the top config's MACROS entry (harm.sh writes one)")
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args()
+    if a.blocks_from:
+        a.block = blocks_from_config(a.blocks_from) + a.block
     coords = {}
     for kv in a.set:
         key, sep, value = kv.partition("=")

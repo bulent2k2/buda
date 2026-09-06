@@ -264,10 +264,51 @@ Smoke vehicles needing no authoring: `manual_macro_placement_test`,
 | Arm | Synthesis | Blocks | Placement | Pins | Buses |
 |---|---|---|---|---|---|
 | **F** flat | `flatten` | none | GPL | `IOPlacement` | GRT |
-| **H** hierarchical, no BUDA | `keep` → harden | per cell | `ManualMacroPlacement`, simple grid | per-block `IOPlacement` | GRT |
+| **H** hierarchical, no BUDA | the leaf modules the RTL declares, each hardened from its own module text; the top `flatten`ed over the hardened netlists as black boxes | one per leaf cell type (`pe_cell`, `feed_cell`, `wbuf_cell`, `acc_cell`), die = the emitter's LEF `SIZE` | `ManualMacroPlacement` at the emitter's DEF locations (the whole placement translated once to fit the die), PDN pitch/offset derived from the array pitch | per-block `IOPlacement` | GRT |
 | **H+B** hierarchical with BUDA | `keep` → harden | per cell, BUDA-sized | BUDA `PlacementOptimizer` | BUDA `FP_DEF_TEMPLATE` | BUDA guides (A) |
 
 H isolates what hierarchy alone costs; H+B minus H is BUDA's contribution.
+Arm H is what `flow/librelane/tier1a/harm.sh N` writes (§8 steps 7a–7d),
+and it differs from the first draft's row in two ways that are the point:
+the partition is not a `SYNTH_KEEP_HIERARCHY_MIN_COST` threshold but the
+four leaf modules of `tpu_rtl.v`, cut out of the file one per block run
+(`row_cell` stays soft), and the block placement is not a "simple grid" but
+the emitter's own DEF — the same placement the H+B arm starts from — so
+the two hierarchical arms differ only in what BUDA adds (sizes, pins,
+corridors), never in where the macros sit.  The one thing H decides that
+the DEF does not say is the top's PDN phase (§8 step 4's lesson).  pdngen
+never SHORTS a strap to a macro's power pin — it CUTS the strap
+(`Shape::cut` spares a same-net obstruction only when the strap CONTAINS the
+pin across its width, which a 2 µm block pin in a 1.6 µm top strap never
+is) — so a same-layer meeting is a clip, and what FEEDS a macro is the
+cross-layer crossing the macro grid vias (`add_pdn_connect {met4 met5}`): a
+top met4 strap over the block's met5 pin.  `harm.sh` picks `PDN_VPITCH` as
+a divisor of the PE column pitch and `PDN_VOFFSET` so that every macro of a
+cell sees the straps at one phase, clear of the met4 pins its block config
+PREDICTS, crossing its met5 pins, and with a VPWR+VGND pair in every
+standard-cell row fragment the halos leave; `PDN_HOFFSET` keeps the met5
+straps off every macro's met5 pins, ordered by distance from the macro
+boxes so they land mid-channel.  `pdn_phase.py` verifies the prediction on
+the hardened LEFs before the top runs.
+
+The step-7c run added the rule that governs OBSTRUCTION, which is the other
+thing that removes a strap.  The `lef` view a top reads
+(`final/lef/<cell>.lef`) is MAGIC's — OpenROAD's `-bloat_occupied_layers`
+abstract LEF is the separate `<cell>.openroad.lef`, which nothing here
+reads — so the OBS is the block's ACTUAL metal, and whose metal it is
+decides everything.  `pe_cell` routes on met4 (`RT_MAX_LAYER met4`) and its
+LEF carries a met4 OBS, but that OBS *is* the block's own PDN, the same
+rectangles as its power pins, so the phase search cleared it by clearing
+them.  The toy's met4 OBS in §9's step 5b was SIGNAL routing pushed onto
+met4 by a pin layout, sitting wherever the router put it — and that made
+pdngen drop straps and fail IR-drop signoff.  So the rule is not "cap the
+block below the top's PDN layers": what must hold is that the block's use
+of those layers is PREDICTABLE and cleared by the phase search.  Capping at
+`RT_MAX_LAYER met3` guarantees it (+0.9 % block wire on the toy); leaving
+met4 to the block works only while the block's met4 is its own grid.
+`pdn_phase.py` classifies every OBS rectangle as the block's own power
+metal or as foreign, and reports the foreign case before the top runs,
+which is the check nothing in the flow had.
 
 ### 7.3 Metrics — all from LibreLane's own `metrics.json`
 
@@ -665,6 +706,144 @@ table and the reading are in §7.1) — run the three SEQUENTIALLY on an idle
 box, since the stage seconds are the point and a second run on the same
 cores is a confound.  `N=16` last — read forward from the three, it is a
 5–6 h run here.
+
+**7a. Tier 1a — arm H, the blocks.**  `harm.sh N` reads the set step 7
+emitted and writes `n<N>/h/`: one hardening directory per leaf cell (its
+module cut out of `tpu_rtl.v`, a fixed die of exactly its `tpu.lef` SIZE,
+pins by LibreLane's placer, the `reg32` block settings), `top/`, the
+predicted LEFs, and a README with these commands filled in for that N.
+The four cells are independent, so they harden in parallel; the wall time
+of the batch and the cpu-sum are BOTH recorded (§7.3).
+
+```bash
+cd ~/src/buda && flow/librelane/tier1a/harm.sh 4         # prints the PDN plan and the utilization estimate
+cd flow/librelane/tier1a/n4/h
+python3 ../../pdn_phase.py top/config.json predicted_lef/*.lef     # dry run, no tools: must PASS
+date +%s > blocks.start
+for c in pe_cell feed_cell wbuf_cell acc_cell; do
+  (cd $c && librelane --dockerized --run-tag h config.json > h.log 2>&1) &
+done; wait; date +%s > blocks.end
+```
+
+Pass: `Flow complete` in each `<cell>/h.log` and `<cell>/runs/h/final/{gds,lef,nl,spef/nom}`
+present — the paths `top/config.json` names.
+
+**The PEPAD is 100**, settled by the first real run (2026-09-06, N = 4,
+LibreLane 3.0.11 / sky130A).  At the emitter's default the PE die is its
+bus-face size (152 × 56 µm, 12 rows) and `OpenROAD.GlobalPlacement` refuses
+with `GPL-0301 Utilization 152.234 % exceeds 100%`: the RTL's PE synthesizes
+to **5,964 µm² of standard cells (624 cells)**, which is §7.1's ~1.7×
+Yosys-to-LibreLane ratio applied to its share of the synthesis table — the
+ratio `harm.py`'s estimate now applies, having read ~40 % low without it.
+Two bars apply in turn, `GPL-0301` at 100 % and then
+`PL_TARGET_DENSITY_PCT 50` via `GPL-0302`: PEPAD 56 clears the first and not
+the second (~68 %), 88 lands on the line (49.8 %), and **100** (228 × 132 µm,
+23,605 µm² of core, ~25–30 %) is the honest margin.  So:
+
+```bash
+flow/librelane/tier1a/gen.sh 4 -PEPAD 100 && flow/librelane/tier1a/harm.sh 4
+```
+
+which moves the top die to 1476 × 1644 µm and re-derives the PDN.  Arm F is
+unaffected (it sizes itself from the RTL).  Measured at PEPAD 100: all four
+cells `Flow complete`, **batch wall 440 s** (`pe_cell` the long pole, the
+other three ~4.5 min), DRC and KLayout 0 each, route wirelength pe 15,576 /
+feed 1,259 / wbuf 1,259 / acc 6,643.  `harm.sh` prints its own estimate per
+cell and names the PEPAD to regenerate with when either bar is at risk.
+
+**7b. Arm H — the PDN-phase check, before the top.**
+
+```bash
+python3 ../../pdn_phase.py top/config.json */runs/h/final/lef/*.lef
+```
+
+Pass: `PASS: 36 instances, ... 0 clips, every instance connected on VPWR
+and VGND`, exit 0.  This is step 4's lesson as a step, and the reading of
+it that survived contact with pdngen's source.  pdngen never SHORTS a
+strap to a macro's pin — it CUTS the strap.  Where a strap comes within
+spacing of any power pin of a macro, `Shape::cut` removes it over that
+macro (the same-net exception spares it only when the strap CONTAINS the
+pin across its width, which a 2 µm block pin in a 1.6 µm strap never is),
+which is what the toy measured.  So a same-layer meeting is a CLIP, never a
+connection, and what feeds a macro is the cross-layer crossing the macro
+grid vias (`add_pdn_connect {met4 met5}`): a top met4 strap over the
+block's met5 pin.  `harm.sh` chose `PDN_VOFFSET` so every macro of a cell
+sees the straps at one phase, clear of its predicted met4 pins, crossing
+its met5 pins, and with a VPWR+VGND pair in every standard-cell row
+fragment the halos leave (the toy's sliver failure); `PDN_HOFFSET` keeps
+the met5 straps off every macro's met5 pins, mid-channel.  This run
+replaces the predicted pins and obstructions with the real ones.
+
+A `CLIP`, `OBSTRUCTED` or `UNCONNECTED` line names the instance, the pin
+rectangle, the strap and the smallest x- or y-shift that clears it, and
+the equivalent `PDN_VOFFSET`/`PDN_HOFFSET` for the whole placement: change
+the offsets in `top/config.json`, rerun the check, and only then the top.
+`OBSTRUCTED` is the one this check exists for beyond the phase: an OBS
+rectangle on a PDN layer that is NOT the block's own power metal, which no
+phase search can have cleared — §7.2 has the rule and `RT_MAX_LAYER` is the
+lever.  Obstruction that IS the block's own grid is counted and named as
+such, since the pin clearance already governs that same metal.
+
+**7c. Arm H — the top.**
+
+```bash
+(cd top && librelane --dockerized --run-tag h config.json)
+```
+
+Pass: `Odb.ManualMacroPlacement` prints `Successfully placed 36 instances`
+— the instance-name rule (`row_0/pe_0` in the DEF, `row_0.pe_0` in the
+flattened netlist) fails HERE, with exit 1, if it is wrong for this
+LibreLane — then `Flow complete`, `All shapes on net VPWR are connected`
+(and VGND).  The placement is the DEF's translated by (226, 70) µm at
+PEPAD 100: the emitter puts `feed_*` at x = −140, outside its own DIEAREA,
+and the shift is the smallest that brings every halo inside the die
+(`top/placement.json` has both coordinates of every instance).
+
+Measured 2026-09-06 at N = 4, PEPAD 100: **2,890 s**, `Successfully placed
+36 instances`, both PDN nets connected, DRC / KLayout / LVS / antenna 0,
+15,167 standard cells beside the 36 macros on a 1,476 × 1,644 µm die.  The
+instance-name rule, the sky130A PDN defaults, the strap-centre semantics
+and the row-fragment rule all held on the real tool.
+
+**7d. Arm H — the row.**
+
+```bash
+python3 ../../runtimes.py top/runs/h --set N=4 --set arm=H --blocks-from top/config.json
+python3 ../../runtimes.py top/runs/h --set N=4 --set arm=H --blocks-from top/config.json --json >> ../../results.jsonl
+```
+
+`--set` stamps the row with its coordinates (step 7's rule); `--blocks-from` reads each block's run directory and instance count off the
+top's own `MACROS` entry, so the H row (§7.3: wall AND cpu-sum for the
+blocks, wire per PLACED instance, the block-internal wire its own column)
+cannot disagree with the config the top was built from.
+
+**The first F-vs-H pair, N = 4** (2026-09-06).  `gen.sh -PEPAD` changes only
+the emitted DEF/LEF — `tpu_rtl.v` and the flat `config.json` are
+byte-identical at PEPAD 24 and 100 — so **arm F is PEPAD-independent** and
+step 7's row stands without a re-run:
+
+| | F (flat) | H (hier, no BUDA) | H/F |
+|---|---|---|---|
+| wall | 1,211 s | **3,296 s** (blocks 423 parallel + top 2,873) | 2.72× |
+| CPU | 1,211 s | 4,327 s | 3.57× |
+| die | 0.280 mm² | **2.427 mm²** | 8.66× |
+| wire | 227 mm | 582 mm (top 243 + blocks 339) | 2.56× |
+| setup WS (worst corner) | +1.81 ns | +0.89 ns | — |
+| DRC / LVS / antenna | 0 | 0 | — |
+
+Two readings, and the second is the one that matters for §3.  **The blocks
+cost 423 s of wall and are CONSTANT in N** — four cell types whether the
+array is 2 × 2 or 32 × 32 — which is §4's solve-once premise visible in a
+measurement for the first time; the top is the entire growth term, and at
+N = 4 alone it is 2.4× the whole flat run.  And **the top is slow because
+its die is 8.66× F's, which is a SIZING artifact rather than a cost of
+hierarchy**: the emitter sizes each cell to its bus faces and PEPAD 100 pads
+it to ~30 % utilization, while F derives its die from cell area at 46 %.
+Block sizing is one of the four decisions §3 assigns to BUDA, so this arm
+measures *hierarchy with geometric block sizing*, and the 8.66× is the
+headroom H+B has to recover — not what hierarchy costs.  Timing now has a
+number behind §2.4's caveat: +0.89 ns against F's +1.81 at the slow corner,
+every block boundary budgeted by one `IO_DELAY_CONSTRAINT`.
 
 **8. Tier 1b — a Gemmini mesh at N = 4, 8, 16.**  Chipyard needs Linux; on
 the Mac that is a Linux container with the BUDA checkout mounted.  The full
