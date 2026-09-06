@@ -23,6 +23,7 @@ wrong time parser would have made every runtime number in the write-up
 wrong by a silent factor.
 """
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -123,6 +124,17 @@ def test_runtimes_reads_librelane_time_format_and_groups_stages(tmp_path):
                        check=True, capture_output=True, text=True)
     row = json.loads(r.stdout)
     assert row["steps"] == 9
+    assert "N" not in row and os.path.isabs(row["run"])          # outside the repo: absolute
+    # A row says which point it is on its own (Codex #881): `--set` puts the
+    # benchmark coordinates in, integers as integers, and a malformed one
+    # is refused rather than recorded as a key with no value.
+    r = subprocess.run([sys.executable, str(_T1A / "runtimes.py"), str(tmp_path), "--json",
+                        "--set", "N=8", "--set", "arm=F"], check=True, capture_output=True, text=True)
+    row = json.loads(r.stdout)
+    assert row["N"] == 8 and row["arm"] == "F" and list(row)[:2] == ["N", "arm"]
+    r = subprocess.run([sys.executable, str(_T1A / "runtimes.py"), str(tmp_path), "--set", "N"],
+                       capture_output=True, text=True)
+    assert r.returncode != 0 and "expected KEY=VALUE" in r.stderr
     assert row["synth_s"] == 63.8                  # 0:0:1:500 + 0:1:2:250, to 0.1 s
     assert row["floorplan+place_s"] == 40.0
     assert row["cts_s"] == 20.0
