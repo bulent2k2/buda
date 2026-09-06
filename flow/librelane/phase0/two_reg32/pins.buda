@@ -1,0 +1,61 @@
+# The block-side handoff on the phase-0 toy: BUDA writes the pin-DEF template
+# that `reg32/gen_pins_def.py` wrote by hand (docs/internal/librelane_hier_flow.md
+# §8 step 3b).  Imports the phase-0 top as placed, routes the `mid[*]` bus
+# between the two reg32 macros, and emits ONE template for the reg32 CELL
+# from what its two instances route: d where the bus enters u1, q where it
+# leaves u0, clk/rst spread on the south edge.
+#
+#   python3 prep_pins.py            # after §8 steps 2 and 4; writes the three inputs below
+#   bin/buda flow/librelane/phase0/two_reg32/pins.buda
+#
+# A pass ends in a `[PinDEF] reg32_pins.def: 66 pin(s) for reg32 — 64 from
+# the plan (detailed; E 32, W 32), 2 spread on edge S on met2` line and a
+# clean `check_design dnuts`; the template then goes into
+# reg32/config_buda_pins.json (FP_DEF_TEMPLATE) and tools/pin_def_verify.py
+# checks the hardened block against it.  What the numbers mean and what to
+# record is in §8 step 3b.
+#
+# The tree has no EDA tools, so this was authored, not run: every input is
+# a run output and `require_file` names the step that produces it.
+
+require_file two_reg32_fp.def reg32_macro.lef sky130_tech.lef hint Run docs/internal/librelane_hier_flow.md §8 steps 2 and 4, then:  python3 flow/librelane/phase0/two_reg32/prep_pins.py
+
+open_bdb :memory:
+set_import_scale dbu
+set_unit_check on
+
+# sky130A's routing stack, declared by hand the way flow/ariane133 declares
+# NanGate45: identity and direction here; PITCH/WIDTH from the tech LEF the
+# run resolved; track POSITIONS from the DEF's own TRACKS.  met3..met5 are
+# TOP (the metal above the LOW pair a leaf footprint blocks); the toy's one
+# trunk seats on met3, the block's IO_PIN_H_LAYER, since a 32-bit bus at
+# met5's 3.4 um pitch is wider than the 80 um macro face.  li1 is not
+# declared (its trailing digit would collide with met1's id), so the DEF's
+# li1 TRACKS are reported skipped (BUDA-1604, twice) — expected.
+def_layer 1 met1 H LOW 30
+def_layer 2 met2 V LOW 30
+def_layer 3 met3 H TOP 30
+def_layer 4 met4 V TOP 30
+def_layer 5 met5 H TOP 30
+import_lef_tech sky130_tech.lef
+
+# The top as LibreLane placed it: u0 at (10, 20) um, u1 at (160, 20) um on a
+# 250 x 120 um die — the same PDN-phase-safe placement §8 step 4 arrived at.
+import_def_lef two_reg32_fp.def reg32_macro.lef
+
+derive_busterms
+add_blocks_from_bdb 0
+run_hier_bundler
+dump_hbundles
+
+generate_hier_topologies
+run_planner hier 3
+run_nuts
+check_design nuts
+run_detailed_nuts
+check_design dnuts
+report_wirelength
+
+# 66 pins: 32 d (W face, met3, from u1), 32 q (E face, met3, from u0), clk +
+# rst on the S edge on met2 tracks.  UNITS 1000 (dbu), DIEAREA 80000 x 80000.
+emit_pin_def reg32_pins.def reg32 unrouted S met2

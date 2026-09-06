@@ -30,7 +30,7 @@ The per-command documentation lives in one page per pipeline stage under
 | [Track assignment (NUTS)](script_reference/nuts.md) | 4, 9 | `run_nuts` · `run_nuts_on_layer` · `run_detailed_nuts` · `set_pair_align_heal` · `set_placed_endpoints` · `ripup_reroute` · `negotiate_congestion` · `refine_selection` |
 | [Routing grid](script_reference/routing_grid.md) | 8 | `def_track_pattern` · `add_grid_override` · `report_overhead` |
 | [Non-default rules (NDR)](script_reference/ndr.md) | setup | `def_ndr` · `set_ndr` · `dump_ndr` — per-net width / spacing / shielding, with the demand model and the worked vehicles |
-| [Verification & visualisation](script_reference/verify_viz.md) | verify / — | `check_design` · `dump_topologies` · `visualize` · `visualize_topologies` · `emit_guides` · `export_def_blockages` · `dump_messages` |
+| [Verification & visualisation](script_reference/verify_viz.md) | verify / — | `check_design` · `dump_topologies` · `visualize` · `visualize_topologies` · `emit_guides` · `export_def_blockages` · `emit_pin_def` · `dump_messages` |
 
 Script control (paths and quoting, `source`, `alias`/`unalias`, `require_file`, `exit`, comments), the output-files table, the typical
 script skeleton, and the BDB command quick reference stay on this page, below —

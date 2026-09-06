@@ -445,11 +445,56 @@ routing-density concept at all — the routing reservation lives in the
 The emitted file round-trips through BUDA's own DEF reader and is
 byte-deterministic.
 
+### `emit_pin_def`
+
+```
+emit_pin_def <file.def> <block-or-cell> [unrouted <N|S|E|W> [<layer>]] [depth <um>] [grid <dbu>] [lef <file.lef>]
+```
+
+Write a **pin-DEF template** for one block — the block-side handoff of the
+LibreLane hierarchical flow (`docs/internal/librelane_hier_flow.md` §5, §8
+step 3b), the file `FP_DEF_TEMPLATE` consumes: DEF 5.8 with `DESIGN` = the
+block or cell name, `UNITS DISTANCE MICRONS` = the session's `lu_per_um`
+(`set_import_scale dbu` for an exact-DBU template; the nominal default
+writes `1` and says so), `DIEAREA` = the block's size, and one `PINS` entry
+per pin, placed where that pin's routed bit-wire MEETS the block face, on
+the bit-wire's layer — so on a signal track by construction — sized the
+layer's minimum width across the wire by `depth` (default 2 um) into the
+block, `DIRECTION` from the net's driver/receiver role (the LEF's when the
+cell has one), `+ USE SIGNAL`, names DEF-escaped (`d\[0\]`).
+
+The rectangle is written **symmetric about the `PLACED` point** because
+that is how OpenROAD writes every pin back (it re-centres the origin), and
+`tools/pin_def_verify.py template.def final.def` compares the ABSOLUTE
+rectangles — never the origins — exiting 0 when every template pin kept
+its metal, naming each mismatch otherwise, and refusing a final DEF with no
+`PINS`.
+
+Run it after `run_detailed_nuts`.  With only `run_nuts` it falls back to
+the abstract bus position with a WARNING (BUDA-1711: not on tracks); with
+neither it refuses.  Pins whose net reaches the block on no bus (`clk`,
+`rst`) are spread evenly on the `unrouted` edge (default `S`) on that
+edge's pin layer's tracks — the lowest patterned layer of the edge's
+direction, or the named one — and the report says how many pins came
+from the plan and how many were spread.  Coordinates snap to `grid` DBU
+(default 5 at a DBU scale, the manufacturing grid; 1 at the nominal scale).
+
+In a hier session naming a **cell** builds one template from every
+instance (template semantics): each instance contributes the pins it
+routes, in cell-local coordinates; two instances routing the same pin to
+different places is a hard error naming both; an instance in any
+orientation but `N` is refused.  The cell's full port list comes from its
+LEF (the one `import_def_lef` read, or `lef <file>`) so a port on no net is
+in the template too.  Naming an **instance** (or a flat block) emits that
+block alone.
+
 **Example:**
 ```
 run_nuts
 emit_guides out/guides.json margin 2 csv out/guides.csv tcl out/guides.tcl
 export_def_blockages out/advisory.def density 0.6
+run_detailed_nuts
+emit_pin_def reg32_pins.def reg32 unrouted S met2
 ```
 
 ---

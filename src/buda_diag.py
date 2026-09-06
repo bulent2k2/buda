@@ -128,6 +128,13 @@ MESSAGES = {
     # ── advisory writer ────────────────────────────────────────────────────
     "BUDA-1701": (WARNING, "Nothing to emit: the plan has no placed bus "
                            "segments."),
+    # ── pin-DEF writer (emit_pin_def, the LibreLane block-side handoff) ────
+    "BUDA-1711": (WARNING, "emit_pin_def has no detailed-NUTS result: pins "
+                           "are placed from the abstract bus positions, "
+                           "which are not on signal tracks."),
+    "BUDA-1712": (WARNING, "A pin whose net is on a routed bundle was reached "
+                           "by no bit-wire at the block face; it is spread "
+                           "with the unrouted pins."),
     # ── session / units ────────────────────────────────────────────────────
     "BUDA-1901": (FATAL,  "The design's coordinates and its track patterns "
                           "are on implausibly different scales."),

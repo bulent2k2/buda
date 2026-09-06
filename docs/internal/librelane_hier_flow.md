@@ -138,6 +138,7 @@ solve-once-copy premise as BUDA's bottom-up planning (`set_bottom_up`,
 | Block placement | `MACROS.<cell>.instances.<inst>.location/orientation` | trivial writer, NEW |
 | Block size | `DIE_AREA` + `FP_SIZING absolute` | rule in `flow/tcl/tpu_lib.tcl` (face-capacity aware); a command, NEW |
 | Block pins at exact positions | `FP_DEF_TEMPLATE` — the shape `phase0/reg32/gen_pins_def.py` writes by hand | NEW writer: per net bit landing on a block, face + coordinate + layer from the DNUTS `net_segment` endpoint at the busterm, transformed to block-local through the instance orientation (`orient_rect.py`) |
+| Block pins from the plan, written | `FP_DEF_TEMPLATE` — the same file, from BUDA | **`emit_pin_def <file.def> <block-or-cell> [unrouted <edge> [<layer>]] [depth <um>] [grid <dbu>] [lef <file>]`** (`buda_session/pin_def.py`): after `run_detailed_nuts`, one pin per net bit where its bit-wire meets the block face, on the bit-wire's layer (a track by construction), rectangle SYMMETRIC about the PLACED point, DEF-escaped names, UNITS from `lu_per_um`; a cell in a hier session is a TEMPLATE (every instance must agree in cell-local coordinates, `N` only for now); nets on no bus are spread on one edge's tracks; verifier `tools/pin_def_verify.py` (absolute rectangles, never origins). Vehicle: `phase0/two_reg32/pins.buda` (§8 step 3b) |
 | Bus corridors | `read_guides` after `set_nets_to_route` | `emit_guides` has the content (per-bit tapered); the OpenROAD guide format (`phase0/measure/guide_io.py`) is NEW |
 | Placement keep-out under corridors | `PL_SOFT_OBSTRUCTIONS` | `export_def_blockages density`; the tuple list is NEW |
 | Bus wiring as FIXED pre-routes | DEF `NETS … + FIXED` | NEW, gated on measurement B |
@@ -346,6 +347,51 @@ any verifier of it must read the geometry the same way.  If the template is
 refused for an off-track or off-grid pin, the generator's `--h-pitch/--h-offset/--v-pitch/--v-offset` take the PDK's real
 values from the tech LEF; if `resolved.json` shows different pin layers, pass
 `--h-layer/--v-layer`.
+
+**3b. The same handoff, with BUDA writing the template.**  Steps 2 and 4
+first: the template comes from the top's PLAN, so the top must exist as
+placed and the block as hardened.  Then, from the BUDA checkout:
+
+```bash
+cd ~/src/buda/flow/librelane/phase0/two_reg32
+python3 prep_pins.py                       # two_reg32_fp.def + reg32_macro.lef + sky130_tech.lef, from the runs
+cd ~/src/buda && bin/buda --no-viz flow/librelane/phase0/two_reg32/pins.buda
+cd flow/librelane/phase0/reg32
+librelane --dockerized --run-tag phase0_buda_pins config_buda_pins.json
+python3 ~/src/buda/tools/pin_def_verify.py ../two_reg32/reg32_pins.def runs/phase0_buda_pins/final/def/reg32.def
+```
+
+Pass, in order: `prep_pins: ok` (2 reg32 instances, 32 `mid` nets, TRACKS
+kept; the DEF is the final one reduced to its floorplan — the std cells
+have no LEF here and the port nets would give u0's `d` and u1's `d` two
+different answers, which is what `emit_pin_def` refuses on a cell; the
+reason each is dropped is in the script's docstring); the flow's
+`check_design dnuts` clean and its last line `[PinDEF] reg32_pins.def: 66
+pin(s) for reg32 — 64 from the plan (detailed; E 32, W 32), 2 spread on
+edge S on met2`, which is the hand template's layout — `d` west, `q` east,
+`clk`/`rst` south, every pin on a track — with the y of each `d[i]`/`q[i]`
+now the y the top-level bus was ROUTED at, so the bus between the two
+macros is straight by construction (`u0.q[i]` and `u1.d[i]` are the same
+bit-wire, and the template has one local y for both); the hardening run
+completing with `Odb.ApplyDEFTemplate` relocating 66 pins; and the
+verifier's `PASS: 66 of 66 template pin(s) appear in the final DEF with an
+identical absolute rectangle`.  A `MISMATCH:` names the pin and both
+rectangles; `REFUSED:` means the final DEF had no `PINS` section, which is
+not a pass.  If the pin count is not 66, the missing pins are ports the
+macro LEF marks `USE CLOCK` (BUDA's LEF reader drops those as pre-routes;
+`prep_pins.py` rewrites them `USE SIGNAL` in its copy and prints how many).
+
+**The number to record** is reg32's own `route__wirelength` under BUDA's
+template (`runs/phase0_buda_pins/final/metrics.json`) against the hand
+template's **6303 µm** and the free placer's 3937 (§7.3: the +60 % is what
+the straight bus costs the block).  BUDA's template lands `d` and `q` on
+the same track pair the hand one chose by convention, so the expectation
+is a number close to 6303; a larger one says the bus's y is a worse row
+for the block's own logic than the hand template's, and that is the
+block-internal column of the §7.3 table, measured rather than assumed.
+`config_buda_pins.json` differs from `config_pins.json` only in where
+`FP_DEF_TEMPLATE` points, so the two hardenings differ only by the
+template.
 
 **4. The top with two hardened macros and a bus between them.**
 
