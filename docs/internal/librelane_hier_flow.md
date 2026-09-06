@@ -138,7 +138,7 @@ solve-once-copy premise as BUDA's bottom-up planning (`set_bottom_up`,
 | Block placement | `MACROS.<cell>.instances.<inst>.location/orientation` | trivial writer, NEW |
 | Block size | `DIE_AREA` + `FP_SIZING absolute` | rule in `flow/tcl/tpu_lib.tcl` (face-capacity aware); a command, NEW |
 | Block pins at exact positions | `FP_DEF_TEMPLATE` — the shape `phase0/reg32/gen_pins_def.py` writes by hand | NEW writer: per net bit landing on a block, face + coordinate + layer from the DNUTS `net_segment` endpoint at the busterm, transformed to block-local through the instance orientation (`orient_rect.py`) |
-| Block pins from the plan, written | `FP_DEF_TEMPLATE` — the same file, from BUDA | **`emit_pin_def <file.def> <block-or-cell> [unrouted <edge> [<layer>]] [depth <um>] [grid <dbu>] [lef <file>]`** (`buda_session/pin_def.py`): after `run_detailed_nuts`, one pin per net bit where its bit-wire meets the block face, on the bit-wire's layer (a track by construction), rectangle SYMMETRIC about the PLACED point, DEF-escaped names, UNITS from `lu_per_um`; a cell in a hier session is a TEMPLATE (every instance must agree in cell-local coordinates, `N` only for now); nets on no bus are spread on one edge's tracks; a pin is on the BLOCK's track grid, so an instance origin off the pin layer's track period is REFUSED with the residue and the clearing shift (`snap` moves each pin to the nearest block-frame track and reports the largest, BUDA-1713); verifier `tools/pin_def_verify.py` (absolute rectangles, never origins). Vehicle: `phase0/two_reg32/pins.buda` (§8 step 3b) |
+| Block pins from the plan, written | `FP_DEF_TEMPLATE` — the same file, from BUDA | **`emit_pin_def <file.def> <block-or-cell> [unrouted <edge> [<layer>]] [depth <um>] [grid <dbu>] [lef <file>]`** (`buda_session/pin_def.py`): after `run_detailed_nuts`, one pin per net bit where its bit-wire meets the block face, on the bit-wire's layer (a track by construction), rectangle SYMMETRIC about the PLACED point, PLAIN names (odb reads an escaped `d\[16\]` back as `d[16\]` and matches nothing; `escaped_names` opts in), UNITS from `lu_per_um`; a cell in a hier session is a TEMPLATE (every instance must agree in cell-local coordinates, `N` only for now); nets on no bus are spread on one edge's tracks; a pin is on the BLOCK's track grid, so an instance origin off the pin layer's track period is REFUSED with the residue and the clearing shift (`snap` moves each pin to the nearest block-frame track and reports the largest, BUDA-1713); verifier `tools/pin_def_verify.py` (absolute rectangles, never origins). Vehicle: `phase0/two_reg32/pins.buda` (§8 step 3b) |
 | Bus corridors | `read_guides` after `set_nets_to_route` | **EXISTS**: `emit_guides <file.guide>` writes the OpenROAD guide file — gcells from the DEF's `GCELLGRID`, the floor-at-both-ends junction rule, DEF-escaped names, pin-access strips on the `terminal` layers (§8 step 5b; the phase-0 lessons of step 5 are the rules it is built from) |
 | Placement keep-out under corridors | `PL_SOFT_OBSTRUCTIONS` | `export_def_blockages density`; the tuple list is NEW |
 | Bus wiring as FIXED pre-routes | DEF `NETS … + FIXED` | NEW, gated on measurement B |
@@ -405,11 +405,14 @@ verifier's `PASS: 66 of 66 template pin(s) appear in the final DEF with an
 identical absolute rectangle`.  A `MISMATCH:` names the pin and both
 rectangles; `REFUSED:` means the final DEF had no `PINS` section, which is
 not a pass.  If `Odb.ApplyDEFTemplate` refuses a NAME rather than a
-position, it is the DEF spelling: the template writes `d\[0\]` (what
-OpenROAD writes back, and what the routed DEF's nets are called) where the
-hand template wrote the plain `d[0]` under `BUSBITCHARS "[]"` — pass
-`plain_names` to `emit_pin_def` and re-run.  Strict matching on the first
-run is what settles which spelling it wants; record the answer here.
+position, it is the DEF spelling, and the first real run SETTLED it: the
+template writes the PLAIN `d[0]` under `BUSBITCHARS "[]"`, as the hand
+template did.  The escaped spelling — what OpenROAD WRITES, and what the
+routed DEF's nets are called — does not survive being read back: odb takes
+`d\[16\]` as the name `d[16\]` (it consumes the leading escape and keeps
+the trailing one), so `Odb.ApplyDEFTemplate` reported all 66 pins "not found
+in design layout" and exited 2.  `escaped_names` writes the other spelling
+for the day a tool wants it; nothing here does.
 
 **THE BLOCK'S TRACKS ARE NOT THE TOP'S, and the flow moves the macros for
 it.**  A planned pin sits where the top's bit-wire meets the face, on one
@@ -429,17 +432,58 @@ a placement cannot move: each pin goes to the nearest block-frame track and
 BUDA-1713 reports the largest shift — metal the top's router then has to
 jog to reach, which is a cost, not a fix.
 
-**The number to record** is reg32's own `route__wirelength` under BUDA's
-template (`runs/phase0_buda_pins/final/metrics.json`) against the hand
-template's **6303 µm** and the free placer's 3937 (§7.3: the +60 % is what
-the straight bus costs the block).  BUDA's template lands `d` and `q` on
-the same track pair the hand one chose by convention, so the expectation
-is a number close to 6303; a larger one says the bus's y is a worse row
-for the block's own logic than the hand template's, and that is the
-block-internal column of the §7.3 table, measured rather than assumed.
-`config_buda_pins.json` differs from `config_pins.json` only in where
-`FP_DEF_TEMPLATE` points, so the two hardenings differ only by the
-template.
+**A BUS'S BIT PITCH MUST LEAVE THE ROUTER ITS ADJUSTMENT MARGIN.**  The
+first end-to-end hardening against a BUDA template put the 32 bits on 32
+CONSECUTIVE met3 tracks — the densest plan there is, and the one the global
+router cannot work with: `GRT_LAYER_ADJUSTMENTS` holds a fraction of every
+layer's tracks in reserve, and a face with none left ends the run in
+`GRT-0116` overflow (measured: **69** overflow, at 5789 µm).  The fix
+belongs in the PLAN, not the writer — the writer puts a pin where the bit
+was routed, so the pitch is the router's own question — and it is one line
+in `pins.buda`:
+
+```
+def_track_pattern 3 190 SIGNAL 300 380 CUSTOM 300 380
+```
+
+one SIGNAL slot then one the router keeps, so the bus takes every SECOND
+met3 track.  `buda_route.buda` needs the same declaration or its guide rows
+sit between the pins.  **The origin is a slot START, not a track centre**:
+`def_track_pattern` anchors the first slot's low edge and the track is its
+centre, so a centre at c needs `origin = c - width/2` — exactly what the DEF
+importer computes for itself (`_apply_def_tracks`).  sky130's met3 tracks are
+at 340 + 680k DBU, so **190** puts the signal centres on 340 + 1360k (every
+second PDK track) while **340** puts them on 490 + 1360k — 150 DBU off every
+one of them, half the wire width.  The measured ladder below was taken with
+340; the vehicle now declares 190 and the number wants re-measuring.
+
+**The numbers to record** are reg32's own `route__wirelength`
+(`runs/<tag>/final/metrics.json`) across the three ways to place its pins,
+measured 2026-09-06 on the phase-0 toy:
+
+| pins placed by | reg32 `route__wirelength` | vs the free placer | outcome |
+|---|---|---|---|
+| LibreLane's own `IOPlacement` | 3937 µm | — | the block alone, no bus to serve |
+| the hand template (`gen_pins_def.py`) | 6358 µm | +62 % | clean (§7.3's +60 % is the same run at 6303 µm, before `RT_MAX_LAYER met3`) |
+| BUDA, every met3 track | 5789 µm | +47 % | **refused**: GRT-0116, 69 overflow |
+| BUDA, every SECOND met3 track | **4966 µm** | **+26 %** | clean but for 4 residual overflow at the die margin |
+
+So the planned template costs the block **+26 %** where the hand one costs
++60-62 %, and that is the §7.3 trade measured rather than assumed: BUDA lands
+`d` and `q` on the y the top's bus was ROUTED at, which is a better row for
+the block's own logic than the convention the hand template followed.  The
+verifier reports `PASS: 66 of 66` on the hardened result, and at the top the
+§5b containment falls from **30.4 % to 0.4 %**.  The 4 residual overflow are
+at the die margin and are the next thing to chase — the off-track 340 origin
+above is a candidate cause, since a pin 150 DBU off the grid is one the
+router must jog to reach.
+
+`config_buda_pins.json` differs from `config_pins.json` in exactly two
+keys, so the two hardenings are comparable: where `FP_DEF_TEMPLATE` points,
+and **`RT_MAX_LAYER met3`**.  The second is not tidiness — a block allowed
+to route on the top's PDN layers hands the top a met4 `OBS`, pdngen drops
+every strap crossing it, and every macro power pin comes out unconnected
+(measured at step 5b; §9 carries the rule).
 
 **4. The top with two hardened macros and a bus between them.**
 

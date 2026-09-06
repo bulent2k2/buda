@@ -10,7 +10,7 @@
     "FP_CORE_UTIL": 45,
     "PL_TARGET_DENSITY_PCT": 50,
 
-    "RT_MAX_LAYER": "met4",
+    "RT_MAX_LAYER": "met3",
 
     "FP_DEF_TEMPLATE": "dir::../two_reg32/reg32_pins.def",
     "FP_TEMPLATE_MATCH_MODE": "strict",

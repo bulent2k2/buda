@@ -20,18 +20,18 @@ from buda_script import leading_path_and_options
 
 from ._options import reject_unknown_options
 
-_OPTS = ("unrouted", "depth", "grid", "lef", "snap", "plain_names")
+_OPTS = ("unrouted", "depth", "grid", "lef", "snap", "escaped_names")
 
 
 def cmd_emit_pin_def(session, cmd, args, cmd_line):
     # Usage: emit_pin_def <file.def> <block-or-cell> [unrouted <N|S|E|W> [<layer>]]
     #                     [depth <um>] [grid <dbu>] [lef <file.lef>] [snap]
-    #                     [plain_names]
+    #                     [escaped_names]
     if len(args) < 2:
         print("Error: emit_pin_def requires an output path and a block or "
               "cell name: emit_pin_def <file.def> <block-or-cell> "
               "[unrouted <N|S|E|W> [<layer>]] [depth <um>] [grid <dbu>] "
-              "[lef <file.lef>] [snap] [plain_names]")
+              "[lef <file.lef>] [snap] [escaped_names]")
         return
     # A QUOTED path may contain spaces; unquoted this is the old split.
     path, rest = leading_path_and_options(cmd_line, _OPTS)
@@ -41,7 +41,7 @@ def cmd_emit_pin_def(session, cmd, args, cmd_line):
         return
     target, opts = rest[0], rest[1:]
     unrouted, unrouted_layer, depth, grid, lef = "S", None, None, None, None
-    snap, plain = False, False
+    snap, escaped = False, False
     i = 0
     while i < len(opts):
         kw = opts[i].lower()
@@ -68,10 +68,12 @@ def cmd_emit_pin_def(session, cmd, args, cmd_line):
             # The fallback for a placement that cannot move onto the track
             # period: each pin to the nearest BLOCK-frame track, LOUD.
             snap, i = True, i + 1
-        elif kw == "plain_names":
-            # `d[0]` rather than `d\[0\]` — which spelling strict template
-            # matching wants is settled on the first real run.
-            plain, i = True, i + 1
+        elif kw == "escaped_names":
+            # `d\[0\]` rather than the default `d[0]`.  The first real run
+            # settled which spelling strict template matching wants: odb reads
+            # an escaped template name back as `d[16\]` and matches NOTHING,
+            # so plain is the default and this is the escape hatch.
+            escaped, i = True, i + 1
         elif kw == "grid" and i + 1 < len(opts):
             try:
                 grid = int(opts[i + 1])
@@ -87,7 +89,7 @@ def cmd_emit_pin_def(session, cmd, args, cmd_line):
     emit_pin_def(session, resolve_script_path(session, path), target,
                  unrouted=unrouted, unrouted_layer=unrouted_layer,
                  depth_um=depth, grid=grid, lef_path=lef, snap=snap,
-                 plain_names=plain)
+                 escaped_names=escaped)
 
 
 COMMANDS = {"emit_pin_def": cmd_emit_pin_def}

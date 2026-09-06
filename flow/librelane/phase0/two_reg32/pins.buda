@@ -37,6 +37,38 @@ def_layer 2 met2 V LOW 30
 def_layer 3 met3 H TOP 30
 def_layer 4 met4 V TOP 30
 def_layer 5 met5 H TOP 30
+
+# THE BUS TAKES EVERY SECOND met3 TRACK, not every one.  The global router
+# is handed `GRT_LAYER_ADJUSTMENTS`, a fraction of each layer's tracks it
+# keeps in reserve; a template whose 32 bits sit on 32 CONSECUTIVE tracks
+# leaves it nothing on the face it has to route to, and the run ends in
+# GRT-0116 overflow.  So the bus is planned at twice the PDK pitch: one
+# SIGNAL slot, then one the router keeps.  The pins land on the SIGNAL
+# slots, and DNUTS places the bit-wires on the same ones by construction.
+#
+# THE ORIGIN IS A SLOT START, NOT A TRACK CENTRE.  `def_track_pattern`'s
+# origin anchors the first slot's LOW EDGE and the track is its centre, so a
+# centre at c needs origin c - width/2 — which is exactly what the DEF
+# importer computes for itself (`_apply_def_tracks`: `origin = tr.start -
+# width/2`, since a DEF `TRACKS` start IS a centre).  sky130's met3 tracks
+# are at 340 + 680k DBU, so an origin of 190 puts the signal centres on
+# 340 + 1360k: every second PDK track, starting at the first.  Measured
+# here with the engine's own `TrackPattern`, both values:
+#
+#   origin 190  ->  unit_pitch 1360, signal centres 340, 1700, 3060, ...
+#   origin 340  ->  unit_pitch 1360, signal centres 490, 1850, 3210, ...
+#
+# The end-to-end run recorded in §8 step 3b used 340 — 150 DBU (0.15 um)
+# off every PDK met3 track, half the wire width — and still hardened
+# cleanly (66/66 pins verified) with 4 residual overflow at the die margin.
+# 190 is the on-track value and is what is declared here; RE-MEASURE before
+# quoting a new wirelength, and `340` reproduces the recorded run exactly.
+#
+# The instance origins below stay on the period either way: the phase rule
+# reads the pattern's `unit_pitch`, which this doubles to 1360, and
+# 20400 = 15 x 1360.
+def_track_pattern 3 190 SIGNAL 300 380 CUSTOM 300 380
+
 import_lef_tech sky130_tech.lef
 
 # The top as LibreLane placed it: u0 at (10, 20) um, u1 at (160, 20) um on a
@@ -46,15 +78,16 @@ import_def_lef two_reg32_fp.def reg32_macro.lef
 # ... moved onto the TRACK PERIOD.  The block is hardened alone with tracks
 # at OFFSET + k*PITCH from ITS origin, so a pin taken from the top's routed
 # wire is on the block's grid only when the instance origin is a whole
-# number of periods on the pin layer: x on met2 (0.46 um), y on met3 (0.68).
-# (10, 20) is 0.34 past a met2 period and 0.28 past a met3 one — measured
-# on this toy, d[0] lands 0.40 um off the block's met3 track and clk 0.12
-# off met2 — and `emit_pin_def` refuses it (or, with `snap`, moves every
-# pin and says by how much).  9.2 / 160.08 are the nearest multiples of
-# 0.46 that keep both macros clear of the 30 um PDN straps (VGND met4 pin
-# at cell-local 13.22..15.22 against straps at 5.52 + 30k, width 1.6); 20.4
-# is the nearest multiple of 0.68.  Step 3b carries these into the top's
-# MACROS locations for the re-run.
+# number of periods on the pin layer: x on met2 (0.46 um), y on met3 (1.36
+# with the doubled pattern above, 0.68 without it).  (10, 20) is 0.34 past
+# a met2 period and 0.28 past a met3 one — measured on this toy, d[0] lands
+# 0.40 um off the block's met3 track and clk 0.12 off met2 — and
+# `emit_pin_def` refuses it (or, with `snap`, moves every pin and says by
+# how much).  9.2 / 160.08 are the nearest multiples of 0.46 that keep both
+# macros clear of the 30 um PDN straps (VGND met4 pin at cell-local
+# 13.22..15.22 against straps at 5.52 + 30k, width 1.6); 20.4 is a whole
+# number of BOTH met3 periods, so it stands whichever pattern is declared.
+# Step 3b carries these into the top's MACROS locations for the re-run.
 move_comp u0 9200 20400
 move_comp u1 160080 20400
 

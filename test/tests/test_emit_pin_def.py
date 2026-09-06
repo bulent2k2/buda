@@ -18,8 +18,9 @@ verifier `tools/pin_def_verify.py`.
 
 Two synthetic designs.  A FLAT one in the shape of flow/def's (two blocks,
 one 4-bit bus plus scalar nets, hand-declared layers and track patterns)
-pins the pin-per-bit geometry, the symmetric-rectangle form, the escaped
-spelling, the unrouted spread, the abstract fallback and the refusals.  A
+pins the pin-per-bit geometry, the symmetric-rectangle form, the plain and
+escaped spellings, the unrouted spread, the abstract fallback and the
+refusals.  A
 HIER one — a DEF + LEF at `set_import_scale dbu`, two instances of one
 macro chained by a bus, the phase-0 toy in miniature — pins UNITS from
 lu_per_um, the template semantics (each instance contributes the pins it
@@ -147,11 +148,24 @@ def test_the_rectangle_is_symmetric_about_the_placed_point(tmp_path):
     assert p[3] == (-2, -1, 2, 1) and p[4][0] == 2
 
 
-def test_names_are_written_def_escaped(tmp_path):
+def test_names_are_written_plain_and_escaped_only_on_request(tmp_path):
+    """PLAIN (`q[0]`) is the default, measured end to end: odb reads a
+    template name `d\\[16\\]` back as `d[16\\]` — it consumes the leading
+    escape and keeps the trailing one — so all 66 pins of the phase-0 block
+    were reported "not found in design layout" and `ApplyDEFTemplate` exited
+    2.  The escaped spelling (what OpenROAD WRITES) stays available behind
+    `escaped_names` and is what the verifier compares through `unescape`."""
     _s, _log, out = _flat(tmp_path, _DNUTS)
     text = out.read_text()
-    assert re.search(r"^\s+- q\\\[0\\\] \+ NET q\\\[0\\\] ", text, re.M), text
-    assert "- q[0] " not in text
+    assert re.search(r"^\s+- q\[0\] \+ NET q\[0\] ", text, re.M), text
+    assert "\\[" not in text
+
+    _s, _log, esc = _flat(tmp_path / "esc", _DNUTS, "escaped_names")
+    etext = esc.read_text()
+    assert re.search(r"^\s+- q\\\[0\\\] \+ NET q\\\[0\\\] ", etext, re.M), etext
+    assert "- q[0] " not in etext
+    # Same pins either way — only the spelling differs.
+    assert _pins(text) == _pins(etext)
 
 
 def test_units_is_the_sessions_lu_per_um_and_the_die_is_the_block(tmp_path):
@@ -604,6 +618,17 @@ def test_the_vehicle_runs_on_the_shape_the_phase0_runs_have(tmp_path):
         assert pins[f"d[{i}]"][4][1] == pins[f"q[{i}]"][4][1]     # one y per bit
         assert pins[f"d[{i}]"][2] == pins[f"q[{i}]"][2] == "met3"
         assert (pins[f"d[{i}]"][4][1] - 340) % 680 == 0      # the BLOCK's met3 track
+    # ... and on EVERY SECOND one: the bus is planned at twice the PDK pitch
+    # so the global router keeps its `GRT_LAYER_ADJUSTMENTS` margin on the
+    # face it has to reach (measured: every track leaves it none and the run
+    # ends in GRT-0116 overflow).  The doubled pitch is the plan's, not the
+    # writer's — `pins.buda` declares it — and the on-track half is what an
+    # origin of 340 gets wrong: `def_track_pattern`'s origin is a slot START,
+    # so 340 puts the centres at 490 + 1360k, 150 DBU off every PDK track.
+    ys = sorted(pins[f"d[{i}]"][4][1] for i in range(32))
+    assert {b - a for a, b in zip(ys, ys[1:])} == {1360}
+    assert "def_track_pattern 3 190 SIGNAL 300 380 CUSTOM 300 380" in \
+        (_P0 / "two_reg32" / "pins.buda").read_text()
     assert pins["clk"][2] == pins["rst"][2] == "met2"
     for n in ("clk", "rst"):
         assert (pins[n][4][0] - 230) % 460 == 0              # the BLOCK's met2 track
@@ -618,9 +643,17 @@ def test_the_vehicle_runs_on_the_shape_the_phase0_runs_have(tmp_path):
     assert pdv.compare(t, _recentred(t)) == ([], [], 66, 66)
 
 
-def test_the_hardening_config_differs_from_the_hand_one_only_by_the_template():
+def test_the_hardening_config_differs_from_the_hand_one_by_two_keys():
+    """The two configs harden the SAME block, so everything that is not the
+    template or the router's ceiling must match — otherwise the wirelength
+    comparison in §8 step 3b is measuring two different runs.
+
+    `RT_MAX_LAYER met3` is the second key and is measured, not tidiness: the
+    BUDA template puts the bus on met3, and leaving the router met4 lets it
+    escape the pin layer, which is not the corridor the template asks for."""
     a = json.loads((_P0 / "reg32" / "config_pins.json").read_text())
     b = json.loads((_P0 / "reg32" / "config_buda_pins.json").read_text())
     assert set(a) == set(b)
-    assert {k for k in a if a[k] != b[k]} == {"FP_DEF_TEMPLATE"}
+    assert {k for k in a if a[k] != b[k]} == {"FP_DEF_TEMPLATE", "RT_MAX_LAYER"}
     assert b["FP_DEF_TEMPLATE"] == "dir::../two_reg32/reg32_pins.def"
+    assert b["RT_MAX_LAYER"] == "met3"

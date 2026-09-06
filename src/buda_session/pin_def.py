@@ -37,8 +37,13 @@ Three facts phase 0 measured decide the shape (§8 step 3):
   pin placed where a DetailedNUTS bit-wire meets the face is on a track by
   construction; the abstract fallback (no `run_detailed_nuts`) is NOT, and
   says so.
-* OpenROAD spells `d[0]` as `d\\[0\\]` in a DEF; the template is written in
-  that spelling (`def_escape`, the inverse of `measure/def_wires.unescape`).
+* Pin names are written PLAIN (`d[0]`), NOT in the escaped spelling
+  OpenROAD uses when it WRITES a DEF.  Measured on the phase-0 toy: odb reads
+  a template `d\\[16\\]` back as the name `d[16\\]` (it consumes the leading
+  escape and keeps the trailing one), so all 66 pins were reported "not found
+  in design layout" and `ApplyDEFTemplate` exited 2.  `def_escape` is kept for
+  the `escaped_names` opt-in, which is there for the day a tool wants the
+  other spelling — nothing here needs it.
 
 TEMPLATE SEMANTICS for a cell: a cell is hardened ONCE and placed N times, so
 every instance must agree on where each pin is in CELL-LOCAL coordinates.  A
@@ -374,7 +379,7 @@ def _lef_cell_pins(session, target, lef_path):
 
 def emit_pin_def(session, path, target, unrouted="S", unrouted_layer=None,
                  depth_um=None, grid=None, lef_path=None, snap=False,
-                 plain_names=False):
+                 escaped_names=False):
     """Write `path`.  Returns the list of (name, planned) written, or None
     when the command refused — every refusal prints an `Error:` line and
     returns, one convention for the command (disagreeing instances, an
@@ -732,7 +737,7 @@ def emit_pin_def(session, path, target, unrouted="S", unrouted_layer=None,
         f"PINS {len(rows)} ;",
     ]
     for p, cx, cy, (x1r, y1r, x2r, y2r) in rows:
-        nm = p.name if plain_names else def_escape(p.name)
+        nm = def_escape(p.name) if escaped_names else p.name
         out.append(
             f"  - {nm} + NET {nm} + DIRECTION {p.dir} + USE SIGNAL"
             f" + LAYER {names_for(p.layer)} ( {x1r} {y1r} ) ( {x2r} {y2r} )"

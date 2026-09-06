@@ -485,7 +485,7 @@ byte-deterministic.
 ### `emit_pin_def`
 
 ```
-emit_pin_def <file.def> <block-or-cell> [unrouted <N|S|E|W> [<layer>]] [depth <um>] [grid <dbu>] [lef <file.lef>] [snap] [plain_names]
+emit_pin_def <file.def> <block-or-cell> [unrouted <N|S|E|W> [<layer>]] [depth <um>] [grid <dbu>] [lef <file.lef>] [snap] [escaped_names]
 ```
 
 Write a **pin-DEF template** for one block — the block-side handoff of the
@@ -498,7 +498,7 @@ per pin, placed where that pin's routed bit-wire MEETS the block face, on
 the bit-wire's layer — so on a signal track by construction — sized the
 layer's minimum width across the wire by `depth` (default 2 um) into the
 block, `DIRECTION` from the net's driver/receiver role (the LEF's when the
-cell has one), `+ USE SIGNAL`, names DEF-escaped (`d\[0\]`).
+cell has one), `+ USE SIGNAL`, names PLAIN (`d[0]`).
 
 The rectangle is written **symmetric about the `PLACED` point** because
 that is how OpenROAD writes every pin back (it re-centres the origin), and
@@ -527,8 +527,23 @@ cannot move — every pin goes to the nearest block-frame track and
 BUDA-1713 reports the largest shift. Pins spread on the `unrouted` edge
 are on the block's own tracks by construction.
 
-`plain_names` writes `d[0]` instead of the DEF-escaped `d\[0\]`, for a
-consumer whose strict name matching wants the unescaped spelling.
+**The bit PITCH is the plan's question, not the writer's.**  A pin goes
+where the bit was routed, so a bus planned on consecutive tracks yields a
+block face with no track left for the global router's
+`GRT_LAYER_ADJUSTMENTS` reserve, and the hardening run ends in `GRT-0116`
+overflow.  Plan the bus at a coarser pitch instead — a `def_track_pattern`
+alternating one `SIGNAL` slot with one the router keeps — and note that the
+pattern's origin is a slot START, so a track centre at `c` needs
+`origin = c - width/2` (§8 step 3b has the worked sky130 numbers).
+
+**Names are written PLAIN**, not in the escaped spelling OpenROAD uses when
+it WRITES a DEF, and that is measured rather than chosen: odb reads a
+template name `d\[16\]` back as `d[16\]` — it consumes the leading escape
+and keeps the trailing one — so `Odb.ApplyDEFTemplate` reported all 66 pins
+of the phase-0 block "not found in design layout" and exited 2.
+`escaped_names` writes `d\[0\]` for a consumer that wants the other
+spelling; `tools/pin_def_verify.py` compares names unescaped, so either
+spelling verifies.
 
 In a hier session naming a **cell** builds one template from every
 instance (template semantics): each instance contributes the pins it
