@@ -351,6 +351,32 @@ def _toy_config(path, x0, x1=160, **extra):
     path.write_text(json.dumps(cfg))
 
 
+def test_pdn_phase_searches_each_axis_against_its_own_clips(tmp_path):
+    """An instance violated on BOTH axes has a remedy: the x-shift clears
+    the vertical-layer clips and the y-shift the horizontal-layer ones, and
+    applying both clears the design.  Judging each candidate against the
+    OTHER axis too rejects every one of them and reports no remedy at all
+    (measured on this case before the fix: global_dx and global_dy both
+    None -- Codex #885), so a shift is judged against the clips its own
+    axis controls and the PAIR is verified before it is offered."""
+    _toy_lef(tmp_path / "reg32.lef")
+    # x: u0 at 20 puts its VGND met4 pins under VPWR straps (the toy's own
+    # failure).  y: an HOFFSET that puts a VPWR met5 strap over the VGND
+    # met5 pin, which no x-shift can move out from under.
+    _toy_config(tmp_path / "both.json", 20, FP_PDN_HOFFSET=28.7, FP_PDN_HPITCH=153.18)
+    r = subprocess.run([sys.executable, str(_T1A / "pdn_phase.py"), str(tmp_path / "both.json"),
+                        "--json", str(tmp_path / "both.out")], capture_output=True, text=True)
+    assert r.returncode == 1, r.stdout + r.stderr
+    out = json.loads((tmp_path / "both.out").read_text())
+    assert sorted({c["axis"] for c in out["clips"]}) == ["x", "y"]          # both axes violated
+    assert out["global_dx"] is not None and out["global_dy"] is not None
+    assert out["global_clean_at_dxdy"] is True
+    assert "TOGETHER they leave every instance clean and connected" in r.stdout
+    u0 = next(p for p in out["per_instance"] if p["instance"] == "u0")
+    assert u0["dx"] is not None and u0["dy"] is not None and u0["clean_at_dxdy"] is True
+    assert "together they clear it" in r.stdout
+
+
 def test_pdn_phase_finds_the_toys_clip_and_the_shift_that_clears_it(tmp_path):
     """The phase-0 toy's failure, recomputed: with u0 at x = 20 its VGND met4
     pin (33.22-35.22) meets the top's VPWR strap (34.72-36.32, offset 0 pitch

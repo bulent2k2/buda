@@ -640,20 +640,26 @@ measured first (53 % of the bus wire outside BUDA's corridor, `q[0]` on
 u0's WEST face), which is the H+B premise stated the other way round: the
 pin template is what makes BUDA's corridor reachable at all.
 
+Run it against the BUDA-pinned block (step 3b) — `TAG=phase0_buda_pins`
+below.  `TAG=phase0_pins`, the HAND template, is the same recipe and is
+what the "neither verdict passes" paragraph reports; the two runs are the
+before and after of the pin writer.
+
 ```bash
 cd flow/librelane/phase0/two_reg32
-librelane --dockerized --run-tag phase0_pins config_pins.json               # the top against the TEMPLATE block
+TAG=phase0_buda_pins                                                        # or phase0_pins for the hand template
+librelane --dockerized --run-tag $TAG config_buda_pins.json                 # the top against THAT block
 mkdir -p out
-cp runs/phase0_pins/*-odb-manualmacroplacement/two_reg32.def out/placed.def  # u0/u1 FIXED, std cells unplaced
+cp runs/$TAG/*-odb-manualmacroplacement/two_reg32.def out/placed.def         # u0/u1 FIXED, std cells unplaced
 ln -sf $PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hd/techlef/sky130_fd_sc_hd__nom.tlef out/tech.tlef
-ln -sf $PWD/../reg32/runs/phase0_pins/final/lef/reg32.lef out/block.lef      # the block BUDA routes between
+ln -sf $PWD/../reg32/runs/$TAG/final/lef/reg32.lef out/block.lef             # the block BUDA routes between
 ../../../../bin/buda buda_route.buda --no-viz                                 # -> out/buda_bus.guide
 cd ../measure
-ODB=$(ls ../two_reg32/runs/phase0_pins/*-openroad-cts/two_reg32.odb)
-./run_or.sh ../two_reg32/runs/phase0_pins guide_ref.tcl ODB=$ODB OUT=$PWD/out   # the ROUTER's corridor on this run
+ODB=$(ls ../two_reg32/runs/$TAG/*-openroad-cts/two_reg32.odb)
+./run_or.sh ../two_reg32/runs/$TAG guide_ref.tcl ODB=$ODB OUT=$PWD/out          # the ROUTER's corridor on this run
 python3 extract_bus_guides.py out/all.guide out/all_bus.guide                # …kept as the control
 python3 extract_bus_guides.py ../two_reg32/out/buda_bus.guide out/bus.guide  # the bus entries, as BUDA wrote them
-./run_or.sh ../two_reg32/runs/phase0_pins guide_test.tcl ODB=$ODB OUT=$PWD/out
+./run_or.sh ../two_reg32/runs/$TAG guide_test.tcl ODB=$ODB OUT=$PWD/out
 python3 check_inside.py out/guided.def out/bus.guide --slack 1.0 --max-corridor-outside-pct 10             # the verdict
 python3 check_inside.py out/guided.def out/all_bus.guide --slack 1.0 --max-corridor-outside-pct 10         # control: the ROUTER's corridor
 python3 check_inside.py out/guided.def out/bus.guide --slack 1.0 --max-outside-pct 5                       # strict: fails until the pin writer exists
@@ -672,8 +678,22 @@ step 5 (`--max-outside-pct`: outside the net's own-layer boxes), which a
 single-layer corridor plan cannot meet while the router changes layers
 inside it to reach pins whose rows the guide did not set.
 
-**Today neither verdict passes, for one known reason, and the recipe says
-so rather than lowering the bar** (next paragraph): the corridor verdict
+**With BUDA's pins both verdicts pass** (`TAG=phase0_buda_pins`, measured
+2026-09-06): the bus is 2294 µm in 168 segments, **0.0 % outside BUDA's
+corridor and 0.4 % on another layer inside it**, so the strict measure
+passes at 0.4 % against 5 %.  The control passes too, and that is the
+expected shape rather than a failed test: with the pins on the plan's rows
+the plan IS the router's natural route, so the two corridors coincide —
+the sharp form of step 5 (a corridor shifted a whole gcell) stays the test
+of FOLLOWING.  The top for that run needs `GRT_ALLOW_CONGESTION` (step 3b:
+4 residual overflow units at the die's east margin, which detailed routing
+clears), and the measure scripts' `global_route` carries
+`-allow_congestion` for the same reason — refusing there would end the
+measurement before it starts.
+
+**With the HAND template's pins neither verdict passes, for one known
+reason, and the recipe says so rather than lowering the bar** (next
+paragraph): the corridor verdict
 fails on 15 vias outside the corridor — every one of them at a jog
 between a bit's BUDA row and its pin row — with 7.7 % of the wire length
 outside, and the strict verdict fails at 30.4 %.  What the run DOES
