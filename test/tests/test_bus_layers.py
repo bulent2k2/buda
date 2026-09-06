@@ -168,6 +168,87 @@ def test_a_bundle_whose_nets_disagree_is_a_hard_error():
         _run(["set_bus_layers d_0 M3", "set_bus_layers d_1 M1"])
 
 
+def test_a_scope_declared_after_bundling_still_reaches_the_plan():
+    """The bundling hook is one-shot, and the PLAN is where a layer is
+    settled — so a scope declared (or changed, or cleared) after
+    `run_bundler` is re-applied before every full plan (Codex #889)."""
+    late = ["run_bundler STRICT", "set_bus_layers d M1", "generate_topologies",
+            "run_planner 3", "run_nuts", "run_detailed_nuts"]
+    s, _log = _run(tail=late)
+    assert _layers_of(s, "d") == [1]
+    # Changed after bundling: the last word wins, not the first.
+    changed = ["run_bundler STRICT", "set_bus_layers d M1",
+               "set_bus_layers d M3", "generate_topologies", "run_planner 3",
+               "run_nuts", "run_detailed_nuts"]
+    s, _log = _run(tail=changed)
+    assert _layers_of(s, "d") == [3]
+    # CLEARED after bundling: the bundle goes back to what governed it
+    # before, which here is nothing — the free choice, not a stale mask.
+    cleared = ["set_bus_layers d M1", "run_bundler STRICT",
+               "set_bus_layers d off", "generate_topologies", "run_planner 3",
+               "run_nuts", "run_detailed_nuts"]
+    s, _log = _run(tail=cleared)
+    assert _layers_of(s, "d") == [3]
+    assert all(not list(w.input.allowed_layers) for w in s.bundles)
+
+
+def test_replanning_under_one_scope_is_stable():
+    """Re-applying must restart from the pre-restriction mask, or a second
+    plan would intersect an already-intersected mask with itself."""
+    twice = ["run_bundler STRICT", "set_bus_layers d M1,M3",
+             "generate_topologies", "run_planner 3", "run_planner 3",
+             "run_nuts", "run_detailed_nuts"]
+    s, _log = _run(tail=twice)
+    d = next(w for w in s.bundles
+             if w.input.original_bundle.get_net_names()[0].startswith("d"))
+    assert sorted(d.input.allowed_layers) == [1, 3]
+
+
+def test_a_governed_net_bundled_with_an_ungoverned_one_is_refused():
+    """STRICT bundles two buses that share a driver and receivers, so a
+    scope on one would silently reroute the other (Codex #889)."""
+    both_to_b = [
+        "def_layer 1 M1 H 30", "def_layer 2 M2 V 30",
+        "def_layer 3 M3 H TOP 30", "def_layer 4 M4 V TOP 30",
+        "def_track_pattern 1 0.5 VDD 2 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 GND 2 1",
+        "def_track_pattern 3 0.5 VDD 2 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 GND 2 1",
+        "def_track_pattern 4 0.5 VDD 2 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 GND 2 1",
+        "add_block a 0 0 100 100", "add_block b 300 0 400 100",
+        "add_bus d[4] a.o b.i", "add_bus e[4] a.o b.i",   # ONE bundle
+        "set_bus_layers d M1", "run_bundler STRICT",
+    ]
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    buf = io.StringIO()
+    with pytest.raises(SystemExit):
+        with contextlib.redirect_stdout(buf):
+            for c in both_to_b:
+                s.do_command(c)
+    log = buf.getvalue()
+    assert "mixes governed and ungoverned nets" in log
+    assert "a bus nobody scoped" in log and "set_bundling" in log
+    # Scoping the peer to the SAME layers is the remedy the message names.
+    ok = both_to_b[:-2] + ["set_bus_layers d M1", "set_bus_layers e M1",
+                           "run_bundler STRICT", "generate_topologies",
+                           "run_planner 3", "run_nuts", "run_detailed_nuts"]
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    with contextlib.redirect_stdout(io.StringIO()):
+        for c in ok:
+            s.do_command(c)
+    assert sorted({n.layer for n in s.detailed_result.net_segments}) == [1]
+
+
+def test_different_prefixes_with_the_same_layers_are_accepted():
+    """The refusal's own remedy is "give the scopes the same layers", so
+    doing that has to work — the rule is the resolved MASK, not the prefix
+    count (Codex #889)."""
+    s, log = _run(["set_bus_layers d_0 M1", "set_bus_layers d_1 M1",
+                   "set_bus_layers d_2 M1", "set_bus_layers d_3 M1"])
+    assert _layers_of(s, "d") == [1], log
+    assert "different" not in log.lower() or "Error" not in log
+
+
 def test_the_restriction_survives_the_hier_resolver(tmp_path):
     """`_apply_layer_policies` OWNS allowed_layers and rewrites it at every
     wrapper-set transition, so the scope is RE-APPLIED after it — the same

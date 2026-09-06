@@ -74,51 +74,90 @@ def layers_for_net(session, net_name):
 
 
 def _bundle_scope(session, wrapper):
-    """The scope governing a BUNDLE: its nets must agree, since a bundle is
-    routed as one bus.  Returns (prefix, layers) or (None, None); a bundle
-    whose nets resolve to DIFFERENT scopes is a hard error — the bundler
-    put them on one bus, so a per-net answer cannot be honoured."""
-    seen = {}
+    """The layers governing a BUNDLE: `(prefix, layers)` or `(None, None)`.
+
+    A bundle routes as ONE bus, so every net in it must resolve to the SAME
+    restriction.  That one rule covers both ways it can fail (Codex #889):
+
+      * two prefixes naming DIFFERENT layers — the bits cannot take both;
+      * a governed net bundled with an UNGOVERNED one, which STRICT does
+        whenever two buses share a driver and receiver set.  Skipping the
+        ungoverned peer would force it onto the named bus's layers although
+        no prefix matched it — silently rerouting a bus nobody scoped.
+
+    Two prefixes naming the SAME layers are fine, since the restriction is
+    satisfiable and that is exactly what the refusal's own remedy asks for.
+    """
+    masks = {}
     for net in wrapper.input.original_bundle.get_net_names():
         prefix, layers = layers_for_net(session, net)
-        if prefix is None:
-            continue
-        seen.setdefault(prefix, (layers, net))
-    if not seen:
-        return (None, None)
-    if len(seen) > 1:
-        b = wrapper.input.original_bundle
-        parts = ", ".join(f"'{p}' ({seen[p][1]})" for p in sorted(seen))
-        print(f"Error: set_bus_layers: bundle {b.id} carries nets governed by "
-              f"different scopes — {parts} — but a bundle routes as ONE bus, "
-              f"so its bits cannot take different layers.  Give the scopes "
-              f"the same layers, or keep the nets apart (set_bundling).")
-        sys.exit(1)
-    prefix = next(iter(seen))
-    return (prefix, seen[prefix][0])
+        key = tuple(layers) if layers else None
+        masks.setdefault(key, (prefix, net))
+    if len(masks) == 1:
+        key, (prefix, _net) = next(iter(masks.items()))
+        return (prefix, list(key)) if key is not None else (None, None)
+    b = wrapper.input.original_bundle
+    free = masks.pop(None, None)
+    named = ", ".join(f"'{p}' -> {list(k)} ({n})"
+                      for k, (p, n) in sorted(masks.items(),
+                                              key=lambda kv: str(kv[1][0])))
+    if free is not None:
+        print(f"Error: set_bus_layers: bundle {b.id} mixes governed and "
+              f"ungoverned nets — {named}, while {free[1]} matches no scope "
+              f"— but a bundle routes as ONE bus, so restricting it would "
+              f"move a bus nobody scoped.  Scope the other net too, widen "
+              f"the scope to `*`, or keep them apart (set_bundling).")
+    else:
+        print(f"Error: set_bus_layers: bundle {b.id} carries nets governed "
+              f"by scopes with DIFFERENT layers — {named} — but a bundle "
+              f"routes as ONE bus, so its bits cannot take different "
+              f"layers.  Give the scopes the same layers, or keep the nets "
+              f"apart (set_bundling).")
+    sys.exit(1)
 
 
 def apply_bus_layer_restrictions(session, wrappers=None):
     """Intersect each governed bundle's bus-layer restriction into
-    `allowed_layers`.  Idempotent; a no-op scan when nothing is declared."""
-    if not getattr(session, "_bus_layer_scopes", None):
-        return 0
+    `allowed_layers`, and RESTORE a bundle that is no longer governed.
+
+    Idempotent and re-runnable, which it has to be: a scope declared (or
+    cleared) after `run_bundler` reaches the wrappers only because the
+    planner re-applies this (Codex #889), and re-applying must not
+    intersect an already-intersected mask with itself forever.  So the
+    mask each bundle had BEFORE any bus-layer restriction is remembered
+    (`_bus_layer_base`, keyed by bundle id) and every application starts
+    from it — the base being whatever else governs the bundle, a cell band
+    or an NDR rule's layers."""
+    wrappers_given = wrappers is not None
     if wrappers is None:
         wrappers = getattr(session, "bundles", []) or []
+    base = getattr(session, "_bus_layer_base", None)
+    if base is None:
+        base = session._bus_layer_base = {}
+    if not getattr(session, "_bus_layer_scopes", None) and not base:
+        return 0
     n = 0
     for w in wrappers:
+        bid = w.input.original_bundle.id
         prefix, layers = _bundle_scope(session, w)
+        if bid not in base and layers:
+            base[bid] = list(w.input.allowed_layers)
+        start = base.get(bid, list(w.input.allowed_layers))
         if not layers:
+            # No longer governed: give back what governed it before.
+            if bid in base:
+                w.input.allowed_layers = base.pop(bid)
             continue
-        cur = list(w.input.allowed_layers)
-        eff = sorted(set(layers) & set(cur)) if cur else sorted(layers)
-        if cur and not eff:
+        eff = sorted(set(layers) & set(start)) if start else sorted(layers)
+        if start and not eff:
             b = w.input.original_bundle
             print(f"Error: set_bus_layers '{prefix}' restricts bundle {b.id} "
                   f"to layers {sorted(layers)}, but what already governs it "
-                  f"allows only {sorted(cur)} — the two have no layer in "
+                  f"allows only {sorted(start)} — the two have no layer in "
                   f"common.  Widen one of them.")
             sys.exit(1)
         w.input.allowed_layers = eff
         n += 1
+    if not wrappers_given and not getattr(session, "_bus_layer_scopes", None):
+        base.clear()
     return n
