@@ -18,8 +18,14 @@
 # exits 1 naming what did not match.  Then:
 #
 #   cd flow/librelane/tier1a/n<N>/h && cat README.md      # harden, check, top, account
+#
+# `--pins <dir>` makes it arm H+B's block side instead: every block config
+# gets an `FP_DEF_TEMPLATE` from BUDA's plan (`pins.sh N` writes n<N>/pins/)
+# and is capped at `RT_MAX_LAYER met3`.  See harm.py's --pins help.
 set -euo pipefail
-N=${1:?usage: harm.sh N   (after gen.sh N)}; shift || true
+N=${1:?usage: harm.sh N [--pins <dir>]   (after gen.sh N)}; shift || true
+pins=()
+if [ $# -ge 2 ] && [ "$1" = "--pins" ]; then pins=(--pins "$2"); shift 2; fi
 if [ $# -ne 0 ]; then echo "harm.sh: unexpected arguments: $*" >&2; exit 1; fi
 here=$(cd "$(dirname "$0")" && pwd)
 # T1A_DIR overrides where the design lives (the tests use a temp dir), as in gen.sh.
@@ -28,5 +34,5 @@ if [ ! -f "$d/tpu.def" ] || [ ! -f "$d/tpu.lef" ] || [ ! -f "$d/tpu_rtl.v" ]; th
     echo "harm.sh: $d has no emitted set (tpu.def/tpu.lef/tpu_rtl.v) -- run gen.sh $N first" >&2
     exit 1
 fi
-python3 "$here/harm.py" "$d"
+python3 "$here/harm.py" "$d" ${pins[@]+"${pins[@]}"}
 echo "tier1a: N=$N -> $d/h  (4 block dirs + top/ + predicted_lef/ + README.md)"
