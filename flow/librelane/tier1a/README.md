@@ -95,13 +95,18 @@ python3 ../../pdn_connect.py runs/h/*-pdn/*.def ../*/runs/h/final/lef/*.lef --js
 python3 ../../pdn_connect.py --self-cross ../*/runs/h/final/lef/*.lef
 ```
 
-The first names every power pin with no via and says whether it had anything
-to reach; the second asks, from the LEFs alone, whether each power pin crosses
-its OWN net on the other connect layer -- `InstanceGrid::getInstancePins` puts
-a macro's pins in the same shape set the straps are in, so a pin that does is
-connected whatever the straps do, and a cell where one net self-crosses and
-the other does not floats that net on every phase.  A `SPLIT:` line, or a
-`via-no-partner` verdict, is the answer before any offset search is run.
+The first names every power pin with no via, says whether it had anything to
+reach, and whether a via it has REACHES a source (the top's own pins) -- an
+`unsourced` terminal is one whose via joins metal the supply never enters,
+PSM-0038's shape; the second asks, from the LEFs alone, whether each power
+pin crosses its OWN net on the other connect layer.  Read the second for
+less than it first claimed: `InstanceGrid::getInstancePins` puts a macro's
+pins in the set `Grid::getIntersections` searches, so such a crossing is one
+pdngen MAY via -- but the N=8 `PDN_HOFFSET 109.3` run offered it 512 pe_cell
+VGND pin-on-pin crossings over the floor and it made none (#900), so a `yes`
+is not a connection and a `SPLIT:` line is a cell to look at, not a verdict.
+The verdict before a top run is `pdn_phase.py`; after it, the first command
+here, and PSM.
 
 What `harm.sh` decided, and why (the full statement is `harm.py`'s docstring):
 

@@ -330,14 +330,20 @@ verified now, and it is narrower than the prose above implies:
   could explain.
 * `InstanceGrid::getInstancePins` (`:1609`) injects the macro's OWN pins as
   fixed shapes on their own layers and `InstanceGrid::getIntersections`
-  (`:1654`) merges them into the search set.  **So a macro's met4 pin can be
-  the partner that connects its met5 pin, with no strap anywhere.**  Neither
-  `harm.py`'s phase search nor `pdn_phase.py` models this, and it is a
-  per-CELL property: a cell whose VPWR pins cross each other and whose VGND
-  pins do not connects one net on every phase and floats the other on every
-  phase, which no offset search can fix and no strap-only prediction can
-  see.  `pdn_connect.py --self-cross <lef>...` asks exactly that question,
-  from the LEFs alone.
+  (`:1654`) merges them into the search set.  ~~So a macro's met4 pin can
+  be the partner that connects its met5 pin, with no strap anywhere.~~
+  **Measured otherwise** (PR #900, the N=8 `PDN_HOFFSET 109.3` run): that
+  plan offered pdngen 512 pe_cell VGND pin-on-pin crossings of 2.0 × 2.0 µm
+  over the 1.4 floor and it made NONE of them — `pdn_connect.py` reports
+  every one `partner-no-via`, and PSM counts exactly those 512 shapes
+  unconnected — while on the working plan the same pins are fed by a
+  strap's via.  What in `makeVias` declines a pin-on-pin pair is not
+  settled; the source loop pairs them.  So a self-crossing is one pdngen
+  MAY via, never one it did: `pdn_connect.py --self-cross <lef>...` still
+  asks the question from the LEFs alone, and its `yes` is a cell to look
+  at, not a connection.  The model does not depend on it either way — it
+  strands the island for want of a source — which is why direction B
+  fails correctly.
 * `Grid::makeVias` (`:827`) pulls into the macro's search area every shape
   from every OTHER grid, so the macro grid connects using the CORE grid's
   straps.  LibreLane's macro grid draws no metal of its own: `pdn_cfg.tcl`
@@ -1689,22 +1695,28 @@ have: every netlist here is either authored or uniquified.
    unconnected shapes" PSM counts), and offers only a VERIFIED shift.  On
    the phase-0 toy: x=10 PASS and x=20 FAIL (u0's VPWR stranded), both as
    measured.  Still ADVISORY — a prediction from the LEFs and the config —
-   and the verdict stays OpenROAD's `PSM-0040`/`PSM-0069`.  Measured on
-   the H+B N=8 artefacts (PR #900): direction A holds (the generated plan
-   PASSes, 272 trims, every terminal on its grid; the old code FAILed it).
-   Direction B taught the post-mortem what PSM's question IS: on the
-   `PDN_HOFFSET 109.3` plan every pe_cell VGND pin carried a via whose
-   partner was the macro's OWN met5 pin (pdngen vias those too), so the
-   per-pin rollup said connected and the net was one blob, while PSM
-   counted exactly those 512 rects unconnected — "one blob" and "the supply
-   reaches it" are different questions.  `pdn_connect.py` now reads the
-   DEF's `PINS` as sources, its `VIAS` for what a via joins, and makes the
-   terminal verdict REACHABILITY (`--explain` prints the chain): 0
-   unsourced terminals on the working plan, 64 per net on the failing one,
-   the 512.  The PREDICTION still passes that plan — the next comparison
-   is its `--json` VGND components against one pe_cell's `--explain` chain,
-   to find which predicted fragment feeds the pin that pdngen did not
-   write.
+   and the verdict stays OpenROAD's `PSM-0040`/`PSM-0069`.  **Validated
+   both ways on the N=8 artefacts** (PR #900, three run reports):
+
+   | on the N=8 artefacts | `pdn_phase.py` (prediction) | `pdn_connect.py` (written DEF) | PSM |
+   |---|---|---|---|
+   | harm.py's own plan | PASS, 104/104 terminals on the grid | 208 connected, 0 floating | `PSM-0040` both nets |
+   | `PDN_HOFFSET 109.3` | FAIL: 64 stranded in 64 instance-nets | 144 connected, 64 floating (64 unsourced) | `PSM-0069`, 512 shapes |
+
+   The arithmetic closes on both sides: each pe_cell's VGND strands on a
+   component of its own 8 pin rects, × 64 = the 512 shapes PSM counts, and
+   the old code FAILed the working plan (144 "clips").  Getting there took
+   two reader fixes the artefacts exposed: the DEF `PINS` reader wanted
+   `;` on its own line (OpenROAD writes it on the `PLACED` line; 0 of 324
+   pins read, sources silently off), and the terminal verdict was "a via
+   landed" where PSM's is "a chain reaches a source" — on the failing plan
+   every pe_cell VGND rect had a same-net 2.0 × 2.0 µm crossing with the
+   macro's own met5 pin and pdngen made no via there (§7.2), so nothing
+   the supply enters through reaches those rects: `unsourced`.  "One
+   blob" and "the supply reaches it" are different questions, and only
+   the second is PSM's.  The prediction's remedy on that plan — every
+   macro `dy=+1.6`, i.e. `PDN_HOFFSET=107.7` — is a falsifiable claim only
+   a top run checks.
 11. **The 5 % pass threshold of measurement A** (§8 step 5) is a number
    read off two runs of one toy.  It should be re-read on the first real
    vehicle (tier 1a, N=4): if the gcell-edge and pin-access share does not

@@ -961,12 +961,19 @@ def self_cross(lefs, layers, via_min=VIA_MIN):
     connect layers cross each other far enough to seat a via?
 
     This needs no DEF and no placement, because it is a property of the CELL.
-    It matters because `InstanceGrid::getInstancePins` injects a macro's pins
-    into the same shape set the straps are in, so a pin that crosses its own
-    net's pin on the other connect layer is connected by that crossing alone --
-    with no strap over it anywhere.  A macro whose VPWR pins cross and whose
-    VGND pins do not will connect one net and float the other on any phase,
-    which no strap-only prediction can see and no offset search can fix."""
+    Its worth is smaller than the first cut claimed.  The source reads as if
+    such a crossing were a via: `InstanceGrid::getInstancePins` injects the
+    macro's pins into the shape set `Grid::getIntersections` searches, and
+    that loop pairs every same-net lower shape with every upper one.  But
+    the N=8 run measured otherwise: the `PDN_HOFFSET 109.3` plan offered
+    pdngen 512 pe_cell VGND pin-on-pin crossings of 2.0 x 2.0 um over a 1.4
+    floor and it made NONE of them (every one `partner-no-via`, and PSM
+    counting exactly those 512 shapes unconnected) -- while on the working
+    plan the same pins are fed by a STRAP's via, not by each other.  What
+    in `makeVias` declines a pin-on-pin pair is not settled here.  So this
+    reports a crossing pdngen MAY via, never one it did: a `yes` is not a
+    connection, and a cell whose two nets differ here (`SPLIT`) is a cell
+    to look at, not a verdict (#900)."""
     lo, hi = layers
     out = []
     for cell in sorted(lefs):
@@ -995,9 +1002,10 @@ def report_self(res, out=sys.stdout):
     lo, hi = res["layers"]
     out.write(f"pdn_connect --self-cross: does a power pin cross its own net on "
               f"the other connect layer?\n"
-              f"  pair {lo}/{hi}, via floor {res['via_min']} um.  A pin that does is "
-              f"connected by that\n  crossing alone, whatever the straps do "
-              f"(InstanceGrid::getInstancePins).\n\n")
+              f"  pair {lo}/{hi}, via floor {res['via_min']} um.  A crossing pdngen MAY via "
+              f"(InstanceGrid::getInstancePins\n  puts the pins in the search set) -- not one it "
+              f"did: measured on N=8 it made none of 512 such\n  crossings, so a `yes` is not a "
+              f"connection.  The verdict is pdn_connect on the written DEF, and PSM.\n\n")
     out.write(f"  cell / pin              {lo:>6} {hi:>6}  overlap  self-crossed\n")
     for r in res["pins"]:
         out.write(f"  {r['cell']:<15} {r['pin']:<6} {r['rects'][lo]:>6} {r['rects'][hi]:>6} "
