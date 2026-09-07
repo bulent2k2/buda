@@ -26,8 +26,11 @@ What pdngen does (OpenROAD src/pdn/src, read rather than assumed):
      its own layer, across the strap's full width.  A macro's power PIN is
      such an obstruction, grown by the layer's spacing ACROSS the strap and
      by the macro grid's halo ALONG it (`InstanceGrid::getInstanceObstructions`
-     -> `applyHalo`, which applies the halo on the layer's wire axis only);
-     a same-net pin is spared only when the strap CONTAINS it across its
+     -> `applyHalo`, which applies the halo on the layer's wire axis only),
+     and the violation subtracted is that grown once more by the STRAP's
+     spacing on every side (`getRectWithLargestObstructionHalo`) -- two
+     spacings across, halo plus one spacing along; a same-net pin is spared
+     only when the strap CONTAINS it plus its spacing across the strap's
      width, which a block pin wider than the strap never is -- so a
      same-layer meeting is a TRIM whatever the two nets are, never a
      connection, and never a defect either: it is how pdngen keeps straps
@@ -461,23 +464,30 @@ def strap_rects(top, vstraps, hstraps):
 
 
 def pin_cutter(top, spacing, net, layer, x1, y1, x2, y2):
-    """A macro pin as pdngen makes it an obstruction to the top's straps.
+    """A macro pin as pdngen makes it an obstruction to the top's straps:
+    (cut_lo, cut_hi, keep_lo, keep_hi, along_lo, along_hi).
 
-    `getInstanceObstructions` grows it by the macro grid's HALO through
-    `applyHalo(rect, halo, true, is_horizontal, is_vertical)`, which applies
-    the halo on x for a horizontal layer and on y for a vertical one and on
-    no other axis -- so a pin grows along the wire direction of its layer.
-    Across it, `Shape::cut` reads the obstruction halo, i.e. the layer's
-    spacing; ONE spacing here, the rule the phase-0 toy validated (whether
-    pdngen adds the strap's own spacing too is not something any run here
-    discriminates).  Returns (across_lo, across_hi, along_lo, along_hi)."""
+    `InstanceGrid::getInstanceObstructions` turns the pin into a shape whose
+    rect is the pin bloated by the layer's spacing (`generateObstruction`)
+    and then by the macro grid's HALO along the layer's wire axis only
+    (`applyHalo(rect, halo, true, is_horizontal, is_vertical)`).  `Shape::cut`
+    then (a) spares a same-net obstruction only when the strap's own rect
+    contains THAT rect across the strap -- so the pin plus ONE spacing is
+    what has to fit (`keep`); (b) takes the violation as that rect grown by
+    the STRAP's obstruction halo, its own spacing, on every side
+    (`getRectWithLargestObstructionHalo`), and subtracts it from the strap --
+    so a strap is cut when the pin comes within TWO spacings of it (`cut`,
+    the pin's and the strap's; one layer, one MIN_SPACING here for both) and
+    loses the pin's extent plus the halo plus one spacing along (`along`).
+    The old reading had one spacing everywhere, which no run here
+    discriminated (x=20 cuts by 0.5 um either way); the source does."""
     g = top["g"]
     sp = spacing.get(layer, 0.0)
     if layer == g["PDN_VERTICAL_LAYER"]:
         h = max(g["PDN_VERTICAL_HALO"], 0.0)
-        return x1 - sp, x2 + sp, y1 - h, y2 + h
+        return x1 - 2 * sp, x2 + 2 * sp, x1 - sp, x2 + sp, y1 - h - sp, y2 + h + sp
     h = max(g["PDN_HORIZONTAL_HALO"], 0.0)
-    return y1 - sp, y2 + sp, x1 - h, x2 + h
+    return y1 - 2 * sp, y2 + 2 * sp, y1 - sp, y2 + sp, x1 - h - sp, x2 + h + sp
 
 
 def _subtract(intervals, lo, hi):
@@ -498,26 +508,28 @@ def trim_straps(top, straps, rects_by, obs_by, spacing):
 
     A cutter on the strap's layer whose ACROSS extent reaches the strap --
     a pin per `pin_cutter`, a foreign OBS bloated as `instance_obstructions`
-    has it -- removes its ALONG extent from the strap, across the strap's
-    full width (`Shape::cut` widens the violation to the strap before
-    subtracting).  A same-net cutter is spared only when the strap CONTAINS
-    it across its width, which a block pin wider than the strap never is, so
-    a same-layer meeting is a trim whatever the two nets are.  The block's
-    own-power OBS is the same metal as its pins and is not counted twice."""
+    has it and again by the strap's own spacing (`Shape::cut` grows every
+    violation by the strap's obstruction halo) -- removes its ALONG extent
+    from the strap, across the strap's full width.  A same-net PIN is spared
+    only when the strap CONTAINS it plus one spacing across its width, which
+    a block pin wider than the strap never is, so a same-layer meeting is a
+    trim whatever the two nets are.  The block's own-power OBS is the same
+    metal as its pins and is not counted twice."""
     frags, trims = [], []
     for s in straps:
         x1, y1, x2, y2 = s["rect"]
         vert = s["vertical"]
+        sp = spacing.get(s["layer"], 0.0)
         along = [(y1, y2)] if vert else [(x1, x2)]
         s_lo, s_hi = (x1, x2) if vert else (y1, y2)
         for inst_name, rects in rects_by.items():
             for (net, layer, px1, py1, px2, py2, pname) in rects:
                 if layer != s["layer"]:
                     continue
-                c_lo, c_hi, a_lo, a_hi = pin_cutter(top, spacing, net, layer, px1, py1, px2, py2)
+                c_lo, c_hi, k_lo, k_hi, a_lo, a_hi = pin_cutter(top, spacing, net, layer, px1, py1, px2, py2)
                 if overlap(c_lo, c_hi, s_lo, s_hi) <= EPS:
                     continue
-                if net == s["net"] and s_lo <= c_lo + EPS and s_hi >= c_hi - EPS:
+                if net == s["net"] and s_lo <= k_lo + EPS and s_hi >= k_hi - EPS:
                     continue                    # contained across the strap: spared
                 before = along
                 along = _subtract(along, a_lo, a_hi)
@@ -531,6 +543,7 @@ def trim_straps(top, straps, rects_by, obs_by, spacing):
                 if ob["layer"] != s["layer"] or ob["own_power_metal"]:
                     continue
                 ox1, oy1, ox2, oy2 = ob["bloated"]
+                ox1, oy1, ox2, oy2 = ox1 - sp, oy1 - sp, ox2 + sp, oy2 + sp
                 c_lo, c_hi, a_lo, a_hi = (ox1, ox2, oy1, oy2) if vert else (oy1, oy2, ox1, ox2)
                 if overlap(c_lo, c_hi, s_lo, s_hi) <= EPS:
                     continue
@@ -549,60 +562,6 @@ def trim_straps(top, straps, rects_by, obs_by, spacing):
     return frags, trims
 
 
-def predicted_network(top, frags, rects_by, via_min):
-    """The vias pdngen would make and the components they leave, per net.
-
-    Shapes are the trimmed straps AND every macro power pin on either connect
-    layer (`getInstancePins` injects them).  A via is a same-net cross-layer
-    overlap of at least `via_min` on both axes (`Grid::getIntersections`).
-    The partition is `pdn_connect.net_components` -- the same code that
-    reads the written DEF, so the prediction and the post-mortem cannot
-    disagree about what "one piece of metal" means.  Returns
-    (components-by-net, terminals-by-net, vias-per-fragment-by-net): the
-    rects handed to the partition are the fragments FIRST, in order, then the
-    pin rects, so a component member index below len(frags) is a fragment."""
-    from pdn_connect import net_components, _BinIndex    # lazy: pdn_connect imports THIS module
-    g = top["g"]
-    lv, lh = g["PDN_VERTICAL_LAYER"], g["PDN_HORIZONTAL_LAYER"]
-    snets = {g["VDD_NET"]: {"rects": [], "vias": [], "pins": []},
-             g["GND_NET"]: {"rects": [], "vias": [], "pins": []}}
-    frag_ids = {n: [] for n in snets}
-    for i, f in enumerate(frags):
-        frag_ids[f["net"]].append(i)
-        snets[f["net"]]["rects"].append((f["layer"], *f["rect"]))
-    terms = {n: [] for n in snets}
-    for inst_name, rects in rects_by.items():
-        per = {}
-        for (net, layer, x1, y1, x2, y2, pname) in rects:
-            if layer not in (lv, lh) or net not in snets:
-                continue
-            snets[net]["rects"].append((layer, x1, y1, x2, y2))
-            per.setdefault((net, pname), []).append((layer, x1, y1, x2, y2))
-        for (net, pname), rs in per.items():
-            terms[net].append({"name": f"{inst_name}.{pname}", "rects": rs})
-    frag_vias = {n: {} for n in snets}
-    for net, d in snets.items():
-        low = [(i, r) for i, r in enumerate(d["rects"]) if r[0] == lv]
-        high = [(i, r) for i, r in enumerate(d["rects"]) if r[0] == lh]
-        if not low or not high:
-            continue
-        hrects = [r for _i, r in high]
-        idx = _BinIndex(hrects, keyfn=lambda r: r[1:])
-        nfr = len(frag_ids[net])
-        for (ia, (_l, ax1, ay1, ax2, ay2)) in low:
-            for j in idx.near(ax1 if idx.axis == 0 else ay1, ax2 if idx.axis == 0 else ay2):
-                ib, (_b, bx1, by1, bx2, by2) = high[j]
-                ox, oy = overlap(ax1, ax2, bx1, bx2), overlap(ay1, ay2, by1, by2)
-                if min(ox, oy) < via_min - EPS:
-                    continue
-                d["vias"].append((lv, (max(ax1, bx1) + min(ax2, bx2)) / 2,
-                                  (max(ay1, by1) + min(ay2, by2)) / 2, "predicted"))
-                for i in (ia, ib):
-                    if i < nfr:
-                        frag_vias[net][i] = frag_vias[net].get(i, 0) + 1
-    return net_components(snets, terms, (lv, lh), with_members=True), terms, frag_vias
-
-
 def min_connections(top):
     """How many vias a strap fragment needs to survive `PdnGen::trimShapes`
     (`Shape::isRemovable`): 2, or 1 on a pin layer -- and LibreLane's
@@ -614,60 +573,151 @@ def min_connections(top):
     return 1 if g["PDN_ENABLE_PINS"] else 2
 
 
+def predicted_network(top, frags, rects_by, via_min, min_conns=None):
+    """The vias pdngen would make, the trim it would apply, and the
+    components that leaves, per net.
+
+    Shapes are the cut straps AND every macro power pin on either connect
+    layer (`getInstancePins` injects them).  A via is a same-net cross-layer
+    overlap of at least `via_min` on both axes (`Grid::getIntersections`),
+    counted on the UNTRIMMED fragments the way `updateVias` runs before
+    `trimShapes`.  Trim then removes every fragment with fewer vias than
+    `min_conns` (None = trim skipped), and on a NON-pin layer (min_conns 2)
+    shrinks a survivor to the extent of its vias -- on a pin layer
+    `trimShapes` leaves a survivor's shape alone -- after which
+    `cleanupVias` drops the vias that lost a shape.  Only THEN is the net
+    partitioned (Codex #900: partitioning first let a one-via fragment that
+    trim removes bridge a terminal into the grid), by
+    `pdn_connect.net_components` -- the same code that reads the written
+    DEF, so the prediction and the post-mortem cannot disagree about what
+    "one piece of metal" means.  Returns (components-by-net, terminals-by-
+    net, trim-by-net) where trim-by-net[net] = {"vias": {frag: n},
+    "removed": [frag ...], "kept": [(frag, rect) ...] in the order the
+    component member indices count them (fragments first, then pins)}."""
+    from pdn_connect import net_components, _BinIndex    # lazy: pdn_connect imports THIS module
+    g = top["g"]
+    lv, lh = g["PDN_VERTICAL_LAYER"], g["PDN_HORIZONTAL_LAYER"]
+    nets = (g["VDD_NET"], g["GND_NET"])
+    pins = {n: [] for n in nets}
+    terms = {n: [] for n in nets}
+    for inst_name, rects in rects_by.items():
+        per = {}
+        for (net, layer, x1, y1, x2, y2, pname) in rects:
+            if layer not in (lv, lh) or net not in pins:
+                continue
+            pins[net].append((layer, x1, y1, x2, y2))
+            per.setdefault((net, pname), []).append((layer, x1, y1, x2, y2))
+        for (net, pname), rs in per.items():
+            terms[net].append({"name": f"{inst_name}.{pname}", "rects": rs})
+    snets, trim = {}, {}
+    for net in nets:
+        fidx = [i for i, f in enumerate(frags) if f["net"] == net]
+        rects = [(frags[i]["layer"], *frags[i]["rect"]) for i in fidx] + pins[net]
+        nfr = len(fidx)
+        # the vias, on everything: (index_a, index_b, overlap rect)
+        low = [(i, r) for i, r in enumerate(rects) if r[0] == lv]
+        high = [(i, r) for i, r in enumerate(rects) if r[0] == lh]
+        vias = []
+        if low and high:
+            hrects = [r for _i, r in high]
+            idx = _BinIndex(hrects, keyfn=lambda r: r[1:])
+            for (ia, (_l, ax1, ay1, ax2, ay2)) in low:
+                for j in idx.near(ax1 if idx.axis == 0 else ay1, ax2 if idx.axis == 0 else ay2):
+                    ib, (_b, bx1, by1, bx2, by2) = high[j]
+                    ox, oy = overlap(ax1, ax2, bx1, bx2), overlap(ay1, ay2, by1, by2)
+                    if min(ox, oy) < via_min - EPS:
+                        continue
+                    vias.append((ia, ib, (max(ax1, bx1), max(ay1, by1), min(ax2, bx2), min(ay2, by2))))
+        count = {}
+        for ia, ib, _r in vias:
+            for i in (ia, ib):
+                if i < nfr:
+                    count[i] = count.get(i, 0) + 1
+        removed = set()
+        kept_rect = {}
+        for p in range(nfr):
+            n = count.get(p, 0)
+            if min_conns is not None and n < min_conns:
+                removed.add(p)
+                continue
+            r = rects[p]
+            if min_conns is not None and min_conns >= 2:
+                areas = [vr for ia, ib, vr in vias if p in (ia, ib)]
+                # a survivor is shrunk to its vias' extent unless they are one
+                # stack (`effectively_vias_stack`: every via area the same)
+                if len({tuple(round(v, 6) for v in a) for a in areas}) > 1:
+                    r = (r[0], min(a[0] for a in areas), min(a[1] for a in areas),
+                         max(a[2] for a in areas), max(a[3] for a in areas))
+            kept_rect[p] = r
+        order = [p for p in range(nfr) if p not in removed]
+        pos = {p: k for k, p in enumerate(order)}
+        new_rects = [kept_rect[p] for p in order] + pins[net]
+        remap = lambda i: pos[i] if i < nfr else i - nfr + len(order)
+        new_vias = [(lv, (vr[0] + vr[2]) / 2, (vr[1] + vr[3]) / 2, "predicted")
+                    for ia, ib, vr in vias if ia not in removed and ib not in removed]
+        snets[net] = {"rects": new_rects, "vias": new_vias, "pins": []}
+        trim[net] = {"vias": {fidx[p]: count.get(p, 0) for p in range(nfr)},
+                     "removed": [fidx[p] for p in sorted(removed)],
+                     "kept": [(fidx[p], kept_rect[p]) for p in order]}
+    return net_components(snets, terms, (lv, lh), with_members=True), terms, trim
+
+
 def evaluate(top, straps, rects_by, obs_by, spacing, via_min):
     """The whole prediction for one placement: the trims, the network, and
     what PSM would find wrong with it.
 
-    pdngen builds the straps, cuts them (`trim_straps`), makes the vias
-    (`predicted_network`), then TRIMS: `PdnGen::trimShapes` removes every
-    strap fragment with fewer connections than `min_connections` and shrinks
-    the rest to the extent of their vias.  So a via-less fragment -- a stub
+    pdngen builds the straps, cuts them (`trim_straps`), makes the vias and
+    TRIMS (`predicted_network`): every strap fragment with fewer connections
+    than `min_connections` is removed before signoff -- a via-less stub
     between two cuts, a strap at the core edge whose crossings are narrower
-    than a via -- is simply gone before signoff, and is NOT a failure.  What
-    `[PSM-0069]` then fails on is a net whose REMAINING shapes are not one
-    connected set: a macro terminal none of whose rectangles is on the net's
-    main grid (`stranded`), or a fragment that survived trim on a component
-    off the main grid (`floating`, the "N unconnected shapes" PSM counts).
-    A pin rectangle off the grid whose TERMINAL is fed by another of its
-    rectangles is neither -- measured, the phase-0 toy passes PSM with two
-    such VGND pin rectangles (a LEF PIN is one terminal, however many RECTs
-    it is drawn as).  `failures` is the union; a placement passes iff it is
-    empty."""
+    than a via.  What `[PSM-0069]` then fails on is a net whose REMAINING
+    shapes are not one connected set: a macro terminal none of whose
+    rectangles is on the net's main grid (`stranded`), or a surviving
+    fragment on a component off the main grid (`floating`, the "N
+    unconnected shapes" PSM counts).  A pin rectangle off the grid whose
+    TERMINAL is fed by another of its rectangles is neither -- measured, the
+    phase-0 toy passes PSM with two such VGND pin rectangles (a LEF PIN is
+    one terminal, however many RECTs it is drawn as).  `failures` is the
+    union; a placement passes iff it is empty."""
     frags, trims = trim_straps(top, straps, rects_by, obs_by, spacing)
-    conn, terms, frag_vias = predicted_network(top, frags, rects_by, via_min)
     min_conns = min_connections(top)
+    conn, terms, trim = predicted_network(top, frags, rects_by, via_min, min_conns)
     stranded, floating, trimmed, off_grid_pins = [], [], [], []
     for net, c in conn.items():
         comps = c["components"]
-        nfr = len([f for f in frags if f["net"] == net])
+        kept = trim[net]["kept"]
+        for p in trim[net]["removed"]:
+            f = frags[p]
+            trimmed.append({"net": net, "layer": f["layer"], "k": f["k"],
+                            "rect": [round(v, 3) for v in f["rect"]], "vias": trim[net]["vias"][p]})
         if not comps:
             continue
         main = comps[0]
-        main_frags = sum(1 for i in main["members"] if i < nfr)
-        # a net with no strap at all has no grid to be on: every terminal is stranded
+        main_frags = sum(1 for i in main["members"] if i < len(kept))
+        # a net with no strap left has no grid to be on: every terminal is stranded
         no_grid = main_frags == 0
         fed = set() if no_grid else set(main["terminals"])
         seen_stranded = set()
         for comp in comps[1:] if not no_grid else comps:
-            fr = [i for i in comp["members"] if i < nfr]
-            surviving = [i for i in fr if min_conns is None or frag_vias[net].get(i, 0) >= min_conns]
+            fr = [i for i in comp["members"] if i < len(kept)]
             lost = [t for t in comp["terminals"] if t not in fed and t not in seen_stranded]
             seen_stranded.update(lost)
             for t in lost:
                 inst, _, pin = t.rpartition(".")
                 stranded.append({"instance": inst, "net": net, "pin": pin, "component": comp["id"],
                                  "component_shapes": comp["shapes"], "component_span": comp["span"],
-                                 "surviving_fragments": len(surviving)})
+                                 "surviving_fragments": len(fr)})
             if not fr and not lost:
                 off_grid_pins.append({"net": net, "component": comp["id"], "shapes": comp["shapes"],
                                       "terminals": comp["terminals"]})
                 continue
             for i in fr:
-                f = frags[i]
-                row = {"net": net, "layer": f["layer"], "k": f["k"], "rect": [round(v, 3) for v in f["rect"]],
-                       "vias": frag_vias[net].get(i, 0), "component": comp["id"],
-                       "terminals": comp["terminals"]}
-                (floating if i in surviving else trimmed).append(row)
+                p, rect = kept[i]
+                f = frags[p]
+                floating.append({"net": net, "layer": f["layer"], "k": f["k"],
+                                 "rect": [round(v, 3) for v in rect[1:]],
+                                 "vias": trim[net]["vias"][p], "component": comp["id"],
+                                 "terminals": comp["terminals"]})
         # terminals the strap grid never reaches at all (no component holds them)
         held = {t for comp in comps for t in comp["terminals"]}
         for t in terms[net]:
@@ -728,6 +778,9 @@ def shift_candidates(rects_list, obs_list, top, vstraps, hstraps, spacing, via_m
             lo, hi = (x1, x2) if axis == "x" else (y1, y2)
             if layer not in (same_layer, cross_layer):
                 continue
+            if layer == same_layer:                  # plus the strap's own spacing, as the cut reads it
+                sp = spacing.get(layer, 0.0)
+                lo, hi = lo - sp, hi + sp
             for s in (straps if layer == same_layer else
                       (hstraps if straps is vstraps else vstraps)):
                 cands.add(s["lo"] - hi)
@@ -736,9 +789,10 @@ def shift_candidates(rects_list, obs_list, top, vstraps, hstraps, spacing, via_m
         for (net, layer, x1, y1, x2, y2, _) in rects:
             lo, hi = (x1, x2) if axis == "x" else (y1, y2)
             if layer == same_layer:
-                # every same-layer meeting is a clip now, whatever the nets, so
-                # both nets' straps contribute the same CLEARING candidates
-                sp = spacing.get(layer, 0.0)
+                # every same-layer meeting is a trim, whatever the nets, so
+                # both nets' straps contribute the same CLEARING candidates:
+                # the pin edge two spacings from the strap edge (`pin_cutter`)
+                sp = 2 * spacing.get(layer, 0.0)
                 for s in straps:
                     cands.add(s["lo"] - sp - hi)
                     cands.add(s["hi"] + sp - lo)

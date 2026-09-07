@@ -11,8 +11,9 @@ This reads the marker database, the top DEF's COMPONENTS, and -- when the
 macro LEFs are given -- each macro's pin and OBS rectangles, and reports per
 marker:
 
-  * the instance whose placed box holds it, its cell, and the CELL-LOCAL
-    coordinates (the DEF orientation inverted), so repeats collapse;
+  * the instance whose placed box its extent overlaps (most, when it
+    straddles a boundary), its cell, and the CELL-LOCAL coordinates (the
+    DEF orientation inverted), so repeats collapse;
   * per offending edge, whether it lies on metal the macro's LEF CLAIMS on
     that layer (a pin or OBS rectangle), and whether it lies inside the
     macro's box at all.  That is the discrimination #896's "where to start"
@@ -152,13 +153,22 @@ def locate(items, comps, lefs):
     for it in items:
         bx1, by1, bx2, by2 = it["bbox"]
         cx, cy = (bx1 + bx2) / 2, (by1 + by2) / 2
-        holder = None
+        # the holder is the macro whose box the marker's extent overlaps most
+        # -- not the one holding its CENTRE: an edge pair straddling the
+        # boundary with the outer edge farther out has its centre outside,
+        # which is exactly the macro-versus-top-routing case (Codex #900)
+        holder, best = None, None
         for c in placed:
             if c["w"] is None:
                 continue
-            if _inside(cx, cy, (c["x"], c["y"], c["x"] + c["w"], c["y"] + c["h"])):
-                holder = c
-                break
+            ox = min(bx2, c["x"] + c["w"]) - max(bx1, c["x"])
+            oy = min(by2, c["y"] + c["h"]) - max(by1, c["y"])
+            if ox < -EPS or oy < -EPS:
+                continue
+            score = (max(ox, 0.0) * max(oy, 0.0), max(ox, 0.0) + max(oy, 0.0),
+                     1 if _inside(cx, cy, (c["x"], c["y"], c["x"] + c["w"], c["y"] + c["h"])) else 0)
+            if best is None or score > best:
+                holder, best = c, score
         row = {**{k: it[k] for k in ("category", "layer", "kind", "edges", "bbox")},
                "instance": None, "cell": None, "orient": None, "local": None, "edge_verdicts": []}
         if holder is None:

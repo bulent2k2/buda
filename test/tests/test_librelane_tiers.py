@@ -411,7 +411,9 @@ def test_pdn_phase_offers_the_smallest_verified_shift_and_searches_pairs(tmp_pat
     straps and an HOFFSET of 28.7 puts the VPWR met5 strap over the VGND
     met5 pin, which cuts it over both macros; a y-shift alone clears it
     (the whole met5 VPWR strap then vias u0's met4 VPWR pins), so that is
-    what is offered, not the pair."""
+    what is offered, not the pair.  The pair search itself is exercised
+    with the verdict stubbed: only a shift on BOTH axes passes, and one is
+    found from the two axes' candidates within the budget."""
     _toy_lef(tmp_path / "reg32.lef")
     _toy_config(tmp_path / "both.json", 20, FP_PDN_HOFFSET=28.7, FP_PDN_HPITCH=153.18)
     r = subprocess.run([sys.executable, str(_T1A / "pdn_phase.py"), str(tmp_path / "both.json"),
@@ -419,9 +421,9 @@ def test_pdn_phase_offers_the_smallest_verified_shift_and_searches_pairs(tmp_pat
     assert r.returncode == 1, r.stdout + r.stderr
     out = json.loads((tmp_path / "both.out").read_text())
     assert sorted({t["axis"] for t in out["trims"]}) == ["x", "y"]          # both axes trimmed
-    assert out["global_dx"] is None and out["global_dy"] == -3.4
-    assert out["global_shift"] == [0.0, -3.4] and out["global_clean_at_shift"] is True
-    assert "shifting EVERY macro by dy=-3.400 (PDN_HOFFSET=32.1)" in r.stdout
+    assert out["global_dx"] is None and out["global_dy"] == -5.0
+    assert out["global_shift"] == [0.0, -5.0] and out["global_clean_at_shift"] is True
+    assert "shifting EVERY macro by dy=-5.000 (PDN_HOFFSET=33.7)" in r.stdout
     assert "both axes needed" not in r.stdout
     # the pair search: when no single axis clears it, the candidates of both
     # axes are tried as pairs, smallest total move first, within the budget
@@ -429,13 +431,15 @@ def test_pdn_phase_offers_the_smallest_verified_shift_and_searches_pairs(tmp_pat
     top = pp.read_top_config(str(tmp_path / "both.json"))
     lefs = pp.read_lef(str(tmp_path / "reg32.lef"))
     real = pp.clean_at
-    monkeypatch.setattr(pp, "clean_at", lambda *a: abs(a[-2] + 0.8) < 1e-9 and abs(a[-1] + 3.4) < 1e-9)
+    monkeypatch.setattr(pp, "clean_at", lambda *a: a[-2] != 0 and a[-1] != 0)
     res = pp.run_check(top, lefs)
     assert res["global_dx"] is None and res["global_dy"] is None
-    assert res["global_shift"] == [-0.8, -3.4] and res["global_clean_at_shift"] is True
+    dx, dy = res["global_shift"]
+    assert dx != 0 and dy != 0 and abs(dx) <= 15 and abs(dy) <= 153.18 / 2      # half a pitch each
+    assert res["global_clean_at_shift"] is True
     buf = io.StringIO()
     pp.report(top, lefs, res, buf)
-    assert "dx=-0.800 (PDN_VOFFSET=0.8) and dy=-3.400 (PDN_HOFFSET=32.1)" in buf.getvalue()
+    assert f"dx={dx:+.3f} (PDN_VOFFSET={res['voffset_for_shift']}) and dy={dy:+.3f}" in buf.getvalue()
     assert "both axes needed: neither alone does" in buf.getvalue()
     monkeypatch.setattr(pp, "clean_at", lambda *a: False)
     res = pp.run_check(top, lefs)
@@ -454,7 +458,8 @@ def test_pdn_phase_finds_the_toys_trim_and_the_shift_that_clears_it(tmp_path):
     across and halo along), and with all three cut the fragments left over
     u0 are via-less stubs that TRIM removes, so u0's VPWR terminal sits on
     no grid: STRANDED, the PSM-0069 shape.  The smallest clearing shift is
-    0.8 um west.  At x = 10 (10 = 160 mod 30, the toy's measured fix) the
+    1.1 um west -- the pin's spacing plus the strap's, both 0.3 on met4,
+    which is how `Shape::cut` grows the violation.  At x = 10 (10 = 160 mod 30, the toy's measured fix) the
     same check passes -- and it passes WITH the two shapes the old model
     called failures (#895): the met4 VPWR strap on the core's left edge,
     whose 0.8 um crossings hold no via and which trim removes, and a VGND
@@ -467,14 +472,14 @@ def test_pdn_phase_finds_the_toys_trim_and_the_shift_that_clears_it(tmp_path):
     r = subprocess.run([sys.executable, str(_T1A / "pdn_phase.py"), str(tmp_path / "bad.json"),
                         "--json", str(tmp_path / "bad.out")], capture_output=True, text=True)
     assert r.returncode == 1, r.stdout + r.stderr
-    assert "TRIM u0 VGND pin VGND on met4 cuts VPWR strap k=1 [34.720,36.320] over y" in r.stdout
+    assert "TRIM u0 VGND pin VGND on met4 cuts VPWR strap k=1 [34.720,36.320] over y [20.580,99.420]" in r.stdout
     assert "STRANDED u0 VPWR pin VPWR: its component (4 shapes" in r.stdout
     assert "every strap fragment on it is via-less and trimmed away" in r.stdout
     assert ("FAIL: 2 instances, 3 trims in 1 instances, 1 stranded terminal(s) in 1 instance-net(s), "
-            "0 floating fragment(s); shifting EVERY macro by dx=-0.800 (PDN_VOFFSET=0.8)") in r.stdout
+            "0 floating fragment(s); shifting EVERY macro by dx=-1.100 (PDN_VOFFSET=1.1)") in r.stdout
     out = json.loads((tmp_path / "bad.out").read_text())
-    assert out["global_dx"] == -0.8 and out["global_shift"] == [-0.8, 0.0]
-    assert out["voffset_for_shift"] == 0.8 and out["global_clean_at_shift"] is True
+    assert out["global_dx"] == -1.1 and out["global_shift"] == [-1.1, 0.0]
+    assert out["voffset_for_shift"] == 1.1 and out["global_clean_at_shift"] is True
     assert out["min_connections"] == 1                       # pin layers: one via keeps a fragment
     assert out["unconnected"] == [{"instance": "u0", "net": "VPWR"}]
     u0 = next(p for p in out["per_instance"] if p["instance"] == "u0")
@@ -540,19 +545,26 @@ def test_pdn_phase_models_trim_in_both_directions(tmp_path):
     d, sk, npn = runs["default"], runs["skiptrim"], runs["nopins"]
     assert (d["min_connections"], sk["min_connections"], npn["min_connections"]) == (1, None, 2)
     assert runs["fp_skip"]["min_connections"] is None              # the deprecated spelling, as a string
-    # the same cuts and the same stranded terminals whatever trim does ...
+    # the same cuts whatever trim does ...
     for r in (sk, npn):
         assert r["trims"] == d["trims"]
+    for r in (d, sk):
         assert [(s["instance"], s["net"]) for s in r["stranded"]] == [("u0", "VPWR"), ("u1", "VGND")]
     # ... but what survives them differs, and it is what PSM would count
-    assert len(npn["floating"]) == 0 < len(d["floating"]) == 8 < len(sk["floating"]) == 21
-    assert len(sk["trimmed_away"]) == 0 and len(d["trimmed_away"]) + len(d["floating"]) == 21
+    assert len(npn["floating"]) == 0 < len(d["floating"]) == 8 < len(sk["floating"]) == 19
+    assert len(sk["trimmed_away"]) == 0 and len(d["trimmed_away"]) == 11 and len(npn["trimmed_away"]) == 23
     assert all(f["vias"] == 1 for f in d["floating"])              # one via keeps it on a pin layer
     assert all(f["vias"] == 0 for f in d["trimmed_away"])
+    # trim runs BEFORE the partition (Codex #900): with two vias required,
+    # the one-via straps that fed u1's VPWR and u0's VGND are removed, and
+    # the terminals they bridged into the grid are stranded -- partitioning
+    # first would have kept them on the main component and passed them
+    assert [(s["instance"], s["net"]) for s in npn["stranded"]] == [
+        ("u0", "VPWR"), ("u1", "VPWR"), ("u0", "VGND"), ("u1", "VGND")]
     buf = io.StringIO()
     pp.report(pp.read_top_config(str(tmp_path / "default.json")), lefs, d, buf)
     text = buf.getvalue()
-    assert "FLOATING VGND met4 fragment k=1 [38.020,10.880,39.620,109.120] with 1 via(s)" in text
+    assert "FLOATING VGND met4 fragment k=4 [128.020,10.880,129.620,109.120] with 1 via(s)" in text
     assert "STRANDED u1 VGND pin VGND: its component (5 shapes" in text and "2 of its fragments survive trim" in text
     assert "trim: a strap fragment with fewer than 1 via is removed" in text
     buf = io.StringIO()
@@ -600,7 +612,7 @@ def test_pdn_phase_reads_the_obstruction_that_removes_the_straps(tmp_path):
     # met4 is gone over the macro, so the met4 pins can only be fed across
     # layers -- and here the default met5 grid misses them
     assert r.returncode == 1 and "STRANDED u0 VPWR pin VPWR" in r.stdout and "STRANDED u0 VGND" in r.stdout
-    assert "TRIM u0 OBS on met4 cuts VPWR strap k=1 [34.720,36.320] over y [10.000,110.000]" in r.stdout
+    assert "TRIM u0 OBS on met4 cuts VPWR strap k=1 [34.720,36.320] over y [9.700,110.300]" in r.stdout
     _toy_lef(tmp_path / "sealed.lef", obs=("met4", "met5"))
     _toy_config(tmp_path / "sealed.json", 10, **{"MACROS": {"reg32": {
         "instances": {"u0": {"location": [10, 20], "orientation": "N"}}, "lef": ["dir::sealed.lef"]}}})
@@ -888,6 +900,10 @@ def test_drc_locate_maps_markers_to_cells_and_says_whose_metal(tmp_path):
         ("m2.2", "edge-pair: (469.492,1059.73;469.37,1059.73)/(469.37,1059.86;469.44,1059.86)"),
         ("m1.1", "polygon: (720,2180;721,2180;721,2181;720,2181)"),
         ("m2.2", "edge-pair: (800,2158;801,2158)/(800,2158.1;801,2158.1)"),
+        # straddling the boundary, the OUTER edge farther from it than the
+        # inner one: the marker's centre is outside the macro, the marker is
+        # still the macro's (Codex #900)
+        ("m2.2", "edge-pair: (763.492,2160.27;763.37,2160.27)/(763.37,2159.6;763.44,2159.6)"),
     ])
     r = subprocess.run([sys.executable, str(_T1A / "drc_locate.py"), str(tmp_path / "drc.lyrdb"),
                         str(tmp_path / "top.def"), str(tmp_path / "acc_cell.lef"),
@@ -902,9 +918,12 @@ def test_drc_locate_maps_markers_to_cells_and_says_whose_metal(tmp_path):
     assert [ev["verdict"] for ev in m[2]["edge_verdicts"]] == ["macro-lef", "macro-unclaimed"]
     assert m[3]["layer"] == "met1" and m[3]["edge_verdicts"][0]["verdict"] == "over-macro"
     assert m[4]["instance"] is None and m[4]["nearest"]["instance"] == "pipe_1_3"
+    assert m[5]["instance"] == "pipe_1_3" and m[5]["local"] == [69.37, -0.4, 69.492, 0.27]
+    assert [ev["verdict"] for ev in m[5]["edge_verdicts"]] == ["macro-lef", "outside"]
     assert out["groups"][0] == {"cell": "acc_cell", "layer": "met2", "local": [69.4, 0.1],
                                 "instances": ["pipe_1_3", "pipe_1_4", "acc_5"]}
-    assert "drc_locate: 5 marker(s), 2 categories (m1.1, m2.2), 4 inside a placed macro (1 cell type(s): acc_cell), 1 elsewhere" in r.stdout
+    assert "drc_locate: 6 marker(s), 2 categories (m1.1, m2.2), 5 inside a placed macro (1 cell type(s): acc_cell), 1 elsewhere" in r.stdout
+    assert "edge B: (763.370,2159.600)-(763.440,2159.600) outside the macro box -- the top's routing against its edge" in r.stdout
     assert "m2.2 (763.370,2160.140)-(763.492,2160.270) -> pipe_1_3 [acc_cell N] local (69.370,0.140)-(69.492,0.270)" in r.stdout
     assert "edge A: (763.492,2160.270)-(763.370,2160.270) on metal the macro's LEF claims (OBS)" in r.stdout
     assert "edge B: (763.370,2160.140)-(763.440,2160.140) inside the macro on an OBSTRUCTED layer but on NO LEF shape" in r.stdout
