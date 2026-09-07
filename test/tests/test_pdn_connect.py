@@ -567,3 +567,41 @@ def test_the_index_agrees_with_a_naive_reference(tmp_path):
         sn = {"N": {"rects": rects, "vias": vias, "pins": ["N"]}}
         got = sorted(c["shapes"] for c in P.net_components(sn, {})["N"]["components"])
         assert got == naive(sn), (rects, vias)
+
+
+def test_a_foreign_pairs_via_does_not_attach_a_terminal(tmp_path):
+    """A met3/met4 via sitting inside a met5 pin joins met3 to met4 and does
+    nothing for that pin.  Crediting it attaches a healthy terminal to a met3
+    stub and reports the stub as stranding it — a false failure, the one
+    direction the exit must not move in.  The union-find still takes the via:
+    it really does join that net's met3 and met4 metal, so it belongs in the
+    NETWORK; only the terminal attachment is pair-filtered."""
+    deff = DEF.replace(
+        "  + USE GROUND ;",
+        "  NEW met3 1600 + SHAPE STRIPE ( 175000 261000 ) ( 185000 * )\n"
+        "  NEW met3 0 ( 180000 261000 ) via3_4\n"
+        "  + USE GROUND ;")
+    res = _run(deff, tmp_path=tmp_path)
+    comps = res["connectivity"]["VGND"]["components"]
+    assert len(comps) == 2 and comps[1]["layers"] == {"met3": 1}
+    assert comps[1]["terminals"] == []               # the met5 pin is not on it
+    assert res["stranded_terminals"] == 0
+    r = _cli(tmp_path, deff, LEF, "--allow-floating", "9")
+    assert r.returncode == 0, r.stdout
+
+
+def test_a_terminal_on_two_fragments_is_one_stranded_terminal(tmp_path):
+    """`--allow-stranded` is a threshold on TERMINALS, so a terminal appearing
+    on two fragments must count once — otherwise a design with exactly one
+    stranded terminal is rejected at `--allow-stranded 1`."""
+    deff = (DEF.replace("  NEW met4 0 ( 200000 300000 ) via4_5\n", "")
+               .replace("  NEW met4 0 ( 111000 300000 ) via4_5",
+                        "  NEW met4 1600 + SHAPE STRIPE ( 111000 190000 ) ( * 210000 )\n"
+                        "  NEW met4 0 ( 111000 300000 ) via4_5"))
+    res = _run(deff, tmp_path=tmp_path)
+    comps = res["connectivity"]["VPWR"]["components"]
+    frags = [c for c in comps[1:] if "row_0.pe_0.VPWR" in c["terminals"]]
+    assert len(frags) == 2                            # named on both
+    assert res["connectivity"]["VPWR"]["stranded_terminals"] == 1   # counted once
+    r = _cli(tmp_path, deff, LEF, "--allow-floating", "9", "--allow-stranded", "1")
+    assert r.returncode == 0, r.stdout

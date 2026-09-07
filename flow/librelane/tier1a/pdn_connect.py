@@ -472,7 +472,7 @@ def _touch(a, b):
             and min(a[3], b[3]) >= max(a[1], b[1]) - EPS)
 
 
-def net_components(snets, terminals_by_net=None):
+def net_components(snets, terminals_by_net=None, layers=None):
     """Partition each power net's DEF metal into ELECTRICAL components.
 
     A macro power TERMINAL can have its via and still be dead, because the
@@ -490,6 +490,14 @@ def net_components(snets, terminals_by_net=None):
     net at this point is now one node" is what a via stack does.  Being
     generous means this pass can only UNDER-report fragmentation, never
     invent it, which is the right direction for something that fails a run.
+
+    `layers` is the audited `add_pdn_connect` pair and filters TERMINAL
+    ATTACHMENT only, never the union-find: a met3/met4 via legitimately joins
+    that net's met3 and met4 metal, so it belongs in the network, but it does
+    nothing for a met5 pin whose footprint it happens to sit inside -- and
+    crediting it would attach a healthy terminal to a met3 stub and report
+    the stub as stranding it.  `audit_instance()` already makes exactly this
+    distinction for the per-pin verdict.
 
     Deliberately NOT joined: two fragments both landing on one macro's pin.
     A hard macro's internal PDN really does connect them, but PSM cannot
@@ -540,13 +548,15 @@ def net_components(snets, terminals_by_net=None):
         rows = []
         for k, members in comps.items():
             area = sum((rects[i][3] - rects[i][1]) * (rects[i][4] - rects[i][2]) for i in members)
-            layers = {}
+            # NOT `layers`: that is the parameter, and shadowing it here made
+            # the pair filter below test this dict's keys instead
+            per_layer = {}
             for i in members:
-                layers[rects[i][0]] = layers.get(rects[i][0], 0) + 1
+                per_layer[rects[i][0]] = per_layer.get(rects[i][0], 0) + 1
             xs = [rects[i][1] for i in members] + [rects[i][3] for i in members]
             ys = [rects[i][2] for i in members] + [rects[i][4] for i in members]
             rows.append({"root": k, "shapes": len(members), "area": round(area, 3),
-                         "layers": dict(sorted(layers.items())),
+                         "layers": dict(sorted(per_layer.items())),
                          "bbox": [round(min(xs), 3), round(min(ys), 3),
                                   round(max(xs), 3), round(max(ys), 3)],
                          "span": round(max(max(xs) - min(xs), max(ys) - min(ys)), 3),
@@ -575,7 +585,9 @@ def net_components(snets, terminals_by_net=None):
                 # is on the other layer
                 for vi in vidx.near(x1 if vidx.axis == 0 else y1,
                                     x2 if vidx.axis == 0 else y2):
-                    (_vl, vx, vy, _vn) = d["vias"][vi]
+                    (vl, vx, vy, _vn) = d["vias"][vi]
+                    if layers is not None and vl not in layers:
+                        continue                 # another pair's via; see above
                     if not (x1 - EPS <= vx <= x2 + EPS and y1 - EPS <= vy <= y2 + EPS):
                         continue
                     for i in covering(vx, vy):
@@ -588,7 +600,10 @@ def net_components(snets, terminals_by_net=None):
         for n, c in enumerate(rows):
             c["id"] = n
             c.pop("root")
-        stranded = sum(len(c["terminals"]) for c in rows[1:])
+        # UNIQUE terminals: a terminal on two fragments is one stranded
+        # terminal, and `--allow-stranded` is a terminal threshold, so summing
+        # the per-fragment lists would reject a design with exactly one.
+        stranded = len({t for c in rows[1:] for t in c["terminals"]})
         out[net] = {"components": rows, "fragments": max(0, len(rows) - 1),
                     "stranded_terminals": stranded, "bridged_by": bridged}
     return out
@@ -693,7 +708,7 @@ def run_audit(def_text, lefs, layers, via_min=VIA_MIN):
              "rects": [tuple([f["layer"]] + f["rect"]) for f in findings
                        if f["instance"] == t["instance"] and f["net"] == t["net"]
                        and f["pin"] == t["pin"]]})
-    nets_conn = net_components(snets, tbn)
+    nets_conn = net_components(snets, tbn, layers)
     fragments = sum(v["fragments"] for v in nets_conn.values())
     stranded = sum(v["stranded_terminals"] for v in nets_conn.values())
     tcounts = {}
