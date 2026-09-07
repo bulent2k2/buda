@@ -38,6 +38,13 @@ this script asks of every power pin on one of those two layers is the
 question pdngen asks: is there a same-net shape on the OTHER one overlapping
 it, and did a via land there.
 
+The count that decides the exit is per TERMINAL, not per rectangle: a LEF
+`PIN` is one node and its several `RECT`s are alternative access shapes
+connected inside the macro, so a via on any one of them feeds it and pdngen
+viaing one and not another is the normal case.  The per-rectangle verdicts
+below stay as the diagnostics -- which layer, which access shape, what it was
+missing -- and the report prints both tables.
+
 Four verdicts per pin rectangle:
 
   connected        a via of the pin's net sits on the pin.  Ground truth --
@@ -256,12 +263,19 @@ def read_specialnets(text, dbu):
         for (layer, width, pts) in _paths(entry, dbu, census):
             half = width / 2.0
             for (x1, y1), (x2, y2) in zip(pts, pts[1:]):
-                if abs(y1 - y2) <= EPS:        # horizontal run
-                    d["rects"].append((layer, min(x1, x2), y1 - half, max(x1, x2), y1 + half))
-                elif abs(x1 - x2) <= EPS:      # vertical run
-                    d["rects"].append((layer, x1 - half, min(y1, y2), x1 + half, max(y1, y2)))
-                else:
+                if abs(y1 - y2) > EPS and abs(x1 - x2) > EPS:
                     census["diagonal"] = census.get("diagonal", 0) + 1
+                    continue
+                # DEF's default extension for SPECIAL wiring is half the width
+                # at the ENDS as well as across the run, so the rectangle grows
+                # by `half` on all four sides -- the same expansion the engine's
+                # own consumer applies (src/bdb.cpp, the special_wires ->
+                # keepouts pass).  Stopping at the centreline endpoints loses
+                # real metal exactly where it matters here: a strap ending at
+                # or just beside a macro pin would read as `no-partner`, or
+                # would seat a via this reader then calls impossible.
+                d["rects"].append((layer, min(x1, x2) - half, min(y1, y2) - half,
+                                   max(x1, x2) + half, max(y1, y2) + half))
         d["vias"].extend(_vias(entry, dbu, census))
     return nets, census
 
@@ -333,9 +347,23 @@ def audit_instance(inst, pins, snets, layers, via_min, straps=None, vias=None):
             continue
         via = None
         for (vl, vx, vy, vname) in vias.get(net, ()):
-            if x1 - EPS <= vx <= x2 + EPS and y1 - EPS <= vy <= y2 + EPS:
-                via = {"layer": vl, "x": round(vx, 4), "y": round(vy, 4), "via": vname}
-                break
+            if not (x1 - EPS <= vx <= x2 + EPS and y1 - EPS <= vy <= y2 + EPS):
+                continue
+            # The via must belong to the pair being audited.  A DEF carries
+            # every connect statement's vias, and a met3/met4 via whose point
+            # happens to fall inside a met5 pin says nothing about that pin --
+            # accepting it would report a floating pin as connected, which is
+            # the one direction this audit must never fail in.  pdngen writes a
+            # via on the LOWER of the two layers it joins, so a via of this
+            # pair is written on one of the two, and one of another pair is
+            # not.  (Residual: a via joining the pin's layer UPWARD out of the
+            # pair is still accepted -- it is a real connection to real grid
+            # metal, just not through this statement, and the DEF names only
+            # the writer's layer, so nothing here can tell the two apart.)
+            if vl not in (layer, other[layer]):
+                continue
+            via = {"layer": vl, "x": round(vx, 4), "y": round(vy, 4), "via": vname}
+            break
         partner = None
         cands = [("strap", r) for r in straps.get((net, other[layer]), ())]
         cands += [("pin", r) for r in own.get((net, other[layer]), ())]
@@ -354,6 +382,46 @@ def audit_instance(inst, pins, snets, layers, via_min, straps=None, vias=None):
                     "net": net, "layer": layer,
                     "rect": [round(v, 4) for v in (x1, y1, x2, y2)],
                     "verdict": verdict, "via": via, "partner": partner})
+    return out
+
+
+def terminal_rollup(findings):
+    """One verdict per (instance, net, pin) TERMINAL, from the per-rectangle
+    findings.
+
+    A LEF `PIN` is ONE terminal; its several `RECT`s (and `PORT`s) are
+    alternative access shapes for the same node, connected inside the macro.
+    So a via on any one of them feeds the terminal and the others are not
+    independently floating -- counting rectangles would fail a macro pdngen
+    connected perfectly well, merely because it did not via every access
+    shape, which is the normal case.  The per-rectangle findings stay: they
+    are the diagnostics (which layer, which access shape, what it was missing).
+    Only the count that decides the exit moves up to the terminal.
+
+    A rect carrying a via counts as connected even when its verdict is
+    `via-no-partner`: the metal IS joined there, and what that verdict says is
+    that the READER cannot explain it.  That claim is not diluted -- it keeps
+    its own per-rect count and fails the run on its own."""
+    order, groups = [], {}
+    for f in findings:
+        k = (f["instance"], f["net"], f["pin"])
+        if k not in groups:
+            order.append(k)
+            groups[k] = []
+        groups[k].append(f)
+    out = []
+    for k in order:
+        fs = groups[k]
+        vias = sum(1 for f in fs if f["via"] is not None)
+        if vias:
+            verdict = "connected"
+        elif any(f["partner"] for f in fs):
+            verdict = "partner-no-via"
+        else:
+            verdict = "no-partner"
+        out.append({"instance": k[0], "cell": fs[0]["cell"], "net": k[1], "pin": k[2],
+                    "verdict": verdict, "rects": len(fs), "vias": vias,
+                    "layers": sorted({f["layer"] for f in fs})})
     return out
 
 
@@ -406,9 +474,22 @@ def run_audit(def_text, lefs, layers, via_min=VIA_MIN):
     counts = {}
     for f in findings:
         counts[f["verdict"]] = counts.get(f["verdict"], 0) + 1
-    floating = counts.get("no-partner", 0) + counts.get("partner-no-via", 0)
+
+    terminals = terminal_rollup(findings)
+    tcounts = {}
+    for t in terminals:
+        tcounts[t["verdict"]] = tcounts.get(t["verdict"], 0) + 1
+    ttally = {}
+    for t in terminals:
+        ttally[(t["cell"], t["net"], t["verdict"])] = \
+            ttally.get((t["cell"], t["net"], t["verdict"]), 0) + 1
+    terminal_rows = [{"cell": c, "net": n, "verdict": v, "count": k}
+                     for (c, n, v), k in sorted(ttally.items())]
+    floating = len(terminals) - tcounts.get("connected", 0)
     return {"dbu": dbu, "layers": list(layers), "via_min": via_min,
             "macros": macros, "pins": len(findings), "counts": counts,
+            "terminals": terminals, "terminal_counts": tcounts,
+            "terminal_rows": terminal_rows, "n_terminals": len(terminals),
             "floating": floating, "rows": rows, "findings": findings,
             "nets": sorted(snets), "unplaced": unplaced,
             "unclaimed_power_pins": sorted(unclaimed),
@@ -476,7 +557,7 @@ def report(res, out=sys.stdout, limit=12):
     w = out.write
     w(f"pdn_connect: connect pair {res['layers'][0]}/{res['layers'][1]}, "
       f"via floor {res['via_min']} um, {res['macros']} macro(s), "
-      f"{res['pins']} power-pin rect(s)\n")
+      f"{res['n_terminals']} power terminal(s) over {res['pins']} rect(s)\n")
     if res["missing_lef"]:
         w("  no LEF (not audited): "
           + ", ".join(f"{c} x{n}" for c, n in sorted(res["missing_lef"].items())) + "\n")
@@ -494,10 +575,23 @@ def report(res, out=sys.stdout, limit=12):
           f"  pdngen vias a same-net cross-layer OVERLAP and nothing else, so a via\n"
           f"  without one means a shape was missed -- treat every verdict below as\n"
           f"  unproven until it is nil.\n")
-    w("\n  cell / net / layer                 verdict          count\n")
+    # The TERMINAL table is the verdict; the rectangle table below it is the
+    # diagnostic.  A LEF pin's several rects are access shapes for one node,
+    # so a via on any of them feeds it -- counting rects would fail a macro
+    # pdngen connected, for not viaing every access shape.
+    w("\n  terminals (a LEF pin is one node; any via on it feeds it)\n")
+    w("  cell / net                         verdict          count\n")
+    for r in res["terminal_rows"]:
+        w(f"  {r['cell']:<16} {r['net']:<13} {r['verdict']:<16} {r['count']:>6}\n")
+    w("\n  access rectangles (diagnostic: which layer, which shape)\n")
+    w("  cell / net / layer                 verdict          count\n")
     for r in res["rows"]:
         w(f"  {r['cell']:<16} {r['net']:<6} {r['layer']:<6} {r['verdict']:<16} {r['count']:>6}\n")
-    bad_findings = [f for f in res["findings"] if f["verdict"] != "connected"]
+    floating_terms = {(t["instance"], t["net"], t["pin"]) for t in res["terminals"]
+                      if t["verdict"] != "connected"}
+    bad_findings = [f for f in res["findings"]
+                    if f["verdict"] == "via-no-partner"
+                    or (f["instance"], f["net"], f["pin"]) in floating_terms]
     other_of = {res["layers"][0]: res["layers"][1], res["layers"][1]: res["layers"][0]}
     shown = 0
     for f in bad_findings[:limit]:
@@ -515,7 +609,8 @@ def report(res, out=sys.stdout, limit=12):
     left = len(bad_findings) - shown
     if left > 0:
         w(f"    ... and {left} more (--json for all)\n")
-    w(f"\n  {res['counts'].get('connected', 0)} connected, {res['floating']} floating\n")
+    w(f"\n  {res['terminal_counts'].get('connected', 0)} terminal(s) connected, "
+      f"{res['floating']} floating\n")
 
 
 def main(argv=None):

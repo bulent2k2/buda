@@ -116,10 +116,12 @@ def test_shape_clause_does_not_lose_the_stripe():
     nets, census = P.read_specialnets(DEF, DBU)
     assert census == {}
     rects = nets["VPWR"]["rects"]
-    # met5 stripe centred on y=300 with width 1.6 -> 299.2 .. 300.8
-    assert ("met5", 0.0, 299.2, 500.0, 300.8) in rects
+    # met5 stripe centred on y=300, width 1.6 -> 299.2 .. 300.8 across the run,
+    # and half a width past each end too (DEF's default extension for SPECIAL
+    # wiring), so x runs -0.8 .. 500.8
+    assert ("met5", -0.8, 299.2, 500.8, 300.8) in rects
     # met4 stripe centred on x=200, the `*` repeating the previous x
-    assert ("met4", 199.2, 0.0, 200.8, 600.0) in rects
+    assert ("met4", 199.2, -0.8, 200.8, 600.8) in rects
 
 
 def test_entry_tail_is_not_read_as_a_via_name():
@@ -164,7 +166,8 @@ def test_the_four_verdicts(tmp_path):
     assert _by(res, "VPWR", "met5")[0]["verdict"] == "connected"
     assert _by(res, "VGND", "met4")[0]["verdict"] == "partner-no-via"
     assert _by(res, "VGND", "met5")[0]["verdict"] == "no-partner"
-    assert res["floating"] == 2
+    # the exit-driving count is per TERMINAL: VGND's two rects are one pin
+    assert res["floating"] == 1 and res["n_terminals"] == 2
 
 
 def test_partner_no_via_names_the_crossing_it_found(tmp_path):
@@ -197,7 +200,9 @@ def test_via_with_no_crossing_is_a_reader_fault_and_fails_alone(tmp_path):
                        "  NEW met5 0 ( 180000 261000 ) via4_5\n  + USE GROUND ;")
     res = _run(deff, tmp_path=tmp_path)
     assert res["counts"]["via-no-partner"] == 1
-    assert res["floating"] == 1                      # the met4 pin only
+    # the via feeds the terminal, so VGND is no longer floating -- and the
+    # reader fault must still fail the run on its own
+    assert res["floating"] == 0
     out = []
     P.report(res, out=type("W", (), {"write": lambda self, s: out.append(s)})())
     assert "READER FAULT" in "".join(out)
@@ -287,11 +292,11 @@ def test_cli_exit_codes_and_json(tmp_path):
     out = tmp_path / "r.json"
     r = _cli(tmp_path, DEF, LEF, "--json", str(out))
     assert r.returncode == 1, r.stderr
-    assert "2 connected, 2 floating" in r.stdout
+    assert "1 terminal(s) connected, 1 floating" in r.stdout
     res = json.loads(out.read_text())
-    assert res["floating"] == 2 and res["layers"] == ["met4", "met5"]
+    assert res["floating"] == 1 and res["layers"] == ["met4", "met5"]
 
-    r = _cli(tmp_path, DEF, LEF, "--allow-floating", "2")
+    r = _cli(tmp_path, DEF, LEF, "--allow-floating", "1")
     assert r.returncode == 0
 
     r = _cli(tmp_path, DEF, LEF, "--layers", "met4")
@@ -355,3 +360,74 @@ def test_no_def_and_no_self_cross_says_which_question_to_ask(tmp_path):
     r = subprocess.run([sys.executable, str(_T1A / "pdn_connect.py")],
                        capture_output=True, text=True)
     assert r.returncode == 2 and "--self-cross" in r.stderr
+
+
+# ── the three review findings, each pinned by the case that reproduced it ──
+def test_a_strap_ending_beside_a_pin_still_reaches_it(tmp_path):
+    """DEF's default extension for SPECIAL wiring is half the width at the
+    ENDS as well as across the run (`src/bdb.cpp` applies the same expansion
+    on all four sides).  Here the met4 strap's centreline STOPS at y=221,
+    1.0 um into the met5 pin's 220..222 band — under the via floor.  Its end
+    cap carries it to 221.8, which clears.  Without the caps this reads
+    `no-partner` on metal that is really there."""
+    deff = DEF.replace("NEW met4 1600 + SHAPE STRIPE ( 200000 0 ) ( * 600000 )",
+                       "NEW met4 1600 + SHAPE STRIPE ( 200000 0 ) ( * 221000 )")
+    f = _by(_run(deff, tmp_path=tmp_path), "VPWR", "met5")[0]
+    assert f["partner"] is not None
+    assert f["partner"]["overlap"] == [1.6, 1.8]     # 1.0 without the end cap
+
+
+def test_a_via_of_another_layer_pair_does_not_connect_the_pin(tmp_path):
+    """A DEF carries every connect statement's vias.  A met3/met4 via whose
+    point falls inside a met5 pin says nothing about that pin, and taking it
+    would report a floating pin as connected — the one direction this audit
+    must never fail in.  pdngen writes a via on the LOWER of the two layers it
+    joins, so a via of the audited pair is written on one of the two."""
+    foreign = DEF.replace("  + USE GROUND ;",
+                          "  NEW met3 0 ( 180000 261000 ) via3_4\n  + USE GROUND ;")
+    f = _by(_run(foreign, tmp_path=tmp_path), "VGND", "met5")[0]
+    assert f["via"] is None and f["verdict"] == "no-partner"
+
+    # control: the same point on met4 IS of this pair and IS taken (and, with
+    # no crossing there, is then the reader fault it should be)
+    own = DEF.replace("  + USE GROUND ;",
+                      "  NEW met4 0 ( 180000 261000 ) via4_5\n  + USE GROUND ;")
+    g = _by(_run(own, tmp_path=tmp_path), "VGND", "met5")[0]
+    assert g["via"]["via"] == "via4_5" and g["verdict"] == "via-no-partner"
+
+
+def test_one_via_feeds_the_whole_terminal(tmp_path):
+    """A LEF `PIN` is one node; its several `RECT`s are alternative access
+    shapes connected inside the macro.  Give VPWR a second met4 access shape
+    that has a crossing but no via: the rectangle is `partner-no-via` and the
+    TERMINAL is still connected, because pdngen viaing one access shape and
+    not the other is the normal case, not a floating pin."""
+    lef = LEF.replace("""        RECT 10 0 12 150 ;
+      LAYER met5 ;
+        RECT 60 20 128 22 ;""",
+                      """        RECT 10 0 12 150 ;
+        RECT 60 0 62 150 ;
+      LAYER met5 ;
+        RECT 60 20 128 22 ;""")
+    res = _run(lef_text=lef, tmp_path=tmp_path)
+    m4 = {f["rect"][0]: f["verdict"] for f in _by(res, "VPWR", "met4")}
+    assert m4 == {110.0: "connected", 160.0: "partner-no-via"}
+
+    term = {(t["net"], t["pin"]): t for t in res["terminals"]}
+    assert term[("VPWR", "VPWR")]["verdict"] == "connected"
+    assert term[("VPWR", "VPWR")]["rects"] == 3 and term[("VPWR", "VPWR")]["vias"] == 2
+    assert res["floating"] == 1                       # VGND's terminal, and only it
+
+
+def test_terminal_rows_are_the_verdict_and_rect_rows_the_diagnostic(tmp_path):
+    """The report prints both: the per-cell/net terminal rollup decides, the
+    per-layer rectangle table is what tells you WHERE (`256 met4 + 256 met5`
+    is the shape the study is chasing)."""
+    res = _run(tmp_path=tmp_path)
+    assert {(r["net"], r["verdict"]): r["count"] for r in res["terminal_rows"]} == {
+        ("VGND", "partner-no-via"): 1, ("VPWR", "connected"): 1}
+    assert len(res["rows"]) == 4                      # one per (net, layer, verdict)
+    out = []
+    P.report(res, out=type("W", (), {"write": lambda self, s: out.append(s)})())
+    text = "".join(out)
+    assert "terminals (a LEF pin is one node" in text and "access rectangles" in text

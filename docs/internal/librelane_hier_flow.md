@@ -347,6 +347,18 @@ unchanged — it is what REMOVES a strap, not what connects one.  The two
 relations are independent, and only the cross-layer one answers "is this pin
 fed".
 
+Two readings a first cut got wrong, both caught in review and both worth
+stating because they bite in opposite directions.  A DEF SPECIAL wire is
+extended by half its width at the ENDS as well as across the run (what
+`src/bdb.cpp`'s `special_wires` -> keepouts pass already applies on all four
+sides), so a strap whose centreline stops beside a macro pin still reaches
+it -- stopping at the centreline endpoints loses real metal and under-reports
+connectivity.  And the count that decides a verdict is per TERMINAL: a LEF
+`PIN` is one node whose several `RECT`s are alternative access shapes
+connected inside the macro, so a via on any one feeds it, and pdngen viaing
+one access shape and not another is the normal case rather than a floating
+pin.
+
 `pdn_connect.py` is the post-mortem twin of `pdn_phase.py`: it reads the DEF
 pdngen WROTE and reports, per macro power pin, whether a via landed on it and
 — where none did — whether the pin had a same-net crossing to connect to at
