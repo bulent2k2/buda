@@ -819,7 +819,7 @@ Full details (required / optional / bundled, versions, install cheat-sheet) in
 [docs/build_test_dependencies.md](docs/build_test_dependencies.md). Summary:
 
 - **pybind11** — C++/Python bindings
-- **Python 3.13+**
+- **Python 3.11+** (`pyproject.toml`; CI pins 3.11 — a 3.12+ box accepts f-string forms 3.11 rejects, so CI's parse step is the arbiter, see docs/internal/ci.md)
 - **matplotlib** + **tkinter** — visualization and floorplanner GUI
 - **SQLite** — bundled as `src/sqlite3.c` (amalgamation; no system dependency)
 - **pytest** + **pytest-bdd** — testing
