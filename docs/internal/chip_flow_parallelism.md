@@ -461,8 +461,15 @@ stale-branch sweep nearly took both, which is what prompted this paragraph:
   * the floor-relievability gate is commit **`187428ab`**, which had no PR
     and is therefore reachable ONLY while its branch
     (`claude/b1-ladder-floor-gate`) exists.  Before deleting that branch,
-    tag it (`git tag -a shelved/b1-ladder-floor-gate 187428ab`) or the 145
-    insertions go with it.
+    tag it **and push the tag** -- a local tag is not a durable reference,
+    it is the same loss one clone away:
+
+        git fetch origin claude/b1-ladder-floor-gate
+        git tag -a shelved/b1-ladder-floor-gate 187428ab \
+            -m "B1 floor-relievability gate: measured INERT, 1 skip/105 calls"
+        git push origin shelved/b1-ladder-floor-gate
+
+    Without that push the 145 insertions go with the branch.
 
 **Conclusion (scoped to what was measured): the
 DISJOINT-FEASIBILITY-UNCHANGED prune is inert on this corpus.**  That
