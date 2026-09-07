@@ -1136,7 +1136,9 @@ headroom H+B has to recover — not what hierarchy costs.  Timing now has a
 number behind §2.4's caveat: +0.89 ns against F's +1.81 at the slow corner,
 every block boundary budgeted by one `IO_DELAY_CONSTRAINT`.
 
-**7e. Arm H+B — the block sizes come from BUDA.**  Steps 3c and 7a-7d
+**7e. Arm H+size — the block sizes come from BUDA** (one of H+B's three
+contributions; the pins and the corridors are not in this arm — see the
+measured section below).  Steps 3c and 7a-7d
 leave one number on the table: arm H's die is 8.66x arm F's at N = 4 and
 6.15x at N = 8, and §8 step 3c measured that as a SIZING artifact — the
 emitter pads every cell with one `PEPAD` while `emit_block_size` sizes each
@@ -1172,7 +1174,87 @@ test that reproduces BOTH measured arm-H dies (2.427 mm² at N = 4 and
 6.347 at N = 8) from the parameters alone, so a drifted transcription
 cannot promise a saving nobody can collect.
 
-**Predicted at N = 8** (`PEPAD 100` is what the measured H run used):
+**MEASURED at N = 8** (2026-09-07, macOS / LibreLane 3.0.11 / sky130A, Docker
+at 20 GB).  It hardens, and the prediction below was exact — 3.935 mm² to
+the digit.
+
+**This arm is `H+size`, NOT H+B.**  §7.2 defines H+B as BUDA's sizes AND its
+`FP_DEF_TEMPLATE` pins AND its corridors; step 7e applies only
+`emit_block_size` and then runs `harm.sh`, which keeps per-block
+`IOPlacement` pins and ordinary global routing, and the row carries none of
+BUDA's own end-of-run triple (§7.3).  So this measures **hierarchy plus
+BUDA sizing** — one of the three contributions — and the row is stamped
+`arm=H+size` so it cannot be read as the H+B point.  H+B needs the pin
+writer (§8 step 3b, working on the toy) and the guide handoff (§8 step 5b,
+working on the toy) carried into the tier-1a vehicle:
+
+| N = 8 | F | H | **H+size** |
+|---|---|---|---|
+| wall | 4,541 s | 6,208 s | **5,023 s** |
+| CPU | 4,541 s | 6,996 s | 5,855 s |
+| blocks (wall, parallel) | — | 326 s | 408 s |
+| top alone | 4,541 s | 5,882 s | 4,615 s |
+| die | 1.032 mm² | 6.347 mm² | **3.935 mm²** |
+| utilisation | 46.3 % | 50.8 % | 38.7 % |
+| arm wire | 935 mm | 1,980 mm | 1,732 mm |
+| setup WS | −0.55 ns | +0.39 ns | **+0.46 ns** |
+| hold WS | +0.091 ns | −1.075 ns | **−0.238 ns** |
+| route DRC / LVS / antenna | 0 | 0 | 0 |
+| KLayout DRC | 0 | 0 | **5** |
+
+**H+size improves four metrics and regresses two.**  Better: die 0.62×,
+wall 0.81×, arm wire 0.87×, hold slack −1.075 → −0.238 ns.  Worse: **KLayout
+DRC 0 → 5**, and block wall time 326 → 408 s (that one is byte-identical
+work and inside the ±25 % noise §8 step 7d measured, so read it as noise,
+not as a cost).  The DRC regression is not noise and it **breaks §7.4's
+floor** — "H+B ≥ H on every PPA metric at every N" — so on the criterion as
+written this arm fails, on 5 `m2.2` spacing violations, and that has to be
+fixed rather than argued away.
+
+So §8 step 3c's reading was right — arm H's die was a SIZING artifact and
+BUDA collects most of it — and the `--optimize-aspect` search's own
+arithmetic is trustworthy: it predicted the die exactly.
+
+Against F the arm is still 3.81× the die and 1.11× the wall, so hierarchy
+has not overtaken flat here; what changed is that the gap is now the one
+hierarchy actually costs rather than one the emitter's padding added.
+
+**Two residuals, both deferred errors** (the flow runs to completion and
+exits non-zero at the gate): **5 KLayout DRC violations**, all `m2.2`
+(met2 minimum spacing) in a repeating pattern — two x positions (763.4,
+939.4) against three y (1944, 2052, 2160), edge gaps of 0.02–0.07 µm, so
+systematic geometry rather than noise — and **hold at −0.238 ns**, better
+than H's −1.075 but not passing.  Route DRC, LVS and antenna are clean.
+
+**The PDN needs `harm.py`'s own offsets, and a hand-"fix" broke it.**  On the
+first attempt at this arm the top failed `PSM-0069` with 512 unconnected
+VGND shapes, and the cause was an offset introduced BY HAND after
+`pdn_phase.py` reported the tool's own plan as failing (144 clips) and
+blessed the replacement with "0 clips, every instance connected".  Re-run
+unmodified, the same design reports `All shapes on net VPWR are connected`
+and VGND, and `pdn_connect.py` audits 208 terminals connected, 0 floating.
+The clips `pdn_phase.py` counts are what pdngen resolves by CUTTING a strap
+(`Shape::cut`), which is only fatal when it isolates a fragment: the hand
+offset cut VGND's met5 into 85 pieces (spans 32.8/108.6/152.8 µm against
+VPWR's 21 intact at 1636.7) and stranded some.  So its clip verdict is as
+unreliable as the connectivity verdict §7.2 records, and `harm.sh`'s
+"the PDN plan fails pdn_phase.py" warning is — on this evidence — a false
+alarm on a plan that works.
+
+**The verdict is OpenROAD's own PSM check, not `pdn_connect.py`.**  That
+script rolls up macro power TERMINALS, and the failure above is a strap
+fragment isolated from the grid while every terminal still has its via —
+which it structurally cannot see: on the FAILING DEF it reported the same
+"208 terminals connected, 0 floating" it reports on the passing one.  It is
+the right tool for asking whether a pin has access, and the wrong one for
+asking whether the network is whole.  Read `PSM-0040`/`PSM-0069` and the
+`*-grid-errors.rpt` for pass/fail; use `pdn_connect.py` to localise a
+failure to pins or away from them.
+
+**The prediction, now confirmed** (`PEPAD 100` is what the measured H run
+used).  The die column below is no longer a prediction — the run above
+emitted 3.935 mm² exactly — and the rows are kept as the record of what the
+tool promised before anyone ran it:
 
 | PE size | source | die | vs arm H | vs arm F (1.032 mm²) |
 |---|---|---|---|---|
@@ -1295,7 +1377,11 @@ have: every netlist here is either authored or uniquified.
 1. The **success criterion** in §7.4 — confirm or replace the numbers.
 2. **sky130A** unless told otherwise.
 3. ~~Vehicle~~ — decided: the ladder in §7.1, tiers 1a and 1b first, both
-   for concrete runtime numbers; Chisel is acceptable.  **H's wall-time gap
+   for concrete runtime numbers; Chisel is acceptable.  **H+size exists at N = 8** (§8 step 7e: die 3.935 mm², wall 5,023 s —
+   four metrics better than H, KLayout DRC 0 → 5 worse, still 3.81× F's die
+   and 1.11× its wall).  It is NOT the H+B point: it carries BUDA's sizes
+   but not its pins or corridors, and its DRC regression breaks §7.4's own
+   floor, so the criterion is unmet twice over.  **H's wall-time gap
    to F is closing as N grows** (§8 step 7d: H/F 2.72× at N = 4, 1.37× at
    N = 8), which is what solve-once predicts.  That is NOT §7.4's crossover
    — that one is about H+B beating F by ≥ 2× within 10 % die area, and the
@@ -1329,7 +1415,17 @@ have: every netlist here is either authored or uniquified.
    are clean at every N (the F rows at 20 ns would want re-running), or
    keep 20 ns and report a sweep in which both arms miss timing at N = 8 for
    different reasons.  Per-pin budgets (phase 3) address H's half only.
-7. **The 5 % pass threshold of measurement A** (§8 step 5) is a number
+7. **Arm H+size's two residuals at N = 8** (§8 step 7e): 5 KLayout `m2.2`
+   met2-spacing violations in a repeating pattern, and hold at −0.238 ns.
+   Both are deferred errors on an otherwise clean run (route DRC, LVS,
+   antenna 0), and the hold half is the same clock question as item 6.
+8. **`pdn_phase.py`'s verdicts cannot be acted on** (§8 step 7e): its
+   connectivity model is wrong (§7.2) and its clip count is what pdngen
+   resolves by cutting straps — following it turned a working H+B design
+   into a `PSM-0069` failure.  Until it is fixed, `harm.sh`'s "the PDN plan
+   fails pdn_phase.py" warning should not be trusted, and `pdn_connect.py`
+   on the written DEF is the verdict that counts.
+9. **The 5 % pass threshold of measurement A** (§8 step 5) is a number
    read off two runs of one toy.  It should be re-read on the first real
    vehicle (tier 1a, N=4): if the gcell-edge and pin-access share does not
    scale with the design, 5 % stays; if it does, the threshold is the wrong
