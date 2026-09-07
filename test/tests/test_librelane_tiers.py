@@ -286,6 +286,56 @@ def test_harm_sh_writes_the_h_arm_from_the_emitted_set(tmp_path, n):
 
 
 @pytest.mark.skipif(not _HAS_TCLSH, reason="gen.sh emits the set through tclsh")
+def test_a_failing_dry_run_warns_and_still_writes_the_arm(tmp_path, monkeypatch, capsys):
+    """`pdn_phase.py`'s verdict must not GATE the arm.
+
+    It used to raise, and that abort is the proximate cause of the study's
+    only PDN failure (#893): it refused to write a plan that works, the only
+    way past it was to hand-edit PDN_HOFFSET, and the hand offset cut VGND's
+    met5 into 85 pieces -- PSM-0069 at signoff on a design whose generated
+    plan was fine.  So a failing dry run is REPORTED and the arm is written.
+    """
+    d = _emit(tmp_path, 2)
+    sys.path.insert(0, str(_T1A))
+    import harm
+    import pdn_phase as pp
+
+    real = pp.run_check
+    monkeypatch.setattr(pp, "run_check", lambda *a, **k: {**real(*a, **k), "pass": False})
+    out = tmp_path / "hout"
+    r = harm.write_h(str(d), str(out), (pp.SKY130["FP_MACRO_HORIZONTAL_HALO"],
+                                        pp.SKY130["FP_MACRO_VERTICAL_HALO"]))
+    assert r["dry_run_failed"] is True
+    assert (out / "top" / "config.json").is_file()          # written anyway
+    err = capsys.readouterr().err
+    assert "ADVISORY" in err and "Do NOT hand-edit" in err
+    assert "PSM" in err
+
+
+def test_the_generated_readme_no_longer_teaches_the_fix_that_broke_the_pdn(tmp_path):
+    """The doc recorded the lesson while this template still instructed the
+    action that caused it -- and the template is written fresh into every arm
+    directory, so it is what the next person reads."""
+    src = (_T1A / "harm.py").read_text()
+    body = src[src.index("def render_readme"):src.index("def main(")]
+    assert "fix the\noffsets in top/config.json" not in body
+    assert "never the top blind" not in body
+    assert "ADVISORY" in body and "Do not hand-edit" in body
+    # and it points at the verdict that counts, with the way to localise it
+    assert "PSM-0040" in body and "grid-errors.rpt" in body
+    assert "pdn_connect.py" in body and "--self-cross" in body
+
+
+def test_pdn_phase_says_it_is_advisory_wherever_it_is_read(tmp_path):
+    """Anyone can run it directly, so the caveat has to travel with the tool
+    and not only with the doc."""
+    sys.path.insert(0, str(_T1A))
+    import pdn_phase as pp
+    assert "ADVISORY" in pp.__doc__ and "PSM-0069" in pp.__doc__
+    assert "verdict" in pp.ADVISORY and "pdn_connect.py" in pp.ADVISORY
+
+
+@pytest.mark.skipif(not _HAS_TCLSH, reason="gen.sh emits the set through tclsh")
 def test_harm_sh_fails_loudly_on_the_shape_it_did_not_expect(tmp_path):
     env = {**os.environ, "T1A_DIR": str(tmp_path)}
     r = subprocess.run(["bash", str(_T1A / "harm.sh"), "2"], env=env, capture_output=True, text=True)

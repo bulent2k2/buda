@@ -952,7 +952,7 @@ of the batch and the cpu-sum are BOTH recorded (§7.3).
 ```bash
 cd ~/src/buda && flow/librelane/tier1a/harm.sh 4         # prints the PDN plan and the utilization estimate
 cd flow/librelane/tier1a/n4/h
-python3 ../../pdn_phase.py top/config.json predicted_lef/*.lef     # dry run, no tools: must PASS
+python3 ../../pdn_phase.py top/config.json predicted_lef/*.lef     # dry run, no tools: ADVISORY (§11 item 8)
 date +%s > blocks.start
 for c in pe_cell feed_cell wbuf_cell acc_cell; do
   (cd $c && librelane --dockerized --run-tag h config.json > h.log 2>&1) &

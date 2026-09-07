@@ -112,8 +112,13 @@ What it writes, and the rule behind each piece:
       writes (core margin 12 sites x 4 rows = 5.52 x 10.88, straps at
       core + 5 + 30k, width 2, spacing 1.7 -- the toy's measured 10.52 /
       14.22) and written as h/predicted_lef/<cell>.lef so `pdn_phase.py`
-      can dry-run before any hardening; the REAL check is the same script
-      on the hardened LEFs, after step 7a and before 7c of §8.
+      can dry-run before any hardening.  Both runs are ADVISORY: the REAL
+      check is OpenROAD's own PSM at the end of the top run.  `pdn_phase.py`
+      counts CLIPS, which are what pdngen resolves by cutting a strap and
+      which are fatal only when the cut isolates a fragment, and its
+      connectivity model is wrong (§7.2); acting on its verdict by hand once
+      turned a working plan into a PSM-0069 failure, so a failing dry run is
+      reported here and never gates the arm (§11 item 8).
 
 Everything derived is checked against the shape it expects and exit 1
 names what did not match: a DEF component whose cell tpu.lef lacks, a leaf
@@ -121,7 +126,8 @@ module missing from tpu_rtl.v, an unplaced component, a polygon DIEAREA,
 an orientation other than N (the emitter writes N; other orientations are
 handled by the shared transform but were never run), instance x's not
 congruent mod the chosen pitch, no feasible phase, a fragment no strap
-reaches, a predicted-LEF dry run that fails its own check.
+reaches.  A predicted-LEF dry run that fails its own check is the one thing
+that does NOT exit 1: see the pdn_plan note above.
 """
 import argparse
 import json
@@ -782,19 +788,37 @@ def write_h(n_dir, out_dir, halo):
     for cell in leaf_cells:
         lefs.update(pp.read_lef(os.path.join(pred_dir, f"{cell}.lef")))
     res = pp.run_check(topcfg, lefs)
-    if not res["pass"]:
+    dry_run_failed = not res["pass"]
+    if dry_run_failed:
+        # ADVISORY, not a gate.  This used to raise, and that abort is the
+        # proximate cause of the study's one PDN failure (#893): it refused to
+        # write a plan that WORKS, the only way past it was to hand-edit
+        # PDN_HOFFSET, and the hand offset cut VGND's met5 into 85 pieces and
+        # stranded some -- PSM-0069 at signoff, on a design whose generated
+        # plan was fine.  `pdn_phase.py`'s clip count is what pdngen resolves
+        # by CUTTING a strap (`Shape::cut`), which is fatal only when the cut
+        # isolates a fragment, and its connectivity model is wrong besides
+        # (docs/internal/librelane_hier_flow.md §7.2 and §11 item 8).  So it
+        # is reported and the arm is written; PSM decides.
         pp.report(topcfg, lefs, res, sys.stderr)
-        raise Shape("the PDN plan fails pdn_phase.py on the PREDICTED pins -- the writer contradicts its checker")
+        print("harm: WARNING: the predicted-pin dry run of pdn_phase.py does not pass.  This is "
+              "ADVISORY and the arm has been written anyway.\n"
+              "harm: Do NOT hand-edit the PDN_* offsets on its say-so -- that is what produced the "
+              "study's only PSM-0069 (see librelane_hier_flow.md §11 item 8).\n"
+              "harm: The verdict is OpenROAD's own PSM check at the end of the TOP run; "
+              "pdn_connect.py on the written DEF localises a failure.", file=sys.stderr)
 
     counts = {cell: sum(1 for i_ in insts if i_["cell"] == cell) for cell in leaf_cells}
-    readme = render_readme(n_dir, out_dir, leaf_cells, counts, sizes, D, dx, dy, vplan, hplan, advice)
+    readme = render_readme(n_dir, out_dir, leaf_cells, counts, sizes, D, dx, dy, vplan, hplan, advice,
+                           dry_run_failed)
     with open(os.path.join(out_dir, "README.md"), "w") as f:
         f.write(readme)
     return {"out": out_dir, "cells": leaf_cells, "counts": counts, "shift": [dx, dy], "vplan": vplan, "hplan": hplan,
-            "advice": advice, "instances": len(insts)}
+            "advice": advice, "instances": len(insts), "dry_run_failed": dry_run_failed}
 
 
-def render_readme(n_dir, out_dir, cells, counts, sizes, D, dx, dy, vplan, hplan, advice):
+def render_readme(n_dir, out_dir, cells, counts, sizes, D, dx, dy, vplan, hplan, advice,
+                  dry_run_failed=False):
     blocks = " ".join(f"--block {c}/runs/h:{counts[c]}" for c in cells)
     n_arr = int(round(math.sqrt(counts.get("pe_cell", 0)))) or "?"   # the array's N: N*N PEs
     harden = "\n".join(f"(cd {c} && librelane --dockerized --run-tag h config.json > h.log 2>&1) &" for c in cells)
@@ -813,11 +837,15 @@ in top/pdn_plan.json and harm.py's docstring.
 
 Utilization (rough): {'; '.join(advice)}
 
-## 0. Dry-run the PDN check on the PREDICTED pins (no tools needed)
+## 0. Dry-run the PDN check on the PREDICTED pins (no tools needed) -- ADVISORY
 
     python3 ../../pdn_phase.py top/config.json {plef}
 
-Pass: `PASS: {sum(counts.values())} instances, ...`.  This only proves the plan agrees with its own prediction.
+`PASS: {sum(counts.values())} instances, ...` only proves the plan agrees with its own prediction.
+**Its verdicts cannot be acted on** ({'it does NOT pass here, and that is not a reason to change anything -- ' if dry_run_failed else ''}librelane_hier_flow.md
+§11 item 8): the clips it counts are what pdngen resolves by CUTTING a strap, fatal only when the cut isolates
+a fragment, and its connectivity model is wrong besides.  Following it once turned a working plan into a
+PSM-0069 failure.  **Do not hand-edit the PDN_* offsets on its say-so.**  The verdict is step 3.
 
 ## 1. Harden the {len(cells)} cells -- independent, so in parallel; record wall AND cpu (§7.3)
 
@@ -830,14 +858,14 @@ Pass, per cell: `Flow complete` in `<cell>/h.log`, and `<cell>/runs/h/final/{{gd
 If `OpenROAD.GlobalPlacement` refuses on utilization, the die (the emitter's LEF SIZE) is too small for the
 RTL: regenerate the whole set with a larger `-PEPAD` (see the utilization line above) and rerun harm.sh.
 
-## 2. The PDN-phase check on the HARDENED pins -- before the top
+## 2. The PDN-phase check on the HARDENED pins -- ADVISORY, same as step 0
 
     python3 ../../pdn_phase.py top/config.json {lefs}
 
-Pass: `PASS: ...`, exit 0.  A COLLISION or UNCONNECTED line names the instance, pin and strap and the smallest
-shift that clears it (and the PDN_VOFFSET/PDN_HOFFSET that is equivalent for all macros at once); fix the
-offsets in top/config.json and rerun the check, never the top blind (§8 step 4: signoff is the first tool step
-that notices, and it is the last step).
+Worth reading for what it SHOWS -- which strap meets which pin, and the shift that would separate them -- and
+not for its verdict.  Run the top whatever it says.  A COLLISION or UNCONNECTED line is information about the
+geometry, not a defect: acting on one by editing PDN_VOFFSET/PDN_HOFFSET is what produced this study's only
+PSM-0069, on a design whose generated plan was fine (librelane_hier_flow.md §11 item 8).
 
 ## 3. The top
 
@@ -846,6 +874,17 @@ that notices, and it is the last step).
 Pass: `Odb.ManualMacroPlacement` prints `Successfully placed {sum(counts.values())} instances` (a declared instance the
 flattened netlist does not have exits 1 there -- that is the `row_0/pe_0` to `row_0.pe_0` name rule failing),
 `Flow complete`, `All shapes on net VPWR are connected` (and VGND) from the IR-drop report.
+
+**This is the PDN verdict** -- `PSM-0040`/`PSM-0069` and `runs/h/*/*-grid-errors.rpt`, not step 0 or step 2.
+If it fails, localise it on the DEF pdngen actually wrote before changing anything:
+
+    python3 ../../pdn_connect.py top/runs/h/*-pdn/*.def */runs/h/final/lef/*.lef --json pdn.json
+    python3 ../../pdn_connect.py --self-cross */runs/h/final/lef/*.lef
+
+The first names every power terminal with no via, and every strap FRAGMENT cut off from the grid with the
+terminals it strands -- the two halves of a PSM failure, which need opposite fixes.  The second needs no run
+at all: it asks whether each power pin crosses its own net on the other connect layer, a per-cell property
+that no PDN offset can change.
 
 ## 4. The row for the table (§7.3: top plus every block, wire per PLACED instance)
 
@@ -882,8 +921,9 @@ def main(argv=None):
           f"{'' if h['met5_straps_over_macros'] else ', none over any macro'})")
     for line in r["advice"]:
         print("harm: " + line)
-    print(f"harm: next steps in {r['out']}/README.md (dry-run check, harden the blocks in parallel, "
-          f"pdn_phase.py on the hardened LEFs, the top, runtimes.py --set N= --set arm=H --blocks-from)")
+    print(f"harm: next steps in {r['out']}/README.md (advisory dry run, harden the blocks in parallel, "
+          f"the top -- whose PSM check is the PDN verdict -- then runtimes.py --set N= --set arm=H "
+          f"--blocks-from)")
     return 0
 
 
