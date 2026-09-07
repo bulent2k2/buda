@@ -634,3 +634,112 @@ def test_runtimes_blocks_from_the_top_config(tmp_path):
     r = subprocess.run([sys.executable, str(_T1A / "runtimes.py"), str(top / "runs" / "h"),
                         "--blocks-from", str(top / "config.json")], capture_output=True, text=True)
     assert r.returncode != 0 and "acc_cell" in r.stderr and "does not exist" in r.stderr
+
+
+# ── arm H+B: pins.sh, harm.sh --pins ──────────────────────────────────────
+@pytest.mark.skipif(not _HAS_TCLSH, reason="gen.sh emits the set through tclsh")
+def test_pins_sh_writes_one_template_per_leaf_cell_and_harm_consumes_it(tmp_path):
+    """`pins.sh N` routes the emitted array and writes one FP_DEF_TEMPLATE
+    per leaf CELL TYPE -- a template, not a per-instance file, because the
+    arm hardens each cell once and places it N^2 times -- and
+    `harm.sh N --pins pins` puts each one into its block's config.
+
+    Three properties earn their assertions: the templates are per CELL (so
+    the count is the LEF's macro count, whatever N is), no two pins in one
+    template share metal (two nets on one rectangle is a short, and a
+    template can produce one where no single instance does -- each instance
+    contributes the pins it routes), and every block is capped at
+    `RT_MAX_LAYER met3`, which is the pin template's own risk: the extra
+    internal wire a template costs is what pushes a block up onto met4, and
+    a block with a met4 OBS made pdngen drop the straps that would have fed
+    it (§8 step 5b, PSM-0069)."""
+    d = _emit(tmp_path, 2)
+    env = {**os.environ, "T1A_DIR": str(tmp_path)}
+    r = subprocess.run(["bash", str(_T1A / "pins.sh"), "2"], env=env,
+                       capture_output=True, text=True, timeout=900)
+    assert r.returncode == 0, r.stdout + r.stderr
+    cells = sorted(_lef_sizes(d / "tpu.lef"))
+    assert cells, "the emitted LEF declares no macro"
+    for c in cells:
+        text = (d / "pins" / f"{c}.def").read_text()
+        assert f"DESIGN {c} ;" in text
+        n = int(re.search(r"^PINS (\d+) ;", text, re.M).group(1))
+        assert n > 0
+        # one pin per piece of metal
+        boxes = []
+        for m in re.finditer(r"- (\S+) \+ NET \S+.*?LAYER (\S+) "
+                             r"\( (-?\d+) (-?\d+) \) \( (-?\d+) (-?\d+) \)"
+                             r".*?PLACED \( (-?\d+) (-?\d+) \)", text):
+            nm, lay = m.group(1), m.group(2)
+            x1, y1, x2, y2, px, py = (int(v) for v in m.group(3, 4, 5, 6, 7, 8))
+            boxes.append((nm, lay, px + x1, py + y1, px + x2, py + y2))
+        assert len(boxes) == n
+        for i, a in enumerate(boxes):
+            for b in boxes[i + 1:]:
+                assert not (a[1] == b[1] and a[2] < b[4] and b[2] < a[4]
+                            and a[3] < b[5] and b[3] < a[5]), \
+                    f"{c}: pins {a[0]} and {b[0]} share metal"
+
+    r = subprocess.run(["bash", str(_T1A / "harm.sh"), "2", "--pins", "pins"],
+                       env=env, capture_output=True, text=True, timeout=600)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "arm=H+B" in r.stdout
+    for c in cells:
+        cfg = json.loads((d / "h" / c / "config.json").read_text())
+        # `permissive`, not `strict`: BUDA plans against the emitter's
+        # structural view and a block run synthesizes the twin, whose
+        # `clk`/`rst` no bus reaches -- `strict` requires the two pin sets
+        # to be identical and exits 1 on exactly that.  What strict was
+        # protecting is checked afterwards by tools/pin_def_verify.py,
+        # which the generated README's step 1 runs.
+        assert cfg["FP_TEMPLATE_MATCH_MODE"] == "permissive"
+        assert cfg["RT_MAX_LAYER"] == "met3"
+        t = cfg["FP_DEF_TEMPLATE"]
+        assert t.startswith("dir::")
+        assert (d / "h" / c / t[len("dir::"):]).resolve() == \
+            (d / "pins" / f"{c}.def").resolve()
+    readme = (d / "h" / "README.md").read_text()
+    assert readme.startswith("# Arm H+B ")
+    assert "--set arm=H+B" in readme
+    plan = json.loads((d / "h" / "top" / "pdn_plan.json").read_text())
+    assert sorted(plan["pin_templates"]) == cells
+
+
+@pytest.mark.skipif(not _HAS_TCLSH, reason="gen.sh emits the set through tclsh")
+def test_without_pins_the_h_arm_is_byte_identical_and_a_gap_is_refused(tmp_path):
+    """The H+B option must not move arm H: the same command without
+    `--pins` writes exactly what it wrote before the option existed, key
+    for key (a `pin_templates: {}` in every arm-H plan file would be a diff
+    for no information).  And a templates directory missing ONE cell is
+    refused BEFORE anything is written -- otherwise it would surface at
+    that block's ApplyDEFTemplate, after the other three had hardened."""
+    d = _emit(tmp_path, 2)
+    env = {**os.environ, "T1A_DIR": str(tmp_path)}
+    assert subprocess.run(["bash", str(_T1A / "pins.sh"), "2"], env=env,
+                          capture_output=True, text=True, timeout=900).returncode == 0
+    plain, pinned = tmp_path / "h_plain", tmp_path / "h_pinned"
+    for out, extra in ((plain, []), (pinned, ["--pins", "pins"])):
+        r = subprocess.run([sys.executable, str(_T1A / "harm.py"), str(d),
+                            "--out", str(out)] + extra,
+                           capture_output=True, text=True, timeout=600)
+        assert r.returncode == 0, r.stdout + r.stderr
+    for c in sorted(_lef_sizes(d / "tpu.lef")):
+        a = json.loads((plain / c / "config.json").read_text())
+        b = json.loads((pinned / c / "config.json").read_text())
+        assert "FP_DEF_TEMPLATE" not in a and "FP_DEF_TEMPLATE" in b
+        assert a["RT_MAX_LAYER"] == "met4", "arm H keeps met4"
+        assert {k: v for k, v in b.items()
+                if k not in ("FP_DEF_TEMPLATE", "FP_TEMPLATE_MATCH_MODE",
+                             "RT_MAX_LAYER")} == \
+            {k: v for k, v in a.items() if k != "RT_MAX_LAYER"}
+    assert "pin_templates" not in json.loads(
+        (plain / "top" / "pdn_plan.json").read_text())
+
+    (d / "pins" / "pe_cell.def").unlink()
+    r = subprocess.run([sys.executable, str(_T1A / "harm.py"), str(d),
+                        "--out", str(tmp_path / "h_gap"), "--pins", "pins"],
+                       capture_output=True, text=True, timeout=600)
+    assert r.returncode == 1
+    assert "no template for pe_cell" in r.stderr
+    assert "pins.sh" in r.stderr
+    assert not (tmp_path / "h_gap").exists(), "refused after writing"

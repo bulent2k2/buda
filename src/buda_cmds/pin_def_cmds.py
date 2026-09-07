@@ -21,19 +21,19 @@ from buda_script import leading_path_and_options
 from ._options import reject_unknown_options
 
 _OPTS = ("unrouted", "depth", "grid", "lef", "snap", "escaped_names",
-         "expect_layer")
+         "expect_layer", "on_mismatch")
 
 
 def cmd_emit_pin_def(session, cmd, args, cmd_line):
     # Usage: emit_pin_def <file.def> <block-or-cell> [unrouted <N|S|E|W> [<layer>]]
     #                     [depth <um>] [grid <dbu>] [lef <file.lef>] [snap]
-    #                     [escaped_names]
+    #                     [escaped_names] [on_mismatch refuse|reference]
     if len(args) < 2:
         print("Error: emit_pin_def requires an output path and a block or "
               "cell name: emit_pin_def <file.def> <block-or-cell> "
               "[unrouted <N|S|E|W> [<layer>]] [depth <um>] [grid <dbu>] "
               "[lef <file.lef>] [snap] [escaped_names] "
-              "[expect_layer <csv>]")
+              "[expect_layer <csv>] [on_mismatch refuse|reference]")
         return
     # A QUOTED path may contain spaces; unquoted this is the old split.
     path, rest = leading_path_and_options(cmd_line, _OPTS)
@@ -43,7 +43,7 @@ def cmd_emit_pin_def(session, cmd, args, cmd_line):
         return
     target, opts = rest[0], rest[1:]
     unrouted, unrouted_layer, depth, grid, lef = "S", None, None, None, None
-    snap, escaped, expect_layer = False, False, None
+    snap, escaped, expect_layer, on_mismatch = False, False, None, "refuse"
     i = 0
     while i < len(opts):
         kw = opts[i].lower()
@@ -72,6 +72,12 @@ def cmd_emit_pin_def(session, cmd, args, cmd_line):
                 print("Error: emit_pin_def expect_layer needs a layer name")
                 return
             i += 2
+        elif kw == "on_mismatch" and i + 1 < len(opts):
+            # `reference` for a cell whose instances CANNOT agree on a pin
+            # because their neighbours differ (the tier-1a array's last row
+            # hands its psum to an accumulator, every other row to the PE
+            # above); the writer's docstring carries the rule.
+            on_mismatch, i = opts[i + 1].lower(), i + 2
         elif kw == "snap":
             # The fallback for a placement that cannot move onto the track
             # period: each pin to the nearest BLOCK-frame track, LOUD.
@@ -97,7 +103,8 @@ def cmd_emit_pin_def(session, cmd, args, cmd_line):
     emit_pin_def(session, resolve_script_path(session, path), target,
                  unrouted=unrouted, unrouted_layer=unrouted_layer,
                  depth_um=depth, grid=grid, lef_path=lef, snap=snap,
-                 escaped_names=escaped, expect_layer=expect_layer)
+                 escaped_names=escaped, expect_layer=expect_layer,
+                 on_mismatch=on_mismatch)
 
 
 COMMANDS = {"emit_pin_def": cmd_emit_pin_def}

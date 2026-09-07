@@ -138,8 +138,8 @@ solve-once-copy premise as BUDA's bottom-up planning (`set_bottom_up`,
 | Block placement | `MACROS.<cell>.instances.<inst>.location/orientation` | trivial writer, NEW |
 | Block size | `DIE_AREA` + `FP_SIZING absolute` | **EXISTS**: `emit_block_size <file.json> <block-or-cell> [area <um2>] [util <pct>] [aspect <w/h>] [margin <um>] [metrics <file.json>] [inst <name>]` (`buda_session/block_size.py`) — the larger of the FACE demand (`eff_bus_width` of the bits the routed plan lands on each face, W/E constraining height and N/S width) and the AREA demand (`area / util`, shaped by `aspect`), per axis, reporting WHICH BINDS. Vehicle: `tier1a/size.buda` (§8 step 3c) |
 | Block pins at exact positions | `FP_DEF_TEMPLATE` — the shape `phase0/reg32/gen_pins_def.py` writes by hand | NEW writer: per net bit landing on a block, face + coordinate + layer from the DNUTS `net_segment` endpoint at the busterm, transformed to block-local through the instance orientation (`orient_rect.py`) |
-| Block pins from the plan, written | `FP_DEF_TEMPLATE` — the same file, from BUDA | **`emit_pin_def <file.def> <block-or-cell> [unrouted <edge> [<layer>]] [depth <um>] [grid <dbu>] [lef <file>]`** (`buda_session/pin_def.py`): after `run_detailed_nuts`, one pin per net bit where its bit-wire meets the block face, on the bit-wire's layer (a track by construction), rectangle SYMMETRIC about the PLACED point, PLAIN names (odb reads an escaped `d\[16\]` back as `d[16\]` and matches nothing; `escaped_names` opts in), UNITS from `lu_per_um`; a cell in a hier session is a TEMPLATE (every instance must agree in cell-local coordinates, `N` only for now); nets on no bus are spread on one edge's tracks; a pin is on the BLOCK's track grid, so an instance origin off the pin layer's track period is REFUSED with the residue and the clearing shift (`snap` moves each pin to the nearest block-frame track and reports the largest, BUDA-1713); verifier `tools/pin_def_verify.py` (absolute rectangles, never origins). Vehicle: `phase0/two_reg32/pins.buda` (§8 step 3b) |
-| Bus corridors | `read_guides` after `set_nets_to_route` | **EXISTS**: `emit_guides <file.guide>` writes the OpenROAD guide file — gcells from the DEF's `GCELLGRID`, the floor-at-both-ends junction rule, DEF-escaped names, pin-access strips on the `terminal` layers (§8 step 5b; the phase-0 lessons of step 5 are the rules it is built from) |
+| Block pins from the plan, written | `FP_DEF_TEMPLATE` — the same file, from BUDA | **`emit_pin_def <file.def> <block-or-cell> [unrouted <edge> [<layer>]] [depth <um>] [grid <dbu>] [lef <file>] [snap] [on_mismatch refuse|reference]`** (`buda_session/pin_def.py`): after `run_detailed_nuts`, one pin per net bit where its bit-wire meets the block face, on the bit-wire's layer (a track by construction), rectangle SYMMETRIC about the PLACED point, PLAIN names (odb reads an escaped `d\[16\]` back as `d[16\]` and matches nothing; `escaped_names` opts in), UNITS from `lu_per_um`; a cell in a hier session is a TEMPLATE (every instance must agree in cell-local coordinates, `N` only for now); nets on no bus are spread on one edge's tracks; a pin is on the BLOCK's track grid, so an instance origin off the pin layer's track period is REFUSED with the residue and the clearing shift (`snap` moves each pin to the nearest block-frame track and reports the largest, BUDA-1713); verifier `tools/pin_def_verify.py` (absolute rectangles, never origins); two pins never share one rectangle — a template MERGES what each instance routes, so one net's pin can land on another's metal where no single instance would (BUDA-1715, 8 of a PE's 32 south-face pins on the tier-1a array), and the later one moves to the nearest free block-frame track; `on_mismatch reference` is for a cell whose instances CANNOT agree because their neighbours differ (the array's last PE row hands its psum to an accumulator, every other row to the PE above), taking the disputed pin from the position the most instances share and counting the jog every other one is left with (BUDA-1714). **The template must be COMPLETE**: `FP_DEF_TEMPLATE` makes LibreLane skip `OpenROAD.IOPlacement` entirely, so a port the template omits is placed by nobody and `GPL-0326` refuses the run — which is why the tier-1a flow reads the SYNTHESIZABLE netlist (`clk`/`rst` and all) rather than the emitter's structural view. Vehicles: `phase0/two_reg32/pins.buda` (§8 step 3b), `tier1a/pins.sh` (§8 step 7f) |
+| Bus corridors | `read_guides` after `set_nets_to_route` | **EXISTS**: `emit_guides <file.guide>` writes the OpenROAD guide file — gcells from the DEF's `GCELLGRID`, the floor-at-both-ends junction rule, DEF-escaped names, pin-access strips on the `terminal` layers (§8 step 5b; the phase-0 lessons of step 5 are the rules it is built from).  **LibreLane 3.0.11 has no step that READS one** (`grt` only writes), so an arm hands them over by cutting the flow: `--to OpenROAD.DetailedRouting --skip OpenROAD.DetailedRouting`, `read_guides` into the ODB, then `--last-run --from OpenROAD.DetailedRouting -e odb=<ours>` — LibreLane's own detailed route and signoff, on BUDA's corridors (§8 step 7f, `tier1a/guide_route.tcl`).  Two traps: the cut has to be BELOW every step that re-routes (`ResizerTimingPostGRT` re-runs `grt.tcl`), and `write_guides` emits the guides the ODB already holds, so the merge must FILTER the router's entry for each guided net rather than concatenate |
 | Placement keep-out under corridors | `PL_SOFT_OBSTRUCTIONS` | `export_def_blockages density`; the tuple list is NEW |
 | Bus wiring as FIXED pre-routes | DEF `NETS … + FIXED` | NEW, gated on measurement B |
 | Per-pin timing budgets | `set_input_delay`/`set_output_delay` in `PNR_SDC_FILE` | NEW capability, phase 3 |
@@ -266,6 +266,12 @@ Smoke vehicles needing no authoring: `manual_macro_placement_test`,
 | **F** flat | `flatten` | none | GPL | `IOPlacement` | GRT |
 | **H** hierarchical, no BUDA | the leaf modules the RTL declares, each hardened from its own module text; the top `flatten`ed over the hardened netlists as black boxes | one per leaf cell type (`pe_cell`, `feed_cell`, `wbuf_cell`, `acc_cell`), die = the emitter's LEF `SIZE` | `ManualMacroPlacement` at the emitter's DEF locations (the whole placement translated once to fit the die), PDN pitch/offset derived from the array pitch | per-block `IOPlacement` | GRT |
 | **H+B** hierarchical with BUDA | `keep` → harden | per cell, BUDA-sized | BUDA `PlacementOptimizer` | BUDA `FP_DEF_TEMPLATE` | BUDA guides (A) |
+
+Arm H+B is what `tier1a/pins.sh N` + `harm.sh N --pins pins` + `guides.sh N`
+build (§8 step 7f); it EXISTS at N = 2.  The placement is still the
+emitter's DEF rather than `PlacementOptimizer`'s, which is deliberate —
+the two hierarchical arms must differ only in what BUDA adds, and a
+different placement would confound sizes, pins and corridors with it.
 
 H isolates what hierarchy alone costs; H+B minus H is BUDA's contribution.
 Arm H is what `flow/librelane/tier1a/harm.sh N` writes (§8 steps 7a–7d),
@@ -1309,6 +1315,168 @@ edge cells are coarsened on the way out — the emitter has ONE `EDGEW`/
 emitted at `acc_cell`'s 96 x 52.  Making them independent is an emitter
 change; `apply_sizes.py` names every cell it oversizes for that reason.
 
+**7f. Arm H+B — the pins and the corridors come from BUDA too.**  Step 7e
+spends one of H+B's three contributions (`emit_block_size`); this spends
+the other two, so a row can be stamped `arm=H+B` rather than `H+size`:
+each block is hardened with an `FP_DEF_TEMPLATE` BUDA wrote from its own
+plan (§8 step 3b's writer, on the array), and the top's buses are routed
+inside BUDA's corridors (§8 step 5b's guide file, mechanism A).  Two new
+scripts and one option:
+
+```bash
+cd flow/librelane/tier1a
+bin/buda --no-viz size.buda                                   # if out/ is empty
+./gen.sh 2 $(python3 apply_sizes.py out --n 2 --optimize-aspect --args)
+./pins.sh 2                      # -> n2/pins/<cell>.def, one per leaf CELL TYPE
+./harm.sh 2 --pins pins          # each block config gets FP_DEF_TEMPLATE
+cd n2/h && cat README.md         # steps 1, 3a, 3b, 3c, 4 -- the arm's own recipe
+```
+
+`pins.sh N` generates and runs `n<N>/pins.buda`; `guides.sh N` (step 3b of
+the generated README) generates and runs `n<N>/h/top/guides.buda` and
+`guide_route.tcl` puts its corridors into the ODB.  Both flows are
+GENERATED for the reason `gen.sh` generates a config: a `.buda` script has
+no variables and resolves every relative path against its own directory,
+so an N-agnostic file could not name `n<N>/tpu.def`.  The rules behind each
+live in the writer.
+
+**The top runs in three parts, and that is the mechanism, not a
+workaround.**  LibreLane 3.0.11 has no step that reads a guide file — `grt`
+only ever WRITES one — so the corridor handoff is: run the top with
+`--to OpenROAD.DetailedRouting --skip OpenROAD.DetailedRouting`, put BUDA's
+guides into the resulting ODB, then resume `--last-run --from
+OpenROAD.DetailedRouting -e odb=<ours>`.  What must NOT happen is finishing
+the route ourselves, which is what phase 0's measurement did: every routing
+metric, the DRC count and the whole signoff tail after it are LibreLane's,
+and an arm whose numbers came from a hand-run router would not be
+comparable with F or H.  So `guide_route.tcl` stops at `write_db`.  The
+guides go in AFTER every step that might re-route (`RepairDesignPostGRT`
+and `ResizerTimingPostGRT` each re-run `grt.tcl`), which is why the cut is
+at detailed routing and not right after global routing.
+
+**`FP_DEF_TEMPLATE` is ALL OR NOTHING, and that decides which netlist BUDA
+reads.**  Declaring it makes LibreLane skip `OpenROAD.IOPlacement`
+entirely (`openroad.py:1357`, "I/O pins were loaded from ..."), so a pin
+the template omits is placed by nobody and global placement refuses the
+run: `GPL-0326 clk toplevel port is not placed`, on all four cells.
+`FP_TEMPLATE_MATCH_MODE permissive` does not rescue it — it only downgrades
+the mismatch from an error to a warning; the pin still ends up unplaced.
+So the template has to cover every port of the module the BLOCK RUN
+synthesizes, which is `tpu_rtl.v` and not the emitter's structural
+`tpu.v`: the structural view declares only the bus ports, while the
+synthesizable twin also has `clk` and `rst`.  `pins.buda` therefore reads
+`tpu_rtl.v` — the same file LibreLane does — and `emit_pin_def` spreads the
+ports no bus reaches on one edge, which is exactly what a clock and a reset
+need.  Permissive mode is still set, because the two pin sets are not
+identical in the other direction either (the top's die ports reach a block
+on nets BUDA has no corridor for); what `strict` was protecting is checked
+afterwards and more sharply by `tools/pin_def_verify.py`, which requires
+every TEMPLATE pin to be in the hardened DEF at the same absolute
+rectangle.  **168 of 168 verified** across the four cells at N = 2.
+
+Reading `tpu_rtl.v` immediately found a reader defect that no netlist in
+the tree could show: **`input wire [7:0] a` was read as ONE BIT.**  The
+declared width comes from the LEADING range of the direction clause (it has
+to: a later bracket belongs to an escaped name), and the net type and sign
+sit between the direction and the range — so with `wire` in the way the
+range never matched, `pe_cell`'s 8-bit `a_in` arrived as a scalar, and the
+first template built from that netlist had 8 pins where the design has 80.
+Every netlist here writes the bare `input [7:0] a` form, which is why it
+survived this long.  Fixed in `bdb.cpp` (strip the type and sign first) and
+pinned on all four spellings.
+
+**Three costs the block-side handoff carries on an array that it did not on
+the toy**, each reported per cell by `pins.sh` so they can be read against
+the block wirelength:
+
+* **The pins are SNAPPED onto the block's own track grid** (BUDA-1713,
+  largest shift 0.4 µm at N = 2).  The honest fix is a placement on the
+  track period — the rule `align_bottom_up` implements and the one the toy
+  used — but on an ARRAY that means rounding `PPX` up to a multiple of the
+  met2 period (0.92 µm) and `RPY` to one of met3's (1.36), and those are
+  paid once per COLUMN and once per ROW, i.e. N times each: ~9 % of the die
+  at N = 8.  A snap costs at most half a period of jog at the face instead.
+  The toy's free fix is not free here, and the arithmetic is why.
+* **A cell whose instances have different NEIGHBOURS cannot have one
+  template agree with every instance's plan** (BUDA-1714, the new
+  `emit_pin_def … on_mismatch reference`).  In this array the last row of
+  PEs hands its psum to an accumulator while every other row hands it to
+  the PE above, so `row_0/pe_0` and `row_1/pe_0` route `p_out` out of
+  different bundles to different places — measured, `p_out[0]` at cell-local
+  x 61870 against 65550 — and no re-plan makes them congruent, because it
+  is the design and not the plan.  The disputed pin is taken from the
+  position the most instances share and every instance left with a jog is
+  counted; that is the same trade `set_bottom_up` makes for a cell's
+  internal routing, except that here the siblings are not congruent and the
+  top's router pays for the copy.
+* **Two nets never share one pin's metal** (BUDA-1715).  A template MERGES
+  what each instance routes, so `p_in` can come from one instance and
+  `w_in` from another and — the instances being congruent — land at the same
+  local coordinate on the same face: 8 of `pe_cell`'s 32 south-face pins
+  collided at N = 2 on the first attempt, which is two nets on one
+  rectangle, i.e. a short.  `emit_pin_def` now moves the later pin (in name
+  order) to the nearest free block-frame track and says so.  The toy could
+  not show this either — one bus per face.
+
+**`write_guides` emits the guides the ODB already has, so the merge must
+FILTER.**  Phase 0's recipe concatenates the router's guide file with
+BUDA's and reads the result as one set (`read_guides` REPLACES rather than
+adds).  That works from a post-CTS ODB, where no net has a guide yet.  Here
+the ODB comes from after LibreLane's OWN global route, so `write_guides`
+wrote all 256 bus nets too and a straight concatenation named every one of
+them TWICE — leaving which corridor the router obeys up to `read_guides`.
+`guide_route.tcl` drops the router's entry for any net BUDA supplies, as it
+copies.  Which nets are withheld is read off BUDA's guide file rather than
+from a net-name prefix: a systolic array has one prefix per link, and a
+prefix list would be one more thing to keep in step with the emitter.
+
+
+**MEASURED at N = 2** (2026-09-07, macOS / LibreLane 3.0.11 / sky130A), with a
+CONTROL — the same emitted array, the same block sizes, the same placement,
+`harm.py` with no `--pins` and no corridor handoff — so the delta is exactly
+the two contributions this step adds and nothing else:
+
+| N = 2 | F | H+size | **H+B** | H+B vs H+size |
+|---|---|---|---|---|
+| top wall | 528 s | 900 s | 973 s | +8.1 % |
+| blocks (wall, parallel) | — | 263 s | 329 s | +25 % |
+| die | 0.087 mm² | 0.625 mm² | 0.625 mm² | — (same DIE_AREA by construction) |
+| **top wire** | 64,268 µm | 67,857 µm | **37,043 µm** | **−45.4 %** |
+| **block wire** (per placed instance) | — | 84,592 µm | **116,310 µm** | **+37.5 %** |
+| **arm wire** | — | 152,449 µm | 153,353 µm | **+0.6 %** |
+| setup WS | +4.655 ns | +0.721 ns | +0.603 ns | −0.118 ns |
+| hold WS | +0.106 ns | +0.113 ns | +0.112 ns | −0.001 ns |
+| route DRC / LVS / antenna | 0 | 0 | 0 | — |
+| KLayout DRC | 0 | 0 | **1** | +1 |
+
+**The corridors do what they are for, and the blocks pay for it almost
+exactly.**  BUDA's pins and guides cut the TOP's routed wire by 45 % — the
+metric the whole handoff targets, on a design where the router had every
+alternative available and 0.73 % congestion — and the pin templates cost the
+blocks 37.5 % of their own wire, which is the same effect §8 step 3b measured
+on the toy (+49 % there).  Counted the way §7.3 requires (top plus every
+block, once per PLACED instance) the arm total moves **+0.6 %**: a wash.  That
+is the number §7.3 predicted would be uninformative on its own — "H+B minus H
+on the arm total alone would net that against the bus it buys without saying
+which side moved" — and it is now measured rather than argued: the block side
+is not a rounding error, it is the entire saving.
+
+Whether that stays true at larger N is NOT settled by this run and should not
+be guessed: both halves scale with N² (top corridors grow with the array, and
+block wire is counted per placed instance), so the ratio need not improve, and
+the block-side cost is one a better pin plan could reduce while the top-side
+saving is already close to the geometric floor.  The next thing to measure is
+this same pair at N = 8, where H+size is already on the table (§8 step 7e).
+
+**On §7.4's floor this arm still fails, and for the third time on the same
+metric class**: KLayout DRC 0 → 1, one `m2.2` (met2 minimum spacing) edge pair
+at (433.44, 26.97) in `tpu_top`, gap 0.04 µm.  Step 7e's five were all inside
+`acc_cell`; this one is at the TOP, so it is the router's own metal rather than
+a cell's.  Setup slack also gives up 0.118 ns of a +0.72 ns margin.  Neither is
+large and neither is noise, and "H+B ≥ H on every PPA metric" admits no
+allowance for either — so the criterion is what has to be argued about (§11
+item 1), not the measurement.
+
 **8. Tier 1b — a Gemmini mesh at N = 4, 8, 16.**  Chipyard needs Linux; on
 the Mac that is a Linux container with the BUDA checkout mounted.  The full
 recipe, with the two places it is guessing, is
@@ -1366,6 +1534,30 @@ requirements phase 0 measured go into the writers rather than the recipe:
   **`emit_pin_def … expect_layer <csv>`** is the check that it held,
   refusing to write a template whose pins left the layer.  `pins.buda`
   declares both; §8 step 3b's number wants re-measuring with them.
+* **A pin DEF is ALL OR NOTHING** (§8 step 7f, measured 2026-09-07):
+  declaring `FP_DEF_TEMPLATE` makes LibreLane skip `OpenROAD.IOPlacement`
+  entirely, so a port the template omits is placed by nobody and
+  `GPL-0326` refuses the run — and `FP_TEMPLATE_MATCH_MODE permissive`
+  does not rescue it, it only downgrades the report.  So the pin writer
+  must be handed the port set of the module the BLOCK RUN synthesizes, not
+  the one the plan happens to route: on the tier-1a array that meant
+  reading the synthesizable netlist (`clk`, `rst` and all) rather than the
+  emitter's structural view, and letting `emit_pin_def` spread the ports no
+  bus reaches.  A block-config writer that emits a template must therefore
+  also know the block's full interface.
+* **A template pin owns its metal, and a template MERGES instances**
+  (§8 step 7f): each instance contributes the pins it routes, so two nets
+  can land on one rectangle where no single instance would — 8 of a PE's 32
+  south-face pins, from two independently planned bundles.  The writer
+  refuses to emit that (BUDA-1715); a placement writer that later moves a
+  macro has to re-derive rather than transform.
+* **On an ARRAY the track-phase fix is not free** (§8 step 7f): the rule
+  above about placing a macro at a clearing phase has a twin for TRACKS,
+  and the toy's answer (move the instance onto the period) costs a whole
+  period per COLUMN and per ROW on an array — ~9 % of the die at N = 8 —
+  because the pitch is what has to move.  `emit_pin_def snap` pays at most
+  half a period of jog at the face instead, which is why the array uses it
+  and the toy did not need to.
 * **The pin-DEF writer places each block pin on the row BUDA's bit lands
   on** (§8 step 5b): with pins from a hand template, only 11 of 32 bits had
   their pin inside their BUDA row (31 µm off at worst), and the router paid
@@ -1406,7 +1598,16 @@ have: every netlist here is either authored or uniquified.
    — that one is about H+B beating F by ≥ 2× within 10 % die area, and the
    arm measured is H, slower than F at both points and at 6.15× its die.
    N = 16 would show whether H reaches parity, and is the run the 20 GB
-   container was raised for; §7.4 stays open until H+B exists.  ~~Open: the tier-2
+   container was raised for.  **H+B now exists at N = 2** (§8 step 7f: all
+   three contributions — sizes, `FP_DEF_TEMPLATE` pins, corridors — with
+   168/168 template pins verified in the hardened blocks, PSM clean on both
+   nets, route DRC 0 and 1 KLayout `m2.2`), and against its own CONTROL
+   (H+size on the same array) BUDA's pins and corridors cut the TOP's wire
+   **−45.4 %** for **+37.5 %** on the blocks, i.e. **+0.6 %** on the arm
+   total — a wash, which is the number §7.3 said would be uninformative
+   alone and is now measured.  So §7.4 can be argued about against a real
+   arm; what is missing is that pair at the N where F is slow, since N = 2
+   is far below any crossover.  ~~Open: the tier-2
    config size~~ — the 1a flat numbers (§7.1) say what this box affords:
    **~55 k std cells / 1 mm² is a 76-minute flat run, and the next doubling
    is 5–6 h.**  So tier 2's `ChipTop` should be sized to the N = 8 point
@@ -1438,13 +1639,30 @@ have: every netlist here is either authored or uniquified.
    met2-spacing violations in a repeating pattern, and hold at −0.238 ns.
    Both are deferred errors on an otherwise clean run (route DRC, LVS,
    antenna 0), and the hold half is the same clock question as item 6.
-8. **`pdn_phase.py`'s verdicts cannot be acted on** (§8 step 7e): its
+9. **Two bundles for one cell-local link** (found on the way to §8 step
+   7f, not chased): at N = 2 the row's activation chain comes out as TWO
+   hbundles — `hb-11 D1 cell:row_cell "DRV:row_0/pe_0|REC:row_0/pe_1"
+   nets=8 [row_0, row_1]` and `hb-14 D1 cell:row_cell
+   "DRV:row_1/pe_0|REC:row_1/pe_1" nets=8 [row_1]`.  Together they carry
+   each row's 8 nets exactly once, so nothing is double-routed, but the
+   first one's instance list claims both rows while its nets are row_0's,
+   and the two route to different cell-local positions — which is what
+   `emit_pin_def`'s reference merge then has to paper over (a 46 µm jog on
+   `a_in[0]`).  If a replica that should have merged did not, the template
+   would agree with every instance and that jog would be zero.  Worth a
+   look at `HierarchicalBundler`'s replica merge before reading the
+   BUDA-1714 counts as the cost of hierarchy.
+
+10. **`pdn_phase.py`'s verdicts cannot be acted on** (§8 step 7e): its
    connectivity model is wrong (§7.2) and its clip count is what pdngen
    resolves by cutting straps — following it turned a working H+B design
    into a `PSM-0069` failure.  Until it is fixed, `harm.sh`'s "the PDN plan
-   fails pdn_phase.py" warning should not be trusted, and `pdn_connect.py`
-   on the written DEF is the verdict that counts.
-9. **The 5 % pass threshold of measurement A** (§8 step 5) is a number
+   fails pdn_phase.py" warning should not be trusted — the verdict is
+   OpenROAD's own `PSM-0040`/`PSM-0069`, with `pdn_connect.py` on the
+   written DEF to LOCALISE a failure (its terminal rollup cannot see an
+   isolated strap fragment; its `net_components()` pass, added by #894,
+   can).  Filed as #895.
+11. **The 5 % pass threshold of measurement A** (§8 step 5) is a number
    read off two runs of one toy.  It should be re-read on the first real
    vehicle (tier 1a, N=4): if the gcell-edge and pin-access share does not
    scale with the design, 5 % stays; if it does, the threshold is the wrong

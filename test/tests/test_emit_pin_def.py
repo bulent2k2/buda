@@ -77,6 +77,24 @@ def _pins(text):
     return out
 
 
+def _no_overlapping_pins(text):
+    """The pairs of pins whose rectangles overlap on one layer — the
+    writer's own invariant, since a pin OWNS its metal and two nets on one
+    rectangle are a short.  Empty on every template it writes."""
+    boxes = []
+    for name, (_net, _d, layer, r, p) in _pins(text).items():
+        boxes.append((name, layer, p[0] + r[0], p[1] + r[1],
+                      p[0] + r[2], p[1] + r[3]))
+    bad = []
+    for i, a in enumerate(boxes):
+        for b in boxes[i + 1:]:
+            if a[1] != b[1]:
+                continue
+            if a[2] < b[4] and b[2] < a[4] and a[3] < b[5] and b[3] < a[5]:
+                bad.append((a[0], b[0]))
+    return bad
+
+
 # ── the flat design ─────────────────────────────────────────────────────────
 # Pattern: one 2-wide rail, four 1-wide signal slots at 1 spacing, one rail;
 # unit pitch 14, origin 0.5 so the signal tracks sit on WHOLE units — 4, 6,
@@ -372,6 +390,7 @@ def test_a_cell_template_merges_what_each_instance_routes(tmp_path):
     assert "2 instance(s)" in log
     # A written template re-read by the verifier against itself passes.
     assert pdv.compare(text, text)[0] == []
+    assert _no_overlapping_pins(text) == [], "two nets on one pin's metal"
 
 
 def test_instances_that_disagree_on_a_pin_are_refused(tmp_path):
@@ -386,6 +405,90 @@ def test_instances_that_disagree_on_a_pin_are_refused(tmp_path):
     assert "Error:" in log and "disagree on pin 'q[" in log
     assert "u0 puts it on met3" in log and "u1 on met3" in log
     assert not out.exists()
+
+
+def test_on_mismatch_reference_takes_the_disputed_pin_and_names_the_jog(tmp_path):
+    """The same three instances the refusal above rejects, with the option
+    the tier-1a array needs: there the LAST row of PEs hands its psum to an
+    accumulator while every other row hands it to the PE above, so two
+    instances of one cell route a pin to different places and NO re-plan
+    makes them agree (docs/internal/librelane_hier_flow.md §8 step 7f).
+
+    The disputed pin comes from the REFERENCE — the position the most
+    instances already share — every other instance is left with a jog the
+    top's router pays, and BUDA-1714 says how many and how far.  Here u0
+    and u1 both route `q` to one local y and u1's second bus is the odd one
+    out, so the reference is the pair's and the file is written."""
+    three = _TWO + [("u2", 310040, 90440, "N")]
+    nets = _bus("mid", "u0", "u1") + _bus("mid2", "u1", "u2")
+    out = tmp_path / "blk.def"
+    _s, log = _hier(tmp_path, three, nets,
+                    [f"emit_pin_def {out} blk on_mismatch reference"])
+    assert "Error:" not in log and out.exists()
+    assert "BUDA-1714: WARNING" in log
+    m = re.search(r"(\d+) pin\(s\) of 'blk' are routed to different local", log)
+    assert m and int(m.group(1)) >= 1
+    assert "left with a jog, the largest" in log
+    assert "the top's router pays that difference in wire" in log
+    text = out.read_text()
+    assert _no_overlapping_pins(text) == []
+    # Every pin still sits on a block-frame track: the reference is one of
+    # the instances' own answers, not an average of them.
+    pins = _pins(text)
+    for i in range(4):
+        assert (pins[f"q[{i}]"][4][1] - 340) % 680 == 0
+
+    # ... and `refuse` is the default, so the file is not written without it.
+    out2 = tmp_path / "blk2.def"
+    _s2, log2 = _hier(tmp_path, three, nets, [f"emit_pin_def {out2} blk"])
+    assert "Error:" in log2 and not out2.exists()
+    assert "on_mismatch reference" in log2, "the refusal names the option"
+    # A value that is neither is refused rather than read as one of them.
+    _s3, log3 = _hier(tmp_path, three, nets,
+                      [f"emit_pin_def {out2} blk on_mismatch maybe"])
+    assert "Error:" in log3 and "must be refuse or reference" in log3
+
+
+def test_two_nets_never_share_one_pins_metal(tmp_path):
+    """Two pins on one rectangle are a short, and a TEMPLATE can produce one
+    where no single instance does: each instance contributes the pins it
+    routes, so `clk` may come from u0 and `rst` from u1 — and when the two
+    instances are congruent, as an array's are, both land at the SAME local
+    coordinate on the same face.  Found on the tier-1a array (a PE's south
+    face takes psum from one instance and weight from another; 8 of 32 bits
+    collided) and reproduced here by two congruent driver/receiver pairs.
+
+    The later pin in name order moves to the nearest free block-frame track
+    and BUDA-1715 says so; no template ever leaves two pins overlapping."""
+    out = tmp_path / "blk.def"
+    lef_pins = [(f"d[{i}]", "INPUT", "SIGNAL", "met3", f"0 {10 + i} 2 {10.3 + i}")
+                for i in range(4)]
+    lef_pins += [(f"q[{i}]", "OUTPUT", "SIGNAL", "met3", f"78 {10 + i} 80 {10.3 + i}")
+                 for i in range(4)]
+    lef_pins += [("clk", "INPUT", "SIGNAL", "met2", "10 0 10.14 2"),
+                 ("rst", "INPUT", "SIGNAL", "met2", "20 0 20.14 2")]
+    # u2 over u0 and u3 over u1, at the SAME offset: the two one-bit nets
+    # reach their receiver's north face at one local x.
+    inst = _TWO + [("u2", 9200, 120400, "N"), ("u3", 160080, 120400, "N")]
+    nets = (_bus("mid", "u0", "u1")
+            + [("s1", [("u2", "q\\[0\\]"), ("u0", "clk")]),
+               ("s2", [("u3", "q\\[0\\]"), ("u1", "rst")])])
+    _s, log = _hier(tmp_path, inst, nets,
+                    [f"emit_pin_def {out} blk on_mismatch reference"],
+                    lef_pins=lef_pins)
+    assert out.exists(), log
+    text = out.read_text()
+    assert _no_overlapping_pins(text) == []
+    assert "BUDA-1715: WARNING" in log, log
+    assert "already held that metal" in log
+    pins = _pins(text)
+    # The mover went to the next block-frame met4 track (920 DBU), not to
+    # some average of the two: a pin the block's router cannot reach is
+    # worse than one a period away.
+    assert pins["clk"][2] == pins["rst"][2] == "met4"
+    assert abs(pins["clk"][4][0] - pins["rst"][4][0]) == 920
+    for n in ("clk", "rst"):
+        assert (pins[n][4][0] - 460) % 920 == 0, "not on a block-frame met4 track"
 
 
 def test_an_off_period_origin_is_refused_and_snap_is_the_loud_fallback(tmp_path):

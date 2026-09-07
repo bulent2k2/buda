@@ -614,7 +614,7 @@ def utilization_advice(cell, w, h):
     return line
 
 
-def write_h(n_dir, out_dir, halo):
+def write_h(n_dir, out_dir, halo, pins_dir=None):
     n_dir = os.path.abspath(n_dir)
     out_dir = os.path.abspath(out_dir)
     for f in ("tpu_rtl.v", "tpu.def", "tpu.lef"):
@@ -647,6 +647,24 @@ def write_h(n_dir, out_dir, halo):
             raise Shape(f"tpu_rtl.v has no module {keep}")
     sizes = {cell: L[cell]["size"] for cell in leaf_cells}
     hx, hy = halo
+
+    # ── BUDA's pin templates, if this is the H+B arm ──────────────────────
+    # One `FP_DEF_TEMPLATE` per leaf CELL TYPE, from `pins.sh N`.  Resolved
+    # HERE, before anything is written: a template missing for one cell
+    # would otherwise be found only when that block's run reached
+    # ApplyDEFTemplate, after the other three had hardened.
+    templates = {}
+    if pins_dir:
+        pd = pins_dir if os.path.isabs(pins_dir) else os.path.join(n_dir, pins_dir)
+        missing = [c for c in leaf_cells
+                   if not os.path.isfile(os.path.join(pd, f"{c}.def"))]
+        if missing:
+            raise Shape(f"--pins {pins_dir}: no template for "
+                        f"{', '.join(missing)} in {pd} -- every leaf cell "
+                        f"needs one, since the arm's pins all come from the "
+                        f"same plan; run flow/librelane/tier1a/pins.sh "
+                        f"{os.path.basename(n_dir).lstrip('n')}")
+        templates = {c: os.path.join(pd, f"{c}.def") for c in leaf_cells}
 
     # ── the placement shift (see the docstring) ──
     xs = [c["x"] for c in D["comps"]]
@@ -706,6 +724,39 @@ def write_h(n_dir, out_dir, halo):
                "CLOCK_PORT": "clk", "CLOCK_PERIOD": CLOCK_PERIOD,
                "FP_SIZING": "absolute", "DIE_AREA": [0, 0, w, h]}
         cfg.update(BLOCK_SETTINGS)
+        if cell in templates:
+            cfg["FP_DEF_TEMPLATE"] = "dir::" + os.path.relpath(
+                templates[cell], d).replace(os.sep, "/")
+            # `permissive`, and the reason is structural rather than a
+            # loosening of the check.  BUDA plans against the emitter's
+            # STRUCTURAL view (tpu.v), whose cells declare only the bus
+            # ports; the SYNTHESIZABLE twin (tpu_rtl.v, what a block run
+            # actually reads) also has `clk` and `rst`, which are on no bus
+            # and which BUDA therefore cannot place.  `strict` requires the
+            # two pin sets to be IDENTICAL and exits 1 on exactly that gap
+            # ("clk not found in template layout, but found in design
+            # layout" -- measured on all four cells at N=2).  Under
+            # `permissive` the template moves the pins it names and
+            # `OpenROAD.IOPlacement`, which ran two steps earlier, keeps
+            # the rest -- which is the division of labour the arm wants.
+            #
+            # What `strict` was protecting -- a template naming pins the
+            # design does not have, i.e. the wrong template -- is checked
+            # AFTER the fact instead, and more sharply: `pin_def_verify.py`
+            # requires every TEMPLATE pin to be in the hardened DEF at the
+            # same absolute rectangle, so a template pin nothing matched is
+            # a reported mismatch.  The README's step 1 runs it.
+            cfg["FP_TEMPLATE_MATCH_MODE"] = "permissive"
+            # ... and the block's routing is capped BELOW the top's PDN
+            # layers, which is §9's rule and is the pin template's own risk:
+            # a template straightens the top's bus at the cost of the
+            # block's internal wire (+49 % measured on the phase-0 toy), the
+            # extra wire is what pushes a block up onto met4, and a block
+            # with a met4 OBS made pdngen drop every strap that would have
+            # fed it -- PSM-0069 at signoff, found on that toy and only on
+            # the block that had a template.  It cost +0.9 % block wire
+            # there; arm H keeps met4 because nothing pushes it there.
+            cfg["RT_MAX_LAYER"] = "met3"
         cfg.update(SIGNOFF)
         with open(os.path.join(d, "config.json"), "w") as f:
             json.dump(cfg, f, indent=4)
@@ -778,6 +829,12 @@ def write_h(n_dir, out_dir, halo):
             "block_pdn": BLOCK_SETTINGS, "block_spacing": BLOCK_SPACING,
             "top_strap": {"width": TOP_STRAP_W, "spacing": TOP_STRAP_SP},
             "predicted_pins": {cell: cells[cell][2] for cell in leaf_cells}}
+    if templates:
+        # Only on the H+B path: a key that is always present but empty would
+        # make every arm-H plan file differ from the one this wrote before
+        # the option existed, for no information.
+        plan["pin_templates"] = {c: os.path.relpath(p, out_dir)
+                                 for c, p in sorted(templates.items())}
     with open(os.path.join(top, "pdn_plan.json"), "w") as f:
         json.dump(plan, f, indent=1)
         f.write("\n")
@@ -810,22 +867,105 @@ def write_h(n_dir, out_dir, halo):
 
     counts = {cell: sum(1 for i_ in insts if i_["cell"] == cell) for cell in leaf_cells}
     readme = render_readme(n_dir, out_dir, leaf_cells, counts, sizes, D, dx, dy, vplan, hplan, advice,
-                           dry_run_failed)
+                           dry_run_failed, bool(templates))
     with open(os.path.join(out_dir, "README.md"), "w") as f:
         f.write(readme)
     return {"out": out_dir, "cells": leaf_cells, "counts": counts, "shift": [dx, dy], "vplan": vplan, "hplan": hplan,
-            "advice": advice, "instances": len(insts), "dry_run_failed": dry_run_failed}
+            "advice": advice, "instances": len(insts), "dry_run_failed": dry_run_failed,
+            "pin_templates": sorted(templates)}
 
 
 def render_readme(n_dir, out_dir, cells, counts, sizes, D, dx, dy, vplan, hplan, advice,
-                  dry_run_failed=False):
+                  dry_run_failed=False, pinned=False):
     blocks = " ".join(f"--block {c}/runs/h:{counts[c]}" for c in cells)
     n_arr = int(round(math.sqrt(counts.get("pe_cell", 0)))) or "?"   # the array's N: N*N PEs
     harden = "\n".join(f"(cd {c} && librelane --dockerized --run-tag h config.json > h.log 2>&1) &" for c in cells)
     lefs = " ".join(f"../{c}/runs/h/final/lef/{c}.lef" for c in cells)
     plef = " ".join(f"predicted_lef/{c}.lef" for c in cells)
-    return f"""# Arm H of tier 1a at this N -- written by `flow/librelane/tier1a/harm.sh`, do not edit
+    arm = "H+B" if pinned else "H"
+    tag = "hb" if pinned else "h"
+    if pinned:
+        top_section = f"""## 3. The top -- in three parts, because BUDA's corridors go in mid-flow
 
+LibreLane 3.0.11 has no step that reads a guide file, so the corridor handoff
+(mechanism A) is done by stopping just before detailed routing, putting BUDA's
+guides into the ODB, and resuming LibreLane's OWN DetailedRouting on it.  What
+must NOT happen is finishing the route ourselves: every routing metric, the DRC
+count and the signoff after it are LibreLane's, and an arm whose numbers came
+from a hand-run router would not be comparable with F or H.
+
+### 3a. The top, up to detailed routing
+
+    (cd top && librelane --dockerized --run-tag {tag} \\
+        --to OpenROAD.DetailedRouting --skip OpenROAD.DetailedRouting config.json)
+
+`--skip` as well as `--to`: `--to X` runs X and then stops, and X is the step
+whose guides we are replacing.  Everything between global routing and it may
+re-route (`OpenROAD.ResizerTimingPostGRT` re-runs the global router), which is
+why BUDA's guides go in AFTER this and not before.
+
+### 3b. BUDA's corridors, into the ODB
+
+    ../../guides.sh {n_arr}                      # -> top/out/buda_bus.guide
+    ODB=$(ls -t top/runs/{tag}/*/*.odb | head -1)
+    ../../../phase0/measure/run_or.sh top/runs/{tag} ../../guide_route.tcl \\
+        ODB=$ODB GUIDE=$PWD/top/out/buda_bus.guide OUT=$PWD/top/out
+
+Pass: `guides.buda` ends in a clean `check_design dnuts`, and `guide_route.tcl`
+prints `N guided net(s), N of them in the design` (a 0 there means the guides
+were written against another netlist and it stops) and `wrote .../guided.odb`.
+
+### 3c. LibreLane's detailed route, on BUDA's guides, then signoff
+
+    (cd top && librelane --dockerized --last-run --from OpenROAD.DetailedRouting \\
+        -e odb="$PWD/out/guided.odb" config.json)
+
+(`$PWD` inside that subshell is `top/`, which is why the path has no `top/`
+in it while step 3b's -- run from here -- does.)
+"""
+    else:
+        top_section = f"""## 3. The top
+
+    (cd top && librelane --dockerized --run-tag {tag} config.json)
+"""
+    pin_note = ("""
+**This is arm H+B's block side.**  Every block config carries
+`FP_DEF_TEMPLATE` (match mode `strict`) from BUDA's plan and is capped at
+`RT_MAX_LAYER met3` -- the pins come from where BUDA's bit-wires reach each
+cell's faces instead of from LibreLane's own placer, which is one of the
+three things §7.2 defines H+B by.  Two costs the templates carry are
+reported by `pins.sh` per cell and are worth having in hand when reading
+step 1's block wirelength: pins SNAPPED onto the block's own track grid
+(the emitter's pitch is not a whole number of track periods), and disputed
+pins taken from a REFERENCE instance (a cell whose instances have different
+neighbours cannot have one template agree with them all).  The remaining
+piece is the top's corridors -- `guides.sh`, step 3b below.
+""" if pinned else "")
+    # Same shape as `pin_note` above, for the same reason -- and this one
+    # was a """-string nested INSIDE the template's own {...} field, which is
+    # PEP 701 (Python 3.12+).  CI pins 3.11, where the parser ends the outer
+    # f-string at the inner """ and reads what follows as code, failing on
+    # the first character it cannot tokenize (a section sign, line 984).
+    pin_verify_note = ("""
+
+...and, on this arm, the pins landed where BUDA put them:
+
+    for c in """ + " ".join(cells) + """; do
+        python3 ../../../../../tools/pin_def_verify.py ../pins/$c.def $c/runs/h/final/def/$c.def || echo "$c: PINS MOVED"
+    done
+
+Every TEMPLATE pin must be in the hardened DEF at the same ABSOLUTE
+rectangle (not the same `PLACED` origin -- OpenROAD re-centres every one it
+writes, §8 step 3).  This is the check that replaces
+`FP_TEMPLATE_MATCH_MODE strict`, which the arm cannot use: BUDA plans
+against the emitter's structural view, whose cells have only the bus ports,
+while a block run reads the synthesizable twin and its `clk`/`rst` -- and
+strict mode exits 1 on precisely that gap.  Permissive mode moves the pins
+the template names and leaves the rest where `OpenROAD.IOPlacement` put
+them; a template pin that matched NOTHING shows up here as a mismatch,
+which is the half of strict worth keeping.""" if pinned else "")
+    return f"""# Arm {arm} of tier 1a at this N -- written by `flow/librelane/tier1a/harm.sh`, do not edit
+{pin_note}
 From `{os.path.relpath(n_dir, out_dir)}/` (tpu_rtl.v + tpu.def + tpu.lef).  Blocks: {', '.join(f'{c} x{counts[c]} ({sizes[c][0]:g} x {sizes[c][1]:g})' for c in cells)};
 top die {D['die'][2]:g} x {D['die'][3]:g} um, {sum(counts.values())} macro instances, placement shifted by ({dx}, {dy}) um from the DEF
 (see top/placement.json for the rule and every instance's both coordinates).
@@ -854,7 +994,7 @@ PSM-0069 failure.  **Do not hand-edit the PDN_* offsets on its say-so.**  The ve
     wait; date +%s > blocks.end
 
 Pass, per cell: `Flow complete` in `<cell>/h.log`, and `<cell>/runs/h/final/{{gds,lef,nl,spef/nom}}` present
-(the paths top/config.json names).  Wall = blocks.end - blocks.start; the cpu-sum comes from runtimes.py below.
+(the paths top/config.json names).  Wall = blocks.end - blocks.start; the cpu-sum comes from runtimes.py below.{pin_verify_note}
 If `OpenROAD.GlobalPlacement` refuses on utilization, the die (the emitter's LEF SIZE) is too small for the
 RTL: regenerate the whole set with a larger `-PEPAD` (see the utilization line above) and rerun harm.sh.
 
@@ -867,18 +1007,15 @@ not for its verdict.  Run the top whatever it says.  A COLLISION or UNCONNECTED 
 geometry, not a defect: acting on one by editing PDN_VOFFSET/PDN_HOFFSET is what produced this study's only
 PSM-0069, on a design whose generated plan was fine (librelane_hier_flow.md §11 item 8).
 
-## 3. The top
-
-    (cd top && librelane --dockerized --run-tag h config.json)
-
+{top_section}
 Pass: `Odb.ManualMacroPlacement` prints `Successfully placed {sum(counts.values())} instances` (a declared instance the
 flattened netlist does not have exits 1 there -- that is the `row_0/pe_0` to `row_0.pe_0` name rule failing),
 `Flow complete`, `All shapes on net VPWR are connected` (and VGND) from the IR-drop report.
 
-**This is the PDN verdict** -- `PSM-0040`/`PSM-0069` and `runs/h/*/*-grid-errors.rpt`, not step 0 or step 2.
+**This is the PDN verdict** -- `PSM-0040`/`PSM-0069` and `top/runs/{tag}/*/*-grid-errors.rpt`, not step 0 or step 2.
 If it fails, localise it on the DEF pdngen actually wrote before changing anything:
 
-    python3 ../../pdn_connect.py top/runs/h/*-pdn/*.def */runs/h/final/lef/*.lef --json pdn.json
+    python3 ../../pdn_connect.py top/runs/{tag}/*-pdn/*.def */runs/h/final/lef/*.lef --json pdn.json
     python3 ../../pdn_connect.py --self-cross */runs/h/final/lef/*.lef
 
 The first names every power terminal with no via, and every strap FRAGMENT cut off from the grid with the
@@ -888,12 +1025,12 @@ that no PDN offset can change.
 
 ## 4. The row for the table (§7.3: top plus every block, wire per PLACED instance)
 
-    python3 ../../runtimes.py top/runs/h --set N={n_arr} --set arm=H --blocks-from top/config.json
-    python3 ../../runtimes.py top/runs/h --set N={n_arr} --set arm=H --blocks-from top/config.json --json >> ../../results.jsonl
+    python3 ../../runtimes.py top/runs/{tag} --set N={n_arr} --set arm={arm} --blocks-from top/config.json
+    python3 ../../runtimes.py top/runs/{tag} --set N={n_arr} --set arm={arm} --blocks-from top/config.json --json >> ../../results.jsonl
 
 `--set` puts the benchmark coordinates into the row (a row must say which point it is on its own, #881);
 `--blocks-from` reads the block run directories and instance counts off the MACROS entry; the explicit form is
-`python3 ../../runtimes.py top/runs/h {blocks}`.
+`python3 ../../runtimes.py top/runs/{tag} {blocks}`.
 """
 
 
@@ -904,9 +1041,15 @@ def main(argv=None):
     ap.add_argument("--halo", type=float, nargs=2, metavar=("HX", "HY"),
                     default=(pp.SKY130["FP_MACRO_HORIZONTAL_HALO"], pp.SKY130["FP_MACRO_VERTICAL_HALO"]),
                     help="FP_MACRO_HORIZONTAL_HALO / VERTICAL_HALO written to the top and used by the checks")
+    ap.add_argument("--pins", metavar="DIR",
+                    help="BUDA's pin templates (flow/librelane/tier1a/pins.sh N writes "
+                         "n<N>/pins/): each block config gets FP_DEF_TEMPLATE and is capped "
+                         "at RT_MAX_LAYER met3.  This is what makes the row H+B rather than "
+                         "H+size; without it the blocks keep LibreLane's own pin placement")
     a = ap.parse_args(argv)
     try:
-        r = write_h(a.n_dir, a.out or os.path.join(a.n_dir, "h"), tuple(a.halo))
+        r = write_h(a.n_dir, a.out or os.path.join(a.n_dir, "h"), tuple(a.halo),
+                    pins_dir=a.pins)
     except Shape as e:
         print(f"harm: ERROR: {e}", file=sys.stderr)
         return 1
@@ -921,9 +1064,14 @@ def main(argv=None):
           f"{'' if h['met5_straps_over_macros'] else ', none over any macro'})")
     for line in r["advice"]:
         print("harm: " + line)
+    if r["pin_templates"]:
+        print(f"harm: pins from BUDA's plan (FP_DEF_TEMPLATE, match mode strict) for "
+              f"{', '.join(r['pin_templates'])}, each block capped at RT_MAX_LAYER met3 "
+              f"-- this is arm H+B's block side; stamp the row `--set arm=H+B`")
+    arm = "H+B" if r["pin_templates"] else "H"
     print(f"harm: next steps in {r['out']}/README.md (advisory dry run, harden the blocks in parallel, "
-          f"the top -- whose PSM check is the PDN verdict -- then runtimes.py --set N= --set arm=H "
-          f"--blocks-from)")
+          f"the top -- whose PSM check is the PDN verdict -- then runtimes.py --set N= "
+          f"--set arm={arm} --blocks-from)")
     return 0
 
 

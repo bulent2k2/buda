@@ -692,6 +692,45 @@ def test_a_vector_port_is_one_pin_per_bit(tmp_path):
     assert all(w[("u0", f"z[{i}]")] == f"q[{i}]" for i in range(4)), w
 
 
+def test_a_net_type_before_the_range_does_not_hide_the_width(tmp_path):
+    """`input wire [7:0] a` is ordinary Verilog-2001, and until 2026-09-07
+    the reader recorded it as ONE BIT with nothing said.
+
+    The declared width is read from the LEADING range of the clause (it has
+    to be: a later bracket belongs to an escaped name), and the net type and
+    sign sit between the direction and the range -- so with `wire` in the
+    way the range regex did not match.  Every netlist in the tree wrote the
+    bare `input [7:0] a` form, so nothing caught it; it surfaced on
+    flow/librelane/tier1a's `tpu_rtl.v`, where pe_cell's 8-bit `a_in` came
+    in as a scalar and a pin template built from that netlist had 8 pins
+    where the design has 80.  All four spellings are pinned here."""
+    db = _v(tmp_path, """\
+        module leaf (a, b, c, d, z);
+          input  wire     [3:0] a;
+          input  reg      [3:0] b;
+          input  wire signed [3:0] c;
+          input  signed   [3:0] d;
+          output logic    [3:0] z;
+        endmodule
+
+        module top ();
+          wire [3:0] wa, wb, wc, wd, wz;
+          leaf u0 (.a(wa), .b(wb), .c(wc), .d(wd), .z(wz));
+        endmodule
+        """)
+    pins = sorted(f"{cp.cell}.{cp.pin_name}" for cp in db.all_cell_pins())
+    for port in ("a", "b", "c", "d", "z"):
+        assert [f"leaf.{port}[{i}]" for i in range(4)] == \
+            [p for p in pins if p.startswith(f"leaf.{port}[")], \
+            f"port {port} did not come in 4 bits wide: {pins}"
+    # ... and the DIRECTION each clause states is still its own.
+    dirs = {cp.pin_name: cp.dir for cp in db.all_cell_pins()}
+    assert dirs["a[0]"] == "INPUT" and dirs["z[0]"] == "OUTPUT"
+    w = _wiring(db)
+    assert all(w[("u0", f"a[{i}]")] == f"wa[{i}]" for i in range(4)), w
+    assert all(w[("u0", f"z[{i}]")] == f"wz[{i}]" for i in range(4)), w
+
+
 def test_a_bus_driven_whole_and_read_by_bit_stays_connected(tmp_path):
     """The shape that makes this half necessary rather than tidy — and the
     one the FIRST half caused.

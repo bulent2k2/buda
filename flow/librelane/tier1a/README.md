@@ -1,7 +1,7 @@
-# Tier 1a of the LibreLane study: the systolic array at N, arms F and H
+# Tier 1a of the LibreLane study: the systolic array at N, arms F, H and H+B
 
 The runnable half of [docs/internal/librelane_hier_flow.md](../../../docs/internal/librelane_hier_flow.md)
-§7.1 (the vehicle), §7.2 (the arms) and §8 (the recipes, steps 7 and 7a-7d).
+§7.1 (the vehicle), §7.2 (the arms) and §8 (the recipes, steps 7 and 7a-7f).
 Everything here runs on the macOS + Docker setup of §8; the tree has no EDA
 tools, so each script says what a pass looks like and fails loudly on the
 shape it did not expect.
@@ -13,7 +13,11 @@ shape it did not expect.
 | `pdn_phase.py <top config.json> [<cell>.lef ...]` | the check to run AFTER hardening and BEFORE the top: reads the hardened macros' VPWR/VGND pin rectangles **and their `OBS` blocks** and the top's PDN config, reports every strap a macro's pin CUTS, every layer a macro obstructs outright, every macro no surviving strap feeds, and the smallest shift (or the equivalent PDN_VOFFSET/PDN_HOFFSET) that clears it.  **ADVISORY** -- read it for what it SHOWS, never for its verdict: its clip count is what pdngen resolves by CUTTING a strap (fatal only when the cut isolates a fragment) and its connectivity model is wrong, and acting on a FAIL by hand once turned a working plan into `PSM-0069` (§11 item 8).  It does not gate `harm.sh`; the PDN verdict is OpenROAD's own PSM at the end of the top run |
 | `pdn_connect.py <pdn.def> [<cell>.lef ...]` | the check to run AFTER the top's PDN stage: reads the DEF **pdngen wrote** and reports, per macro power pin, whether a via landed on it and -- where none did -- whether the pin had a same-net crossing on the other `add_pdn_connect` layer at all.  The verdict is per TERMINAL (a LEF `PIN` is one node, so a via on any of its access rectangles feeds it) with the per-rectangle detail printed beside it.  Nothing is modelled: every cut, halo and obstruction subtraction has already happened by the time that metal is in the file.  `--self-cross <lef>...` asks the LEF-only half (does a power pin cross its OWN net on the other connect layer -- a per-cell property that connects or floats a net on every phase, which no offset search can fix).  It also partitions each power net's DEF metal into ELECTRICAL components (same-layer touch, joined across layers by the vias) and names every fragment off the main grid and the terminals it strands -- the `PSM-0069` failure mode a per-pin rollup cannot see.  The post-mortem twin of `pdn_phase.py`; `PSM-0040`/`PSM-0069` stay the verdict |
 | `runtimes.py <run> [--set KEY=VALUE ...] [--block <run>[:<n>] ...] [--blocks-from <top config.json>] [--json]` | the row for the table: per-stage seconds and the §7.3 metrics; an H arm's row carries its blocks (wall = the longest, cpu = the sum, wire per PLACED instance), derived from the top's MACROS entry with `--blocks-from` |
-| `apply_sizes.py <sizes dir> [--n N] [--baseline <n dir>] [--optimize-aspect] [--args] [--json]` | arm **H+B**: turns `emit_block_size`'s fragments (from `size.buda`) into the `gen.sh` knobs that re-emit the array at BUDA's block sizes, and predicts the die with the emitter's own arithmetic. `--optimize-aspect` reshapes the PE to minimise the ARRAY's die rather than the cell's — same area, same face floors. See the study's §8 step 7e |
+| `apply_sizes.py <sizes dir> [--n N] [--baseline <n dir>] [--optimize-aspect] [--args] [--json]` | the FIRST of arm **H+B**'s three contributions: turns `emit_block_size`'s fragments (from `size.buda`) into the `gen.sh` knobs that re-emit the array at BUDA's block sizes, and predicts the die with the emitter's own arithmetic. `--optimize-aspect` reshapes the PE to minimise the ARRAY's die rather than the cell's — same area, same face floors. See the study's §8 step 7e |
+| `pins.sh N` | the SECOND: generates and runs `n<N>/pins.buda`, which routes the array and writes one `FP_DEF_TEMPLATE` per leaf CELL TYPE into `n<N>/pins/` -- a template, because a cell is hardened once and placed N² times.  It reads `tpu_rtl.v` (not `tpu.v`) because `FP_DEF_TEMPLATE` is ALL OR NOTHING: declaring it makes LibreLane skip `OpenROAD.IOPlacement`, so a port the template omits is placed by nobody.  Three costs it REPORTS per cell -- pins snapped onto the block's own track grid (BUDA-1713), disputed pins taken from a reference instance (BUDA-1714, for a cell whose instances have different neighbours), and pins moved off a track another net's pin already held (BUDA-1715).  Study §8 step 7f |
+| `harm.sh N --pins pins` | writes arm **H+B**'s blocks instead of arm H's: `FP_DEF_TEMPLATE` per block config plus `RT_MAX_LAYER met3` (a template costs internal wire, extra wire reaches met4, and a block with a met4 `OBS` made pdngen drop the straps that fed it -- §8 step 5b).  Without `--pins` the output is byte-identical to arm H's |
+| `guides.sh N` | the THIRD: generates and runs `n<N>/h/top/guides.buda`, which routes the top's buses against the placement LibreLane ACTUALLY used (the run's own manual-macro-placement DEF, since `harm.py` shifts every macro) and writes the corridors in the file `read_guides` reads |
+| `guide_route.tcl` | puts those corridors into the ODB, through phase 0's `measure/run_or.sh`: global-route everything BUT the guided nets, merge in BUDA's entries (FILTERING the router's own for those nets -- `write_guides` emits the guides the ODB already holds), `read_guides`, `write_db`.  It stops there ON PURPOSE: LibreLane's own `OpenROAD.DetailedRouting` is resumed on the result, so every routing metric and the whole signoff tail stay LibreLane's |
 
 ## Arm F (flat) at N
 
@@ -42,6 +46,44 @@ the wall figure), read `pdn_phase.py` on the hardened LEFs (advisory too), run t
 `pdn_connect.py` to localise a failure -- and take the **row** with `runtimes.py top/runs/h --set N=4 --set arm=H --blocks-from
 top/config.json --json >> ../../results.jsonl` (`--set` stamps the row with
 its coordinates, as the flat arm's row is stamped).
+
+## Arm H+B (hierarchical, with BUDA) at N
+
+All three contributions: BUDA's block sizes, its pins, its corridors.
+
+```bash
+cd ~/src/buda
+bin/buda --no-viz flow/librelane/tier1a/size.buda        # if out/ is empty
+cd flow/librelane/tier1a
+python3 apply_sizes.py out --n 2 --baseline n2 --optimize-aspect   # read it first
+./gen.sh 2 $(python3 apply_sizes.py out --n 2 --optimize-aspect --args)
+./pins.sh 2                       # -> n2/pins/<cell>.def, one per leaf cell TYPE
+./harm.sh 2 --pins pins           # -> n2/h, with FP_DEF_TEMPLATE in every block
+cd n2/h && cat README.md          # steps 1, 3a, 3b, 3c, 4
+```
+
+The generated README differs from arm H's in two places.  Step 1 adds
+`tools/pin_def_verify.py` per cell -- every TEMPLATE pin must be in the
+hardened DEF at the same ABSOLUTE rectangle (never the same `PLACED` origin:
+OpenROAD re-centres every one it writes).  And step 3, the top, runs in
+three parts, because LibreLane 3.0.11 has no step that READS a guide file:
+
+```bash
+(cd top && librelane --dockerized --run-tag hb \
+    --to OpenROAD.DetailedRouting --skip OpenROAD.DetailedRouting config.json)
+../../guides.sh 2
+ODB=$(ls -t top/runs/hb/*/*.odb | head -1)
+../../../phase0/measure/run_or.sh top/runs/hb ../../guide_route.tcl \
+    ODB=$ODB GUIDE=$PWD/top/out/buda_bus.guide OUT=$PWD/top/out
+(cd top && librelane --dockerized --last-run --from OpenROAD.DetailedRouting \
+    -e odb="$PWD/out/guided.odb" config.json)
+```
+
+The cut is at DETAILED routing rather than right after global routing
+because `RepairDesignPostGRT` and `ResizerTimingPostGRT` each re-run
+`grt.tcl`, and BUDA's guides have to be the last word.  Measured at N = 2
+(§8 step 7f): 168/168 template pins verified, `All shapes on net VPWR are
+connected` and VGND, route DRC 0, KLayout DRC 1.
 
 When the top's PDN check fails (`[PSM-0069] Check connectivity failed`), read
 what pdngen actually did rather than re-deriving what it should have done:

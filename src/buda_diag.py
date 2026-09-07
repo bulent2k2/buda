@@ -138,6 +138,13 @@ MESSAGES = {
     "BUDA-1713": (WARNING, "emit_pin_def snapped pins onto the block-frame "
                            "tracks because the instance origin is off the "
                            "track period; the largest shift is reported."),
+    "BUDA-1714": (WARNING, "emit_pin_def took a disputed pin from the "
+                           "reference instance because the cell's instances "
+                           "route it to different places; the jog every "
+                           "other instance is left with is reported."),
+    "BUDA-1715": (WARNING, "emit_pin_def moved a pin off the track its "
+                           "bit-wire reached the face on because another "
+                           "net's pin already held that metal."),
     # ── session / units ────────────────────────────────────────────────────
     "BUDA-1901": (FATAL,  "The design's coordinates and its track patterns "
                           "are on implausibly different scales."),
