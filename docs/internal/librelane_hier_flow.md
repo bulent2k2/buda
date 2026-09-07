@@ -1430,6 +1430,53 @@ copies.  Which nets are withheld is read off BUDA's guide file rather than
 from a net-name prefix: a systolic array has one prefix per link, and a
 prefix list would be one more thing to keep in step with the emitter.
 
+
+**MEASURED at N = 2** (2026-09-07, macOS / LibreLane 3.0.11 / sky130A), with a
+CONTROL — the same emitted array, the same block sizes, the same placement,
+`harm.py` with no `--pins` and no corridor handoff — so the delta is exactly
+the two contributions this step adds and nothing else:
+
+| N = 2 | F | H+size | **H+B** | H+B vs H+size |
+|---|---|---|---|---|
+| top wall | 528 s | 900 s | 973 s | +8.1 % |
+| blocks (wall, parallel) | — | 263 s | 329 s | +25 % |
+| die | 0.087 mm² | 0.625 mm² | 0.625 mm² | — (same DIE_AREA by construction) |
+| **top wire** | 64,268 µm | 67,857 µm | **37,043 µm** | **−45.4 %** |
+| **block wire** (per placed instance) | — | 84,592 µm | **116,310 µm** | **+37.5 %** |
+| **arm wire** | — | 152,449 µm | 153,353 µm | **+0.6 %** |
+| setup WS | +4.655 ns | +0.721 ns | +0.603 ns | −0.118 ns |
+| hold WS | +0.106 ns | +0.113 ns | +0.112 ns | −0.001 ns |
+| route DRC / LVS / antenna | 0 | 0 | 0 | — |
+| KLayout DRC | 0 | 0 | **1** | +1 |
+
+**The corridors do what they are for, and the blocks pay for it almost
+exactly.**  BUDA's pins and guides cut the TOP's routed wire by 45 % — the
+metric the whole handoff targets, on a design where the router had every
+alternative available and 0.73 % congestion — and the pin templates cost the
+blocks 37.5 % of their own wire, which is the same effect §8 step 3b measured
+on the toy (+49 % there).  Counted the way §7.3 requires (top plus every
+block, once per PLACED instance) the arm total moves **+0.6 %**: a wash.  That
+is the number §7.3 predicted would be uninformative on its own — "H+B minus H
+on the arm total alone would net that against the bus it buys without saying
+which side moved" — and it is now measured rather than argued: the block side
+is not a rounding error, it is the entire saving.
+
+Whether that stays true at larger N is NOT settled by this run and should not
+be guessed: both halves scale with N² (top corridors grow with the array, and
+block wire is counted per placed instance), so the ratio need not improve, and
+the block-side cost is one a better pin plan could reduce while the top-side
+saving is already close to the geometric floor.  The next thing to measure is
+this same pair at N = 8, where H+size is already on the table (§8 step 7e).
+
+**On §7.4's floor this arm still fails, and for the third time on the same
+metric class**: KLayout DRC 0 → 1, one `m2.2` (met2 minimum spacing) edge pair
+at (433.44, 26.97) in `tpu_top`, gap 0.04 µm.  Step 7e's five were all inside
+`acc_cell`; this one is at the TOP, so it is the router's own metal rather than
+a cell's.  Setup slack also gives up 0.118 ns of a +0.72 ns margin.  Neither is
+large and neither is noise, and "H+B ≥ H on every PPA metric" admits no
+allowance for either — so the criterion is what has to be argued about (§11
+item 1), not the measurement.
+
 **8. Tier 1b — a Gemmini mesh at N = 4, 8, 16.**  Chipyard needs Linux; on
 the Mac that is a Linux container with the BUDA checkout mounted.  The full
 recipe, with the two places it is guessing, is
@@ -1554,9 +1601,13 @@ have: every netlist here is either authored or uniquified.
    container was raised for.  **H+B now exists at N = 2** (§8 step 7f: all
    three contributions — sizes, `FP_DEF_TEMPLATE` pins, corridors — with
    168/168 template pins verified in the hardened blocks, PSM clean on both
-   nets, route DRC 0 and 1 KLayout `m2.2`), so §7.4 can be argued about
-   against a real arm; what is still missing is H+B at the N where F is
-   slow, since N = 2 is far below any crossover.  ~~Open: the tier-2
+   nets, route DRC 0 and 1 KLayout `m2.2`), and against its own CONTROL
+   (H+size on the same array) BUDA's pins and corridors cut the TOP's wire
+   **−45.4 %** for **+37.5 %** on the blocks, i.e. **+0.6 %** on the arm
+   total — a wash, which is the number §7.3 said would be uninformative
+   alone and is now measured.  So §7.4 can be argued about against a real
+   arm; what is missing is that pair at the N where F is slow, since N = 2
+   is far below any crossover.  ~~Open: the tier-2
    config size~~ — the 1a flat numbers (§7.1) say what this box affords:
    **~55 k std cells / 1 mm² is a 76-minute flat run, and the next doubling
    is 5–6 h.**  So tier 2's `ChipTop` should be sized to the N = 8 point
