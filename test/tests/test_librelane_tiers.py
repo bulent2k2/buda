@@ -835,3 +835,88 @@ def test_without_pins_the_h_arm_is_byte_identical_and_a_gap_is_refused(tmp_path)
     assert "no template for pe_cell" in r.stderr
     assert "pins.sh" in r.stderr
     assert not (tmp_path / "h_gap").exists(), "refused after writing"
+
+
+def _acc_lef(path):
+    """A 96 x 60 block with met2 OBS as Magic draws it -- ACTUAL shapes, not a
+    cover: two met2 rects, and a met4 VGND pin at local x 69.52-71.52 (the
+    #896 neighbour).  No met1 OBS at all."""
+    L = ["VERSION 5.8 ;", "MACRO acc_cell", "  CLASS BLOCK ;", "  ORIGIN 0 0 ;", "  SIZE 96 BY 60 ;",
+         "  PIN VGND", "    DIRECTION INOUT ;", "    USE GROUND ;", "    PORT",
+         "      LAYER met4 ;", "      RECT 69.52 5.0 71.52 55.0 ;", "    END", "  END VGND",
+         "  OBS", "    LAYER met2 ;", "      RECT 69.30 0.20 69.50 0.40 ;", "      RECT 10.0 10.0 50.0 50.0 ;",
+         "  END", "END acc_cell", "END LIBRARY"]
+    path.write_text("\n".join(L) + "\n")
+
+
+def _lyrdb(path, items):
+    """A KLayout report database with one <item> per (category, value)."""
+    body = "".join(f"<item><category>'{c}'</category><cell>top</cell><visited>false</visited>"
+                   f"<multiplicity>1</multiplicity><values><value>{v}</value></values></item>"
+                   for c, v in items)
+    path.write_text("<?xml version=\"1.0\"?><report-database><description>DRC</description>"
+                    "<categories><category><name>m2.2</name></category></categories>"
+                    f"<cells><cell><name>top</name></cell></cells><items>{body}</items></report-database>")
+
+
+def test_drc_locate_maps_markers_to_cells_and_says_whose_metal(tmp_path):
+    """#896's five `m2.2` markers are one defect: the same local spot of one
+    cell.  `drc_locate.py` reads the lyrdb and the top DEF, inverts each
+    instance's placement (orientation included) to give the CELL-LOCAL spot,
+    groups equal spots, and -- with the LEF -- says per offending edge
+    whether it sits on metal the macro's abstract claims, inside the macro
+    on an obstructed layer with no shape under it (the GDS metal the LEF does
+    not cover: the router cannot have routed there), over the macro on an
+    unobstructed layer (the top's routing), or outside it.  That ordering
+    is what decides which of the issue's three experiments to run first."""
+    _acc_lef(tmp_path / "acc_cell.lef")
+    (tmp_path / "top.def").write_text("\n".join([
+        "VERSION 5.8 ;", "DESIGN top ;", "UNITS DISTANCE MICRONS 1000 ;",
+        "COMPONENTS 3 ;",
+        "- pipe_1_3 acc_cell + PLACED ( 694000 2160000 ) N ;",
+        "- pipe_1_4 acc_cell + PLACED ( 870000 2160000 ) N ;",
+        "- acc_5 acc_cell + PLACED ( 400000 1000000 ) FS ;",       # mirrored: local y counts from the top
+        "END COMPONENTS", "END DESIGN"]) + "\n")
+    # the issue's own marker (edge A on the LEF's met2 OBS, edge B 0.13 um
+    # above the cell edge on no LEF shape), the same spot in the neighbour,
+    # the same spot in the MIRRORED instance (top coords differ, local do
+    # not), a met1 marker over a macro (met1 unobstructed), and one in the
+    # channel between macros
+    _lyrdb(tmp_path / "drc.lyrdb", [
+        ("m2.2", "edge-pair: (763.492,2160.27;763.37,2160.27)/(763.37,2160.14;763.44,2160.14)"),
+        ("m2.2", "edge-pair: (939.492,2160.27;939.37,2160.27)/(939.37,2160.14;939.44,2160.14)"),
+        ("m2.2", "edge-pair: (469.492,1059.73;469.37,1059.73)/(469.37,1059.86;469.44,1059.86)"),
+        ("m1.1", "polygon: (720,2180;721,2180;721,2181;720,2181)"),
+        ("m2.2", "edge-pair: (800,2158;801,2158)/(800,2158.1;801,2158.1)"),
+    ])
+    r = subprocess.run([sys.executable, str(_T1A / "drc_locate.py"), str(tmp_path / "drc.lyrdb"),
+                        str(tmp_path / "top.def"), str(tmp_path / "acc_cell.lef"),
+                        "--json", str(tmp_path / "loc.json")], capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr
+    out = json.loads((tmp_path / "loc.json").read_text())
+    m = out["markers"]
+    assert m[0]["instance"] == "pipe_1_3" and m[0]["local"] == [69.37, 0.14, 69.492, 0.27]
+    assert [ev["verdict"] for ev in m[0]["edge_verdicts"]] == ["macro-lef", "macro-unclaimed"]
+    assert m[0]["edge_verdicts"][0]["on"] == ["OBS"]
+    assert m[2]["instance"] == "acc_5" and m[2]["orient"] == "FS" and m[2]["local"] == [69.37, 0.14, 69.492, 0.27]
+    assert [ev["verdict"] for ev in m[2]["edge_verdicts"]] == ["macro-lef", "macro-unclaimed"]
+    assert m[3]["layer"] == "met1" and m[3]["edge_verdicts"][0]["verdict"] == "over-macro"
+    assert m[4]["instance"] is None and m[4]["nearest"]["instance"] == "pipe_1_3"
+    assert out["groups"][0] == {"cell": "acc_cell", "layer": "met2", "local": [69.4, 0.1],
+                                "instances": ["pipe_1_3", "pipe_1_4", "acc_5"]}
+    assert "drc_locate: 5 marker(s), 2 categories (m1.1, m2.2), 4 inside a placed macro (1 cell type(s): acc_cell), 1 elsewhere" in r.stdout
+    assert "m2.2 (763.370,2160.140)-(763.492,2160.270) -> pipe_1_3 [acc_cell N] local (69.370,0.140)-(69.492,0.270)" in r.stdout
+    assert "edge A: (763.492,2160.270)-(763.370,2160.270) on metal the macro's LEF claims (OBS)" in r.stdout
+    assert "edge B: (763.370,2160.140)-(763.440,2160.140) inside the macro on an OBSTRUCTED layer but on NO LEF shape" in r.stdout
+    assert "GROUP acc_cell met2 local ~(69.4,0.1): 3 marker(s) in pipe_1_3, pipe_1_4, acc_5 -- one defect, repeated per instance" in r.stdout
+    assert "-> no macro holds it; nearest pipe_1_3 [acc_cell] 10.500 um away" in r.stdout
+    # without a LEF the location half still runs; the size then comes from nowhere, so nothing is located
+    r = subprocess.run([sys.executable, str(_T1A / "drc_locate.py"), str(tmp_path / "drc.lyrdb"),
+                        str(tmp_path / "top.def")], capture_output=True, text=True)
+    assert r.returncode == 0 and "no LEF given, so no edge is classified" in r.stdout
+    assert "0 inside a placed macro" in r.stdout
+    # a file that is not a report database is refused, not read as empty
+    (tmp_path / "junk.lyrdb").write_text("not xml")
+    r = subprocess.run([sys.executable, str(_T1A / "drc_locate.py"), str(tmp_path / "junk.lyrdb"),
+                        str(tmp_path / "top.def")], capture_output=True, text=True)
+    assert r.returncode == 2 and "not a KLayout report database" in r.stderr

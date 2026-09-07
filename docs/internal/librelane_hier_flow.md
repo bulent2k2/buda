@@ -1641,6 +1641,11 @@ have: every netlist here is either authored or uniquified.
    met2-spacing violations in a repeating pattern, and hold at −0.238 ns.
    Both are deferred errors on an otherwise clean run (route DRC, LVS,
    antenna 0), and the hold half is the same clock question as item 6.
+   The DRC half is #896 (all five at `acc_cell` local (69.4, 0.0), next to
+   its own met4 VGND pin); `drc_locate.py` on the run's `.lyrdb` + top DEF
+   + `acc_cell.lef` says per edge whether the offending metal is the
+   macro's own (LEF-claimed), GDS metal the abstract does not cover, or the
+   top's routing — which of the issue's three experiments to run first.
 9. **Two bundles for one cell-local link** (found on the way to §8 step
    7f, not chased): at N = 2 the row's activation chain comes out as TWO
    hbundles — `hb-11 D1 cell:row_cell "DRV:row_0/pe_0|REC:row_0/pe_1"
