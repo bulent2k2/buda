@@ -324,7 +324,11 @@ def read_vias(text):
     return out
 
 
-_PIN_ENTRY = re.compile(r"^\s*-\s+(\S+)(.*?)^\s*;", re.S | re.M)
+# the terminator ends the entry wherever it is: OpenROAD writes it on the
+# PLACED line (`+ FIXED ( x y ) N ;`), and a pattern wanting it on a line of
+# its own matched 0 of a real DEF's 324 pins (#900) -- which the report said
+# honestly ("no top pin on this net") and which switched the sources off
+_PIN_ENTRY = re.compile(r"^\s*-\s+(\S+)([^;]*);", re.M)
 _PIN_NET = re.compile(r"\+\s*NET\s+(\S+)")
 _PIN_LAYER = re.compile(r"\+\s*LAYER\s+(\S+)\s*\(\s*(-?\d+)\s+(-?\d+)\s*\)\s*\(\s*(-?\d+)\s+(-?\d+)\s*\)")
 _PIN_PLACED = re.compile(r"\+\s*(?:PLACED|FIXED|COVER)\s*\(\s*(-?\d+)\s+(-?\d+)\s*\)")
@@ -889,21 +893,43 @@ def run_audit(def_text, lefs, layers, via_min=VIA_MIN, explain=None):
                        if f["instance"] == t["instance"] and f["net"] == t["net"]
                        and f["pin"] == t["pin"]]})
     nets_conn = net_components(snets, tbn, layers, via_layers=via_layers, sources=sources,
-                               explain=bool(explain))
+                               explain=True)
+    # The terminal verdict is REACHABILITY, which is PSM's question.  A via
+    # landing on a pin proves a join, not a supply: on the N=8 failing plan
+    # every pe_cell VGND pin carried a via whose partner was the macro's OWN
+    # met5 pin (pdngen makes that via too, `getInstancePins`), so the
+    # per-rect audit said connected, the net was one blob, and PSM counted
+    # all 512 of those rects unconnected -- because nothing the supply
+    # enters through reaches them.  With the top's pins known a terminal is
+    # connected iff some join chain reaches one; without them, iff it lands
+    # on the main component at all.  Everything a via joined but the supply
+    # never reaches is `unsourced` (#900).
     explained = []
-    if explain:
-        for t in terminals:
-            name = f"{t['instance']}.{t['pin']}"
-            if not (t["instance"] == explain or t["cell"] == explain or name == explain
-                    or explain == "*"):
-                continue
-            chain = join_path(nets_conn[t["net"]], name) if t["net"] in nets_conn else None
+    unproven = {(f["instance"], f["net"], f["pin"]) for f in findings if f["verdict"] == "via-no-partner"}
+    for t in terminals:
+        name = f"{t['instance']}.{t['pin']}"
+        c = nets_conn.get(t["net"])
+        reach, chain = False, None
+        if c is not None:
+            if c["has_source"]:
+                chain = join_path(c, name)
+                reach = chain is not None
+            else:
+                reach = name in c["components"][0]["terminals"] if c["components"] else False
+        t["reaches_source"] = reach
+        # a via the reader cannot explain (via-no-partner) proves nothing
+        # either way; its READER FAULT fails the run on its own, and the
+        # terminal keeps its verdict rather than adding a second failure
+        if t["verdict"] == "connected" and not reach and (t["instance"], t["net"], t["pin"]) not in unproven:
+            t["verdict"] = "unsourced"
+        if explain and (t["instance"] == explain or t["cell"] == explain or name == explain
+                        or explain == "*"):
             explained.append({"terminal": name, "net": t["net"], "cell": t["cell"],
-                              "reaches_source": chain is not None,
+                              "reaches_source": reach,
                               "chain": [{"layer": r[0], "rect": [round(v, 3) for v in r[1:]], "how": how}
                                         for r, how in (chain or [])]})
-        for v in nets_conn.values():
-            v.pop("graph", None)               # not JSON-sized
+    for v in nets_conn.values():
+        v.pop("graph", None)                   # not JSON-sized
     fragments = sum(v["fragments"] for v in nets_conn.values())
     stranded = sum(v["stranded_terminals"] for v in nets_conn.values())
     tcounts = {}
@@ -1013,7 +1039,9 @@ def report(res, out=sys.stdout, limit=12):
     # diagnostic.  A LEF pin's several rects are access shapes for one node,
     # so a via on any of them feeds it -- counting rects would fail a macro
     # pdngen connected, for not viaing every access shape.
-    w("\n  terminals (a LEF pin is one node; any via on it feeds it)\n")
+    w("\n  terminals (a LEF pin is one node; it is connected when a via on it REACHES a source --\n"
+      "  the top's own pins -- and `unsourced` when its via joins metal the supply never enters,\n"
+      "  the macro's own pin on the other layer included: PSM-0038's shape)\n")
     w("  cell / net                         verdict          count\n")
     for r in res["terminal_rows"]:
         w(f"  {r['cell']:<16} {r['net']:<13} {r['verdict']:<16} {r['count']:>6}\n")
@@ -1084,8 +1112,10 @@ def report(res, out=sys.stdout, limit=12):
                 w(f"    {k:>3}. {step['layer']:<6} {step['rect']}  <- {step['how']}\n")
         else:
             w(f"\n  {e['terminal']} ({e['net']}, {e['cell']}) reaches NO source\n")
+    uns = res["terminal_counts"].get("unsourced", 0)
     w(f"\n  {res['terminal_counts'].get('connected', 0)} terminal(s) connected, "
-      f"{res['floating']} floating\n")
+      f"{res['floating']} floating" + (f" ({uns} of them unsourced: a via, but no chain to a source)" if uns
+                                       else "") + "\n")
 
 
 def main(argv=None):

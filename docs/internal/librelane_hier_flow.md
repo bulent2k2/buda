@@ -1689,10 +1689,22 @@ have: every netlist here is either authored or uniquified.
    unconnected shapes" PSM counts), and offers only a VERIFIED shift.  On
    the phase-0 toy: x=10 PASS and x=20 FAIL (u0's VPWR stranded), both as
    measured.  Still ADVISORY — a prediction from the LEFs and the config —
-   and the verdict stays OpenROAD's `PSM-0040`/`PSM-0069`.  What is NOT yet
-   done is the real-artifact validation: the H+B N=8 set both ways (the
-   generated plan must PASS, the hand HOFFSET must FAIL on VGND's met5),
-   which needs the hardened LEFs and the top config from the MacBook run.
+   and the verdict stays OpenROAD's `PSM-0040`/`PSM-0069`.  Measured on
+   the H+B N=8 artefacts (PR #900): direction A holds (the generated plan
+   PASSes, 272 trims, every terminal on its grid; the old code FAILed it).
+   Direction B taught the post-mortem what PSM's question IS: on the
+   `PDN_HOFFSET 109.3` plan every pe_cell VGND pin carried a via whose
+   partner was the macro's OWN met5 pin (pdngen vias those too), so the
+   per-pin rollup said connected and the net was one blob, while PSM
+   counted exactly those 512 rects unconnected — "one blob" and "the supply
+   reaches it" are different questions.  `pdn_connect.py` now reads the
+   DEF's `PINS` as sources, its `VIAS` for what a via joins, and makes the
+   terminal verdict REACHABILITY (`--explain` prints the chain): 0
+   unsourced terminals on the working plan, 64 per net on the failing one,
+   the 512.  The PREDICTION still passes that plan — the next comparison
+   is its `--json` VGND components against one pe_cell's `--explain` chain,
+   to find which predicted fragment feeds the pin that pdngen did not
+   write.
 11. **The 5 % pass threshold of measurement A** (§8 step 5) is a number
    read off two runs of one toy.  It should be re-read on the first real
    vehicle (tier 1a, N=4): if the gcell-edge and pin-access share does not
