@@ -56,6 +56,23 @@ orientation `N` is accepted for now: the cell-local transform of a rotated
 or mirrored instance is `orient_rect.py`'s, and until it is wired in here a
 wrong transform would place every pin of that instance on the wrong face
 with nothing saying so.
+
+`on_mismatch reference` is the option for a cell whose instances CANNOT
+agree, which is not a planner failure but a property of the design: in the
+tier-1a systolic array every interior PE hands its psum to the PE above,
+while the LAST row hands it to an accumulator, so those two instances route
+`p_out` out of different bundles to different places and no re-plan makes
+them congruent (measured at N=2: `p_out[0]` at local x 61870 on
+`row_0/pe_0`, 65550 on `row_1/pe_0`).  Under it the disputed pin is taken
+from the REFERENCE instance — the position the most instances already
+share, ties going to the first in the merge order, so the total jog is the
+smallest a single template can leave — and every instance that has to jog
+to it is counted with the largest distance (BUDA-1714).  That is the same
+trade `set_bottom_up` makes for a cell's internal routing (solve one
+reference instance, copy to the congruent siblings); here the siblings are
+not congruent, so the copy is what the top's router pays for.  The default
+is `refuse`, because a template that silently disagrees with the plan it
+came from is worse than no template.
 """
 import re
 
@@ -379,11 +396,16 @@ def _lef_cell_pins(session, target, lef_path):
 
 def emit_pin_def(session, path, target, unrouted="S", unrouted_layer=None,
                  depth_um=None, grid=None, lef_path=None, snap=False,
-                 escaped_names=False, expect_layer=None):
+                 escaped_names=False, expect_layer=None,
+                 on_mismatch="refuse"):
     """Write `path`.  Returns the list of (name, planned) written, or None
     when the command refused — every refusal prints an `Error:` line and
     returns, one convention for the command (disagreeing instances, an
     off-phase origin, a non-N orientation included)."""
+    if on_mismatch not in ("refuse", "reference"):
+        print(f"Error: emit_pin_def on_mismatch must be refuse or reference, "
+              f"got '{on_mismatch}'")
+        return None
     if unrouted not in _FACES:
         print(f"Error: emit_pin_def unrouted edge must be one of "
               f"{'/'.join(_FACES)}, got '{unrouted}'")
@@ -613,24 +635,72 @@ def emit_pin_def(session, path, target, unrouted="S", unrouted_layer=None,
                        f"and the top's router will jog to meet it; a "
                        f"placement on the track period removes the shift")
 
+    # Every instance's answer for a pin, in the merge order, so a mismatch
+    # can be REPORTED with all of them rather than with the first pair.
+    offers = {}
     for name, _bx, planned in per_inst:
         for pn, p in planned.items():
-            q = merged.get(pn)
-            if q is None:
-                merged[pn] = p
+            offers.setdefault(pn, []).append(p)
+    n_disputed, n_jogging, max_jog, worst_pin = 0, 0, 0.0, None
+
+    def agree(a, b):
+        """The comparison the refusal has always used: same layer and face,
+        and within half a layout unit on both axes."""
+        return (a.layer == b.layer and a.face == b.face
+                and abs(a.cx - b.cx) < 0.5 and abs(a.cy - b.cy) < 0.5)
+
+    for pn, cand in offers.items():
+        groups = []                       # [[pins that agree], …], in order
+        for p in cand:
+            for g in groups:
+                if agree(g[0], p):
+                    g.append(p)
+                    break
+            else:
+                groups.append([p])
+        if len(groups) == 1:
+            merged[pn] = cand[0]
+            continue
+        if on_mismatch != "reference":
+            q, p = groups[0][0], groups[1][0]
+            print(f"Error: emit_pin_def: instances of '{target}' "
+                  f"disagree on pin '{pn}': {q.source} puts it on "
+                  f"{names_for(q.layer)} face {q.face} at local "
+                  f"({q.cx:g}, {q.cy:g}), {p.source} on "
+                  f"{names_for(p.layer)} face {p.face} at local "
+                  f"({p.cx:g}, {p.cy:g}) — a cell is hardened once, so "
+                  f"every instance must route the pin to the same place; "
+                  f"re-plan (or pin the topology) until they agree, or pass "
+                  f"`on_mismatch reference` to take the disputed pins from "
+                  f"the reference instance and be told the jog")
+            return None
+        # The REFERENCE is the position the most instances already share
+        # (ties to the merge order, which `groups` preserves): the smallest
+        # total jog one template can leave.
+        ref = max(groups, key=len)[0]
+        merged[pn] = ref
+        n_disputed += 1
+        for p in cand:
+            if agree(p, ref):
                 continue
-            same = (q.layer == p.layer and q.face == p.face
-                    and abs(q.cx - p.cx) < 0.5 and abs(q.cy - p.cy) < 0.5)
-            if not same:
-                print(f"Error: emit_pin_def: instances of '{target}' "
-                      f"disagree on pin '{pn}': {q.source} puts it on "
-                      f"{names_for(q.layer)} face {q.face} at local "
-                      f"({q.cx:g}, {q.cy:g}), {p.source} on "
-                      f"{names_for(p.layer)} face {p.face} at local "
-                      f"({p.cx:g}, {p.cy:g}) — a cell is hardened once, so "
-                      f"every instance must route the pin to the same place; "
-                      f"re-plan (or pin the topology) until they agree")
-                return None
+            n_jogging += 1
+            d = abs(p.cx - ref.cx) + abs(p.cy - ref.cy)
+            if worst_pin is None or d > max_jog:
+                max_jog, worst_pin = d, (pn, p, ref)
+    if n_disputed:
+        pn, p, ref = worst_pin
+        buda_diag.emit("BUDA-1714",
+                       f"emit_pin_def: {n_disputed} pin(s) of '{target}' are "
+                       f"routed to different local positions by different "
+                       f"instances and were taken from the reference "
+                       f"instance; {n_jogging} instance-pin(s) are left with "
+                       f"a jog, the largest {max_jog:g} layout units on "
+                       f"'{pn}' ({p.source} routes it to local "
+                       f"({p.cx:g}, {p.cy:g}) on {names_for(p.layer)} face "
+                       f"{p.face}, the template puts it at "
+                       f"({ref.cx:g}, {ref.cy:g}) on {names_for(ref.layer)} "
+                       f"face {ref.face}) — the top's router pays that "
+                       f"difference in wire")
     if not all_pins:
         print(f"Error: emit_pin_def: '{target}' has no pins — no net reaches "
               f"it and (in a hier session) its cell declares no port")
@@ -643,6 +713,65 @@ def emit_pin_def(session, path, target, unrouted="S", unrouted_layer=None,
                        f"over the cell) — spread with the unrouted pins: "
                        f"{', '.join(missed_all[:8])}"
                        + (" …" if len(missed_all) > 8 else ""))
+
+    # ── one pin per piece of metal ─────────────────────────────────────────
+    # Two nets whose bit-wires reach the SAME face at the same coordinate
+    # give two pins on one rectangle, which is a short.  The top's route is
+    # not wrong — two wires ENDING on a face line touch at a point, and no
+    # audit is looking for that — but a PIN owns its metal, so the template
+    # cannot carry both.  Found on the tier-1a array, where a PE's south
+    # face takes psum (24 bits) and weight (8) from two independently
+    # planned bundles: 8 of the 32 landed on a track another bit already
+    # held.  The phase-0 toy could not show it (one bus per face).
+    #
+    # The first occupant in natural-name order keeps the track and the other
+    # moves to the nearest free block-frame one; the pin the PLAN put there
+    # is thus arbitrary between the two, which is why the move is reported
+    # rather than quietly made.  A face with no free track left refuses:
+    # there is no honest pin to write.
+    moved, max_move = 0, 0.0
+    for (face, lid), group in sorted(
+            {(p.face, p.layer): None for p in merged.values()}.items()):
+        pins = sorted((p for p in merged.values()
+                       if p.face == face and p.layer == lid),
+                      key=lambda q: _natural_key(q.name))
+        if len(pins) < 2:
+            continue
+        along = (lambda q: q.cx) if face in ("S", "N") else (lambda q: q.cy)
+        extent = bw if face in ("S", "N") else bh
+        placed = []                        # (coord, half-width) kept so far
+        for q in pins:
+            a, hw = along(q), q.width / 2.0
+            if all(abs(a - b) >= hw + h2 - 1e-6 for b, h2 in placed):
+                placed.append((a, hw))
+                continue
+            free = [t for t in _free_tracks(session, lid, extent,
+                                            [b for b, _h2 in placed])
+                    if all(abs(t - b) >= hw + h2 - 1e-6
+                           for b, h2 in placed)]
+            if not free:
+                print(f"Error: emit_pin_def: face {face} of '{target}' has no "
+                      f"free {names_for(lid)} signal track for pin "
+                      f"'{q.name}' — its bit-wire reaches the face where "
+                      f"another net's pin already sits, and every other "
+                      f"track on that face is taken")
+                return None
+            t = min(free, key=lambda v: abs(v - a))
+            if face in ("S", "N"):
+                q.cx = t
+            else:
+                q.cy = t
+            moved += 1
+            max_move = max(max_move, abs(t - a))
+            placed.append((t, hw))
+    if moved:
+        buda_diag.emit("BUDA-1715",
+                       f"emit_pin_def: {moved} pin(s) of '{target}' were "
+                       f"moved off the track their bit-wire reached the face "
+                       f"on because another net's pin already held that "
+                       f"metal, the largest by {max_move:g} layout units — "
+                       f"two independently planned bundles landing on one "
+                       f"face; the top's router jogs to the moved pin")
 
     # ── the unrouted ones, spread on one edge ──────────────────────────────
     unrouted_names = sorted((pn for pn in all_pins if pn not in merged),
