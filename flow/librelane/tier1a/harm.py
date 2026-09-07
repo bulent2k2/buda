@@ -941,6 +941,29 @@ pins taken from a REFERENCE instance (a cell whose instances have different
 neighbours cannot have one template agree with them all).  The remaining
 piece is the top's corridors -- `guides.sh`, step 3b below.
 """ if pinned else "")
+    # Same shape as `pin_note` above, for the same reason -- and this one
+    # was a """-string nested INSIDE the template's own {...} field, which is
+    # PEP 701 (Python 3.12+).  CI pins 3.11, where the parser ends the outer
+    # f-string at the inner """ and reads what follows as code, failing on
+    # the first character it cannot tokenize (a section sign, line 984).
+    pin_verify_note = ("""
+
+...and, on this arm, the pins landed where BUDA put them:
+
+    for c in """ + " ".join(cells) + """; do
+        python3 ../../../../../tools/pin_def_verify.py ../pins/$c.def $c/runs/h/final/def/$c.def || echo "$c: PINS MOVED"
+    done
+
+Every TEMPLATE pin must be in the hardened DEF at the same ABSOLUTE
+rectangle (not the same `PLACED` origin -- OpenROAD re-centres every one it
+writes, §8 step 3).  This is the check that replaces
+`FP_TEMPLATE_MATCH_MODE strict`, which the arm cannot use: BUDA plans
+against the emitter's structural view, whose cells have only the bus ports,
+while a block run reads the synthesizable twin and its `clk`/`rst` -- and
+strict mode exits 1 on precisely that gap.  Permissive mode moves the pins
+the template names and leaves the rest where `OpenROAD.IOPlacement` put
+them; a template pin that matched NOTHING shows up here as a mismatch,
+which is the half of strict worth keeping.""" if pinned else "")
     return f"""# Arm {arm} of tier 1a at this N -- written by `flow/librelane/tier1a/harm.sh`, do not edit
 {pin_note}
 From `{os.path.relpath(n_dir, out_dir)}/` (tpu_rtl.v + tpu.def + tpu.lef).  Blocks: {', '.join(f'{c} x{counts[c]} ({sizes[c][0]:g} x {sizes[c][1]:g})' for c in cells)};
@@ -971,24 +994,7 @@ PSM-0069 failure.  **Do not hand-edit the PDN_* offsets on its say-so.**  The ve
     wait; date +%s > blocks.end
 
 Pass, per cell: `Flow complete` in `<cell>/h.log`, and `<cell>/runs/h/final/{{gds,lef,nl,spef/nom}}` present
-(the paths top/config.json names).  Wall = blocks.end - blocks.start; the cpu-sum comes from runtimes.py below.{"""
-
-...and, on this arm, the pins landed where BUDA put them:
-
-    for c in """ + " ".join(cells) + """; do
-        python3 ../../../../../tools/pin_def_verify.py ../pins/$c.def $c/runs/h/final/def/$c.def || echo "$c: PINS MOVED"
-    done
-
-Every TEMPLATE pin must be in the hardened DEF at the same ABSOLUTE
-rectangle (not the same `PLACED` origin -- OpenROAD re-centres every one it
-writes, §8 step 3).  This is the check that replaces
-`FP_TEMPLATE_MATCH_MODE strict`, which the arm cannot use: BUDA plans
-against the emitter's structural view, whose cells have only the bus ports,
-while a block run reads the synthesizable twin and its `clk`/`rst` -- and
-strict mode exits 1 on precisely that gap.  Permissive mode moves the pins
-the template names and leaves the rest where `OpenROAD.IOPlacement` put
-them; a template pin that matched NOTHING shows up here as a mismatch,
-which is the half of strict worth keeping.""" if pinned else ""}
+(the paths top/config.json names).  Wall = blocks.end - blocks.start; the cpu-sum comes from runtimes.py below.{pin_verify_note}
 If `OpenROAD.GlobalPlacement` refuses on utilization, the die (the emitter's LEF SIZE) is too small for the
 RTL: regenerate the whole set with a larger `-PEPAD` (see the utilization line above) and rerun harm.sh.
 
