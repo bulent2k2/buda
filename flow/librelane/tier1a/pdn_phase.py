@@ -5,70 +5,76 @@ and §9, phase 1).
 
     pdn_phase.py <top config.json> [<cell.lef> ...] [--json out.json]
 
-ADVISORY, and this is not a caveat but the first thing to know: its verdicts
-cannot be acted on.  The clips it counts are what pdngen resolves by CUTTING
-a strap, which is fatal only when the cut isolates a fragment, and the
-connectivity model below is wrong in a way librelane_hier_flow.md §7.2
-records.  Following a FAIL once -- editing PDN_HOFFSET to make it happy --
-turned a design whose generated plan was fine into a PSM-0069 failure, by
-cutting one net's met5 into 85 pieces (§11 item 8).  What it is GOOD for is
-showing which strap meets which pin and by how much.  The PDN verdict is
-OpenROAD's own PSM check at the end of the top run, and `pdn_connect.py` on
-the DEF pdngen wrote localises a failure to pins or away from them.
+ADVISORY: a PREDICTION of what pdngen builds and of what OpenROAD's PSM
+check then finds unconnected, not the verdict.  The verdict is that PSM
+check (`[PSM-0069] Check connectivity failed`) at the end of the top run,
+the LAST step of the run; `pdn_connect.py` on the DEF pdngen wrote is the
+post-mortem, and the two share one network code (`pdn_connect.net_components`),
+so a disagreement between prediction and post-mortem points at the
+prediction's INPUT -- a LEF, a config value, a pdngen rule this does not
+model -- rather than at a second definition of "connected".  The previous
+model counted every same-layer meeting as a defect and was wrong in the way
+librelane_hier_flow.md §7.2 records; acting on its FAIL by editing
+PDN_HOFFSET once turned a working plan into a PSM-0069 failure (§11 item 8).
 
-A macro is fed by the top's power straps, and pdngen never SHORTS a strap to
-a macro's power pin -- it CUTS the strap.  Two things cut it, and neither is
-visible before IR-drop signoff (`[PSM-0069] Check connectivity failed`,
-measured on the phase-0 toy), which is the LAST step of the run:
+What pdngen does (OpenROAD src/pdn/src, read rather than assumed):
 
-  * a same-layer MEETING: where a strap comes within spacing of any power pin
-    of the macro, `Shape::cut` (OpenROAD src/pdn/src/shape.cpp) removes the
-    strap over the macro.  The same-net exception spares it only when the
-    strap CONTAINS the pin across its width, which a 2 um block pin inside a
-    1.6 um top strap never is -- so a same-layer overlap is a clip whatever
-    the two nets are, and never a connection;
-  * an OBSTRUCTION, which pdngen bloats by the macro grid's halo
-    (`InstanceGrid::getInstanceObstructions`) and subtracts, removing every
-    strap it covers.  The `lef` view a top reads (`final/lef/<cell>.lef`) is
-    MAGIC's (`Magic.WriteLEF`; OpenROAD's `-bloat_occupied_layers` abstract
-    LEF is the separate `<cell>.openroad.lef`), so the OBS is the block's
-    ACTUAL metal, and WHOSE metal it is decides whether it matters.  On the
-    PDN layers it is normally the block's own grid -- the same rectangles as
-    its power pins -- which a phase search clears by clearing the pins,
-    because they are the same metal.  FOREIGN metal on a PDN layer is the
-    dangerous kind: signal routing pushed up there by a pin layout, sitting
-    wherever the router put it, which no phase search can have cleared.  That
-    is the shape that made pdngen drop straps and fail IR-drop signoff on the
-    phase-0 toy, so it is reported and it is what cuts here.
+  1. STRAPS.  `Straps::makeStraps` places the top's straps at core origin +
+     offset + k*pitch (see `straps_along`; not simply "every k the pitch
+     allows").
+  2. CUTS.  `Shape::cut` removes a strap wherever it meets an obstruction on
+     its own layer, across the strap's full width.  A macro's power PIN is
+     such an obstruction, grown by the layer's spacing ACROSS the strap and
+     by the macro grid's halo ALONG it (`InstanceGrid::getInstanceObstructions`
+     -> `applyHalo`, which applies the halo on the layer's wire axis only);
+     a same-net pin is spared only when the strap CONTAINS it across its
+     width, which a block pin wider than the strap never is -- so a
+     same-layer meeting is a TRIM whatever the two nets are, never a
+     connection, and never a defect either: it is how pdngen keeps straps
+     off macro pins.  A macro's OBS is an obstruction too, bloated by
+     spacing and halo; on a PDN layer it is normally the block's OWN power
+     grid (Magic's LEF draws the actual metal, and `final/lef/<cell>.lef` is
+     Magic's), the same rectangles as its pins, so it is not counted twice.
+     FOREIGN metal on a PDN layer -- signal routing pushed up there -- is the
+     dangerous kind: it removes every strap it covers and no phase clears it,
+     so it is reported with the remedy (cap the block below that layer,
+     `RT_MAX_LAYER`).
+  3. VIAS.  `Grid::getIntersections` makes a via wherever a same-net shape on
+     the connect pair's lower layer overlaps one on the upper layer -- the
+     top's straps AND the macro's own pins, which `getInstancePins` injects
+     (`add_pdn_connect -grid macro -layers {met4 met5}`, LibreLane's macro
+     grid) -- when the overlap can hold one (1.4 x 1.4 on sky130 via4).
+  4. TRIM.  `PdnGen::trimShapes` (run unless PDN_SKIPTRIM, which harm.py
+     sets for BLOCKS only, so a top trims) removes every strap fragment with
+     fewer connections than `Shape::isRemovable` requires -- 2, or 1 on a pin
+     layer, and PDN_ENABLE_PINS (default on) makes both connect layers pin
+     layers -- and shrinks the rest to the extent of their vias.  So a
+     via-less fragment (a stub between two cuts; the strap on the core edge
+     whose crossings are narrower than a via) is GONE before signoff.
 
-What is left to feed the macro is the CROSS-layer crossing that the macro
-grid's `add_pdn_connect -layers {met4 met5}` turns into vias -- on a strap
-that survived.  So this reads the hardened block's final LEF (its VPWR/VGND
-pin rectangles AND its OBS blocks) and the top's PDN config (pitch, offset,
-width, spacing, layers, core margins, halo), places every macro instance the
-way `Odb.ManualMacroPlacement` will, and reports:
+PSM then fails a net whose remaining shapes are not one connected set.  In
+these terms the check reports, per net:
 
-  * every (instance, pin rect, strap) CLIP -- a strap this macro's pin cuts
-    (suppressed where the macro's OBS has already removed that strap: pdngen
-    got there first);
-  * every layer a macro obstructs with metal that is NOT its own power grid,
-    since no phase search cleared it and the straps it covers are gone -- with
-    the remedy named (cap the block below that layer with `RT_MAX_LAYER`, or
-    keep the layer for the block's own grid).  Own-power obstruction is
-    counted and reported as such rather than treated as a finding;
-  * every (instance, net) with NO connection -- no surviving strap of that net
-    on the other layer crosses a pin of that net with room for a via (a strap
-    that misses a pin by 0.66 um is the second way the toy failed);
-  * per instance, and for the whole placement, the SMALLEST x-shift (and
-    y-shift for the horizontal straps) that clears it, the whole-placement
-    one restated as the PDN_VOFFSET/PDN_HOFFSET that would do the same.
+  * every TRIM (informational: which pin or OBS cuts which strap, where);
+  * every STRANDED terminal -- a macro power pin NONE of whose rectangles is
+    on its net's main grid (a LEF PIN is one terminal however many RECTs it
+    is drawn as; a pin rectangle off the grid whose terminal is fed by
+    another of its rectangles is not a failure -- measured, the phase-0 toy
+    passes PSM with two such VGND rectangles);
+  * every FLOATING fragment -- a strap piece that survives trim on a
+    component off the main grid: the "N unconnected shapes" PSM counts;
+  * the smallest whole-placement shift (x, y, or a searched pair when
+    neither axis alone does it) after which nothing is predicted to fail,
+    restated as the PDN_VOFFSET/PDN_HOFFSET that would do the same -- offered
+    only after being verified.
 
-PASS looks like `PASS: <n> instances, <m> power-pin rects, 0 clips, every
-instance connected on VPWR and VGND` and exit 0.  Any clip or unconnected net
-is a FAIL (exit 1) with every offender listed; an input of a shape this did
-not expect -- a config without DIE_AREA, a LEF without the macro, a power pin
-or an obstruction drawn as a POLYGON, an instance with no location -- is
-exit 2, because a check that guessed would be worse than none.
+PASS looks like `PASS: <n> instances, <m> power-pin rects, <t> trims in <i>
+instances, every terminal on its net's grid, no surviving fragment off it`
+and exit 0; a stranded terminal or a floating fragment is a FAIL (exit 1)
+with every offender listed; an input of a shape this did not expect -- a
+config without DIE_AREA, a LEF without the macro, a power pin or an
+obstruction drawn as a POLYGON, an instance with no location -- is exit 2,
+because a check that guessed would be worse than none.
 
 The strap positions are pdngen's own loop (`Straps::makeStraps`), which is
 not simply "every k the pitch allows": see `straps_along`.
@@ -106,6 +112,12 @@ SKY130 = {
     # "$PDN_HORIZONTAL_HALO $PDN_VERTICAL_HALO"`), not the floorplan's; both
     # default to 10 in LibreLane, but they are different knobs
     "PDN_HORIZONTAL_HALO": 10.0, "PDN_VERTICAL_HALO": 10.0,
+    # what pdngen's trim removes (`PdnGen::trimShapes`): a strap with fewer
+    # connections (vias) than the minimum -- 2, or 1 on a PIN layer, and
+    # PDN_ENABLE_PINS (default on) makes both connect layers pin layers.
+    # PDN_SKIPTRIM (default off) skips the pass; harm.py sets it for BLOCKS
+    # only, so a top runs with trim
+    "PDN_ENABLE_PINS": True, "PDN_SKIPTRIM": False,
 }
 OWN_METAL_TOL = 1.0        # how far an OBS rect may exceed the pin it covers
 SITE_W, SITE_H = 0.46, 2.72          # sky130_fd_sc_hd unithd
@@ -157,6 +169,9 @@ def read_top_config(path):
               "BOTTOM_MARGIN_MULT", "TOP_MARGIN_MULT", "FP_MACRO_HORIZONTAL_HALO",
               "FP_MACRO_VERTICAL_HALO", "PDN_HORIZONTAL_HALO", "PDN_VERTICAL_HALO"):
         g[k] = float(g[k])
+    for k in ("PDN_ENABLE_PINS", "PDN_SKIPTRIM"):
+        v = g[k]
+        g[k] = v.strip().lower() in ("1", "true", "yes", "on") if isinstance(v, str) else bool(v)
     if g["PDN_VPITCH"] <= 0 or g["PDN_HPITCH"] <= 0:
         raise InputShape(f"{path}: PDN pitches must be positive")
     if "CORE_AREA" in cfg:
@@ -418,89 +433,254 @@ def instance_obstructions(inst, macro, top, spacing, rects):
     return out
 
 
-def eval_instance(inst, rects, obs, top, vstraps, hstraps, spacing, via_min):
-    """(clips, connected-by-net, connections, obstructed-layers) for one placed
-    instance; `rects` and `obs` already in top coordinates.
-
-    pdngen never SHORTS two nets -- it CUTS.  Where a macro's power pin or its
-    OBS meets a top strap on the same layer, `Shape::cut` removes the strap
-    over the macro, and the same-net exception spares it only when the strap
-    CONTAINS the pin across its width (a 2 um block pin never fits inside a
-    1.6 um top strap, and an obstruction copied into a grid carries no net at
-    all).  So a same-layer meeting is a CLIP whatever the nets are, never a
-    connection, and what actually feeds a macro is the CROSS-layer crossing
-    that `add_pdn_connect -layers {met4 met5}` vias -- on a strap that is
-    still there to cross it.
-    """
-    g, core = top["g"], top["core"]
+# ── the grid pdngen would WRITE ──────────────────────────────────────────
+# Three rules, each read out of OpenROAD's src/pdn/src and each one the old
+# model lacked (#895).  (1) `Shape::cut`: a strap meeting an obstruction on
+# its own layer is CUT there, across its full width -- a clip is a trim, not a
+# verdict, and the strap keeps the rest of its length.  (2) `InstanceGrid::
+# getInstanceObstructions` + `applyHalo(..., is_horizontal, is_vertical)`: a
+# macro PIN is an obstruction grown by the macro grid's halo ALONG its
+# layer's direction and by the layer's spacing ACROSS it.  (3) `Grid::
+# getIntersections` + `getInstancePins`: a via exists wherever a same-net
+# shape on the connect pair's lower layer overlaps one on its upper layer,
+# and the macro's own pins are shapes -- so connectivity is CROSS-layer, a
+# pin can be fed by a strap on the other layer or by its own net's pin on
+# the other layer, and whether it IS fed is a property of the whole net's
+# metal, which `pdn_connect.net_components` already answers for a written
+# DEF and here answers for the predicted one.
+def strap_rects(top, vstraps, hstraps):
+    """Every strap as a rectangle on its layer: a vertical strap spans the
+    core's height, a horizontal one its width."""
+    g, c = top["g"], top["core"]
     lv, lh = g["PDN_VERTICAL_LAYER"], g["PDN_HORIZONTAL_LAYER"]
-    clips, connections = [], []
-    connected = {g["VDD_NET"]: False, g["GND_NET"]: False}
-    cut = {lv: set(), lh: set()}
-    obs_cut = {lv: set(), lh: set()}
-    obstructed = {}
+    out = [{"net": s["net"], "layer": lv, "k": s["k"], "vertical": True,
+            "rect": [s["lo"], c[1], s["hi"], c[3]]} for s in vstraps]
+    out += [{"net": s["net"], "layer": lh, "k": s["k"], "vertical": False,
+             "rect": [c[0], s["lo"], c[2], s["hi"]]} for s in hstraps]
+    return out
 
-    # (a) the straps this macro removes over itself, and why.  Only FOREIGN
-    # metal cuts here: an obstruction that IS the block's own power grid is the
-    # same metal as its pins, so the pin rule below governs it and counting it
-    # twice would refuse plans that demonstrably route.
-    own_power = {}
-    for ob in obs:
-        layer = ob["layer"]
-        if layer not in cut:
-            continue
-        if ob["own_power_metal"]:
-            own_power[layer] = own_power.get(layer, 0) + 1
-            continue
-        ox1, oy1, ox2, oy2 = ob["bloated"]
-        straps, lo, hi = (vstraps, ox1, ox2) if layer == lv else (hstraps, oy1, oy2)
-        hit = [j for j, s in enumerate(straps) if overlap(s["lo"], s["hi"], lo, hi) > EPS]
-        cut[layer].update(hit)
-        obs_cut[layer].update(hit)
-        if hit:
-            e = obstructed.setdefault(layer, {"rect": [round(v, 3) for v in ob["rect"]], "straps": 0})
-            e["straps"] += len(hit)
-    for (net, layer, x1, y1, x2, y2, pname) in rects:
-        if layer not in cut:
-            continue
-        if layer == lv and overlap(y1, y2, core[1], core[3]) <= 0:
-            continue
-        if layer == lh and overlap(x1, x2, core[0], core[2]) <= 0:
-            continue
-        sp = spacing.get(layer, 0.0)
-        straps, lo, hi = (vstraps, x1, x2) if layer == lv else (hstraps, y1, y2)
-        for j, s in enumerate(straps):
-            ov = overlap(lo, hi, s["lo"], s["hi"])
-            if ov > -sp + EPS:
-                cut[layer].add(j)
-                if j in obs_cut[layer]:
-                    continue          # the OBS already removed this strap here
-                clips.append({"instance": inst["name"], "pin": pname, "net": net, "layer": layer,
-                              "rect": [x1, y1, x2, y2], "strap_net": s["net"], "strap_k": s["k"],
-                              "strap": [s["lo"], s["hi"]], "overlap": round(ov, 4),
-                              "axis": "x" if layer == lv else "y"})
 
-    # (b) what still feeds it: a SURVIVING strap of the same net on the other layer
-    for (net, layer, x1, y1, x2, y2, pname) in rects:
-        if layer == lv:
-            other, straps = lh, hstraps
-        elif layer == lh:
-            other, straps = lv, vstraps
-        else:
+def pin_cutter(top, spacing, net, layer, x1, y1, x2, y2):
+    """A macro pin as pdngen makes it an obstruction to the top's straps.
+
+    `getInstanceObstructions` grows it by the macro grid's HALO through
+    `applyHalo(rect, halo, true, is_horizontal, is_vertical)`, which applies
+    the halo on x for a horizontal layer and on y for a vertical one and on
+    no other axis -- so a pin grows along the wire direction of its layer.
+    Across it, `Shape::cut` reads the obstruction halo, i.e. the layer's
+    spacing; ONE spacing here, the rule the phase-0 toy validated (whether
+    pdngen adds the strap's own spacing too is not something any run here
+    discriminates).  Returns (across_lo, across_hi, along_lo, along_hi)."""
+    g = top["g"]
+    sp = spacing.get(layer, 0.0)
+    if layer == g["PDN_VERTICAL_LAYER"]:
+        h = max(g["PDN_VERTICAL_HALO"], 0.0)
+        return x1 - sp, x2 + sp, y1 - h, y2 + h
+    h = max(g["PDN_HORIZONTAL_HALO"], 0.0)
+    return y1 - sp, y2 + sp, x1 - h, x2 + h
+
+
+def _subtract(intervals, lo, hi):
+    out = []
+    for a, b in intervals:
+        if hi <= a + EPS or lo >= b - EPS:
+            out.append((a, b))
             continue
-        for j, s in enumerate(straps):
-            if s["net"] != net or j in cut[other]:
+        if lo > a + EPS:
+            out.append((a, lo))
+        if hi < b - EPS:
+            out.append((hi, b))
+    return out
+
+
+def trim_straps(top, straps, rects_by, obs_by, spacing):
+    """(fragments, trims): each strap after every cut pdngen would make in it.
+
+    A cutter on the strap's layer whose ACROSS extent reaches the strap --
+    a pin per `pin_cutter`, a foreign OBS bloated as `instance_obstructions`
+    has it -- removes its ALONG extent from the strap, across the strap's
+    full width (`Shape::cut` widens the violation to the strap before
+    subtracting).  A same-net cutter is spared only when the strap CONTAINS
+    it across its width, which a block pin wider than the strap never is, so
+    a same-layer meeting is a trim whatever the two nets are.  The block's
+    own-power OBS is the same metal as its pins and is not counted twice."""
+    frags, trims = [], []
+    for s in straps:
+        x1, y1, x2, y2 = s["rect"]
+        vert = s["vertical"]
+        along = [(y1, y2)] if vert else [(x1, x2)]
+        s_lo, s_hi = (x1, x2) if vert else (y1, y2)
+        for inst_name, rects in rects_by.items():
+            for (net, layer, px1, py1, px2, py2, pname) in rects:
+                if layer != s["layer"]:
+                    continue
+                c_lo, c_hi, a_lo, a_hi = pin_cutter(top, spacing, net, layer, px1, py1, px2, py2)
+                if overlap(c_lo, c_hi, s_lo, s_hi) <= EPS:
+                    continue
+                if net == s["net"] and s_lo <= c_lo + EPS and s_hi >= c_hi - EPS:
+                    continue                    # contained across the strap: spared
+                before = along
+                along = _subtract(along, a_lo, a_hi)
+                if along != before:
+                    trims.append({"instance": inst_name, "pin": pname, "net": net, "layer": layer,
+                                  "strap_net": s["net"], "strap_k": s["k"],
+                                  "strap": [round(s_lo, 3), round(s_hi, 3)],
+                                  "along": [round(a_lo, 3), round(a_hi, 3)],
+                                  "axis": "x" if vert else "y"})
+            for ob in obs_by.get(inst_name, ()):
+                if ob["layer"] != s["layer"] or ob["own_power_metal"]:
+                    continue
+                ox1, oy1, ox2, oy2 = ob["bloated"]
+                c_lo, c_hi, a_lo, a_hi = (ox1, ox2, oy1, oy2) if vert else (oy1, oy2, ox1, ox2)
+                if overlap(c_lo, c_hi, s_lo, s_hi) <= EPS:
+                    continue
+                before = along
+                along = _subtract(along, a_lo, a_hi)
+                if along != before:
+                    trims.append({"instance": inst_name, "pin": None, "net": None, "layer": s["layer"],
+                                  "strap_net": s["net"], "strap_k": s["k"],
+                                  "strap": [round(s_lo, 3), round(s_hi, 3)],
+                                  "along": [round(a_lo, 3), round(a_hi, 3)],
+                                  "axis": "x" if vert else "y", "obs": True})
+        for a, b in along:
+            if b - a > EPS:
+                frags.append({"net": s["net"], "layer": s["layer"], "k": s["k"],
+                              "rect": [x1, a, x2, b] if vert else [a, y1, b, y2]})
+    return frags, trims
+
+
+def predicted_network(top, frags, rects_by, via_min):
+    """The vias pdngen would make and the components they leave, per net.
+
+    Shapes are the trimmed straps AND every macro power pin on either connect
+    layer (`getInstancePins` injects them).  A via is a same-net cross-layer
+    overlap of at least `via_min` on both axes (`Grid::getIntersections`).
+    The partition is `pdn_connect.net_components` -- the same code that
+    reads the written DEF, so the prediction and the post-mortem cannot
+    disagree about what "one piece of metal" means.  Returns
+    (components-by-net, terminals-by-net, vias-per-fragment-by-net): the
+    rects handed to the partition are the fragments FIRST, in order, then the
+    pin rects, so a component member index below len(frags) is a fragment."""
+    from pdn_connect import net_components, _BinIndex    # lazy: pdn_connect imports THIS module
+    g = top["g"]
+    lv, lh = g["PDN_VERTICAL_LAYER"], g["PDN_HORIZONTAL_LAYER"]
+    snets = {g["VDD_NET"]: {"rects": [], "vias": [], "pins": []},
+             g["GND_NET"]: {"rects": [], "vias": [], "pins": []}}
+    frag_ids = {n: [] for n in snets}
+    for i, f in enumerate(frags):
+        frag_ids[f["net"]].append(i)
+        snets[f["net"]]["rects"].append((f["layer"], *f["rect"]))
+    terms = {n: [] for n in snets}
+    for inst_name, rects in rects_by.items():
+        per = {}
+        for (net, layer, x1, y1, x2, y2, pname) in rects:
+            if layer not in (lv, lh) or net not in snets:
                 continue
-            if other == lh:      # horizontal strap: spans the core in x
-                ovx = min(x2, core[2]) - max(x1, core[0])
-                ovy = overlap(y1, y2, s["lo"], s["hi"])
-            else:                # vertical strap: spans the core in y
-                ovx = overlap(x1, x2, s["lo"], s["hi"])
-                ovy = min(y2, core[3]) - max(y1, core[1])
-            if min(ovx, ovy) >= via_min - EPS:
-                connected[net] = True
-                connections.append((inst["name"], pname, layer, "crossed by", s["net"], s["k"], other))
-    return clips, connected, connections, obstructed, own_power
+            snets[net]["rects"].append((layer, x1, y1, x2, y2))
+            per.setdefault((net, pname), []).append((layer, x1, y1, x2, y2))
+        for (net, pname), rs in per.items():
+            terms[net].append({"name": f"{inst_name}.{pname}", "rects": rs})
+    frag_vias = {n: {} for n in snets}
+    for net, d in snets.items():
+        low = [(i, r) for i, r in enumerate(d["rects"]) if r[0] == lv]
+        high = [(i, r) for i, r in enumerate(d["rects"]) if r[0] == lh]
+        if not low or not high:
+            continue
+        hrects = [r for _i, r in high]
+        idx = _BinIndex(hrects, keyfn=lambda r: r[1:])
+        nfr = len(frag_ids[net])
+        for (ia, (_l, ax1, ay1, ax2, ay2)) in low:
+            for j in idx.near(ax1 if idx.axis == 0 else ay1, ax2 if idx.axis == 0 else ay2):
+                ib, (_b, bx1, by1, bx2, by2) = high[j]
+                ox, oy = overlap(ax1, ax2, bx1, bx2), overlap(ay1, ay2, by1, by2)
+                if min(ox, oy) < via_min - EPS:
+                    continue
+                d["vias"].append((lv, (max(ax1, bx1) + min(ax2, bx2)) / 2,
+                                  (max(ay1, by1) + min(ay2, by2)) / 2, "predicted"))
+                for i in (ia, ib):
+                    if i < nfr:
+                        frag_vias[net][i] = frag_vias[net].get(i, 0) + 1
+    return net_components(snets, terms, (lv, lh), with_members=True), terms, frag_vias
+
+
+def min_connections(top):
+    """How many vias a strap fragment needs to survive `PdnGen::trimShapes`
+    (`Shape::isRemovable`): 2, or 1 on a pin layer -- and LibreLane's
+    `PDN_ENABLE_PINS` (default on) declares both connect layers pin layers.
+    None when the top skips trim (`PDN_SKIPTRIM`): everything survives."""
+    g = top["g"]
+    if g["PDN_SKIPTRIM"]:
+        return None
+    return 1 if g["PDN_ENABLE_PINS"] else 2
+
+
+def evaluate(top, straps, rects_by, obs_by, spacing, via_min):
+    """The whole prediction for one placement: the trims, the network, and
+    what PSM would find wrong with it.
+
+    pdngen builds the straps, cuts them (`trim_straps`), makes the vias
+    (`predicted_network`), then TRIMS: `PdnGen::trimShapes` removes every
+    strap fragment with fewer connections than `min_connections` and shrinks
+    the rest to the extent of their vias.  So a via-less fragment -- a stub
+    between two cuts, a strap at the core edge whose crossings are narrower
+    than a via -- is simply gone before signoff, and is NOT a failure.  What
+    `[PSM-0069]` then fails on is a net whose REMAINING shapes are not one
+    connected set: a macro terminal none of whose rectangles is on the net's
+    main grid (`stranded`), or a fragment that survived trim on a component
+    off the main grid (`floating`, the "N unconnected shapes" PSM counts).
+    A pin rectangle off the grid whose TERMINAL is fed by another of its
+    rectangles is neither -- measured, the phase-0 toy passes PSM with two
+    such VGND pin rectangles (a LEF PIN is one terminal, however many RECTs
+    it is drawn as).  `failures` is the union; a placement passes iff it is
+    empty."""
+    frags, trims = trim_straps(top, straps, rects_by, obs_by, spacing)
+    conn, terms, frag_vias = predicted_network(top, frags, rects_by, via_min)
+    min_conns = min_connections(top)
+    stranded, floating, trimmed, off_grid_pins = [], [], [], []
+    for net, c in conn.items():
+        comps = c["components"]
+        nfr = len([f for f in frags if f["net"] == net])
+        if not comps:
+            continue
+        main = comps[0]
+        main_frags = sum(1 for i in main["members"] if i < nfr)
+        # a net with no strap at all has no grid to be on: every terminal is stranded
+        no_grid = main_frags == 0
+        fed = set() if no_grid else set(main["terminals"])
+        seen_stranded = set()
+        for comp in comps[1:] if not no_grid else comps:
+            fr = [i for i in comp["members"] if i < nfr]
+            surviving = [i for i in fr if min_conns is None or frag_vias[net].get(i, 0) >= min_conns]
+            lost = [t for t in comp["terminals"] if t not in fed and t not in seen_stranded]
+            seen_stranded.update(lost)
+            for t in lost:
+                inst, _, pin = t.rpartition(".")
+                stranded.append({"instance": inst, "net": net, "pin": pin, "component": comp["id"],
+                                 "component_shapes": comp["shapes"], "component_span": comp["span"],
+                                 "surviving_fragments": len(surviving)})
+            if not fr and not lost:
+                off_grid_pins.append({"net": net, "component": comp["id"], "shapes": comp["shapes"],
+                                      "terminals": comp["terminals"]})
+                continue
+            for i in fr:
+                f = frags[i]
+                row = {"net": net, "layer": f["layer"], "k": f["k"], "rect": [round(v, 3) for v in f["rect"]],
+                       "vias": frag_vias[net].get(i, 0), "component": comp["id"],
+                       "terminals": comp["terminals"]}
+                (floating if i in surviving else trimmed).append(row)
+        # terminals the strap grid never reaches at all (no component holds them)
+        held = {t for comp in comps for t in comp["terminals"]}
+        for t in terms[net]:
+            if t["name"] not in held and t["name"] not in seen_stranded:
+                inst, _, pin = t["name"].rpartition(".")
+                seen_stranded.add(t["name"])
+                stranded.append({"instance": inst, "net": net, "pin": pin, "component": None,
+                                 "component_shapes": 0, "component_span": 0.0, "surviving_fragments": 0})
+    failures = ([{"kind": "stranded", **x} for x in stranded]
+                + [{"kind": "floating", **x} for x in floating])
+    return {"frags": frags, "trims": trims, "network": conn, "stranded": stranded,
+            "floating": floating, "trimmed": trimmed, "off_grid_pins": off_grid_pins,
+            "min_connections": min_conns, "failures": failures}
 
 
 def shifted(rects, dx, dy):
@@ -518,22 +698,16 @@ def shifted_obs(obs, dx, dy):
     return out
 
 
-def clean_at(inst, rects, obs, top, vstraps, hstraps, spacing, via_min, dx, dy, axis=None):
-    """Clip-free and connected on both nets after (dx, dy).
-
-    With `axis` given, only the clips THAT axis controls are judged and
-    connectivity is left to the joint check.  A shift along x moves a
-    vertical-layer pin across the vertical straps and can do nothing about
-    a horizontal-layer clip, so requiring the other axis to be clean here
-    rejects every x candidate while the y search rejects every y one, and
-    an instance violated on both axes is reported as having no remedy --
-    though applying the two shifts TOGETHER clears it (Codex #885).
-    """
-    clips, con, _, _, _ = eval_instance(inst, shifted(rects, dx, dy), shifted_obs(obs, dx, dy),
-                                        top, vstraps, hstraps, spacing, via_min)
-    if axis is not None:
-        return not [c for c in clips if c["axis"] == axis]
-    return not clips and all(con.values())
+def clean_at(top, straps, rects_by, obs_by, spacing, via_min, dx, dy):
+    """No predicted PSM failure after every macro moves by (dx, dy) --
+    equivalently, after the straps move by (-dx, -dy), which is what a
+    PDN_*OFFSET change does.  The verdict is global by nature: which
+    fragment a strap breaks into depends on every macro it passes, so a
+    per-instance shift has no well-defined question to ask; the remedy
+    offered is the one shift of the whole set."""
+    r_by = {n: shifted(r, dx, dy) for n, r in rects_by.items()}
+    o_by = {n: shifted_obs(o, dx, dy) for n, o in obs_by.items()}
+    return not evaluate(top, straps, r_by, o_by, spacing, via_min)["failures"]
 
 
 def shift_candidates(rects_list, obs_list, top, vstraps, hstraps, spacing, via_min, axis):
@@ -581,30 +755,43 @@ def shift_candidates(rects_list, obs_list, top, vstraps, hstraps, spacing, via_m
     return sorted(out, key=lambda v: (abs(v), v))
 
 
-def smallest_shift(insts, rects_by, obs_by, top, vstraps, hstraps, spacing, via_min, axis, limit):
-    """The smallest |shift| along `axis` (within +-limit) after which every
-    instance in `insts` is free of the clips THAT AXIS controls; None when
-    no candidate within the limit does it.  Whether the design is then
-    clean is `joint_clean`'s question -- the two axes are searched
-    independently and applied together."""
-    cands = shift_candidates([rects_by[i["name"]] for i in insts], [obs_by[i["name"]] for i in insts],
+MAX_SHIFT_TRIALS = 400          # single-axis trials, and the pair search's budget
+MAX_TRIM_LINES = 40             # TRIM lines on the terminal; every one is in --json
+
+
+def axis_candidates(top, rects_by, obs_by, spacing, via_min, axis, limit, vstraps, hstraps):
+    insts = list(rects_by)
+    cands = shift_candidates([rects_by[i] for i in insts], [obs_by[i] for i in insts],
                              top, vstraps, hstraps, spacing, via_min, axis)
-    for d in cands:
-        if abs(d) > limit + EPS:
-            break
+    return [d for d in cands if abs(d) <= limit + EPS]
+
+
+def smallest_shift(top, straps, rects_by, obs_by, spacing, via_min, axis, limit, vstraps, hstraps):
+    """The smallest |shift| along `axis` alone (within +-limit) after which
+    nothing is predicted to fail; None when no candidate within the limit
+    does it.  Candidates are the offsets at which some pin edge meets some
+    strap edge plus spacing, or a crossing reaches via size -- the smallest
+    clearing shift is one of those or 0."""
+    for d in axis_candidates(top, rects_by, obs_by, spacing, via_min, axis, limit, vstraps, hstraps)[:MAX_SHIFT_TRIALS]:
         dx, dy = (d, 0.0) if axis == "x" else (0.0, d)
-        if all(clean_at(i, rects_by[i["name"]], obs_by[i["name"]], top, vstraps, hstraps,
-                        spacing, via_min, dx, dy, axis) for i in insts):
+        if clean_at(top, straps, rects_by, obs_by, spacing, via_min, dx, dy):
             return d
     return None
 
 
-def joint_clean(insts, rects_by, obs_by, top, vstraps, hstraps, spacing, via_min, dx, dy):
-    """Does applying BOTH shifts leave every instance clean and connected?
-    The per-axis searches answer only about their own clips, so the pair is
-    verified before it is offered as the remedy."""
-    return all(clean_at(i, rects_by[i["name"]], obs_by[i["name"]], top, vstraps, hstraps,
-                        spacing, via_min, dx, dy) for i in insts)
+def smallest_pair(top, straps, rects_by, obs_by, spacing, via_min, xlimit, ylimit, vstraps, hstraps):
+    """A (dx, dy) that clears a placement failing on BOTH axes, where neither
+    axis alone can: the candidates of each axis, smallest first, tried as
+    pairs by increasing |dx|+|dy| within the trial budget.  None when the
+    budget finds nothing -- a placement or pitch change is then the remedy."""
+    xs = axis_candidates(top, rects_by, obs_by, spacing, via_min, "x", xlimit, vstraps, hstraps)
+    ys = axis_candidates(top, rects_by, obs_by, spacing, via_min, "y", ylimit, vstraps, hstraps)
+    n = max(1, int(math.sqrt(MAX_SHIFT_TRIALS)))
+    pairs = sorted(((dx, dy) for dx in xs[:n] for dy in ys[:n]), key=lambda p: (abs(p[0]) + abs(p[1]), p))
+    for dx, dy in pairs[:MAX_SHIFT_TRIALS]:
+        if clean_at(top, straps, rects_by, obs_by, spacing, via_min, dx, dy):
+            return dx, dy
+    return None
 
 
 def run_check(top, lefs, spacing=None, via_min=VIA_MIN):
@@ -612,12 +799,12 @@ def run_check(top, lefs, spacing=None, via_min=VIA_MIN):
     g = top["g"]
     lv, lh = g["PDN_VERTICAL_LAYER"], g["PDN_HORIZONTAL_LAYER"]
     vstraps, hstraps = top_straps(top)
+    straps = strap_rects(top, vstraps, hstraps)
     for inst in top["instances"]:
         if inst["cell"] not in lefs:
             raise InputShape(f"no LEF defines MACRO {inst['cell']} (instance {inst['name']}); LEFs read: "
                              f"{sorted(lefs)}")
-    rects_by, obs_by, per_inst, all_clips, unconnected, n_rects = {}, {}, [], [], [], 0
-    sealed = []
+    rects_by, obs_by, n_rects, sealed, own_power_by = {}, {}, 0, [], {}
     for inst in top["instances"]:
         macro = lefs[inst["cell"]]
         rects = instance_rects(inst, macro, top)
@@ -627,56 +814,82 @@ def run_check(top, lefs, spacing=None, via_min=VIA_MIN):
         obs = instance_obstructions(inst, macro, top, spacing, rects)
         rects_by[inst["name"]], obs_by[inst["name"]] = rects, obs
         n_rects += len(rects)
-        clips, con, cons, obstructed, own_power = eval_instance(inst, rects, obs, top, vstraps, hstraps,
-                                                                spacing, via_min)
-        all_clips.extend(clips)
-        for net, ok in con.items():
-            if not ok:
-                unconnected.append({"instance": inst["name"], "net": net})
-        if lv in obstructed and lh in obstructed:
+        foreign = {ob["layer"] for ob in obs if not ob["own_power_metal"]}
+        if lv in foreign and lh in foreign:
             sealed.append({"instance": inst["name"], "cell": inst["cell"]})
-        row = {"instance": inst["name"], "cell": inst["cell"], "clips": len(clips),
-               "connected": con, "connections": len(cons),
-               "obstructed": sorted(obstructed), "own_power_obs": own_power}
-        if clips or not all(con.values()):
-            row["dx"] = smallest_shift([inst], rects_by, obs_by, top, vstraps, hstraps, spacing, via_min,
-                                       "x", g["PDN_VPITCH"] / 2)
-            row["dy"] = smallest_shift([inst], rects_by, obs_by, top, vstraps, hstraps, spacing, via_min,
-                                       "y", g["PDN_HPITCH"] / 2)
-            row["clean_at_dxdy"] = (row["dx"] is not None and row["dy"] is not None
-                                    and joint_clean([inst], rects_by, obs_by, top, vstraps, hstraps,
-                                                    spacing, via_min, row["dx"], row["dy"]))
-        per_inst.append(row)
+        own = {}
+        for ob in obs:
+            if ob["own_power_metal"]:
+                own[ob["layer"]] = own.get(ob["layer"], 0) + 1
+        own_power_by[inst["name"]] = own
+    ev = evaluate(top, straps, rects_by, obs_by, spacing, via_min)
+    stranded = ev["stranded"]
+    unconnected = sorted({(s["instance"], s["net"]) for s in stranded})
+    unconnected = [{"instance": i, "net": n} for i, n in unconnected]
+    per_inst = []
+    for inst in top["instances"]:
+        n = inst["name"]
+        con = {net: not any(s["instance"] == n and s["net"] == net for s in stranded)
+               for net in (g["VDD_NET"], g["GND_NET"])}
+        foreign = sorted({ob["layer"] for ob in obs_by[n] if not ob["own_power_metal"]})
+        per_inst.append({"instance": n, "cell": inst["cell"],
+                         "trims": sum(1 for t in ev["trims"] if t["instance"] == n),
+                         "connected": con, "obstructed": foreign, "own_power_obs": own_power_by[n]})
+    net_rows = {}
+    for net, c in ev["network"].items():
+        comps = c["components"]
+        net_rows[net] = {"straps": sum(1 for st in straps if st["net"] == net),
+                         "fragments": sum(1 for f in ev["frags"] if f["net"] == net),
+                         "components": len(comps),
+                         "main_shapes": comps[0]["shapes"] if comps else 0,
+                         "terminals": len(ev_terms(ev, net)),
+                         "terminals_on_grid": len(ev_terms(ev, net)) - sum(1 for s in stranded if s["net"] == net),
+                         "trimmed_away": sum(1 for f in ev["trimmed"] if f["net"] == net),
+                         "floating": sum(1 for f in ev["floating"] if f["net"] == net),
+                         "bridged_by": c["bridged_by"]}
     result = {"config": top["path"], "instances": len(top["instances"]), "pin_rects": n_rects,
-              "clips": all_clips, "unconnected": unconnected, "per_instance": per_inst,
-              "sealed": sealed, "used_defaults": top["used_defaults"],
-              "vstraps": len(vstraps), "hstraps": len(hstraps),
-              "pass": not all_clips and not unconnected}
+              "trims": ev["trims"], "unconnected": unconnected, "stranded": stranded,
+              "floating": ev["floating"], "trimmed_away": ev["trimmed"], "off_grid_pins": ev["off_grid_pins"],
+              "min_connections": ev["min_connections"], "failures": ev["failures"],
+              "network": net_rows, "per_instance": per_inst, "sealed": sealed,
+              "used_defaults": top["used_defaults"], "vstraps": len(vstraps), "hstraps": len(hstraps),
+              "pass": not ev["failures"]}
     if not result["pass"]:
-        insts = top["instances"]
-        dx = smallest_shift(insts, rects_by, obs_by, top, vstraps, hstraps, spacing, via_min, "x",
-                            g["PDN_VPITCH"] / 2)
-        dy = smallest_shift(insts, rects_by, obs_by, top, vstraps, hstraps, spacing, via_min, "y",
-                            g["PDN_HPITCH"] / 2)
+        args = (top, straps, rects_by, obs_by, spacing, via_min)
+        xl, yl = g["PDN_VPITCH"] / 2, g["PDN_HPITCH"] / 2
+        dx = smallest_shift(*args, "x", xl, vstraps, hstraps)
+        dy = smallest_shift(*args, "y", yl, vstraps, hstraps)
         result["global_dx"], result["global_dy"] = dx, dy
-        if dx is not None:
-            result["voffset_for_dx"] = round((g["PDN_VOFFSET"] - dx) % g["PDN_VPITCH"], 3)
-        if dy is not None:
-            result["hoffset_for_dy"] = round((g["PDN_HOFFSET"] - dy) % g["PDN_HPITCH"], 3)
-        # Each axis was searched against its OWN clips, so the pair is
-        # verified before the offsets are offered as the fix (Codex #885).
-        result["global_clean_at_dxdy"] = (
-            dx is not None and dy is not None
-            and joint_clean(insts, rects_by, obs_by, top, vstraps, hstraps, spacing, via_min, dx, dy))
+        # one axis alone when either does it (the smaller move); a PAIR only
+        # when neither does -- and then a searched one, since a design failing
+        # on both axes passes neither single search (Codex #885)
+        singles = [(abs(d), (d, 0.0) if ax == "x" else (0.0, d))
+                   for ax, d in (("x", dx), ("y", dy)) if d is not None]
+        pair = min(singles)[1] if singles else smallest_pair(*args, xl, yl, vstraps, hstraps)
+        result["global_shift"] = list(pair) if pair else None
+        if pair:
+            result["voffset_for_shift"] = round((g["PDN_VOFFSET"] - pair[0]) % g["PDN_VPITCH"], 3)
+            result["hoffset_for_shift"] = round((g["PDN_HOFFSET"] - pair[1]) % g["PDN_HPITCH"], 3)
+        # the offered shift is VERIFIED before it is offered (Codex #885)
+        result["global_clean_at_shift"] = bool(pair) and clean_at(*args, *pair)
     return result
 
 
+def ev_terms(ev, net):
+    """The terminals of `net` the evaluation saw: the union of every
+    component's terminal list plus the ones no component holds."""
+    names = {t for c in ev["network"][net]["components"] for t in c["terminals"]}
+    names |= {f"{s['instance']}.{s['pin']}" for s in ev["stranded"] if s["net"] == net}
+    return names
+
+
 ADVISORY = (
-    "  ADVISORY: read this for WHAT IT SHOWS, not for its verdict.  The clips it counts are what\n"
-    "  pdngen resolves by CUTTING a strap, which is fatal only when the cut isolates a fragment,\n"
-    "  and its connectivity model is wrong (librelane_hier_flow.md §7.2, §11 item 8).  Acting on a\n"
-    "  FAIL by hand once turned a working plan into PSM-0069.  The PDN verdict is OpenROAD's own\n"
-    "  PSM check at the end of the top run; pdn_connect.py on the written DEF localises a failure."
+    "  ADVISORY: a PREDICTION of pdngen's own steps -- cut, via, trim -- and of what PSM then finds\n"
+    "  unconnected, not the verdict.  The verdict is OpenROAD's own PSM check at the end of the top\n"
+    "  run; pdn_connect.py on the DEF pdngen wrote is the post-mortem, and it uses the same network\n"
+    "  code, so where the two disagree the prediction's INPUT is what to look at.  A TRIM is not a\n"
+    "  defect (it is how pdngen keeps straps off macro pins); a via-less fragment is trimmed away,\n"
+    "  not stranded.  Editing PDN_*OFFSET on the old check's say-so is what produced PSM-0069 once."
 )
 
 
@@ -690,6 +903,12 @@ def report(top, lefs, res, out=sys.stdout):
       f" (VPWR first, VGND +{g['PDN_VWIDTH'] + g['PDN_VSPACING']:.2f}; width {g['PDN_VWIDTH']})")
     p(f"  {lh} straps: {res['hstraps']} at y = {core[1]:.3f} + {g['PDN_HOFFSET']} + k*{g['PDN_HPITCH']}"
       f" (width {g['PDN_HWIDTH']}, VGND +{g['PDN_HWIDTH'] + g['PDN_HSPACING']:.2f})")
+    mc = res.get("min_connections")
+    if mc is None:
+        p("  trim: SKIPPED (PDN_SKIPTRIM) -- every strap fragment survives, via-less ones included")
+    else:
+        p(f"  trim: a strap fragment with fewer than {mc} via{'s' if mc > 1 else ''} is removed "
+          f"(`PdnGen::trimShapes`; PDN_ENABLE_PINS {'on' if g['PDN_ENABLE_PINS'] else 'off'})")
     own = {}
     for r in res["per_instance"]:
         for layer, n in (r.get("own_power_obs") or {}).items():
@@ -722,43 +941,61 @@ def report(top, lefs, res, out=sys.stdout):
               f"halo it removes {layer} straps over this macro (`Shape::cut` against "
               f"`InstanceGrid::getInstanceObstructions`).  Signal routing on a PDN layer does this -- "
               f"cap the block below it (RT_MAX_LAYER) or keep that layer for the block's own grid")
-    for c in res["clips"]:
-        p(f"CLIP {c['instance']} {c['net']} pin {c['pin']} on {c['layer']} "
-          f"[{c['rect'][0]:.3f},{c['rect'][2]:.3f}]x[{c['rect'][1]:.3f},{c['rect'][3]:.3f}] "
-          f"cuts {c['strap_net']} strap k={c['strap_k']} [{c['strap'][0]:.3f},{c['strap'][1]:.3f}] "
-          f"(overlap {c['overlap']:.3f} um along {c['axis']}; spacing counted)")
-    for u in res["unconnected"]:
-        p(f"UNCONNECTED {u['instance']} {u['net']}: no surviving strap of that net on the other layer "
-          f"crosses a pin of that net with room for a via")
+    trims = res["trims"]
+    for t in trims[:MAX_TRIM_LINES]:
+        what = (f"OBS" if t.get("obs") else f"{t['net']} pin {t['pin']}")
+        p(f"TRIM {t['instance']} {what} on {t['layer']} cuts {t['strap_net']} strap k={t['strap_k']} "
+          f"[{t['strap'][0]:.3f},{t['strap'][1]:.3f}] over {'y' if t['axis'] == 'x' else 'x'} "
+          f"[{t['along'][0]:.3f},{t['along'][1]:.3f}]"
+          + ("" if t.get("obs") else " (spacing across, halo along)"))
+    if len(trims) > MAX_TRIM_LINES:
+        p(f"  ... {len(trims) - MAX_TRIM_LINES} more trims (all in --json)")
+    for net, row in res["network"].items():
+        p(f"  {net}: {row['straps']} straps -> {row['fragments']} fragments after the cuts; main grid "
+          f"{row['main_shapes']} shapes; {row['trimmed_away']} via-less fragment(s) trimmed away; "
+          f"{row['floating']} surviving off the grid; terminals on the grid "
+          f"{row['terminals_on_grid']}/{row['terminals']}"
+          + (f"; {len(row['bridged_by'])} terminal(s) bridge two components (not credited)"
+             if row["bridged_by"] else ""))
+    for s_ in res["stranded"]:
+        where = ("no strap of that net reaches any rectangle of it" if s_["component"] is None else
+                 f"its component ({s_['component_shapes']} shapes, span {s_['component_span']:.3f}) is off "
+                 f"the main grid" + (f", {s_['surviving_fragments']} of its fragments survive trim"
+                                     if s_["surviving_fragments"] else ", and every strap fragment on it is "
+                                     "via-less and trimmed away"))
+        p(f"STRANDED {s_['instance']} {s_['net']} pin {s_['pin']}: {where}")
+    for f in res["floating"]:
+        p(f"FLOATING {f['net']} {f['layer']} fragment k={f['k']} [{f['rect'][0]:.3f},{f['rect'][1]:.3f},"
+          f"{f['rect'][2]:.3f},{f['rect'][3]:.3f}] with {f['vias']} via(s): survives trim on a component "
+          f"off the main grid -- a shape PSM reports unconnected"
+          + (f" (component carries {', '.join(f['terminals'][:4])})" if f["terminals"] else ""))
     for sd in res["sealed"]:
         p(f"  {sd['instance']} ({sd['cell']}) carries foreign metal on BOTH {lv} and {lh}: nothing can "
           f"reach it. Cap the block below them (`RT_MAX_LAYER`) so those layers hold only its own "
           f"power grid, which the phase search can clear")
-    bad = [r for r in res["per_instance"] if r["clips"] or not all(r["connected"].values())]
-    for r in bad:
-        fmt = lambda v: "none within half a pitch" if v is None else f"{v:+.3f} um"
-        both = ("" if not r.get("clean_at_dxdy") else "; together they clear it")
-        p(f"  {r['instance']}: smallest x-shift {fmt(r['dx'])}, smallest y-shift {fmt(r['dy'])}{both}")
+    n_trim_inst = len({t["instance"] for t in trims})
     if res["pass"]:
-        p(f"PASS: {res['instances']} instances, {res['pin_rects']} power-pin rects, 0 clips, "
-          f"every instance connected on {g['VDD_NET']} and {g['GND_NET']}")
+        p(f"PASS: {res['instances']} instances, {res['pin_rects']} power-pin rects, {len(trims)} trims "
+          f"in {n_trim_inst} instances, every terminal on its net's grid, no surviving fragment off it "
+          f"({len(res['trimmed_away'])} via-less trimmed away)")
+        return
+    line = (f"FAIL: {res['instances']} instances, {len(trims)} trims in {n_trim_inst} instances, "
+            f"{len(res['stranded'])} stranded terminal(s) in {len(res['unconnected'])} instance-net(s), "
+            f"{len(res['floating'])} floating fragment(s)")
+    sh = res.get("global_shift")
+    if sh and res.get("global_clean_at_shift"):
+        parts = []
+        if sh[0]:
+            parts.append(f"dx={sh[0]:+.3f} (PDN_VOFFSET={res['voffset_for_shift']})")
+        if sh[1]:
+            parts.append(f"dy={sh[1]:+.3f} (PDN_HOFFSET={res['hoffset_for_shift']})")
+        line += ("; shifting EVERY macro by " + " and ".join(parts) + " -- equivalently the strap "
+                 "offset(s) named -- leaves nothing predicted to fail"
+                 + (" (both axes needed: neither alone does)" if sh[0] and sh[1] else ""))
     else:
-        line = (f"FAIL: {res['instances']} instances, {len(res['clips'])} clips in "
-                f"{len({c['instance'] for c in res['clips']})} instances, "
-                f"{len(res['unconnected'])} unconnected instance-nets")
-        if res.get("global_dx") is not None:
-            line += (f"; shifting EVERY macro by dx={res['global_dx']:+.3f} clears the x-axis "
-                     f"(equivalently PDN_VOFFSET={res['voffset_for_dx']})")
-        if res.get("global_dy") is not None:
-            line += (f"; dy={res['global_dy']:+.3f} the y-axis (PDN_HOFFSET={res['hoffset_for_dy']})")
-        if res.get("global_clean_at_dxdy"):
-            line += "; TOGETHER they leave every instance clean and connected"
-        elif res.get("global_dx") is not None and res.get("global_dy") is not None:
-            line += ("; together they do NOT clear it -- each axis's shift removes only that axis's "
-                     "clips, so a placement or pitch change is needed")
-        if res.get("global_dx") is None and res.get("global_dy") is None:
-            line += "; no single shift within half a pitch clears either axis -- see the per-instance shifts"
-        p(line)
+        line += ("; no shift within half a pitch on either axis, nor a pair within the trial budget, "
+                 "clears it -- a placement or pitch change is needed")
+    p(line)
 
 
 def main(argv=None):

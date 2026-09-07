@@ -1264,7 +1264,9 @@ offset cut VGND's met5 into 85 pieces (spans 32.8/108.6/152.8 µm against
 VPWR's 21 intact at 1636.7) and stranded some.  So its clip verdict is as
 unreliable as the connectivity verdict §7.2 records, and `harm.sh`'s
 "the PDN plan fails pdn_phase.py" warning is — on this evidence — a false
-alarm on a plan that works.
+alarm on a plan that works.  (Since resolved: `pdn_phase.py` now models
+pdngen's cut/via/TRIM and reports a meeting as a TRIM, not a clip — §11
+item 10.)
 
 **The verdict is OpenROAD's own PSM check, not `pdn_connect.py`.**  That
 script rolls up macro power TERMINALS, and the failure above is a strap
@@ -1653,15 +1655,30 @@ have: every netlist here is either authored or uniquified.
    look at `HierarchicalBundler`'s replica merge before reading the
    BUDA-1714 counts as the cost of hierarchy.
 
-10. **`pdn_phase.py`'s verdicts cannot be acted on** (§8 step 7e): its
-   connectivity model is wrong (§7.2) and its clip count is what pdngen
-   resolves by cutting straps — following it turned a working H+B design
-   into a `PSM-0069` failure.  Until it is fixed, `harm.sh`'s "the PDN plan
-   fails pdn_phase.py" warning should not be trusted — the verdict is
-   OpenROAD's own `PSM-0040`/`PSM-0069`, with `pdn_connect.py` on the
-   written DEF to LOCALISE a failure (its terminal rollup cannot see an
-   isolated strap fragment; its `net_components()` pass, added by #894,
-   can).  Filed as #895.
+10. ~~**`pdn_phase.py`'s verdicts cannot be acted on**~~ REWRITTEN (#895):
+   the old model counted every same-layer meeting as a defect (the "144
+   clips" FAIL on the plan that works, §8 step 7e) and called a via-less
+   strap fragment stranded; following it turned a working H+B design into
+   a `PSM-0069` failure.  It now predicts pdngen's own steps, read from
+   OpenROAD's `src/pdn` — cut (`Shape::cut`, spacing across and halo along
+   the layer's wire axis), via (`Grid::getIntersections`, the macro's own
+   pins injected by `getInstancePins`), TRIM (`PdnGen::trimShapes`: a
+   fragment with fewer vias than `Shape::isRemovable` requires is removed —
+   2, or 1 on a pin layer, and `PDN_ENABLE_PINS` makes both connect layers
+   pin layers; `PDN_SKIPTRIM` skips it and harm.py sets that for BLOCKS
+   only) — and partitions what survives with `pdn_connect.py`'s OWN
+   `net_components`, so prediction and post-mortem share one definition of
+   "connected".  It reports TRIMs as information, STRANDED terminals (no
+   rectangle of the pin on its net's grid — a LEF PIN is one terminal,
+   which is why the phase-0 toy passes PSM with two VGND rectangles off the
+   grid) and FLOATING fragments (survive trim off the grid: the "N
+   unconnected shapes" PSM counts), and offers only a VERIFIED shift.  On
+   the phase-0 toy: x=10 PASS and x=20 FAIL (u0's VPWR stranded), both as
+   measured.  Still ADVISORY — a prediction from the LEFs and the config —
+   and the verdict stays OpenROAD's `PSM-0040`/`PSM-0069`.  What is NOT yet
+   done is the real-artifact validation: the H+B N=8 set both ways (the
+   generated plan must PASS, the hand HOFFSET must FAIL on VGND's met5),
+   which needs the hardened LEFs and the top config from the MacBook run.
 11. **The 5 % pass threshold of measurement A** (§8 step 5) is a number
    read off two runs of one toy.  It should be re-read on the first real
    vehicle (tier 1a, N=4): if the gcell-edge and pin-access share does not

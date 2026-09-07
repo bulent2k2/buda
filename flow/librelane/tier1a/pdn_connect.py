@@ -472,7 +472,7 @@ def _touch(a, b):
             and min(a[3], b[3]) >= max(a[1], b[1]) - EPS)
 
 
-def net_components(snets, terminals_by_net=None, layers=None):
+def net_components(snets, terminals_by_net=None, layers=None, with_members=False):
     """Partition each power net's DEF metal into ELECTRICAL components.
 
     A macro power TERMINAL can have its via and still be dead, because the
@@ -556,6 +556,10 @@ def net_components(snets, terminals_by_net=None, layers=None):
             xs = [rects[i][1] for i in members] + [rects[i][3] for i in members]
             ys = [rects[i][2] for i in members] + [rects[i][4] for i in members]
             rows.append({"root": k, "shapes": len(members), "area": round(area, 3),
+                         # the rect indices (input order) only on request: a
+                         # caller predicting the grid needs them to say WHICH
+                         # fragment is off it; the JSON report does not
+                         **({"members": sorted(members)} if with_members else {}),
                          "layers": dict(sorted(per_layer.items())),
                          "bbox": [round(min(xs), 3), round(min(ys), 3),
                                   round(max(xs), 3), round(max(ys), 3)],
