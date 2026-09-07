@@ -1,8 +1,7 @@
 # From PR #145: https://github.com/bulent2k2/buda/pull/145
 
-git fetch origin claude/bdb-test-data-management-v4m069
-git checkout claude/bdb-test-data-management-v4m069
-  # or main, once #145 merges
+# (#145 merged; this runs on main -- it used to say to check out the
+#  branch, which stopped working when that branch was deleted)
 source bin/activate
 bb
 python3 tools/gds_demo.py
