@@ -96,6 +96,17 @@ jobs:
           pip install pybind11 pytest pytest-bdd pytest-xdist matplotlib
           pip install -r src/web/requirements.txt
 
+      - name: Every Python file parses on this interpreter
+        # Runs BEFORE the build, so a file that does not parse fails here in
+        # seconds instead of six minutes later, as the tests that import it --
+        # which is how it read on PR #897: 8 failures and an error, all one
+        # SyntaxError in harm.py.  The shape is version-specific and that is
+        # the point: CI pins 3.11, and a dev box on 3.12+ accepts f-string
+        # forms 3.11 rejects (PEP 701: a same-type quote nested in a field, a
+        # backslash in one), so a green local run says nothing about it and
+        # only an interpreter of CI's own version can.  debug/ is scratch.
+        run: git ls-files -z '*.py' ':!debug' | xargs -0 python -m py_compile
+
       - name: Build
         run: bin/bb
 

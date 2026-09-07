@@ -20,15 +20,22 @@ rows = db.execute("""
     ORDER BY p.name
 """).fetchall()
 
+def _bit(name):
+    """The bracketed index in an SRAM instance name.  Kept out of the
+    f-strings below: a backslash inside an f-string field is PEP 701,
+    Python 3.12+, and this file did not parse on the 3.11 CI runs on."""
+    return re.search(r"\[(\d+)\]", name).group(1)
+
+
 def short_name(name):
     if 'i_icache' in name and 'data_sram' in name:
-        return f"ic_data_{re.search(r'\[(\d+)\]', name).group(1)}"
+        return f"ic_data_{_bit(name)}"
     if 'i_icache' in name and 'tag_sram' in name:
-        return f"ic_tag_{re.search(r'\[(\d+)\]', name).group(1)}"
+        return f"ic_tag_{_bit(name)}"
     if 'i_nbdcache' in name and 'data_sram' in name:
-        return f"dc_data_{re.search(r'\[(\d+)\]', name).group(1)}"
+        return f"dc_data_{_bit(name)}"
     if 'i_nbdcache' in name and 'tag_sram' in name:
-        return f"dc_tag_{re.search(r'\[(\d+)\]', name).group(1)}"
+        return f"dc_tag_{_bit(name)}"
     if 'valid_dirty' in name:
         return 'dc_vld'
 

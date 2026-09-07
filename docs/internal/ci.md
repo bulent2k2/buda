@@ -53,6 +53,15 @@ list, verified by building this repo from nothing in a bare container:
   while the gate still reports success.  Measured: **2077 passed / 25 skipped**
   without it, **2105 passed / 3 skipped** with it — 28 tests.
 
+**Every Python file parses on this interpreter** runs before the build: a
+`SyntaxError` in one `.py` used to surface only as the tests that import it
+failing, a build and six minutes later, reading as a test problem (PR #897: 8
+failures + 1 error, all one nested-quote f-string in `harm.py`).  It is
+version-specific by design — CI pins **3.11**, and a dev box on 3.12+ accepts
+f-string forms 3.11 rejects (PEP 701: a same-type quote nested in a field, a
+backslash in one), so a green local run says nothing about it and only an
+interpreter of CI's version can.  `debug/` is scratch and is excluded.
+
 That last one is why the workflow has a `No module skipped for a missing
 import` step.  pytest skips a whole module when its import fails, so a missing
 dependency *removes* tests silently rather than failing; an import-skip is a CI
