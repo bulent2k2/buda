@@ -876,11 +876,16 @@ def test_drc_locate_maps_markers_to_cells_and_says_whose_metal(tmp_path):
     cell.  `drc_locate.py` reads the lyrdb and the top DEF, inverts each
     instance's placement (orientation included) to give the CELL-LOCAL spot,
     groups equal spots, and -- with the LEF -- says per offending edge
-    whether it sits on metal the macro's abstract claims, inside the macro
-    on an obstructed layer with no shape under it (the GDS metal the LEF does
-    not cover: the router cannot have routed there), over the macro on an
-    unobstructed layer (the top's routing), or outside it.  That ordering
-    is what decides which of the issue's three experiments to run first."""
+    whether it sits on metal the macro's abstract claims, in a HOLE of the
+    abstract (inside the box on no claimed shape: the router reads the spot
+    as free, so the edge is the top's wire or macro metal the LEF omits --
+    the nearest claimed shape is named, which is how a notch beside a pin
+    reads), or outside it.  The N=8 ground truth: both edges of every
+    marker inside the box, one on the macro's real met2 in a notch the LEF
+    leaves beside pin `in[22]`, the other the TOP's wire overhanging into
+    that notch -- so "obstructed layer, therefore no router wire" was a
+    wrong inference, and a claimed-against-hole pair is reported as the
+    notch shape whose fix is in the abstract."""
     _acc_lef(tmp_path / "acc_cell.lef")
     (tmp_path / "top.def").write_text("\n".join([
         "VERSION 5.8 ;", "DESIGN top ;", "UNITS DISTANCE MICRONS 1000 ;",
@@ -912,21 +917,27 @@ def test_drc_locate_maps_markers_to_cells_and_says_whose_metal(tmp_path):
     out = json.loads((tmp_path / "loc.json").read_text())
     m = out["markers"]
     assert m[0]["instance"] == "pipe_1_3" and m[0]["local"] == [69.37, 0.14, 69.492, 0.27]
-    assert [ev["verdict"] for ev in m[0]["edge_verdicts"]] == ["macro-lef", "macro-unclaimed"]
-    assert m[0]["edge_verdicts"][0]["on"] == ["OBS"]
+    assert [ev["verdict"] for ev in m[0]["edge_verdicts"]] == ["macro-lef", "hole"]
+    assert m[0]["edge_verdicts"][0]["on"] == ["OBS"] and m[0]["shape"] == "notch"
+    assert m[0]["edge_verdicts"][1]["nearest_claimed"] == ["OBS", 0.06]     # the notch's width
     assert m[2]["instance"] == "acc_5" and m[2]["orient"] == "FS" and m[2]["local"] == [69.37, 0.14, 69.492, 0.27]
-    assert [ev["verdict"] for ev in m[2]["edge_verdicts"]] == ["macro-lef", "macro-unclaimed"]
-    assert m[3]["layer"] == "met1" and m[3]["edge_verdicts"][0]["verdict"] == "over-macro"
+    assert [ev["verdict"] for ev in m[2]["edge_verdicts"]] == ["macro-lef", "hole"]
+    assert m[3]["layer"] == "met1" and m[3]["edge_verdicts"][0]["verdict"] == "hole"
+    assert m[3]["edge_verdicts"][0]["nearest_claimed"] is None and m[3]["shape"] == "hole"
     assert m[4]["instance"] is None and m[4]["nearest"]["instance"] == "pipe_1_3"
     assert m[5]["instance"] == "pipe_1_3" and m[5]["local"] == [69.37, -0.4, 69.492, 0.27]
     assert [ev["verdict"] for ev in m[5]["edge_verdicts"]] == ["macro-lef", "outside"]
+    assert m[5]["shape"] == "boundary"
     assert out["groups"][0] == {"cell": "acc_cell", "layer": "met2", "local": [69.4, 0.1],
                                 "instances": ["pipe_1_3", "pipe_1_4", "acc_5"]}
     assert "drc_locate: 6 marker(s), 2 categories (m1.1, m2.2), 5 inside a placed macro (1 cell type(s): acc_cell), 1 elsewhere" in r.stdout
     assert "edge B: (763.370,2159.600)-(763.440,2159.600) outside the macro box -- the top's routing against its edge" in r.stdout
     assert "m2.2 (763.370,2160.140)-(763.492,2160.270) -> pipe_1_3 [acc_cell N] local (69.370,0.140)-(69.492,0.270)" in r.stdout
     assert "edge A: (763.492,2160.270)-(763.370,2160.270) on metal the macro's LEF claims (OBS)" in r.stdout
-    assert "edge B: (763.370,2160.140)-(763.440,2160.140) inside the macro on an OBSTRUCTED layer but on NO LEF shape" in r.stdout
+    assert ("edge B: (763.370,2160.140)-(763.440,2160.140) inside the macro box on NO LEF shape"
+            in r.stdout)
+    assert "nearest claimed shape OBS at 0.060 um" in r.stdout
+    assert "=> claimed metal against an abstract HOLE" in r.stdout and "openroad.lef" in r.stdout
     assert "GROUP acc_cell met2 local ~(69.4,0.1): 3 marker(s) in pipe_1_3, pipe_1_4, acc_5 -- one defect, repeated per instance" in r.stdout
     assert "-> no macro holds it; nearest pipe_1_3 [acc_cell] 10.500 um away" in r.stdout
     # without a LEF the location half still runs; the size then comes from nowhere, so nothing is located

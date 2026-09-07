@@ -15,15 +15,17 @@ marker:
     straddles a boundary), its cell, and the CELL-LOCAL coordinates (the
     DEF orientation inverted), so repeats collapse;
   * per offending edge, whether it lies on metal the macro's LEF CLAIMS on
-    that layer (a pin or OBS rectangle), and whether it lies inside the
-    macro's box at all.  That is the discrimination #896's "where to start"
-    needs before any hour-long re-run: an edge inside the macro box that the
-    LEF claims is the macro's own metal; one inside the box on NO claimed
-    shape is metal the abstract does not show -- either the macro's GDS
-    metal the LEF does not cover (the abstract-vs-GDS gap; the router could
-    not have put a wire on an obstructed layer there) or, on a layer the
-    macro does not obstruct, the top's routing over the macro; one OUTSIDE
-    the box is the top's routing against the macro edge;
+    that layer (a pin or OBS rectangle), in a HOLE of the abstract (inside
+    the macro's box on no claimed shape -- a spot the router reads as free,
+    so the edge may be the top's wire routed into it, or the macro's own
+    metal the abstract omits; the GDS decides which, and the nearest
+    claimed shape is named so a notch beside a pin reads as one), or
+    OUTSIDE the box (the top's routing against the macro edge).  A claimed
+    edge against a hole edge is the abstraction-notch shape #896 turned out
+    to be: the router overhangs a wire into a corner Magic's LEF left
+    uncovered, against the macro's real metal there.  Whether a layer is
+    obstructed elsewhere says nothing about THIS spot, which is the
+    inference the first cut drew and the N=8 artefacts refuted;
   * the GROUPS: markers with the same cell, layer and local spot (0.1 um),
     which is what "one defect, not five" means.
 
@@ -203,23 +205,32 @@ def locate(items, comps, lefs):
         for (layer, *r) in m.get("obs", []):
             if layer == it["layer"]:
                 claimed.append(("OBS", pp.orient_rect(tuple(r), holder["orient"], *m["size"])))
-        obstructed_layer = any(layer == it["layer"] for (layer, *_r) in m.get("obs", []))
         box = (holder["x"], holder["y"], holder["x"] + holder["w"], holder["y"] + holder["h"])
         for (ex1, ey1, ex2, ey2) in it["edges"]:
             mx, my = (ex1 + ex2) / 2, (ey1 + ey2) / 2
-            on = [what for what, r in claimed
-                  if _inside(mx - holder["x"], my - holder["y"], r)]
+            lx, ly = mx - holder["x"], my - holder["y"]
+            on = [what for what, r in claimed if _inside(lx, ly, r)]
             inside = _inside(mx, my, box)
+            nearest = None
+            if not on and claimed:
+                for what, r in claimed:
+                    d = max(r[0] - lx, 0.0, lx - r[2], r[1] - ly, ly - r[3])
+                    if nearest is None or d < nearest[1]:
+                        nearest = (what, round(d, 3))
             if on:
                 verdict = "macro-lef"
-            elif inside and obstructed_layer:
-                verdict = "macro-unclaimed"
             elif inside:
-                verdict = "over-macro"
+                verdict = "hole"
             else:
                 verdict = "outside"
             row["edge_verdicts"].append({"edge": (ex1, ey1, ex2, ey2), "inside_box": inside,
-                                         "on": on, "verdict": verdict})
+                                         "on": on, "verdict": verdict,
+                                         "nearest_claimed": nearest})
+        kinds = {ev["verdict"] for ev in row["edge_verdicts"]}
+        row["shape"] = ("notch" if kinds == {"macro-lef", "hole"} else
+                        "hole" if kinds == {"hole"} else
+                        "macro" if kinds == {"macro-lef"} else
+                        "boundary" if "outside" in kinds else "mixed")
         out.append(row)
     return out
 
@@ -239,10 +250,17 @@ def groups(rows):
 
 VERDICT_TEXT = {
     "macro-lef": "on metal the macro's LEF claims",
-    "macro-unclaimed": "inside the macro on an OBSTRUCTED layer but on NO LEF shape -- the macro's GDS "
-                       "metal the abstract does not cover (the router cannot have put a wire there)",
-    "over-macro": "inside the macro box on a layer its LEF does not obstruct -- the top's routing over it",
+    "hole": "inside the macro box on NO LEF shape -- a spot the abstract leaves free, so the router may "
+            "have put the top's wire here, or it is macro metal the abstract omits; the GDS decides",
     "outside": "outside the macro box -- the top's routing against its edge",
+}
+SHAPE_TEXT = {
+    "notch": "claimed metal against an abstract HOLE: the router overhung a wire into a corner the LEF "
+             "leaves uncovered, against the macro's real metal there (the #896 shape) -- the fix is in "
+             "the abstract (cover the metal, or read the bloated `<cell>.openroad.lef`), not the placement",
+    "hole": "both edges in an abstract hole: the GDS says whose metal each is",
+    "macro": "both edges on LEF-claimed metal: the macro's own DRC question (check its block run)",
+    "boundary": "one edge outside the box: the top's routing against the macro edge",
 }
 
 
@@ -268,9 +286,14 @@ def report(rows, grp, lefs, out=sys.stdout):
           f"({l[2]:.3f},{l[3]:.3f})")
         for n, ev in enumerate(r["edge_verdicts"]):
             e = ev["edge"]
+            near = ev.get("nearest_claimed")
             p(f"    edge {'AB'[n] if len(r['edge_verdicts']) == 2 else n}: ({e[0]:.3f},{e[1]:.3f})-"
               f"({e[2]:.3f},{e[3]:.3f}) {VERDICT_TEXT[ev['verdict']]}"
-              + (f" ({', '.join(ev['on'])})" if ev["on"] else ""))
+              + (f" ({', '.join(ev['on'])})" if ev["on"] else "")
+              + (f"; nearest claimed shape {near[0]} at {near[1]:.3f} um" if near and ev["verdict"] == "hole"
+                 else ""))
+        if r.get("shape") in SHAPE_TEXT:
+            p(f"    => {SHAPE_TEXT[r['shape']]}")
     for g in grp:
         p(f"GROUP {g['cell']} {g['layer']} local ~({g['local'][0]:.1f},{g['local'][1]:.1f}): "
           f"{len(g['instances'])} marker(s) in {', '.join(g['instances'])}"

@@ -1643,9 +1643,18 @@ have: every netlist here is either authored or uniquified.
    antenna 0), and the hold half is the same clock question as item 6.
    The DRC half is #896 (all five at `acc_cell` local (69.4, 0.0), next to
    its own met4 VGND pin); `drc_locate.py` on the run's `.lyrdb` + top DEF
-   + `acc_cell.lef` says per edge whether the offending metal is the
-   macro's own (LEF-claimed), GDS metal the abstract does not cover, or the
-   top's routing — which of the issue's three experiments to run first.
+   + `acc_cell.lef` says per edge whether the offending metal is on a
+   shape the LEF claims, in a hole of the abstract, or outside the box.
+   Run on the artefacts (PR #900) it is an abstraction NOTCH, not any of
+   the issue's three experiments: Magic's LEF leaves the corner where pin
+   `in[22]`'s rect ends and the met2 OBS begins uncovered (x 69.37–69.65,
+   y 0–0.56), the macro's real met2 sits in it, the router reads the notch
+   as free and overhangs the top's wire into it — 0.130 µm against m2.2's
+   0.140; the same notch beside `wbuf_cell`'s `rst` gives the N=2 H+B run
+   its one marker (0.040 µm).  The block's own DRC is 0 because the partner
+   shape is the top's wire.  Candidates: have the top read the
+   `-bloat_occupied_layers` abstract (`<cell>.openroad.lef`), or grow the
+   met2 OBS to cover the macro's real metal.
 9. **Two bundles for one cell-local link** (found on the way to §8 step
    7f, not chased): at N = 2 the row's activation chain comes out as TWO
    hbundles — `hb-11 D1 cell:row_cell "DRV:row_0/pe_0|REC:row_0/pe_1"
