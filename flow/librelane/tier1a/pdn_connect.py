@@ -63,9 +63,25 @@ Four verdicts per pin rectangle:
                    pair) and the run's other verdicts cannot be trusted.  It
                    is reported first and fails the check on its own.
 
-Exit 0 when every power pin of every macro is connected, 1 when any floats
-(`--allow-floating N` raises the bar to N), 2 on input the reader will not
-guess at.
+Then a question a per-pin audit structurally cannot ask: **is each net one
+piece of metal?**  A terminal can have its via and still be dead, because the
+metal it vias onto is a fragment cut off from the grid -- what `PSM-0069`
+reports, and what defeated this script's first version: on the study's own
+N=8 run the FAILING DEF and the passing one both audited "208 terminals
+connected, 0 floating" (#893).  `net_components()` partitions each net's own
+shapes (same-layer rectangles that touch are one piece; a via joins every
+shape of that net covering its point), calls the largest by area the grid,
+and reports the rest as fragments -- naming, for each, the terminals it
+strands.  A fragment carrying terminals fails the run; one carrying none is
+floating stub metal, reported and not fatal.
+
+`PSM-0040`/`PSM-0069` and the `*-grid-errors.rpt` remain the verdict.  This
+localises a failure to pins or away from them, which is the part that costs a
+person an afternoon.
+
+Exit 0 when every power terminal is connected and no fragment strands one; 1
+when any floats (`--allow-floating N`) or is stranded (`--allow-stranded N`);
+2 on input the reader will not guess at.
 """
 import argparse
 import json
@@ -385,6 +401,214 @@ def audit_instance(inst, pins, snets, layers, via_min, straps=None, vias=None):
     return out
 
 
+# ── is the NETWORK whole? (the question a terminal rollup cannot ask) ─────
+class _UF:
+    def __init__(self, n):
+        self.p = list(range(n))
+
+    def find(self, a):
+        p = self.p
+        while p[a] != a:
+            p[a] = p[p[a]]
+            a = p[a]
+        return a
+
+    def union(self, a, b):
+        ra, rb = self.find(a), self.find(b)
+        if ra != rb:
+            self.p[rb] = ra
+
+
+class _BinIndex:
+    """Bins rectangles along their NARROW axis so a point or box query touches
+    a handful of candidates instead of all of them.
+
+    A PDN is thousands of long thin stripes, so the obvious index shapes fail
+    in opposite ways: a uniform 2-D grid puts one die-crossing strap in
+    thousands of cells, and a scan is quadratic.  Binning on the axis the
+    rectangles are THIN along gives each one a bin or two.  Measured on a
+    6120-rect / 103k-via synthetic PDN: 25.9 s scanning, 0.4 s indexed.
+    """
+
+    def __init__(self, rects, keyfn=lambda r: r, nbins=4096):
+        self.rects = rects
+        self.axis = 0
+        if rects:
+            wx = sorted(keyfn(r)[2] - keyfn(r)[0] for r in rects)
+            wy = sorted(keyfn(r)[3] - keyfn(r)[1] for r in rects)
+            self.axis = 0 if wx[len(wx) // 2] <= wy[len(wy) // 2] else 1
+        a = self.axis
+        lo = min((keyfn(r)[a] for r in rects), default=0.0)
+        hi = max((keyfn(r)[a + 2] for r in rects), default=0.0)
+        self.lo = lo
+        self.n = max(1, min(nbins, len(rects) or 1))
+        self.w = max((hi - lo) / self.n, 1e-9)
+        self.bins = [[] for _ in range(self.n + 1)]
+        for i, r in enumerate(rects):
+            k = keyfn(r)
+            for b in range(self._bin(k[a]), self._bin(k[a + 2]) + 1):
+                self.bins[b].append(i)
+
+    def _bin(self, v):
+        return max(0, min(self.n, int((v - self.lo) / self.w)))
+
+    def near(self, lo, hi):
+        """Indices whose bin range meets [lo, hi] on the index axis."""
+        seen = set()
+        for b in range(self._bin(lo), self._bin(hi) + 1):
+            seen.update(self.bins[b])
+        return seen
+
+    def at(self, x, y):
+        return self.near(x if self.axis == 0 else y, x if self.axis == 0 else y)
+
+
+def _touch(a, b):
+    """Two rectangles are electrically one piece of metal when they overlap OR
+    ABUT.  Touching must count: pdngen writes a strap as path segments that
+    meet end to end, so a strict-overlap rule would fragment every strap at
+    every bend and report a whole grid as rubble."""
+    return (min(a[2], b[2]) >= max(a[0], b[0]) - EPS
+            and min(a[3], b[3]) >= max(a[1], b[1]) - EPS)
+
+
+def net_components(snets, terminals_by_net=None, layers=None):
+    """Partition each power net's DEF metal into ELECTRICAL components.
+
+    A macro power TERMINAL can have its via and still be dead, because the
+    metal it vias onto is a fragment isolated from the rest of the grid.
+    That is what `PSM-0069` reports and what the per-pin audit above
+    structurally cannot see -- measured on this study's own N=8 run, where
+    the failing DEF and the passing one both audited "208 terminals
+    connected, 0 floating" (#893).
+
+    Union-find over the net's own shapes: same-layer rectangles that touch
+    are one piece, and a via placement joins every rectangle of that net
+    containing its point, on any layer.  The via rule is deliberately
+    generous -- the DEF names only the layer the via was WRITTEN on, so
+    asking which two layers it joins is guesswork, while "everything of this
+    net at this point is now one node" is what a via stack does.  Being
+    generous means this pass can only UNDER-report fragmentation, never
+    invent it, which is the right direction for something that fails a run.
+
+    `layers` is the audited `add_pdn_connect` pair and filters TERMINAL
+    ATTACHMENT only, never the union-find: a met3/met4 via legitimately joins
+    that net's met3 and met4 metal, so it belongs in the network, but it does
+    nothing for a met5 pin whose footprint it happens to sit inside -- and
+    crediting it would attach a healthy terminal to a met3 stub and report
+    the stub as stranding it.  `audit_instance()` already makes exactly this
+    distinction for the per-pin verdict.
+
+    Deliberately NOT joined: two fragments both landing on one macro's pin.
+    A hard macro's internal PDN really does connect them, but PSM cannot
+    traverse an abstract LEF and does not credit it -- and agreeing with the
+    verdict matters more here than being physically complete.  Where it
+    happens it is reported (`bridged_by`) rather than silently applied.
+    """
+    out = {}
+    for net, d in snets.items():
+        rects = list(d["rects"])
+        if not rects:
+            continue
+        uf = _UF(len(rects))
+        # same-layer touch, by an x-sweep: a PDN's stripes are long on one
+        # axis and narrow on the other, so the active list stays short.  The
+        # worst case is still quadratic; a report that took too long would be
+        # a better problem than the silence it replaces.
+        bylayer = {}
+        for i, r in enumerate(rects):
+            bylayer.setdefault(r[0], []).append(i)
+        for idxs in bylayer.values():
+            idxs.sort(key=lambda i: rects[i][1])
+            active = []
+            for i in idxs:
+                x1 = rects[i][1]
+                active = [j for j in active if rects[j][3] >= x1 - EPS]
+                bi = rects[i][1:]
+                for j in active:
+                    if _touch(bi, rects[j][1:]):
+                        uf.union(i, j)
+                active.append(i)
+        idx = _BinIndex(rects, keyfn=lambda r: r[1:])
+
+        def covering(vx, vy):
+            return [i for i in idx.at(vx, vy)
+                    if rects[i][1] - EPS <= vx <= rects[i][3] + EPS
+                    and rects[i][2] - EPS <= vy <= rects[i][4] + EPS]
+
+        # a via joins every shape of this net covering its point
+        for (_vl, vx, vy, _vn) in d["vias"]:
+            hit = covering(vx, vy)
+            for j in hit[1:]:
+                uf.union(hit[0], j)
+
+        comps = {}
+        for i, r in enumerate(rects):
+            comps.setdefault(uf.find(i), []).append(i)
+        rows = []
+        for k, members in comps.items():
+            area = sum((rects[i][3] - rects[i][1]) * (rects[i][4] - rects[i][2]) for i in members)
+            # NOT `layers`: that is the parameter, and shadowing it here made
+            # the pair filter below test this dict's keys instead
+            per_layer = {}
+            for i in members:
+                per_layer[rects[i][0]] = per_layer.get(rects[i][0], 0) + 1
+            xs = [rects[i][1] for i in members] + [rects[i][3] for i in members]
+            ys = [rects[i][2] for i in members] + [rects[i][4] for i in members]
+            rows.append({"root": k, "shapes": len(members), "area": round(area, 3),
+                         "layers": dict(sorted(per_layer.items())),
+                         "bbox": [round(min(xs), 3), round(min(ys), 3),
+                                  round(max(xs), 3), round(max(ys), 3)],
+                         "span": round(max(max(xs) - min(xs), max(ys) - min(ys)), 3),
+                         "terminals": []})
+        rows.sort(key=lambda c: (-c["area"], -c["shapes"]))
+        index = {c["root"]: n for n, c in enumerate(rows)}
+
+        # which macro terminals sit on which component -- the fragments that
+        # carry none are floating stubs, the ones that carry some strand pins
+        vidx = _BinIndex(d["vias"], keyfn=lambda v: (v[1], v[2], v[1], v[2]))
+        bridged = []
+        for t in (terminals_by_net or {}).get(net, ()):
+            on = set()
+            for (tl, x1, y1, x2, y2) in t["rects"]:
+                # (a) the pin's own metal touching a strap on the SAME layer.
+                # The layer test is not a detail: without it a met5 pin
+                # "touches" every met4 strap whose footprint it crosses, and
+                # crossing metal on two layers is not connected -- that is
+                # what the via is for.
+                for i in idx.near(x1 if idx.axis == 0 else y1,
+                                  x2 if idx.axis == 0 else y2):
+                    if rects[i][0] == tl and _touch((x1, y1, x2, y2), rects[i][1:]):
+                        on.add(index[uf.find(i)])
+                # (b) a via inside the pin, landing in a shape of the net --
+                # the normal case, and the only one for a pin whose partner
+                # is on the other layer
+                for vi in vidx.near(x1 if vidx.axis == 0 else y1,
+                                    x2 if vidx.axis == 0 else y2):
+                    (vl, vx, vy, _vn) = d["vias"][vi]
+                    if layers is not None and vl not in layers:
+                        continue                 # another pair's via; see above
+                    if not (x1 - EPS <= vx <= x2 + EPS and y1 - EPS <= vy <= y2 + EPS):
+                        continue
+                    for i in covering(vx, vy):
+                        on.add(index[uf.find(i)])
+            for c in sorted(on):
+                rows[c]["terminals"].append(t["name"])
+            if len(on) > 1:
+                bridged.append({"terminal": t["name"], "components": sorted(on)})
+
+        for n, c in enumerate(rows):
+            c["id"] = n
+            c.pop("root")
+        # UNIQUE terminals: a terminal on two fragments is one stranded
+        # terminal, and `--allow-stranded` is a terminal threshold, so summing
+        # the per-fragment lists would reject a design with exactly one.
+        stranded = len({t for c in rows[1:] for t in c["terminals"]})
+        out[net] = {"components": rows, "fragments": max(0, len(rows) - 1),
+                    "stranded_terminals": stranded, "bridged_by": bridged}
+    return out
+
+
 def terminal_rollup(findings):
     """One verdict per (instance, net, pin) TERMINAL, from the per-rectangle
     findings.
@@ -476,6 +700,17 @@ def run_audit(def_text, lefs, layers, via_min=VIA_MIN):
         counts[f["verdict"]] = counts.get(f["verdict"], 0) + 1
 
     terminals = terminal_rollup(findings)
+    # the network question, from the same shapes the per-pin audit just used
+    tbn = {}
+    for t in terminals:
+        tbn.setdefault(t["net"], []).append(
+            {"name": f"{t['instance']}.{t['pin']}",
+             "rects": [tuple([f["layer"]] + f["rect"]) for f in findings
+                       if f["instance"] == t["instance"] and f["net"] == t["net"]
+                       and f["pin"] == t["pin"]]})
+    nets_conn = net_components(snets, tbn, layers)
+    fragments = sum(v["fragments"] for v in nets_conn.values())
+    stranded = sum(v["stranded_terminals"] for v in nets_conn.values())
     tcounts = {}
     for t in terminals:
         tcounts[t["verdict"]] = tcounts.get(t["verdict"], 0) + 1
@@ -489,6 +724,8 @@ def run_audit(def_text, lefs, layers, via_min=VIA_MIN):
     return {"dbu": dbu, "layers": list(layers), "via_min": via_min,
             "macros": macros, "pins": len(findings), "counts": counts,
             "terminals": terminals, "terminal_counts": tcounts,
+            "connectivity": nets_conn, "fragments": fragments,
+            "stranded_terminals": stranded,
             "terminal_rows": terminal_rows, "n_terminals": len(terminals),
             "floating": floating, "rows": rows, "findings": findings,
             "nets": sorted(snets), "unplaced": unplaced,
@@ -609,6 +846,33 @@ def report(res, out=sys.stdout, limit=12):
     left = len(bad_findings) - shown
     if left > 0:
         w(f"    ... and {left} more (--json for all)\n")
+    # the network question.  A terminal with its via can still be dead when
+    # the metal it vias onto is cut off from the grid -- what PSM-0069
+    # reports, and what the tables above structurally cannot show.
+    w("\n  network (is each net one piece of metal?)\n")
+    for net in sorted(res["connectivity"]):
+        c = res["connectivity"][net]
+        comps = c["components"]
+        main = comps[0]
+        w(f"  {net:<6} {len(comps)} component(s); main {main['shapes']} shape(s) "
+          f"{main['layers']} span {main['span']}\n")
+        for frag in comps[1:1 + limit]:
+            who = (f", STRANDING {len(frag['terminals'])} terminal(s): "
+                   + ", ".join(frag["terminals"][:4])
+                   + (" …" if len(frag["terminals"]) > 4 else "")
+                   if frag["terminals"] else ", no terminal on it")
+            w(f"    fragment {frag['id']}: {frag['shapes']} shape(s) {frag['layers']} "
+              f"span {frag['span']} at {frag['bbox']}{who}\n")
+        if len(comps) - 1 > limit:
+            w(f"    ... and {len(comps) - 1 - limit} more fragment(s) (--json for all)\n")
+        for b in c["bridged_by"][:3]:
+            w(f"    NOTE {b['terminal']} lands on components {b['components']} — a hard "
+              f"macro's own PDN joins them, PSM does not credit that\n")
+    if res["fragments"]:
+        w(f"\n  {res['fragments']} fragment(s) off the main network, stranding "
+          f"{res['stranded_terminals']} terminal(s).  PSM-0040/PSM-0069 and the\n"
+          f"  *-grid-errors.rpt are the verdict; this localises it.\n")
+
     w(f"\n  {res['terminal_counts'].get('connected', 0)} terminal(s) connected, "
       f"{res['floating']} floating\n")
 
@@ -623,7 +887,9 @@ def main(argv=None):
     ap.add_argument("--via-min", type=float, default=VIA_MIN,
                     help=f"min overlap in both axes to seat a via (um, {VIA_MIN})")
     ap.add_argument("--allow-floating", type=int, default=0, metavar="N",
-                    help="pass with up to N floating power-pin rects (0)")
+                    help="pass with up to N floating power terminals (0)")
+    ap.add_argument("--allow-stranded", type=int, default=0, metavar="N",
+                    help="pass with up to N terminals on a fragment off the main network (0)")
     ap.add_argument("--self-cross", action="store_true",
                     help="LEFs only, no DEF: report per cell whether each power pin crosses its "
                          "own net on the other connect layer (see self_cross())")
@@ -669,6 +935,8 @@ def main(argv=None):
     if a.self_cross:
         return 0                               # a report, not a verdict
     if res["counts"].get("via-no-partner", 0):
+        return 1
+    if res["stranded_terminals"] > a.allow_stranded:
         return 1
     return 0 if res["floating"] <= a.allow_floating else 1
 

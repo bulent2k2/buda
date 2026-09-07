@@ -5,6 +5,17 @@ and §9, phase 1).
 
     pdn_phase.py <top config.json> [<cell.lef> ...] [--json out.json]
 
+ADVISORY, and this is not a caveat but the first thing to know: its verdicts
+cannot be acted on.  The clips it counts are what pdngen resolves by CUTTING
+a strap, which is fatal only when the cut isolates a fragment, and the
+connectivity model below is wrong in a way librelane_hier_flow.md §7.2
+records.  Following a FAIL once -- editing PDN_HOFFSET to make it happy --
+turned a design whose generated plan was fine into a PSM-0069 failure, by
+cutting one net's met5 into 85 pieces (§11 item 8).  What it is GOOD for is
+showing which strap meets which pin and by how much.  The PDN verdict is
+OpenROAD's own PSM check at the end of the top run, and `pdn_connect.py` on
+the DEF pdngen wrote localises a failure to pins or away from them.
+
 A macro is fed by the top's power straps, and pdngen never SHORTS a strap to
 a macro's power pin -- it CUTS the strap.  Two things cut it, and neither is
 visible before IR-drop signoff (`[PSM-0069] Check connectivity failed`,
@@ -660,11 +671,21 @@ def run_check(top, lefs, spacing=None, via_min=VIA_MIN):
     return result
 
 
+ADVISORY = (
+    "  ADVISORY: read this for WHAT IT SHOWS, not for its verdict.  The clips it counts are what\n"
+    "  pdngen resolves by CUTTING a strap, which is fatal only when the cut isolates a fragment,\n"
+    "  and its connectivity model is wrong (librelane_hier_flow.md §7.2, §11 item 8).  Acting on a\n"
+    "  FAIL by hand once turned a working plan into PSM-0069.  The PDN verdict is OpenROAD's own\n"
+    "  PSM check at the end of the top run; pdn_connect.py on the written DEF localises a failure."
+)
+
+
 def report(top, lefs, res, out=sys.stdout):
     g, core = top["g"], top["core"]
     lv, lh = g["PDN_VERTICAL_LAYER"], g["PDN_HORIZONTAL_LAYER"]
     p = lambda *a: print(*a, file=out)
     p(f"pdn_phase: {top['path']}: die {top['die']}, core {[round(v, 3) for v in core]}")
+    p(ADVISORY)
     p(f"  {lv} straps: {res['vstraps']} at x = {core[0]:.3f} + {g['PDN_VOFFSET']} + k*{g['PDN_VPITCH']}"
       f" (VPWR first, VGND +{g['PDN_VWIDTH'] + g['PDN_VSPACING']:.2f}; width {g['PDN_VWIDTH']})")
     p(f"  {lh} straps: {res['hstraps']} at y = {core[1]:.3f} + {g['PDN_HOFFSET']} + k*{g['PDN_HPITCH']}"

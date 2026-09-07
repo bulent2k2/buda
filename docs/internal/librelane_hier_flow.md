@@ -359,6 +359,25 @@ connected inside the macro, so a via on any one feeds it, and pdngen viaing
 one access shape and not another is the normal case rather than a floating
 pin.
 
+It also answers the question a per-pin rollup structurally cannot, and the
+N=8 run is why it has to: there, the FAILING DEF and the passing one both
+audited "208 terminals connected, 0 floating", because the failure was a
+strap fragment isolated from the grid while every terminal kept its via.
+`net_components()` partitions each net's own DEF metal into electrical
+components -- same-layer rectangles that touch are one piece, and a via joins
+every shape of that net covering its point -- calls the largest by area the
+grid, and reports each remaining fragment with the terminals it strands.  A
+fragment carrying terminals fails the run; one carrying none is floating stub
+metal, named and not fatal.  Two rules earn their place: TOUCHING counts,
+because pdngen writes a strap as segments that meet end to end and a
+strict-overlap rule would report a whole grid as rubble; and two fragments
+landing on one macro's pin are NOT joined, because a hard macro's internal
+PDN really does connect them but PSM cannot traverse an abstract LEF and does
+not credit it -- agreeing with the verdict matters more here than being
+physically complete, so that bridge is reported rather than applied.
+`PSM-0040`/`PSM-0069` and the `*-grid-errors.rpt` stay the verdict; this
+localises a failure to pins or away from them.
+
 `pdn_connect.py` is the post-mortem twin of `pdn_phase.py`: it reads the DEF
 pdngen WROTE and reports, per macro power pin, whether a via landed on it and
 — where none did — whether the pin had a same-net crossing to connect to at
@@ -933,7 +952,7 @@ of the batch and the cpu-sum are BOTH recorded (§7.3).
 ```bash
 cd ~/src/buda && flow/librelane/tier1a/harm.sh 4         # prints the PDN plan and the utilization estimate
 cd flow/librelane/tier1a/n4/h
-python3 ../../pdn_phase.py top/config.json predicted_lef/*.lef     # dry run, no tools: must PASS
+python3 ../../pdn_phase.py top/config.json predicted_lef/*.lef     # dry run, no tools: ADVISORY (§11 item 8)
 date +%s > blocks.start
 for c in pe_cell feed_cell wbuf_cell acc_cell; do
   (cd $c && librelane --dockerized --run-tag h config.json > h.log 2>&1) &
