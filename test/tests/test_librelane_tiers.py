@@ -686,7 +686,13 @@ def test_pins_sh_writes_one_template_per_leaf_cell_and_harm_consumes_it(tmp_path
     assert "arm=H+B" in r.stdout
     for c in cells:
         cfg = json.loads((d / "h" / c / "config.json").read_text())
-        assert cfg["FP_TEMPLATE_MATCH_MODE"] == "strict"
+        # `permissive`, not `strict`: BUDA plans against the emitter's
+        # structural view and a block run synthesizes the twin, whose
+        # `clk`/`rst` no bus reaches -- `strict` requires the two pin sets
+        # to be identical and exits 1 on exactly that.  What strict was
+        # protecting is checked afterwards by tools/pin_def_verify.py,
+        # which the generated README's step 1 runs.
+        assert cfg["FP_TEMPLATE_MATCH_MODE"] == "permissive"
         assert cfg["RT_MAX_LAYER"] == "met3"
         t = cfg["FP_DEF_TEMPLATE"]
         assert t.startswith("dir::")
