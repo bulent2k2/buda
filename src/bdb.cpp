@@ -2719,6 +2719,20 @@ VerilogImportStats BDB::import_verilog(const std::string& v_path) {
                 std::transform(dir.begin(), dir.end(), dir.begin(),
                                [](unsigned char c){ return std::toupper(c); });
                 std::string rest = (*it)[2].str();
+                // The NET TYPE and the sign come between the direction and
+                // the range in ordinary Verilog-2001 — `input wire [7:0] a`
+                // — so they are stripped FIRST.  The range regex below is
+                // anchored at the start of the clause (it has to be: only
+                // the leading range is the declared width, a later bracket
+                // belongs to an escaped name), and with `wire` still in the
+                // way it did not match, so every such port was recorded ONE
+                // BIT WIDE with nothing said.  Measured on
+                // flow/librelane/tier1a's tpu_rtl.v: `input wire [7:0] a_in`
+                // gave pe_cell a scalar `a_in`, the 8-bit bus collapsed to
+                // one net, and a pin template built from it had 8 pins where
+                // the design has 80.  Every netlist in the tree until then
+                // wrote the bare `input [7:0] a` form.
+                rest = std::regex_replace(rest, std::regex(R"(\b(wire|reg|logic|signed|unsigned)\b)"), " ");
                 // The clause's range comes once, before the names, and
                 // applies to all of them: `input [3:0] a, b;` declares two
                 // 4-bit ports.  Read it BEFORE the strip below throws every
@@ -2737,7 +2751,6 @@ VerilogImportStats BDB::import_verilog(const std::string& v_path) {
                     }
                 }
                 rest = std::regex_replace(rest, std::regex(R"(\[[^\]]+\])"), " ");
-                rest = std::regex_replace(rest, std::regex(R"(\b(wire|reg|logic|signed|unsigned)\b)"), " ");
                 std::stringstream ss(rest);
                 std::string item;
                 while (std::getline(ss, item, ',')) {
