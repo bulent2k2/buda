@@ -605,3 +605,145 @@ def test_a_terminal_on_two_fragments_is_one_stranded_terminal(tmp_path):
     assert res["connectivity"]["VPWR"]["stranded_terminals"] == 1   # counted once
     r = _cli(tmp_path, deff, LEF, "--allow-floating", "9", "--allow-stranded", "1")
     assert r.returncode == 0, r.stdout
+
+
+VIAS = """VIAS 1 ;
+- via4_5 + VIARULE via4_5_rule + CUTSIZE 800 800 + LAYERS met4 via4 met5 + CUTSPACING 800 800 + ENCLOSURE 310 310 310 310 ;
+END VIAS
+"""
+
+
+def test_a_via_joins_only_the_layers_it_connects(tmp_path):
+    """A via4 placed where a met1 rail also passes must not join the rail:
+    the join reads the via's layers from the DEF's VIAS section.  Without
+    that section the via's layers are unknown, every layer it covers is
+    joined as before, and the count of such vias is reported -- so a DEF
+    that cannot say is not silently read as one that did (#900)."""
+    rail = "  NEW met1 480 + SHAPE FOLLOWPIN ( 0 300000 ) ( 500000 * )\n"
+    deff = DEF.replace("  + USE POWER ;", rail + "  + USE POWER ;")
+    res = _run(deff, tmp_path=tmp_path)                 # no VIAS section: layer-blind, counted
+    c = res["connectivity"]["VPWR"]
+    assert len(c["components"]) == 1 and c["via_layers_unknown"] == 3
+    with_vias = deff.replace("COMPONENTS 3 ;", VIAS + "COMPONENTS 3 ;")
+    assert P.read_vias(with_vias) == {"via4_5": {"met4", "met5"}}
+    res = _run(with_vias, tmp_path=tmp_path)
+    c = res["connectivity"]["VPWR"]
+    assert c["via_layers_unknown"] == 0
+    assert len(c["components"]) == 2 and c["components"][1]["layers"] == {"met1": 1}
+    r = _cli(tmp_path, deff, LEF, "--allow-floating", "9")
+    assert "3 via(s) of a name the DEF's VIAS section does not define" in r.stdout
+
+
+# the terminator on the PLACED line, as OpenROAD writes it -- the fixture
+# form is load-bearing: a reader wanting `;` on a line of its own matched 0
+# of a real DEF's 324 pins and silently switched the sources off (#900)
+PINS = """PINS 1 ;
+- VGND + NET VGND + SPECIAL + DIRECTION INOUT + USE GROUND
+  + PORT
+    + LAYER met5 ( -800 -800 ) ( 800 800 )
+    + PLACED ( 10000 320000 ) N ;
+END PINS
+"""
+
+
+def test_the_main_component_is_the_sourced_one(tmp_path):
+    """PSM checks reachability from the net's SOURCE -- the top's own pins,
+    which LibreLane's PDN_ENABLE_PINS makes of the straps -- not whether the
+    net is one blob.  So with a PINS section the main component is the one
+    a top pin touches, even when an unsourced blob is bigger; without one
+    the largest stands in and the report says so."""
+    blob = "  NEW met4 3000 + SHAPE STRIPE ( 400000 0 ) ( * 700000 )\n"       # bigger than the strap
+    deff = DEF.replace("  + USE GROUND ;", blob + "  + USE GROUND ;")
+    res = _run(deff, tmp_path=tmp_path)
+    c = res["connectivity"]["VGND"]
+    assert not c["has_source"] and c["components"][0]["layers"] == {"met4": 1}     # largest wins
+    assert P.read_bterms(deff.replace("COMPONENTS 3 ;", PINS + "COMPONENTS 3 ;"), DBU) == {
+        "VGND": [("met5", 9.2, 319.2, 10.8, 320.8)]}
+    # ... and the terminator on a line of its own, and two PORTs, read the same
+    own_line = PINS.replace(" N ;", " N\n  ;")
+    assert P.read_bterms(own_line, DBU) == {"VGND": [("met5", 9.2, 319.2, 10.8, 320.8)]}
+    two = PINS.replace("    + PLACED ( 10000 320000 ) N ;",
+                       "    + PLACED ( 10000 320000 ) N\n  + PORT\n    + LAYER met4 ( 0 0 ) ( 1000 1000 )\n"
+                       "    + FIXED ( 20000 20000 ) N ;")
+    assert P.read_bterms(two, DBU) == {"VGND": [("met5", 9.2, 319.2, 10.8, 320.8),
+                                                ("met4", 20.0, 20.0, 21.0, 21.0)]}
+    res = _run(deff.replace("COMPONENTS 3 ;", PINS + "COMPONENTS 3 ;"), tmp_path=tmp_path)
+    c = res["connectivity"]["VGND"]
+    assert c["has_source"] and c["sourced_components"] == 1
+    assert c["components"][0]["sourced"] and c["components"][0]["layers"] == {"met5": 1}
+    assert not c["components"][1]["sourced"] and c["components"][1]["layers"] == {"met4": 1}
+    r = _cli(tmp_path, deff.replace("COMPONENTS 3 ;", PINS + "COMPONENTS 3 ;"), LEF,
+             "--allow-floating", "9")
+    assert "sourced by the top's 1 pin shape(s)" in r.stdout
+    r = _cli(tmp_path, deff, LEF, "--allow-floating", "9")
+    assert "no top pin on this net in the DEF, so the largest stands in as main" in r.stdout
+
+
+def test_explain_prints_the_chain_from_a_terminal_to_a_source(tmp_path):
+    """`--explain` is for the run where this reader and PSM disagree: for
+    each terminal it prints the rects and joins by which the terminal
+    reaches a source, so the first questionable link is on the page rather
+    than inferred.  The VPWR terminal here reaches the top's VPWR pin in
+    one step: the via the met4 strap makes inside the terminal's met5 rect
+    lands on the strap the top pin sits on."""
+    pins = PINS.replace("VGND", "VPWR").replace("USE GROUND", "USE POWER").replace(
+        "LAYER met5", "LAYER met4").replace(
+        "+ PLACED ( 10000 320000 ) N", "+ PLACED ( 200000 600000 ) N")       # on the met4 strap
+    deff = DEF.replace("COMPONENTS 3 ;", pins + "COMPONENTS 3 ;")
+    res = _run(deff, tmp_path=tmp_path, explain="row_0.pe_0")
+    ex = {e["terminal"]: e for e in res["explained"]}
+    assert set(ex) == {"row_0.pe_0.VPWR", "row_0.pe_0.VGND"}
+    chain = ex["row_0.pe_0.VPWR"]["chain"]
+    assert ex["row_0.pe_0.VPWR"]["reaches_source"]
+    assert [c["layer"] for c in chain] == ["met4"] and chain[0]["rect"] == [199.2, -0.8, 200.8, 600.8]
+    assert chain[0]["how"] == "via via4_5 at (200.000, 221.000) inside the pin's met5 rect"
+    assert not ex["row_0.pe_0.VGND"]["reaches_source"]
+    # without the via on the pin's met5 rect the source is reached only
+    # through the met5 strap: two steps, each join named
+    far = deff.replace("  NEW met4 0 ( 200000 221000 ) via4_5\n", "")
+    res2 = _run(far, tmp_path=tmp_path, explain="row_0.pe_0.VPWR")
+    chain2 = res2["explained"][0]["chain"]
+    assert [c["layer"] for c in chain2] == ["met5", "met4"]
+    assert chain2[0]["how"] == "via via4_5 at (111.000, 300.000) inside the pin's met4 rect"
+    assert chain2[1]["how"] == "via via4_5 at (200.000, 300.000)"
+    r = _cli(tmp_path, deff, LEF, "--allow-floating", "9", "--explain", "pe_cell")
+    assert "row_0.pe_0.VPWR (VPWR, pe_cell) reaches a source in 1 step(s):" in r.stdout
+    assert "  0. met4   [199.2, -0.8, 200.8, 600.8]  <- via via4_5 at (200.000, 221.000)" in r.stdout
+    assert "row_0.pe_0.VGND (VGND, pe_cell) reaches NO source" in r.stdout
+    assert "graph" not in json.dumps(res)
+
+
+def test_a_via_onto_the_macros_own_pin_is_not_a_supply(tmp_path):
+    """The N=8 failing plan, in one macro: pdngen vias a pin against the
+    macro's OWN pin on the other layer (`getInstancePins` makes both shapes
+    of the same net), so the per-rect audit sees a via on every VGND rect and
+    the old rollup said connected -- while PSM counted all of them
+    unconnected, because no chain leads from them to the supply.  The
+    terminal verdict is reachability now: `unsourced` when its via joins
+    metal no top pin reaches (here: nothing but the macro's other pin), and
+    the exit fails on it as on a floating one."""
+    lef = LEF.replace("RECT 60 60 128 62 ;", "RECT 20 60 128 62 ;")   # VGND met5 pin crosses its met4 pin
+    deff = DEF.replace("  + USE GROUND ;",
+                       "  NEW met4 0 ( 131000 261000 ) via4_5\n  + USE GROUND ;")   # the pin-to-pin via
+    res = _run(deff, lef, tmp_path=tmp_path)
+    vg = {(f["layer"]): f for f in res["findings"] if f["net"] == "VGND"}
+    assert vg["met5"]["verdict"] == "connected" and vg["met5"]["partner"]["kind"] == "pin"   # its own met4 pin
+    t = next(t for t in res["terminals"] if t["net"] == "VGND")
+    assert t["verdict"] == "unsourced" and t["vias"] == 2 and not t["reaches_source"]   # both rects carry it
+    assert res["terminal_counts"] == {"connected": 1, "unsourced": 1} and res["floating"] == 1
+    # with the top's VGND pin on the met5 strap it is still unsourced: the
+    # strap never reaches the macro's pins
+    deff2 = deff.replace("COMPONENTS 3 ;", PINS + "COMPONENTS 3 ;")
+    res = _run(deff2, lef, tmp_path=tmp_path)
+    t = next(t for t in res["terminals"] if t["net"] == "VGND")
+    assert t["verdict"] == "unsourced" and res["connectivity"]["VGND"]["has_source"]
+    # a strap fragment joining the pin to the sourced strap makes it connected
+    deff3 = deff2.replace("  + USE GROUND ;",
+                          "  NEW met4 1600 + SHAPE STRIPE ( 131000 200000 ) ( * 330000 )\n"
+                          "  NEW met4 0 ( 131000 320000 ) via4_5\n  + USE GROUND ;")
+    res = _run(deff3, lef, tmp_path=tmp_path)
+    t = next(t for t in res["terminals"] if t["net"] == "VGND")
+    assert t["verdict"] == "connected" and t["reaches_source"]
+    r = _cli(tmp_path, deff2, lef)
+    assert r.returncode == 1 and "1 floating (1 of them unsourced: a via, but no chain to a source)" in r.stdout
+    assert "pe_cell          VGND          unsourced" in r.stdout

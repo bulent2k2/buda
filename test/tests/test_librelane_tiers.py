@@ -22,6 +22,7 @@ one -- per-step `runtime.txt` in its `h:m:s:ms` format, `final/metrics.json`
 wrong time parser would have made every runtime number in the write-up
 wrong by a silent factor.
 """
+import io
 import json
 import os
 import subprocess
@@ -401,73 +402,117 @@ def _toy_config(path, x0, x1=160, **extra):
     path.write_text(json.dumps(cfg))
 
 
-def test_pdn_phase_searches_each_axis_against_its_own_clips(tmp_path):
-    """An instance violated on BOTH axes has a remedy: the x-shift clears
-    the vertical-layer clips and the y-shift the horizontal-layer ones, and
-    applying both clears the design.  Judging each candidate against the
-    OTHER axis too rejects every one of them and reports no remedy at all
-    (measured on this case before the fix: global_dx and global_dy both
-    None -- Codex #885), so a shift is judged against the clips its own
-    axis controls and the PAIR is verified before it is offered."""
+def test_pdn_phase_offers_the_smallest_verified_shift_and_searches_pairs(tmp_path, monkeypatch):
+    """The remedy is ONE whole-placement shift, verified before it is
+    offered: the smaller single-axis shift when either axis alone clears
+    the prediction, else a searched (dx, dy) pair -- a design failing on
+    both axes passes neither single search and used to get no remedy at
+    all (Codex #885).  Here u0 at x=20 puts its VGND met4 pins under VPWR
+    straps and an HOFFSET of 28.7 puts the VPWR met5 strap over the VGND
+    met5 pin, which cuts it over both macros; a y-shift alone clears it
+    (the whole met5 VPWR strap then vias u0's met4 VPWR pins), so that is
+    what is offered, not the pair.  The pair search itself is exercised
+    with the verdict stubbed: only a shift on BOTH axes passes, and one is
+    found from the two axes' candidates within the budget."""
     _toy_lef(tmp_path / "reg32.lef")
-    # x: u0 at 20 puts its VGND met4 pins under VPWR straps (the toy's own
-    # failure).  y: an HOFFSET that puts a VPWR met5 strap over the VGND
-    # met5 pin, which no x-shift can move out from under.
     _toy_config(tmp_path / "both.json", 20, FP_PDN_HOFFSET=28.7, FP_PDN_HPITCH=153.18)
     r = subprocess.run([sys.executable, str(_T1A / "pdn_phase.py"), str(tmp_path / "both.json"),
                         "--json", str(tmp_path / "both.out")], capture_output=True, text=True)
     assert r.returncode == 1, r.stdout + r.stderr
     out = json.loads((tmp_path / "both.out").read_text())
-    assert sorted({c["axis"] for c in out["clips"]}) == ["x", "y"]          # both axes violated
-    assert out["global_dx"] is not None and out["global_dy"] is not None
-    assert out["global_clean_at_dxdy"] is True
-    assert "TOGETHER they leave every instance clean and connected" in r.stdout
-    u0 = next(p for p in out["per_instance"] if p["instance"] == "u0")
-    assert u0["dx"] is not None and u0["dy"] is not None and u0["clean_at_dxdy"] is True
-    assert "together they clear it" in r.stdout
+    assert sorted({t["axis"] for t in out["trims"]}) == ["x", "y"]          # both axes trimmed
+    assert out["global_dx"] is None and out["global_dy"] == -5.0
+    assert out["global_shift"] == [0.0, -5.0] and out["global_clean_at_shift"] is True
+    assert "shifting EVERY macro by dy=-5.000 (PDN_HOFFSET=33.7)" in r.stdout
+    assert "both axes needed" not in r.stdout
+    # the pair search: when no single axis clears it, the candidates of both
+    # axes are tried as pairs, smallest total move first, within the budget
+    import pdn_phase as pp
+    top = pp.read_top_config(str(tmp_path / "both.json"))
+    lefs = pp.read_lef(str(tmp_path / "reg32.lef"))
+    real = pp.clean_at
+    monkeypatch.setattr(pp, "clean_at", lambda *a: a[-2] != 0 and a[-1] != 0)
+    res = pp.run_check(top, lefs)
+    assert res["global_dx"] is None and res["global_dy"] is None
+    dx, dy = res["global_shift"]
+    assert dx != 0 and dy != 0 and abs(dx) <= 15 and abs(dy) <= 153.18 / 2      # half a pitch each
+    assert res["global_clean_at_shift"] is True
+    buf = io.StringIO()
+    pp.report(top, lefs, res, buf)
+    assert f"dx={dx:+.3f} (PDN_VOFFSET={res['voffset_for_shift']}) and dy={dy:+.3f}" in buf.getvalue()
+    assert "both axes needed: neither alone does" in buf.getvalue()
+    monkeypatch.setattr(pp, "clean_at", lambda *a: False)
+    res = pp.run_check(top, lefs)
+    assert res["global_shift"] is None
+    buf = io.StringIO()
+    pp.report(top, lefs, res, buf)
+    assert "nor a pair within the trial budget" in buf.getvalue()
+    monkeypatch.setattr(pp, "clean_at", real)
 
 
-def test_pdn_phase_finds_the_toys_clip_and_the_shift_that_clears_it(tmp_path):
-    """The phase-0 toy's failure, recomputed: with u0 at x = 20 its VGND met4
-    pin (33.22-35.22) meets the top's VPWR strap (34.72-36.32, offset 0 pitch
-    30 from the 5.52 core origin) -- the doc's own numbers -- so pdngen CUTS
-    that strap over the macro, and with all three cut u0's VPWR has nothing
-    left to feed it.  The smallest clearing shift is 0.8 um west; at x = 10
-    (10 = 160 mod 30) the same check passes.  A macro whose pins no strap
-    crosses is UNCONNECTED, and a top without a fixed die is refused
+def test_pdn_phase_finds_the_toys_trim_and_the_shift_that_clears_it(tmp_path):
+    """The phase-0 toy's failure, recomputed through pdngen's own steps: with
+    u0 at x = 20 its VGND met4 pin (33.22-35.22) meets the top's VPWR strap
+    (34.72-36.32, offset 0 pitch 30 from the 5.52 core origin) -- the doc's
+    own numbers -- so pdngen CUTS that strap over the macro (a TRIM, spacing
+    across and halo along), and with all three cut the fragments left over
+    u0 are via-less stubs that TRIM removes, so u0's VPWR terminal sits on
+    no grid: STRANDED, the PSM-0069 shape.  The smallest clearing shift is
+    1.1 um west -- the pin's spacing plus the strap's, both 0.3 on met4,
+    which is how `Shape::cut` grows the violation.  At x = 10 (10 = 160 mod 30, the toy's measured fix) the
+    same check passes -- and it passes WITH the two shapes the old model
+    called failures (#895): the met4 VPWR strap on the core's left edge,
+    whose 0.8 um crossings hold no via and which trim removes, and a VGND
+    met4 pin rectangle off the grid whose TERMINAL is fed by its met5
+    rectangle.  A macro whose pins no strap crosses is STRANDED on both
+    nets with no trim at all, and a top without a fixed die is refused
     (exit 2)."""
     _toy_lef(tmp_path / "reg32.lef")
     _toy_config(tmp_path / "bad.json", 20)
     r = subprocess.run([sys.executable, str(_T1A / "pdn_phase.py"), str(tmp_path / "bad.json"),
                         "--json", str(tmp_path / "bad.out")], capture_output=True, text=True)
     assert r.returncode == 1, r.stdout + r.stderr
-    assert "CLIP u0 VGND pin VGND on met4 [33.220,35.220]" in r.stdout
-    assert "cuts VPWR strap k=1 [34.720,36.320]" in r.stdout
-    assert "FAIL: 2 instances, 3 clips in 1 instances, 1 unconnected" in r.stdout
-    assert "UNCONNECTED u0 VPWR" in r.stdout          # the clips are why
+    assert "TRIM u0 VGND pin VGND on met4 cuts VPWR strap k=1 [34.720,36.320] over y [20.580,99.420]" in r.stdout
+    assert "STRANDED u0 VPWR pin VPWR: its component (4 shapes" in r.stdout
+    assert "every strap fragment on it is via-less and trimmed away" in r.stdout
+    assert ("FAIL: 2 instances, 3 trims in 1 instances, 1 stranded terminal(s) in 1 instance-net(s), "
+            "0 floating fragment(s); shifting EVERY macro by dx=-1.100 (PDN_VOFFSET=1.1)") in r.stdout
     out = json.loads((tmp_path / "bad.out").read_text())
-    assert out["global_dx"] == -0.8 and out["voffset_for_dx"] == 0.8
+    assert out["global_dx"] == -1.1 and out["global_shift"] == [-1.1, 0.0]
+    assert out["voffset_for_shift"] == 1.1 and out["global_clean_at_shift"] is True
+    assert out["min_connections"] == 1                       # pin layers: one via keeps a fragment
+    assert out["unconnected"] == [{"instance": "u0", "net": "VPWR"}]
     u0 = next(p for p in out["per_instance"] if p["instance"] == "u0")
-    assert u0["dx"] == -0.8 and u0["clips"] == 3
-    assert all(p["clips"] == 0 for p in out["per_instance"] if p["instance"] == "u1")
+    assert u0["trims"] == 3 and u0["connected"] == {"VPWR": False, "VGND": True}
+    assert all(p["trims"] == 0 for p in out["per_instance"] if p["instance"] == "u1")
     _toy_config(tmp_path / "good.json", 10)                     # the toy's fix
-    r = subprocess.run([sys.executable, str(_T1A / "pdn_phase.py"), str(tmp_path / "good.json")],
-                       capture_output=True, text=True)
-    assert r.returncode == 0 and "PASS: 2 instances, 16 power-pin rects, 0 clips" in r.stdout, r.stdout
+    r = subprocess.run([sys.executable, str(_T1A / "pdn_phase.py"), str(tmp_path / "good.json"),
+                        "--json", str(tmp_path / "good.out")], capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "PASS: 2 instances, 16 power-pin rects, 0 trims in 0 instances, every terminal" in r.stdout
+    assert "(1 via-less trimmed away)" in r.stdout
+    out = json.loads((tmp_path / "good.out").read_text())
+    assert not out["failures"] and len(out["trimmed_away"]) == 1
+    edge = out["trimmed_away"][0]
+    assert edge["net"] == "VPWR" and edge["layer"] == "met4" and edge["k"] == 0 and edge["vias"] == 0
+    assert edge["rect"][0] == 4.72 and edge["rect"][2] == 6.32               # the core-edge strap
+    assert {p["net"] for p in out["off_grid_pins"]} == {"VGND"}
+    assert sorted(t for p in out["off_grid_pins"] for t in p["terminals"]) == ["u0.VGND", "u1.VGND"]
+    assert out["network"]["VGND"]["terminals_on_grid"] == 2 and out["network"]["VPWR"]["terminals_on_grid"] == 2
     assert "ASSUMED" in r.stdout and "PDN_HPITCH=153.18" in r.stdout   # what it took from the defaults
     # the LEF passed explicitly wins over the config's path
     r = subprocess.run([sys.executable, str(_T1A / "pdn_phase.py"), str(tmp_path / "good.json"),
                         str(tmp_path / "reg32.lef")], capture_output=True, text=True)
     assert r.returncode == 0
-    # unconnected: met5 pins too short for any vertical strap to cross them,
-    # met4 pins clear of every strap -- no short, no supply either
+    # stranded on both nets: met5 pins too short for any vertical strap to
+    # cross them, met4 pins clear of every strap -- no trim, no supply either
     _toy_lef(tmp_path / "short.lef", met5_x_hi=8.0)
     _toy_config(tmp_path / "unc.json", 10, **{"MACROS": {"reg32": {
         "instances": {"u0": {"location": [10, 20], "orientation": "N"}}, "lef": ["dir::short.lef"]}}})
     r = subprocess.run([sys.executable, str(_T1A / "pdn_phase.py"), str(tmp_path / "unc.json")],
                        capture_output=True, text=True)
-    assert r.returncode == 1 and "UNCONNECTED u0 VPWR" in r.stdout and "UNCONNECTED u0 VGND" in r.stdout
-    assert "0 clips in 0 instances, 2 unconnected" in r.stdout
+    assert r.returncode == 1 and "STRANDED u0 VPWR pin VPWR" in r.stdout and "STRANDED u0 VGND pin VGND" in r.stdout
+    assert "FAIL: 1 instances, 0 trims in 0 instances, 2 stranded terminal(s) in 2 instance-net(s)" in r.stdout
     _toy_config(tmp_path / "rel.json", 10, FP_SIZING="relative")
     r = subprocess.run([sys.executable, str(_T1A / "pdn_phase.py"), str(tmp_path / "rel.json")],
                        capture_output=True, text=True)
@@ -475,6 +520,64 @@ def test_pdn_phase_finds_the_toys_clip_and_the_shift_that_clears_it(tmp_path):
     r = subprocess.run([sys.executable, str(_T1A / "pdn_phase.py"), str(tmp_path / "good.json"),
                         str(tmp_path / "missing.lef")], capture_output=True, text=True)
     assert r.returncode == 2 and "no such LEF" in r.stderr
+
+
+def test_pdn_phase_models_trim_in_both_directions(tmp_path):
+    """#895's two halves.  A same-layer meeting is a TRIM, which is never a
+    failure by itself: the old model's "N clips" FAIL on a plan that works
+    (144 clips on the H+B set, PSM clean) came from counting them.  And a
+    cut CAN strand: the hand HOFFSET that fragmented VGND's met5 into 85
+    pieces failed PSM-0069, and this toy's HOFFSET 28.7 reproduces the shape
+    -- fragments that survive trim on a component off the grid (FLOATING,
+    the "unconnected shapes" PSM counts) and a terminal whose every
+    rectangle is off it (STRANDED).  Which fragments survive is pdngen's
+    trim rule, read from the config: with PDN_SKIPTRIM every fragment
+    survives (the via-less ones included), with PDN_ENABLE_PINS off a
+    fragment needs two vias, and the counts move monotonically."""
+    import pdn_phase as pp
+    _toy_lef(tmp_path / "reg32.lef")
+    lefs = pp.read_lef(str(tmp_path / "reg32.lef"))
+    runs = {}
+    for name, extra in (("default", {}), ("skiptrim", {"PDN_SKIPTRIM": True}),
+                        ("nopins", {"PDN_ENABLE_PINS": False}), ("fp_skip", {"FP_PDN_SKIPTRIM": "true"})):
+        _toy_config(tmp_path / f"{name}.json", 20, FP_PDN_HOFFSET=28.7, FP_PDN_HPITCH=153.18, **extra)
+        runs[name] = pp.run_check(pp.read_top_config(str(tmp_path / f"{name}.json")), lefs)
+    d, sk, npn = runs["default"], runs["skiptrim"], runs["nopins"]
+    assert (d["min_connections"], sk["min_connections"], npn["min_connections"]) == (1, None, 2)
+    assert runs["fp_skip"]["min_connections"] is None              # the deprecated spelling, as a string
+    # the same cuts whatever trim does ...
+    for r in (sk, npn):
+        assert r["trims"] == d["trims"]
+    for r in (d, sk):
+        assert [(s["instance"], s["net"]) for s in r["stranded"]] == [("u0", "VPWR"), ("u1", "VGND")]
+    # ... but what survives them differs, and it is what PSM would count
+    assert len(npn["floating"]) == 0 < len(d["floating"]) == 8 < len(sk["floating"]) == 19
+    assert len(sk["trimmed_away"]) == 0 and len(d["trimmed_away"]) == 11 and len(npn["trimmed_away"]) == 23
+    assert all(f["vias"] == 1 for f in d["floating"])              # one via keeps it on a pin layer
+    assert all(f["vias"] == 0 for f in d["trimmed_away"])
+    # trim runs BEFORE the partition (Codex #900): with two vias required,
+    # the one-via straps that fed u1's VPWR and u0's VGND are removed, and
+    # the terminals they bridged into the grid are stranded -- partitioning
+    # first would have kept them on the main component and passed them
+    assert [(s["instance"], s["net"]) for s in npn["stranded"]] == [
+        ("u0", "VPWR"), ("u1", "VPWR"), ("u0", "VGND"), ("u1", "VGND")]
+    buf = io.StringIO()
+    pp.report(pp.read_top_config(str(tmp_path / "default.json")), lefs, d, buf)
+    text = buf.getvalue()
+    assert "FLOATING VGND met4 fragment k=4 [128.020,10.880,129.620,109.120] with 1 via(s)" in text
+    assert "STRANDED u1 VGND pin VGND: its component (5 shapes" in text and "2 of its fragments survive trim" in text
+    assert "trim: a strap fragment with fewer than 1 via is removed" in text
+    buf = io.StringIO()
+    pp.report(pp.read_top_config(str(tmp_path / "skiptrim.json")), lefs, sk, buf)
+    assert "trim: SKIPPED (PDN_SKIPTRIM)" in buf.getvalue()
+    # with trim skipped the core-edge strap is a permanent floating shape no
+    # shift removes, and the check says so rather than offering one
+    assert sk["global_shift"] is None and "nor a pair within the trial budget" in buf.getvalue()
+    # the prediction and the post-mortem share one network code: what
+    # pdn_connect reads off a DEF is what this predicts from the LEFs
+    from pdn_connect import net_components
+    assert pp.predicted_network.__doc__ and "pdn_connect.net_components" in pp.predicted_network.__doc__
+    assert net_components.__defaults__[-1] is False                # members only on request
 
 
 def test_pdn_phase_reads_the_obstruction_that_removes_the_straps(tmp_path):
@@ -508,7 +611,8 @@ def test_pdn_phase_reads_the_obstruction_that_removes_the_straps(tmp_path):
     assert "RT_MAX_LAYER" in r.stdout          # the remedy, named
     # met4 is gone over the macro, so the met4 pins can only be fed across
     # layers -- and here the default met5 grid misses them
-    assert r.returncode == 1 and "UNCONNECTED u0" in r.stdout
+    assert r.returncode == 1 and "STRANDED u0 VPWR pin VPWR" in r.stdout and "STRANDED u0 VGND" in r.stdout
+    assert "TRIM u0 OBS on met4 cuts VPWR strap k=1 [34.720,36.320] over y [9.700,110.300]" in r.stdout
     _toy_lef(tmp_path / "sealed.lef", obs=("met4", "met5"))
     _toy_config(tmp_path / "sealed.json", 10, **{"MACROS": {"reg32": {
         "instances": {"u0": {"location": [10, 20], "orientation": "N"}}, "lef": ["dir::sealed.lef"]}}})
@@ -743,3 +847,106 @@ def test_without_pins_the_h_arm_is_byte_identical_and_a_gap_is_refused(tmp_path)
     assert "no template for pe_cell" in r.stderr
     assert "pins.sh" in r.stderr
     assert not (tmp_path / "h_gap").exists(), "refused after writing"
+
+
+def _acc_lef(path):
+    """A 96 x 60 block with met2 OBS as Magic draws it -- ACTUAL shapes, not a
+    cover: two met2 rects, and a met4 VGND pin at local x 69.52-71.52 (the
+    #896 neighbour).  No met1 OBS at all."""
+    L = ["VERSION 5.8 ;", "MACRO acc_cell", "  CLASS BLOCK ;", "  ORIGIN 0 0 ;", "  SIZE 96 BY 60 ;",
+         "  PIN VGND", "    DIRECTION INOUT ;", "    USE GROUND ;", "    PORT",
+         "      LAYER met4 ;", "      RECT 69.52 5.0 71.52 55.0 ;", "    END", "  END VGND",
+         "  OBS", "    LAYER met2 ;", "      RECT 69.30 0.20 69.50 0.40 ;", "      RECT 10.0 10.0 50.0 50.0 ;",
+         "  END", "END acc_cell", "END LIBRARY"]
+    path.write_text("\n".join(L) + "\n")
+
+
+def _lyrdb(path, items):
+    """A KLayout report database with one <item> per (category, value)."""
+    body = "".join(f"<item><category>'{c}'</category><cell>top</cell><visited>false</visited>"
+                   f"<multiplicity>1</multiplicity><values><value>{v}</value></values></item>"
+                   for c, v in items)
+    path.write_text("<?xml version=\"1.0\"?><report-database><description>DRC</description>"
+                    "<categories><category><name>m2.2</name></category></categories>"
+                    f"<cells><cell><name>top</name></cell></cells><items>{body}</items></report-database>")
+
+
+def test_drc_locate_maps_markers_to_cells_and_says_whose_metal(tmp_path):
+    """#896's five `m2.2` markers are one defect: the same local spot of one
+    cell.  `drc_locate.py` reads the lyrdb and the top DEF, inverts each
+    instance's placement (orientation included) to give the CELL-LOCAL spot,
+    groups equal spots, and -- with the LEF -- says per offending edge
+    whether it sits on metal the macro's abstract claims, in a HOLE of the
+    abstract (inside the box on no claimed shape: the router reads the spot
+    as free, so the edge is the top's wire or macro metal the LEF omits --
+    the nearest claimed shape is named, which is how a notch beside a pin
+    reads), or outside it.  The N=8 ground truth: both edges of every
+    marker inside the box, one on the macro's real met2 in a notch the LEF
+    leaves beside pin `in[22]`, the other the TOP's wire overhanging into
+    that notch -- so "obstructed layer, therefore no router wire" was a
+    wrong inference, and a claimed-against-hole pair is reported as the
+    notch shape whose fix is in the abstract."""
+    _acc_lef(tmp_path / "acc_cell.lef")
+    (tmp_path / "top.def").write_text("\n".join([
+        "VERSION 5.8 ;", "DESIGN top ;", "UNITS DISTANCE MICRONS 1000 ;",
+        "COMPONENTS 3 ;",
+        "- pipe_1_3 acc_cell + PLACED ( 694000 2160000 ) N ;",
+        "- pipe_1_4 acc_cell + PLACED ( 870000 2160000 ) N ;",
+        "- acc_5 acc_cell + PLACED ( 400000 1000000 ) FS ;",       # mirrored: local y counts from the top
+        "END COMPONENTS", "END DESIGN"]) + "\n")
+    # the issue's own marker (edge A on the LEF's met2 OBS, edge B 0.13 um
+    # above the cell edge on no LEF shape), the same spot in the neighbour,
+    # the same spot in the MIRRORED instance (top coords differ, local do
+    # not), a met1 marker over a macro (met1 unobstructed), and one in the
+    # channel between macros
+    _lyrdb(tmp_path / "drc.lyrdb", [
+        ("m2.2", "edge-pair: (763.492,2160.27;763.37,2160.27)/(763.37,2160.14;763.44,2160.14)"),
+        ("m2.2", "edge-pair: (939.492,2160.27;939.37,2160.27)/(939.37,2160.14;939.44,2160.14)"),
+        ("m2.2", "edge-pair: (469.492,1059.73;469.37,1059.73)/(469.37,1059.86;469.44,1059.86)"),
+        ("m1.1", "polygon: (720,2180;721,2180;721,2181;720,2181)"),
+        ("m2.2", "edge-pair: (800,2158;801,2158)/(800,2158.1;801,2158.1)"),
+        # straddling the boundary, the OUTER edge farther from it than the
+        # inner one: the marker's centre is outside the macro, the marker is
+        # still the macro's (Codex #900)
+        ("m2.2", "edge-pair: (763.492,2160.27;763.37,2160.27)/(763.37,2159.6;763.44,2159.6)"),
+    ])
+    r = subprocess.run([sys.executable, str(_T1A / "drc_locate.py"), str(tmp_path / "drc.lyrdb"),
+                        str(tmp_path / "top.def"), str(tmp_path / "acc_cell.lef"),
+                        "--json", str(tmp_path / "loc.json")], capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr
+    out = json.loads((tmp_path / "loc.json").read_text())
+    m = out["markers"]
+    assert m[0]["instance"] == "pipe_1_3" and m[0]["local"] == [69.37, 0.14, 69.492, 0.27]
+    assert [ev["verdict"] for ev in m[0]["edge_verdicts"]] == ["macro-lef", "hole"]
+    assert m[0]["edge_verdicts"][0]["on"] == ["OBS"] and m[0]["shape"] == "notch"
+    assert m[0]["edge_verdicts"][1]["nearest_claimed"] == ["OBS", 0.06]     # the notch's width
+    assert m[2]["instance"] == "acc_5" and m[2]["orient"] == "FS" and m[2]["local"] == [69.37, 0.14, 69.492, 0.27]
+    assert [ev["verdict"] for ev in m[2]["edge_verdicts"]] == ["macro-lef", "hole"]
+    assert m[3]["layer"] == "met1" and m[3]["edge_verdicts"][0]["verdict"] == "hole"
+    assert m[3]["edge_verdicts"][0]["nearest_claimed"] is None and m[3]["shape"] == "hole"
+    assert m[4]["instance"] is None and m[4]["nearest"]["instance"] == "pipe_1_3"
+    assert m[5]["instance"] == "pipe_1_3" and m[5]["local"] == [69.37, -0.4, 69.492, 0.27]
+    assert [ev["verdict"] for ev in m[5]["edge_verdicts"]] == ["macro-lef", "outside"]
+    assert m[5]["shape"] == "boundary"
+    assert out["groups"][0] == {"cell": "acc_cell", "layer": "met2", "local": [69.4, 0.1],
+                                "instances": ["pipe_1_3", "pipe_1_4", "acc_5"]}
+    assert "drc_locate: 6 marker(s), 2 categories (m1.1, m2.2), 5 inside a placed macro (1 cell type(s): acc_cell), 1 elsewhere" in r.stdout
+    assert "edge B: (763.370,2159.600)-(763.440,2159.600) outside the macro box -- the top's routing against its edge" in r.stdout
+    assert "m2.2 (763.370,2160.140)-(763.492,2160.270) -> pipe_1_3 [acc_cell N] local (69.370,0.140)-(69.492,0.270)" in r.stdout
+    assert "edge A: (763.492,2160.270)-(763.370,2160.270) on metal the macro's LEF claims (OBS)" in r.stdout
+    assert ("edge B: (763.370,2160.140)-(763.440,2160.140) inside the macro box on NO LEF shape"
+            in r.stdout)
+    assert "nearest claimed shape OBS at 0.060 um" in r.stdout
+    assert "=> claimed metal against an abstract HOLE" in r.stdout and "openroad.lef" in r.stdout
+    assert "GROUP acc_cell met2 local ~(69.4,0.1): 3 marker(s) in pipe_1_3, pipe_1_4, acc_5 -- one defect, repeated per instance" in r.stdout
+    assert "-> no macro holds it; nearest pipe_1_3 [acc_cell] 10.500 um away" in r.stdout
+    # without a LEF the location half still runs; the size then comes from nowhere, so nothing is located
+    r = subprocess.run([sys.executable, str(_T1A / "drc_locate.py"), str(tmp_path / "drc.lyrdb"),
+                        str(tmp_path / "top.def")], capture_output=True, text=True)
+    assert r.returncode == 0 and "no LEF given, so no edge is classified" in r.stdout
+    assert "0 inside a placed macro" in r.stdout
+    # a file that is not a report database is refused, not read as empty
+    (tmp_path / "junk.lyrdb").write_text("not xml")
+    r = subprocess.run([sys.executable, str(_T1A / "drc_locate.py"), str(tmp_path / "junk.lyrdb"),
+                        str(tmp_path / "top.def")], capture_output=True, text=True)
+    assert r.returncode == 2 and "not a KLayout report database" in r.stderr

@@ -852,11 +852,10 @@ def write_h(n_dir, out_dir, halo, pins_dir=None):
         # write a plan that WORKS, the only way past it was to hand-edit
         # PDN_HOFFSET, and the hand offset cut VGND's met5 into 85 pieces and
         # stranded some -- PSM-0069 at signoff, on a design whose generated
-        # plan was fine.  `pdn_phase.py`'s clip count is what pdngen resolves
-        # by CUTTING a strap (`Shape::cut`), which is fatal only when the cut
-        # isolates a fragment, and its connectivity model is wrong besides
-        # (docs/internal/librelane_hier_flow.md §7.2 and §11 item 8).  So it
-        # is reported and the arm is written; PSM decides.
+        # plan was fine.  The check now models pdngen's own steps (cut, via,
+        # TRIM -- #895) and a same-layer meeting is a trim, not a defect; but
+        # it is still a PREDICTION from the LEFs and the config, so it is
+        # reported and the arm is written; PSM decides.
         pp.report(topcfg, lefs, res, sys.stderr)
         print("harm: WARNING: the predicted-pin dry run of pdn_phase.py does not pass.  This is "
               "ADVISORY and the arm has been written anyway.\n"
@@ -982,10 +981,12 @@ Utilization (rough): {'; '.join(advice)}
     python3 ../../pdn_phase.py top/config.json {plef}
 
 `PASS: {sum(counts.values())} instances, ...` only proves the plan agrees with its own prediction.
-**Its verdicts cannot be acted on** ({'it does NOT pass here, and that is not a reason to change anything -- ' if dry_run_failed else ''}librelane_hier_flow.md
-§11 item 8): the clips it counts are what pdngen resolves by CUTTING a strap, fatal only when the cut isolates
-a fragment, and its connectivity model is wrong besides.  Following it once turned a working plan into a
-PSM-0069 failure.  **Do not hand-edit the PDN_* offsets on its say-so.**  The verdict is step 3.
+**It is a prediction, not the verdict** ({'it does NOT pass here, and that alone is not a reason to change anything -- ' if dry_run_failed else ''}librelane_hier_flow.md
+§11 item 8): it models pdngen's own steps -- a same-layer meeting is a TRIM, which is how pdngen keeps straps off
+macro pins and never a defect by itself; a via-less fragment is trimmed away; what it predicts PSM will fail on is a
+STRANDED terminal or a FLOATING fragment.  Its older version counted every meeting as a defect, and following it
+once turned a working plan into a PSM-0069 failure.  **Do not hand-edit the PDN_* offsets on its say-so.**  The
+verdict is step 3.
 
 ## 1. Harden the {len(cells)} cells -- independent, so in parallel; record wall AND cpu (§7.3)
 
@@ -1002,10 +1003,12 @@ RTL: regenerate the whole set with a larger `-PEPAD` (see the utilization line a
 
     python3 ../../pdn_phase.py top/config.json {lefs}
 
-Worth reading for what it SHOWS -- which strap meets which pin, and the shift that would separate them -- and
-not for its verdict.  Run the top whatever it says.  A COLLISION or UNCONNECTED line is information about the
-geometry, not a defect: acting on one by editing PDN_VOFFSET/PDN_HOFFSET is what produced this study's only
-PSM-0069, on a design whose generated plan was fine (librelane_hier_flow.md §11 item 8).
+Worth reading for what it SHOWS -- which strap meets which pin (TRIM), which terminal ends up on no grid
+(STRANDED), which strap piece survives trim off the grid (FLOATING), and the verified shift that would clear
+it -- and run the top whatever it says: a TRIM is geometry, not a defect, and even a predicted failure is a
+prediction from the LEFs and the config.  Acting on the old check's verdict by editing PDN_VOFFSET/PDN_HOFFSET
+is what produced this study's only PSM-0069, on a design whose generated plan was fine (librelane_hier_flow.md
+§11 item 8); if the prediction and step 3 disagree, `pdn_connect.py` on the written DEF says where.
 
 {top_section}
 Pass: `Odb.ManualMacroPlacement` prints `Successfully placed {sum(counts.values())} instances` (a declared instance the

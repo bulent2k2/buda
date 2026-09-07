@@ -296,6 +296,74 @@ def read_specialnets(text, dbu):
     return nets, census
 
 
+_VIA_ENTRY = re.compile(r"^\s*-\s+(\S+)(.*?);", re.S | re.M)
+_VIA_LAYERS = re.compile(r"\+\s*LAYERS\s+(\S+)\s+(\S+)\s+(\S+)")
+_VIA_RECT = re.compile(r"\+\s*RECT\s+(\S+)\s*\(")
+
+
+def read_vias(text):
+    """{via name: {metal layers it joins}} from the DEF's VIAS section: a
+    generated via names its layers (`+ VIARULE ... + LAYERS met4 via4 met5`),
+    a fixed one draws them (`+ RECT met4 ( ... ) ( ... )`).  Empty when the
+    section is absent (a LEF-defined via is not here; its layers are then
+    unknown and the join falls back to every layer, counted)."""
+    body = _section(text, "VIAS")
+    out = {}
+    if body is None:
+        return out
+    for m in _VIA_ENTRY.finditer(body):
+        name, entry = m.group(1), m.group(2)
+        layers = set()
+        for lm in _VIA_LAYERS.finditer(entry):
+            layers.add(lm.group(1))
+            layers.add(lm.group(3))
+        for rm in _VIA_RECT.finditer(entry):
+            layers.add(rm.group(1))
+        if layers:
+            out[name] = layers
+    return out
+
+
+# the terminator ends the entry wherever it is: OpenROAD writes it on the
+# PLACED line (`+ FIXED ( x y ) N ;`), and a pattern wanting it on a line of
+# its own matched 0 of a real DEF's 324 pins (#900) -- which the report said
+# honestly ("no top pin on this net") and which switched the sources off
+_PIN_ENTRY = re.compile(r"^\s*-\s+(\S+)([^;]*);", re.M)
+_PIN_NET = re.compile(r"\+\s*NET\s+(\S+)")
+_PIN_LAYER = re.compile(r"\+\s*LAYER\s+(\S+)\s*\(\s*(-?\d+)\s+(-?\d+)\s*\)\s*\(\s*(-?\d+)\s+(-?\d+)\s*\)")
+_PIN_PLACED = re.compile(r"\+\s*(?:PLACED|FIXED|COVER)\s*\(\s*(-?\d+)\s+(-?\d+)\s*\)")
+
+
+def read_bterms(text, dbu):
+    """{net: [(layer, x1, y1, x2, y2)]} -- the top's own pins on each net
+    from the DEF's PINS section, in microns.  These are PSM's SOURCES: its
+    connectivity check asks whether every shape reaches a block terminal
+    (`checkConnectivity`), not whether the net is one blob, and LibreLane's
+    `PDN_ENABLE_PINS` promotes the top's straps to exactly these.  A pin
+    with several `+ PORT`s contributes each; a pin with none is one port."""
+    body = _section(text, "PINS")
+    out = {}
+    if body is None:
+        return out
+    for m in _PIN_ENTRY.finditer(body):
+        entry = m.group(2)
+        nm = _PIN_NET.search(entry)
+        if not nm:
+            continue
+        net = unescape(nm.group(1))
+        ports = re.split(r"\+\s*PORT\b", entry)
+        for port in (ports[1:] if len(ports) > 1 else ports):
+            pm = _PIN_PLACED.search(port)
+            if not pm:
+                continue
+            ox, oy = int(pm.group(1)) / dbu, int(pm.group(2)) / dbu
+            for lm in _PIN_LAYER.finditer(port):
+                x1, y1, x2, y2 = (int(lm.group(i)) / dbu for i in range(2, 6))
+                out.setdefault(net, []).append((lm.group(1), ox + min(x1, x2), oy + min(y1, y2),
+                                                ox + max(x1, x2), oy + max(y1, y2)))
+    return out
+
+
 # ── the audit ─────────────────────────────────────────────────────────────
 def _ov(a1, a2, b1, b2):
     return min(a2, b2) - max(a1, b1)
@@ -472,7 +540,8 @@ def _touch(a, b):
             and min(a[3], b[3]) >= max(a[1], b[1]) - EPS)
 
 
-def net_components(snets, terminals_by_net=None, layers=None):
+def net_components(snets, terminals_by_net=None, layers=None, with_members=False,
+                   via_layers=None, sources=None, explain=False):
     """Partition each power net's DEF metal into ELECTRICAL components.
 
     A macro power TERMINAL can have its via and still be dead, because the
@@ -504,6 +573,18 @@ def net_components(snets, terminals_by_net=None, layers=None):
     traverse an abstract LEF and does not credit it -- and agreeing with the
     verdict matters more here than being physically complete.  Where it
     happens it is reported (`bridged_by`) rather than silently applied.
+
+    `via_layers` ({via name: layers}, from `read_vias`) limits a via's join
+    to the layers it actually connects: a via4 placed where a met1 rail also
+    passes must not join the rail (the layer-blind rule did, counted here as
+    `via_layers_unknown` when a via's layers are not known).  `sources`
+    ({net: [(layer, x1, y1, x2, y2)]}, from `read_bterms`) is PSM's notion
+    of where the supply enters -- the top's own pins -- and makes the MAIN
+    component the sourced one rather than the largest: `sourced` is stamped
+    per component and `has_source` per net, because PSM asks reachability
+    from a source and a blob nothing feeds is not a grid (#900).  `explain`
+    keeps the join graph (`graph`: the rects and every (i, j, how) edge plus
+    each terminal's landings) for `join_path`.
     """
     out = {}
     for net, d in snets.items():
@@ -511,6 +592,8 @@ def net_components(snets, terminals_by_net=None, layers=None):
         if not rects:
             continue
         uf = _UF(len(rects))
+        edges = [] if explain else None
+        unknown_via_layers = 0
         # same-layer touch, by an x-sweep: a PDN's stripes are long on one
         # axis and narrow on the other, so the active list stays short.  The
         # worst case is still quadratic; a report that took too long would be
@@ -528,6 +611,8 @@ def net_components(snets, terminals_by_net=None, layers=None):
                 for j in active:
                     if _touch(bi, rects[j][1:]):
                         uf.union(i, j)
+                        if edges is not None:
+                            edges.append((i, j, "touch"))
                 active.append(i)
         idx = _BinIndex(rects, keyfn=lambda r: r[1:])
 
@@ -536,11 +621,19 @@ def net_components(snets, terminals_by_net=None, layers=None):
                     if rects[i][1] - EPS <= vx <= rects[i][3] + EPS
                     and rects[i][2] - EPS <= vy <= rects[i][4] + EPS]
 
-        # a via joins every shape of this net covering its point
-        for (_vl, vx, vy, _vn) in d["vias"]:
+        # a via joins every shape of this net covering its point -- on the
+        # layers the via connects, when the DEF says which those are
+        for (_vl, vx, vy, vn) in d["vias"]:
             hit = covering(vx, vy)
+            vl = (via_layers or {}).get(vn)
+            if vl is None:
+                unknown_via_layers += 1
+            else:
+                hit = [i for i in hit if rects[i][0] in vl]
             for j in hit[1:]:
                 uf.union(hit[0], j)
+                if edges is not None:
+                    edges.append((hit[0], j, f"via {vn} at ({vx:.3f}, {vy:.3f})"))
 
         comps = {}
         for i, r in enumerate(rects):
@@ -556,13 +649,35 @@ def net_components(snets, terminals_by_net=None, layers=None):
             xs = [rects[i][1] for i in members] + [rects[i][3] for i in members]
             ys = [rects[i][2] for i in members] + [rects[i][4] for i in members]
             rows.append({"root": k, "shapes": len(members), "area": round(area, 3),
+                         # the rect indices (input order) only on request: a
+                         # caller predicting the grid needs them to say WHICH
+                         # fragment is off it; the JSON report does not
+                         **({"members": sorted(members)} if with_members else {}),
                          "layers": dict(sorted(per_layer.items())),
                          "bbox": [round(min(xs), 3), round(min(ys), 3),
                                   round(max(xs), 3), round(max(ys), 3)],
                          "span": round(max(max(xs) - min(xs), max(ys) - min(ys)), 3),
                          "terminals": []})
-        rows.sort(key=lambda c: (-c["area"], -c["shapes"]))
+        # PSM's main grid is the one the supply ENTERS: a component holding
+        # one of the top's own pins on this net.  Without any source known
+        # (no PINS section, or none on this net) the largest stands in.
+        src = (sources or {}).get(net, [])
+        if src:
+            sidx = _BinIndex(src, keyfn=lambda r: r[1:])
+            for c in rows:
+                c["sourced"] = False
+            for k, members in comps.items():
+                for i in members:
+                    r = rects[i]
+                    hit = any(src[j][0] == r[0] and _touch(r[1:], src[j][1:])
+                              for j in sidx.near(r[1] if sidx.axis == 0 else r[2],
+                                                 r[3] if sidx.axis == 0 else r[4]))
+                    if hit:
+                        next(c for c in rows if c["root"] == k)["sourced"] = True
+                        break
+        rows.sort(key=lambda c: (0 if c.get("sourced") else 1, -c["area"], -c["shapes"]))
         index = {c["root"]: n for n, c in enumerate(rows)}
+        landings = {} if explain else None
 
         # which macro terminals sit on which component -- the fragments that
         # carry none are floating stubs, the ones that carry some strand pins
@@ -580,6 +695,8 @@ def net_components(snets, terminals_by_net=None, layers=None):
                                   x2 if idx.axis == 0 else y2):
                     if rects[i][0] == tl and _touch((x1, y1, x2, y2), rects[i][1:]):
                         on.add(index[uf.find(i)])
+                        if landings is not None:
+                            landings.setdefault(t["name"], []).append((i, f"{tl} rect of the pin touches it"))
                 # (b) a via inside the pin, landing in a shape of the net --
                 # the normal case, and the only one for a pin whose partner
                 # is on the other layer
@@ -592,6 +709,9 @@ def net_components(snets, terminals_by_net=None, layers=None):
                         continue
                     for i in covering(vx, vy):
                         on.add(index[uf.find(i)])
+                        if landings is not None:
+                            landings.setdefault(t["name"], []).append(
+                                (i, f"via {_vn} at ({vx:.3f}, {vy:.3f}) inside the pin's {tl} rect"))
             for c in sorted(on):
                 rows[c]["terminals"].append(t["name"])
             if len(on) > 1:
@@ -605,8 +725,70 @@ def net_components(snets, terminals_by_net=None, layers=None):
         # the per-fragment lists would reject a design with exactly one.
         stranded = len({t for c in rows[1:] for t in c["terminals"]})
         out[net] = {"components": rows, "fragments": max(0, len(rows) - 1),
-                    "stranded_terminals": stranded, "bridged_by": bridged}
+                    "stranded_terminals": stranded, "bridged_by": bridged,
+                    "has_source": bool(src), "sourced_components": sum(1 for c in rows if c.get("sourced")),
+                    "via_layers_unknown": unknown_via_layers}
+        if explain:
+            out[net]["graph"] = {"rects": rects, "edges": edges, "landings": landings,
+                                 "sourced_rects": sorted({i for i in range(len(rects))
+                                                          if src and any(
+                                                              src[j][0] == rects[i][0]
+                                                              and _touch(rects[i][1:], src[j][1:])
+                                                              for j in range(len(src)))})}
     return out
+
+
+def join_path(net_result, terminal):
+    """How `terminal` reaches a SOURCE (or, with no source known, the main
+    component's largest shape): the chain of rects and joins from one of
+    the terminal's landings, breadth-first, so the first questionable link
+    is on the page.  Needs `net_components(..., explain=True)`.  Returns a
+    list of (rect, how-it-was-reached) or None when the terminal reaches
+    nothing sourced."""
+    g = net_result.get("graph")
+    if not g:
+        raise InputShape("join_path needs net_components(..., explain=True)")
+    rects, landings = g["rects"], g["landings"].get(terminal, [])
+    if not landings:
+        return None
+    adj = {}
+    for i, j, how in g["edges"]:
+        adj.setdefault(i, []).append((j, how))
+        adj.setdefault(j, []).append((i, how))
+    goal = set(g["sourced_rects"])
+    if not goal:
+        main = net_result["components"][0]
+        if "members" in main:
+            goal = set(main["members"][:1])
+        else:
+            return None
+    from collections import deque
+    prev = {}
+    q = deque()
+    for i, how in landings:
+        if i not in prev:
+            prev[i] = (None, how)
+            q.append(i)
+    found = None
+    while q:
+        i = q.popleft()
+        if i in goal:
+            found = i
+            break
+        for j, how in adj.get(i, ()):
+            if j not in prev:
+                prev[j] = (i, how)
+                q.append(j)
+    if found is None:
+        return None
+    chain = []
+    i = found
+    while i is not None:
+        p, how = prev[i]
+        chain.append((rects[i], how))
+        i = p
+    chain.reverse()
+    return chain
 
 
 def terminal_rollup(findings):
@@ -649,10 +831,12 @@ def terminal_rollup(findings):
     return out
 
 
-def run_audit(def_text, lefs, layers, via_min=VIA_MIN):
+def run_audit(def_text, lefs, layers, via_min=VIA_MIN, explain=None):
     dbu = read_units(def_text)
     comps, unplaced = read_components(def_text, dbu)
     snets, census = read_specialnets(def_text, dbu)
+    via_layers = read_vias(def_text)
+    sources = read_bterms(def_text, dbu)
     netof = pin_nets(snets)
 
     straps = shapes_by_layer(snets, set(layers))
@@ -708,7 +892,44 @@ def run_audit(def_text, lefs, layers, via_min=VIA_MIN):
              "rects": [tuple([f["layer"]] + f["rect"]) for f in findings
                        if f["instance"] == t["instance"] and f["net"] == t["net"]
                        and f["pin"] == t["pin"]]})
-    nets_conn = net_components(snets, tbn, layers)
+    nets_conn = net_components(snets, tbn, layers, via_layers=via_layers, sources=sources,
+                               explain=True)
+    # The terminal verdict is REACHABILITY, which is PSM's question.  A via
+    # landing on a pin proves a join, not a supply: on the N=8 failing plan
+    # every pe_cell VGND pin carried a via whose partner was the macro's OWN
+    # met5 pin (pdngen makes that via too, `getInstancePins`), so the
+    # per-rect audit said connected, the net was one blob, and PSM counted
+    # all 512 of those rects unconnected -- because nothing the supply
+    # enters through reaches them.  With the top's pins known a terminal is
+    # connected iff some join chain reaches one; without them, iff it lands
+    # on the main component at all.  Everything a via joined but the supply
+    # never reaches is `unsourced` (#900).
+    explained = []
+    unproven = {(f["instance"], f["net"], f["pin"]) for f in findings if f["verdict"] == "via-no-partner"}
+    for t in terminals:
+        name = f"{t['instance']}.{t['pin']}"
+        c = nets_conn.get(t["net"])
+        reach, chain = False, None
+        if c is not None:
+            if c["has_source"]:
+                chain = join_path(c, name)
+                reach = chain is not None
+            else:
+                reach = name in c["components"][0]["terminals"] if c["components"] else False
+        t["reaches_source"] = reach
+        # a via the reader cannot explain (via-no-partner) proves nothing
+        # either way; its READER FAULT fails the run on its own, and the
+        # terminal keeps its verdict rather than adding a second failure
+        if t["verdict"] == "connected" and not reach and (t["instance"], t["net"], t["pin"]) not in unproven:
+            t["verdict"] = "unsourced"
+        if explain and (t["instance"] == explain or t["cell"] == explain or name == explain
+                        or explain == "*"):
+            explained.append({"terminal": name, "net": t["net"], "cell": t["cell"],
+                              "reaches_source": reach,
+                              "chain": [{"layer": r[0], "rect": [round(v, 3) for v in r[1:]], "how": how}
+                                        for r, how in (chain or [])]})
+    for v in nets_conn.values():
+        v.pop("graph", None)                   # not JSON-sized
     fragments = sum(v["fragments"] for v in nets_conn.values())
     stranded = sum(v["stranded_terminals"] for v in nets_conn.values())
     tcounts = {}
@@ -725,7 +946,9 @@ def run_audit(def_text, lefs, layers, via_min=VIA_MIN):
             "macros": macros, "pins": len(findings), "counts": counts,
             "terminals": terminals, "terminal_counts": tcounts,
             "connectivity": nets_conn, "fragments": fragments,
-            "stranded_terminals": stranded,
+            "stranded_terminals": stranded, "explained": explained,
+            "sources": {n: len(v) for n, v in sources.items()},
+            "via_layers_known": len(via_layers),
             "terminal_rows": terminal_rows, "n_terminals": len(terminals),
             "floating": floating, "rows": rows, "findings": findings,
             "nets": sorted(snets), "unplaced": unplaced,
@@ -738,12 +961,19 @@ def self_cross(lefs, layers, via_min=VIA_MIN):
     connect layers cross each other far enough to seat a via?
 
     This needs no DEF and no placement, because it is a property of the CELL.
-    It matters because `InstanceGrid::getInstancePins` injects a macro's pins
-    into the same shape set the straps are in, so a pin that crosses its own
-    net's pin on the other connect layer is connected by that crossing alone --
-    with no strap over it anywhere.  A macro whose VPWR pins cross and whose
-    VGND pins do not will connect one net and float the other on any phase,
-    which no strap-only prediction can see and no offset search can fix."""
+    Its worth is smaller than the first cut claimed.  The source reads as if
+    such a crossing were a via: `InstanceGrid::getInstancePins` injects the
+    macro's pins into the shape set `Grid::getIntersections` searches, and
+    that loop pairs every same-net lower shape with every upper one.  But
+    the N=8 run measured otherwise: the `PDN_HOFFSET 109.3` plan offered
+    pdngen 512 pe_cell VGND pin-on-pin crossings of 2.0 x 2.0 um over a 1.4
+    floor and it made NONE of them (every one `partner-no-via`, and PSM
+    counting exactly those 512 shapes unconnected) -- while on the working
+    plan the same pins are fed by a STRAP's via, not by each other.  What
+    in `makeVias` declines a pin-on-pin pair is not settled here.  So this
+    reports a crossing pdngen MAY via, never one it did: a `yes` is not a
+    connection, and a cell whose two nets differ here (`SPLIT`) is a cell
+    to look at, not a verdict (#900)."""
     lo, hi = layers
     out = []
     for cell in sorted(lefs):
@@ -772,9 +1002,10 @@ def report_self(res, out=sys.stdout):
     lo, hi = res["layers"]
     out.write(f"pdn_connect --self-cross: does a power pin cross its own net on "
               f"the other connect layer?\n"
-              f"  pair {lo}/{hi}, via floor {res['via_min']} um.  A pin that does is "
-              f"connected by that\n  crossing alone, whatever the straps do "
-              f"(InstanceGrid::getInstancePins).\n\n")
+              f"  pair {lo}/{hi}, via floor {res['via_min']} um.  A crossing pdngen MAY via "
+              f"(InstanceGrid::getInstancePins\n  puts the pins in the search set) -- not one it "
+              f"did: measured on N=8 it made none of 512 such\n  crossings, so a `yes` is not a "
+              f"connection.  The verdict is pdn_connect on the written DEF, and PSM.\n\n")
     out.write(f"  cell / pin              {lo:>6} {hi:>6}  overlap  self-crossed\n")
     for r in res["pins"]:
         out.write(f"  {r['cell']:<15} {r['pin']:<6} {r['rects'][lo]:>6} {r['rects'][hi]:>6} "
@@ -816,7 +1047,9 @@ def report(res, out=sys.stdout, limit=12):
     # diagnostic.  A LEF pin's several rects are access shapes for one node,
     # so a via on any of them feeds it -- counting rects would fail a macro
     # pdngen connected, for not viaing every access shape.
-    w("\n  terminals (a LEF pin is one node; any via on it feeds it)\n")
+    w("\n  terminals (a LEF pin is one node; it is connected when a via on it REACHES a source --\n"
+      "  the top's own pins -- and `unsourced` when its via joins metal the supply never enters,\n"
+      "  the macro's own pin on the other layer included: PSM-0038's shape)\n")
     w("  cell / net                         verdict          count\n")
     for r in res["terminal_rows"]:
         w(f"  {r['cell']:<16} {r['net']:<13} {r['verdict']:<16} {r['count']:>6}\n")
@@ -849,13 +1082,20 @@ def report(res, out=sys.stdout, limit=12):
     # the network question.  A terminal with its via can still be dead when
     # the metal it vias onto is cut off from the grid -- what PSM-0069
     # reports, and what the tables above structurally cannot show.
-    w("\n  network (is each net one piece of metal?)\n")
+    w("\n  network (is each net one piece of metal, and does the supply reach it?)\n")
     for net in sorted(res["connectivity"]):
         c = res["connectivity"][net]
         comps = c["components"]
         main = comps[0]
+        src = (f"sourced by the top's {res['sources'].get(net, 0)} pin shape(s)" if main.get("sourced")
+               else (f"NO SOURCE on it -- the top's {res['sources'].get(net, 0)} pin shape(s) on this net "
+                     f"touch none of its metal" if c["has_source"]
+                     else "no top pin on this net in the DEF, so the largest stands in as main"))
         w(f"  {net:<6} {len(comps)} component(s); main {main['shapes']} shape(s) "
-          f"{main['layers']} span {main['span']}\n")
+          f"{main['layers']} span {main['span']}, {src}\n")
+        if c.get("via_layers_unknown"):
+            w(f"    {c['via_layers_unknown']} via(s) of a name the DEF's VIAS section does not define: "
+              f"joined on every layer they cover\n")
         for frag in comps[1:1 + limit]:
             who = (f", STRANDING {len(frag['terminals'])} terminal(s): "
                    + ", ".join(frag["terminals"][:4])
@@ -873,8 +1113,17 @@ def report(res, out=sys.stdout, limit=12):
           f"{res['stranded_terminals']} terminal(s).  PSM-0040/PSM-0069 and the\n"
           f"  *-grid-errors.rpt are the verdict; this localises it.\n")
 
+    for e in res.get("explained", []):
+        if e["reaches_source"]:
+            w(f"\n  {e['terminal']} ({e['net']}, {e['cell']}) reaches a source in {len(e['chain'])} step(s):\n")
+            for k, step in enumerate(e["chain"]):
+                w(f"    {k:>3}. {step['layer']:<6} {step['rect']}  <- {step['how']}\n")
+        else:
+            w(f"\n  {e['terminal']} ({e['net']}, {e['cell']}) reaches NO source\n")
+    uns = res["terminal_counts"].get("unsourced", 0)
     w(f"\n  {res['terminal_counts'].get('connected', 0)} terminal(s) connected, "
-      f"{res['floating']} floating\n")
+      f"{res['floating']} floating" + (f" ({uns} of them unsourced: a via, but no chain to a source)" if uns
+                                       else "") + "\n")
 
 
 def main(argv=None):
@@ -893,6 +1142,10 @@ def main(argv=None):
     ap.add_argument("--self-cross", action="store_true",
                     help="LEFs only, no DEF: report per cell whether each power pin crosses its "
                          "own net on the other connect layer (see self_cross())")
+    ap.add_argument("--explain", metavar="WHO",
+                    help="print, for every power terminal of instance/cell/terminal WHO (or *), the "
+                         "chain of shapes and joins by which it reaches one of the top's own pins -- "
+                         "the first questionable link is what to compare with PSM")
     ap.add_argument("--json", metavar="OUT", help="write every finding as JSON")
     a = ap.parse_args(argv)
     try:
@@ -924,7 +1177,7 @@ def main(argv=None):
             raise InputShape("no LEF given, so no macro pin geometry to audit; pass the "
                              "hardened blocks' LEFs")
         res = (self_cross(lefs, layers, a.via_min) if a.self_cross
-               else run_audit(def_text, lefs, layers, a.via_min))
+               else run_audit(def_text, lefs, layers, a.via_min, a.explain))
     except InputShape as e:
         print(f"pdn_connect: ERROR: {e}", file=sys.stderr)
         return 2

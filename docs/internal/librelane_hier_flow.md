@@ -330,14 +330,20 @@ verified now, and it is narrower than the prose above implies:
   could explain.
 * `InstanceGrid::getInstancePins` (`:1609`) injects the macro's OWN pins as
   fixed shapes on their own layers and `InstanceGrid::getIntersections`
-  (`:1654`) merges them into the search set.  **So a macro's met4 pin can be
-  the partner that connects its met5 pin, with no strap anywhere.**  Neither
-  `harm.py`'s phase search nor `pdn_phase.py` models this, and it is a
-  per-CELL property: a cell whose VPWR pins cross each other and whose VGND
-  pins do not connects one net on every phase and floats the other on every
-  phase, which no offset search can fix and no strap-only prediction can
-  see.  `pdn_connect.py --self-cross <lef>...` asks exactly that question,
-  from the LEFs alone.
+  (`:1654`) merges them into the search set.  ~~So a macro's met4 pin can
+  be the partner that connects its met5 pin, with no strap anywhere.~~
+  **Measured otherwise** (PR #900, the N=8 `PDN_HOFFSET 109.3` run): that
+  plan offered pdngen 512 pe_cell VGND pin-on-pin crossings of 2.0 × 2.0 µm
+  over the 1.4 floor and it made NONE of them — `pdn_connect.py` reports
+  every one `partner-no-via`, and PSM counts exactly those 512 shapes
+  unconnected — while on the working plan the same pins are fed by a
+  strap's via.  What in `makeVias` declines a pin-on-pin pair is not
+  settled; the source loop pairs them.  So a self-crossing is one pdngen
+  MAY via, never one it did: `pdn_connect.py --self-cross <lef>...` still
+  asks the question from the LEFs alone, and its `yes` is a cell to look
+  at, not a connection.  The model does not depend on it either way — it
+  strands the island for want of a source — which is why direction B
+  fails correctly.
 * `Grid::makeVias` (`:827`) pulls into the macro's search area every shape
   from every OTHER grid, so the macro grid connects using the CORE grid's
   straps.  LibreLane's macro grid draws no metal of its own: `pdn_cfg.tcl`
@@ -1264,7 +1270,9 @@ offset cut VGND's met5 into 85 pieces (spans 32.8/108.6/152.8 µm against
 VPWR's 21 intact at 1636.7) and stranded some.  So its clip verdict is as
 unreliable as the connectivity verdict §7.2 records, and `harm.sh`'s
 "the PDN plan fails pdn_phase.py" warning is — on this evidence — a false
-alarm on a plan that works.
+alarm on a plan that works.  (Since resolved: `pdn_phase.py` now models
+pdngen's cut/via/TRIM and reports a meeting as a TRIM, not a clip — §11
+item 10.)
 
 **The verdict is OpenROAD's own PSM check, not `pdn_connect.py`.**  That
 script rolls up macro power TERMINALS, and the failure above is a strap
@@ -1639,6 +1647,20 @@ have: every netlist here is either authored or uniquified.
    met2-spacing violations in a repeating pattern, and hold at −0.238 ns.
    Both are deferred errors on an otherwise clean run (route DRC, LVS,
    antenna 0), and the hold half is the same clock question as item 6.
+   The DRC half is #896 (all five at `acc_cell` local (69.4, 0.0), next to
+   its own met4 VGND pin); `drc_locate.py` on the run's `.lyrdb` + top DEF
+   + `acc_cell.lef` says per edge whether the offending metal is on a
+   shape the LEF claims, in a hole of the abstract, or outside the box.
+   Run on the artefacts (PR #900) it is an abstraction NOTCH, not any of
+   the issue's three experiments: Magic's LEF leaves the corner where pin
+   `in[22]`'s rect ends and the met2 OBS begins uncovered (x 69.37–69.65,
+   y 0–0.56), the macro's real met2 sits in it, the router reads the notch
+   as free and overhangs the top's wire into it — 0.130 µm against m2.2's
+   0.140; the same notch beside `wbuf_cell`'s `rst` gives the N=2 H+B run
+   its one marker (0.040 µm).  The block's own DRC is 0 because the partner
+   shape is the top's wire.  Candidates: have the top read the
+   `-bloat_occupied_layers` abstract (`<cell>.openroad.lef`), or grow the
+   met2 OBS to cover the macro's real metal.
 9. **Two bundles for one cell-local link** (found on the way to §8 step
    7f, not chased): at N = 2 the row's activation chain comes out as TWO
    hbundles — `hb-11 D1 cell:row_cell "DRV:row_0/pe_0|REC:row_0/pe_1"
@@ -1653,15 +1675,48 @@ have: every netlist here is either authored or uniquified.
    look at `HierarchicalBundler`'s replica merge before reading the
    BUDA-1714 counts as the cost of hierarchy.
 
-10. **`pdn_phase.py`'s verdicts cannot be acted on** (§8 step 7e): its
-   connectivity model is wrong (§7.2) and its clip count is what pdngen
-   resolves by cutting straps — following it turned a working H+B design
-   into a `PSM-0069` failure.  Until it is fixed, `harm.sh`'s "the PDN plan
-   fails pdn_phase.py" warning should not be trusted — the verdict is
-   OpenROAD's own `PSM-0040`/`PSM-0069`, with `pdn_connect.py` on the
-   written DEF to LOCALISE a failure (its terminal rollup cannot see an
-   isolated strap fragment; its `net_components()` pass, added by #894,
-   can).  Filed as #895.
+10. ~~**`pdn_phase.py`'s verdicts cannot be acted on**~~ REWRITTEN (#895):
+   the old model counted every same-layer meeting as a defect (the "144
+   clips" FAIL on the plan that works, §8 step 7e) and called a via-less
+   strap fragment stranded; following it turned a working H+B design into
+   a `PSM-0069` failure.  It now predicts pdngen's own steps, read from
+   OpenROAD's `src/pdn` — cut (`Shape::cut`, spacing across and halo along
+   the layer's wire axis), via (`Grid::getIntersections`, the macro's own
+   pins injected by `getInstancePins`), TRIM (`PdnGen::trimShapes`: a
+   fragment with fewer vias than `Shape::isRemovable` requires is removed —
+   2, or 1 on a pin layer, and `PDN_ENABLE_PINS` makes both connect layers
+   pin layers; `PDN_SKIPTRIM` skips it and harm.py sets that for BLOCKS
+   only) — and partitions what survives with `pdn_connect.py`'s OWN
+   `net_components`, so prediction and post-mortem share one definition of
+   "connected".  It reports TRIMs as information, STRANDED terminals (no
+   rectangle of the pin on its net's grid — a LEF PIN is one terminal,
+   which is why the phase-0 toy passes PSM with two VGND rectangles off the
+   grid) and FLOATING fragments (survive trim off the grid: the "N
+   unconnected shapes" PSM counts), and offers only a VERIFIED shift.  On
+   the phase-0 toy: x=10 PASS and x=20 FAIL (u0's VPWR stranded), both as
+   measured.  Still ADVISORY — a prediction from the LEFs and the config —
+   and the verdict stays OpenROAD's `PSM-0040`/`PSM-0069`.  **Validated
+   both ways on the N=8 artefacts** (PR #900, three run reports):
+
+   | on the N=8 artefacts | `pdn_phase.py` (prediction) | `pdn_connect.py` (written DEF) | PSM |
+   |---|---|---|---|
+   | harm.py's own plan | PASS, 104/104 terminals on the grid | 208 connected, 0 floating | `PSM-0040` both nets |
+   | `PDN_HOFFSET 109.3` | FAIL: 64 stranded in 64 instance-nets | 144 connected, 64 floating (64 unsourced) | `PSM-0069`, 512 shapes |
+
+   The arithmetic closes on both sides: each pe_cell's VGND strands on a
+   component of its own 8 pin rects, × 64 = the 512 shapes PSM counts, and
+   the old code FAILed the working plan (144 "clips").  Getting there took
+   two reader fixes the artefacts exposed: the DEF `PINS` reader wanted
+   `;` on its own line (OpenROAD writes it on the `PLACED` line; 0 of 324
+   pins read, sources silently off), and the terminal verdict was "a via
+   landed" where PSM's is "a chain reaches a source" — on the failing plan
+   every pe_cell VGND rect had a same-net 2.0 × 2.0 µm crossing with the
+   macro's own met5 pin and pdngen made no via there (§7.2), so nothing
+   the supply enters through reaches those rects: `unsourced`.  "One
+   blob" and "the supply reaches it" are different questions, and only
+   the second is PSM's.  The prediction's remedy on that plan — every
+   macro `dy=+1.6`, i.e. `PDN_HOFFSET=107.7` — is a falsifiable claim only
+   a top run checks.
 11. **The 5 % pass threshold of measurement A** (§8 step 5) is a number
    read off two runs of one toy.  It should be re-read on the first real
    vehicle (tier 1a, N=4): if the gcell-edge and pin-access share does not
