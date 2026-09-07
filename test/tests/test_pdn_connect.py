@@ -82,6 +82,7 @@ SPECIALNETS 2 ;
   NEW met4 1600 + SHAPE STRIPE ( 200000 0 ) ( * 600000 )
   NEW met4 0 ( 111000 300000 ) via4_5
   NEW met4 0 ( 200000 221000 ) via4_5
+  NEW met4 0 ( 200000 300000 ) via4_5
   + USE POWER ;
 - VGND ( * VGND )
   + ROUTED met5 1600 + SHAPE STRIPE ( 0 320000 ) ( 500000 * )
@@ -130,7 +131,7 @@ def test_entry_tail_is_not_read_as_a_via_name():
     censused as an unread `via_mid_path`."""
     nets, census = P.read_specialnets(DEF, DBU)
     assert "via_mid_path" not in census
-    assert [v[3] for v in nets["VPWR"]["vias"]] == ["via4_5", "via4_5"]
+    assert [v[3] for v in nets["VPWR"]["vias"]] == ["via4_5"] * 3
     assert nets["VGND"]["vias"] == []
 
 
@@ -431,3 +432,138 @@ def test_terminal_rows_are_the_verdict_and_rect_rows_the_diagnostic(tmp_path):
     P.report(res, out=type("W", (), {"write": lambda self, s: out.append(s)})())
     text = "".join(out)
     assert "terminals (a LEF pin is one node" in text and "access rectangles" in text
+
+
+# ── is the NETWORK whole? ─────────────────────────────────────────────────
+# The failure mode the tables above structurally cannot see: a terminal keeps
+# its via while the metal it vias onto is a fragment cut off from the grid.
+# Measured on the study's own N=8 run, where the FAILING DEF and the passing
+# one both audited "208 terminals connected, 0 floating" (#893).
+def test_a_whole_grid_reports_one_component_per_net(tmp_path):
+    res = _run(tmp_path=tmp_path)
+    assert res["fragments"] == 0 and res["stranded_terminals"] == 0
+    vp = res["connectivity"]["VPWR"]["components"]
+    assert len(vp) == 1 and vp[0]["layers"] == {"met4": 1, "met5": 1}
+
+
+def test_crossing_metal_needs_a_via_to_be_one_network(tmp_path):
+    """VPWR's met4 and met5 straps cross, and metal on two layers is not
+    connected without a via — that is what the via is for.  Drop the crossing
+    via and the net is two pieces; it is the only difference."""
+    deff = DEF.replace("  NEW met4 0 ( 200000 300000 ) via4_5\n", "")
+    res = _run(deff, tmp_path=tmp_path)
+    comps = res["connectivity"]["VPWR"]["components"]
+    assert len(comps) == 2
+    assert {tuple(sorted(c["layers"])) for c in comps} == {("met4",), ("met5",)}
+    assert res["fragments"] == 1
+
+
+def test_a_fragment_carrying_terminals_strands_them_and_fails(tmp_path):
+    """The exit has to move: the per-pin tables still say every terminal has
+    its via, which is exactly the false clean result #893 hit."""
+    deff = DEF.replace("  NEW met4 0 ( 200000 300000 ) via4_5\n", "")
+    res = _run(deff, tmp_path=tmp_path)
+    assert res["floating"] == 1                       # unchanged, VGND's
+    assert res["terminal_counts"]["connected"] == 1   # VPWR still "connected"
+    assert res["stranded_terminals"] >= 1             # and yet stranded
+    frag = res["connectivity"]["VPWR"]["components"][1]
+    assert "row_0.pe_0.VPWR" in frag["terminals"]
+
+    r = _cli(tmp_path, deff, LEF, "--allow-floating", "9")
+    assert r.returncode == 1, r.stdout
+    assert "fragment(s) off the main network" in r.stdout
+    r = _cli(tmp_path, deff, LEF, "--allow-floating", "9", "--allow-stranded", "9")
+    assert r.returncode == 0, r.stdout
+
+
+def test_a_terminal_bridging_two_components_is_reported_not_applied(tmp_path):
+    """A hard macro's internal PDN really does join two fragments landing on
+    one of its pins, but PSM cannot traverse an abstract LEF and does not
+    credit it.  Agreeing with the verdict matters more than being physically
+    complete, so the bridge is a NOTE and never a union."""
+    deff = DEF.replace("  NEW met4 0 ( 200000 300000 ) via4_5\n", "")
+    res = _run(deff, tmp_path=tmp_path)
+    bridged = res["connectivity"]["VPWR"]["bridged_by"]
+    assert [b["terminal"] for b in bridged] == ["row_0.pe_0.VPWR"]
+    assert bridged[0]["components"] == [0, 1]
+    assert len(res["connectivity"]["VPWR"]["components"]) == 2   # still split
+
+
+def test_a_fragment_with_no_terminal_is_reported_but_strands_nothing(tmp_path):
+    """Floating stub metal is worth naming and is not a stranded pin, so it
+    must not fail the run on its own."""
+    deff = DEF.replace("  + USE GROUND ;",
+                       "  NEW met5 1600 + SHAPE STRIPE ( 0 500000 ) ( 100000 * )\n"
+                       "  + USE GROUND ;")
+    res = _run(deff, tmp_path=tmp_path)
+    frags = res["connectivity"]["VGND"]["components"][1:]
+    assert len(frags) == 1 and frags[0]["terminals"] == []
+    assert res["stranded_terminals"] == 0
+    r = _cli(tmp_path, deff, LEF, "--allow-floating", "9")
+    assert r.returncode == 0, r.stdout
+
+
+def test_a_strap_written_as_segments_is_one_component(tmp_path):
+    """pdngen writes a strap as path segments that meet end to end.  A
+    strict-overlap rule would fragment every strap at every join and report a
+    whole grid as rubble, so touching counts."""
+    deff = DEF.replace("  + ROUTED met5 1600 + SHAPE STRIPE ( 0 320000 ) ( 500000 * )",
+                       "  + ROUTED met5 1600 + SHAPE STRIPE ( 0 320000 ) ( 250000 * )\n"
+                       "  NEW met5 1600 + SHAPE STRIPE ( 250000 320000 ) ( 500000 * )")
+    res = _run(deff, tmp_path=tmp_path)
+    comps = res["connectivity"]["VGND"]["components"]
+    assert len(comps) == 1 and comps[0]["shapes"] == 2
+    assert res["fragments"] == 0
+
+
+def test_components_are_ordered_with_the_grid_first(tmp_path):
+    """`main` is the largest by area — a fragment is what is NOT the grid, so
+    a one-shape stub must never be read as the network."""
+    deff = DEF.replace("  + USE GROUND ;",
+                       "  NEW met5 1600 + SHAPE STRIPE ( 0 500000 ) ( 100000 * )\n"
+                       "  + USE GROUND ;")
+    comps = _run(deff, tmp_path=tmp_path)["connectivity"]["VGND"]["components"]
+    assert comps[0]["area"] > comps[1]["area"]
+    assert [c["id"] for c in comps] == [0, 1]
+
+
+def test_the_index_agrees_with_a_naive_reference(tmp_path):
+    """`_BinIndex` replaced an exact O(N^2) scan, and an index that quietly
+    drops a candidate would merge nothing and report a whole grid as rubble.
+    So the partition is checked against a plain pairwise implementation on
+    random geometry — a second implementation, not a re-run of the first."""
+    import itertools
+    import random
+
+    def naive(sn):
+        rects = list(sn["N"]["rects"])
+        uf = P._UF(len(rects))
+        for i, j in itertools.combinations(range(len(rects)), 2):
+            if rects[i][0] == rects[j][0] and P._touch(rects[i][1:], rects[j][1:]):
+                uf.union(i, j)
+        for (_l, vx, vy, _n) in sn["N"]["vias"]:
+            hit = [i for i, r in enumerate(rects)
+                   if r[1] - P.EPS <= vx <= r[3] + P.EPS
+                   and r[2] - P.EPS <= vy <= r[4] + P.EPS]
+            for j in hit[1:]:
+                uf.union(hit[0], j)
+        g = {}
+        for i in range(len(rects)):
+            g.setdefault(uf.find(i), 0)
+            g[uf.find(i)] += 1
+        return sorted(g.values())
+
+    rng = random.Random(7)
+    for _ in range(120):
+        rects, vias = [], []
+        for _r in range(rng.randint(2, 30)):
+            x, y = rng.uniform(0, 60), rng.uniform(0, 60)
+            rects.append((rng.choice(["met4", "met5"]), round(x, 2), round(y, 2),
+                          round(x + rng.uniform(0.5, 25), 2),
+                          round(y + rng.uniform(0.5, 25), 2)))
+        for _v in range(rng.randint(0, 12)):
+            vias.append(("met4", round(rng.uniform(0, 60), 2),
+                         round(rng.uniform(0, 60), 2), "v"))
+        sn = {"N": {"rects": rects, "vias": vias, "pins": ["N"]}}
+        got = sorted(c["shapes"] for c in P.net_components(sn, {})["N"]["components"])
+        assert got == naive(sn), (rects, vias)
