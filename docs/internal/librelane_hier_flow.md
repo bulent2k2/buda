@@ -310,6 +310,55 @@ met4 to the block works only while the block's met4 is its own grid.
 metal or as foreign, and reports the foreign case before the top runs,
 which is the check nothing in the flow had.
 
+**What pdngen's connection mechanism actually is** (OpenROAD `src/pdn/src`,
+read 2026-09-07 — until then the rule above was inferred from behaviour, and
+a run whose macros floated had been chased on the inference).  It is
+verified now, and it is narrower than the prose above implies:
+
+* `Grid::getIntersections` (`grid.cpp:573`) emits a via wherever a same-net
+  shape on an `add_pdn_connect` pair's LOWER layer OVERLAPS a same-net shape
+  on its UPPER layer.  That is the whole rule.  It is CROSS-LAYER, so "a
+  strap of the same net over the pin on the pin's own layer" is not part of
+  it — a macro pin with no strap above it connects perfectly well, which is
+  what a model-free reading of a failing run's PDN DEF had shown and nothing
+  could explain.
+* `InstanceGrid::getInstancePins` (`:1609`) injects the macro's OWN pins as
+  fixed shapes on their own layers and `InstanceGrid::getIntersections`
+  (`:1654`) merges them into the search set.  **So a macro's met4 pin can be
+  the partner that connects its met5 pin, with no strap anywhere.**  Neither
+  `harm.py`'s phase search nor `pdn_phase.py` models this, and it is a
+  per-CELL property: a cell whose VPWR pins cross each other and whose VGND
+  pins do not connects one net on every phase and floats the other on every
+  phase, which no offset search can fix and no strap-only prediction can
+  see.  `pdn_connect.py --self-cross <lef>...` asks exactly that question,
+  from the LEFs alone.
+* `Grid::makeVias` (`:827`) pulls into the macro's search area every shape
+  from every OTHER grid, so the macro grid connects using the CORE grid's
+  straps.  LibreLane's macro grid draws no metal of its own: `pdn_cfg.tcl`
+  is `define_pdn_grid -macro -default -name macro -starts_with POWER -halo
+  ...` plus exactly one `add_pdn_connect -grid macro -layers
+  "$PDN_VERTICAL_LAYER $PDN_HORIZONTAL_LAYER"`, and no `add_pdn_stripe`.
+  (Worth recording because if it HAD drawn its own straps, the phase search
+  would be aiming at metal that does not exist.)
+
+The same-layer CUT (`Shape::cut`, `shape.cpp:223`, sparing a same-net
+obstruction only when the strap contains it across its width) is real and
+unchanged — it is what REMOVES a strap, not what connects one.  The two
+relations are independent, and only the cross-layer one answers "is this pin
+fed".
+
+`pdn_connect.py` is the post-mortem twin of `pdn_phase.py`: it reads the DEF
+pdngen WROTE and reports, per macro power pin, whether a via landed on it and
+— where none did — whether the pin had a same-net crossing to connect to at
+all.  Nothing in it is modelled: every cut, halo and obstruction subtraction
+has already happened by the time that metal is in the file, so it needs no
+theory of any of them.  Its four verdicts are `connected` (a via, ground
+truth), `no-partner` (nothing to reach — a geometry story), `partner-no-via`
+(the crossing is there and the via is not — take it to the pdngen log, not to
+more geometry), and `via-no-partner`, which the rule above makes impossible
+and which therefore means the READER is wrong; it is printed first and fails
+the run on its own, so a wrong reading cannot be mistaken for a clean design.
+
 ### 7.3 Metrics — all from LibreLane's own `metrics.json`
 
 Per arm and per N: wall-clock (total and per stage; H arms report block
