@@ -95,13 +95,21 @@ if ! command grep -q 'Flow complete' "rep_${tag}_3c.log"; then
     echo "        no .end marker written.  Last lines:" >&2
     tail -3 "rep_${tag}_3c.log" >&2
     echo "        NOTE: top/runs/$tag/final/metrics.json may exist and be STALE." >&2
-    exit "${tail_rc:-1}"
+    # NOT `${tail_rc:-1}`: that substitutes only when the variable is unset
+    # or EMPTY, never when it is `0` -- so a tail that returns zero without
+    # completing (a Docker-side kill that exits clean, a truncated log)
+    # printed FAILED and then exited SUCCESS.  The very shape this branch
+    # exists to close, one level down (Codex/review #906).
+    exit $(( tail_rc ? tail_rc : 1 ))
 fi
 date +%s > "rep_${tag}.end"
 echo "repeat: done in $(( $(cat "rep_${tag}.end") - $(cat "rep_${tag}.start") ))s -> top/runs/$tag"
 if [ "$tail_rc" -ne 0 ]; then
     echo "repeat: the flow completed every step but exited $tail_rc -- a DEFERRED"
     echo "        signoff error (a DRC/LVS count), not an aborted run.  Read it:"
-    command grep -E 'ERROR.*deferred' "rep_${tag}_3c.log" | tail -3
+    # `|| true`: this is a DIAGNOSTIC.  Under `set -euo pipefail` a grep that
+    # matches nothing exits 1, fails the pipeline and ends the script at 1 --
+    # discarding the very status the line above promises to preserve.
+    command grep -E 'ERROR.*deferred' "rep_${tag}_3c.log" | tail -3 || true
 fi
 exit "$tail_rc"
