@@ -1764,6 +1764,44 @@ have: every netlist here is either authored or uniquified.
    the second is PSM's.  The prediction's remedy on that plan — every
    macro `dy=+1.6`, i.e. `PDN_HOFFSET=107.7` — is a falsifiable claim only
    a top run checks.
+13. **Both candidate fixes for the #896 notch FAIL, each differently**
+   (measured 2026-09-07 on the N = 8 H+B arm, one top run each).  §11 item 7
+   named two: read OpenROAD's bloated abstract at the top, or grow the met2
+   OBS to cover the macro's real metal.  Neither survives contact.
+
+   * **`<cell>.openroad.lef` (the whole abstract) destroys the PDN.**  It
+     does close the notch — a single `4.67,0 – 91.47,60` rect covers it —
+     but it adds blanket OBS on **met4 and met5**, where Magic's LEF has
+     NONE, and those are the top's PDN layers.  pdngen drops every strap
+     that crosses an obstruction, so the macros lose their supply:
+     **125,800 power grid violations**, the flow stopping at
+     `Checker.PowerGridViolations` before routing mattered.  That is §7.2's
+     own rule ("foreign metal on a PDN layer is the dangerous kind")
+     reproduced by the proposed fix.  It also needs producing first —
+     `OpenROAD.WriteViews` is not in the Classic flow, so the file never
+     exists (`write_abstract.tcl` makes it from a block's final ODB).
+   * **The layer-scoped form (met2's OBS only, `patch_obs.py`) fixes the
+     DRC and breaks extraction.**  It clears the PDN gate (`PSM-0040` both
+     nets) and takes **KLayout DRC 2 → 0** at **+0.15 % top wire**
+     (300,704 → 301,145 µm) with timing and die unmoved — and then Magic
+     reports **6,233 illegal overlaps against the baseline's 0**, every one
+     of them `Illegal overlap between obsm2 and metal2 (types do not
+     connect)`.
+   
+   The second failure is the informative one: a blanket met2 OBS
+   CONTRADICTS what this arm does, because the top routes met2 — that is
+   where `emit_pin_def` puts the N/S bus pins, so the router must reach met2
+   on the macro's faces and cross met2 over it.  Declaring the whole layer
+   obstructed and then routing on it is exactly the overlap Magic counts.
+
+   So the fix cannot be "obstruct the layer"; it has to be **"obstruct the
+   metal the abstract omits, and nothing else"** — the boolean difference
+   between the macro's real met2 GDS and Magic's met2 OBS, added as rects.
+   That is the surgical version of the same idea, it leaves every place the
+   top legitimately routes met2 free, and it is the next thing to try.  Not
+   yet run: it needs the GDS difference computed per cell (KLayout can) and
+   one more top run to judge.
+
 12. **`pdn_phase.py` detects, but its REMEDY is wrong** (measured
    2026-09-07 on the N = 8 artefacts).  The model now fails the
    `PDN_HOFFSET 109.3` plan correctly — 64 stranded terminals, matching
