@@ -1614,6 +1614,48 @@ and the same class as step 7e's five in `acc_cell` (§11 item 7).  So every
 DRC violation this arm has ever produced traces to one hole in one cell's
 LEF, not to the routing.
 
+**7g. LOOK at a run** (`flow/librelane/snapshots.py`).  Every measurement in
+this section is a number, and the study had no way to SEE a run: LibreLane
+renders exactly ONE image, of the FINAL layout, while the eighteen
+intermediate DEFs a top run writes — floorplan, macro placement, PDN, global
+and detailed placement, CTS, global and detailed routing — sit on disk and
+nothing ever draws them.  A wrong floorplan is then invisible until a metric
+twelve steps later is wrong.
+
+```bash
+python3 flow/librelane/snapshots.py <run>/runs/<tag> --list      # what is there
+python3 flow/librelane/snapshots.py <run>/runs/<tag> --bdb       # curated set + BDBs
+```
+
+**Nothing is re-run** — every artefact comes from files the run already
+wrote, so it works on runs finished weeks ago and costs seconds a stage.  The
+renderer is KLayout's own `render.py`, the one the flow's `KLayout.Render`
+step uses, which takes a DEF as readily as a GDS; the tech file, layer
+properties, layer map and cell LEFs all come from the run's own
+`resolved.json`, so a stage renders in exactly the colours the final render
+uses.  (The script lives at a Nix store path inside the image, so it is
+located by asking the interpreter, not by hard-coding a path that works until
+the next release.)
+
+**A BDB is written only where a BDB is the right container, and the boundary
+is measured rather than assumed.**  `import_def_lef` reads COMPONENTS, NETS
+and pin connectivity, so a placement stage lands complete — on the N = 8 top,
+296 components / 4 cells / 3,586 nets / 6,928 pins at macro placement, rising
+to 39,465 / 7 / 3,861 by CTS as tap cells and the clock tree appear, which is
+itself worth watching.  But it does NOT read routed geometry:
+`net_segment`, `bus_segment` and `net_via` come back **0/0/0** on a routed
+DEF, because those tables are BUDA's OWN routing output.  A BDB of a routed
+stage would therefore look like an unrouted design and quietly mislead, so
+the tool refuses to write one and says why.  For somebody else's routing the
+DEF is the artefact: `bin/viz <run>/NN-step/<design>.def` opens it, and
+`bin/fp <stage>.bdb` opens a placement stage where a macro can be dragged and
+the HPWL and flylines move with it.
+
+What the first run of it showed on the N = 8 H+B top, at a glance and with no
+measurement: the 8 × 8 PE array, the `feed_cell` column down the west edge,
+the `wbuf` row above and the `acc`/pipe rows below — and the wide empty
+margins that §7.4's die penalty is made of.
+
 **8. Tier 1b — a Gemmini mesh at N = 4, 8, 16.**  Chipyard needs Linux; on
 the Mac that is a Linux container with the BUDA checkout mounted.  The full
 recipe, with the two places it is guessing, is
