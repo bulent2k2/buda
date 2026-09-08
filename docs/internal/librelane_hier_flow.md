@@ -1764,6 +1764,32 @@ have: every netlist here is either authored or uniquified.
    the second is PSM's.  The prediction's remedy on that plan — every
    macro `dy=+1.6`, i.e. `PDN_HOFFSET=107.7` — is a falsifiable claim only
    a top run checks.
+12. **`pdn_phase.py` detects, but its REMEDY is wrong** (measured
+   2026-09-07 on the N = 8 artefacts).  The model now fails the
+   `PDN_HOFFSET 109.3` plan correctly — 64 stranded terminals, matching
+   PSM's 512 shapes — and offers a verified-looking fix with it: *"shifting
+   EVERY macro by dy=+1.600 (`PDN_HOFFSET=107.7`) leaves nothing predicted
+   to fail"*.  It does not.  Built and checked, the 107.7 plan gives
+   `PSM-0069` on VGND with **512 unconnected shapes whose coordinate list
+   is byte-identical to 109.3's** — the remedy moved nothing that mattered,
+   though it did apply (the met5 straps moved exactly 1.6 µm, 120180 →
+   118580 DBU).  `pdn_phase.py` predicts `PASS` for it.  So the detection
+   half is validated and the remedy half is not, and a remedy that looks
+   verified is worse than none: §11 item 10's whole lesson was that acting
+   on this tool by hand broke a working design.  Until the shift search is
+   checked the same way the verdict now is, treat the offset it names as a
+   hypothesis and test it with `check_grid.tcl`, which costs minutes:
+
+   ```
+   cd <arm>/top && librelane --dockerized --run-tag pdnX --to OpenROAD.GeneratePDN config_X.json
+   ../../../phase0/measure/run_or.sh runs/pdnX ../../../check_grid.tcl \
+       ODB=$PWD/runs/pdnX/21-openroad-generatepdn/*.odb
+   ```
+
+   That check is itself validated against a known failure (the 109.3 run's
+   own ODB: 512 shapes, `PSM-0069` on VGND, VPWR clean — the signoff
+   verdict, from step 21 instead of step 56).
+
 11. **The 5 % pass threshold of measurement A** (§8 step 5) is a number
    read off two runs of one toy.  It should be re-read on the first real
    vehicle (tier 1a, N=4): if the gcell-edge and pin-access share does not
