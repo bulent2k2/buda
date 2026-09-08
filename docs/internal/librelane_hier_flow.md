@@ -456,17 +456,15 @@ study exists to answer and stays.
   MEASURED grounds rather than for want of a measurement: **run-to-run
   timing noise is ZERO** (measured 2026-09-08 — an independent repeat of
   the N = 8 H+B arm, all three legs, against the run it repeats:
-  **273 metrics present in both, 0 differ**, `timing__setup__ws` bit-equal
-  at 0.367518 and `route__wirelength` at 300,704).  The layout is
-  reproducible, which is what the pinned detailed-router seed
-  (`-or_seed 42`, §4) predicted, so there is no noise for a tolerance to
-  absorb and every loss counts by arithmetic rather than by policy.  Two
-  caveats worth keeping: it is ONE repeat of ONE config (bit-identity is
-  far stronger evidence than closeness — it says the flow is
-  deterministic, not merely quiet — but it is still one pair), and the
-  repeat aborted at step 62 of 72 when its session tore down, so the nine
-  LVS/DRC metrics past that point are absent from the comparison rather
-  than equal (the timing figure lands at step 55 and is unaffected).
+  **282 metrics present in both, 0 differ**, with no key in one and not
+  the other — `timing__setup__ws` bit-equal at 0.367518,
+  `route__wirelength` at 300,704, and the signoff counts down to the
+  baseline's own 2 KLayout DRC errors).  The layout is reproducible, which
+  is what the pinned detailed-router seed (`-or_seed 42`, §4) predicted,
+  so there is no noise for a tolerance to absorb and every loss counts by
+  arithmetic rather than by policy.  One caveat stands: it is ONE repeat
+  of ONE config — bit-identity is far stronger evidence than closeness (it
+  says the flow is deterministic, not merely quiet), but it is one pair.
   **N = 8 status:** holds on wall (4,797 s vs H's 6,208), CPU-sum (5,402
   vs 6,996 s), arm wire, die (3.935 vs 6.347 mm²), hold (H's −1.075 ns
   fixed to +0.112), power, PSM, Magic overlaps (0 vs 0) and — since
@@ -1623,9 +1621,10 @@ deferred errors, the first fully clean signoff this arm has produced.
 under H (+0.3705 against +0.3890) on the notch-fixed arm.  That it is a real
 regression rather than measurement scatter is now measured rather than
 assumed — an independent repeat of the whole arm reproduced it BIT-IDENTICALLY
-(273 metrics present in both, 0 differ; `timing__setup__ws` equal to the
-digit at 0.367518, `route__wirelength` at 300,704), so run-to-run timing noise
-is zero and there is no tolerance for the gap to hide in.  What that leaves is
+(282 metrics present in both, 0 differ, with no key in one and not the other;
+`timing__setup__ws` equal to the digit at 0.367518, `route__wirelength` at
+300,704, and the signoff counts down to the baseline's own 2 KLayout DRC
+errors), so run-to-run timing noise is zero and there is no tolerance for the gap to hide in.  What that leaves is
 a tuning question rather than a verdict on the mechanism: this arm has never
 been timing-driven — no `PNR_SDC_FILE`, and §5's per-pin timing budgets are
 phase 3 and unbuilt — so 0.0185 ns of a +0.39 ns margin is the first thing a
