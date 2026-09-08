@@ -929,7 +929,7 @@ in it while step 3b's -- run from here -- does.)
 """
     pin_note = ("""
 **This is arm H+B's block side.**  Every block config carries
-`FP_DEF_TEMPLATE` (match mode `strict`) from BUDA's plan and is capped at
+`FP_DEF_TEMPLATE` (match mode `permissive`, see step 1) from BUDA's plan and is capped at
 `RT_MAX_LAYER met3` -- the pins come from where BUDA's bit-wires reach each
 cell's faces instead of from LibreLane's own placer, which is one of the
 three things §7.2 defines H+B by.  Two costs the templates carry are
@@ -1068,7 +1068,7 @@ def main(argv=None):
     for line in r["advice"]:
         print("harm: " + line)
     if r["pin_templates"]:
-        print(f"harm: pins from BUDA's plan (FP_DEF_TEMPLATE, match mode strict) for "
+        print(f"harm: pins from BUDA's plan (FP_DEF_TEMPLATE, match mode permissive) for "
               f"{', '.join(r['pin_templates'])}, each block capped at RT_MAX_LAYER met3 "
               f"-- this is arm H+B's block side; stamp the row `--set arm=H+B`")
     arm = "H+B" if r["pin_templates"] else "H"

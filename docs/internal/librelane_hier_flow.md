@@ -1485,6 +1485,53 @@ large and neither is noise, and "H+B ≥ H on every PPA metric" admits no
 allowance for either — so the criterion is what has to be argued about (§11
 item 1), not the measurement.
 
+
+**MEASURED at N = 8** (2026-09-07), with the H+size row of step 7e as the
+CONTROL — same emitted set (byte-identical `tpu.def`/`tpu.lef`/`tpu_rtl.v`),
+same block sizes, same placement, so the delta is the pins and the corridors
+and nothing else:
+
+| N = 8 | F | H | H+size | **H+B** | H+B vs H+size |
+|---|---|---|---|---|---|
+| arm wall | 4,541 s | 6,208 s | 5,023 s | **4,797 s** | −4.5 % |
+| top alone | 4,541 s | 5,882 s | 4,615 s | 4,496 s | −2.6 % |
+| blocks (wall, parallel) | — | 326 s | 408 s | 301 s | −26 % (noise: ±25 %) |
+| die | 1.032 mm² | 6.347 | 3.935 | 3.935 | — |
+| utilisation | 46.3 % | 50.8 % | 38.7 % | 38.7 % | — |
+| **top wire** | 934,831 µm | 803,897 | 749,932 | **300,704** | **−59.9 %** |
+| **block wire** | — | 1,176,440 | 981,616 | **1,382,072** | **+40.8 %** |
+| **arm wire** | — | 1,980,337 | 1,731,548 | **1,682,776** | **−2.8 %** |
+| setup WS | −0.550 ns | +0.389 | +0.464 | +0.368 | −0.096 ns |
+| **hold WS** | +0.091 ns | **−1.075** | −0.238 | **+0.112** | +0.350 ns |
+| route DRC / LVS / antenna | 0 | 0 | 0 | 0 | — |
+| KLayout DRC | 0 | 0 | 5 | **2** | −3 |
+
+PSM clean on both nets, 168/168 template pins verified in the hardened
+blocks, 2,944 guided nets all present in the design, `check_design dnuts`
+clean before the handoff.
+
+**The N = 2 question is settled, and favourably.**  At N = 2 the corridors
+bought −45.4 % of the top's wire for +37.5 % on the blocks and the arm total
+came out **+0.6 %: a wash**, and this doc said plainly that whether the trade
+improves with N was not settled and should not be guessed, since both halves
+scale with N².  At N = 8 the top saving GROWS to **−59.9 %** while the block
+cost holds at +40.8 %, and the arm total turns into a **−2.8 % net win**.  So
+the corridor saving scales better than the pin cost does — measured at two
+points, one doubling apart, rather than argued.
+
+**H+B against arm H**: better on wall (−23 %), die (0.62×), top wire (−63 %),
+arm wire (−15 %), power (−3.6 %) and — the one that matters most — **hold
+slack, which H FAILS at −1.075 ns and H+B passes at +0.112 ns** (§11 item 6).
+Worse on block wire (+17 %), setup slack (−0.021 ns of a +0.39 ns margin) and
+**KLayout DRC 0 → 2**.
+
+**§7.4's floor is still unmet, on the same defect and nothing else.**  Both
+remaining markers are one `m2.2` at `wbuf_cell` local (91.4, 14.9), in
+`wbuf_1` and `wbuf_5` — the SAME abstraction notch as the single N = 2 marker
+and the same class as step 7e's five in `acc_cell` (§11 item 7).  So every
+DRC violation this arm has ever produced traces to one hole in one cell's
+LEF, not to the routing.
+
 **8. Tier 1b — a Gemmini mesh at N = 4, 8, 16.**  Chipyard needs Linux; on
 the Mac that is a Linux container with the BUDA checkout mounted.  The full
 recipe, with the two places it is guessing, is
@@ -1717,6 +1764,73 @@ have: every netlist here is either authored or uniquified.
    the second is PSM's.  The prediction's remedy on that plan — every
    macro `dy=+1.6`, i.e. `PDN_HOFFSET=107.7` — is a falsifiable claim only
    a top run checks.
+13. **Both candidate fixes for the #896 notch FAIL, each differently**
+   (measured 2026-09-07 on the N = 8 H+B arm, one top run each).  §11 item 7
+   named two: read OpenROAD's bloated abstract at the top, or grow the met2
+   OBS to cover the macro's real metal.  Neither survives contact.
+
+   * **`<cell>.openroad.lef` (the whole abstract) destroys the PDN.**  It
+     does close the notch — a single `4.67,0 – 91.47,60` rect covers it —
+     but it adds blanket OBS on **met4 and met5**, where Magic's LEF has
+     NONE, and those are the top's PDN layers.  pdngen drops every strap
+     that crosses an obstruction, so the macros lose their supply:
+     **125,800 power grid violations**, the flow stopping at
+     `Checker.PowerGridViolations` before routing mattered.  That is §7.2's
+     own rule ("foreign metal on a PDN layer is the dangerous kind")
+     reproduced by the proposed fix.  It also needs producing first —
+     `OpenROAD.WriteViews` is not in the Classic flow, so the file never
+     exists (`write_abstract.tcl` makes it from a block's final ODB).
+   * **The layer-scoped form (met2's OBS only, `patch_obs.py`) fixes the
+     DRC and breaks extraction.**  It clears the PDN gate (`PSM-0040` both
+     nets) and takes **KLayout DRC 2 → 0** at **+0.15 % top wire**
+     (300,704 → 301,145 µm) with timing and die unmoved — and then Magic
+     reports **6,233 illegal overlaps against the baseline's 0**, every one
+     of them `Illegal overlap between obsm2 and metal2 (types do not
+     connect)`.
+   
+   The second failure is the informative one: a blanket met2 OBS
+   CONTRADICTS what this arm does, because the top routes met2 — that is
+   where `emit_pin_def` puts the N/S bus pins, so the router must reach met2
+   on the macro's faces and cross met2 over it.  Declaring the whole layer
+   obstructed and then routing on it is exactly the overlap Magic counts.
+
+   So the fix cannot be "obstruct the layer"; it has to be **"obstruct the
+   metal the abstract omits, and nothing else"** — the boolean difference
+   between the macro's real met2 GDS and Magic's met2 OBS, added as rects.
+   That is the surgical version of the same idea, it leaves every place the
+   top legitimately routes met2 free, and it is the next thing to try.  Not
+   yet run: it needs the GDS difference computed per cell (KLayout can) and
+   one more top run to judge.
+
+12. **`pdn_phase.py` detects, but its REMEDY is wrong** (measured
+   2026-09-07 on the N = 8 artefacts).  The model now fails the
+   `PDN_HOFFSET 109.3` plan correctly — 64 stranded terminals, matching
+   PSM's 512 shapes — and offers a verified-looking fix with it: *"shifting
+   EVERY macro by dy=+1.600 (`PDN_HOFFSET=107.7`) leaves nothing predicted
+   to fail"*.  It does not.  Built and checked, the 107.7 plan gives
+   `PSM-0069` on VGND with **512 unconnected shapes whose coordinate list
+   is byte-identical to 109.3's** — the remedy moved nothing that mattered,
+   though it did apply (the met5 straps moved exactly 1.6 µm, 120180 →
+   118580 DBU).  `pdn_phase.py` predicts `PASS` for it.  So the detection
+   half is validated and the remedy half is not, and a remedy that looks
+   verified is worse than none: §11 item 10's whole lesson was that acting
+   on this tool by hand broke a working design.  Until the shift search is
+   checked the same way the verdict now is, treat the offset it names as a
+   hypothesis and test it with `check_grid.tcl`, which costs minutes:
+
+   ```bash
+   cd n<N>/h/top
+   librelane --dockerized --run-tag pdnX --to OpenROAD.GeneratePDN config_X.json
+   # Resolve the ODB first: a glob inside an `ODB=...` word is not expanded
+   # (bash passes `*.odb` through literally; zsh errors "no matches found").
+   ODB=$(ls runs/pdnX/*-openroad-generatepdn/*.odb | head -1)
+   ../../../../phase0/measure/run_or.sh runs/pdnX ../../../check_grid.tcl ODB="$PWD/$ODB"
+   ```
+
+   That check is itself validated against a known failure (the 109.3 run's
+   own ODB: 512 shapes, `PSM-0069` on VGND, VPWR clean — the signoff
+   verdict, from step 21 instead of step 56).
+
 11. **The 5 % pass threshold of measurement A** (§8 step 5) is a number
    read off two runs of one toy.  It should be re-read on the first real
    vehicle (tier 1a, N=4): if the gcell-edge and pin-access share does not

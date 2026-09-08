@@ -950,3 +950,53 @@ def test_drc_locate_maps_markers_to_cells_and_says_whose_metal(tmp_path):
     r = subprocess.run([sys.executable, str(_T1A / "drc_locate.py"), str(tmp_path / "junk.lyrdb"),
                         str(tmp_path / "top.def")], capture_output=True, text=True)
     assert r.returncode == 2 and "not a KLayout report database" in r.stderr
+
+
+def test_the_documented_relative_paths_resolve_from_the_directory_they_say(tmp_path):
+    """A recipe in the study's own docs that cannot be pasted is worse than
+    no recipe, and `../..`-counting is exactly where one rots: the
+    `check_grid.tcl` snippet said `cd <arm>/top` and then reached for
+    `../../../phase0/...`, which from `n<N>/h/top` lands on
+    `tier1a/phase0` -- a directory that does not exist (Codex #901).
+
+    So each fenced block is WALKED the way pasting it would walk: a `cd`
+    moves the working directory, and every `../`-prefixed script path after
+    it is resolved against wherever the block has got to.  Only `.sh`/`.py`/
+    `.tcl` targets are asserted -- a run directory is made by the recipe
+    itself and is not checked in."""
+    doc = (_ROOT / "docs" / "internal" / "librelane_hier_flow.md").read_text()
+    t1a = _ROOT / "flow" / "librelane" / "tier1a"
+    checked = 0
+    for block in re.findall(r"```(?:bash)?\n(.*?)```", doc, re.S):
+        cwd = None
+        for raw in block.splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            for part in line.split("&&"):
+                part = part.strip()
+                if not part.startswith("cd "):
+                    continue
+                d = part[3:].strip().split()[0]
+                d = re.sub(r"<[^>]*>", "8", d)
+                if d.startswith("~/src/buda"):
+                    cwd = _ROOT / d[len("~/src/buda"):].lstrip("/")
+                elif d.startswith(("~", "/", "$")):
+                    cwd = None                    # someone else's machine
+                elif cwd is not None:
+                    cwd = cwd / d
+                else:
+                    cwd = t1a / d                 # blocks that open in tier1a
+            if cwd is None:
+                continue
+            for tok in re.findall(r"(?<![\w/.])\.\./[\w./-]+", line):
+                if any(c in tok for c in "<>$*"):
+                    continue
+                target = (cwd / tok).resolve()
+                if target.suffix in (".sh", ".py", ".tcl"):
+                    assert target.exists(), (
+                        f"in a block at {cwd.relative_to(_ROOT)}: '{tok}' resolves "
+                        f"to {target}, which does not exist -- the recipe cannot "
+                        f"be pasted")
+                    checked += 1
+    assert checked, "no relative script path was checked; has the doc changed shape?"
