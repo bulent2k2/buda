@@ -434,20 +434,24 @@ construction rather than by execution, and the N = 8 measurements (§8 step
 study exists to answer and stays.
 
 * **The floor: H+B ≥ H on the ARM TOTALS and on signoff, at every N.**
-  Arm wall, arm wire (top + blocks), worst setup and hold slack, and every
-  signoff count (route DRC, LVS, antenna, KLayout DRC, PSM).  Not "every
-  metric": BUDA's pins and corridors move wire from the top into the
-  blocks BY DESIGN, and that trade is the point — at N = 8 the top's wire
-  fell 59.9 % while the blocks' rose 40.8 %, for an arm total 2.8 % under
-  H+size and 15 % under H.  A floor that forbids the block half forbids the
-  mechanism.  A timing difference inside run-to-run noise is not a
-  regression; that noise is NOT yet measured (two identical runs would
-  do), so until it is, a setup loss smaller than 0.05 ns against a margin
-  of 0.39 ns is recorded and not counted.  **N = 8 status:** holds on wall
-  (4,797 s vs H's 6,208), arm wire, hold (H's −1.075 ns fixed to +0.112),
-  power and PSM; fails on KLayout DRC 0 → 2, which is one abstraction
-  notch in one cell (#896, the `notch_obs.py` run pending) and not the
-  routing; setup is 0.021 ns under H.
+  The complete list: arm wall, arm wire (top + blocks), die, worst setup
+  slack, worst hold slack, power, and every signoff count (route DRC,
+  LVS, antenna, KLayout DRC, PSM).  Not "every metric": BUDA's pins and
+  corridors move wire from the top into the blocks BY DESIGN, and that
+  trade is the point — at N = 8 the top's wire fell 59.9 % while the
+  blocks' rose 40.8 %, for an arm total 2.8 % under H+size and 15 % under
+  H.  A floor that forbids the block half forbids the mechanism.  The
+  comparison is STRICT: a timing difference inside run-to-run noise would
+  not be a regression, but that noise is measured only for wall time
+  (±25 %, §8 step 7d), not for timing, and a tolerance chosen after seeing
+  the N = 8 result would be exactly the number-after-the-data this
+  section warns against — so until two identical runs put a figure on
+  it, every loss counts.  **N = 8 status:** holds on wall (4,797 s vs H's
+  6,208), arm wire, die (3.935 vs 6.347 mm²), hold (H's −1.075 ns fixed
+  to +0.112), power and PSM; fails on two: KLayout DRC 0 → 2, which is
+  one abstraction notch in one cell (#896, the `notch_obs.py` run
+  pending) and not the routing, and setup 0.021 ns under H (+0.368 vs
+  +0.389 ns), which counts until the noise measurement says otherwise.
 * **The die penalty is reported, not gated.**  ~~Within 10 % of F on die
   area~~ was a target for a flat flow, not a hard-macro one: F packs at
   46.3 % utilisation with nothing between the cells, while H+B pays a
@@ -1147,7 +1151,9 @@ the wall figures carry ±25 % noise (below), so they are a trend, not a law.
 
 **What this is not.**  §7.4's crossover asks for an N at which **H+B** beats
 F on wall time by **≥ 2×** while holding die area within 10 % of F's and
-setup slack within 0.5 ns.  Nothing here bears on it:
+setup slack within 0.5 ns (as §7.4 read when this was written; the die
+clause is since struck and the penalty reported instead).  Nothing here
+bears on it:
 
 * the arm measured is **H**, without BUDA — H+B does not exist yet, and
   §7.2 defines H as the control that isolates what hierarchy alone costs;
@@ -1694,8 +1700,9 @@ have: every netlist here is either authored or uniquified.
    flat-flow target a hard-macro flow cannot reach by tuning (3.81× at
    N = 8, tens of percent available), the penalty reported instead; the
    ≥ 2× wall-time crossover with setup within 0.5 ns of F stays as the
-   study's question.  Open under it: the floor's KLayout DRC item (#896)
-   and the setup noise measurement.
+   study's question.  Open under it: the floor's two N = 8 failures — the
+   KLayout DRC notch (#896) and the 0.021 ns setup loss, which counts
+   until two identical runs measure the timing noise.
 2. **sky130A** unless told otherwise.
 3. ~~Vehicle~~ — decided: the ladder in §7.1, tiers 1a and 1b first, both
    for concrete runtime numbers; Chisel is acceptable.  **H+size exists at N = 8** (§8 step 7e: die 3.935 mm², wall 5,023 s —
@@ -1705,8 +1712,9 @@ have: every netlist here is either authored or uniquified.
    floor, so the criterion is unmet twice over.  **H's wall-time gap
    to F is closing as N grows** (§8 step 7d: H/F 2.72× at N = 4, 1.37× at
    N = 8), which is what solve-once predicts.  That is NOT §7.4's crossover
-   — that one is about H+B beating F by ≥ 2× within 10 % die area, and the
-   arm measured is H, slower than F at both points and at 6.15× its die.
+   — that one is about H+B beating F by ≥ 2× (within 10 % die area as it
+   read then; the die clause is since struck, item 1), and the arm
+   measured is H, slower than F at both points and at 6.15× its die.
    N = 16 would show whether H reaches parity, and is the run the 20 GB
    container was raised for.  **H+B now exists at N = 2** (§8 step 7f: all
    three contributions — sizes, `FP_DEF_TEMPLATE` pins, corridors — with
