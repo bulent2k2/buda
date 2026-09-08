@@ -67,9 +67,14 @@ these terms the check reports, per net:
   * every FLOATING fragment -- a strap piece that survives trim on a
     component off the main grid: the "N unconnected shapes" PSM counts;
   * the smallest whole-placement shift (x, y, or a searched pair when
-    neither axis alone does it) after which nothing is predicted to fail,
-    restated as the PDN_VOFFSET/PDN_HOFFSET that would do the same -- offered
-    only after being verified.
+    neither axis alone does it) after which nothing is PREDICTED to fail,
+    restated as the PDN_VOFFSET/PDN_HOFFSET that would do the same.  It is
+    verified against THIS MODEL and nothing else, and that once measured
+    wrong: on the N=8 artefacts the predicted PDN_HOFFSET=107.7 reproduced
+    the 109.3 plan's failure byte for byte while this predicted PASS
+    (librelane_hier_flow.md s11 item 12).  So the detection half is
+    validated and the remedy half is a hypothesis; `check_grid.tcl` tests
+    one in minutes, and a remedy that LOOKS verified is worse than none.
 
 PASS looks like `PASS: <n> instances, <m> power-pin rects, <t> trims in <i>
 instances, every terminal on its net's grid, no surviving fragment off it`
@@ -1044,8 +1049,11 @@ def report(top, lefs, res, out=sys.stdout):
         if sh[1]:
             parts.append(f"dy={sh[1]:+.3f} (PDN_HOFFSET={res['hoffset_for_shift']})")
         line += ("; shifting EVERY macro by " + " and ".join(parts) + " -- equivalently the strap "
-                 "offset(s) named -- leaves nothing predicted to fail"
-                 + (" (both axes needed: neither alone does)" if sh[0] and sh[1] else ""))
+                 "offset(s) named -- is PREDICTED to leave nothing failing"
+                 + (" (both axes needed: neither alone does)" if sh[0] and sh[1] else "")
+                 + ".  A HYPOTHESIS, not a fix: the verification is against this model, and on N=8 the "
+                 "predicted PDN_HOFFSET=107.7 reproduced the failure byte for byte (librelane_hier_flow.md "
+                 "s11 item 12) -- judge it with check_grid.tcl (minutes) before a top run")
     else:
         line += ("; no shift within half a pitch on either axis, nor a pair within the trial budget, "
                  "clears it -- a placement or pitch change is needed")
