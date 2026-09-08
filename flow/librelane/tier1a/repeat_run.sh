@@ -21,6 +21,15 @@ set -euo pipefail
 arm=${1:?usage: repeat_run.sh <arm_dir> <config.json> <new_tag> [wait_for_file]}
 cfg=${2:?}; tag=${3:?}; waitfor=${4:-}
 here=$(cd "$(dirname "$0")" && pwd)
+# CANONICALISE BEFORE THE FIRST `cd`.  Every later derivation is `$arm/..`,
+# and after `cd "$arm"` a RELATIVE arm resolves against itself -- so the
+# documented `repeat_run.sh flow/librelane/tier1a/n8/h ...` from the repo
+# root died on `cd: .../n8/h/..: No such file or directory` (Codex #906).
+# Absolute paths are what it has always been called with, which is why it
+# never bit; the interface says nothing about that and should not.
+arm=$(cd "$arm" 2>/dev/null && pwd) || { echo "repeat: no arm dir at $1" >&2; exit 1; }
+cfg=$(cd "$(dirname "$cfg")" 2>/dev/null && pwd)/$(basename "$cfg") \
+    || { echo "repeat: no config at $2" >&2; exit 1; }
 cd "$arm"
 if [ -n "$waitfor" ]; then
     echo "repeat: waiting for $waitfor"
@@ -64,8 +73,35 @@ caffeinate -ims "$here/../phase0/measure/run_or.sh" "top/runs/$tag" "$here/guide
     > "rep_${tag}_route.log" 2>&1
 echo "repeat: corridors in"
 
+# The tail's exit status is the RUN's verdict and must survive.  `|| true`
+# here turned a killed signoff into `repeat: done`, and this experiment is
+# the worst place for that: an aborted resume keeps a STALE
+# `final/metrics.json` (measured -- leftover from leg 1, sentinel 1e39
+# timing), so a caller waiting on the `.end` marker reads a plausible,
+# entirely wrong row rather than an error.  Measured on the run that
+# prompted this: killed at step 62 of 72, announced `done in 2449s`
+# against the 4193s the leg takes (Codex #906).
+#
+# A DEFERRED signoff error is not a crash, though -- LibreLane exits 1 for
+# `N KLayout DRC errors found` on a run that completed every step -- so the
+# two are separated rather than both swallowed: `Flow complete` in the log
+# is the completion test, and a non-zero exit WITH it is reported and kept.
+tail_rc=0
 (cd top && caffeinate -ims ~/.venvs/librelane/bin/librelane --docker-no-tty --dockerized \
     --last-run --from OpenROAD.DetailedRouting -e odb="$PWD/out/guided.odb" \
-    "$(basename "$cfg")" > "../rep_${tag}_3c.log" 2>&1) || true
+    "$(basename "$cfg")" > "../rep_${tag}_3c.log" 2>&1) || tail_rc=$?
+if ! command grep -q 'Flow complete' "rep_${tag}_3c.log"; then
+    echo "repeat: FAILED -- the signoff tail did not complete (exit $tail_rc);" >&2
+    echo "        no .end marker written.  Last lines:" >&2
+    tail -3 "rep_${tag}_3c.log" >&2
+    echo "        NOTE: top/runs/$tag/final/metrics.json may exist and be STALE." >&2
+    exit "${tail_rc:-1}"
+fi
 date +%s > "rep_${tag}.end"
 echo "repeat: done in $(( $(cat "rep_${tag}.end") - $(cat "rep_${tag}.start") ))s -> top/runs/$tag"
+if [ "$tail_rc" -ne 0 ]; then
+    echo "repeat: the flow completed every step but exited $tail_rc -- a DEFERRED"
+    echo "        signoff error (a DRC/LVS count), not an aborted run.  Read it:"
+    command grep -E 'ERROR.*deferred' "rep_${tag}_3c.log" | tail -3
+fi
+exit "$tail_rc"

@@ -55,6 +55,7 @@ What each is good for:
   * DEF    -- routing stages.  `bin/viz <run>/NN-step/<design>.def`.
 """
 import argparse
+import fnmatch
 import glob
 import json
 import os
@@ -113,17 +114,47 @@ def resolved(run_dir):
     return json.load(open(p))
 
 
+def by_corner(value, corner):
+    """A LEF view is either a plain list or a dict KEYED BY CORNER PATTERN,
+    and the two must not be confused: `list(dict)` yields the KEYS, so the
+    renderer would be handed `nom_*` as a filename.
+
+    LibreLane resolves `TECH_LEFS`/`CELL_LEFS` per corner --
+    `{"nom_*": ..., "min_*": ..., "max_*": ...}` against a concrete
+    `DEFAULT_CORNER` like `nom_tt_025C_1v80` -- so the pattern is matched
+    with fnmatch and the exact key wins if present.  This is the rule
+    `phase0/measure/read_resolved.py` already implements; it is repeated
+    here rather than imported because that file is a standalone stdout
+    helper for `run_or.sh`, not a module.  Codex #906."""
+    if not isinstance(value, dict):
+        return list(value or [])
+    if corner in value:
+        got = value[corner]
+    else:
+        got = next((v for k, v in value.items() if fnmatch.fnmatch(corner, k)), None)
+        if got is None:
+            got = next(iter(value.values()), None)
+    return list(got) if isinstance(got, list) else ([got] if got else [])
+
+
 def lefs(cfg, run_dir):
     """Every LEF the render needs: the PDK's, plus each macro's hardened one.
 
     The macro LEFs come from the run's own MACROS entry rather than from a
     guess about the tree layout, and a path that is not there is reported
     instead of silently dropped -- a macro rendered without its LEF is an
-    empty box, which looks like a placement bug."""
-    out = list(cfg.get("CELL_LEFS") or [])
-    out += list(cfg.get("EXTRA_LEFS") or [])
-    if cfg.get("TECH_LEF"):
-        out.insert(0, cfg["TECH_LEF"])
+    empty box, which looks like a placement bug.
+
+    The PDK views are corner-keyed (see `by_corner`), and the technology
+    view's key is `TECH_LEFS` -- PLURAL.  Reading a singular `TECH_LEF`
+    found nothing and passed the renderer NO technology LEF at all
+    (Codex #906); the renders still came out because `-T`/`-M` supply the
+    layer map, but the sites and layer definitions were missing."""
+    corner = cfg.get("DEFAULT_CORNER") or "nom_tt_025C_1v80"
+    out = by_corner(cfg.get("CELL_LEFS"), corner)
+    out += by_corner(cfg.get("EXTRA_LEFS"), corner)
+    tech = by_corner(cfg.get("TECH_LEFS") or cfg.get("TECH_LEF"), corner)
+    out = tech + out
     missing = []
     for _cell, m in (cfg.get("MACROS") or {}).items():
         for p in (m.get("lef") or []):
