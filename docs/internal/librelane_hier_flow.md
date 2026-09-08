@@ -1780,10 +1780,13 @@ have: every netlist here is either authored or uniquified.
    checked the same way the verdict now is, treat the offset it names as a
    hypothesis and test it with `check_grid.tcl`, which costs minutes:
 
-   ```
-   cd <arm>/top && librelane --dockerized --run-tag pdnX --to OpenROAD.GeneratePDN config_X.json
-   ../../../phase0/measure/run_or.sh runs/pdnX ../../../check_grid.tcl \
-       ODB=$PWD/runs/pdnX/21-openroad-generatepdn/*.odb
+   ```bash
+   cd n<N>/h/top
+   librelane --dockerized --run-tag pdnX --to OpenROAD.GeneratePDN config_X.json
+   # Resolve the ODB first: a glob inside an `ODB=...` word is not expanded
+   # (bash passes `*.odb` through literally; zsh errors "no matches found").
+   ODB=$(ls runs/pdnX/*-openroad-generatepdn/*.odb | head -1)
+   ../../../../phase0/measure/run_or.sh runs/pdnX ../../../check_grid.tcl ODB="$PWD/$ODB"
    ```
 
    That check is itself validated against a known failure (the 109.3 run's

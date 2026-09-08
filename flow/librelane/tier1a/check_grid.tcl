@@ -30,3 +30,8 @@ foreach n $nets {
     }
 }
 puts "check_grid: [llength $nets] net(s), $bad failing"
+# EXIT NONZERO on a failing net.  Without this the script printed `FAIL` and
+# then let OpenROAD exit 0, so a caller gating on the status -- `set -e`, a
+# CI step, `run_or.sh`'s own exit code -- read a disconnected PDN as a pass.
+# The whole point of this script is to be that gate (Codex #901).
+if {$bad > 0} { exit 1 }
