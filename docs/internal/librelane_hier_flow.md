@@ -1485,6 +1485,53 @@ large and neither is noise, and "H+B ≥ H on every PPA metric" admits no
 allowance for either — so the criterion is what has to be argued about (§11
 item 1), not the measurement.
 
+
+**MEASURED at N = 8** (2026-09-07), with the H+size row of step 7e as the
+CONTROL — same emitted set (byte-identical `tpu.def`/`tpu.lef`/`tpu_rtl.v`),
+same block sizes, same placement, so the delta is the pins and the corridors
+and nothing else:
+
+| N = 8 | F | H | H+size | **H+B** | H+B vs H+size |
+|---|---|---|---|---|---|
+| arm wall | 4,541 s | 6,208 s | 5,023 s | **4,797 s** | −4.5 % |
+| top alone | 4,541 s | 5,882 s | 4,615 s | 4,496 s | −2.6 % |
+| blocks (wall, parallel) | — | 326 s | 408 s | 301 s | −26 % (noise: ±25 %) |
+| die | 1.032 mm² | 6.347 | 3.935 | 3.935 | — |
+| utilisation | 46.3 % | 50.8 % | 38.7 % | 38.7 % | — |
+| **top wire** | 934,831 µm | 803,897 | 749,932 | **300,704** | **−59.9 %** |
+| **block wire** | — | 1,176,440 | 981,616 | **1,382,072** | **+40.8 %** |
+| **arm wire** | — | 1,980,337 | 1,731,548 | **1,682,776** | **−2.8 %** |
+| setup WS | −0.550 ns | +0.389 | +0.464 | +0.368 | −0.096 ns |
+| **hold WS** | +0.091 ns | **−1.075** | −0.238 | **+0.112** | +0.350 ns |
+| route DRC / LVS / antenna | 0 | 0 | 0 | 0 | — |
+| KLayout DRC | 0 | 0 | 5 | **2** | −3 |
+
+PSM clean on both nets, 168/168 template pins verified in the hardened
+blocks, 2,944 guided nets all present in the design, `check_design dnuts`
+clean before the handoff.
+
+**The N = 2 question is settled, and favourably.**  At N = 2 the corridors
+bought −45.4 % of the top's wire for +37.5 % on the blocks and the arm total
+came out **+0.6 %: a wash**, and this doc said plainly that whether the trade
+improves with N was not settled and should not be guessed, since both halves
+scale with N².  At N = 8 the top saving GROWS to **−59.9 %** while the block
+cost holds at +40.8 %, and the arm total turns into a **−2.8 % net win**.  So
+the corridor saving scales better than the pin cost does — measured at two
+points, one doubling apart, rather than argued.
+
+**H+B against arm H**: better on wall (−23 %), die (0.62×), top wire (−63 %),
+arm wire (−15 %), power (−3.6 %) and — the one that matters most — **hold
+slack, which H FAILS at −1.075 ns and H+B passes at +0.112 ns** (§11 item 6).
+Worse on block wire (+17 %), setup slack (−0.021 ns of a +0.39 ns margin) and
+**KLayout DRC 0 → 2**.
+
+**§7.4's floor is still unmet, on the same defect and nothing else.**  Both
+remaining markers are one `m2.2` at `wbuf_cell` local (91.4, 14.9), in
+`wbuf_1` and `wbuf_5` — the SAME abstraction notch as the single N = 2 marker
+and the same class as step 7e's five in `acc_cell` (§11 item 7).  So every
+DRC violation this arm has ever produced traces to one hole in one cell's
+LEF, not to the routing.
+
 **8. Tier 1b — a Gemmini mesh at N = 4, 8, 16.**  Chipyard needs Linux; on
 the Mac that is a Linux container with the BUDA checkout mounted.  The full
 recipe, with the two places it is guessing, is
