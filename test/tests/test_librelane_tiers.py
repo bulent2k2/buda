@@ -1000,3 +1000,97 @@ def test_the_documented_relative_paths_resolve_from_the_directory_they_say(tmp_p
                         f"be pasted")
                     checked += 1
     assert checked, "no relative script path was checked; has the doc changed shape?"
+
+
+def _notch_lef(path, obs=True):
+    """`acc_cell` as Magic abstracts it around #896's notch: pin `in[22]`'s
+    met2 rect ends at x 69.37, the met2 OBS resumes at x 69.65 (and a
+    blanket from y 0.56), so x 69.37-69.65 / y 0-0.56 is claimed by nothing."""
+    L = ["VERSION 5.8 ;", "MACRO acc_cell", "  CLASS BLOCK ;", "  ORIGIN 0 0 ;", "  SIZE 96 BY 60 ;",
+         "  PIN in[22]", "    DIRECTION INPUT ;", "    USE SIGNAL ;", "    PORT",
+         "      LAYER met2 ;", "      RECT 69.09 0.00 69.37 0.28 ;", "    END", "  END in[22]",
+         "  PIN VGND", "    DIRECTION INOUT ;", "    USE GROUND ;", "    PORT",
+         "      LAYER met4 ;", "      RECT 69.52 5.0 71.52 55.0 ;", "    END", "  END VGND"]
+    if obs:
+        L += ["  OBS", "    LAYER met2 ;", "      RECT 69.65 0.07 70.65 0.56 ;",
+              "      RECT 0.00 0.56 96.00 60.00 ;", "    LAYER met4 ;", "      RECT 69.52 5.0 71.52 55.0 ;",
+              "  END"]
+    L += ["END acc_cell", "END LIBRARY"]
+    path.write_text("\n".join(L) + "\n")
+
+
+def _notch_gds(path, extra=None):
+    sys.path.insert(0, str(_ROOT / "tools"))
+    from gds_build import GdsBuilder
+    b = GdsBuilder()
+    sub = b.structure("filler")
+    sub.boundary(69, 20, [(0, 0), (1, 0), (1, 1), (0, 1)])           # met2 in a SUBCELL
+    top = b.structure("acc_cell")
+    top.boundary(69, 20, [(69.09, 0.0), (69.37, 0.0), (69.37, 0.28), (69.09, 0.28)])   # the pin's metal
+    top.boundary(69, 20, [(69.37, 0.27), (69.62, 0.27), (69.62, 0.56), (69.37, 0.56)])  # the real metal in the notch
+    top.boundary(69, 20, [(20, 20), (30, 20), (30, 30), (20, 30)])                      # under the blanket
+    top.boundary(70, 20, [(0, 0), (96, 0), (96, 60), (0, 60)])                          # met3: not asked about
+    top.sref("filler", (80, 40))                                                         # placed under the blanket
+    if extra:
+        extra(top)
+    b.write(str(path))
+
+
+def test_notch_obs_claims_exactly_the_metal_the_abstract_omits(tmp_path):
+    """#896's third fix, the one the two measured ones point at (§11 item
+    13): obstruct the metal the abstract OMITS and nothing else.  The tool
+    reads the cell's real metal from its GDS (flattened through SREF), the
+    LEF's claim (every pin's rects plus the OBS), and writes the difference
+    into the OBS -- here exactly the notch rect beside `in[22]`, with the
+    pin's own metal, the metal under the blanket and the subcell's rect all
+    covered and therefore untouched.  A shape that is not a rectangle is
+    refused, not boxed, because a bbox would over-claim."""
+    _notch_lef(tmp_path / "acc_cell.lef")
+    _notch_gds(tmp_path / "acc_cell.gds")
+    r = subprocess.run([sys.executable, str(_T1A / "notch_obs.py"), str(tmp_path / "acc_cell.gds"),
+                        str(tmp_path / "acc_cell.lef"), str(tmp_path / "patched.lef"),
+                        "--json", str(tmp_path / "notch.json")], capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr
+    out = json.loads((tmp_path / "notch.json").read_text())
+    assert out["metal_rects"] == 4 and out["claimed_pin_rects"] == 1 and out["claimed_obs_rects"] == 2
+    assert out["uncovered"] == [[69.37, 0.27, 69.62, 0.56]] and out["uncovered_area"] == 0.0725
+    assert "1 uncovered piece(s), 0.0725 um^2" in r.stdout
+    assert "RECT 69.370 0.270 69.620 0.560   (0.250 x 0.290)" in r.stdout
+    patched = (tmp_path / "patched.lef").read_text()
+    assert "    LAYER met2 ;\n      RECT 69.370 0.270 69.620 0.560 ;\n" in patched
+    assert patched.count("RECT") == (tmp_path / "acc_cell.lef").read_text().count("RECT") + 1
+    assert patched.replace("    LAYER met2 ;\n      RECT 69.370 0.270 69.620 0.560 ;\n", "", 1) == \
+        (tmp_path / "acc_cell.lef").read_text()                       # every other byte unchanged
+    # the patched LEF reads back with the notch claimed: a second pass finds nothing
+    r = subprocess.run([sys.executable, str(_T1A / "notch_obs.py"), str(tmp_path / "acc_cell.gds"),
+                        str(tmp_path / "patched.lef"), str(tmp_path / "again.lef")],
+                       capture_output=True, text=True)
+    assert r.returncode == 0 and "no notch on this layer" in r.stdout, r.stdout
+    # a LEF with no OBS block at all: the tool adds one, and every metal rect
+    # but the pin's is then uncovered (the subcell's rect too -- flattening)
+    _notch_lef(tmp_path / "bare.lef", obs=False)
+    r = subprocess.run([sys.executable, str(_T1A / "notch_obs.py"), str(tmp_path / "acc_cell.gds"),
+                        str(tmp_path / "bare.lef"), str(tmp_path / "bare_patched.lef"),
+                        "--json", str(tmp_path / "bare.json")], capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr
+    out = json.loads((tmp_path / "bare.json").read_text())
+    assert out["uncovered"] == [[20.0, 20.0, 30.0, 30.0], [69.37, 0.27, 69.62, 0.56], [80.0, 40.0, 81.0, 41.0]]
+    assert "  OBS\n    LAYER met2 ;\n" in (tmp_path / "bare_patched.lef").read_text()
+    # refusals: an L-shaped BOUNDARY, a PATH, the wrong layer map, a missing file
+    _notch_gds(tmp_path / "poly.gds", extra=lambda t: t.boundary(
+        69, 20, [(10, 10), (14, 10), (14, 12), (12, 12), (12, 14), (10, 14)]))
+    r = subprocess.run([sys.executable, str(_T1A / "notch_obs.py"), str(tmp_path / "poly.gds"),
+                        str(tmp_path / "acc_cell.lef"), str(tmp_path / "x.lef")], capture_output=True, text=True)
+    assert r.returncode == 2 and "1 shape(s) on met2 that are not rectangles" in r.stderr
+    assert "BOUNDARY with 6 corners" in r.stderr and not (tmp_path / "x.lef").exists()
+    _notch_gds(tmp_path / "path.gds", extra=lambda t: t.path(69, 20, [(10, 10), (14, 10)], 0.5))
+    r = subprocess.run([sys.executable, str(_T1A / "notch_obs.py"), str(tmp_path / "path.gds"),
+                        str(tmp_path / "acc_cell.lef"), str(tmp_path / "x.lef")], capture_output=True, text=True)
+    assert r.returncode == 2 and "a PATH with 2 points" in r.stderr
+    r = subprocess.run([sys.executable, str(_T1A / "notch_obs.py"), str(tmp_path / "acc_cell.gds"),
+                        str(tmp_path / "acc_cell.lef"), str(tmp_path / "x.lef"), "--gds-layer", "99/0"],
+                       capture_output=True, text=True)
+    assert r.returncode == 2 and "no met2 (99/0) rectangle" in r.stderr
+    r = subprocess.run([sys.executable, str(_T1A / "notch_obs.py"), str(tmp_path / "nope.gds"),
+                        str(tmp_path / "acc_cell.lef"), str(tmp_path / "x.lef")], capture_output=True, text=True)
+    assert r.returncode == 2 and "no such file" in r.stderr

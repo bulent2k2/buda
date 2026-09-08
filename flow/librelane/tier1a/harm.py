@@ -1004,7 +1004,7 @@ RTL: regenerate the whole set with a larger `-PEPAD` (see the utilization line a
     python3 ../../pdn_phase.py top/config.json {lefs}
 
 Worth reading for what it SHOWS -- which strap meets which pin (TRIM), which terminal ends up on no grid
-(STRANDED), which strap piece survives trim off the grid (FLOATING), and the verified shift that would clear
+(STRANDED), which strap piece survives trim off the grid (FLOATING), and the shift the MODEL predicts would clear
 it -- and run the top whatever it says: a TRIM is geometry, not a defect, and even a predicted failure is a
 prediction from the LEFs and the config.  Acting on the old check's verdict by editing PDN_VOFFSET/PDN_HOFFSET
 is what produced this study's only PSM-0069, on a design whose generated plan was fine (librelane_hier_flow.md

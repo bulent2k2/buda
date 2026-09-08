@@ -1798,9 +1798,14 @@ have: every netlist here is either authored or uniquified.
    metal the abstract omits, and nothing else"** — the boolean difference
    between the macro's real met2 GDS and Magic's met2 OBS, added as rects.
    That is the surgical version of the same idea, it leaves every place the
-   top legitimately routes met2 free, and it is the next thing to try.  Not
-   yet run: it needs the GDS difference computed per cell (KLayout can) and
-   one more top run to judge.
+   top legitimately routes met2 free, and it is the next thing to try.
+   `notch_obs.py <cell.gds> <magic.lef> <out.lef>` computes it — the
+   cell's met2 rectangles from its GDS, flattened through SREF/AREF, minus
+   every pin and OBS rect the LEF claims, appended to the OBS as RECTs;
+   tested on a synthetic cell carrying exactly the `in[22]` notch, where it
+   claims that one rectangle and nothing else, and it refuses a shape that
+   is not a rectangle rather than boxing it.  Not yet run on the real
+   cells: one top run with the patched LEF in place of Magic's judges it.
 
 12. **`pdn_phase.py` detects, but its REMEDY is wrong** (measured
    2026-09-07 on the N = 8 artefacts).  The model now fails the
@@ -1814,9 +1819,12 @@ have: every netlist here is either authored or uniquified.
    118580 DBU).  `pdn_phase.py` predicts `PASS` for it.  So the detection
    half is validated and the remedy half is not, and a remedy that looks
    verified is worse than none: §11 item 10's whole lesson was that acting
-   on this tool by hand broke a working design.  Until the shift search is
-   checked the same way the verdict now is, treat the offset it names as a
-   hypothesis and test it with `check_grid.tcl`, which costs minutes:
+   on this tool by hand broke a working design.  So the FAIL line now says
+   so itself ("is PREDICTED to leave nothing failing.  A HYPOTHESIS, not a
+   fix … judge it with check_grid.tcl"), and the generated README calls it
+   the shift the MODEL predicts.  Until the shift search is checked the
+   same way the verdict now is, treat the offset it names as a hypothesis
+   and test it with `check_grid.tcl`, which costs minutes:
 
    ```bash
    cd n<N>/h/top
