@@ -77,7 +77,10 @@ def read_gds(path):
     """{structure: {"elems": [...], "refs": [...]}} plus the dbu in um.
     An element is ("boundary", layer, datatype, [(x, y), ...]) or
     ("path", layer, datatype, n_points); a ref is (sname, x, y, angle_deg,
-    mirror_x, cols, rows, col_pitch, row_pitch) with cols=rows=1 for SREF."""
+    mirror_x, mag, cols, rows, (col_dx, col_dy), (row_dx, row_dy)) in dbu,
+    with cols=rows=1 and zero vectors for an SREF.  The AREF vectors keep
+    BOTH components -- a rotated lattice has a column vector with a y part
+    -- and MAG is read and applied, not just recognised (Codex #902)."""
     data = open(path, "rb").read()
     pos, dbu_um, structs, cur, elem, refs = 0, None, {}, None, None, None
     while pos + 4 <= len(data):
@@ -96,7 +99,7 @@ def read_gds(path):
             cur = None
         elif rt in (_BOUNDARY, _PATH, _SREF, _AREF, _TEXT):
             elem = {"kind": rt, "layer": None, "datatype": None, "xy": [], "sname": None,
-                    "angle": 0.0, "mirror": False, "cols": 1, "rows": 1}
+                    "angle": 0.0, "mirror": False, "mag": 1.0, "cols": 1, "rows": 1}
         elif rt == _LAYER and elem is not None:
             elem["layer"] = struct.unpack(">h", body[:2])[0]
         elif rt == _DATATYPE and elem is not None:
@@ -107,6 +110,8 @@ def read_gds(path):
             elem["mirror"] = bool(struct.unpack(">H", body[:2])[0] & 0x8000)
         elif rt == _ANGLE and elem is not None:
             elem["angle"] = _real8(body[:8])
+        elif rt == _MAG and elem is not None:
+            elem["mag"] = _real8(body[:8])
         elif rt == _COLROW and elem is not None:
             elem["cols"], elem["rows"] = struct.unpack(">hh", body[:4])
         elif rt == _XY and elem is not None:
@@ -121,13 +126,15 @@ def read_gds(path):
                 xy = elem["xy"]
                 if elem["kind"] == _SREF:
                     cur["refs"].append((elem["sname"], xy[0][0], xy[0][1], elem["angle"],
-                                        elem["mirror"], 1, 1, 0, 0))
+                                        elem["mirror"], elem["mag"], 1, 1, (0, 0), (0, 0)))
                 else:
                     cols, rows = elem["cols"], elem["rows"]
-                    cp = (xy[1][0] - xy[0][0]) / cols if cols else 0
-                    rp = (xy[2][1] - xy[0][1]) / rows if rows else 0
+                    # p2 = origin + cols * column vector, p3 = origin + rows *
+                    # row vector, both in the PARENT's frame: keep both parts
+                    cv = ((xy[1][0] - xy[0][0]) / cols, (xy[1][1] - xy[0][1]) / cols) if cols else (0, 0)
+                    rv = ((xy[2][0] - xy[0][0]) / rows, (xy[2][1] - xy[0][1]) / rows) if rows else (0, 0)
                     cur["refs"].append((elem["sname"], xy[0][0], xy[0][1], elem["angle"],
-                                        elem["mirror"], cols, rows, cp, rp))
+                                        elem["mirror"], elem["mag"], cols, rows, cv, rv))
             elem = None
     if dbu_um is None:
         raise InputShape(f"{path}: no UNITS record -- not a GDSII file")
@@ -179,14 +186,20 @@ def layer_shapes(structs, top, layer_dt, dbu_um, depth=0, seen=None):
                        f"{max(p[0] for p in pts):.3f},{max(p[1] for p in pts):.3f})")
             continue
         rects.append((xs[0], ys[0], xs[1], ys[1]))
-    for (sname, ox, oy, angle, mirror, cols, rows, cp, rp) in st["refs"]:
+    for (sname, ox, oy, angle, mirror, mag, cols, rows, cv, rv) in st["refs"]:
         sub, sub_bad = layer_shapes(structs, sname, layer_dt, dbu_um, depth + 1)
         bad.extend(sub_bad)
+        if mag <= 0:
+            raise InputShape(f"{top}: a reference to {sname} with MAG {mag}")
         for c in range(cols):
             for r in range(rows):
-                dx, dy = (ox + c * cp) * dbu_um, (oy + r * rp) * dbu_um
+                dx = (ox + c * cv[0] + r * rv[0]) * dbu_um
+                dy = (oy + c * cv[1] + r * rv[1]) * dbu_um
                 for (x1, y1, x2, y2) in sub:
-                    p = [_xform((x, y), angle, mirror) for x in (x1, x2) for y in (y1, y2)]
+                    # GDS applies mirror, then MAG, then the rotation, then the
+                    # translation; on an axis-aligned rectangle the uniform
+                    # scale commutes with the rest
+                    p = [_xform((x * mag, y * mag), angle, mirror) for x in (x1, x2) for y in (y1, y2)]
                     rects.append((min(q[0] for q in p) + dx, min(q[1] for q in p) + dy,
                                   max(q[0] for q in p) + dx, max(q[1] for q in p) + dy))
     return rects, bad
@@ -244,6 +257,28 @@ def difference(metal, claimed):
     return sorted(set(pieces))
 
 
+def lef_polygons_on(text, cell, layer):
+    """How many POLYGON shapes the LEF draws on `layer` inside MACRO `cell`,
+    in a PIN or in the OBS.  `read_lef` refuses a polygon only in a POWER
+    pin (its own concern); here a SIGNAL pin's polygon matters just as much,
+    because an unread pin shape is metal the difference would then claim as
+    OBS -- over the pin itself (Codex #902)."""
+    n, in_macro, cur = 0, False, None
+    for line in text.splitlines():
+        t = line.split()
+        if not t:
+            continue
+        if t[0] == "MACRO" and len(t) > 1:
+            in_macro = t[1] == cell
+        elif t[0] == "END" and len(t) > 1 and t[1] == cell:
+            in_macro = False
+        elif in_macro and t[0] == "LAYER" and len(t) > 1:
+            cur = t[1].rstrip(";")
+        elif in_macro and t[0] == "POLYGON" and cur == layer:
+            n += 1
+    return n
+
+
 def patch_lef(text, cell, layer, rects):
     """Magic's LEF with `rects` appended to `cell`'s OBS under a new LAYER
     clause; every other byte unchanged."""
@@ -282,6 +317,11 @@ def run(gds_path, lef_path, layer, gds_layer):
             raise InputShape(f"{gds_path}: no structure named {cell} and no single unreferenced top "
                              f"({tops[:8]})")
         top = tops[0]
+    n_poly = lef_polygons_on(open(lef_path).read(), cell, layer)
+    if n_poly:
+        raise InputShape(f"{lef_path}: MACRO {cell} draws {n_poly} {layer} shape(s) as POLYGON; this reads "
+                         f"RECTs only, and a pin shape it cannot read is metal the difference would then "
+                         f"obstruct -- over the pin itself.  Write the LEF with rectangles")
     metal, bad = layer_shapes(structs, top, gds_layer, dbu_um)
     if bad:
         raise InputShape(f"{gds_path}: {len(bad)} shape(s) on {layer} that are not rectangles -- a bbox "

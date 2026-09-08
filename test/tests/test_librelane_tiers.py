@@ -1076,6 +1076,27 @@ def test_notch_obs_claims_exactly_the_metal_the_abstract_omits(tmp_path):
     out = json.loads((tmp_path / "bare.json").read_text())
     assert out["uncovered"] == [[20.0, 20.0, 30.0, 30.0], [69.37, 0.27, 69.62, 0.56], [80.0, 40.0, 81.0, 41.0]]
     assert "  OBS\n    LAYER met2 ;\n" in (tmp_path / "bare_patched.lef").read_text()
+    # references with MAG and a rotated AREF lattice: the copies land where
+    # GDS puts them -- scaled, and with BOTH components of the column vector
+    # (Codex #902: MAG was read and not applied, the vector's y part dropped)
+    _notch_gds(tmp_path / "refs.gds", extra=lambda t: t.sref("filler", (60, 50), mag=2.0).aref(
+        "filler", (10, 50), cols=2, rows=1, col_pitch=(3, 1), row_pitch=(0, 2)))
+    r = subprocess.run([sys.executable, str(_T1A / "notch_obs.py"), str(tmp_path / "refs.gds"),
+                        str(tmp_path / "bare.lef"), str(tmp_path / "refs_patched.lef"),
+                        "--json", str(tmp_path / "refs.json")], capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr
+    out = json.loads((tmp_path / "refs.json").read_text())
+    assert out["uncovered"] == [[10.0, 50.0, 11.0, 51.0], [13.0, 51.0, 14.0, 52.0], [20.0, 20.0, 30.0, 30.0],
+                                [60.0, 50.0, 62.0, 52.0], [69.37, 0.27, 69.62, 0.56], [80.0, 40.0, 81.0, 41.0]]
+    # a SIGNAL pin drawn as a POLYGON on the layer is refused: read_lef only
+    # refuses power-pin polygons, and an unread pin shape would be claimed as
+    # OBS over the pin itself (Codex #902)
+    poly_lef = (tmp_path / "acc_cell.lef").read_text().replace(
+        "      RECT 69.09 0.00 69.37 0.28 ;", "      POLYGON 69.09 0.00 69.37 0.00 69.37 0.28 69.09 0.28 ;")
+    (tmp_path / "polypin.lef").write_text(poly_lef)
+    r = subprocess.run([sys.executable, str(_T1A / "notch_obs.py"), str(tmp_path / "acc_cell.gds"),
+                        str(tmp_path / "polypin.lef"), str(tmp_path / "x.lef")], capture_output=True, text=True)
+    assert r.returncode == 2 and "draws 1 met2 shape(s) as POLYGON" in r.stderr and not (tmp_path / "x.lef").exists()
     # refusals: an L-shaped BOUNDARY, a PATH, the wrong layer map, a missing file
     _notch_gds(tmp_path / "poly.gds", extra=lambda t: t.boundary(
         69, 20, [(10, 10), (14, 10), (14, 12), (12, 12), (12, 14), (10, 14)]))
