@@ -27,16 +27,29 @@ if [ -n "$waitfor" ]; then
     while [ ! -f "$waitfor" ]; do sleep 60; done
     echo "repeat: predecessor finished, starting"
 fi
-n=$(basename "$(cd "$arm/../.." && pwd)"); n=${n#n}
+# `<arm>` is <t1a_dir>/n<N>/h, so N is one level up and T1A_DIR is two.
+# Derived and CHECKED here, before the six-minute first leg: getting these
+# wrong cost a queued run 36 idle minutes, because the script did the
+# expensive leg first and only then handed guides.sh a path it refused.
+n=$(basename "$(cd "$arm/.." && pwd)"); n=${n#n}
+t1a=$(cd "$arm/../.." && pwd)
+case "$n" in ''|*[!0-9]*) echo "repeat: derived N='$n' from $arm -- expected <t1a>/n<N>/h" >&2; exit 1;; esac
+[ -d "$t1a/n$n/h/top" ] || { echo "repeat: derived T1A_DIR=$t1a, but $t1a/n$n/h/top is not there" >&2; exit 1; }
+[ -f "$cfg" ] || { echo "repeat: no config at $cfg" >&2; exit 1; }
+echo "repeat: N=$n  T1A_DIR=$t1a  tag=$tag"
 before=$(md5 -q top/out/buda_bus.guide 2>/dev/null || echo none)
 
 date +%s > "rep_${tag}.start"
+if [ -d "top/runs/$tag" ] && ls "top/runs/$tag"/43-* >/dev/null 2>&1; then
+    echo "repeat: leg 1 already complete for tag $tag -- resuming at the corridors"
+else
 (cd top && caffeinate -ims ~/.venvs/librelane/bin/librelane --docker-no-tty --dockerized \
     --run-tag "$tag" --to OpenROAD.DetailedRouting --skip OpenROAD.DetailedRouting \
     "$(basename "$cfg")" > "../rep_${tag}_3a.log" 2>&1)
+fi
 echo "repeat: 3a done"
 
-TAG="$tag" T1A_DIR="$(cd "$arm/../../.." && pwd)" "$here/guides.sh" "$n" > "rep_${tag}_guides.log" 2>&1
+TAG="$tag" T1A_DIR="$t1a" "$here/guides.sh" "$n" > "rep_${tag}_guides.log" 2>&1
 after=$(md5 -q top/out/buda_bus.guide)
 if [ "$before" = "$after" ]; then
     echo "repeat: BUDA's corridors are byte-identical to the first run ($after)"
