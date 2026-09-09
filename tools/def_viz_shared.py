@@ -173,16 +173,23 @@ class DefVizData:
             tmp_lef = None
             if not effective_lef or not _os.path.exists(effective_lef):
                 sizes = infer_cell_sizes_from_def(def_path)
-                if sizes:
-                    tmp_lef = tempfile.NamedTemporaryFile(
-                        mode='w', suffix='.lef', delete=False)
-                    tmp_lef.write(_synthetic_lef(sizes))
-                    tmp_lef.close()
-                    effective_lef = tmp_lef.name
-                    print(f'[def_viz] no LEF — inferred sizes for: '
-                          f'{", ".join(sizes)}')
-                else:
-                    effective_lef = ''
+                # A synthetic LEF is written even when there is NOTHING to
+                # infer.  A DEF with no COMPONENTS is a real and useful file
+                # -- BUDA's `emit_pin_def` writes exactly one, a PINS-only
+                # pin template -- and handing the reader an empty path made
+                # it die with `read_lef: cannot open ` naming no file,
+                # because there is no file to name.  `_synthetic_lef({})` is
+                # a valid empty library, which is the honest input: the DEF
+                # declares no cell, so no cell needs a footprint.
+                tmp_lef = tempfile.NamedTemporaryFile(
+                    mode='w', suffix='.lef', delete=False)
+                tmp_lef.write(_synthetic_lef(sizes))
+                tmp_lef.close()
+                effective_lef = tmp_lef.name
+                print(f'[def_viz] no LEF — inferred sizes for: '
+                      f'{", ".join(sizes)}' if sizes else
+                      '[def_viz] no LEF and no COMPONENTS to infer one from: '
+                      'reading the DEF alone (a PINS-only template is this)')
             try:
                 st = db.import_def_lef(def_path, effective_lef)
                 # A LEF that does not cover the DEF's cells is the ONE import
@@ -213,6 +220,23 @@ class DefVizData:
                         f"          Use the LEF that matches this DEF, or drop "
                         f"the LEF argument to infer sizes from the placement.")
                 db.compute_all()
+            except BaseException:
+                # The cache is keyed on MTIME, and this file was created
+                # before the import ran -- so it is already newer than the
+                # DEF, and a failed import leaves it behind for the NEXT run
+                # to reuse.  That run skips the import entirely and reports
+                # `0 nets · 0 instances · die 0.0×0.0 µm`: an empty window,
+                # reading as "the DEF has nothing in it".  Measured on a
+                # PINS-only template, and it also defeats the missing-cells
+                # SystemExit above -- that one raises AFTER the import has
+                # written the speck-sized database, so the refusal holds
+                # once and the second run draws the specks it refused.
+                db = None
+                try:
+                    _os.remove(db_path)
+                except OSError:
+                    pass
+                raise
             finally:
                 if tmp_lef is not None:
                     _os.unlink(tmp_lef.name)
