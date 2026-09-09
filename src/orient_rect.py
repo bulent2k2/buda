@@ -29,7 +29,12 @@ read the geometry without dragging in the routing engine.  The table mirrors
 `orient_map` in `topology.cpp` — (swap axes, reflect x, reflect y).
 """
 
-# (swap, reflect_x, reflect_y) per DEF/BDB orientation token.
+# (swap, reflect_x, reflect_y) per BDB orientation token -- the convention
+# `component.orient` is stored in, which is NOT DEF's: the two agree on the
+# pure rotations and differ on all four flips (BDB mirrors about X, DEF about
+# Y, so BDB `FN` is `(x, h-y)` where DEF's is `(w-x, y)`).  A token read
+# straight out of a DEF file goes through `tools/def_orient.py` instead;
+# `def_orient_to_bdb` in `bdb.cpp` is the permutation between them.
 ORIENT_MAPS = {"N":  (0, 0, 0), "S":  (0, 1, 1),
                "FN": (0, 0, 1), "FS": (0, 1, 0),
                "W":  (1, 1, 0), "E":  (1, 0, 1),

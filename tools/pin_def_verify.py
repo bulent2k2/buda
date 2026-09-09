@@ -42,8 +42,12 @@ offsets are added.  Both files must state the same `UNITS DISTANCE MICRONS`
 or the numbers are not comparable, which is reported as a mismatch of the
 files rather than of a pin.
 """
+import os
 import re
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from def_orient import DEF_ORIENT_POINT   # noqa: E402
 
 _PINS = re.compile(r"^PINS\s+(\d+)\s*;(.*?)^END PINS", re.S | re.M)
 _ENTRY = re.compile(r"^\s*-\s+(\S+)(.*?);", re.S | re.M)
@@ -59,25 +63,18 @@ def unescape(name):
 
 
 def _orient(x, y, o):
-    """A pin-local offset under a DEF orientation token."""
-    o = o or "N"
-    if o == "N":
-        return x, y
-    if o == "S":
-        return -x, -y
-    if o == "W":
-        return -y, x
-    if o == "E":
-        return y, -x
-    if o == "FN":
-        return -x, y
-    if o == "FS":
-        return x, -y
-    if o == "FW":
-        return y, x
-    if o == "FE":
-        return -y, -x
-    raise ValueError(f"unknown orientation token {o!r}")
+    """A pin-local offset under a DEF orientation token.
+
+    The table is shared with `def_viz_shared.py`'s loader and is the twin of
+    `def_orient_xf` in `src/bdb.cpp` (`tools/def_orient.py` says why the three
+    exist and why DEF's flips are not BDB's).  An unknown token RAISES here
+    rather than falling back: this script exists to say whether a pin moved,
+    and a rectangle placed by a guess would answer that question with no idea.
+    """
+    try:
+        return DEF_ORIENT_POINT[o or "N"](x, y)
+    except KeyError:
+        raise ValueError(f"unknown orientation token {o!r}") from None
 
 
 def read_pins(text, what):

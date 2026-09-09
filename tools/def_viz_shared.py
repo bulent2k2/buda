@@ -26,6 +26,7 @@ import matplotlib.patches as mpatches
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _HERE)
 from def_cluster import parse_def, parse_lef
+from def_orient import DEF_ORIENT_POINT
 from group_tree import GroupTree, lighten_color
 
 # Try to import the fast C++ BDB module
@@ -96,28 +97,18 @@ def infer_cell_sizes_from_def(def_path: str) -> dict:
     return sizes
 
 
-# A DEF orientation applied to a point in the oriented object's own frame,
-# about its ORIGIN -- the twin of `def_orient_xf` in `src/bdb.cpp` at a
-# degenerate (0 x 0) box, which is the form a `PIN`'s `PORT` rect needs: it is
-# anchored at a point, not inside an extent, and may be negative on either
-# axis.  DEF's own tokens, whose flips are NOT BDB's (`def_orient_to_bdb`
-# permutes FN/FS and FE/FW).
-_DEF_ORIENT_XF = {
-    "N":  lambda x, y: (x, y),
-    "S":  lambda x, y: (-x, -y),
-    "FN": lambda x, y: (-x, y),       # mirror Y
-    "FS": lambda x, y: (x, -y),       # mirror X
-    "W":  lambda x, y: (-y, x),       # CCW 90
-    "E":  lambda x, y: (y, -x),       # CW 90
-    "FW": lambda x, y: (y, x),
-    "FE": lambda x, y: (-y, -x),
-}
-
-
 def _def_orient_xf(orient, x, y):
-    """(x, y) transformed by `orient`; an unknown token is the identity, as
-    the reader's own `else` branch is."""
-    return _DEF_ORIENT_XF.get((orient or "N").upper(), lambda a, b: (a, b))(x, y)
+    """A pin-local offset transformed by its DEF orientation token.
+
+    The table is `def_orient.DEF_ORIENT_POINT` -- shared with
+    `pin_def_verify.py`, which already carried this rule when the reader did
+    not, and the twin of `def_orient_xf` in `src/bdb.cpp` at a degenerate
+    (0 x 0) box.  An unknown token is the IDENTITY here, matching the
+    reader's own `else` branch, so the picture cannot depend on which loader
+    ran; the verifier refuses one instead, which is why the policy is the
+    caller's and not the table's."""
+    return DEF_ORIENT_POINT.get((orient or "N").upper(),
+                                lambda a, b: (a, b))(x, y)
 
 
 def parse_def_pins(def_path: str) -> dict:
