@@ -556,8 +556,24 @@ def choose_horizontal(insts, cells, core, rpy):
 
 # ── the writer ────────────────────────────────────────────────────────────
 def views(cell):
+    """The four views the top reads of a hardened macro.
+
+    The `lef` is `<cell>.notch.lef`, NOT Magic's own -- the patched abstract
+    `notch.sh N` writes beside it (issue #907, the automation of #896).
+    Magic's LEF leaves a NOTCH uncovered where a pin rect ends and the OBS
+    blanket begins; the macro's real metal sits in it, the top's router
+    reads it as free and overhangs a wire into it, and the block's own DRC
+    cannot see the marker because the partner shape is the top's wire.
+    Measured on N=8 H+B: KLayout DRC 2 -> 0, Magic overlaps 0, PDN clean,
+    top wire +0.004 %.
+
+    Naming the patched file HERE is what makes the fix unskippable: it is
+    three hand steps per cell per run, and a run that skips them brings the
+    marker back with nothing saying so.  Now the top stops at once on a LEF
+    that is not there.  The `gds` view stays the hardened GDS -- the
+    rectified twin is an INPUT to the patch, not a deliverable."""
     base = f"dir::../{cell}/runs/h/final"
-    return {"gds": [f"{base}/gds/{cell}.gds"], "lef": [f"{base}/lef/{cell}.lef"],
+    return {"gds": [f"{base}/gds/{cell}.gds"], "lef": [f"{base}/lef/{cell}.notch.lef"],
             "nl": [f"{base}/nl/{cell}.nl.v"],
             "spef": {f"{c}_*": f"{base}/spef/{c}/{cell}.{c}.spef" for c in ("nom", "min", "max")}}
 
@@ -879,12 +895,12 @@ def render_readme(n_dir, out_dir, cells, counts, sizes, D, dx, dy, vplan, hplan,
     blocks = " ".join(f"--block {c}/runs/h:{counts[c]}" for c in cells)
     n_arr = int(round(math.sqrt(counts.get("pe_cell", 0)))) or "?"   # the array's N: N*N PEs
     harden = "\n".join(f"(cd {c} && librelane --dockerized --run-tag h config.json > h.log 2>&1) &" for c in cells)
-    lefs = " ".join(f"../{c}/runs/h/final/lef/{c}.lef" for c in cells)
+    lefs = " ".join(f"../{c}/runs/h/final/lef/{c}.notch.lef" for c in cells)
     plef = " ".join(f"predicted_lef/{c}.lef" for c in cells)
     arm = "H+B" if pinned else "H"
     tag = "hb" if pinned else "h"
     if pinned:
-        top_section = f"""## 3. The top -- in three parts, because BUDA's corridors go in mid-flow
+        top_section = f"""## 4. The top -- in three parts, because BUDA's corridors go in mid-flow
 
 LibreLane 3.0.11 has no step that reads a guide file, so the corridor handoff
 (mechanism A) is done by stopping just before detailed routing, putting BUDA's
@@ -893,7 +909,7 @@ must NOT happen is finishing the route ourselves: every routing metric, the DRC
 count and the signoff after it are LibreLane's, and an arm whose numbers came
 from a hand-run router would not be comparable with F or H.
 
-### 3a. The top, up to detailed routing
+### 4a. The top, up to detailed routing
 
     (cd top && librelane --dockerized --run-tag {tag} \\
         --to OpenROAD.DetailedRouting --skip OpenROAD.DetailedRouting config.json)
@@ -903,7 +919,7 @@ whose guides we are replacing.  Everything between global routing and it may
 re-route (`OpenROAD.ResizerTimingPostGRT` re-runs the global router), which is
 why BUDA's guides go in AFTER this and not before.
 
-### 3b. BUDA's corridors, into the ODB
+### 4b. BUDA's corridors, into the ODB
 
     ../../guides.sh {n_arr}                      # -> top/out/buda_bus.guide
     ODB=$(ls -t top/runs/{tag}/*/*.odb | head -1)
@@ -914,16 +930,16 @@ Pass: `guides.buda` ends in a clean `check_design dnuts`, and `guide_route.tcl`
 prints `N guided net(s), N of them in the design` (a 0 there means the guides
 were written against another netlist and it stops) and `wrote .../guided.odb`.
 
-### 3c. LibreLane's detailed route, on BUDA's guides, then signoff
+### 4c. LibreLane's detailed route, on BUDA's guides, then signoff
 
     (cd top && librelane --dockerized --last-run --from OpenROAD.DetailedRouting \\
         -e odb="$PWD/out/guided.odb" config.json)
 
 (`$PWD` inside that subshell is `top/`, which is why the path has no `top/`
-in it while step 3b's -- run from here -- does.)
+in it while step 4b's -- run from here -- does.)
 """
     else:
-        top_section = f"""## 3. The top
+        top_section = f"""## 4. The top
 
     (cd top && librelane --dockerized --run-tag {tag} config.json)
 """
@@ -938,7 +954,7 @@ step 1's block wirelength: pins SNAPPED onto the block's own track grid
 (the emitter's pitch is not a whole number of track periods), and disputed
 pins taken from a REFERENCE instance (a cell whose instances have different
 neighbours cannot have one template agree with them all).  The remaining
-piece is the top's corridors -- `guides.sh`, step 3b below.
+piece is the top's corridors -- `guides.sh`, step 4b below.
 """ if pinned else "")
     # Same shape as `pin_note` above, for the same reason -- and this one
     # was a """-string nested INSIDE the template's own {...} field, which is
@@ -986,7 +1002,7 @@ Utilization (rough): {'; '.join(advice)}
 macro pins and never a defect by itself; a via-less fragment is trimmed away; what it predicts PSM will fail on is a
 STRANDED terminal or a FLOATING fragment.  Its older version counted every meeting as a defect, and following it
 once turned a working plan into a PSM-0069 failure.  **Do not hand-edit the PDN_* offsets on its say-so.**  The
-verdict is step 3.
+verdict is step 4.
 
 ## 1. Harden the {len(cells)} cells -- independent, so in parallel; record wall AND cpu (§7.3)
 
@@ -999,7 +1015,44 @@ Pass, per cell: `Flow complete` in `<cell>/h.log`, and `<cell>/runs/h/final/{{gd
 If `OpenROAD.GlobalPlacement` refuses on utilization, the die (the emitter's LEF SIZE) is too small for the
 RTL: regenerate the whole set with a larger `-PEPAD` (see the utilization line above) and rerun harm.sh.
 
-## 2. The PDN-phase check on the HARDENED pins -- ADVISORY, same as step 0
+## 2. Close the abstraction notch in every block's LEF -- NOT optional
+
+    ../../notch.sh {n_arr}
+
+Magic's `final/lef/<cell>.lef` abstracts the block rect by rect and leaves a NOTCH uncovered where a pin rect
+ends and the OBS blanket begins.  The macro's real metal sits in it, the top's router reads it as free and
+overhangs a wire into it, and the block's own DRC cannot see the marker -- the partner shape is the top's wire.
+`notch.sh` runs `rectify_gds.py` (the metal as rectangles, area-checked) and then `notch_obs.py` (the boolean
+difference between that metal and everything the LEF claims, added to the OBS) per cell, and writes
+`<cell>.notch.lef` beside Magic's.  Measured on N=8 H+B: KLayout DRC 2 -> 0, Magic overlaps 0, PDN clean, top
+wire +11 um on 300 mm (+0.004 %) -- the first fully clean signoff this arm produced (§11 item 13).
+
+Pass, per cell: `rectify_gds` prints `area ... (IDENTICAL)` and `notch_obs` names the pieces it claimed --
+`N uncovered piece(s), X um^2 in all` (about 1.2 um^2 per cell at N=8, against the 5,208 a met2 blanket
+claimed).  ZERO pieces is also a pass and worth reading: it means Magic's abstract already covers every
+rectangle on the layer, so `<cell>.notch.lef` is Magic's LEF unchanged.  A per-layer `.notch.<layer>.json`
+records every piece.
+
+`--layers met2,met3` runs more than the default met2, which is the only layer a marker has appeared on.
+
+**This step cannot be skipped**: `top/config.json` names `<cell>.notch.lef` in each `MACROS` entry, so a top
+run without it stops on a missing file instead of silently going back to the unpatched abstract.  If a cell
+REFUSES -- `rectify_gds.py` on a decomposition that changed the area, `notch_obs.py` on a shape it cannot read
+or a signal-pin polygon in the LEF -- `notch.sh` exits non-zero and leaves that cell with no `.notch.lef`.  Fix
+it by hand rather than working around it; the recipe is the same two tools, per layer:
+
+    c=<the cell that refused>; f=$PWD/$c/runs/h/final       # run from here, n<N>/h
+    docker run --rm -v "$HOME:$HOME" -w "$PWD" ghcr.io/librelane/librelane:3.0.11 \\
+        klayout -b -r ../../rectify_gds.py \\
+        -rd gds=$f/gds/$c.gds -rd lnum=69 -rd ldt=20 -rd out=$f/gds/$c.rect.gds
+    python3 ../../notch_obs.py $f/gds/$c.rect.gds $f/lef/$c.lef $f/lef/$c.notch.lef
+
+(met2 is GDS 69/20; `notch_obs.py --gds-layer L/DT` takes another pair.)  A cell whose GDS the decomposition
+genuinely cannot handle can be carried UNPATCHED with `cp $f/lef/$c.lef $f/lef/$c.notch.lef` -- the top
+then runs against Magic's abstract for that one cell, which is the pre-#896 behaviour, so say so in the row:
+its markers are back.
+
+## 3. The PDN-phase check on the HARDENED pins -- ADVISORY, same as step 0
 
     python3 ../../pdn_phase.py top/config.json {lefs}
 
@@ -1008,25 +1061,25 @@ Worth reading for what it SHOWS -- which strap meets which pin (TRIM), which ter
 it -- and run the top whatever it says: a TRIM is geometry, not a defect, and even a predicted failure is a
 prediction from the LEFs and the config.  Acting on the old check's verdict by editing PDN_VOFFSET/PDN_HOFFSET
 is what produced this study's only PSM-0069, on a design whose generated plan was fine (librelane_hier_flow.md
-§11 item 8); if the prediction and step 3 disagree, `pdn_connect.py` on the written DEF says where.
+§11 item 8); if the prediction and step 4 disagree, `pdn_connect.py` on the written DEF says where.
 
 {top_section}
 Pass: `Odb.ManualMacroPlacement` prints `Successfully placed {sum(counts.values())} instances` (a declared instance the
 flattened netlist does not have exits 1 there -- that is the `row_0/pe_0` to `row_0.pe_0` name rule failing),
 `Flow complete`, `All shapes on net VPWR are connected` (and VGND) from the IR-drop report.
 
-**This is the PDN verdict** -- `PSM-0040`/`PSM-0069` and `top/runs/{tag}/*/*-grid-errors.rpt`, not step 0 or step 2.
+**This is the PDN verdict** -- `PSM-0040`/`PSM-0069` and `top/runs/{tag}/*/*-grid-errors.rpt`, not step 0 or step 3.
 If it fails, localise it on the DEF pdngen actually wrote before changing anything:
 
-    python3 ../../pdn_connect.py top/runs/{tag}/*-pdn/*.def */runs/h/final/lef/*.lef --json pdn.json
-    python3 ../../pdn_connect.py --self-cross */runs/h/final/lef/*.lef
+    python3 ../../pdn_connect.py top/runs/{tag}/*-pdn/*.def */runs/h/final/lef/*.notch.lef --json pdn.json
+    python3 ../../pdn_connect.py --self-cross */runs/h/final/lef/*.notch.lef
 
 The first names every power terminal with no via, and every strap FRAGMENT cut off from the grid with the
 terminals it strands -- the two halves of a PSM failure, which need opposite fixes.  The second needs no run
 at all: it asks whether each power pin crosses its own net on the other connect layer, a per-cell property
 that no PDN offset can change.
 
-## 4. The row for the table (§7.3: top plus every block, wire per PLACED instance)
+## 5. The row for the table (§7.3: top plus every block, wire per PLACED instance)
 
     python3 ../../runtimes.py top/runs/{tag} --set N={n_arr} --set arm={arm} --blocks-from top/config.json
     python3 ../../runtimes.py top/runs/{tag} --set N={n_arr} --set arm={arm} --blocks-from top/config.json --json >> ../../results.jsonl
