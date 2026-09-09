@@ -29,12 +29,14 @@ What pdngen does (OpenROAD src/pdn/src, read rather than assumed):
      -> `applyHalo`, which applies the halo on the layer's wire axis only),
      and the violation subtracted is that grown once more by the STRAP's
      spacing on every side (`getRectWithLargestObstructionHalo`) -- two
-     spacings across, halo plus one spacing along; a same-net pin is spared
-     only when the strap CONTAINS it plus its spacing across the strap's
-     width, which a block pin wider than the strap never is -- so a
-     same-layer meeting is a TRIM whatever the two nets are, never a
-     connection, and never a defect either: it is how pdngen keeps straps
-     off macro pins.  A macro's OBS is an obstruction too, bloated by
+     spacings across, halo plus two spacings along, and the query that
+     finds the pin is a CLOSED box intersection, so a pin whose spacing
+     exactly touches the strap's cuts it (#904).  No same-net pin is
+     spared: the macro grid's own copy of the pin (`GridObsShape`) carries
+     no net, so `Shape::cut`'s same-net exception never applies to a macro
+     under `define_pdn_grid -macro`.  So a same-layer meeting is a TRIM
+     whatever the two nets are, never a connection, and never a defect
+     either: it is how pdngen keeps straps off macro pins.  A macro's OBS is an obstruction too, bloated by
      spacing and halo; on a PDN layer it is normally the block's OWN power
      grid (Magic's LEF draws the actual metal, and `final/lef/<cell>.lef` is
      Magic's), the same rectangles as its pins, so it is not counted twice.
@@ -51,35 +53,49 @@ What pdngen does (OpenROAD src/pdn/src, read rather than assumed):
      sets for BLOCKS only, so a top trims) removes every strap fragment with
      fewer connections than `Shape::isRemovable` requires -- 2, or 1 on a pin
      layer, and PDN_ENABLE_PINS (default on) makes both connect layers pin
-     layers -- and shrinks the rest to the extent of their vias.  So a
-     via-less fragment (a stub between two cuts; the strap on the core edge
-     whose crossings are narrower than a via) is GONE before signoff.
+     layers -- and shrinks the rest to the extent of their vias.  Skipping
+     it does not keep a via-less fragment: `Shape::writeToDb` refuses a
+     shape with no via and no term connection (PDN-0200).  So a via-less
+     fragment (a stub between two cuts; the strap on the core edge whose
+     crossings are narrower than a via) is GONE before signoff either way.
+  5. PINS.  With PDN_ENABLE_PINS every surviving fragment on a connect
+     layer is written as a pin shape of its net (`Shape::writeToDb` with
+     `make_rect_as_pin`, every shape on a pin layer), and PSM's sources are
+     the net's pin shapes -- so a component is FED iff it holds a surviving
+     fragment, whichever component it is.
 
-PSM then fails a net whose remaining shapes are not one connected set.  In
+PSM then fails a net with a macro terminal the supply never reaches.  In
 these terms the check reports, per net:
 
   * every TRIM (informational: which pin or OBS cuts which strap, where);
-  * every STRANDED terminal -- a macro power pin NONE of whose rectangles is
-    on its net's main grid (a LEF PIN is one terminal however many RECTs it
-    is drawn as; a pin rectangle off the grid whose terminal is fed by
+  * every STRANDED terminal -- a macro power pin NONE of whose rectangles
+    is on a component holding a surviving fragment (with pins off: on its
+    net's largest component).  A LEF PIN is one terminal however many RECTs
+    it is drawn as; a pin rectangle off the grid whose terminal is fed by
     another of its rectangles is not a failure -- measured, the phase-0 toy
-    passes PSM with two such VGND rectangles);
+    passes PSM with two such VGND rectangles;
   * every FLOATING fragment -- a strap piece that survives trim on a
-    component off the main grid: the "N unconnected shapes" PSM counts;
+    component off the largest one.  With pins on it is a pin shape of its
+    own, a source, stray metal PSM does not count: reported, not a failure.
+    With pins off it is the "N unconnected shapes" PSM counts;
   * the smallest whole-placement shift (x, y, or a searched pair when
     neither axis alone does it) after which nothing is PREDICTED to fail,
     restated as the PDN_VOFFSET/PDN_HOFFSET that would do the same.  It is
     verified against THIS MODEL and nothing else, and that once measured
     wrong: on the N=8 artefacts the predicted PDN_HOFFSET=107.7 reproduced
     the 109.3 plan's failure byte for byte while this predicted PASS
-    (librelane_hier_flow.md s11 item 12).  So the detection half is
-    validated and the remedy half is a hypothesis; `check_grid.tcl` tests
-    one in minutes, and a remedy that LOOKS verified is worse than none.
+    (librelane_hier_flow.md s11 item 12).  The cause was the model's cut
+    rule -- a touch spared, one spacing short along, a same-net spare
+    pdngen never applies, and sources placed on the largest component --
+    read out of the source and fixed (#904); the corrected remedy for that
+    plan is unmeasured.  So the detection half is validated and the remedy
+    half is a hypothesis; `check_grid.tcl` tests one in minutes, and a
+    remedy that LOOKS verified is worse than none.
 
 PASS looks like `PASS: <n> instances, <m> power-pin rects, <t> trims in <i>
 instances, every terminal on its net's grid, no surviving fragment off it`
-and exit 0; a stranded terminal or a floating fragment is a FAIL (exit 1)
-with every offender listed; an input of a shape this did not expect -- a
+and exit 0; a stranded terminal (or, with pins off, a floating fragment)
+is a FAIL (exit 1) with every offender listed; an input of a shape this did not expect -- a
 config without DIE_AREA, a LEF without the macro, a power pin or an
 obstruction drawn as a POLYGON, an instance with no location -- is exit 2,
 because a check that guessed would be worse than none.
@@ -470,29 +486,34 @@ def strap_rects(top, vstraps, hstraps):
 
 def pin_cutter(top, spacing, net, layer, x1, y1, x2, y2):
     """A macro pin as pdngen makes it an obstruction to the top's straps:
-    (cut_lo, cut_hi, keep_lo, keep_hi, along_lo, along_hi).
+    (cut_lo, cut_hi, along_lo, along_hi) -- the strap is cut when its
+    ACROSS extent reaches [cut_lo, cut_hi], touching included, and then
+    loses [along_lo, along_hi] of its length.
 
     `InstanceGrid::getInstanceObstructions` turns the pin into a shape whose
     rect is the pin bloated by the layer's spacing (`generateObstruction`)
     and then by the macro grid's HALO along the layer's wire axis only
-    (`applyHalo(rect, halo, true, is_horizontal, is_vertical)`).  `Shape::cut`
-    then (a) spares a same-net obstruction only when the strap's own rect
-    contains THAT rect across the strap -- so the pin plus ONE spacing is
-    what has to fit (`keep`); (b) takes the violation as that rect grown by
-    the STRAP's obstruction halo, its own spacing, on every side
-    (`getRectWithLargestObstructionHalo`), and subtracts it from the strap --
-    so a strap is cut when the pin comes within TWO spacings of it (`cut`,
-    the pin's and the strap's; one layer, one MIN_SPACING here for both) and
-    loses the pin's extent plus the halo plus one spacing along (`along`).
-    The old reading had one spacing everywhere, which no run here
-    discriminated (x=20 cuts by 0.5 um either way); the source does."""
+    (`applyHalo(rect, halo, true, is_horizontal, is_vertical)`), and sets
+    that same rect as its obstruction.  `Shape::cut` finds it with an rtree
+    query of the STRAP's obstruction (the strap plus its spacing) against
+    that rect -- `bgi::intersects` on boxes is CLOSED, so a strap is cut
+    when the pin comes within TWO spacings of it, the pin's and the strap's,
+    a touch included (#904 item 1: the old `<= EPS` spared the touch, and a
+    shift search whose candidates are the boundaries landed on exactly
+    those) -- and subtracts that rect grown by the strap's own spacing on
+    every side (`getRectWithLargestObstructionHalo`), so the length lost is
+    the pin plus the halo plus TWO spacings (#904 item 2: the old reading
+    had one).  Nothing spares a same-net pin (#904 item 3): the pin reaches
+    the top's grid twice, as the block-level obstruction and as the macro
+    grid's own `GridObsShape`, and the latter carries no net, so the
+    same-net exception in `Shape::cut` never sees it."""
     g = top["g"]
     sp = spacing.get(layer, 0.0)
     if layer == g["PDN_VERTICAL_LAYER"]:
         h = max(g["PDN_VERTICAL_HALO"], 0.0)
-        return x1 - 2 * sp, x2 + 2 * sp, x1 - sp, x2 + sp, y1 - h - sp, y2 + h + sp
+        return x1 - 2 * sp, x2 + 2 * sp, y1 - h - 2 * sp, y2 + h + 2 * sp
     h = max(g["PDN_HORIZONTAL_HALO"], 0.0)
-    return y1 - 2 * sp, y2 + 2 * sp, y1 - sp, y2 + sp, x1 - h - sp, x2 + h + sp
+    return y1 - 2 * sp, y2 + 2 * sp, x1 - h - 2 * sp, x2 + h + 2 * sp
 
 
 def _subtract(intervals, lo, hi):
@@ -515,11 +536,14 @@ def trim_straps(top, straps, rects_by, obs_by, spacing):
     a pin per `pin_cutter`, a foreign OBS bloated as `instance_obstructions`
     has it and again by the strap's own spacing (`Shape::cut` grows every
     violation by the strap's obstruction halo) -- removes its ALONG extent
-    from the strap, across the strap's full width.  A same-net PIN is spared
-    only when the strap CONTAINS it plus one spacing across its width, which
-    a block pin wider than the strap never is, so a same-layer meeting is a
-    trim whatever the two nets are.  The block's own-power OBS is the same
-    metal as its pins and is not counted twice."""
+    from the strap, across the strap's full width.  "Reaches" is CLOSED, as
+    the rtree query in `Shape::cut` is: a cutter whose edge sits exactly
+    on the strap's is a cut, not a miss.  Every same-layer meeting is a
+    trim whatever the two nets are; the same-net spare in `Shape::cut`
+    (a strap that contains the pin plus its spacing across) is unreachable
+    for a macro under `define_pdn_grid -macro`, whose `GridObsShape` copy
+    of the pin carries no net.  The block's own-power OBS is the same metal
+    as its pins and is not counted twice."""
     frags, trims = [], []
     for s in straps:
         x1, y1, x2, y2 = s["rect"]
@@ -531,11 +555,9 @@ def trim_straps(top, straps, rects_by, obs_by, spacing):
             for (net, layer, px1, py1, px2, py2, pname) in rects:
                 if layer != s["layer"]:
                     continue
-                c_lo, c_hi, k_lo, k_hi, a_lo, a_hi = pin_cutter(top, spacing, net, layer, px1, py1, px2, py2)
-                if overlap(c_lo, c_hi, s_lo, s_hi) <= EPS:
-                    continue
-                if net == s["net"] and s_lo <= k_lo + EPS and s_hi >= k_hi - EPS:
-                    continue                    # contained across the strap: spared
+                c_lo, c_hi, a_lo, a_hi = pin_cutter(top, spacing, net, layer, px1, py1, px2, py2)
+                if overlap(c_lo, c_hi, s_lo, s_hi) < -EPS:
+                    continue                    # a real gap; a touch is a cut (closed query)
                 before = along
                 along = _subtract(along, a_lo, a_hi)
                 if along != before:
@@ -550,7 +572,7 @@ def trim_straps(top, straps, rects_by, obs_by, spacing):
                 ox1, oy1, ox2, oy2 = ob["bloated"]
                 ox1, oy1, ox2, oy2 = ox1 - sp, oy1 - sp, ox2 + sp, oy2 + sp
                 c_lo, c_hi, a_lo, a_hi = (ox1, ox2, oy1, oy2) if vert else (oy1, oy2, ox1, ox2)
-                if overlap(c_lo, c_hi, s_lo, s_hi) <= EPS:
+                if overlap(c_lo, c_hi, s_lo, s_hi) < -EPS:
                     continue
                 before = along
                 along = _subtract(along, a_lo, a_hi)
@@ -568,13 +590,17 @@ def trim_straps(top, straps, rects_by, obs_by, spacing):
 
 
 def min_connections(top):
-    """How many vias a strap fragment needs to survive `PdnGen::trimShapes`
-    (`Shape::isRemovable`): 2, or 1 on a pin layer -- and LibreLane's
+    """How many vias a strap fragment needs to reach the DEF: 2, or 1 on a
+    pin layer (`PdnGen::trimShapes` / `Shape::isRemovable`), and LibreLane's
     `PDN_ENABLE_PINS` (default on) declares both connect layers pin layers.
-    None when the top skips trim (`PDN_SKIPTRIM`): everything survives."""
+    `PDN_SKIPTRIM` skips that pass but not the write: `Shape::writeToDb`
+    refuses a shape with no term connection and no via (`PDN-0200 Removing
+    floating shape`), so a via-less fragment never reaches the DEF either
+    way -- 1 then, and nothing is shrunk (#904 item 4; the old None,
+    "everything survives", was off by one)."""
     g = top["g"]
     if g["PDN_SKIPTRIM"]:
-        return None
+        return 1
     return 1 if g["PDN_ENABLE_PINS"] else 2
 
 
@@ -673,20 +699,28 @@ def evaluate(top, straps, rects_by, obs_by, spacing, via_min):
 
     pdngen builds the straps, cuts them (`trim_straps`), makes the vias and
     TRIMS (`predicted_network`): every strap fragment with fewer connections
-    than `min_connections` is removed before signoff -- a via-less stub
-    between two cuts, a strap at the core edge whose crossings are narrower
-    than a via.  What `[PSM-0069]` then fails on is a net whose REMAINING
-    shapes are not one connected set: a macro terminal none of whose
-    rectangles is on the net's main grid (`stranded`), or a surviving
-    fragment on a component off the main grid (`floating`, the "N
-    unconnected shapes" PSM counts).  A pin rectangle off the grid whose
-    TERMINAL is fed by another of its rectangles is neither -- measured, the
-    phase-0 toy passes PSM with two such VGND pin rectangles (a LEF PIN is
-    one terminal, however many RECTs it is drawn as).  `failures` is the
-    union; a placement passes iff it is empty."""
+    than `min_connections` is gone before signoff -- a via-less stub between
+    two cuts, a strap at the core edge whose crossings are narrower than a
+    via.  What `[PSM-0069]` then fails on is a macro terminal the supply
+    never reaches, and where the supply ENTERS is decided by the write
+    (#904 item 4): with `PDN_ENABLE_PINS` every surviving fragment on a
+    connect layer is written as a pin shape of the net (`GridComponent::
+    writeToDb` -> `Shape::writeToDb(make_rect_as_pin)`, every shape on a
+    pin layer), and a pin shape is a PSM source -- so a component is fed
+    iff it holds ONE surviving fragment, whichever component it is, and a
+    fragment off the largest component is stray metal PSM does not count
+    (`floating`, reported, not a failure).  With pins off nothing marks a
+    source, and the check keeps the older rule: the largest component is
+    the grid, a terminal off it is `stranded` and a fragment off it
+    `floating`, both failures.  A pin rectangle off the grid whose TERMINAL
+    is fed by another of its rectangles is neither -- measured, the phase-0
+    toy passes PSM with two such VGND pin rectangles (a LEF PIN is one
+    terminal, however many RECTs it is drawn as).  `failures` is what a
+    placement must have none of to pass."""
     frags, trims = trim_straps(top, straps, rects_by, obs_by, spacing)
     min_conns = min_connections(top)
     conn, terms, trim = predicted_network(top, frags, rects_by, via_min, min_conns)
+    pins_on = bool(top["g"]["PDN_ENABLE_PINS"])
     stranded, floating, trimmed, off_grid_pins = [], [], [], []
     for net, c in conn.items():
         comps = c["components"]
@@ -697,14 +731,20 @@ def evaluate(top, straps, rects_by, obs_by, spacing, via_min):
                             "rect": [round(v, 3) for v in f["rect"]], "vias": trim[net]["vias"][p]})
         if not comps:
             continue
-        main = comps[0]
-        main_frags = sum(1 for i in main["members"] if i < len(kept))
-        # a net with no strap left has no grid to be on: every terminal is stranded
-        no_grid = main_frags == 0
-        fed = set() if no_grid else set(main["terminals"])
+        frags_of = lambda comp: [i for i in comp["members"] if i < len(kept)]
+        if pins_on:
+            sourced = [comp for comp in comps if frags_of(comp)]
+            main = sourced[0] if sourced else None
+            fed = {t for comp in sourced for t in comp["terminals"]}
+        else:
+            # a net with no strap left has no grid to be on: every terminal is stranded
+            main = comps[0] if frags_of(comps[0]) else None
+            fed = set(main["terminals"]) if main else set()
         seen_stranded = set()
-        for comp in comps[1:] if not no_grid else comps:
-            fr = [i for i in comp["members"] if i < len(kept)]
+        for comp in comps:
+            if comp is main:
+                continue
+            fr = frags_of(comp)
             lost = [t for t in comp["terminals"] if t not in fed and t not in seen_stranded]
             seen_stranded.update(lost)
             for t in lost:
@@ -722,7 +762,7 @@ def evaluate(top, straps, rects_by, obs_by, spacing, via_min):
                 floating.append({"net": net, "layer": f["layer"], "k": f["k"],
                                  "rect": [round(v, 3) for v in rect[1:]],
                                  "vias": trim[net]["vias"][p], "component": comp["id"],
-                                 "terminals": comp["terminals"]})
+                                 "terminals": comp["terminals"], "sourced": pins_on})
         # terminals the strap grid never reaches at all (no component holds them)
         held = {t for comp in comps for t in comp["terminals"]}
         for t in terms[net]:
@@ -732,7 +772,7 @@ def evaluate(top, straps, rects_by, obs_by, spacing, via_min):
                 stranded.append({"instance": inst, "net": net, "pin": pin, "component": None,
                                  "component_shapes": 0, "component_span": 0.0, "surviving_fragments": 0})
     failures = ([{"kind": "stranded", **x} for x in stranded]
-                + [{"kind": "floating", **x} for x in floating])
+                + [{"kind": "floating", **x} for x in floating if not x["sourced"]])
     return {"frags": frags, "trims": trims, "network": conn, "stranded": stranded,
             "floating": floating, "trimmed": trimmed, "off_grid_pins": off_grid_pins,
             "min_connections": min_conns, "failures": failures}
@@ -963,8 +1003,9 @@ def report(top, lefs, res, out=sys.stdout):
     p(f"  {lh} straps: {res['hstraps']} at y = {core[1]:.3f} + {g['PDN_HOFFSET']} + k*{g['PDN_HPITCH']}"
       f" (width {g['PDN_HWIDTH']}, VGND +{g['PDN_HWIDTH'] + g['PDN_HSPACING']:.2f})")
     mc = res.get("min_connections")
-    if mc is None:
-        p("  trim: SKIPPED (PDN_SKIPTRIM) -- every strap fragment survives, via-less ones included")
+    if g["PDN_SKIPTRIM"]:
+        p("  trim: SKIPPED (PDN_SKIPTRIM) -- but a via-less strap fragment still never reaches the DEF "
+          "(`Shape::writeToDb`, PDN-0200), so one via keeps a fragment and none is shrunk")
     else:
         p(f"  trim: a strap fragment with fewer than {mc} via{'s' if mc > 1 else ''} is removed "
           f"(`PdnGen::trimShapes`; PDN_ENABLE_PINS {'on' if g['PDN_ENABLE_PINS'] else 'off'})")
@@ -1012,7 +1053,9 @@ def report(top, lefs, res, out=sys.stdout):
     for net, row in res["network"].items():
         p(f"  {net}: {row['straps']} straps -> {row['fragments']} fragments after the cuts; main grid "
           f"{row['main_shapes']} shapes; {row['trimmed_away']} via-less fragment(s) trimmed away; "
-          f"{row['floating']} surviving off the grid; terminals on the grid "
+          f"{row['floating']} surviving off the grid"
+          + (" (pin shapes of their own: sourced)" if row['floating'] and g["PDN_ENABLE_PINS"] else "")
+          + f"; terminals on the grid "
           f"{row['terminals_on_grid']}/{row['terminals']}"
           + (f"; {len(row['bridged_by'])} terminal(s) bridge two components (not credited)"
              if row["bridged_by"] else ""))
@@ -1026,7 +1069,9 @@ def report(top, lefs, res, out=sys.stdout):
     for f in res["floating"]:
         p(f"FLOATING {f['net']} {f['layer']} fragment k={f['k']} [{f['rect'][0]:.3f},{f['rect'][1]:.3f},"
           f"{f['rect'][2]:.3f},{f['rect'][3]:.3f}] with {f['vias']} via(s): survives trim on a component "
-          f"off the main grid -- a shape PSM reports unconnected"
+          f"off the main grid -- "
+          + ("written as a pin shape of its own, a PSM source: stray metal, not a failure"
+             if f.get("sourced") else "a shape PSM reports unconnected")
           + (f" (component carries {', '.join(f['terminals'][:4])})" if f["terminals"] else ""))
     for sd in res["sealed"]:
         p(f"  {sd['instance']} ({sd['cell']}) carries foreign metal on BOTH {lv} and {lh}: nothing can "
@@ -1035,12 +1080,16 @@ def report(top, lefs, res, out=sys.stdout):
     n_trim_inst = len({t["instance"] for t in trims})
     if res["pass"]:
         p(f"PASS: {res['instances']} instances, {res['pin_rects']} power-pin rects, {len(trims)} trims "
-          f"in {n_trim_inst} instances, every terminal on its net's grid, no surviving fragment off it "
-          f"({len(res['trimmed_away'])} via-less trimmed away)")
+          f"in {n_trim_inst} instances, every terminal on its net's grid, "
+          + (f"{len(res['floating'])} surviving fragment(s) off it, each a pin shape of its own "
+             if res["floating"] else "no surviving fragment off it ")
+          + f"({len(res['trimmed_away'])} via-less trimmed away)")
         return
     line = (f"FAIL: {res['instances']} instances, {len(trims)} trims in {n_trim_inst} instances, "
             f"{len(res['stranded'])} stranded terminal(s) in {len(res['unconnected'])} instance-net(s), "
-            f"{len(res['floating'])} floating fragment(s)")
+            f"{len(res['floating'])} floating fragment(s)"
+            + (" (pin shapes of their own: not failures)"
+               if res["floating"] and all(f.get("sourced") for f in res["floating"]) else ""))
     sh = res.get("global_shift")
     if sh and res.get("global_clean_at_shift"):
         parts = []
@@ -1051,9 +1100,9 @@ def report(top, lefs, res, out=sys.stdout):
         line += ("; shifting EVERY macro by " + " and ".join(parts) + " -- equivalently the strap "
                  "offset(s) named -- is PREDICTED to leave nothing failing"
                  + (" (both axes needed: neither alone does)" if sh[0] and sh[1] else "")
-                 + ".  A HYPOTHESIS, not a fix: the verification is against this model, and on N=8 the "
-                 "predicted PDN_HOFFSET=107.7 reproduced the failure byte for byte (librelane_hier_flow.md "
-                 "s11 item 12) -- judge it with check_grid.tcl (minutes) before a top run")
+                 + ".  A HYPOTHESIS, not a fix: the verification is against this model, whose remedy "
+                 "measured wrong once before its cut rule was corrected (librelane_hier_flow.md s11 item "
+                 "12, #904) -- judge it with check_grid.tcl (minutes) before a top run")
     else:
         line += ("; no shift within half a pitch on either axis, nor a pair within the trial budget, "
                  "clears it -- a placement or pitch change is needed")
