@@ -452,23 +452,25 @@ study exists to answer and stays.
   the blocks BY DESIGN, and that trade is the point — at N = 8 the top's
   wire fell 59.9 % while the blocks' rose 40.8 %, for an arm total 2.8 %
   under H+size and 15 % under H.  A floor that forbids the block half
-  forbids the mechanism.  The comparison is STRICT: a timing difference
-  inside run-to-run noise would not be a regression, but no timing noise
-  is measured, and a tolerance chosen after seeing the N = 8 result would
-  be exactly the number-after-the-data this section warns against — so
-  every loss counts.  What is known points at the loss being real rather
-  than noise: the detailed router runs with a pinned seed
-  (`-or_seed 42`, §4), so if the layout is reproducible the timing noise
-  is zero by construction, and the met2-blanket variant, which perturbed
-  the top's wire by 0.15 %, moved setup by 0.0023 ns — an order of
-  magnitude under the 0.021 ns gap.  A repeat of one run would settle
-  reproducibility and is the first question to ask before any tolerance
-  is written.  **N = 8 status:** holds on wall (4,797 s vs H's 6,208),
-  CPU-sum (5,402 vs 6,996 s), arm wire, die (3.935 vs 6.347 mm²), hold
-  (H's −1.075 ns fixed to +0.112), power, PSM and Magic overlaps (0 vs 0);
-  fails on two: KLayout DRC 0 → 2, which is one abstraction notch in one
-  cell (#896, the `notch_obs.py` run pending) and not the routing, and
-  setup 0.021 ns under H (+0.368 vs +0.389 ns), which counts.
+  forbids the mechanism.  The comparison is STRICT, and it is strict on
+  MEASURED grounds rather than for want of a measurement: **run-to-run
+  timing noise is ZERO** (measured 2026-09-08 — an independent repeat of
+  the N = 8 H+B arm, all three legs, against the run it repeats:
+  **282 metrics present in both, 0 differ**, with no key in one and not
+  the other — `timing__setup__ws` bit-equal at 0.367518,
+  `route__wirelength` at 300,704, and the signoff counts down to the
+  baseline's own 2 KLayout DRC errors).  The layout is reproducible, which
+  is what the pinned detailed-router seed (`-or_seed 42`, §4) predicted,
+  so there is no noise for a tolerance to absorb and every loss counts by
+  arithmetic rather than by policy.  One caveat stands: it is ONE repeat
+  of ONE config — bit-identity is far stronger evidence than closeness (it
+  says the flow is deterministic, not merely quiet), but it is one pair.
+  **N = 8 status:** holds on wall (4,797 s vs H's 6,208), CPU-sum (5,402
+  vs 6,996 s), arm wire, die (3.935 vs 6.347 mm²), hold (H's −1.075 ns
+  fixed to +0.112), power, PSM, Magic overlaps (0 vs 0) and — since
+  `notch_obs.py` — **KLayout DRC (0 vs 0)**; fails on ONE: setup
+  **0.0185 ns** under H (+0.3705 vs +0.3890 ns), which the noise
+  measurement now confirms is real.
 * **The die penalty is reported, not gated.**  ~~Within 10 % of F on die
   area~~ was a target for a flat flow, not a hard-macro one: F packs at
   46.3 % utilisation with nothing between the cells, while H+B pays a
@@ -1607,12 +1609,68 @@ slack, which H FAILS at −1.075 ns and H+B passes at +0.112 ns** (§11 item 6).
 Worse on block wire (+17 %), setup slack (−0.021 ns of a +0.39 ns margin) and
 **KLayout DRC 0 → 2**.
 
-**§7.4's floor is still unmet, on the same defect and nothing else.**  Both
-remaining markers are one `m2.2` at `wbuf_cell` local (91.4, 14.9), in
-`wbuf_1` and `wbuf_5` — the SAME abstraction notch as the single N = 2 marker
-and the same class as step 7e's five in `acc_cell` (§11 item 7).  So every
-DRC violation this arm has ever produced traces to one hole in one cell's
-LEF, not to the routing.
+**Both remaining markers were one `m2.2`** at `wbuf_cell` local (91.4, 14.9),
+in `wbuf_1` and `wbuf_5` — the SAME abstraction notch as the single N = 2
+marker and the same class as step 7e's five in `acc_cell`.  So every DRC
+violation this arm ever produced traced to one hole in one cell's LEF, not to
+the routing, and `notch_obs.py` closed it (§11 item 13): **KLayout DRC 2 → 0
+with Magic overlaps still 0, at +11 µm of top wire** — `Flow complete`, no
+deferred errors, the first fully clean signoff this arm has produced.
+
+**So §7.4's floor is unmet at N = 8 on ONE metric: setup slack**, 0.0185 ns
+under H (+0.3705 against +0.3890) on the notch-fixed arm.  That it is a real
+regression rather than measurement scatter is now measured rather than
+assumed — an independent repeat of the whole arm reproduced it BIT-IDENTICALLY
+(282 metrics present in both, 0 differ, with no key in one and not the other;
+`timing__setup__ws` equal to the digit at 0.367518, `route__wirelength` at
+300,704, and the signoff counts down to the baseline's own 2 KLayout DRC
+errors), so run-to-run timing noise is zero and there is no tolerance for the gap to hide in.  What that leaves is
+a tuning question rather than a verdict on the mechanism: this arm has never
+been timing-driven — no `PNR_SDC_FILE`, and §5's per-pin timing budgets are
+phase 3 and unbuilt — so 0.0185 ns of a +0.39 ns margin is the first thing a
+timing-aware run would be expected to move.
+
+**7g. LOOK at a run** (`flow/librelane/snapshots.py`).  Every measurement in
+this section is a number, and the study had no way to SEE a run: LibreLane
+renders exactly ONE image, of the FINAL layout, while the eighteen
+intermediate DEFs a top run writes — floorplan, macro placement, PDN, global
+and detailed placement, CTS, global and detailed routing — sit on disk and
+nothing ever draws them.  A wrong floorplan is then invisible until a metric
+twelve steps later is wrong.
+
+```bash
+python3 flow/librelane/snapshots.py <run>/runs/<tag> --list      # what is there
+python3 flow/librelane/snapshots.py <run>/runs/<tag> --bdb       # curated set + BDBs
+```
+
+**Nothing is re-run** — every artefact comes from files the run already
+wrote, so it works on runs finished weeks ago and costs seconds a stage.  The
+renderer is KLayout's own `render.py`, the one the flow's `KLayout.Render`
+step uses, which takes a DEF as readily as a GDS; the tech file, layer
+properties, layer map and cell LEFs all come from the run's own
+`resolved.json`, so a stage renders in exactly the colours the final render
+uses.  (The script lives at a Nix store path inside the image, so it is
+located by asking the interpreter, not by hard-coding a path that works until
+the next release.)
+
+**A BDB is written only where a BDB is the right container, and the boundary
+is measured rather than assumed.**  `import_def_lef` reads COMPONENTS, NETS
+and pin connectivity, so a placement stage lands complete — on the N = 8 top,
+296 components / 4 cells / 3,586 nets / 6,928 pins at macro placement, rising
+to 39,465 / 7 / 3,861 by CTS as tap cells and the clock tree appear, which is
+itself worth watching.  But it does NOT read routed geometry:
+`net_segment`, `bus_segment` and `net_via` come back **0/0/0** on a routed
+DEF, because those tables are BUDA's OWN routing output.  A BDB of a routed
+stage would therefore look like an unrouted design and quietly mislead, so
+the tool refuses to write one and says why.  For somebody else's routing the
+DEF is the artefact: `bin/viz <run>/NN-step/<design>.def` opens it, and
+`bin/fp <stage>.bdb` opens a placement stage where a macro can be dragged and
+the HPWL and flylines move with it.
+
+What the first run of it showed on the N = 8 H+B top, at a glance and with no
+measurement: the 8 × 8 PE array, the `feed_cell` column down the west edge,
+the `wbuf` row above and the `acc`/pipe rows below — and the wide empty
+margins that §7.4's die penalty is made of.
 
 **8. Tier 1b — a Gemmini mesh at N = 4, 8, 16.**  Chipyard needs Linux; on
 the Mac that is a Linux container with the BUDA checkout mounted.  The full
@@ -1729,11 +1787,25 @@ have: every netlist here is either authored or uniquified.
    flat-flow target a hard-macro flow cannot reach by tuning (3.81× at
    N = 8, tens of percent available), the penalty reported instead; the
    ≥ 2× wall-time crossover with setup within 0.5 ns of F stays as the
-   study's question.  Open under it: the floor's two N = 8 failures — the
-   KLayout DRC notch (#896) and the 0.021 ns setup loss, which counts
-   until a repeat run measures timing reproducibility under the pinned
-   router seed — and the die arithmetic's two levers (channel first, then
-   padding) as the reported-not-gated cost.
+   study's question.  Both of the floor's N = 8 failures are now
+   RESOLVED, one by a fix and one by a measurement, leaving ONE:
+
+   * the KLayout DRC notch (#896) is **CLOSED** — `notch_obs.py` claims
+     the 1.2 µm² per cell the abstract omits and takes DRC 2 → 0 with
+     Magic overlaps still 0 and +11 µm of top wire (§11 item 13);
+   * the 0.021 ns setup loss **counts, measured** — an independent repeat
+     of the whole arm is bit-identical to the run it repeats (273 shared
+     metrics, 0 differ), so run-to-run timing noise is zero and there is
+     no tolerance to absorb the gap.  It is now 0.0185 ns against the
+     notch-fixed arm (+0.3705 vs H's +0.3890).
+
+   So H+B at N = 8 passes every gate on the floor except setup slack, by
+   0.0185 ns of a +0.39 ns margin.  What is open is what to DO about that:
+   a real regression this small is a tuning question (the arm has never
+   been timing-driven — no `PNR_SDC_FILE`, §5's phase-3 per-pin budgets
+   unbuilt), not evidence the mechanism costs timing.  Also open: the die
+   arithmetic's two levers (channel first, then padding) as the
+   reported-not-gated cost.
 2. **sky130A** unless told otherwise.
 3. ~~Vehicle~~ — decided: the ladder in §7.1, tiers 1a and 1b first, both
    for concrete runtime numbers; Chisel is acceptable.  **H+size exists at N = 8** (§8 step 7e: die 3.935 mm², wall 5,023 s —
@@ -1898,8 +1970,34 @@ have: every netlist here is either authored or uniquified.
    every pin and OBS rect the LEF claims, appended to the OBS as RECTs;
    tested on a synthetic cell carrying exactly the `in[22]` notch, where it
    claims that one rectangle and nothing else, and it refuses a shape that
-   is not a rectangle rather than boxing it.  Not yet run on the real
-   cells: one top run with the patched LEF in place of Magic's judges it.
+   is not a rectangle rather than boxing it.
+
+   **MEASURED 2026-09-08, and it is the fix.**  On the N = 8 H+B arm:
+
+   | | KLayout DRC | Magic overlaps | PDN | top wire |
+   |---|---|---|---|---|
+   | Magic's LEF (baseline) | 2 | 0 | clean | 300,704 µm |
+   | whole abstract | — | — | **125,800 violations** | never routed |
+   | met2 blanket | 0 | **6,233** | clean | 301,145 µm |
+   | **`notch_obs.py`** | **0** | **0** | clean | **300,715 µm** |
+
+   Eleven microns across a 300 mm route — +0.004 %, against the blanket's
+   +0.15 % — with die and hold unmoved and setup a shade BETTER (+0.3705
+   vs +0.3675 ns).  `Flow complete`, no deferred errors: the first fully
+   clean signoff this arm has produced, and #896 closes on it.
+
+   Its precondition did not hold on the real cells, which is worth
+   recording because the refusal was RIGHT and still blocked every one.
+   The tool needs the macro's metal as rectangles and will not box a
+   polygon — but Magic streams routed metal as rectilinear BOUNDARYs (a
+   wire with a jog is one 12- or 14-corner polygon), **982 of them on
+   `pe_cell` alone**, so all four cells were refused.  `rectify_gds.py`
+   decomposes them into rectangles first (a trapezoid decomposition of an
+   axis-aligned polygon IS rectangles over the same area) and compares the
+   region area before and after, refusing to write if they differ —
+   identical on all four cells, after which `notch_obs.py` runs unmodified.
+   The claim it then makes is 1.2 µm² per cell where the blanket claimed
+   5,208, and the notch goes from 98 % uncovered to 0 %.
 
 12. **`pdn_phase.py` detects, but its REMEDY is wrong** (measured
    2026-09-07 on the N = 8 artefacts).  The model now fails the
