@@ -44,7 +44,11 @@ nets, 6,928 pins) -- but it does NOT read routed geometry, so `net_segment`,
 are BUDA's OWN routing output.  A BDB of a routed LibreLane stage would
 therefore look like an unrouted design and quietly mislead, so this refuses
 to write one and says why; for somebody else's routing the DEF is the
-artefact, and `bin/viz <stage>.def` opens it.
+artefact, and `bin/viz <stage>.def` opens it.  The footprints in it are the
+run's real ones, standard cells included -- its `CELL_LEFS` go in beside the
+hardened macro LEFs, so nothing lands at the importer's fallback size and
+`allow_missing_footprints` is not needed; the `def_layer` table likewise
+comes from the run's own `TECH_LEFS` rather than a hard-coded stack.
 
 What each is good for:
   * PNG    -- every stage.  The quick "does this look right", and diffable
@@ -126,6 +130,12 @@ def by_corner(value, corner):
     `phase0/measure/read_resolved.py` already implements; it is repeated
     here rather than imported because that file is a standalone stdout
     helper for `run_or.sh`, not a module.  Codex #906."""
+    if isinstance(value, str):
+        # A scalar path, not a sequence of characters.  `list("a.lef")` is
+        # `['a', '.', 'l', 'e', 'f']` and every one of them would be handed
+        # to the renderer as a `-l` argument; the dict branch below already
+        # guarded its scalar, and the top-level one did not.
+        return [value]
     if not isinstance(value, dict):
         return list(value or [])
     if corner in value:
@@ -135,6 +145,60 @@ def by_corner(value, corner):
         if got is None:
             got = next(iter(value.values()), None)
     return list(got) if isinstance(got, list) else ([got] if got else [])
+
+
+def tech_lefs(cfg):
+    """The run's technology LEF(s), resolved for its own corner."""
+    corner = cfg.get("DEFAULT_CORNER") or "nom_tt_025C_1v80"
+    return by_corner(cfg.get("TECH_LEFS") or cfg.get("TECH_LEF"), corner)
+
+
+# The fallback when a run has no readable technology LEF.  sky130A's routing
+# stack, which is the only PDK this study runs -- named as a FALLBACK rather
+# than as the table, so a run on another PDK is told rather than drawn wrong.
+SKY130_LAYERS = [("li1", "V"), ("met1", "H"), ("met2", "V"), ("met3", "H"),
+                 ("met4", "V"), ("met5", "H")]
+
+
+def tech_layers(tech_path):
+    """[(name, "H"|"V")] for every ROUTING layer of a technology LEF, in file
+    order -- the layer table a stage BDB is declared with.
+
+    Read from the run's OWN technology LEF rather than hard-coded, which is
+    what makes the BDB right on a PDK this file has never seen (#908).  Only
+    `TYPE ROUTING` layers with a `DIRECTION` are taken: a cut layer has no
+    direction and is not a `def_layer`.
+
+    Parsed here rather than through `import_lef_tech`, which is the engine's
+    own reader, because that command derives a layer's ID from the trailing
+    integer of its NAME -- so sky130's `li1` and `met1` both want id 1 and
+    one of them is dropped (measured: `skipped layer met1: layer id already
+    in use`).  Position in the file is a total order and cannot collide."""
+    out, name, is_routing, direction = [], None, False, None
+    try:
+        text = open(tech_path).read()
+    except OSError:
+        return []
+    for raw in text.splitlines():
+        t = raw.split("#")[0].split()
+        if not t:
+            continue
+        # A layer block OPENS with exactly `LAYER <name>`.  The length test is
+        # load-bearing: sky130's tech LEF declares a PROPERTY named LAYER
+        # (`LAYER LEF58_TYPE STRING ;`, inside PROPERTYDEFINITIONS), and
+        # taking that as an open block left every real layer inside a block
+        # that never ends -- measured, the whole file read as ZERO layers.
+        if t[0] == "LAYER" and len(t) == 2:
+            name, is_routing, direction = t[1], False, None
+        elif name is not None and t[0] == "TYPE" and len(t) >= 2:
+            is_routing = t[1].rstrip(";").upper() == "ROUTING"
+        elif name is not None and t[0] == "DIRECTION" and len(t) >= 2:
+            direction = t[1].rstrip(";").upper()[:1]
+        elif t[0] == "END" and len(t) >= 2 and t[1] == name:
+            if is_routing and direction in ("H", "V"):
+                out.append((name, direction))
+            name = None
+    return out
 
 
 def lefs(cfg, run_dir):
@@ -163,11 +227,48 @@ def lefs(cfg, run_dir):
     return out, missing
 
 
+def mounts(paths):
+    """The `-v` arguments that make every one of `paths` visible in the
+    container, and the paths that cannot be made visible.
+
+    The container sees only what is bind-mounted.  $HOME covers the usual
+    layout -- a checkout, a PDK under `~/.ciel`, a run tree beside the
+    design -- and anything OUTSIDE it (a run on a scratch volume, a PDK_ROOT
+    on another disk, a `--out` elsewhere) was simply not there, with nothing
+    but `render.py`'s own one-line path error to say so (#908).  So each
+    such path gets its own mount at the same path, deduplicated against a
+    mount that already contains it.
+
+    A path at the filesystem root has no mount short of `/` and is
+    REPORTED rather than mounted: bind-mounting `/` into the container is
+    not a thing a render should do."""
+    home = os.path.realpath(os.path.expanduser("~"))
+    roots, bad = [home], []
+    for p in paths:
+        r = os.path.realpath(p if os.path.isdir(p) else os.path.dirname(p) or ".")
+        if any(r == m or r.startswith(m + os.sep) for m in roots):
+            continue
+        if os.path.dirname(r) == r:          # "/" itself
+            bad.append(p)
+            continue
+        roots.append(r)
+    args = []
+    for m in roots:
+        args += ["-v", f"{m}:{m}"]
+    return args, bad
+
+
 def render(def_path, png, cfg, run_dir, lef_paths, quiet=False):
-    args = ["docker", "run", "--rm",
-            "-v", f"{os.path.expanduser('~')}:{os.path.expanduser('~')}",
-            "-w", os.getcwd(), IMAGE,
-            "python3", "-c", _RENDER_SHIM]
+    tech_files = [cfg[k] for k in ("KLAYOUT_TECH", "KLAYOUT_PROPERTIES", "KLAYOUT_DEF_LAYER_MAP")
+                  if cfg.get(k)]
+    mnt, bad = mounts([def_path, png, os.getcwd()] + list(lef_paths) + tech_files)
+    if bad:
+        if not quiet:
+            print(f"      render skipped: not under any mountable root: {', '.join(bad)}")
+        return False
+    args = (["docker", "run", "--rm"] + mnt +
+            ["-w", os.getcwd(), IMAGE,
+             "python3", "-c", _RENDER_SHIM])
     for l in lef_paths:
         args += ["-l", l]
     for flag, key in (("-T", "KLAYOUT_TECH"), ("-P", "KLAYOUT_PROPERTIES"),
@@ -183,21 +284,31 @@ def render(def_path, png, cfg, run_dir, lef_paths, quiet=False):
     return r.returncode == 0
 
 
-def write_bdb(def_path, bdb, lef_paths, buda, layers):
-    """One BDB per placement stage, through BUDA's own importer."""
-    macro_lefs = [l for l in lef_paths if "/final/lef/" in l]
-    if not macro_lefs:
-        return False, "no macro LEF in the run's MACROS entry"
+def write_bdb(def_path, bdb, footprint_lefs, buda, layers):
+    """One BDB per placement stage, through BUDA's own importer.
+
+    EVERY footprint LEF goes in, the PDK's standard-cell library as well as
+    the run's hardened macros, and `allow_missing_footprints` therefore does
+    NOT (#908).  It used to take the macro LEFs alone and pass the flag, so
+    a CTS stage's 39,465 standard cells all imported at the importer's 0.5 x
+    0.5 fallback: a BDB that opens in `bin/fp` with specks where the cells
+    are, and an HPWL measured over speck centres.  The library LEF is
+    already in the run's own `CELL_LEFS`, so the real footprints cost
+    nothing but naming them -- and with them named, the importer's refusal
+    is a GUARD again (a cell in no LEF is a wrong-library run) rather than a
+    setting that hides the missing input, the same shape as a `|| true`."""
+    if not footprint_lefs:
+        return False, "the run's resolved.json names no CELL_LEFS and no macro LEF"
     cat = bdb + ".lef"
     with open(cat, "w") as f:
-        for l in macro_lefs:
+        for l in footprint_lefs:
             f.write(open(l).read() + "\n")
     script = bdb + ".buda"
     with open(script, "w") as f:
         f.write(f"open_bdb {bdb}\nset_import_scale dbu\nset_unit_check warn\n")
         for i, (n, d) in enumerate(layers, 1):
             f.write(f"def_layer {i} {n} {d} 30\n")
-        f.write(f"import_def_lef {def_path} {cat} allow_missing_footprints\nsave_bdb\n")
+        f.write(f"import_def_lef {def_path} {cat}\nsave_bdb\n")
     r = subprocess.run([buda, "--no-viz", script], capture_output=True, text=True)
     return r.returncode == 0, (r.stderr or r.stdout).strip().splitlines()[-1][:120] if r.returncode else ""
 
@@ -234,12 +345,25 @@ def main(argv=None):
     lef_paths, missing = lefs(cfg, run_dir)
     for m in missing:
         print(f"snapshots: WARNING: macro LEF not found, its cells will render empty: {m}")
+    tech = tech_lefs(cfg)
+    layers = tech_layers(tech[0]) if tech else []
+    if layers:
+        print(f"snapshots: layers from {os.path.basename(tech[0])}: "
+              + " ".join(f"{n}({d})" for n, d in layers))
+    else:
+        # A stage BDB needs a layer table and the run did not supply a
+        # readable one.  SAY which table is being used instead rather than
+        # drawing another PDK's stack in silence.
+        layers = SKY130_LAYERS
+        print(f"snapshots: WARNING: no routing layer read from the run's TECH_LEFS "
+              f"({tech[0] if tech else 'none named'}) -- falling back to sky130A's stack; "
+              f"the run's PDK is {cfg.get('PDK')}")
+    footprints = [l for l in lef_paths if l not in tech]
     out = os.path.abspath(a.out or os.path.join(run_dir, "..", "snapshots"))
     os.makedirs(out, exist_ok=True)
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     buda = os.path.join(os.path.dirname(root), "bin", "buda")
     buda = buda if os.path.isfile(buda) else os.path.join(root, "..", "bin", "buda")
-    layers = [("met1", "H"), ("met2", "V"), ("met3", "H"), ("met4", "V"), ("met5", "H")]
 
     rows = []
     for n, step, name, dp in picked:
@@ -251,7 +375,7 @@ def main(argv=None):
         if a.bdb:
             if name in PLACEMENT_STAGES:
                 bp = os.path.join(out, f"{n:02d}-{name}.bdb")
-                bok, err = write_bdb(dp, bp, lef_paths, buda, layers)
+                bok, err = write_bdb(dp, bp, footprints, buda, layers)
                 bdb_note = os.path.basename(bp) if bok else f"failed: {err}"
             else:
                 bdb_note = "skipped — a routed DEF's geometry is not read into a BDB (see --help)"

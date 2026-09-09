@@ -1671,7 +1671,22 @@ itself worth watching.  But it does NOT read routed geometry:
 `net_segment`, `bus_segment` and `net_via` come back **0/0/0** on a routed
 DEF, because those tables are BUDA's OWN routing output.  A BDB of a routed
 stage would therefore look like an unrouted design and quietly mislead, so
-the tool refuses to write one and says why.  For somebody else's routing the
+the tool refuses to write one and says why.
+
+The footprints in it are the REAL ones, on the standard cells as well as the
+macros (#908).  The first cut concatenated the hardened macro LEFs alone and
+passed `allow_missing_footprints`, so at CTS all 39,465 components landed at
+the importer's 0.5 × 0.5 µm fallback: a BDB that opens in `bin/fp` with
+specks where the cells are, and an HPWL over speck centres.  The PDK's
+standard-cell library is already in the run's own `CELL_LEFS`, so naming it
+costs nothing — measured on the N = 8 top at CTS, **39,141 of 39,141**
+components imported with **0** at the fallback size (tap cells at their real
+0.46 × 2.72 µm site) — and with it named the flag can go, which makes the
+importer's refusal a guard again rather than a setting that hides a missing
+input.  The `def_layer` table comes from the run's own `TECH_LEFS` the same
+way, parsed for `TYPE ROUTING` layers with a `DIRECTION`, rather than from a
+hard-coded sky130 stack; a run with no readable technology LEF is told which
+stack it fell back to and what its `PDK` says.  For somebody else's routing the
 DEF is the artefact: `bin/viz <run>/NN-step/<design>.def` opens it, and
 `bin/fp <stage>.bdb` opens a placement stage where a macro can be dragged and
 the HPWL and flylines move with it.
