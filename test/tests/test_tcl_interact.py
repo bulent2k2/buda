@@ -101,6 +101,12 @@ def _run(cmd, tmp_path, stdin="done\n"):
                           timeout=900, env={**os.environ})
 
 
+def _tcl_lit(s):
+    """`s` as a Tcl literal — braced, none of the cases carrying braces."""
+    assert "{" not in s and "}" not in s and "\\" not in s, s
+    return "{" + s + "}"
+
+
 def _log(flow):
     """The flow's per-command detail, where the driver now files it.
 
@@ -378,6 +384,256 @@ def test_hier_stage_resume_holds_construction_and_replans(tmp_path):
     assert r.returncode == 0, r.stdout + r.stderr
     assert _log(flow).count("topo 2 of 5") >= 4, "the inspection session dirtied the checkpoint"
     assert "done -- 0 overlaps, 0 unplaced, 0 audit violations" in r.stdout
+
+
+def test_a_hier_resume_does_not_demand_the_inputs_it_holds(tmp_path):
+    """#873, its own four-command repro: a hier resume replayed
+    `require_file` while HOLDING the commands that read those files, so it
+    announced "5 held by the checkpoint" and then refused to start because
+    those five had no inputs -- offering the remedy for regenerating files
+    it would never open.  `flow/tpu` and `flow/ariane133` are where it
+    bites, both being flows whose inputs are deliberately not checked in.
+
+    Resolved PER PATH: the three inputs here are read only by held
+    importers, so the whole statement goes and the resume says which
+    requirements it dropped and why."""
+    for f in ("tpu.def", "tpu.lef", "tpu.v", "tpu2.buda"):
+        shutil.copy(_ROOT / "flow" / "tpu" / f, tmp_path / f)
+    flow = tmp_path / "tpu2.buda"
+
+    r = _run([*_BTCL_CMD, "-b", flow], tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "done -- 0 overlaps, 0 unplaced, 0 audit violations" in r.stdout
+
+    # the inputs the resume does not read
+    for f in ("tpu.def", "tpu.lef", "tpu.v"):
+        (tmp_path / f).unlink()
+
+    r = _run([*_BTCL_CMD, "-r", flow], tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "held by the checkpoint" in r.stdout
+    assert "require_file: 3 input(s) are read only by commands the checkpoint" \
+        in " ".join(r.stdout.split()), r.stdout
+    assert "still required" not in r.stdout            # all three were moot
+    assert "BUDA-1905" not in r.stdout, "the resume still demanded them"
+    assert "done -- 0 overlaps, 0 unplaced, 0 audit violations" in r.stdout
+
+
+def test_require_file_is_pruned_per_path_not_per_statement(tmp_path):
+    """The rule the fix turns on, over the cases that separate it from
+    holding the whole statement.
+
+    A `require_file` names files of BOTH kinds in ONE statement -- the
+    reason a per-statement decision cannot be right.
+    `flow/ariane133/ariane133.buda` requires `ariane.v` and
+    `fakeram45_256x16.lef`, read by held importers, alongside
+    `NangateOpenCellLibrary.tech.lef`, read by `import_lef_tech`, which
+    REPLAYS.  Three of the four in-tree flows that pair the two look like
+    that.  Holding the line loses the tech LEF's remedy hint; replaying it
+    refuses a resume that works.
+
+    Every other case KEEPS today's behaviour, which is what makes the
+    change safe: a path no held line names, a path spelled differently
+    between the requirement and the reader, and a flat resume with nothing
+    held at all.
+
+    The proc is extracted and run on its own rather than sourced (sourcing
+    the driver runs a session), which also proves it is self-contained --
+    the same method `test_btcl_quoted_paths` uses."""
+    text = _DRIVER.read_text().splitlines()
+    body = []
+    for name in ("proc _verb ", "proc _split_args ", "proc _origin_dir ",
+                 "proc _lex_resolve ", "proc _prune_requires "):
+        a = next(i for i, l in enumerate(text) if l.startswith(name))
+        b = next(i for i in range(a, len(text)) if text[i] == "}")
+        body += text[a:b + 1]
+
+    held = ["import_def_lef ../../demo/ariane/ariane.def fakeram45_256x16.lef",
+            "import_verilog ariane.v",
+            "import_def_lef 'a b.def' c.lef"]
+    setup = ["open_bdb x.bdb",
+             "import_lef_tech NangateOpenCellLibrary.tech.lef",
+             # the mixed statement: two held inputs, one replayed reader's
+             "require_file ariane.v fakeram45_256x16.lef"
+             " NangateOpenCellLibrary.tech.lef hint Fetch them first: fetch.py",
+             # a path no held line names -- kept, the safe direction
+             "require_file elsewhere.txt",
+             # spelled differently from the held line's token -- kept
+             "require_file demo/ariane/ariane.def",
+             # a quoted path with a space, held: dropped, and the survivor
+             # keeps its quoting through the rewrite
+             "require_file 'a b.def' elsewhere.txt",
+             "def_layer 4 M4 H TOP 30"]
+    probe = tmp_path / "probe.tcl"
+    probe.write_text(
+        "source " + _tcl_lit(str(_ROOT / "tools" / "buda.tcl")) + "\n"
+        + "\n".join(body) + "\n"
+        + "set held [list " + " ".join(_tcl_lit(l) for l in held) + "]\n"
+        + "set setup [list " + " ".join(_tcl_lit(l) for l in setup) + "]\n"
+        + "lassign [_prune_requires $setup $held] out notes\n"
+        + 'foreach l $out { puts "OUT:$l" }\n'
+        + 'foreach n $notes { puts "NOTE:[lindex $n 0]|[lindex $n 1]" }\n')
+    r = subprocess.run(["tclsh", str(probe)], text=True, capture_output=True,
+                       timeout=120)
+    assert r.returncode == 0, r.stderr
+    out = [l[4:] for l in r.stdout.splitlines() if l.startswith("OUT:")]
+    notes = [l[5:] for l in r.stdout.splitlines() if l.startswith("NOTE:")]
+
+    # the mixed statement keeps ONLY the replayed reader's file, with the hint
+    assert ("require_file NangateOpenCellLibrary.tech.lef hint Fetch them"
+            " first: fetch.py") in out, out
+    # untouched: neither path is named by a held line
+    assert "require_file elsewhere.txt" in out
+    assert "require_file demo/ariane/ariane.def" in out
+    # the quoted held path goes; the unmatched one stays, still one statement
+    assert "require_file elsewhere.txt" in out
+    assert not any("a b.def" in l for l in out), out
+    # nothing else moved
+    assert out[0] == "open_bdb x.bdb" and out[-1] == "def_layer 4 M4 H TOP 30"
+    assert len(notes) == 2, notes            # the mixed one and the quoted one
+    assert notes[0] == ("NangateOpenCellLibrary.tech.lef"
+                        "|ariane.v fakeram45_256x16.lef"), notes[0]
+
+    # nothing held (a FLAT resume) leaves every statement alone
+    probe.write_text(
+        "source " + _tcl_lit(str(_ROOT / "tools" / "buda.tcl")) + "\n"
+        + "\n".join(body) + "\n"
+        + "set setup [list " + " ".join(_tcl_lit(l) for l in setup) + "]\n"
+        + "lassign [_prune_requires $setup {}] out notes\n"
+        + 'puts "N:[llength $out]:[llength $notes]"\n')
+    r = subprocess.run(["tclsh", str(probe)], text=True, capture_output=True,
+                       timeout=120)
+    assert r.returncode == 0, r.stderr
+    assert f"N:{len(setup)}:0" in r.stdout, r.stdout
+
+
+def test_a_differently_spelled_required_path_is_rooted_not_guessed(tmp_path):
+    """The literal match's one blind spot, and the rule that closes it.
+
+    `require_file ./tpu.def` beside `import_def_lef tpu.def` names one file
+    in two spellings, and a token comparison keeps the requirement -- the
+    safe direction, but the resume then refuses on a file nothing reads with
+    no hint that the leading `./` is why.  So a literal miss gets ONE more
+    chance: both tokens resolved LEXICALLY against their own recorded
+    `# origin:` directory.
+
+    Rooted at the TRACE's origins, never at this session's flow directory,
+    because the build and the resume may be different clones of the tree.
+    Both sides then carry build-time roots that are stale identically and
+    cancel, which this measures directly: the same tokens under a
+    completely different recorded root give the same verdict.  A side whose
+    origin the trace does not record is not normalized at all and falls
+    back to the literal test, so an unknown root can only keep a
+    requirement, never drop one.
+
+    Lexical because the files are GONE -- that is the situation this whole
+    path exists for -- so `file normalize`, which anchors at the CWD and
+    resolves symlinks, is the wrong tool.
+    """
+    text = _DRIVER.read_text().splitlines()
+    body = []
+    for name in ("proc _verb ", "proc _split_args ", "proc _origin_dir ",
+                 "proc _lex_resolve ", "proc _prune_requires "):
+        a = next(i for i, l in enumerate(text) if l.startswith(name))
+        b = next(i for i in range(a, len(text)) if text[i] == "}")
+        body += text[a:b + 1]
+
+    held = ["import_def_lef tpu.def tpu.lef"]
+    setup = ["require_file ./tpu.def sub/../tpu.lef unrelated.v",
+             "def_layer 4 M4 H TOP 30"]
+
+    def probe(root, with_origins=True):
+        lines = ["source " + _tcl_lit(str(_ROOT / "tools" / "buda.tcl"))]
+        lines += body
+        lines.append("set ::origin_of [dict create]")
+        if with_origins:
+            for l in held + setup:
+                lines.append("dict set ::origin_of " + _tcl_lit(l) + " "
+                             + _tcl_lit(root + "/flow.buda"))
+        lines.append("set held [list " + " ".join(_tcl_lit(l) for l in held) + "]")
+        lines.append("set setup [list " + " ".join(_tcl_lit(l) for l in setup) + "]")
+        lines.append("lassign [_prune_requires $setup $held] out notes")
+        lines.append('foreach l $out { puts "OUT:$l" }')
+        f = tmp_path / "probe2.tcl"
+        f.write_text("\n".join(lines) + "\n")
+        r = subprocess.run(["tclsh", str(f)], text=True, capture_output=True,
+                           timeout=120)
+        assert r.returncode == 0, r.stderr
+        return [l[4:] for l in r.stdout.splitlines() if l.startswith("OUT:")]
+
+    # `./tpu.def` and `sub/../tpu.lef` resolve onto the held importer's two
+    # inputs and go; `unrelated.v` is named by nothing held and stays.
+    out = probe("/build/clone-a")
+    assert "require_file unrelated.v" in out, out
+    assert not any("tpu." in l for l in out), out
+
+    # the SAME tokens under a different recorded root: the prefix cancels, so
+    # the verdict cannot depend on which clone the build ran in
+    assert probe("/somewhere/else/entirely") == out
+    assert probe("/x") == out
+
+    # with no origin recorded the rooted chance is not taken at all, and the
+    # literal test alone keeps every path -- an unknown root never drops one
+    out = probe("/build/clone-a", with_origins=False)
+    assert out[0] == "require_file ./tpu.def sub/../tpu.lef unrelated.v", out
+
+
+def test_pruning_agrees_with_the_engine_and_keeps_the_sourced_root(tmp_path):
+    """Two ways the rewrite can lie about the flow it is rewriting, both
+    found by Codex on #914 and both reproduced here first.
+
+    (a) The `hint` delimiter is EXACT in `cmd_require_file`
+    (`if "hint" in argv`), so `require_file design.def HINT` declares TWO
+    paths and the engine reports `HINT` missing -- measured.  Case-folding
+    it here read the second as remedy text, so pruning the first dropped
+    the statement and the resumed flow stopped checking `HINT` at all.  A
+    reader of the flow's own syntax that disagrees with the engine about
+    that syntax is what this file's `_split_args` twin exists to prevent.
+
+    (b) `::origin_of` is keyed by the RECORDED line text.  A partly pruned
+    statement is a NEW string, so `_replay` fell back to the entry flow's
+    directory for it -- and a surviving relative path that lives beside the
+    SOURCED file is then looked for in the parent's, and reported missing.
+    That is the sourced-vs-entry root confusion the per-line origins were
+    added to fix, reintroduced by the rewrite."""
+    text = _DRIVER.read_text().splitlines()
+    body = []
+    for name in ("proc _verb ", "proc _split_args ", "proc _origin_dir ",
+                 "proc _lex_resolve ", "proc _prune_requires "):
+        a = next(i for i, l in enumerate(text) if l.startswith(name))
+        b = next(i for i in range(a, len(text)) if text[i] == "}")
+        body += text[a:b + 1]
+
+    sub = "/build/flow/sub/inner.buda"
+    held = ["import_def_lef a.def x.lef"]
+    setup = ["require_file a.def HINT",           # (a): HINT is a PATH
+             "require_file a.def b.lef hint see fetch.py",   # (b): mixed
+             "import_lef_tech b.lef"]
+    lines = ["source " + _tcl_lit(str(_ROOT / "tools" / "buda.tcl"))] + body
+    lines.append("set ::origin_of [dict create]")
+    for l in held + setup:
+        lines.append("dict set ::origin_of " + _tcl_lit(l) + " " + _tcl_lit(sub))
+    lines.append("set held [list " + " ".join(_tcl_lit(l) for l in held) + "]")
+    lines.append("set setup [list " + " ".join(_tcl_lit(l) for l in setup) + "]")
+    lines.append("lassign [_prune_requires $setup $held] out notes")
+    lines.append('foreach l $out { puts "OUT:$l|[_origin_dir $l]" }')
+    probe = tmp_path / "probe3.tcl"
+    probe.write_text("\n".join(lines) + "\n")
+    r = subprocess.run(["tclsh", str(probe)], text=True, capture_output=True,
+                       timeout=120)
+    assert r.returncode == 0, r.stderr
+    got = dict(l[4:].split("|", 1) for l in r.stdout.splitlines()
+               if l.startswith("OUT:"))
+
+    # (a) `HINT` is a path, so it survives the prune of `a.def` -- the
+    # statement is rewritten, not dropped, and the engine still checks it
+    assert "require_file HINT" in got, got
+
+    # (b) the rewritten mixed statement keeps the SOURCED file's directory,
+    # so `b.lef` is still looked for beside inner.buda
+    rewritten = next(k for k in got
+                     if k.startswith("require_file b.lef hint"))
+    assert got[rewritten] == "/build/flow/sub", got
 
 
 def test_below_plan_resume_holds_healers_the_plan_already_carries(tmp_path):

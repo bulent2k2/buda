@@ -770,6 +770,180 @@ proc replay_tail {} {
 # (Codex #763).  Re-solving is fine: run_nuts/run_detailed_nuts persist
 # through the selective expanded machinery, which is what the stage replay
 # itself runs.
+# The directory a recorded line's RELATIVE paths were resolved against: its
+# `# origin:` script's own directory, since that is the rule the engine
+# followed when the build ran.  Empty when the trace does not say (a
+# pre-`# origin:` trace) or says two things (the same text recorded from two
+# roots, which `::origin_of` marks ambiguous) -- and empty means DO NOT
+# normalize, which is what keeps the comparison below root-independent.
+proc _origin_dir {ln} {
+    if {![info exists ::origin_of]} { return "" }
+    if {![dict exists $::origin_of $ln]} { return "" }
+    set o [dict get $::origin_of $ln]
+    if {$o eq ""} { return "" }
+    return [file dirname $o]
+}
+
+
+# `p` resolved against `root` LEXICALLY: `.` dropped, `..` popped, separators
+# regularized, and the filesystem never touched.
+#
+# Not `file normalize`, for two reasons that both matter here.  It anchors a
+# relative path at the CWD, which is not the root the engine used; and it
+# resolves symlinks, which needs the file to EXIST -- and the whole point of
+# this comparison is that these files are gone.
+proc _lex_resolve {root p} {
+    set full [expr {[file pathtype $p] eq "relative" ? [file join $root $p] : $p}]
+    set out {}
+    foreach seg [file split $full] {
+        if {$seg eq "."} { continue }
+        # Never pop the root itself: `file split /a` is {/ a}, so element 0
+        # is the volume and `..` above it has nothing to remove.
+        if {$seg eq ".." && [llength $out] > 1} {
+            set out [lrange $out 0 end-1]
+            continue
+        }
+        lappend out $seg
+    }
+    if {![llength $out]} { return $p }
+    return [file join {*}$out]
+}
+
+
+# `require_file` states a flow's INPUT PRECONDITION, and on a HIER resume some
+# of those inputs are read by commands the checkpoint HOLDS: the design is
+# already built, so `import_def_lef`/`import_verilog`/`import_gds` do not run
+# and their files need not be there.  Replaying the check anyway refused a
+# resume that works, and offered the remedy for REGENERATING files the session
+# would never open (#873 -- the same run printed "5 held by the checkpoint"
+# and then died on the inputs of those five).
+#
+# Resolved PER PATH rather than per statement, because one statement names
+# both kinds.  `flow/ariane133/ariane133.buda` requires `ariane.v` and
+# `fakeram45_256x16.lef`, read by held importers, alongside
+# `NangateOpenCellLibrary.tech.lef`, read by `import_lef_tech`, which
+# REPLAYS -- three of the four flows that pair the two are like this.  So
+# holding the whole line loses that path's remedy hint while replaying it
+# refuses a working resume, and neither is right for the flow it matters
+# most on.
+#
+# The path-to-command mapping needs no path-vs-option cleverness, which is
+# what made this look harder than it is: a required path is compared
+# LITERALLY against the argument tokens of the lines THIS SAME PASS has
+# already classified, both being tokens the flow itself wrote.  A path is
+# dropped only when a held line names it and no replayed line does, so an
+# unmatched path and one any replayed command reads both KEEP today's
+# behaviour.
+#
+# A literal miss then gets ONE more chance, rooted: the same two tokens
+# resolved lexically against their OWN recorded `# origin:` directories
+# (`_lex_resolve`).  That is what catches a flow writing `require_file
+# ./tpu.def` beside an `import_def_lef tpu.def`, and a requirement in a
+# sourced file naming its reader's input by another route -- measured, no
+# checked-in flow needs it (all 24 required paths across the 8 flows that
+# declare any match literally), which is exactly why it is a FALLBACK and
+# not the rule: a case that already matched cannot change.
+#
+# Root-independence is the reason it uses the ORIGINS rather than the
+# session's own flow directory, and it is not a nicety -- the build and the
+# resume may be different clones or copies of the tree.  Both sides are
+# rooted at BUILD-time paths from the same trace, so whatever prefix is
+# stale is stale identically and cancels in the comparison; a side whose
+# origin the trace does not record is not normalized at all, and falls back
+# to the literal test.  Mixing one recorded root with this machine's would
+# be the way to get a wrong answer, so it never happens.
+#
+# Returns {pruned_setup notes}, one note per statement it changed:
+# {kept moot}.
+proc _prune_requires {setup held_lines} {
+    if {![llength $held_lines]} { return [list $setup {}] }
+    set held_tokens {}
+    set held_rooted {}
+    foreach ln $held_lines {
+        set d [_origin_dir $ln]
+        foreach t [_split_args $ln] {
+            dict set held_tokens $t 1
+            if {$d ne ""} { dict set held_rooted [_lex_resolve $d $t] 1 }
+        }
+    }
+    # Every OTHER replayed line's tokens.  `require_file` lines are excluded
+    # from this set on purpose: naming a path is not reading it, so a second
+    # `require_file` for the same input must not keep the first one alive.
+    set replay_tokens {}
+    set replay_rooted {}
+    foreach ln $setup {
+        if {[_verb $ln] eq "require_file"} { continue }
+        set d [_origin_dir $ln]
+        foreach t [_split_args $ln] {
+            dict set replay_tokens $t 1
+            if {$d ne ""} { dict set replay_rooted [_lex_resolve $d $t] 1 }
+        }
+    }
+    set out {}
+    set notes {}
+    foreach ln $setup {
+        if {[_verb $ln] ne "require_file"} { lappend out $ln; continue }
+        # `require_file <path>... [hint <text>]` -- the hint is the rest of
+        # the line and travels with whatever paths survive.
+        #
+        # The delimiter is matched EXACTLY, as `cmd_require_file` matches it
+        # (`if "hint" in argv`, then `argv.index("hint")` -- the first
+        # occurrence, case-sensitive).  Case-folding here read `require_file
+        # design.def HINT` as one path plus remedy text where the engine
+        # reads TWO paths, so pruning `design.def` dropped the statement and
+        # with it the check on `HINT` -- which the engine reports missing
+        # (measured: BUDA-1905 names `HINT`).  A reader of a flow's own
+        # syntax that disagrees with the engine about that syntax is the
+        # defect this file's `_split_args` twin exists to prevent (Codex
+        # #914).
+        set paths {}
+        set tail {}
+        set in_hint 0
+        foreach a [_split_args $ln] {
+            if {!$in_hint && $a eq "hint"} { set in_hint 1 }
+            if {$in_hint} { lappend tail $a } else { lappend paths $a }
+        }
+        set keep {}
+        set moot {}
+        set d [_origin_dir $ln]
+        foreach pth $paths {
+            set r [expr {$d eq "" ? "" : [_lex_resolve $d $pth]}]
+            set by_held [expr {[dict exists $held_tokens $pth]
+                               || ($r ne "" && [dict exists $held_rooted $r])}]
+            set by_replay [expr {[dict exists $replay_tokens $pth]
+                                 || ($r ne "" && [dict exists $replay_rooted $r])}]
+            if {$by_held && !$by_replay} {
+                lappend moot $pth
+            } else {
+                lappend keep $pth
+            }
+        }
+        if {![llength $moot]} { lappend out $ln; continue }
+        lappend notes [list $keep $moot]
+        # A statement with no path left is dropped entirely.  It is not
+        # rewritten to a bare `require_file`, which the engine refuses (a
+        # command that named nothing checked nothing) -- correctly, and that
+        # refusal is not this resume's to trip over.
+        if {[llength $keep]} {
+            set rewritten "require_file [::buda::_join_args [concat $keep $tail]]"
+            # `::origin_of` is keyed by the RECORDED line text, and this is a
+            # new string -- so without carrying the origin over, `_replay`
+            # falls back to the ENTRY flow's directory and a surviving
+            # relative path that lives beside the SOURCED file is reported
+            # missing from the parent's (Codex #914; the same
+            # sourced-vs-entry root confusion recorded at `_replay`, which
+            # the per-line origins exist to fix).  An ambiguous or absent
+            # origin is carried over as-is: "" is what both mean there.
+            if {[info exists ::origin_of] && [dict exists $::origin_of $ln]} {
+                dict set ::origin_of $rewritten [dict get $::origin_of $ln]
+            }
+            lappend out $rewritten
+        }
+    }
+    return [list $out $notes]
+}
+
+
 proc _inspect_guard {verb} {
     if {[string match edit_* $verb]
             || [string match generate_* $verb]
@@ -1573,6 +1747,7 @@ if {$stage eq "build"} {
                         emit_ export_ select_topolog unpin_topology}
     set setup {}
     set held 0
+    set held_lines {}
     foreach ln [lrange $lines 0 [expr {$cut - 1}]] {
         set verb [_verb $ln]
         if {[_skipped $verb $pipeline_prefixes]} { continue }
@@ -1613,8 +1788,16 @@ if {$stage eq "build"} {
                 if {[string match ${p}* $verb]} { set ok 1; break }
             }
         }
-        if {$ok} { lappend setup $ln } else { incr held }
+        if {$ok} {
+            lappend setup $ln
+        } else {
+            incr held
+            lappend held_lines $ln
+        }
     }
+
+    # What the held construction made moot: see `_prune_requires`.
+    lassign [_prune_requires $setup $held_lines] setup require_notes
 
     # The post-cut replay: the flow's own commands from the stage on, under
     # the replan filter — except that a `topo` cut must of course replay
@@ -1652,6 +1835,13 @@ if {$stage eq "build"} {
           [expr {$is_hier ? "HIER" : "FLAT"}] flow, [llength $setup] setup\
           command(s)[expr {$held ? ", $held held by the checkpoint" : ""}],\
           [llength $stage_lines] to replay"
+    foreach note $require_notes {
+        lassign $note keep moot
+        puts "$tag: require_file: [llength $moot] input(s) are read only by\
+              commands the checkpoint holds, so they are not required here\
+              ([join $moot {, }])[expr {[llength $keep] ?
+              " -- still required: [join $keep {, }]" : ""}]"
+    }
     if {[llength $held_planner]} {
         puts "$tag: holding [llength $held_planner] planner-dependent\
               command(s) ([lsort -unique $held_planner]) -- the restored\

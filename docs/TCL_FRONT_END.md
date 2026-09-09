@@ -709,7 +709,18 @@ replayed `add_inst` is a duplicate-instance error, a re-derive would
 renumber busterm ids the restored bundles reference), so only the
 session-state verbs replay — stack, patterns, `add_blocks_from_bdb`
 projections, layer policies — and the construction commands are held,
-counted, and said.  Hier `topo`/`plan` restore the pre-expansion view
+counted, and said.  A held command's INPUTS are held with it: a
+`require_file` path that only held construction reads is dropped from the
+check and said, resolved per PATH because one statement names both kinds
+(`flow/ariane133` requires the netlist and macro LEF its held importers
+read alongside the technology LEF that the REPLAYED `import_lef_tech`
+reads, so the first two go and the third stays required with its hint).
+A path no held command names stays required, so the ambiguous case keeps
+the check; one spelled differently from its reader's token gets a further
+comparison rooted at each line's own recorded `# origin:` directory —
+the TRACE's roots rather than this session's, since build and resume may
+be different clones, so the stale prefix cancels on both sides.  Until this was fixed a hier resume announced what it was
+holding and then refused to start on those very files (#873).  Hier `topo`/`plan` restore the pre-expansion view
 (the cuts that still run `run_planner hier`, whose expansion it feeds);
 hier `nuts`/`dnuts` restore the POST-expansion view (`load_pipeline
 expanded`) as an **INSPECTION session** — the quick look at a long
