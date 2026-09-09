@@ -716,7 +716,10 @@ check and said, resolved per PATH because one statement names both kinds
 read alongside the technology LEF that the REPLAYED `import_lef_tech`
 reads, so the first two go and the third stays required with its hint).
 A path no held command names stays required, so the ambiguous case keeps
-the check.  Until this was fixed a hier resume announced what it was
+the check; one spelled differently from its reader's token gets a further
+comparison rooted at each line's own recorded `# origin:` directory —
+the TRACE's roots rather than this session's, since build and resume may
+be different clones, so the stale prefix cancels on both sides.  Until this was fixed a hier resume announced what it was
 holding and then refused to start on those very files (#873).  Hier `topo`/`plan` restore the pre-expansion view
 (the cuts that still run `run_planner hier`, whose expansion it feeds);
 hier `nuts`/`dnuts` restore the POST-expansion view (`load_pipeline

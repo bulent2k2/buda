@@ -276,9 +276,18 @@ routinely names both kinds: `flow/ariane133` requires `ariane.v` and the
 macro LEF, read by held importers, alongside the technology LEF that
 `import_lef_tech` reads, and `import_lef_tech` REPLAYS. So the held inputs
 are dropped, the tech LEF stays required with its hint, and the resume says
-which requirements it dropped and why. A path no held command names, or one
-spelled differently from the way its reader names it, stays required — the
-ambiguous case keeps the check rather than skipping it. Flat resumes replay
+which requirements it dropped and why. A path no held command names stays
+required, so the ambiguous case keeps the check rather than skipping it. A
+path *spelled* differently from the way its reader names it (`./tpu.def`
+beside `import_def_lef tpu.def`) is caught by one further, rooted
+comparison: both tokens are resolved lexically against their own recorded
+origin script's directory. That rooting is deliberately the **trace's**,
+not the resuming session's, because the build and the resume may be
+different clones of the tree — both sides then carry build-time roots whose
+stale prefix cancels, and a side whose origin the trace does not record is
+not normalized at all. No checked-in flow needs this (all 24 required paths
+across the 8 flows that declare any already match literally), which is why
+it is a fallback and cannot change a case that already matched. Flat resumes replay
 setup wholesale and are unaffected. Before this, such a resume refused to
 start on files it would never open, offering the remedy for regenerating
 them (#873).

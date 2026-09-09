@@ -770,6 +770,46 @@ proc replay_tail {} {
 # (Codex #763).  Re-solving is fine: run_nuts/run_detailed_nuts persist
 # through the selective expanded machinery, which is what the stage replay
 # itself runs.
+# The directory a recorded line's RELATIVE paths were resolved against: its
+# `# origin:` script's own directory, since that is the rule the engine
+# followed when the build ran.  Empty when the trace does not say (a
+# pre-`# origin:` trace) or says two things (the same text recorded from two
+# roots, which `::origin_of` marks ambiguous) -- and empty means DO NOT
+# normalize, which is what keeps the comparison below root-independent.
+proc _origin_dir {ln} {
+    if {![info exists ::origin_of]} { return "" }
+    if {![dict exists $::origin_of $ln]} { return "" }
+    set o [dict get $::origin_of $ln]
+    if {$o eq ""} { return "" }
+    return [file dirname $o]
+}
+
+
+# `p` resolved against `root` LEXICALLY: `.` dropped, `..` popped, separators
+# regularized, and the filesystem never touched.
+#
+# Not `file normalize`, for two reasons that both matter here.  It anchors a
+# relative path at the CWD, which is not the root the engine used; and it
+# resolves symlinks, which needs the file to EXIST -- and the whole point of
+# this comparison is that these files are gone.
+proc _lex_resolve {root p} {
+    set full [expr {[file pathtype $p] eq "relative" ? [file join $root $p] : $p}]
+    set out {}
+    foreach seg [file split $full] {
+        if {$seg eq "."} { continue }
+        # Never pop the root itself: `file split /a` is {/ a}, so element 0
+        # is the volume and `..` above it has nothing to remove.
+        if {$seg eq ".." && [llength $out] > 1} {
+            set out [lrange $out 0 end-1]
+            continue
+        }
+        lappend out $seg
+    }
+    if {![llength $out]} { return $p }
+    return [file join {*}$out]
+}
+
+
 # `require_file` states a flow's INPUT PRECONDITION, and on a HIER resume some
 # of those inputs are read by commands the checkpoint HOLDS: the design is
 # already built, so `import_def_lef`/`import_verilog`/`import_gds` do not run
@@ -791,25 +831,53 @@ proc replay_tail {} {
 # what made this look harder than it is: a required path is compared
 # LITERALLY against the argument tokens of the lines THIS SAME PASS has
 # already classified, both being tokens the flow itself wrote.  A path is
-# dropped only when a held line names it and no replayed line does; an
-# unmatched path, a differently spelled one, and one any replayed command
-# reads all KEEP today's behaviour, so every ambiguity fails safe.
+# dropped only when a held line names it and no replayed line does, so an
+# unmatched path and one any replayed command reads both KEEP today's
+# behaviour.
+#
+# A literal miss then gets ONE more chance, rooted: the same two tokens
+# resolved lexically against their OWN recorded `# origin:` directories
+# (`_lex_resolve`).  That is what catches a flow writing `require_file
+# ./tpu.def` beside an `import_def_lef tpu.def`, and a requirement in a
+# sourced file naming its reader's input by another route -- measured, no
+# checked-in flow needs it (all 24 required paths across the 8 flows that
+# declare any match literally), which is exactly why it is a FALLBACK and
+# not the rule: a case that already matched cannot change.
+#
+# Root-independence is the reason it uses the ORIGINS rather than the
+# session's own flow directory, and it is not a nicety -- the build and the
+# resume may be different clones or copies of the tree.  Both sides are
+# rooted at BUILD-time paths from the same trace, so whatever prefix is
+# stale is stale identically and cancels in the comparison; a side whose
+# origin the trace does not record is not normalized at all, and falls back
+# to the literal test.  Mixing one recorded root with this machine's would
+# be the way to get a wrong answer, so it never happens.
 #
 # Returns {pruned_setup notes}, one note per statement it changed:
 # {kept moot}.
 proc _prune_requires {setup held_lines} {
     if {![llength $held_lines]} { return [list $setup {}] }
     set held_tokens {}
+    set held_rooted {}
     foreach ln $held_lines {
-        foreach t [_split_args $ln] { dict set held_tokens $t 1 }
+        set d [_origin_dir $ln]
+        foreach t [_split_args $ln] {
+            dict set held_tokens $t 1
+            if {$d ne ""} { dict set held_rooted [_lex_resolve $d $t] 1 }
+        }
     }
     # Every OTHER replayed line's tokens.  `require_file` lines are excluded
     # from this set on purpose: naming a path is not reading it, so a second
     # `require_file` for the same input must not keep the first one alive.
     set replay_tokens {}
+    set replay_rooted {}
     foreach ln $setup {
         if {[_verb $ln] eq "require_file"} { continue }
-        foreach t [_split_args $ln] { dict set replay_tokens $t 1 }
+        set d [_origin_dir $ln]
+        foreach t [_split_args $ln] {
+            dict set replay_tokens $t 1
+            if {$d ne ""} { dict set replay_rooted [_lex_resolve $d $t] 1 }
+        }
     }
     set out {}
     set notes {}
@@ -826,9 +894,14 @@ proc _prune_requires {setup held_lines} {
         }
         set keep {}
         set moot {}
+        set d [_origin_dir $ln]
         foreach pth $paths {
-            if {[dict exists $held_tokens $pth]
-                    && ![dict exists $replay_tokens $pth]} {
+            set r [expr {$d eq "" ? "" : [_lex_resolve $d $pth]}]
+            set by_held [expr {[dict exists $held_tokens $pth]
+                               || ($r ne "" && [dict exists $held_rooted $r])}]
+            set by_replay [expr {[dict exists $replay_tokens $pth]
+                                 || ($r ne "" && [dict exists $replay_rooted $r])}]
+            if {$by_held && !$by_replay} {
                 lappend moot $pth
             } else {
                 lappend keep $pth

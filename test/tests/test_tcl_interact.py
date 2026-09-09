@@ -442,7 +442,8 @@ def test_require_file_is_pruned_per_path_not_per_statement(tmp_path):
     the same method `test_btcl_quoted_paths` uses."""
     text = _DRIVER.read_text().splitlines()
     body = []
-    for name in ("proc _verb ", "proc _split_args ", "proc _prune_requires "):
+    for name in ("proc _verb ", "proc _split_args ", "proc _origin_dir ",
+                 "proc _lex_resolve ", "proc _prune_requires "):
         a = next(i for i, l in enumerate(text) if l.startswith(name))
         b = next(i for i in range(a, len(text)) if text[i] == "}")
         body += text[a:b + 1]
@@ -504,6 +505,77 @@ def test_require_file_is_pruned_per_path_not_per_statement(tmp_path):
                        timeout=120)
     assert r.returncode == 0, r.stderr
     assert f"N:{len(setup)}:0" in r.stdout, r.stdout
+
+
+def test_a_differently_spelled_required_path_is_rooted_not_guessed(tmp_path):
+    """The literal match's one blind spot, and the rule that closes it.
+
+    `require_file ./tpu.def` beside `import_def_lef tpu.def` names one file
+    in two spellings, and a token comparison keeps the requirement -- the
+    safe direction, but the resume then refuses on a file nothing reads with
+    no hint that the leading `./` is why.  So a literal miss gets ONE more
+    chance: both tokens resolved LEXICALLY against their own recorded
+    `# origin:` directory.
+
+    Rooted at the TRACE's origins, never at this session's flow directory,
+    because the build and the resume may be different clones of the tree.
+    Both sides then carry build-time roots that are stale identically and
+    cancel, which this measures directly: the same tokens under a
+    completely different recorded root give the same verdict.  A side whose
+    origin the trace does not record is not normalized at all and falls
+    back to the literal test, so an unknown root can only keep a
+    requirement, never drop one.
+
+    Lexical because the files are GONE -- that is the situation this whole
+    path exists for -- so `file normalize`, which anchors at the CWD and
+    resolves symlinks, is the wrong tool.
+    """
+    text = _DRIVER.read_text().splitlines()
+    body = []
+    for name in ("proc _verb ", "proc _split_args ", "proc _origin_dir ",
+                 "proc _lex_resolve ", "proc _prune_requires "):
+        a = next(i for i, l in enumerate(text) if l.startswith(name))
+        b = next(i for i in range(a, len(text)) if text[i] == "}")
+        body += text[a:b + 1]
+
+    held = ["import_def_lef tpu.def tpu.lef"]
+    setup = ["require_file ./tpu.def sub/../tpu.lef unrelated.v",
+             "def_layer 4 M4 H TOP 30"]
+
+    def probe(root, with_origins=True):
+        lines = ["source " + _tcl_lit(str(_ROOT / "tools" / "buda.tcl"))]
+        lines += body
+        lines.append("set ::origin_of [dict create]")
+        if with_origins:
+            for l in held + setup:
+                lines.append("dict set ::origin_of " + _tcl_lit(l) + " "
+                             + _tcl_lit(root + "/flow.buda"))
+        lines.append("set held [list " + " ".join(_tcl_lit(l) for l in held) + "]")
+        lines.append("set setup [list " + " ".join(_tcl_lit(l) for l in setup) + "]")
+        lines.append("lassign [_prune_requires $setup $held] out notes")
+        lines.append('foreach l $out { puts "OUT:$l" }')
+        f = tmp_path / "probe2.tcl"
+        f.write_text("\n".join(lines) + "\n")
+        r = subprocess.run(["tclsh", str(f)], text=True, capture_output=True,
+                           timeout=120)
+        assert r.returncode == 0, r.stderr
+        return [l[4:] for l in r.stdout.splitlines() if l.startswith("OUT:")]
+
+    # `./tpu.def` and `sub/../tpu.lef` resolve onto the held importer's two
+    # inputs and go; `unrelated.v` is named by nothing held and stays.
+    out = probe("/build/clone-a")
+    assert "require_file unrelated.v" in out, out
+    assert not any("tpu." in l for l in out), out
+
+    # the SAME tokens under a different recorded root: the prefix cancels, so
+    # the verdict cannot depend on which clone the build ran in
+    assert probe("/somewhere/else/entirely") == out
+    assert probe("/x") == out
+
+    # with no origin recorded the rooted chance is not taken at all, and the
+    # literal test alone keeps every path -- an unknown root never drops one
+    out = probe("/build/clone-a", with_origins=False)
+    assert out[0] == "require_file ./tpu.def sub/../tpu.lef unrelated.v", out
 
 
 def test_below_plan_resume_holds_healers_the_plan_already_carries(tmp_path):
