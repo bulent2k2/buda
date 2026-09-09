@@ -928,17 +928,27 @@ def test_both_def_loaders_draw_the_same_pins(tmp_path, monkeypatch):
     import def_viz_shared as dv                    # noqa: E402
 
     orients = ["N", "S", "FN", "FS", "E", "W", "FE", "FW"]
-    body = "".join(
+    # An UNPLACED pin FIRST, carrying neither LAYER nor PLACED, which any
+    # floorplan DEF has before IO placement.  It is here because the two
+    # loaders disagreed on it: a DOTALL `.*?` between NET and LAYER runs
+    # past the `;` that ends this entry and takes the NEXT pin's rectangle,
+    # so the fallback drew `PIN/unplaced` at `p_N`'s position and dropped
+    # `p_N` -- a real pin gone and a wrong name on a real rectangle, while
+    # the reader skips the unplaced pin and draws the other eight.  The
+    # count assertion below does not catch that on its own (eight in, eight
+    # out, wrong names), so the NAMES are what is asserted.
+    body = "  - unplaced + NET unplaced + DIRECTION INPUT + USE SIGNAL ;\n"
+    body += "".join(
         f"  - p_{o} + NET p_{o} + DIRECTION INPUT + USE SIGNAL + LAYER met3 "
         f"( -1000 -150 ) ( 1000 150 ) + PLACED ( {5000 + 1000 * i} 24820 ) {o} ;\n"
         for i, o in enumerate(orients))
     dp = tmp_path / "t.def"
     dp.write_text('VERSION 5.8 ;\nDIVIDERCHAR "/" ;\nBUSBITCHARS "[]" ;\nDESIGN t ;\n'
                   "UNITS DISTANCE MICRONS 1000 ;\nDIEAREA ( 0 0 ) ( 128000 150000 ) ;\n"
-                  f"PINS {len(orients)} ;\n{body}END PINS\nEND DESIGN\n")
+                  f"PINS {len(orients) + 1} ;\n{body}END PINS\nEND DESIGN\n")
 
     py = {k: tuple(round(v, 4) for v in r) for k, r in dv.parse_def_pins(str(dp)).items()}
-    assert len(py) == len(orients), sorted(py)
+    assert set(py) == {f"PIN/p_{o}" for o in orients}, sorted(py)
 
     if not dv._BDB_AVAILABLE:
         pytest.skip("the extension is not built, so there is no second loader to compare")

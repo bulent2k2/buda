@@ -111,6 +111,17 @@ def parse_def_pins(def_path: str) -> dict:
     offset by the PLACED origin -- so the two loaders draw one picture; a
     test compares them pin for pin over all eight orientations.
 
+    Both gaps in the pattern are `[^;]*?` rather than `.*?`, because a DEF
+    pin entry is terminated by `;` and a pin may legitimately carry neither
+    LAYER nor PLACED -- an UNPLACED pin, which any floorplan DEF has before
+    IO placement.  Across such an entry a DOTALL `.*?` runs on into the NEXT
+    pin and takes ITS rectangle: the unplaced pin was drawn under its own
+    name at the placed pin's position, and the placed pin vanished from the
+    picture.  Measured on a three-pin DEF, one unplaced: the fallback gave
+    `PIN/unplaced_a` at `placed_b`'s rect and no `placed_b`, where the
+    reader gives `placed_b` and `placed_c` -- so it also broke the
+    two-loaders-agree property the test below exists to hold.
+
     Which is why the pin's ORIENTATION is deliberately not applied to its
     rectangle here.  DEF 5.8 gives a PORT's geometry relative to the pin's
     origin and transforms it by the orientation, so a `E` pin's rect should
@@ -130,9 +141,9 @@ def parse_def_pins(def_path: str) -> dict:
         return {}
     out = {}
     for m in re.finditer(
-            r"-\s+(\S+)\s+\+\s+NET\s+\S+.*?LAYER\s+\S+\s+"
+            r"-\s+(\S+)\s+\+\s+NET\s+\S+[^;]*?LAYER\s+\S+\s+"
             r"\(\s*(-?\d+)\s+(-?\d+)\s*\)\s*\(\s*(-?\d+)\s+(-?\d+)\s*\)"
-            r".*?\+\s*(?:PLACED|FIXED)\s*\(\s*(-?\d+)\s+(-?\d+)\s*\)\s+(\S+)",
+            r"[^;]*?\+\s*(?:PLACED|FIXED)\s*\(\s*(-?\d+)\s+(-?\d+)\s*\)\s+(\S+)",
             sec.group(1), re.DOTALL):
         name, rx1, ry1, rx2, ry2, px, py, _orient = m.groups()
         xs, ys = (int(rx1), int(rx2)), (int(ry1), int(ry2))
