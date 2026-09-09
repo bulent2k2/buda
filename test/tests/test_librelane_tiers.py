@@ -944,6 +944,119 @@ def test_without_pins_the_h_arm_is_byte_identical_and_a_gap_is_refused(tmp_path)
     assert not (tmp_path / "h_gap").exists(), "refused after writing"
 
 
+def test_the_pin_template_emit_pin_def_writes_opens_in_the_def_visualizer(tmp_path):
+    """`bin/viz <cell>.def` on a BUDA pin template -- the way to SEE where
+    the plan put a block's pins before anything is hardened.
+
+    It did not open at all.  A template is a PINS-only DEF: no COMPONENTS,
+    so `def_viz_shared`'s no-LEF path had no placement to infer cell sizes
+    from, handed the reader an EMPTY LEF path, and died with `read_lef:
+    cannot open ` -- naming no file, because there is no file to name.
+    Worse on the second try: the failed import had already created
+    `<cell>.bdb`, which is newer than the DEF, so the cache was reused and
+    the load reported `0 nets · 0 instances · die 0.0x0.0 um` and drew an
+    EMPTY window -- reading as a plan that produced no pins.
+
+    Both halves are pinned here on a real template: it loads, every pin is
+    there as a boundary component at its own rectangle, and running twice
+    gives the same answer as running once."""
+    d = tmp_path / "pins"
+    d.mkdir()
+    pins = [("a_in[0]", "INPUT", 1000, 24820), ("a_out[0]", "OUTPUT", 127000, 69700),
+            ("clk", "INPUT", 64000, 1000)]
+    body = "".join(
+        f"  - {n} + NET {n} + DIRECTION {dr} + USE SIGNAL + LAYER met3 "
+        f"( -1000 -150 ) ( 1000 150 ) + PLACED ( {x} {y} ) N ;\n"
+        for n, dr, x, y in pins)
+    (d / "pe_cell.def").write_text(
+        'VERSION 5.8 ;\nDIVIDERCHAR "/" ;\nBUSBITCHARS "[]" ;\nDESIGN pe_cell ;\n'
+        "UNITS DISTANCE MICRONS 1000 ;\nDIEAREA ( 0 0 ) ( 128000 150000 ) ;\n"
+        f"PINS {len(pins)} ;\n{body}END PINS\nEND DESIGN\n")
+
+    sys.path.insert(0, str(_ROOT / "tools"))
+    from def_viz_shared import DefVizData          # noqa: E402
+
+    summaries = []
+    for _ in range(2):                              # the cache must not change the answer
+        summaries.append(DefVizData().load(str(d / "pe_cell.def"), ""))
+    assert summaries[0] == summaries[1], summaries
+    assert f"{len(pins)} instances" in summaries[0], summaries[0]
+    assert "die 128.0" in summaries[0], summaries[0]
+    data = DefVizData()
+    data.load(str(d / "pe_cell.def"), "")
+    got = {n.split("/")[-1]: v for n, v in data.inst_info.items()}
+    assert set(got) == {n for n, *_r in pins}, sorted(got)
+    # the pin's own rectangle, not a fallback speck: 2 x 0.3 um at its PLACED spot
+    a = got["a_in[0]"]
+    assert (round(a["x2"] - a["x1"], 3), round(a["y2"] - a["y1"], 3)) == (2.0, 0.3)
+    assert round(a["x1"], 3) == 0.0 and round(a["y1"], 3) == 24.67
+
+
+def test_both_def_loaders_draw_the_same_pins(tmp_path, monkeypatch):
+    """`bin/viz` has TWO loaders -- the BDB extension when it is built, a
+    pure-Python parser when it is not -- and the picture must not depend on
+    which one ran.  The Python one read COMPONENTS and NETS and nothing
+    else, so a PINS-only template drew an empty die there even after the
+    extension path was fixed (Codex #911).
+
+    Compared pin for pin over ALL EIGHT DEF orientations, because that is
+    where they turned out to differ: DEF 5.8 transforms a PORT's rectangle
+    by the pin's orientation, and `import_def_lef` does not -- an `E` pin
+    with a 2.0 x 0.3 offset rect imports 2.0 x 0.3 rather than 0.3 x 2.0.
+    The fallback matches the READER rather than the spec, deliberately: a
+    drawing that depends on whether the extension is built is worse than
+    both being wrong the same way, and the reader is where it gets fixed
+    (opens_interchange.md item 17).  This test is what will say so when it
+    does -- it fails the day the two stop agreeing, in either direction."""
+    sys.path.insert(0, str(_ROOT / "tools"))
+    import def_viz_shared as dv                    # noqa: E402
+
+    orients = ["N", "S", "FN", "FS", "E", "W", "FE", "FW"]
+    # An UNPLACED pin FIRST, carrying neither LAYER nor PLACED, which any
+    # floorplan DEF has before IO placement.  It is here because the two
+    # loaders disagreed on it: a DOTALL `.*?` between NET and LAYER runs
+    # past the `;` that ends this entry and takes the NEXT pin's rectangle,
+    # so the fallback drew `PIN/unplaced` at `p_N`'s position and dropped
+    # `p_N` -- a real pin gone and a wrong name on a real rectangle, while
+    # the reader skips the unplaced pin and draws the other eight.  The
+    # count assertion below does not catch that on its own (eight in, eight
+    # out, wrong names), so the NAMES are what is asserted.
+    body = "  - unplaced + NET unplaced + DIRECTION INPUT + USE SIGNAL ;\n"
+    body += "".join(
+        f"  - p_{o} + NET p_{o} + DIRECTION INPUT + USE SIGNAL + LAYER met3 "
+        f"( -1000 -150 ) ( 1000 150 ) + PLACED ( {5000 + 1000 * i} 24820 ) {o} ;\n"
+        for i, o in enumerate(orients))
+    dp = tmp_path / "t.def"
+    dp.write_text('VERSION 5.8 ;\nDIVIDERCHAR "/" ;\nBUSBITCHARS "[]" ;\nDESIGN t ;\n'
+                  "UNITS DISTANCE MICRONS 1000 ;\nDIEAREA ( 0 0 ) ( 128000 150000 ) ;\n"
+                  f"PINS {len(orients) + 1} ;\n{body}END PINS\nEND DESIGN\n")
+
+    py = {k: tuple(round(v, 4) for v in r) for k, r in dv.parse_def_pins(str(dp)).items()}
+    assert set(py) == {f"PIN/p_{o}" for o in orients}, sorted(py)
+
+    if not dv._BDB_AVAILABLE:
+        pytest.skip("the extension is not built, so there is no second loader to compare")
+    lef = tmp_path / "empty.lef"
+    lef.write_text("VERSION 5.8 ;\nEND LIBRARY\n")
+    from def_viz_shared import _buda_mod           # noqa: E402
+    db = _buda_mod.BDB(str(tmp_path / "t.bdb"))
+    db.import_def_lef(str(dp), str(lef))
+    bdb = {c.name: tuple(round(v, 4) for v in (c.x1, c.y1, c.x2, c.y2))
+           for c in db.all_components()}
+    assert py == {k: v for k, v in bdb.items() if k in py}, \
+        {o: (py[f"PIN/p_{o}"], bdb[f"PIN/p_{o}"]) for o in orients
+         if py[f"PIN/p_{o}"] != bdb[f"PIN/p_{o}"]}
+
+    # ...and the whole loader agrees too, not just the pin reader
+    a = dv.DefVizData(); a.load(str(dp), str(lef))
+    monkeypatch.setattr(dv, "_BDB_AVAILABLE", False)
+    b = dv.DefVizData(); b.load(str(dp), "")
+    assert {k: {m: round(n, 4) for m, n in v.items() if m != "cell"}
+            for k, v in a.inst_info.items()} == \
+           {k: {m: round(n, 4) for m, n in v.items() if m != "cell"}
+            for k, v in b.inst_info.items()}
+
+
 def _acc_lef(path):
     """A 96 x 60 block with met2 OBS as Magic draws it -- ACTUAL shapes, not a
     cover: two met2 rects, and a met4 VGND pin at local x 69.52-71.52 (the
@@ -1059,8 +1172,24 @@ def test_the_documented_relative_paths_resolve_from_the_directory_they_say(tmp_p
     it is resolved against wherever the block has got to.  Only `.sh`/`.py`/
     `.tcl` targets are asserted -- a run directory is made by the recipe
     itself and is not checked in."""
-    doc = (_ROOT / "docs" / "internal" / "librelane_hier_flow.md").read_text()
-    t1a = _ROOT / "flow" / "librelane" / "tier1a"
+    docs = [(_ROOT / "docs" / "internal" / "librelane_hier_flow.md",
+             _ROOT / "flow" / "librelane" / "tier1a"),
+            # The recipe SHEET is all recipes, so it is the file this guard
+            # is worth the most on.  Its blocks open in flow/librelane, and
+            # they all `cd ~/src/buda/...` first, which the walk resolves.
+            (_ROOT / "flow" / "librelane" / "VISUAL_CHECKS.md",
+             _ROOT / "flow" / "librelane")]
+    checked = 0
+    for doc_path, base in docs:
+        checked += _walk_blocks(doc_path.read_text(), base, _ROOT)
+    assert checked, "no relative script path was checked; has the doc changed shape?"
+
+
+def _walk_blocks(doc, t1a, _ROOT):
+    """Walk each fenced block the way pasting it would: a `cd` moves the
+    working directory and every `../`-prefixed script path after it is
+    resolved against wherever the block has got to.  `t1a` is where a block
+    that opens with a bare relative `cd` starts."""
     checked = 0
     for block in re.findall(r"```(?:bash)?\n(.*?)```", doc, re.S):
         cwd = None
@@ -1080,12 +1209,19 @@ def test_the_documented_relative_paths_resolve_from_the_directory_they_say(tmp_p
                     cwd = None                    # someone else's machine
                 elif cwd is not None:
                     cwd = cwd / d
+                elif (_ROOT / d).is_dir():
+                    cwd = _ROOT / d               # a bare `flow/...` is REPO-relative
                 else:
                     cwd = t1a / d                 # blocks that open in tier1a
             if cwd is None:
                 continue
-            for tok in re.findall(r"(?<![\w/.])\.\./[\w./-]+", line):
-                if any(c in tok for c in "<>$*"):
+            # `../`-prefixed paths, and PLAIN relative ones -- `python3
+            # snapshots.py` rots exactly as `../../pdn_phase.py` does, and
+            # was not looked at at all.
+            toks = (re.findall(r"(?<![\w/.])\.\./[\w./-]+", line)
+                    + re.findall(r"(?<![\w/.<-])(?!\.\./)([\w][\w./-]*\.(?:py|sh|tcl))\b", line))
+            for tok in toks:
+                if any(c in tok for c in "<>$*") or tok.startswith("/"):
                     continue
                 target = (cwd / tok).resolve()
                 if target.suffix in (".sh", ".py", ".tcl"):
@@ -1094,7 +1230,7 @@ def test_the_documented_relative_paths_resolve_from_the_directory_they_say(tmp_p
                         f"to {target}, which does not exist -- the recipe cannot "
                         f"be pasted")
                     checked += 1
-    assert checked, "no relative script path was checked; has the doc changed shape?"
+    return checked
 
 
 def test_notch_sh_refuses_an_unhardened_cell_and_clears_the_stale_patch(tmp_path):

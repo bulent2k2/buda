@@ -807,7 +807,7 @@ be one no PDN connects, and nothing before signoff says so.
 **5. Measurement A — guides.**
 
 ```bash
-cd ../measure && mkdir -p out
+cd ~/src/buda/flow/librelane/phase0/measure && mkdir -p out
 ODB=$(ls ../two_reg32/runs/phase0/*-openroad-cts/two_reg32.odb)
 ./run_or.sh ../two_reg32/runs/phase0 guide_ref.tcl  ODB=$ODB OUT=$PWD/out      # reference: route all, keep guides
 python3 extract_bus_guides.py out/all.guide out/bus.guide                       # the bus's guides, as routed
@@ -1651,6 +1651,17 @@ twelve steps later is wrong.
 python3 flow/librelane/snapshots.py <run>/runs/<tag> --list      # what is there
 python3 flow/librelane/snapshots.py <run>/runs/<tag> --bdb       # curated set + BDBs
 ```
+
+The recipes for all three things worth looking at — these stages, BUDA's own
+bundles and bit-wires through `btcl -b`, and the pins on both sides of the
+template handoff — are collected in
+[`flow/librelane/VISUAL_CHECKS.md`](../../flow/librelane/VISUAL_CHECKS.md),
+with the sweep over every run on disk and
+[`contact_sheet.py`](../../flow/librelane/contact_sheet.py), which puts all
+of them on ONE page so the same stage can be compared across N, across arms
+and across the variants of one arm (48 runs / 116 images on the current
+tree).  Its own fenced blocks are walked by the pasteability guard the way
+this file's are.
 
 **Nothing is re-run** — every artefact comes from files the run already
 wrote, so it works on runs finished weeks ago and costs seconds a stage.  The

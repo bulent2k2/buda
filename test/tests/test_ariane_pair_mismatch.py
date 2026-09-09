@@ -106,6 +106,42 @@ def test_the_visualizer_refuses_the_pair_too():
     assert "0.5" in msg and "entirely wrong" in msg, msg
 
 
+def test_the_refusal_survives_a_second_run(tmp_path):
+    """The refusal above holds ONCE, and once is not enough.
+
+    `_load_via_bdb` caches: it reuses `<def>.bdb` whenever that file is
+    newer than the DEF.  The `SystemExit` is raised AFTER
+    `import_def_lef` has already written the speck-sized database, so the
+    cache is left behind newer than its input and the SECOND run skips the
+    import -- and with it the check -- and draws the 133 specks the first
+    run refused.  The comment on the refusal says the caching is the
+    reason it matters; the refusal did not act on it.
+
+    Same mechanism, no LEF involved: a failed import of any kind leaves a
+    cache that the next run reports as `0 nets · 0 instances · die
+    0.0x0.0 um` -- an empty window, which reads as a DEF with nothing in
+    it.  So the failing import removes what it wrote."""
+    import gc
+    import shutil
+    import sys
+    sys.path.insert(0, str(_ROOT / "tools"))
+    from def_viz_shared import DefVizData
+
+    # a private copy, so the refusal is exercised without racing the other
+    # tests in this file for demo/ariane's cache file
+    d = tmp_path / "ariane.def"
+    l = tmp_path / "ariane.lef"
+    shutil.copy(_DEMO / "ariane.def", d)
+    shutil.copy(_DEMO / "ariane.lef", l)
+    for attempt in ("first", "second"):
+        with pytest.raises(SystemExit) as e:
+            DefVizData().load(str(d), str(l))
+        assert "fakeram45_256x16" in str(e.value), f"{attempt} run: {e.value}"
+        gc.collect()
+    assert not (tmp_path / "ariane.bdb").exists(), \
+        "the refused import left its cache behind for the next run to reuse"
+
+
 def test_the_visualizers_no_lef_mode_still_works():
     """The refusal names a way forward, so that way has to work: with no
     LEF the loader infers sizes from the placement.  A guard that leaves
