@@ -2072,6 +2072,35 @@ have: every netlist here is either authored or uniquified.
    own ODB: 512 shapes, `PSM-0069` on VGND, VPWR clean — the signoff
    verdict, from step 21 instead of step 56).
 
+   **Why it passed 107.7** — read out of `src/pdn/src` rather than run
+   (#904, 2026-09-09), four places the model differed from `Shape::cut`
+   and `Shape::writeToDb`, all fixed: (1) the rtree query that finds a
+   pin's obstruction is a CLOSED box intersection, so a strap whose edge
+   sits exactly two spacings from the pin is cut — the model spared the
+   touch, and its shift candidates ARE the boundaries, so it returned
+   exactly the shifts pdngen rejects (107.7 is 109.3 less one met5
+   spacing); (2) the length lost is the pin plus the halo plus TWO
+   spacings (the obstruction rect grown by the strap's own spacing), not
+   one; (3) the same-net spare is unreachable for a macro under
+   `define_pdn_grid -macro`, whose `GridObsShape` copy of the pin carries
+   no net; (4) with `PDN_ENABLE_PINS` every surviving fragment on a
+   connect layer is written as a pin shape — a PSM source — so a
+   component is fed iff it holds one surviving fragment, a fragment off
+   the largest component is reported and not failed, and `PDN_SKIPTRIM`
+   still loses a via-less fragment at the write (PDN-0200).  On the
+   phase-0 toy the remedy moved from -1.1 to -1.105 (the grid step a
+   closed cut needs) and the y-remedy from -5.0 to -5.005.  The corrected
+   remedy for the 109.3 plan is UNMEASURED: the next `check_grid.tcl` run
+   reads it, and until one passes the remedy stays a hypothesis.  The
+   pin-on-pin question (#905) resolved the same way: nothing in the
+   source declines the pair — `InstanceGrid::getIntersections` injects
+   the pins, the generator builds a 2.0 × 2.0 crossing with one cut, and
+   nothing removes it — so the "none of 512" reading contradicts the
+   README's earlier "every rect carried one" and is settled by
+   `grep -c via5_6_2000_2000` on the pdngen DEF.  Either way that via
+   sources nothing: it joins the macro's pins to each other, and the
+   island is fed only by a surviving strap fragment.
+
 11. **The 5 % pass threshold of measurement A** (§8 step 5) is a number
    read off two runs of one toy.  It should be re-read on the first real
    vehicle (tier 1a, N=4): if the gcell-edge and pin-access share does not
