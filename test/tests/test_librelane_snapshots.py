@@ -182,6 +182,67 @@ def test_mounts_makes_a_run_tree_outside_home_visible(tmp_path):
     assert bad == ["/x.def"] and args == ["-v", f"{home}:{home}"]
 
 
+def test_every_path_render_passes_is_inside_a_mount_even_through_a_symlink(tmp_path, monkeypatch):
+    """The mount set and the arguments must be ONE spelling of each path.
+
+    `mounts` resolves, and `render` used to pass the caller's path
+    unresolved, so an input reached through a symlink was mounted at its
+    TARGET and named by its LINK: mount `/mnt/pdk`, argument
+    `/scratch/pdk-link/cells.lef`, whose parent is mounted nowhere, and
+    KLayout fails on a file that is plainly there on the host (Codex #909).
+    Not exotic -- on macOS `/var` is a link to `/private/var`, so every path
+    under a system temp directory has two spellings.
+
+    So the property is checked over the WHOLE argv rather than on the one
+    call that was reported: every absolute path `render` hands the container
+    must lie inside one of the `-v` roots it asks for."""
+    real_dir = tmp_path / "real"
+    real_dir.mkdir()
+    (real_dir / "cells.lef").write_text("")
+    (real_dir / "tpu_top.def").write_text("")
+    (tmp_path / "link").symlink_to(real_dir)
+
+    seen = {}
+    monkeypatch.setattr(sn.subprocess, "run",
+                        lambda argv, **k: seen.setdefault("argv", argv) and None
+                        or type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})())
+    cfg = {"KLAYOUT_TECH": str(tmp_path / "link" / "sky130A.lyt")}
+    sn.render(str(tmp_path / "link" / "tpu_top.def"), str(tmp_path / "link" / "out.png"),
+              cfg, str(real_dir), [str(tmp_path / "link" / "cells.lef")])
+    argv = seen["argv"]
+    roots = [argv[i + 1].split(":")[0] for i, a in enumerate(argv) if a == "-v"]
+    paths = [a for a in argv if a.startswith("/") and (
+        a.endswith((".lef", ".def", ".png", ".lyt")) or a in roots)]
+    assert paths, argv
+    for a in paths:
+        assert any(a == r or a.startswith(r.rstrip("/") + os.sep) for r in roots), \
+            f"{a} is passed to the container but is inside none of {roots}"
+    # ...and the working directory is resolved the same way
+    w = argv[argv.index("-w") + 1]
+    assert any(w == r or w.startswith(r.rstrip("/") + os.sep) for r in roots), (w, roots)
+
+
+def test_render_keeps_each_klayout_file_on_its_own_flag(tmp_path, monkeypatch):
+    """`-T`, `-P` and `-M` are three different files, and a run need not
+    declare all three.  Pairing a FILTERED list of the present ones with a
+    positional `zip` over the flags hands the layer map to `-P` the moment
+    `KLAYOUT_PROPERTIES` is absent, which is every tier-1a run."""
+    (tmp_path / "t.lyt").write_text("")
+    (tmp_path / "m.map").write_text("")
+    (tmp_path / "x.def").write_text("")
+    seen = {}
+    monkeypatch.setattr(sn.subprocess, "run",
+                        lambda argv, **k: seen.setdefault("argv", argv) and None
+                        or type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})())
+    sn.render(str(tmp_path / "x.def"), str(tmp_path / "x.png"),
+              {"KLAYOUT_TECH": str(tmp_path / "t.lyt"),
+               "KLAYOUT_DEF_LAYER_MAP": str(tmp_path / "m.map")}, str(tmp_path), [])
+    argv = seen["argv"]
+    assert argv[argv.index("-T") + 1].endswith("t.lyt")
+    assert argv[argv.index("-M") + 1].endswith("m.map")
+    assert "-P" not in argv
+
+
 def test_main_renders_the_curated_stages_and_writes_the_index(tmp_path, monkeypatch, capsys):
     """The end-to-end pass over `main`'s index writer, with the only two
     functions that need the image stubbed.

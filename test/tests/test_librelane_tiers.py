@@ -1055,6 +1055,37 @@ def test_notch_sh_refuses_an_unhardened_cell_and_clears_the_stale_patch(tmp_path
     assert r.returncode == 1 and "gen.sh 3" in r.stderr
 
 
+def test_notch_sh_refuses_an_empty_layer_list_instead_of_renaming_the_deliverables(tmp_path):
+    """`--layers ''` (or a comma-only value) ran ZERO passes, and the moves
+    at the end of the cell then renamed the cell's OWN hardened `.gds` and
+    Magic's `.lef` to the derived names -- reported success, and left the
+    top's configured GDS gone and a `.notch.lef` that is the unpatched
+    abstract (Codex #909).  Reproduced before the fix on all three
+    spellings; the hardening it would have destroyed is hours per cell.
+
+    Refused at the argument now, and the move is ALSO guarded on a completed
+    pass: one guard is enough to close this, and neither should be the only
+    one."""
+    d = tmp_path / "n2"
+    d.mkdir()
+    d.joinpath("tpu.lef").write_text("MACRO pe_cell\n  CLASS BLOCK ;\n  SIZE 10 BY 10 ;\nEND pe_cell\n")
+    fin = d / "h" / "pe_cell" / "runs" / "h" / "final"
+    (fin / "gds").mkdir(parents=True)
+    (fin / "lef").mkdir(parents=True)
+    (fin / "gds" / "pe_cell.gds").write_text("the hardened GDS\n")
+    (fin / "lef" / "pe_cell.lef").write_text("Magic's abstract\n")
+    for spelling in ("", ",", " , "):
+        r = subprocess.run(["bash", str(_T1A / "notch.sh"), "2", "--layers", spelling],
+                           env={**os.environ, "T1A_DIR": str(tmp_path)},
+                           capture_output=True, text=True, timeout=300)
+        assert r.returncode == 1, f"--layers {spelling!r}: " + r.stdout + r.stderr
+        assert "names no layer" in r.stderr
+        assert (fin / "gds" / "pe_cell.gds").read_text() == "the hardened GDS\n"
+        assert (fin / "lef" / "pe_cell.lef").read_text() == "Magic's abstract\n"
+        assert not (fin / "gds" / "pe_cell.rect.gds").exists()
+        assert not (fin / "lef" / "pe_cell.notch.lef").exists()
+
+
 def _notch_lef(path, obs=True):
     """`acc_cell` as Magic abstracts it around #896's notch: pin `in[22]`'s
     met2 rect ends at x 69.37, the met2 OBS resumes at x 69.65 (and a

@@ -56,6 +56,18 @@ N=${1:?usage: notch.sh N [--layers met2]   (after the blocks harden)}; shift || 
 layers=met2
 if [ $# -ge 2 ] && [ "$1" = "--layers" ]; then layers=$2; shift 2; fi
 if [ $# -ne 0 ]; then echo "notch.sh: unexpected arguments: $*" >&2; exit 1; fi
+# An EMPTY layer list is refused HERE rather than run.  Zero passes leaves
+# `src`/`inlef` pointing at the cell's own hardened `.gds` and Magic's
+# `.lef`, and the moves below then RENAME the two deliverables to the
+# derived names and report success -- the top's configured GDS gone and a
+# `.notch.lef` that is the unpatched abstract (Codex #909, reproduced).  The
+# move is guarded on a completed pass as well: one refusal is enough, and
+# neither guard should be the only one.
+layer_list=$(echo "$layers" | tr ',' ' ')
+if [ -z "$(echo $layer_list)" ]; then
+    echo "notch.sh: --layers '$layers' names no layer -- met2 is the default; there is nothing to patch" >&2
+    exit 1
+fi
 here=$(cd "$(dirname "$0")" && pwd)
 # T1A_DIR overrides where the design lives (the tests use a temp dir), as in gen.sh.
 d="${T1A_DIR:-$here}/n$N"
@@ -85,7 +97,7 @@ for c in $cells; do
     fi
     ok=1
     src="$gdsdir/$c.gds"; inlef="$lefdir/$c.lef"; i=0; tmp=()
-    for layer in ${layers//,/ }; do
+    for layer in $layer_list; do
         i=$((i + 1))
         ldef=$(PYTHONPATH="$here" python3 -c \
             'import sys, notch_obs; print(*notch_obs.SKY130_GDS[sys.argv[1]])' "$layer" 2>/dev/null) || {
@@ -107,7 +119,7 @@ for c in $cells; do
         fi
         src="$rgds"; inlef="$nlef"
     done
-    if [ "$ok" = 1 ]; then
+    if [ "$ok" = 1 ] && [ "$i" -gt 0 ]; then
         mv "$src" "$gdsdir/$c.rect.gds"; mv "$inlef" "$out"
     else
         fail+=("$c")

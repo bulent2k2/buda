@@ -241,7 +241,16 @@ def mounts(paths):
 
     A path at the filesystem root has no mount short of `/` and is
     REPORTED rather than mounted: bind-mounting `/` into the container is
-    not a thing a render should do."""
+    not a thing a render should do.
+
+    Every path is RESOLVED first, and so is every argument the command gets
+    (`real`, below) -- the two spellings must be the same one or the mount
+    is useless.  Mounting the resolved directory while passing the
+    SYMLINKED path names a file the container cannot see: the mount is
+    `/mnt/pdk` and the argument `/scratch/pdk-link/cells.lef`, whose parent
+    is mounted nowhere (Codex #909).  It is not an exotic case -- on macOS
+    `/var` is itself a link to `/private/var`, so every path under a system
+    temp directory has two spellings."""
     home = os.path.realpath(os.path.expanduser("~"))
     roots, bad = [home], []
     for p in paths:
@@ -258,23 +267,40 @@ def mounts(paths):
     return args, bad
 
 
+def real(path):
+    """The one spelling of a path that both the mount and the argument use.
+
+    A file's own realpath, or -- when it does not exist yet, as the output
+    PNG does not -- its directory's, with the basename put back."""
+    d, b = os.path.split(path)
+    return os.path.join(os.path.realpath(d or "."), b)
+
+
 def render(def_path, png, cfg, run_dir, lef_paths, quiet=False):
-    tech_files = [cfg[k] for k in ("KLAYOUT_TECH", "KLAYOUT_PROPERTIES", "KLAYOUT_DEF_LAYER_MAP")
-                  if cfg.get(k)]
-    mnt, bad = mounts([def_path, png, os.getcwd()] + list(lef_paths) + tech_files)
+    # Resolved BEFORE the mount set is derived, and passed resolved to the
+    # command: a mount and an argument that spell the same file differently
+    # is a mount that buys nothing (see `mounts`).
+    def_path, png = real(def_path), real(png)
+    lef_paths = [real(l) for l in lef_paths]
+    # (flag, path) pairs, so an ABSENT key cannot shift the remaining files
+    # onto the wrong flags -- which a filtered list plus a positional zip
+    # would do the moment a run declared no KLAYOUT_PROPERTIES.
+    tech_files = [(flag, real(cfg[k])) for flag, k in
+                  (("-T", "KLAYOUT_TECH"), ("-P", "KLAYOUT_PROPERTIES"),
+                   ("-M", "KLAYOUT_DEF_LAYER_MAP")) if cfg.get(k)]
+    cwd = os.path.realpath(os.getcwd())
+    mnt, bad = mounts([def_path, png, cwd] + lef_paths + [t for _f, t in tech_files])
     if bad:
         if not quiet:
             print(f"      render skipped: not under any mountable root: {', '.join(bad)}")
         return False
     args = (["docker", "run", "--rm"] + mnt +
-            ["-w", os.getcwd(), IMAGE,
+            ["-w", cwd, IMAGE,
              "python3", "-c", _RENDER_SHIM])
     for l in lef_paths:
         args += ["-l", l]
-    for flag, key in (("-T", "KLAYOUT_TECH"), ("-P", "KLAYOUT_PROPERTIES"),
-                      ("-M", "KLAYOUT_DEF_LAYER_MAP")):
-        if cfg.get(key):
-            args += [flag, cfg[key]]
+    for flag, t in tech_files:
+        args += [flag, t]
     args += ["-o", png,
              "--resolution", str(cfg.get("KLAYOUT_RENDER_RESOLUTION") or 1000),
              def_path]
