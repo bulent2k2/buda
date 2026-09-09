@@ -71,13 +71,26 @@ done
 python3 contact_sheet.py                 # -> renders/index.html
 ```
 
-Measured on the current tree: 48 runs, 116 images, 6.6 MB, about 40 s a run
-(most of it Docker start-up).  [`contact_sheet.py`](contact_sheet.py) then
-writes one page over all of them, grouped by run, so the same stage can be
-compared across N, across arms and across the variants of one arm — which
-is the question a directory full of PNGs cannot answer.  `renders/` is
-git-ignored; the page's `img` paths are relative, so it opens straight from
-the filesystem.
+Drop `--stages` for the curated eight, which is what the sweep above uses:
+measured on the current tree, 48 runs and **356 images** in 33 MB, about
+90 s a run (most of it Docker start-up).
+[`contact_sheet.py`](contact_sheet.py) then writes one page over all of
+them, grouped by run and laid out left to right in flow order, so the same
+stage can be compared across N, across arms and across the variants of one
+arm — which is the question a directory full of PNGs cannot answer.
+`renders/` is git-ignored; the page's `img` paths are relative, so it opens
+straight from the filesystem.  `--embed` inlines a downscaled copy of every
+image instead, giving ONE shareable file (8.9 MB for the set).
+
+**Every tile says how much of its stage is placed**, and that is the number
+to read before concluding a render is broken.  `floorplan` is a grey
+rectangle in every run and correctly so: measured on the N=8 top, the DEF
+at that stage carries its die, its 896 standard-cell rows and **296
+components of which 0 have a location** — LibreLane places the macros at
+step 17 and the cells at 28/34.  Re-rendered at six times the resolution it
+is the same picture with the row hatch resolved.  The first stage with
+anything in it is `manualmacroplacement` for a top (104 of 296) and
+`globalplacement` for a block.
 
 **A BDB as well as a picture**, for the placement stages:
 

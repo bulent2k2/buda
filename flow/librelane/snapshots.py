@@ -111,6 +111,41 @@ def stages(run_dir):
     return sorted(out)
 
 
+def placement(def_path):
+    """(components, how many carry a location) for a stage DEF.
+
+    The number that says whether a picture can show anything.  At
+    `floorplan` a top DEF has its die, its standard-cell rows and a
+    COMPONENTS section in which NOT ONE entry has a `+ PLACED` or `+ FIXED`
+    clause -- measured on the N=8 top: 296 components, 0 located -- so the
+    render is a die outline over a row hatch and that is the whole truth of
+    the stage.  Rendered at 6x resolution it is the same picture with the
+    hatch resolved.
+
+    Without this the reader is left to guess whether an empty-looking stage
+    is an empty stage or a broken render, which is exactly the doubt these
+    pictures exist to remove; with it the caption says `0 of 296 placed`."""
+    total = located = 0
+    try:
+        with open(def_path) as f:
+            inside = False
+            for line in f:
+                t = line.strip()
+                if t.startswith("COMPONENTS "):
+                    inside = True
+                    try:
+                        total = int(t.split()[1])
+                    except (IndexError, ValueError):
+                        pass
+                elif t.startswith("END COMPONENTS"):
+                    break
+                elif inside and ("+ PLACED" in t or "+ FIXED" in t):
+                    located += 1
+    except OSError:
+        pass
+    return total, located
+
+
 def resolved(run_dir):
     p = os.path.join(run_dir, "resolved.json")
     if not os.path.isfile(p):
@@ -397,6 +432,8 @@ def main(argv=None):
         png = os.path.join(out, f"{n:02d}-{name}.png")
         ok = render(dp, png, cfg, run_dir, lef_paths)
         size = os.path.getsize(png) if ok and os.path.isfile(png) else 0
+        total, located = placement(dp)
+        placed = f"{located} of {total} placed" if total else "no components"
         bdb_note = ""
         if a.bdb:
             if name in PLACEMENT_STAGES:
@@ -405,18 +442,31 @@ def main(argv=None):
                 bdb_note = os.path.basename(bp) if bok else f"failed: {err}"
             else:
                 bdb_note = "skipped — a routed DEF's geometry is not read into a BDB (see --help)"
-        print(f"  {n:3} {name:24} {'png ' + str(size // 1024) + 'k' if ok else 'PNG FAILED':14} {bdb_note}")
-        rows.append((n, name, why, os.path.basename(png) if ok else None, bdb_note))
+        print(f"  {n:3} {name:24} {'png ' + str(size // 1024) + 'k' if ok else 'PNG FAILED':14} "
+              f"{placed:20} {bdb_note}")
+        rows.append((n, name, why, os.path.basename(png) if ok else None, bdb_note,
+                     total, located))
 
     idx = os.path.join(out, "index.md")
     with open(idx, "w") as f:
         f.write(f"# Stage snapshots — `{os.path.relpath(run_dir, os.getcwd())}`\n\n")
         f.write("Rendered from the DEFs the run already wrote; nothing was re-run.\n\n")
-        f.write("| # | stage | what to look for | render | BDB |\n|---|---|---|---|---|\n")
-        for n, name, why, png, bdb in rows:
-            f.write(f"| {n} | `{name}` | {why} | {'![](' + png + ')' if png else '—'} | {bdb or '—'} |\n")
+        f.write("| # | stage | what to look for | placed | render | BDB |\n"
+                "|---|---|---|---|---|---|\n")
+        for n, name, why, png, bdb, total, located in rows:
+            pl = f"{located} of {total}" if total else "—"
+            f.write(f"| {n} | `{name}` | {why} | {pl} | "
+                    f"{'![](' + png + ')' if png else '—'} | {bdb or '—'} |\n")
         f.write("\nOpen a routing stage's own DEF with `bin/viz <run>/NN-step/<design>.def`;\n"
                 "open a placement BDB with `bin/fp <file>.bdb`.\n")
+    # A manifest beside the images, so a reader over MANY runs (contact_sheet.py)
+    # can caption each one without re-opening the DEFs.
+    with open(os.path.join(out, "stages.json"), "w") as f:
+        json.dump({"run": run_dir,
+                   "stages": [{"n": n, "stage": name, "png": png,
+                               "components": total, "placed": located}
+                              for n, name, _w, png, _b, total, located in rows]},
+                  f, indent=1)
     print(f"\nsnapshots: {len(rows)} stage(s) -> {out}\n  index: {idx}")
     return 0
 

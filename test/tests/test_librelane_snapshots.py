@@ -277,6 +277,16 @@ def test_main_renders_the_curated_stages_and_writes_the_index(tmp_path, monkeypa
     idx = (out / "index.md").read_text()
     assert "| 3 | `floorplan` |" in idx and "| 49 | `detailedrouting` |" in idx
     assert "a routed DEF's geometry is not read into a BDB" in idx
+    assert idx.rstrip().endswith("`bin/fp <file>.bdb`."), idx[-200:]
+    # The manifest is JSON and NOTHING else -- it is parsed by contact_sheet.py.
+    # Its writer sat next to index.md's and swallowed index.md's closing lines
+    # into it, which cost the footer above and left every manifest of a 48-run
+    # sweep unparseable ("Extra data: line 55").
+    man = json.loads((out / "stages.json").read_text())
+    assert [s["stage"] for s in man["stages"]] == \
+        ["floorplan", "manualmacroplacement", "detailedrouting"]
+    assert {s["png"] for s in man["stages"]} == set(seen["render"])
+    assert all(("components" in s and "placed" in s) for s in man["stages"])
     assert "layers from nom.tlef: met1(H)" in capsys.readouterr().out
 
 
@@ -308,11 +318,13 @@ def test_contact_sheet_urls_resolve_against_the_page_not_the_render_root(tmp_pat
         assert r.returncode == 0, r.stdout + r.stderr
         page = out or (root / "index.html")
         html = page.read_text()
-        refs = re.findall(r'(?:src|href)="([^"]+)"', html)
-        assert len(refs) == 6, refs          # 3 images, each also linked
+        # only the page's OWN files -- the font stylesheet is a remote href
+        refs = [u for u in re.findall(r'(?:src|href)="([^"]+)"', html)
+                if not u.startswith(("http:", "https:", "data:", "#"))]
+        assert len(refs) == 3, refs                     # one per stage PNG
         for u in refs:
             assert (page.parent / u).exists(), f"{page}: {u} points at nothing"
-        assert "2 runs, 3 images" in html
+        assert ">2</b><span>runs</span>" in html and ">3</b><span>renders</span>" in html
         assert "not-a-render" not in html    # a directory with no stage PNG is not a run
 
     # a root with nothing in it is refused rather than written as an empty page
