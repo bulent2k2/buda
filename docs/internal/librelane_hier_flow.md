@@ -1051,10 +1051,19 @@ date +%s > blocks.start
 for c in pe_cell feed_cell wbuf_cell acc_cell; do
   (cd $c && librelane --dockerized --run-tag h config.json > h.log 2>&1) &
 done; wait; date +%s > blocks.end
+../../notch.sh 4                                     # the patched abstracts the top's MACROS name
 ```
 
 Pass: `Flow complete` in each `<cell>/h.log` and `<cell>/runs/h/final/{gds,lef,nl,spef/nom}`
 present — the paths `top/config.json` names.
+
+`notch.sh` is outside the timed batch on purpose (it is seconds, and the
+wall figure §7.3 reports is the hardening) but it is NOT optional: it closes
+the abstraction notch of §11 item 13 per cell, and `top/config.json` names
+the `<cell>.notch.lef` it writes, so the top run stops on a missing LEF
+without it.  Pass, per cell: `area ... (IDENTICAL)` from the decomposition
+and the piece count `notch_obs.py` claimed (~1.2 µm² per cell at N = 8; zero
+pieces is also a pass and means Magic's abstract already covered the layer).
 
 **The PEPAD is 100**, settled by the first real run (2026-09-06, N = 4,
 LibreLane 3.0.11 / sky130A).  At the emitter's default the PE die is its
@@ -1082,7 +1091,7 @@ cell and names the PEPAD to regenerate with when either bar is at risk.
 **7b. Arm H — the PDN-phase check, before the top.**
 
 ```bash
-python3 ../../pdn_phase.py top/config.json */runs/h/final/lef/*.lef
+python3 ../../pdn_phase.py top/config.json */runs/h/final/lef/*.notch.lef
 ```
 
 Pass: `PASS: 36 instances, ... 0 clips, every instance connected on VPWR
@@ -1662,7 +1671,22 @@ itself worth watching.  But it does NOT read routed geometry:
 `net_segment`, `bus_segment` and `net_via` come back **0/0/0** on a routed
 DEF, because those tables are BUDA's OWN routing output.  A BDB of a routed
 stage would therefore look like an unrouted design and quietly mislead, so
-the tool refuses to write one and says why.  For somebody else's routing the
+the tool refuses to write one and says why.
+
+The footprints in it are the REAL ones, on the standard cells as well as the
+macros (#908).  The first cut concatenated the hardened macro LEFs alone and
+passed `allow_missing_footprints`, so at CTS all 39,465 components landed at
+the importer's 0.5 × 0.5 µm fallback: a BDB that opens in `bin/fp` with
+specks where the cells are, and an HPWL over speck centres.  The PDK's
+standard-cell library is already in the run's own `CELL_LEFS`, so naming it
+costs nothing — measured on the N = 8 top at CTS, **39,141 of 39,141**
+components imported with **0** at the fallback size (tap cells at their real
+0.46 × 2.72 µm site) — and with it named the flag can go, which makes the
+importer's refusal a guard again rather than a setting that hides a missing
+input.  The `def_layer` table comes from the run's own `TECH_LEFS` the same
+way, parsed for `TYPE ROUTING` layers with a `DIRECTION`, rather than from a
+hard-coded sky130 stack; a run with no readable technology LEF is told which
+stack it fell back to and what its `PDK` says.  For somebody else's routing the
 DEF is the artefact: `bin/viz <run>/NN-step/<design>.def` opens it, and
 `bin/fp <stage>.bdb` opens a placement stage where a macro can be dragged and
 the HPWL and flylines move with it.
@@ -1998,6 +2022,23 @@ have: every netlist here is either authored or uniquified.
    identical on all four cells, after which `notch_obs.py` runs unmodified.
    The claim it then makes is 1.2 µm² per cell where the blanket claimed
    5,208, and the notch goes from 98 % uncovered to 0 %.
+
+   **It is now a STEP rather than a hand recipe** (#907).  The measurement
+   above cost three hand operations per cell per run — rectify, notch, edit
+   `MACROS.<cell>.lef` — and a step someone skips brings the marker back
+   with nothing saying so, because the block's own DRC is 0: the partner
+   shape is the top's wire.  `flow/librelane/tier1a/notch.sh N` runs both
+   tools per leaf cell and writes `<cell>.notch.lef` beside Magic's, and
+   `harm.py` points the generated top config's `MACROS.<cell>.lef` at that
+   file — so the step cannot be skipped at all: a top run without it stops
+   at once on a LEF that is not there.  A cell whose GDS the decomposition
+   cannot handle is refused LOUDLY, with no stale `.notch.lef` left standing
+   from a previous run and the hand recipe in the generated README's step 2.
+
+   That the automation reproduces the measurement is measured, not assumed:
+   re-run over the N = 8 artefacts it produced all four `.notch.lef` files
+   **byte-identical** to the hand-run ones the table above was measured on,
+   in 17 s for the set.
 
 12. **`pdn_phase.py` detects, but its REMEDY is wrong** (measured
    2026-09-07 on the N = 8 artefacts).  The model now fails the

@@ -17,7 +17,13 @@
 # every check are in harm.py's docstring; a set of a shape it did not expect
 # exits 1 naming what did not match.  Then:
 #
-#   cd flow/librelane/tier1a/n<N>/h && cat README.md      # harden, check, top, account
+#   cd flow/librelane/tier1a/n<N>/h && cat README.md   # harden, notch, check, top, account
+#
+# Its step 2 is `notch.sh N`, and the top's `MACROS.<cell>.lef` names the
+# `<cell>.notch.lef` that step writes rather than Magic's own (#907): the
+# abstraction notch #896 closed on was three hand steps per cell per run,
+# and a run that skipped one brought the DRC marker back with nothing
+# saying so.  A top run without the step now stops on a missing LEF.
 #
 # `--pins <dir>` makes it arm H+B's block side instead: every block config
 # gets an `FP_DEF_TEMPLATE` from BUDA's plan (`pins.sh N` writes n<N>/pins/)

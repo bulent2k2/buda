@@ -81,8 +81,14 @@ flow/**/_trunk_trim_on_*.buda
 flow/**/_mst_trim_off_*.buda
 
 # LibreLane study (docs/internal/librelane_hier_flow.md): generated designs and run dirs
-flow/librelane/tier1a/n*/
-flow/librelane/tier1b/n*/
+# `**/n*/` rather than `n*/`: an emitted set is `n<N>/`, but a VARIANT of the
+# arm gets its own root holding one (`hb2/n8/`, `hb_hoffset109/n8/`), and only
+# the `runs/` inside those was ignored -- the configs, src and DEF/LEF beside
+# them were not, so `git add -A` swept 117 files and 98k lines of them into a
+# commit (PR #909).  Matching at any depth ignores the next variant root the
+# day it appears, without anyone having to remember to name it here.
+flow/librelane/tier1a/**/n*/
+flow/librelane/tier1b/**/n*/
 flow/librelane/**/runs/
 flow/librelane/phase0/measure/out/
 flow/librelane/phase0/reg32/pins.def

@@ -1,8 +1,19 @@
 # Decompose one layer's polygons into RECTANGLES, area-preserving, so
 # `notch_obs.py`'s rectangle precondition holds on a real Magic GDS.
 #
-#   run_or.sh <run> rectify_gds.py GDS=<in.gds> LNUM=69 LDT=20 OUT=<out.gds>
-#   (a KLayout script: pass values with -rd, which run_or.sh forwards)
+# `notch.sh N` runs it per cell; the hand form is a KLayout BATCH script, so
+# it goes to `klayout -b -r` with its values as `-rd`, in the LibreLane image
+# (there is no host KLayout in this recipe, and `pya` is KLayout's own
+# module -- this is NOT an OpenROAD script and `phase0/measure/run_or.sh`,
+# which runs `openroad -exit`, cannot carry it):
+#
+#   docker run --rm -v "$HOME:$HOME" -w "$PWD" ghcr.io/librelane/librelane:3.0.11 \
+#       klayout -b -r rectify_gds.py \
+#       -rd gds=<in.gds> -rd lnum=69 -rd ldt=20 -rd out=<out.gds>
+#
+# Every path must be inside a mount: a GDS outside $HOME is simply not there
+# for the container, and the failure is `Unable to open file`, not a mount
+# error.  `notch.sh` mounts the design tree when it is elsewhere.
 #
 # WHY.  `notch_obs.py` needs the macro's real metal as rectangles and REFUSES
 # a non-rectangle rather than take its bbox -- correct, since a bbox

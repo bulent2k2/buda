@@ -235,7 +235,11 @@ def test_harm_sh_writes_the_h_arm_from_the_emitted_set(tmp_path, n):
     for cell, m in cfg["MACROS"].items():
         for name, inst in m["instances"].items():
             placed[name] = (cell, inst["location"], inst["orientation"])
-        assert m["lef"] == [f"dir::../{cell}/runs/h/final/lef/{cell}.lef"]
+        # the PATCHED abstract, not Magic's own -- naming it here is what
+        # makes `notch.sh` unskippable: a top run without it stops on a
+        # missing LEF instead of quietly routing against the unpatched
+        # abstract and bringing #896's marker back (#907)
+        assert m["lef"] == [f"dir::../{cell}/runs/h/final/lef/{cell}.notch.lef"]
         assert m["gds"] == [f"dir::../{cell}/runs/h/final/gds/{cell}.gds"]
         assert m["nl"] == [f"dir::../{cell}/runs/h/final/nl/{cell}.nl.v"]
         assert m["spef"] == {f"{c}_*": f"dir::../{cell}/runs/h/final/spef/{c}/{cell}.{c}.spef"
@@ -280,6 +284,13 @@ def test_harm_sh_writes_the_h_arm_from_the_emitted_set(tmp_path, n):
                        capture_output=True, text=True)
     assert r.returncode == 0 and f"PASS: {len(comps)} instances" in r.stdout, r.stdout + r.stderr
     readme = (h / "README.md").read_text()
+    # the notch step, and the two checks that read the macro LEFs by GLOB:
+    # with `<cell>.notch.lef` beside `<cell>.lef`, a `*.lef` glob would hand
+    # each tool BOTH abstracts of every cell
+    assert f"../../notch.sh {n}" in readme
+    assert "final/lef/*.lef" not in readme and "final/lef/*.notch.lef" in readme
+    for c in cells:
+        assert f"../{c}/runs/h/final/lef/{c}.notch.lef" in readme
     assert f"runtimes.py top/runs/h --set N={n} --set arm=H --blocks-from top/config.json" in readme
     assert f"--block pe_cell/runs/h:{n * n}" in readme
     assert "--block ../pe_cell" not in readme          # ../pe_cell is n<N>/pe_cell, which does not exist
@@ -1000,6 +1011,79 @@ def test_the_documented_relative_paths_resolve_from_the_directory_they_say(tmp_p
                         f"be pasted")
                     checked += 1
     assert checked, "no relative script path was checked; has the doc changed shape?"
+
+
+def test_notch_sh_refuses_an_unhardened_cell_and_clears_the_stale_patch(tmp_path):
+    """`notch.sh N` closes #896's abstraction notch per cell, and the whole
+    point of moving it out of the hand recipe (#907) is that it cannot be
+    half-done: the top's `MACROS.<cell>.lef` names `<cell>.notch.lef`, so a
+    skipped step stops the top on a missing file rather than silently
+    routing against Magic's unpatched abstract.
+
+    Two properties earn assertions here, and neither needs Docker.  A cell
+    that has not hardened is REFUSED by name (not skipped, not warned
+    about), and the run exits non-zero saying not to run the top.  And each
+    cell's PREVIOUS `.notch.lef` is removed BEFORE that cell is
+    reprocessed -- otherwise a failing rerun would leave last run's patch
+    standing for the top to pick up, which is the same silent-stale-input
+    shape the file-naming was meant to remove."""
+    d = tmp_path / "n2"
+    d.mkdir()
+    cells = ("pe_cell", "acc_cell")
+    d.joinpath("tpu.lef").write_text(
+        "".join(f"MACRO {c}\n  CLASS BLOCK ;\n  SIZE 10 BY 10 ;\nEND {c}\n" for c in cells))
+    for c in cells:
+        fin = d / "h" / c / "runs" / "h" / "final"
+        (fin / "gds").mkdir(parents=True)
+        (fin / "lef").mkdir(parents=True)
+        (fin / "lef" / f"{c}.notch.lef").write_text("last run's patch\n")
+    r = subprocess.run(["bash", str(_T1A / "notch.sh"), "2"],
+                       env={**os.environ, "T1A_DIR": str(tmp_path)},
+                       capture_output=True, text=True, timeout=300)
+    assert r.returncode == 1, r.stdout + r.stderr
+    for c in cells:
+        assert f"{c} is not hardened" in r.stderr
+        assert not (d / "h" / c / "runs" / "h" / "final" / "lef" / f"{c}.notch.lef").exists(), \
+            f"{c}: the stale patch survived a failed run"
+    assert "2 cell(s) have no patched abstract" in r.stderr
+    assert "Do NOT run the top" in r.stderr
+
+    # and an arm that was never written is refused with the command that writes it
+    r = subprocess.run(["bash", str(_T1A / "notch.sh"), "3"],
+                       env={**os.environ, "T1A_DIR": str(tmp_path)},
+                       capture_output=True, text=True, timeout=300)
+    assert r.returncode == 1 and "gen.sh 3" in r.stderr
+
+
+def test_notch_sh_refuses_an_empty_layer_list_instead_of_renaming_the_deliverables(tmp_path):
+    """`--layers ''` (or a comma-only value) ran ZERO passes, and the moves
+    at the end of the cell then renamed the cell's OWN hardened `.gds` and
+    Magic's `.lef` to the derived names -- reported success, and left the
+    top's configured GDS gone and a `.notch.lef` that is the unpatched
+    abstract (Codex #909).  Reproduced before the fix on all three
+    spellings; the hardening it would have destroyed is hours per cell.
+
+    Refused at the argument now, and the move is ALSO guarded on a completed
+    pass: one guard is enough to close this, and neither should be the only
+    one."""
+    d = tmp_path / "n2"
+    d.mkdir()
+    d.joinpath("tpu.lef").write_text("MACRO pe_cell\n  CLASS BLOCK ;\n  SIZE 10 BY 10 ;\nEND pe_cell\n")
+    fin = d / "h" / "pe_cell" / "runs" / "h" / "final"
+    (fin / "gds").mkdir(parents=True)
+    (fin / "lef").mkdir(parents=True)
+    (fin / "gds" / "pe_cell.gds").write_text("the hardened GDS\n")
+    (fin / "lef" / "pe_cell.lef").write_text("Magic's abstract\n")
+    for spelling in ("", ",", " , "):
+        r = subprocess.run(["bash", str(_T1A / "notch.sh"), "2", "--layers", spelling],
+                           env={**os.environ, "T1A_DIR": str(tmp_path)},
+                           capture_output=True, text=True, timeout=300)
+        assert r.returncode == 1, f"--layers {spelling!r}: " + r.stdout + r.stderr
+        assert "names no layer" in r.stderr
+        assert (fin / "gds" / "pe_cell.gds").read_text() == "the hardened GDS\n"
+        assert (fin / "lef" / "pe_cell.lef").read_text() == "Magic's abstract\n"
+        assert not (fin / "gds" / "pe_cell.rect.gds").exists()
+        assert not (fin / "lef" / "pe_cell.notch.lef").exists()
 
 
 def _notch_lef(path, obs=True):
