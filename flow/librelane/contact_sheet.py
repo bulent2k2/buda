@@ -43,21 +43,27 @@ CSS = """
    renders never use, which is what keeps chrome reading as chrome. */
 :root {
   color-scheme: light dark;
-  --bg:#eaecee; --panel:#ffffff; --sunk:#dfe3e6;
+  --bg:#eaecee; --panel:#ffffff;
   --fg:#161b1f; --dim:#5d6a72; --faint:#8b979e;
   --line:#cdd3d7; --accent:#2d7d73; --flag:#9a5b32;
   --shadow:0 1px 2px rgba(20,30,35,.10);
+  /* The ground a THUMBNAIL sits on, and the one token that does NOT change
+     with the theme: a KLayout render is drawn on black, the tiles are a
+     fixed size and the images are not, so `object-fit:contain` letterboxes
+     every one of them.  On a light ground those bars read as padding
+     somebody forgot to remove; on the render's own black they vanish. */
+  --shot:#0b0e10;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg:#0d1013; --panel:#161b20; --sunk:#0a0d0f;
+    --bg:#0d1013; --panel:#161b20;
     --fg:#dfe5e9; --dim:#8794a0; --faint:#5b6771;
     --line:#252d34; --accent:#7fb0a6; --flag:#c08a5e;
     --shadow:none;
   }
 }
 :root[data-theme="dark"] {
-  --bg:#0d1013; --panel:#161b20; --sunk:#0a0d0f;
+  --bg:#0d1013; --panel:#161b20;
   --fg:#dfe5e9; --dim:#8794a0; --faint:#5b6771;
   --line:#252d34; --accent:#7fb0a6; --flag:#c08a5e;
   --shadow:none;
@@ -131,7 +137,7 @@ h2 {
 }
 .tile img {
   display:block; width:196px; height:150px; object-fit:contain;
-  background:var(--sunk); border:1px solid var(--line); border-radius:2px;
+  background:var(--shot); border:1px solid var(--line); border-radius:2px;
   box-shadow:var(--shadow);
 }
 .tile:hover img { border-color:var(--accent); }
@@ -149,7 +155,7 @@ dialog {
   background:var(--panel); color:var(--fg); max-width:96vw; max-height:94vh;
 }
 dialog::backdrop { background:rgba(0,0,0,.82); }
-dialog img { display:block; max-width:92vw; max-height:78vh; background:var(--sunk); }
+dialog img { display:block; max-width:92vw; max-height:78vh; background:var(--shot); }
 dialog .meta {
   padding:.6rem .8rem;
   font:400 .74rem/1.5 "IBM Plex Mono", ui-monospace, Menlo, monospace;
