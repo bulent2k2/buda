@@ -267,6 +267,22 @@ run arrives whole — which is what lets the Tcl front end pass a hint as one
 argument (`buda::require_file top.v hint {run fetch.py first}`) without its
 quotes reaching the message.
 
+**On a `btcl -r` hier resume, a requirement whose reader is held is
+dropped.** A hier resume restores the design from the checkpoint and
+therefore HOLDS the commands that built it — `import_def_lef`,
+`import_verilog`, `import_gds` — so the files they read need not be present.
+The check is resolved **per path**, not per statement, because one statement
+routinely names both kinds: `flow/ariane133` requires `ariane.v` and the
+macro LEF, read by held importers, alongside the technology LEF that
+`import_lef_tech` reads, and `import_lef_tech` REPLAYS. So the held inputs
+are dropped, the tech LEF stays required with its hint, and the resume says
+which requirements it dropped and why. A path no held command names, or one
+spelled differently from the way its reader names it, stays required — the
+ambiguous case keeps the check rather than skipping it. Flat resumes replay
+setup wholesale and are unaffected. Before this, such a resume refused to
+start on files it would never open, offering the remedy for regenerating
+them (#873).
+
 **Why not just let the importer fail?** It does fail, correctly — but its
 complaint is about a path it could not open. Where that file *comes from* — a
 fetch script, an earlier stage's output, a site-specific location — is the

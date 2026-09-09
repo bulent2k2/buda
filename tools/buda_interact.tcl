@@ -770,6 +770,84 @@ proc replay_tail {} {
 # (Codex #763).  Re-solving is fine: run_nuts/run_detailed_nuts persist
 # through the selective expanded machinery, which is what the stage replay
 # itself runs.
+# `require_file` states a flow's INPUT PRECONDITION, and on a HIER resume some
+# of those inputs are read by commands the checkpoint HOLDS: the design is
+# already built, so `import_def_lef`/`import_verilog`/`import_gds` do not run
+# and their files need not be there.  Replaying the check anyway refused a
+# resume that works, and offered the remedy for REGENERATING files the session
+# would never open (#873 -- the same run printed "5 held by the checkpoint"
+# and then died on the inputs of those five).
+#
+# Resolved PER PATH rather than per statement, because one statement names
+# both kinds.  `flow/ariane133/ariane133.buda` requires `ariane.v` and
+# `fakeram45_256x16.lef`, read by held importers, alongside
+# `NangateOpenCellLibrary.tech.lef`, read by `import_lef_tech`, which
+# REPLAYS -- three of the four flows that pair the two are like this.  So
+# holding the whole line loses that path's remedy hint while replaying it
+# refuses a working resume, and neither is right for the flow it matters
+# most on.
+#
+# The path-to-command mapping needs no path-vs-option cleverness, which is
+# what made this look harder than it is: a required path is compared
+# LITERALLY against the argument tokens of the lines THIS SAME PASS has
+# already classified, both being tokens the flow itself wrote.  A path is
+# dropped only when a held line names it and no replayed line does; an
+# unmatched path, a differently spelled one, and one any replayed command
+# reads all KEEP today's behaviour, so every ambiguity fails safe.
+#
+# Returns {pruned_setup notes}, one note per statement it changed:
+# {kept moot}.
+proc _prune_requires {setup held_lines} {
+    if {![llength $held_lines]} { return [list $setup {}] }
+    set held_tokens {}
+    foreach ln $held_lines {
+        foreach t [_split_args $ln] { dict set held_tokens $t 1 }
+    }
+    # Every OTHER replayed line's tokens.  `require_file` lines are excluded
+    # from this set on purpose: naming a path is not reading it, so a second
+    # `require_file` for the same input must not keep the first one alive.
+    set replay_tokens {}
+    foreach ln $setup {
+        if {[_verb $ln] eq "require_file"} { continue }
+        foreach t [_split_args $ln] { dict set replay_tokens $t 1 }
+    }
+    set out {}
+    set notes {}
+    foreach ln $setup {
+        if {[_verb $ln] ne "require_file"} { lappend out $ln; continue }
+        # `require_file <path>... [hint <text>]` -- the hint is the rest of
+        # the line and travels with whatever paths survive.
+        set paths {}
+        set tail {}
+        set in_hint 0
+        foreach a [_split_args $ln] {
+            if {!$in_hint && [string tolower $a] eq "hint"} { set in_hint 1 }
+            if {$in_hint} { lappend tail $a } else { lappend paths $a }
+        }
+        set keep {}
+        set moot {}
+        foreach pth $paths {
+            if {[dict exists $held_tokens $pth]
+                    && ![dict exists $replay_tokens $pth]} {
+                lappend moot $pth
+            } else {
+                lappend keep $pth
+            }
+        }
+        if {![llength $moot]} { lappend out $ln; continue }
+        lappend notes [list $keep $moot]
+        # A statement with no path left is dropped entirely.  It is not
+        # rewritten to a bare `require_file`, which the engine refuses (a
+        # command that named nothing checked nothing) -- correctly, and that
+        # refusal is not this resume's to trip over.
+        if {[llength $keep]} {
+            lappend out "require_file [::buda::_join_args [concat $keep $tail]]"
+        }
+    }
+    return [list $out $notes]
+}
+
+
 proc _inspect_guard {verb} {
     if {[string match edit_* $verb]
             || [string match generate_* $verb]
@@ -1573,6 +1651,7 @@ if {$stage eq "build"} {
                         emit_ export_ select_topolog unpin_topology}
     set setup {}
     set held 0
+    set held_lines {}
     foreach ln [lrange $lines 0 [expr {$cut - 1}]] {
         set verb [_verb $ln]
         if {[_skipped $verb $pipeline_prefixes]} { continue }
@@ -1613,8 +1692,16 @@ if {$stage eq "build"} {
                 if {[string match ${p}* $verb]} { set ok 1; break }
             }
         }
-        if {$ok} { lappend setup $ln } else { incr held }
+        if {$ok} {
+            lappend setup $ln
+        } else {
+            incr held
+            lappend held_lines $ln
+        }
     }
+
+    # What the held construction made moot: see `_prune_requires`.
+    lassign [_prune_requires $setup $held_lines] setup require_notes
 
     # The post-cut replay: the flow's own commands from the stage on, under
     # the replan filter — except that a `topo` cut must of course replay
@@ -1652,6 +1739,13 @@ if {$stage eq "build"} {
           [expr {$is_hier ? "HIER" : "FLAT"}] flow, [llength $setup] setup\
           command(s)[expr {$held ? ", $held held by the checkpoint" : ""}],\
           [llength $stage_lines] to replay"
+    foreach note $require_notes {
+        lassign $note keep moot
+        puts "$tag: require_file: [llength $moot] input(s) are read only by\
+              commands the checkpoint holds, so they are not required here\
+              ([join $moot {, }])[expr {[llength $keep] ?
+              " -- still required: [join $keep {, }]" : ""}]"
+    }
     if {[llength $held_planner]} {
         puts "$tag: holding [llength $held_planner] planner-dependent\
               command(s) ([lsort -unique $held_planner]) -- the restored\

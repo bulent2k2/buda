@@ -101,6 +101,12 @@ def _run(cmd, tmp_path, stdin="done\n"):
                           timeout=900, env={**os.environ})
 
 
+def _tcl_lit(s):
+    """`s` as a Tcl literal — braced, none of the cases carrying braces."""
+    assert "{" not in s and "}" not in s and "\\" not in s, s
+    return "{" + s + "}"
+
+
 def _log(flow):
     """The flow's per-command detail, where the driver now files it.
 
@@ -378,6 +384,126 @@ def test_hier_stage_resume_holds_construction_and_replans(tmp_path):
     assert r.returncode == 0, r.stdout + r.stderr
     assert _log(flow).count("topo 2 of 5") >= 4, "the inspection session dirtied the checkpoint"
     assert "done -- 0 overlaps, 0 unplaced, 0 audit violations" in r.stdout
+
+
+def test_a_hier_resume_does_not_demand_the_inputs_it_holds(tmp_path):
+    """#873, its own four-command repro: a hier resume replayed
+    `require_file` while HOLDING the commands that read those files, so it
+    announced "5 held by the checkpoint" and then refused to start because
+    those five had no inputs -- offering the remedy for regenerating files
+    it would never open.  `flow/tpu` and `flow/ariane133` are where it
+    bites, both being flows whose inputs are deliberately not checked in.
+
+    Resolved PER PATH: the three inputs here are read only by held
+    importers, so the whole statement goes and the resume says which
+    requirements it dropped and why."""
+    for f in ("tpu.def", "tpu.lef", "tpu.v", "tpu2.buda"):
+        shutil.copy(_ROOT / "flow" / "tpu" / f, tmp_path / f)
+    flow = tmp_path / "tpu2.buda"
+
+    r = _run([*_BTCL_CMD, "-b", flow], tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "done -- 0 overlaps, 0 unplaced, 0 audit violations" in r.stdout
+
+    # the inputs the resume does not read
+    for f in ("tpu.def", "tpu.lef", "tpu.v"):
+        (tmp_path / f).unlink()
+
+    r = _run([*_BTCL_CMD, "-r", flow], tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "held by the checkpoint" in r.stdout
+    assert "require_file: 3 input(s) are read only by commands the checkpoint" \
+        in " ".join(r.stdout.split()), r.stdout
+    assert "still required" not in r.stdout            # all three were moot
+    assert "BUDA-1905" not in r.stdout, "the resume still demanded them"
+    assert "done -- 0 overlaps, 0 unplaced, 0 audit violations" in r.stdout
+
+
+def test_require_file_is_pruned_per_path_not_per_statement(tmp_path):
+    """The rule the fix turns on, over the cases that separate it from
+    holding the whole statement.
+
+    A `require_file` names files of BOTH kinds in ONE statement -- the
+    reason a per-statement decision cannot be right.
+    `flow/ariane133/ariane133.buda` requires `ariane.v` and
+    `fakeram45_256x16.lef`, read by held importers, alongside
+    `NangateOpenCellLibrary.tech.lef`, read by `import_lef_tech`, which
+    REPLAYS.  Three of the four in-tree flows that pair the two look like
+    that.  Holding the line loses the tech LEF's remedy hint; replaying it
+    refuses a resume that works.
+
+    Every other case KEEPS today's behaviour, which is what makes the
+    change safe: a path no held line names, a path spelled differently
+    between the requirement and the reader, and a flat resume with nothing
+    held at all.
+
+    The proc is extracted and run on its own rather than sourced (sourcing
+    the driver runs a session), which also proves it is self-contained --
+    the same method `test_btcl_quoted_paths` uses."""
+    text = _DRIVER.read_text().splitlines()
+    body = []
+    for name in ("proc _verb ", "proc _split_args ", "proc _prune_requires "):
+        a = next(i for i, l in enumerate(text) if l.startswith(name))
+        b = next(i for i in range(a, len(text)) if text[i] == "}")
+        body += text[a:b + 1]
+
+    held = ["import_def_lef ../../demo/ariane/ariane.def fakeram45_256x16.lef",
+            "import_verilog ariane.v",
+            "import_def_lef 'a b.def' c.lef"]
+    setup = ["open_bdb x.bdb",
+             "import_lef_tech NangateOpenCellLibrary.tech.lef",
+             # the mixed statement: two held inputs, one replayed reader's
+             "require_file ariane.v fakeram45_256x16.lef"
+             " NangateOpenCellLibrary.tech.lef hint Fetch them first: fetch.py",
+             # a path no held line names -- kept, the safe direction
+             "require_file elsewhere.txt",
+             # spelled differently from the held line's token -- kept
+             "require_file demo/ariane/ariane.def",
+             # a quoted path with a space, held: dropped, and the survivor
+             # keeps its quoting through the rewrite
+             "require_file 'a b.def' elsewhere.txt",
+             "def_layer 4 M4 H TOP 30"]
+    probe = tmp_path / "probe.tcl"
+    probe.write_text(
+        "source " + _tcl_lit(str(_ROOT / "tools" / "buda.tcl")) + "\n"
+        + "\n".join(body) + "\n"
+        + "set held [list " + " ".join(_tcl_lit(l) for l in held) + "]\n"
+        + "set setup [list " + " ".join(_tcl_lit(l) for l in setup) + "]\n"
+        + "lassign [_prune_requires $setup $held] out notes\n"
+        + 'foreach l $out { puts "OUT:$l" }\n'
+        + 'foreach n $notes { puts "NOTE:[lindex $n 0]|[lindex $n 1]" }\n')
+    r = subprocess.run(["tclsh", str(probe)], text=True, capture_output=True,
+                       timeout=120)
+    assert r.returncode == 0, r.stderr
+    out = [l[4:] for l in r.stdout.splitlines() if l.startswith("OUT:")]
+    notes = [l[5:] for l in r.stdout.splitlines() if l.startswith("NOTE:")]
+
+    # the mixed statement keeps ONLY the replayed reader's file, with the hint
+    assert ("require_file NangateOpenCellLibrary.tech.lef hint Fetch them"
+            " first: fetch.py") in out, out
+    # untouched: neither path is named by a held line
+    assert "require_file elsewhere.txt" in out
+    assert "require_file demo/ariane/ariane.def" in out
+    # the quoted held path goes; the unmatched one stays, still one statement
+    assert "require_file elsewhere.txt" in out
+    assert not any("a b.def" in l for l in out), out
+    # nothing else moved
+    assert out[0] == "open_bdb x.bdb" and out[-1] == "def_layer 4 M4 H TOP 30"
+    assert len(notes) == 2, notes            # the mixed one and the quoted one
+    assert notes[0] == ("NangateOpenCellLibrary.tech.lef"
+                        "|ariane.v fakeram45_256x16.lef"), notes[0]
+
+    # nothing held (a FLAT resume) leaves every statement alone
+    probe.write_text(
+        "source " + _tcl_lit(str(_ROOT / "tools" / "buda.tcl")) + "\n"
+        + "\n".join(body) + "\n"
+        + "set setup [list " + " ".join(_tcl_lit(l) for l in setup) + "]\n"
+        + "lassign [_prune_requires $setup {}] out notes\n"
+        + 'puts "N:[llength $out]:[llength $notes]"\n')
+    r = subprocess.run(["tclsh", str(probe)], text=True, capture_output=True,
+                       timeout=120)
+    assert r.returncode == 0, r.stderr
+    assert f"N:{len(setup)}:0" in r.stdout, r.stdout
 
 
 def test_below_plan_resume_holds_healers_the_plan_already_carries(tmp_path):
