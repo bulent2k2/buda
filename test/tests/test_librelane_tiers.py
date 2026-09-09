@@ -908,6 +908,61 @@ def test_the_pin_template_emit_pin_def_writes_opens_in_the_def_visualizer(tmp_pa
     assert round(a["x1"], 3) == 0.0 and round(a["y1"], 3) == 24.67
 
 
+def test_both_def_loaders_draw_the_same_pins(tmp_path, monkeypatch):
+    """`bin/viz` has TWO loaders -- the BDB extension when it is built, a
+    pure-Python parser when it is not -- and the picture must not depend on
+    which one ran.  The Python one read COMPONENTS and NETS and nothing
+    else, so a PINS-only template drew an empty die there even after the
+    extension path was fixed (Codex #911).
+
+    Compared pin for pin over ALL EIGHT DEF orientations, because that is
+    where they turned out to differ: DEF 5.8 transforms a PORT's rectangle
+    by the pin's orientation, and `import_def_lef` does not -- an `E` pin
+    with a 2.0 x 0.3 offset rect imports 2.0 x 0.3 rather than 0.3 x 2.0.
+    The fallback matches the READER rather than the spec, deliberately: a
+    drawing that depends on whether the extension is built is worse than
+    both being wrong the same way, and the reader is where it gets fixed
+    (opens_interchange.md item 17).  This test is what will say so when it
+    does -- it fails the day the two stop agreeing, in either direction."""
+    sys.path.insert(0, str(_ROOT / "tools"))
+    import def_viz_shared as dv                    # noqa: E402
+
+    orients = ["N", "S", "FN", "FS", "E", "W", "FE", "FW"]
+    body = "".join(
+        f"  - p_{o} + NET p_{o} + DIRECTION INPUT + USE SIGNAL + LAYER met3 "
+        f"( -1000 -150 ) ( 1000 150 ) + PLACED ( {5000 + 1000 * i} 24820 ) {o} ;\n"
+        for i, o in enumerate(orients))
+    dp = tmp_path / "t.def"
+    dp.write_text('VERSION 5.8 ;\nDIVIDERCHAR "/" ;\nBUSBITCHARS "[]" ;\nDESIGN t ;\n'
+                  "UNITS DISTANCE MICRONS 1000 ;\nDIEAREA ( 0 0 ) ( 128000 150000 ) ;\n"
+                  f"PINS {len(orients)} ;\n{body}END PINS\nEND DESIGN\n")
+
+    py = {k: tuple(round(v, 4) for v in r) for k, r in dv.parse_def_pins(str(dp)).items()}
+    assert len(py) == len(orients), sorted(py)
+
+    if not dv._BDB_AVAILABLE:
+        pytest.skip("the extension is not built, so there is no second loader to compare")
+    lef = tmp_path / "empty.lef"
+    lef.write_text("VERSION 5.8 ;\nEND LIBRARY\n")
+    from def_viz_shared import _buda_mod           # noqa: E402
+    db = _buda_mod.BDB(str(tmp_path / "t.bdb"))
+    db.import_def_lef(str(dp), str(lef))
+    bdb = {c.name: tuple(round(v, 4) for v in (c.x1, c.y1, c.x2, c.y2))
+           for c in db.all_components()}
+    assert py == {k: v for k, v in bdb.items() if k in py}, \
+        {o: (py[f"PIN/p_{o}"], bdb[f"PIN/p_{o}"]) for o in orients
+         if py[f"PIN/p_{o}"] != bdb[f"PIN/p_{o}"]}
+
+    # ...and the whole loader agrees too, not just the pin reader
+    a = dv.DefVizData(); a.load(str(dp), str(lef))
+    monkeypatch.setattr(dv, "_BDB_AVAILABLE", False)
+    b = dv.DefVizData(); b.load(str(dp), "")
+    assert {k: {m: round(n, 4) for m, n in v.items() if m != "cell"}
+            for k, v in a.inst_info.items()} == \
+           {k: {m: round(n, 4) for m, n in v.items() if m != "cell"}
+            for k, v in b.inst_info.items()}
+
+
 def _acc_lef(path):
     """A 96 x 60 block with met2 OBS as Magic draws it -- ACTUAL shapes, not a
     cover: two met2 rects, and a met4 VGND pin at local x 69.52-71.52 (the

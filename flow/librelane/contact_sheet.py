@@ -81,7 +81,15 @@ def main(argv=None):
     runs = sheets(root)
     if not runs:
         sys.exit(f"contact_sheet: no <NN>-<stage>.png under {root}")
-    out = a.out or os.path.join(root, "index.html")
+    out = os.path.abspath(a.out or os.path.join(root, "index.html"))
+    # The `img` paths are resolved by the BROWSER, against the PAGE's own
+    # directory -- not against the render root the names were built from.
+    # With `-o` pointing anywhere else the two differ and every image and
+    # link on the page is broken (Codex #911), so the page's own directory
+    # is what they are made relative to.
+    rel = os.path.relpath(root, os.path.dirname(out))
+    def url(p):
+        return p if rel == "." else f"{rel}/{p}"
 
     n_png = sum(len(s) for _r, s in runs)
     body = [f"<h1>LibreLane stage renders — {len(runs)} runs, {n_png} images</h1>",
@@ -95,8 +103,9 @@ def main(argv=None):
             group = g
             body.append(f"<h2>{g}</h2>")
         body.append(f"<h3>{slug.replace('_', ' / ')}</h3><div class=\"row\">")
-        for n, stage, rel in shots:
-            body.append(f'<figure><a href="{rel}"><img src="{rel}" loading="lazy" '
+        for n, stage, path in shots:
+            u = url(path)
+            body.append(f'<figure><a href="{u}"><img src="{u}" loading="lazy" '
                         f'alt="{slug} {stage}"></a>'
                         f"<figcaption>{n} {stage}</figcaption></figure>")
         body.append("</div>")

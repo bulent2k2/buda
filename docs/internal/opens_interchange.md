@@ -1292,6 +1292,36 @@ declaration is the answer for good.
 
 ---
 
+## 17. A DEF `PIN`'s orientation is not applied to its PORT rectangle
+
+DEF 5.8 gives a `PIN`'s `PORT` geometry relative to the pin's own origin and
+transforms it by the pin's orientation, exactly as it does a component's
+geometry.  `import_def_lef` offsets the rectangle by the `PLACED` origin and
+ignores the orientation, so an `E` pin comes out with the shape an `N` pin
+would have.
+
+Measured on a synthetic DEF carrying one pin per orientation with the same
+`( -1000 -150 ) ( 1000 150 )` offset rect: all eight import 2.0 x 0.3 µm,
+where the four 90° ones (`E`, `W`, `FE`, `FW`) should be 0.3 x 2.0.  The
+four direction-preserving ones (`N`, `S`, `FN`, `FS`) are correct — a
+mirror of a rect about its own origin is the same rect here — so the fault
+is exactly the 90° family, the same family that needed its own handling in
+`set_bottom_up`'s rotation classes.
+
+**Not fixed here because it is a reader change with reach**: pin rects are
+what `derive_busterms` puts on a block's faces, so every imported design's
+routing interface moves the day it lands, and the corpus is the only thing
+that can say by how much.  Nothing in the LibreLane study is affected —
+`emit_pin_def` writes `N` for every pin, which is where the reader is right.
+
+Found while giving `def_viz_shared`'s pure-Python fallback a PINS reader
+(#911): the natural thing was to apply the transform, and cross-checking the
+two loaders pin for pin is what showed they disagreed.  The fallback matches
+the READER deliberately, so the picture cannot depend on whether the
+extension is built; when the reader is fixed, that test is what will say so.
+
+---
+
 ## Resolved (by 2026-08-09)
 
 Recorded because each was found by building `flow/def/` and each had passed

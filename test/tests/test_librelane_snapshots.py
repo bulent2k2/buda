@@ -29,6 +29,7 @@ that need the image, and they are stubbed for a pass over the index writer.
 """
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -277,3 +278,45 @@ def test_main_renders_the_curated_stages_and_writes_the_index(tmp_path, monkeypa
     assert "| 3 | `floorplan` |" in idx and "| 49 | `detailedrouting` |" in idx
     assert "a routed DEF's geometry is not read into a BDB" in idx
     assert "layers from nom.tlef: met1(H)" in capsys.readouterr().out
+
+
+def test_contact_sheet_urls_resolve_against_the_page_not_the_render_root(tmp_path):
+    """`contact_sheet.py` names each image relative to the RENDER ROOT, and a
+    browser resolves it relative to the PAGE.  Those are the same directory
+    only by default: with `-o` pointing anywhere else, every image and every
+    link on the page is broken (Codex #911) -- 116 of them on the current
+    tree, and a page of broken images looks like a render that failed.
+
+    Checked the way a browser would: every `src` and `href` is opened
+    relative to the page's own directory, in both placements."""
+    import subprocess as sp
+    root = tmp_path / "renders"
+    (root / "tier1a_n8_h_top_runs_h").mkdir(parents=True)
+    (root / "tier1a_n8_h_top_runs_h" / "13-floorplan.png").write_bytes(b"\x89PNG\r\n")
+    (root / "tier1a_n8_h_top_runs_h" / "34-detailedplacement.png").write_bytes(b"\x89PNG\r\n")
+    (root / "phase0_reg32_runs_phase0").mkdir()
+    (root / "phase0_reg32_runs_phase0" / "13-floorplan.png").write_bytes(b"\x89PNG\r\n")
+    (root / "not-a-render").mkdir()          # no NN-stage.png: not a run
+    script = _ROOT / "flow" / "librelane" / "contact_sheet.py"
+
+    for out in (None, tmp_path / "pages" / "index.html"):
+        argv = [sys.executable, str(script), str(root)]
+        if out is not None:
+            (tmp_path / "pages").mkdir(exist_ok=True)
+            argv += ["-o", str(out)]
+        r = sp.run(argv, capture_output=True, text=True)
+        assert r.returncode == 0, r.stdout + r.stderr
+        page = out or (root / "index.html")
+        html = page.read_text()
+        refs = re.findall(r'(?:src|href)="([^"]+)"', html)
+        assert len(refs) == 6, refs          # 3 images, each also linked
+        for u in refs:
+            assert (page.parent / u).exists(), f"{page}: {u} points at nothing"
+        assert "2 runs, 3 images" in html
+        assert "not-a-render" not in html    # a directory with no stage PNG is not a run
+
+    # a root with nothing in it is refused rather than written as an empty page
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    r = sp.run([sys.executable, str(script), str(empty)], capture_output=True, text=True)
+    assert r.returncode != 0 and "no <NN>-<stage>.png" in r.stderr

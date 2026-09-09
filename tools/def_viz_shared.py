@@ -96,6 +96,52 @@ def infer_cell_sizes_from_def(def_path: str) -> dict:
     return sizes
 
 
+def parse_def_pins(def_path: str) -> dict:
+    """{'PIN/<name>': (x1, y1, x2, y2) in um} for the DEF's PINS section.
+
+    The pure-Python fallback's `parse_def` reads COMPONENTS and NETS and
+    nothing else, and a DEF may legitimately have neither: BUDA's
+    `emit_pin_def` writes a PINS-ONLY pin template, which is exactly the
+    file `bin/viz` is documented to open to see where a plan put a block's
+    pins.  Without the extension built, that drew an empty die (Codex
+    #911).
+
+    The naming and the geometry match what `BDB.import_def_lef` produces
+    for the same file -- `PIN/<name>`, cell `__PORT__`, the LAYER rect
+    offset by the PLACED origin -- so the two loaders draw one picture; a
+    test compares them pin for pin over all eight orientations.
+
+    Which is why the pin's ORIENTATION is deliberately not applied to its
+    rectangle here.  DEF 5.8 gives a PORT's geometry relative to the pin's
+    origin and transforms it by the orientation, so a `E` pin's rect should
+    come out rotated -- and `BDB.import_def_lef` does not rotate it
+    (measured: an `E` pin with a 2.0 x 0.3 offset rect imports 2.0 x 0.3,
+    not 0.3 x 2.0).  Rotating HERE would make the drawing depend on whether
+    the extension is built, which is worse than both being wrong the same
+    way, and the reader is the place to fix it: opens_interchange.md item
+    17.  Every pin in this study is `N`, where the two agree exactly.
+    """
+    with open(def_path) as f:
+        content = f.read()
+    um = re.search(r"UNITS DISTANCE MICRONS (\d+)", content)
+    units = int(um.group(1)) if um else 1000
+    sec = re.search(r"^PINS \d+ ;(.*?)^END PINS", content, re.DOTALL | re.MULTILINE)
+    if not sec:
+        return {}
+    out = {}
+    for m in re.finditer(
+            r"-\s+(\S+)\s+\+\s+NET\s+\S+.*?LAYER\s+\S+\s+"
+            r"\(\s*(-?\d+)\s+(-?\d+)\s*\)\s*\(\s*(-?\d+)\s+(-?\d+)\s*\)"
+            r".*?\+\s*(?:PLACED|FIXED)\s*\(\s*(-?\d+)\s+(-?\d+)\s*\)\s+(\S+)",
+            sec.group(1), re.DOTALL):
+        name, rx1, ry1, rx2, ry2, px, py, _orient = m.groups()
+        xs, ys = (int(rx1), int(rx2)), (int(ry1), int(ry2))
+        px, py = int(px), int(py)
+        out[f"PIN/{name}"] = ((px + min(xs)) / units, (py + min(ys)) / units,
+                              (px + max(xs)) / units, (py + max(ys)) / units)
+    return out
+
+
 def _synthetic_lef(cell_sizes: dict) -> str:
     """Build a minimal LEF string from a {cell: (w, h)} dict."""
     lines = ['VERSION 5.8 ;']
@@ -365,6 +411,14 @@ class DefVizData:
             self.net_insts[net_name] = inst_set
 
         self.all_nets = sorted(nets_raw.keys())
+
+        # The DEF's own die PORTS, which `parse_def` does not read and which
+        # may be all a DEF has (a pin template).  Same names, cell and
+        # rectangles the BDB path gives, so the picture does not depend on
+        # whether the extension is built.
+        for name, (x1, y1, x2, y2) in parse_def_pins(def_path).items():
+            self.inst_info[name] = {"x1": x1, "y1": y1, "x2": x2, "y2": y2,
+                                    "cell": "__PORT__", "depth": 0}
 
     def save_groups(self):
         if self.def_path:
