@@ -1000,14 +1000,15 @@ def test_both_def_loaders_draw_the_same_pins(tmp_path, monkeypatch):
     extension path was fixed (Codex #911).
 
     Compared pin for pin over ALL EIGHT DEF orientations, because that is
-    where they turned out to differ: DEF 5.8 transforms a PORT's rectangle
-    by the pin's orientation, and `import_def_lef` does not -- an `E` pin
-    with a 2.0 x 0.3 offset rect imports 2.0 x 0.3 rather than 0.3 x 2.0.
-    The fallback matches the READER rather than the spec, deliberately: a
-    drawing that depends on whether the extension is built is worse than
-    both being wrong the same way, and the reader is where it gets fixed
-    (opens_interchange.md item 17).  This test is what will say so when it
-    does -- it fails the day the two stop agreeing, in either direction."""
+    where they turned out to differ -- and then, once they agreed, where
+    they turned out to agree on the WRONG answer.  DEF 5.8 transforms a
+    PORT's rectangle by the pin's orientation and neither loader did, so
+    the four 90 degree ones came out with width and height exchanged
+    (#912).  Agreement alone cannot catch that, both being wrong the same
+    way, so the SHAPES are asserted too: a 2.0 x 0.3 offset rect is
+    0.3 x 2.0 on the die for `W`/`E`/`FW`/`FE` and unchanged for the four
+    direction-preserving ones, where a mirror of a rect about its own
+    origin is that rect."""
     sys.path.insert(0, str(_ROOT / "tools"))
     import def_viz_shared as dv                    # noqa: E402
 
@@ -1033,6 +1034,13 @@ def test_both_def_loaders_draw_the_same_pins(tmp_path, monkeypatch):
 
     py = {k: tuple(round(v, 4) for v in r) for k, r in dv.parse_def_pins(str(dp)).items()}
     assert set(py) == {f"PIN/p_{o}" for o in orients}, sorted(py)
+
+    # the SHAPE, not just the agreement: the 90 degree family is rotated
+    for o in orients:
+        x1, y1, x2, y2 = py[f"PIN/p_{o}"]
+        wh = (round(x2 - x1, 4), round(y2 - y1, 4))
+        want = (0.3, 2.0) if o in ("W", "E", "FW", "FE") else (2.0, 0.3)
+        assert wh == want, f"{o}: {wh} != {want}"
 
     if not dv._BDB_AVAILABLE:
         pytest.skip("the extension is not built, so there is no second loader to compare")

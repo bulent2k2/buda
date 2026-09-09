@@ -96,6 +96,30 @@ def infer_cell_sizes_from_def(def_path: str) -> dict:
     return sizes
 
 
+# A DEF orientation applied to a point in the oriented object's own frame,
+# about its ORIGIN -- the twin of `def_orient_xf` in `src/bdb.cpp` at a
+# degenerate (0 x 0) box, which is the form a `PIN`'s `PORT` rect needs: it is
+# anchored at a point, not inside an extent, and may be negative on either
+# axis.  DEF's own tokens, whose flips are NOT BDB's (`def_orient_to_bdb`
+# permutes FN/FS and FE/FW).
+_DEF_ORIENT_XF = {
+    "N":  lambda x, y: (x, y),
+    "S":  lambda x, y: (-x, -y),
+    "FN": lambda x, y: (-x, y),       # mirror Y
+    "FS": lambda x, y: (x, -y),       # mirror X
+    "W":  lambda x, y: (-y, x),       # CCW 90
+    "E":  lambda x, y: (y, -x),       # CW 90
+    "FW": lambda x, y: (y, x),
+    "FE": lambda x, y: (-y, -x),
+}
+
+
+def _def_orient_xf(orient, x, y):
+    """(x, y) transformed by `orient`; an unknown token is the identity, as
+    the reader's own `else` branch is."""
+    return _DEF_ORIENT_XF.get((orient or "N").upper(), lambda a, b: (a, b))(x, y)
+
+
 def parse_def_pins(def_path: str) -> dict:
     """{'PIN/<name>': (x1, y1, x2, y2) in um} for the DEF's PINS section.
 
@@ -122,15 +146,15 @@ def parse_def_pins(def_path: str) -> dict:
     reader gives `placed_b` and `placed_c` -- so it also broke the
     two-loaders-agree property the test below exists to hold.
 
-    Which is why the pin's ORIENTATION is deliberately not applied to its
-    rectangle here.  DEF 5.8 gives a PORT's geometry relative to the pin's
-    origin and transforms it by the orientation, so a `E` pin's rect should
-    come out rotated -- and `BDB.import_def_lef` does not rotate it
-    (measured: an `E` pin with a 2.0 x 0.3 offset rect imports 2.0 x 0.3,
-    not 0.3 x 2.0).  Rotating HERE would make the drawing depend on whether
-    the extension is built, which is worse than both being wrong the same
-    way, and the reader is the place to fix it: opens_interchange.md item
-    17.  Every pin in this study is `N`, where the two agree exactly.
+    The pin's ORIENTATION is applied, as DEF 5.8 says: a PORT's geometry is
+    given relative to the pin's own origin and transformed by the
+    orientation, so an `E` pin's 2.0 x 0.3 rect is 0.3 x 2.0 on the die.
+    Both loaders do this since #912 -- until then NEITHER did, and this
+    docstring recorded the divergence as deliberate on the grounds that a
+    drawing depending on whether the extension is built is worse than both
+    being wrong the same way.  That reasoning was sound and is now spent:
+    the reader was fixed and this moved with it, in one change, because the
+    parity test asserts the two agree and fails in EITHER direction.
     """
     with open(def_path) as f:
         content = f.read()
@@ -145,11 +169,14 @@ def parse_def_pins(def_path: str) -> dict:
             r"\(\s*(-?\d+)\s+(-?\d+)\s*\)\s*\(\s*(-?\d+)\s+(-?\d+)\s*\)"
             r"[^;]*?\+\s*(?:PLACED|FIXED)\s*\(\s*(-?\d+)\s+(-?\d+)\s*\)\s+(\S+)",
             sec.group(1), re.DOTALL):
-        name, rx1, ry1, rx2, ry2, px, py, _orient = m.groups()
-        xs, ys = (int(rx1), int(rx2)), (int(ry1), int(ry2))
+        name, rx1, ry1, rx2, ry2, px, py, orient = m.groups()
         px, py = int(px), int(py)
-        out[f"PIN/{name}"] = ((px + min(xs)) / units, (py + min(ys)) / units,
-                              (px + max(xs)) / units, (py + max(ys)) / units)
+        ax, ay = _def_orient_xf(orient, int(rx1), int(ry1))
+        bx, by = _def_orient_xf(orient, int(rx2), int(ry2))
+        out[f"PIN/{name}"] = ((px + min(ax, bx)) / units,
+                              (py + min(ay, by)) / units,
+                              (px + max(ax, bx)) / units,
+                              (py + max(ay, by)) / units)
     return out
 
 

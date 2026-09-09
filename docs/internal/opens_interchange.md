@@ -9,7 +9,8 @@ described in [`lefdef_interface_plan.md`](lefdef_interface_plan.md) (phases
 this page is the backlog behind them.
 
 Snapshot index — last verified against `main`: **2026-08-14** (item 16
-added 2026-08-25).  Everything here has landed except **item 8, the
+added 2026-08-25; item 17 added and resolved 2026-09-09).  Everything here
+has landed except **item 8, the
 packaged wheel**, which is a CI and packaging project rather than an
 interchange defect and is the only entry still owed code, and **item 16**,
 whose STORAGE half closed 2026-08-27 (a BDB cell can carry a multi-rect
@@ -1292,33 +1293,61 @@ declaration is the answer for good.
 
 ---
 
-## 17. A DEF `PIN`'s orientation is not applied to its PORT rectangle
+## 17. ~~A DEF `PIN`'s orientation is not applied to its PORT rectangle~~ — RESOLVED 2026-09-09
 
 DEF 5.8 gives a `PIN`'s `PORT` geometry relative to the pin's own origin and
 transforms it by the pin's orientation, exactly as it does a component's
-geometry.  `import_def_lef` offsets the rectangle by the `PLACED` origin and
-ignores the orientation, so an `E` pin comes out with the shape an `N` pin
+geometry.  `import_def_lef` offset the rectangle by the `PLACED` origin and
+ignored the orientation, so an `E` pin came out with the shape an `N` pin
 would have.
 
 Measured on a synthetic DEF carrying one pin per orientation with the same
-`( -1000 -150 ) ( 1000 150 )` offset rect: all eight import 2.0 x 0.3 µm,
-where the four 90° ones (`E`, `W`, `FE`, `FW`) should be 0.3 x 2.0.  The
-four direction-preserving ones (`N`, `S`, `FN`, `FS`) are correct — a
-mirror of a rect about its own origin is the same rect here — so the fault
-is exactly the 90° family, the same family that needed its own handling in
-`set_bottom_up`'s rotation classes.
+`( -1000 -150 ) ( 1000 150 )` offset rect: all eight imported 2.0 x 0.3 µm,
+where the four 90° ones (`E`, `W`, `FE`, `FW`) are 0.3 x 2.0.  The four
+direction-preserving ones (`N`, `S`, `FN`, `FS`) were already correct — a
+mirror of a rect about its own origin is that rect once the corners are
+re-min/maxed — so the fault was exactly the 90° family, the same family
+that needed its own handling in `set_bottom_up`'s rotation classes.
 
-**Not fixed here because it is a reader change with reach**: pin rects are
-what `derive_busterms` puts on a block's faces, so every imported design's
-routing interface moves the day it lands, and the corpus is the only thing
-that can say by how much.  Nothing in the LibreLane study is affected —
-`emit_pin_def` writes `N` for every pin, which is where the reader is right.
+**What landed.**  The transform is applied where the boundary component's
+bbox is built, and it is the SAME function the macro-`OBS` path already
+used: `def_orient_xf` (`bdb.cpp`) takes a point in the oriented object's own
+frame over a `w x h` box whose transformed lower-left stays at the origin.
+That extraction REMOVED a copy rather than adding one — the OBS lambda was
+an inline second spelling of the same table — and it is DEF's own tokens,
+not the BDB ones `def_orient_to_bdb` maps to, because both callers hold a
+token straight out of the file and the flips differ between the two
+conventions.
 
-Found while giving `def_viz_shared`'s pure-Python fallback a PINS reader
-(#911): the natural thing was to apply the transform, and cross-checking the
-two loaders pin for pin is what showed they disagreed.  The fallback matches
-the READER deliberately, so the picture cannot depend on whether the
-extension is built; when the reader is fixed, that test is what will say so.
+**A pin needs the ORIGIN-relative form, and one function still serves both.**
+A cell rect is normalized inside the cell's extent so the transformed box
+keeps its lower-left; a `PORT` rect is anchored at the pin's own origin and
+may be negative on either axis, so there is no box to normalize against.
+The box form degenerates to the origin form EXACTLY at `w = h = 0` — `S` is
+`(w-x, h-y)` over a box and `(-x, -y)` about a point, the same expression —
+so the PINS loop calls it with a degenerate box rather than carrying a
+second rule.  Pinned by a test with an ASYMMETRIC rect, where the two forms
+give different ANSWERS rather than merely different reasoning: `( 0 0 )
+( 2000 500 )` under `S` puts the pin's extent BELOW and LEFT of its placed
+point, which a box-normalized transform cannot produce.
+
+The boundary component's own `component.orient` stays `N`: the transform is
+already in the bbox, and a `__PORT__` cell has no internal frame or
+`cell_rect` footprint for a token to mean anything about, so storing one
+would invite a second application on the way out.
+
+**Both loaders now apply it.**  `def_viz_shared`'s pure-Python fallback
+matched the reader DELIBERATELY (so the picture cannot depend on whether the
+extension is built) and that reasoning is spent the moment the reader is
+right — the parity test now fails in EITHER direction, and it asserts the
+SHAPE as well as the agreement, since two loaders wrong the same way agree
+perfectly.
+
+Found while giving that fallback a PINS reader (#911): the natural thing was
+to apply the transform, and cross-checking the two loaders pin for pin is
+what showed they disagreed.  Nothing in the LibreLane study could reach it —
+`emit_pin_def` writes `N` for every pin it emits, which is where the reader
+was right; only somebody else's DEF carries a rotated one.
 
 ---
 

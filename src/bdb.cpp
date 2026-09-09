@@ -1382,6 +1382,30 @@ static std::string port_dir_inward(const std::string& d) {
     return d.empty() ? "UNKNOWN" : d;      // INOUT / UNKNOWN pass through
 }
 
+// A DEF orientation applied to a point in the oriented object's own frame,
+// over a w x h box whose transformed lower-left stays at the origin.  DEF's
+// own tokens, NOT the BDB ones `def_orient_to_bdb` maps to (the flips
+// differ), because both callers hold a token straight out of the file.
+//
+// Called with w = h = 0 it is the ORIGIN-RELATIVE transform, which is what a
+// DEF `PIN`'s `PORT` geometry needs: that rect is given relative to the pin's
+// own origin and may be negative on either axis, so there is no box to
+// normalize against.  One function for both because the box form degenerates
+// to the origin form exactly -- `S` is (w-x, h-y) over a box and (-x, -y)
+// about a point, which is the same expression at w = h = 0.
+static void def_orient_xf(const std::string& o8, double x, double y,
+                          double w, double h, double& ox, double& oy) {
+    if      (o8 == "N")  { ox = x;      oy = y;      }
+    else if (o8 == "S")  { ox = w - x;  oy = h - y;  }
+    else if (o8 == "FN") { ox = w - x;  oy = y;      }   // mirror Y
+    else if (o8 == "FS") { ox = x;      oy = h - y;  }   // mirror X
+    else if (o8 == "W")  { ox = h - y;  oy = x;      }   // CCW 90
+    else if (o8 == "E")  { ox = y;      oy = w - x;  }   // CW 90
+    else if (o8 == "FW") { ox = y;      oy = x;      }
+    else if (o8 == "FE") { ox = h - y;  oy = w - x;  }
+    else                 { ox = x;      oy = y;      }   // unknown: identity
+}
+
 static std::pair<std::string,bool> def_orient_to_bdb(const std::string& o) {
     if (o == "N")  return {"N",  false};
     if (o == "S")  return {"S",  false};
@@ -1763,17 +1787,9 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
         if (mac && !mac->obs.empty() && has_pos) {
             const double mw = um_to_lu(mac->w), mh = um_to_lu(mac->h);
             const std::string o8 = c.orient.empty() ? "N" : c.orient;
+            // x, y are macro-frame layout units, ORIGIN already removed.
             auto xform = [&](double x, double y, double& ox, double& oy) {
-                // x, y are macro-frame layout units, ORIGIN already removed.
-                if      (o8 == "N")  { ox = x;        oy = y;        }
-                else if (o8 == "S")  { ox = mw - x;   oy = mh - y;   }
-                else if (o8 == "FN") { ox = mw - x;   oy = y;        } // mirror Y
-                else if (o8 == "FS") { ox = x;        oy = mh - y;   } // mirror X
-                else if (o8 == "W")  { ox = mh - y;   oy = x;        } // CCW 90
-                else if (o8 == "E")  { ox = y;        oy = mw - x;   } // CW 90
-                else if (o8 == "FW") { ox = y;        oy = x;        }
-                else if (o8 == "FE") { ox = mh - y;   oy = mw - x;   }
-                else                 { ox = x;        oy = y;        }
+                def_orient_xf(o8, x, y, mw, mh, ox, oy);
             };
             for (const auto& o : mac->obs)
                 for (const auto& r : o.rects) {
@@ -1985,12 +2001,30 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
         }
         port_comp[p.name] = cname;
         const double px = dbu_to_lu(p.x), py = dbu_to_lu(p.y);
+        // DEF 5.8 gives a PORT's geometry relative to the pin's own origin and
+        // TRANSFORMS it by the pin's orientation, exactly as it does a
+        // component's.  Ignoring that imported every orientation with the
+        // shape an `N` pin would have, so the four 90 degree ones (W/E/FW/FE)
+        // came out with width and height exchanged -- measured on one pin per
+        // orientation with the same `( -1000 -150 ) ( 1000 150 )` rect, all
+        // eight arrived 2.0 x 0.3 um where those four are 0.3 x 2.0 (#912).
+        // The four direction-preserving ones were already right, a mirror of a
+        // rect about its own origin being that rect once the corners are
+        // re-min/maxed, which is why this went unseen: `emit_pin_def` writes
+        // `N` for every pin it emits.
+        //
+        // The box is DEGENERATE here (0 x 0) because a PORT rect is anchored
+        // at a point rather than inside an extent -- see `def_orient_xf`.
+        const std::string po = p.orient.empty() ? "N" : p.orient;
         double x1 = px, y1 = py, x2 = px, y2 = py;
         for (const auto& r : p.rects) {          // shapes are relative to PLACED
-            x1 = std::min(x1, px + dbu_to_lu(r.x1));
-            y1 = std::min(y1, py + dbu_to_lu(r.y1));
-            x2 = std::max(x2, px + dbu_to_lu(r.x2));
-            y2 = std::max(y2, py + dbu_to_lu(r.y2));
+            double ax, ay, bx, by;
+            def_orient_xf(po, dbu_to_lu(r.x1), dbu_to_lu(r.y1), 0, 0, ax, ay);
+            def_orient_xf(po, dbu_to_lu(r.x2), dbu_to_lu(r.y2), 0, 0, bx, by);
+            x1 = std::min(x1, px + std::min(ax, bx));
+            y1 = std::min(y1, py + std::min(ay, by));
+            x2 = std::max(x2, px + std::max(ax, bx));
+            y2 = std::max(y2, py + std::max(ay, by));
         }
         const std::string pcell = port_cell_for(x2 - x1, y2 - y1);
         sqlite3_bind_text  (s_comp,1,cname.c_str(),-1,SQLITE_TRANSIENT);
@@ -1999,6 +2033,10 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
         sqlite3_bind_double(s_comp,4,y1);
         sqlite3_bind_double(s_comp,5,x2);
         sqlite3_bind_double(s_comp,6,y2);
+        // `N`, and not the pin's token: the transform above is already IN the
+        // bbox, and a `__PORT__` cell has no internal frame for a token to
+        // describe (no `cell_rect` footprint, so nothing re-reads it).  Storing
+        // the pin's orientation here would invite a second application.
         sqlite3_bind_text  (s_comp,7,"N",-1,SQLITE_STATIC);
         sqlite3_bind_int   (s_comp,8,1);
         sqlite3_step(s_comp); sqlite3_reset(s_comp);
