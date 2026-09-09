@@ -885,11 +885,22 @@ proc _prune_requires {setup held_lines} {
         if {[_verb $ln] ne "require_file"} { lappend out $ln; continue }
         # `require_file <path>... [hint <text>]` -- the hint is the rest of
         # the line and travels with whatever paths survive.
+        #
+        # The delimiter is matched EXACTLY, as `cmd_require_file` matches it
+        # (`if "hint" in argv`, then `argv.index("hint")` -- the first
+        # occurrence, case-sensitive).  Case-folding here read `require_file
+        # design.def HINT` as one path plus remedy text where the engine
+        # reads TWO paths, so pruning `design.def` dropped the statement and
+        # with it the check on `HINT` -- which the engine reports missing
+        # (measured: BUDA-1905 names `HINT`).  A reader of a flow's own
+        # syntax that disagrees with the engine about that syntax is the
+        # defect this file's `_split_args` twin exists to prevent (Codex
+        # #914).
         set paths {}
         set tail {}
         set in_hint 0
         foreach a [_split_args $ln] {
-            if {!$in_hint && [string tolower $a] eq "hint"} { set in_hint 1 }
+            if {!$in_hint && $a eq "hint"} { set in_hint 1 }
             if {$in_hint} { lappend tail $a } else { lappend paths $a }
         }
         set keep {}
@@ -914,7 +925,19 @@ proc _prune_requires {setup held_lines} {
         # command that named nothing checked nothing) -- correctly, and that
         # refusal is not this resume's to trip over.
         if {[llength $keep]} {
-            lappend out "require_file [::buda::_join_args [concat $keep $tail]]"
+            set rewritten "require_file [::buda::_join_args [concat $keep $tail]]"
+            # `::origin_of` is keyed by the RECORDED line text, and this is a
+            # new string -- so without carrying the origin over, `_replay`
+            # falls back to the ENTRY flow's directory and a surviving
+            # relative path that lives beside the SOURCED file is reported
+            # missing from the parent's (Codex #914; the same
+            # sourced-vs-entry root confusion recorded at `_replay`, which
+            # the per-line origins exist to fix).  An ambiguous or absent
+            # origin is carried over as-is: "" is what both mean there.
+            if {[info exists ::origin_of] && [dict exists $::origin_of $ln]} {
+                dict set ::origin_of $rewritten [dict get $::origin_of $ln]
+            }
+            lappend out $rewritten
         }
     }
     return [list $out $notes]

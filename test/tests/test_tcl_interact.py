@@ -578,6 +578,64 @@ def test_a_differently_spelled_required_path_is_rooted_not_guessed(tmp_path):
     assert out[0] == "require_file ./tpu.def sub/../tpu.lef unrelated.v", out
 
 
+def test_pruning_agrees_with_the_engine_and_keeps_the_sourced_root(tmp_path):
+    """Two ways the rewrite can lie about the flow it is rewriting, both
+    found by Codex on #914 and both reproduced here first.
+
+    (a) The `hint` delimiter is EXACT in `cmd_require_file`
+    (`if "hint" in argv`), so `require_file design.def HINT` declares TWO
+    paths and the engine reports `HINT` missing -- measured.  Case-folding
+    it here read the second as remedy text, so pruning the first dropped
+    the statement and the resumed flow stopped checking `HINT` at all.  A
+    reader of the flow's own syntax that disagrees with the engine about
+    that syntax is what this file's `_split_args` twin exists to prevent.
+
+    (b) `::origin_of` is keyed by the RECORDED line text.  A partly pruned
+    statement is a NEW string, so `_replay` fell back to the entry flow's
+    directory for it -- and a surviving relative path that lives beside the
+    SOURCED file is then looked for in the parent's, and reported missing.
+    That is the sourced-vs-entry root confusion the per-line origins were
+    added to fix, reintroduced by the rewrite."""
+    text = _DRIVER.read_text().splitlines()
+    body = []
+    for name in ("proc _verb ", "proc _split_args ", "proc _origin_dir ",
+                 "proc _lex_resolve ", "proc _prune_requires "):
+        a = next(i for i, l in enumerate(text) if l.startswith(name))
+        b = next(i for i in range(a, len(text)) if text[i] == "}")
+        body += text[a:b + 1]
+
+    sub = "/build/flow/sub/inner.buda"
+    held = ["import_def_lef a.def x.lef"]
+    setup = ["require_file a.def HINT",           # (a): HINT is a PATH
+             "require_file a.def b.lef hint see fetch.py",   # (b): mixed
+             "import_lef_tech b.lef"]
+    lines = ["source " + _tcl_lit(str(_ROOT / "tools" / "buda.tcl"))] + body
+    lines.append("set ::origin_of [dict create]")
+    for l in held + setup:
+        lines.append("dict set ::origin_of " + _tcl_lit(l) + " " + _tcl_lit(sub))
+    lines.append("set held [list " + " ".join(_tcl_lit(l) for l in held) + "]")
+    lines.append("set setup [list " + " ".join(_tcl_lit(l) for l in setup) + "]")
+    lines.append("lassign [_prune_requires $setup $held] out notes")
+    lines.append('foreach l $out { puts "OUT:$l|[_origin_dir $l]" }')
+    probe = tmp_path / "probe3.tcl"
+    probe.write_text("\n".join(lines) + "\n")
+    r = subprocess.run(["tclsh", str(probe)], text=True, capture_output=True,
+                       timeout=120)
+    assert r.returncode == 0, r.stderr
+    got = dict(l[4:].split("|", 1) for l in r.stdout.splitlines()
+               if l.startswith("OUT:"))
+
+    # (a) `HINT` is a path, so it survives the prune of `a.def` -- the
+    # statement is rewritten, not dropped, and the engine still checks it
+    assert "require_file HINT" in got, got
+
+    # (b) the rewritten mixed statement keeps the SOURCED file's directory,
+    # so `b.lef` is still looked for beside inner.buda
+    rewritten = next(k for k in got
+                     if k.startswith("require_file b.lef hint"))
+    assert got[rewritten] == "/build/flow/sub", got
+
+
 def test_below_plan_resume_holds_healers_the_plan_already_carries(tmp_path):
     # load_pipeline restores the PLAN, not the planner object, so the
     # healers would refuse outright on a below-plan resume — and holding
