@@ -992,6 +992,71 @@ def test_the_pin_template_emit_pin_def_writes_opens_in_the_def_visualizer(tmp_pa
     assert round(a["x1"], 3) == 0.0 and round(a["y1"], 3) == 24.67
 
 
+def test_a_def_cache_older_than_the_importer_is_not_reused(tmp_path, monkeypatch):
+    """A `<def>.bdb` beside a DEF is a CACHE of two inputs -- the DEF and the
+    reader -- and freshness was tested against the DEF alone.  So upgrading
+    BUDA left every existing cache in place and the viz kept drawing the old
+    import, silently, because a cache hit prints nothing.
+
+    Found by Codex on PR #915 against the #912 pin fix, and reproduced with
+    the two builds: a cache written by the pre-fix build and read by the fixed
+    one returns the UNROTATED pin.  The shape that matters is an UPGRADE --
+    cache newer than the DEF, older than the importer -- so that is what this
+    builds, by mtime rather than by owning two builds."""
+    import sys
+    sys.path.insert(0, str(_ROOT / "tools"))
+    import def_viz_shared as dv                    # noqa: E402
+
+    d = tmp_path / "c.def"
+    d.write_text("VERSION 5.8 ;\nDESIGN t ;\nUNITS DISTANCE MICRONS 1000 ;\n"
+                 "DIEAREA ( 0 0 ) ( 1000 1000 ) ;\nEND DESIGN\n")
+    cache = tmp_path / "c.bdb"
+    cache.write_text("not a real database; freshness is decided before it is opened")
+
+    # The stamp is the compiled importer's build time; drive it rather than
+    # depending on when this checkout was built.
+    monkeypatch.setattr(dv, "_importer_mtime", lambda: 2000.0)
+
+    os.utime(d, (1000, 1000))
+    os.utime(cache, (1500, 1500))                  # after the DEF, before the importer
+    assert not dv.bdb_cache_is_fresh(str(cache), str(d)), (
+        "a cache older than the importer must be re-imported -- this is the "
+        "upgrade that silently kept a pre-fix import")
+    # and the DEF-only rule it replaces would have called that same cache
+    # fresh, which is what makes this guard non-vacuous
+    assert os.path.getmtime(cache) >= os.path.getmtime(d)
+
+    os.utime(cache, (2500, 2500))                  # after both
+    assert dv.bdb_cache_is_fresh(str(cache), str(d))
+
+    os.utime(cache, (500, 500))                    # older than the DEF
+    assert not dv.bdb_cache_is_fresh(str(cache), str(d))
+
+    # No readable module file (frozen/built-in) keeps the DEF-only rule rather
+    # than inventing a stamp: a cache newer than the DEF is reused as always.
+    monkeypatch.setattr(dv, "_importer_mtime", lambda: None)
+    os.utime(cache, (1500, 1500))
+    assert dv.bdb_cache_is_fresh(str(cache), str(d))
+
+
+def test_the_two_freshness_callers_share_one_rule(tmp_path, monkeypatch):
+    """`bdb_is_fresh` (the pre-check `def_viz_o1`/`o2` ask before offering to
+    build) and `_load_via_bdb`'s own reuse test were two copies of this rule.
+    A cache the loader declines while the pre-check calls it fresh is a
+    re-import the caller was told it could skip, so they must be one
+    function -- the same single-sourcing this PR applied to the orientation
+    table."""
+    import sys
+    sys.path.insert(0, str(_ROOT / "tools"))
+    import def_viz_shared as dv                    # noqa: E402
+    import inspect
+
+    src = inspect.getsource(dv.DefVizData._load_via_bdb)
+    assert "bdb_cache_is_fresh(db_path, def_path)" in src, src
+    assert "getmtime" not in src, "the loader must not re-derive the rule"
+    assert "bdb_cache_is_fresh" in inspect.getsource(dv.bdb_is_fresh)
+
+
 def test_both_def_loaders_draw_the_same_pins(tmp_path, monkeypatch):
     """`bin/viz` has TWO loaders -- the BDB extension when it is built, a
     pure-Python parser when it is not -- and the picture must not depend on

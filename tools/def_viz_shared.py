@@ -38,13 +38,56 @@ except ImportError:
     _BDB_AVAILABLE = False
 
 
+def _importer_mtime():
+    """When the compiled importer that WRITES these caches was built, or None.
+
+    A `<def>.bdb` beside a DEF is a CACHE, derived from two things: the DEF and
+    the reader.  Freshness was tested against the DEF alone, so upgrading BUDA
+    left every existing cache in place and the viz kept drawing the old
+    import -- silently, since a cache hit prints nothing.  Reproduced on the
+    #912 pin fix: a cache built by the pre-fix build and read by the fixed one
+    returns the UNROTATED pin, and only deleting it or touching the DEF gets
+    the corrected geometry (Codex on PR #915).
+
+    The extension's own build time is the stamp because it IS the importer --
+    `import_def_lef` is entirely C++.  The BDB SCHEMA version cannot serve:
+    this fix changed what the reader COMPUTES without changing what the tables
+    HOLD, so no bump would have happened, and a hand-maintained constant only
+    works if every future reader change remembers it.  A rebuild that changes
+    nothing invalidates caches, which costs one re-import and is the safe
+    direction.
+
+    None when the module has no readable file (frozen or built-in): there the
+    DEF-only rule stands, since inventing a stamp would be worse than the
+    behaviour that has always been there.
+    """
+    try:
+        return os.path.getmtime(_buda_mod.__file__)
+    except (AttributeError, OSError, TypeError):
+        return None
+
+
+def bdb_cache_is_fresh(db_path: str, def_path: str) -> bool:
+    """Is this cache usable -- newer than BOTH the DEF and the importer?
+
+    ONE rule, because there were two copies of it (`bdb_is_fresh` and
+    `_load_via_bdb`'s own `reuse`) and a cache the loader declines while the
+    pre-check calls it fresh is a re-import the caller was told it could skip.
+    """
+    if not os.path.exists(db_path):
+        return False
+    cache = os.path.getmtime(db_path)
+    if cache < os.path.getmtime(def_path):
+        return False
+    stamp = _importer_mtime()
+    return stamp is None or cache >= stamp
+
+
 def bdb_is_fresh(def_path: str) -> bool:
     """Return True if a up-to-date .bdb already exists for def_path (no LEF needed)."""
     if not _BDB_AVAILABLE:
         return False
-    db_path = _buda_mod.BDB.db_path(def_path)
-    return (os.path.exists(db_path) and
-            os.path.getmtime(db_path) >= os.path.getmtime(def_path))
+    return bdb_cache_is_fresh(_buda_mod.BDB.db_path(def_path), def_path)
 
 # ── Palette ───────────────────────────────────────────────────────────────────
 _C_DRIVER   = '#FF8C66'
@@ -238,10 +281,7 @@ class DefVizData:
         """Fast load using the BDB C++ module. Reuses existing .bdb if newer than .def."""
         import os as _os, tempfile
         db_path = _buda_mod.BDB.db_path(def_path)
-        reuse = (
-            _os.path.exists(db_path) and
-            _os.path.getmtime(db_path) >= _os.path.getmtime(def_path)
-        )
+        reuse = bdb_cache_is_fresh(db_path, def_path)
         db = _buda_mod.BDB(db_path)
         if not reuse:
             effective_lef = lef_path

@@ -1377,8 +1377,27 @@ by checked-in flows and are `.gitignore`-d rather than absent:
   are placed by OpenROAD's IO placement rather than by `emit_pin_def`, so
   unlike anything BUDA writes they may legitimately be rotated.
 
-What was measured for the first of those, in place of the run needing a
-generated 9.5 MB input and an OpenROAD install: a **no-PDN control** of that
+**The strap case was then RUN** (by the issue's author, who has the generated
+input): `ariane133_ndr_straps` is **bit-identical** across the fix — abstract WL
+60,972,078, detailed WL 68,412,060, 111 bundles / 101 bit-wires, 0 overlaps, 0
+unplaced, the same 61-item audit (56 `NDR_BOND`, 2 `BUSTERM_OPEN`, 3
+`NDR_SPACING`) and the same `check_design` 32/31/18, both ways — while all 495
+port rectangles MOVED, so the run was sensitive to the change rather than blind
+to it.  Their two additions are worth keeping over the framing above.  First,
+those rects are **square** (140x140 and 280x280), so the rotation changes the
+box's ANCHOR and not its dimensions, translating each by half its own side —
+which is why "half the metal outside the die" is exact here rather than
+approximate, and why a census by SHAPE cannot see this design move at all.
+Second, the band effect has a cause: the out-of-die port metal put a Hanan line
+at `x = -140`, giving M6 a **half-width sliver band**, and with the ports inside
+the die that band is gone and the minimum doubles — the two ariane runs above
+presumably did the same thing silently.  Their verification also avoided the
+`sys.path` trap by probing BEHAVIOUR rather than a path: an `E` pin imported
+immediately before each run, reporting `2.0 x 0.3 -> BASELINE` and
+`0.3 x 2.0 -> FIXED`.
+
+What was measured for that flow BEFORE the real run, in place of a generated
+9.5 MB input and an OpenROAD install: a **no-PDN control** of that
 exact flow — same m4-m7 stack, same NDR rules, same shields, same 495 `E`
 pins, with the input DEF substituted for the unspliced `demo/ariane/ariane.def`.
 Result byte-identical on the flow log apart from ONE line: detailed WL
@@ -1389,6 +1408,30 @@ bundles.  The one line that moves is the tightest Hanan band swapping layers,
 70 DBU, since a die-port pin's edge IS a Hanan line.  That is the mechanism by
 which a PDN run could differ and the control cannot rule out, so the strap case
 is owed the real before/after rather than an expectation.
+
+**A cache made the fix invisible on an upgrade** (Codex on PR #915, fixed with
+it): a `<def>.bdb` beside a DEF is a CACHE of two inputs — the DEF and the
+reader — and `def_viz_shared` tested freshness against the DEF alone, so
+upgrading BUDA left every existing cache in place and the viz kept drawing the
+old import.  Silently, since a cache hit prints nothing.  Reproduced with the
+two builds: a cache written by the pre-fix build and read by the fixed one
+returns the UNROTATED pin, and only deleting it or touching the DEF recovers
+the corrected geometry — and the ariane test masked it by deleting `*.bdb`
+first.  The freshness rule now also requires the cache to be newer than the
+compiled importer's build time (`_importer_mtime`), which is the right stamp
+because `import_def_lef` IS the extension: the BDB SCHEMA version cannot serve,
+since this fix changed what the reader COMPUTES without changing what the
+tables HOLD, and a hand-maintained constant only works if every future reader
+change remembers it.  A rebuild that changes nothing costs one re-import, the
+safe direction; a module with no readable file keeps the DEF-only rule rather
+than inventing a stamp.  The rule existed TWICE (`bdb_is_fresh`, which
+`def_viz_o1`/`o2` ask before offering to build, and the loader's own `reuse`)
+and is now one function — a cache the loader declines while the pre-check calls
+it fresh is a re-import the caller was told it could skip.  Reproducing it also
+caught a trap in the reproduction itself: the two builds here are in REVERSE
+chronological order relative to their semantics, so the first attempt showed
+nothing and proved only that a cache newer than both inputs is fresh.  The shape
+that matters is an UPGRADE, and the test builds it by mtime.
 
 **The first census of this was wrong, in the same way as the vacuous
 verifications below.**  It said "of every DEF in the tree, only
