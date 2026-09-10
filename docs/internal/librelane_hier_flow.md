@@ -2051,6 +2051,39 @@ have: every netlist here is either authored or uniquified.
    **byte-identical** to the hand-run ones the table above was measured on,
    in 17 s for the set.
 
+   **It was also the H+size arm's only DRC** (measured 2026-09-10, run tag
+   `hsnt`).  That arm was the one dirty cell left in §7.3's table at 5
+   KLayout markers, and `drc_locate.py` reads them as ONE defect repeated
+   per instance — `acc_cell` local ~(69.4, 0.1), both edges in an abstract
+   hole, nearest claimed shape pin `in[22]` at 0.010 µm — character for
+   character the #896 notch.  Re-running the top against the patched
+   abstracts (the blocks were already hardened, so `notch.sh` plus the top
+   alone):
+
+   | | baseline `h` | notched `hsnt` |
+   |---|---|---|
+   | KLayout DRC | **5** | **0** |
+   | route wirelength | 749,932 | 750,432 (+0.067 %) |
+   | route DRC | 0 | 0 |
+   | hold WS / violations | −0.2380 ns / 67 | **−0.2200 ns / 60** |
+   | setup WS | +0.4637 | +0.4762 |
+   | die area, instances | 3,935,420 / 528,542 | 3,935,420 / 528,536 |
+
+   So the fix carries across arms: +0.067 % of top wire here against
+   +0.004 % on H+B, and timing moves the right way on both hold measures
+   rather than being traded away.
+
+   Two things this run does NOT say, both worth stating because the flow
+   still exits non-zero.  The run ends on a DEFERRED ERROR for **hold
+   violations** in two corners — and so did the baseline (`top/h.log`
+   line 14544, the same checker on the same corners), so that is
+   pre-existing and slightly IMPROVED, not a cost of the patch; what left
+   the deferred set is the DRC.  And `RUN_MAGIC_DRC` is `False` in this
+   arm's config, in both runs, so the H+size rows carry **no Magic overlap
+   count at all** — §7.4's floor gates on that number, and for this arm it
+   has never been measured.  The 0 in the H+B column is not evidence about
+   this one.
+
 12. **`pdn_phase.py` detects, but its REMEDY is wrong** (measured
    2026-09-07 on the N = 8 artefacts).  The model now fails the
    `PDN_HOFFSET 109.3` plan correctly — 64 stranded terminals, matching
