@@ -1965,12 +1965,23 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
     //
     // The PLACED point wins whenever it lies on a rect: it is the DEF's own
     // statement of where the pin is, so nothing moves where nothing was wrong.
-    // Otherwise the LARGEST rect's centre -- the most metal to land on.  NOT
-    // the bbox midpoint, which for disjoint rects can fall in the GAP between
-    // them (measured: rects at 39.8..40.2 and 60.0..60.4 put it at 50.1, on no
-    // metal at all).  `test_a_die_ports_pin_survives_the_merge_unchanged` had
-    // already recorded that trap from an earlier review, and the first cut of
-    // this fix walked into it.
+    // Otherwise the centre of the rect NEAREST that point.
+    //
+    // NOT the bbox midpoint, which for disjoint rects can fall in the GAP
+    // between them (measured: rects at 39.8..40.2 and 60.0..60.4 put it at
+    // 50.1, on no metal at all).
+    // `test_a_die_ports_pin_survives_the_merge_unchanged` had already recorded
+    // that trap from an earlier review, and the first cut of this fix walked
+    // into it.
+    //
+    // And not the LARGEST rect either, which the cut after that used on a
+    // "most metal to land on" argument.  That argument is about the wrong
+    // thing: what routing targets is the port COMPONENT, while this point is
+    // the reference busterm derivation, HPWL and the flylines read -- so what
+    // it owes is fidelity to where the DEF put the pin.  Measured, largest is
+    // actively worse: with a small rect 0.1 um from the placed point and a
+    // huge one 50 um away it lands 60 um from the DEF's own position where
+    // nearest lands 0.3 um away.
     std::map<std::string, std::pair<double,double>> port_pos;
     // The __PORT__ cell rows (opens item 3): the boundary components
     // reference them, and without a cell row the GDS export emits SREFs to
@@ -2042,7 +2053,7 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
         // it -- so, like #912 itself, only somebody else's DEF reaches it.
         double x1 = px, y1 = py, x2 = px, y2 = py;
         bool seeded = false, on_metal = false;
-        double best_area = -1, bcx = px, bcy = py;
+        double best_d = -1, bcx = px, bcy = py;
         constexpr double kEps = 1e-9;
         for (const auto& r : p.rects) {          // shapes are relative to PLACED
             double ax, ay, bx, by;
@@ -2057,9 +2068,15 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
             }
             if (px >= rx1 - kEps && px <= rx2 + kEps &&
                 py >= ry1 - kEps && py <= ry2 + kEps) on_metal = true;
-            const double area = (rx2 - rx1) * (ry2 - ry1);
-            if (area > best_area) {              // first rect always wins (-1)
-                best_area = area;
+            // Box distance from the placed point to this rect, 0 when inside
+            // -- the same form `import_gds` uses to attribute a label.  STRICT
+            // `<`, so equidistant rects resolve to the first in DEF order:
+            // arbitrary but deterministic, and every candidate is on metal.
+            const double ddx = std::max({rx1 - px, 0.0, px - rx2});
+            const double ddy = std::max({ry1 - py, 0.0, py - ry2});
+            const double d = std::hypot(ddx, ddy);
+            if (best_d < 0 || d < best_d) {      // first rect always wins (-1)
+                best_d = d;
                 bcx = (rx1 + rx2) / 2.0;  bcy = (ry1 + ry2) / 2.0;
             }
         }

@@ -212,7 +212,7 @@ END COMPONENTS
 PINS 1 ;
   - vout + NET vout + DIRECTION OUTPUT + USE SIGNAL
 {layers}
-    + PLACED ( 40000 24000 ) N ;
+    + PLACED ( 40000 24000 ) {orient} ;
 END PINS
 NETS 1 ;
   - vout ( PIN vout ) ( u1 A ) ;
@@ -221,7 +221,7 @@ END DESIGN
 """
 
 
-def _port_round_trip(tmp_path, rects, tag):
+def _port_round_trip(tmp_path, rects, tag, orient="N"):
     """Import a DEF whose one die port carries `rects` (DBU, origin-relative),
     export to GDS, re-import.  Returns the pin position, the port component
     bbox, the skipped-label count and the pin count after the round trip."""
@@ -230,7 +230,8 @@ def _port_round_trip(tmp_path, rects, tag):
     layers = "\n".join(f"    + LAYER met3 ( {r[0]} {r[1]} ) ( {r[2]} {r[3]} )"
                         for r in rects)
     (tmp_path / f"{tag}.lef").write_text(_RT_LEF)
-    (tmp_path / f"{tag}.def").write_text(_RT_DEF.format(layers=layers))
+    (tmp_path / f"{tag}.def").write_text(
+        _RT_DEF.format(layers=layers, orient=orient))
     db = buda.BDB(str(tmp_path / f"{tag}a.bdb"))
     db.import_def_lef(str(tmp_path / f"{tag}.def"), str(tmp_path / f"{tag}.lef"))
     pin = next(p for p in db.all_pins() if p.pin_name == "vout")
@@ -287,8 +288,8 @@ def test_a_multi_rect_ports_pin_is_on_a_rect_and_never_in_the_gap(tmp_path):
 
     So: the PLACED point wins whenever it lies on a rect -- the DEF's own
     statement, and nothing moves where nothing was wrong -- and otherwise the
-    LARGEST rect's centre, which is on metal by construction and inside the
-    component bbox because the bbox is the union.  Reported by Codex on #923."""
+    centre of the rect NEAREST it, which is on metal by construction and inside
+    the component bbox because the bbox is the union."""
     # (a) two disjoint rects, the placed point on the FIRST: it stands, and the
     #     bbox midpoint (50.1) is not used.
     pos, bb, skipped, npins = _port_round_trip(
@@ -300,27 +301,36 @@ def test_a_multi_rect_ports_pin_is_on_a_rect_and_never_in_the_gap(tmp_path):
     assert bb[0] <= pos[0] <= bb[2] and bb[1] <= pos[1] <= bb[3]
     assert skipped == 0 and npins == 2
 
-    # (b) two disjoint rects, the placed point on NEITHER: the LARGER rect's
-    #     centre, still on metal and still inside the component.
+    # (b) the placed point on NEITHER rect: the NEAREST rect's centre.  The
+    #     far rect here is 100x the area of the near one, so this also pins
+    #     that "nearest" is the rule and not "largest".
     pos, bb, skipped, npins = _port_round_trip(
-        tmp_path, [(5000, -200, 5400, 200), (20000, -2000, 24000, 2000)], "big")
+        tmp_path, [(5000, -200, 5400, 200), (20000, -2000, 24000, 2000)], "near")
     metal = [(45.0, 23.8, 45.4, 24.2), (60.0, 22.0, 64.0, 26.0)]
-    assert pos == (62.0, 24.0), pos             # centre of the 4 x 4 um rect
+    assert pos == (45.2, 24.0), pos            # the NEAR rect; largest gives (62, 24)
     assert _on_metal(pos, metal), (pos, metal)
     assert bb[0] <= pos[0] <= bb[2] and bb[1] <= pos[1] <= bb[3]
     assert skipped == 0 and npins == 2
 
-    # (c) the placed point on the SMALLER rect, a much larger one elsewhere.
-    #     This is the case that separates the two halves of the rule: "keep the
-    #     placed point when it is on metal" answers (40, 24) and "always the
-    #     largest rect" answers (62, 24).  Cases (a) and (b) above cannot tell
-    #     them apart -- (a)'s two rects have EQUAL area, so first-wins returns
-    #     the placed point by coincidence -- which a mutation run is how I found
-    #     out rather than assumed.
-    pos, bb, skipped, npins = _port_round_trip(
-        tmp_path, [(-200, -200, 200, 200), (20000, -2000, 24000, 2000)], "small")
-    metal = [(39.8, 23.8, 40.2, 24.2), (60.0, 22.0, 64.0, 26.0)]
-    assert pos == (40.0, 24.0), pos             # the DEF's own point, kept
-    assert _on_metal(pos, metal), (pos, metal)
-    assert bb[0] <= pos[0] <= bb[2] and bb[1] <= pos[1] <= bb[3]
+    # (c) the placed point ON a rect but NOT at that rect's centre.  This is
+    #     what separates the two clauses: keeping the DEF's point answers
+    #     (40, 24) where the nearest rect's CENTRE answers (41.0, 24.25).
+    #     An earlier cut of this test could not tell them apart at all.
+    pos, bb, skipped, npins = _port_round_trip(tmp_path, (0, 0, 2000, 500), "corner")
+    assert pos == (40.0, 24.0), pos            # the DEF's own point, kept
+    assert _on_metal(pos, [(40.0, 24.0, 42.0, 24.5)]), pos
     assert skipped == 0 and npins == 2
+
+
+def test_the_pin_stays_inside_its_component_in_every_orientation(tmp_path):
+    """The label-recovery invariant of the fix above, MEASURED rather than
+    argued -- the largest-rect centre is inside the union bbox "by
+    construction", and #912 is what a by-construction claim about orientation
+    is worth.  Disjoint rects with the placed point on neither, so every one of
+    the eight goes through the nearest-rect clause."""
+    rects = [(5000, -200, 5400, 200), (20000, -2000, 24000, 2000)]
+    for o in ORIENTS:
+        pos, bb, skipped, npins = _port_round_trip(
+            tmp_path, rects, f"o{o}", orient=o)
+        assert bb[0] <= pos[0] <= bb[2] and bb[1] <= pos[1] <= bb[3], (o, pos, bb)
+        assert skipped == 0 and npins == 2, (o, skipped, npins)
