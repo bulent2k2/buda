@@ -876,3 +876,190 @@ def test_the_via_reader_reads_every_placement_a_pdn_generator_writes(name):
     # and every via NAME the file ends a wire statement with is one of them
     truth = len(re.findall(r"\)\s+(via\w+)\s*[;\n]", body))
     assert got >= truth, f"{name}: {truth} in the text, reader found {got}"
+
+
+# ── the detail line must not deny a via the finding HAS (#905) ─────────────
+
+def test_an_unsourced_terminal_is_not_reported_as_having_no_via(tmp_path):
+    """The detail block lists every finding of a FLOATING terminal, not only
+    findings that lack something.  `SELF_DEF`'s rects are all `connected` --
+    partner AND via -- while the terminal is `unsourced`, so all of them get
+    listed, and the branch that describes them used to fall through to
+    "but no via".
+
+    That is the sentence #905 was read off.  On the N=8 `PDN_HOFFSET 109.3`
+    DEF it printed 512 such lines, every one naming a rect that HAS its via
+    (the JSON says `connected` with a via for all 1,448 findings there), and
+    they were taken as "pdngen made none of 512 pin-on-pin crossings" -- a
+    claim about the generator, produced entirely by the reporter.
+
+    So this asserts the TEXT, which nothing did: the fixtures that carry the
+    shape assert the JSON, and the JSON was right the whole time.
+    """
+    r = _cli(tmp_path, SELF_DEF, SELF_LEF)
+    assert "unsourced" in r.stdout, r.stdout
+    # the rects are joined, and the report must say so
+    assert "but no via" not in r.stdout, (
+        "a `connected` finding was described as having no via:\n" + r.stdout)
+    assert "via5_6_2000_2000_1_1_1600_1600" in r.stdout, r.stdout
+    assert "this RECT is fine" in r.stdout, r.stdout
+
+
+def test_a_rect_that_really_has_no_via_still_says_so(tmp_path):
+    """The guard above must not silence the true form.  Strip the via
+    PLACEMENT from `SELF_DEF` (keeping the crossing and the VIAS entry) and
+    the same rects become `partner-no-via`, which is what "but no via" is
+    for."""
+    no_via = SELF_DEF.replace(
+        "  + ROUTED met4 0 + SHAPE STRIPE ( 131000 261000 ) via5_6_2000_2000_1_1_1600_1600\n",
+        "  + ROUTED met4 0 + SHAPE STRIPE ( 131000 261000 ) ( 131000 261001 )\n")
+    assert no_via != SELF_DEF, "fixture edit did not apply"
+    r = _cli(tmp_path, no_via, SELF_LEF)
+    assert "but no via" in r.stdout, r.stdout
+
+
+# A met4 pin crossing TWO met5 pins with the via over the SECOND only -- the
+# shape that separates "has a via" from "joins onto THIS crossing" (#921).
+TWOCROSS_LEF = """MACRO twocross
+  CLASS BLOCK ;
+  SIZE 200 BY 200 ;
+  PIN VGND
+    USE GROUND ;
+    PORT
+      LAYER met4 ;
+        RECT 30 0 32 200 ;
+      LAYER met5 ;
+        RECT 0 10 200 12 ;
+        RECT 0 150 200 152 ;
+    END
+  END VGND
+END twocross
+"""
+
+TWOCROSS_DEF = """VERSION 5.8 ;
+DESIGN top ;
+UNITS DISTANCE MICRONS 1000 ;
+DIEAREA ( 0 0 ) ( 600000 700000 ) ;
+VIAS 1 ;
+    - via5_6_2000_2000_1_1_1600_1600
+      + VIARULE M4M5_PR
+      + CUTSIZE 800 800
+      + LAYERS met4 via4 met5
+      + CUTSPACING 800 800
+      + ENCLOSURE 600 600 600 600
+      + ROWCOL 1 1
+       ;
+END VIAS
+COMPONENTS 1 ;
+- u1 twocross + PLACED ( 0 0 ) N ;
+END COMPONENTS
+SPECIALNETS 1 ;
+- VGND ( * VGND )
+  + ROUTED met4 0 + SHAPE STRIPE ( 31000 151000 ) via5_6_2000_2000_1_1_1600_1600
+  + USE GROUND ;
+END SPECIALNETS
+END DESIGN
+"""
+
+
+def test_the_detail_line_does_not_invent_which_crossing_the_via_lands_on(tmp_path):
+    """`audit_instance` picks the first qualifying `partner` and the first via
+    inside the rect INDEPENDENTLY, so on a pin crossing several shapes the via
+    may sit over a later one.  Naming that partner as the thing the via joins
+    would be a claim the audit never made (#921).
+
+    Here the met4 pin crosses met5 at y 10..12 and again at y 150..152, and
+    the only via is at (31, 151) -- over the second.  The met4 line must not
+    say it joins onto the first.
+    """
+    r = _cli(tmp_path, TWOCROSS_DEF, TWOCROSS_LEF)
+    met4 = [l for l in r.stdout.splitlines() if "u1.VGND" in l and "met4 [30.0" in l]
+    assert len(met4) == 1, r.stdout
+    line = met4[0]
+    assert "via5_6_2000_2000_1_1_1600_1600" in line, line
+    assert "[0.0, 10.0, 200.0, 12.0]" not in line, (
+        "named a crossing the via does not sit on:\n" + line)
+    assert "at (31.0, 151.0)" in line, line
+
+
+def test_the_detail_line_still_names_the_partner_when_the_via_is_on_it(tmp_path):
+    """The guard above must not cost the useful case: where the recorded
+    partner DOES cover the via, saying so is both true and worth saying.  The
+    met5 rect at y 150..152 is crossed by the met4 pin and the via sits inside
+    that met4 rect, so that line keeps the `onto the ...` form."""
+    r = _cli(tmp_path, TWOCROSS_DEF, TWOCROSS_LEF)
+    met5 = [l for l in r.stdout.splitlines() if "u1.VGND" in l and "met5 [0.0, 150.0" in l]
+    assert len(met5) == 1, r.stdout
+    assert "onto the pin on met4 at [30.0, 0.0, 32.0, 200.0]" in met5[0], met5[0]
+
+
+# A via WRITTEN on a layer of the audited pair that leaves the pair UPWARD --
+# `audit_instance` accepts it deliberately (:443), and it spans neither rect
+# involved, so XY containment alone cannot license the `onto` form (#921).
+UPVIA_LEF = """MACRO upvia
+  CLASS BLOCK ;
+  SIZE 200 BY 200 ;
+  PIN VGND
+    USE GROUND ;
+    PORT
+      LAYER met4 ;
+        RECT 30 0 32 200 ;
+      LAYER met5 ;
+        RECT 0 150 200 152 ;
+    END
+  END VGND
+END upvia
+"""
+
+UPVIA_DEF = """VERSION 5.8 ;
+DESIGN top ;
+UNITS DISTANCE MICRONS 1000 ;
+DIEAREA ( 0 0 ) ( 600000 700000 ) ;
+VIAS 1 ;
+    - via6_7_2000_2000_1_1_1600_1600
+      + VIARULE M5M6_PR
+      + CUTSIZE 800 800
+      + LAYERS met5 via5 met6
+      + CUTSPACING 800 800
+      + ENCLOSURE 600 600 600 600
+      + ROWCOL 1 1
+       ;
+END VIAS
+COMPONENTS 1 ;
+- u1 upvia + PLACED ( 0 0 ) N ;
+END COMPONENTS
+SPECIALNETS 1 ;
+- VGND ( * VGND )
+  + ROUTED met5 0 + SHAPE STRIPE ( 31000 151000 ) via6_7_2000_2000_1_1_1600_1600
+  + USE GROUND ;
+END SPECIALNETS
+END DESIGN
+"""
+
+
+def test_a_via_leaving_the_pair_upward_does_not_get_an_onto(tmp_path):
+    """The met4 and met5 pins cross at (31, 151) and the only via sits exactly
+    there -- but it joins met5 to met6, so it spans NO met4 and cannot be what
+    joins either rect to the other.  `audit_instance` still accepts it (its
+    :443 comment keeps an upward-out-of-pair via, since the DEF names only the
+    writer's layer), so the reporter has to consult the VIAS section rather
+    than trust the coordinates."""
+    r = _cli(tmp_path, UPVIA_DEF, UPVIA_LEF)
+    lines = [l for l in r.stdout.splitlines() if "u1.VGND" in l]
+    assert len(lines) == 2, r.stdout
+    for l in lines:
+        assert "via6_7_2000_2000_1_1_1600_1600" in l, l
+        assert " onto the " not in l, ("claimed a join a met5/met6 via cannot make:\n" + l)
+        assert "at (31.0, 151.0)" in l, l
+
+
+def test_a_via_whose_layers_the_def_does_not_define_gets_no_onto(tmp_path):
+    """Same rule, the unknown case.  `net_components` treats an unknown via as
+    joining EVERY layer -- safe for connectivity, since it never falsely
+    disconnects -- but for a sentence ASSERTING a join the safe direction is
+    the opposite, so an undefined via name keeps the coordinate form."""
+    no_vias = UPVIA_DEF[:UPVIA_DEF.index("VIAS 1 ;")] + UPVIA_DEF[UPVIA_DEF.index("END VIAS") + 9:]
+    assert "VIARULE" not in no_vias, no_vias
+    r = _cli(tmp_path, no_vias, UPVIA_LEF)
+    for l in [l for l in r.stdout.splitlines() if "u1.VGND" in l]:
+        assert " onto the " not in l, l

@@ -949,6 +949,9 @@ def run_audit(def_text, lefs, layers, via_min=VIA_MIN, explain=None):
             "stranded_terminals": stranded, "explained": explained,
             "sources": {n: len(v) for n, v in sources.items()},
             "via_layers_known": len(via_layers),
+            # the MAP as well as the count: the reporter needs it to say
+            # whether a via can join the partner it is about to name.
+            "via_layers": {k: sorted(v) for k, v in via_layers.items()},
             "terminal_rows": terminal_rows, "n_terminals": len(terminals),
             "floating": floating, "rows": rows, "findings": findings,
             "nets": sorted(snets), "unplaced": unplaced,
@@ -1118,6 +1121,45 @@ def report(res, out=sys.stdout, limit=12):
         if f["verdict"] == "via-no-partner":
             why = (f"via {f['via']['via']} at ({f['via']['x']}, {f['via']['y']}) with NOTHING "
                    f"on {o} overlapping it -- the reader missed a shape")
+        elif f["verdict"] == "connected":
+            # Listed because its TERMINAL is floating -- never because this
+            # rect wants anything: it has a partner AND a via.  Falling into
+            # the "but no via" branch below is what produced the #905
+            # misreading: on the N=8 `PDN_HOFFSET 109.3` DEF this printed 512
+            # such lines, every one naming a rect that HAS its via, and they
+            # were read as "pdngen made none of 512 pin-on-pin crossings".
+            # The rect is joined; what fails is one level up, and the terminal
+            # table already says so.
+            #
+            # `partner` is the FIRST qualifying crossing and `via` the FIRST
+            # via inside the rect, chosen independently -- so on a pin that
+            # crosses several shapes the via may sit over a later one, and
+            # naming this partner as the thing it joins would be a claim the
+            # audit never made (Codex, PR #921).  Assert the join only when
+            # this partner actually covers the via point; otherwise give the
+            # via alone, which is all that is established.
+            v = f["via"]
+            px1, py1, px2, py2 = p["rect"]
+            covered = (px1 - EPS <= v["x"] <= px2 + EPS
+                       and py1 - EPS <= v["y"] <= py2 + EPS)
+            # XY containment is still not enough.  `audit_instance` accepts a
+            # via that leaves the pair UPWARD (its :443 comment says so): such
+            # a via is WRITTEN on a layer of the pair but spans neither this
+            # rect's layer nor the partner's, so it can sit exactly on the
+            # crossing and join nothing here (Codex, PR #921 round 2).  Ask
+            # the DEF's VIAS section what it actually joins.
+            vl = res.get("via_layers", {}).get(v["via"])
+            # Unknown layers fall back to the coordinate form.  `net_components`
+            # treats an unknown via as joining EVERY layer, which is the safe
+            # direction for CONNECTIVITY (never falsely disconnect); for a
+            # sentence ASSERTING a join the safe direction is the opposite.
+            spans = vl is not None and f["layer"] in vl and p["layer"] in vl
+            if covered and spans:
+                onto = f" onto the {p['kind']} on {p['layer']} at {p['rect']}"
+            else:
+                onto = f" at ({v['x']}, {v['y']})"
+            why = (f"joined by {v['via']}{onto} -- this RECT is fine; its "
+                   f"TERMINAL is what fails (the island reaches no source)")
         elif p:
             why = (f"crossed by a {p['kind']} on {p['layer']} at {p['rect']} "
                    f"(overlap {p['overlap']}) but no via")
