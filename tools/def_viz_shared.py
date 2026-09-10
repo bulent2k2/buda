@@ -26,6 +26,7 @@ import matplotlib.patches as mpatches
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _HERE)
 from def_cluster import parse_def, parse_lef
+from def_orient import DEF_ORIENT_POINT
 from group_tree import GroupTree, lighten_color
 
 # Try to import the fast C++ BDB module
@@ -37,13 +38,56 @@ except ImportError:
     _BDB_AVAILABLE = False
 
 
+def _importer_mtime():
+    """When the compiled importer that WRITES these caches was built, or None.
+
+    A `<def>.bdb` beside a DEF is a CACHE, derived from two things: the DEF and
+    the reader.  Freshness was tested against the DEF alone, so upgrading BUDA
+    left every existing cache in place and the viz kept drawing the old
+    import -- silently, since a cache hit prints nothing.  Reproduced on the
+    #912 pin fix: a cache built by the pre-fix build and read by the fixed one
+    returns the UNROTATED pin, and only deleting it or touching the DEF gets
+    the corrected geometry (Codex on PR #915).
+
+    The extension's own build time is the stamp because it IS the importer --
+    `import_def_lef` is entirely C++.  The BDB SCHEMA version cannot serve:
+    this fix changed what the reader COMPUTES without changing what the tables
+    HOLD, so no bump would have happened, and a hand-maintained constant only
+    works if every future reader change remembers it.  A rebuild that changes
+    nothing invalidates caches, which costs one re-import and is the safe
+    direction.
+
+    None when the module has no readable file (frozen or built-in): there the
+    DEF-only rule stands, since inventing a stamp would be worse than the
+    behaviour that has always been there.
+    """
+    try:
+        return os.path.getmtime(_buda_mod.__file__)
+    except (AttributeError, OSError, TypeError):
+        return None
+
+
+def bdb_cache_is_fresh(db_path: str, def_path: str) -> bool:
+    """Is this cache usable -- newer than BOTH the DEF and the importer?
+
+    ONE rule, because there were two copies of it (`bdb_is_fresh` and
+    `_load_via_bdb`'s own `reuse`) and a cache the loader declines while the
+    pre-check calls it fresh is a re-import the caller was told it could skip.
+    """
+    if not os.path.exists(db_path):
+        return False
+    cache = os.path.getmtime(db_path)
+    if cache < os.path.getmtime(def_path):
+        return False
+    stamp = _importer_mtime()
+    return stamp is None or cache >= stamp
+
+
 def bdb_is_fresh(def_path: str) -> bool:
     """Return True if a up-to-date .bdb already exists for def_path (no LEF needed)."""
     if not _BDB_AVAILABLE:
         return False
-    db_path = _buda_mod.BDB.db_path(def_path)
-    return (os.path.exists(db_path) and
-            os.path.getmtime(db_path) >= os.path.getmtime(def_path))
+    return bdb_cache_is_fresh(_buda_mod.BDB.db_path(def_path), def_path)
 
 # ── Palette ───────────────────────────────────────────────────────────────────
 _C_DRIVER   = '#FF8C66'
@@ -96,6 +140,20 @@ def infer_cell_sizes_from_def(def_path: str) -> dict:
     return sizes
 
 
+def _def_orient_xf(orient, x, y):
+    """A pin-local offset transformed by its DEF orientation token.
+
+    The table is `def_orient.DEF_ORIENT_POINT` -- shared with
+    `pin_def_verify.py`, which already carried this rule when the reader did
+    not, and the twin of `def_orient_xf` in `src/bdb.cpp` at a degenerate
+    (0 x 0) box.  An unknown token is the IDENTITY here, matching the
+    reader's own `else` branch, so the picture cannot depend on which loader
+    ran; the verifier refuses one instead, which is why the policy is the
+    caller's and not the table's."""
+    return DEF_ORIENT_POINT.get((orient or "N").upper(),
+                                lambda a, b: (a, b))(x, y)
+
+
 def parse_def_pins(def_path: str) -> dict:
     """{'PIN/<name>': (x1, y1, x2, y2) in um} for the DEF's PINS section.
 
@@ -122,15 +180,15 @@ def parse_def_pins(def_path: str) -> dict:
     reader gives `placed_b` and `placed_c` -- so it also broke the
     two-loaders-agree property the test below exists to hold.
 
-    Which is why the pin's ORIENTATION is deliberately not applied to its
-    rectangle here.  DEF 5.8 gives a PORT's geometry relative to the pin's
-    origin and transforms it by the orientation, so a `E` pin's rect should
-    come out rotated -- and `BDB.import_def_lef` does not rotate it
-    (measured: an `E` pin with a 2.0 x 0.3 offset rect imports 2.0 x 0.3,
-    not 0.3 x 2.0).  Rotating HERE would make the drawing depend on whether
-    the extension is built, which is worse than both being wrong the same
-    way, and the reader is the place to fix it: opens_interchange.md item
-    17.  Every pin in this study is `N`, where the two agree exactly.
+    The pin's ORIENTATION is applied, as DEF 5.8 says: a PORT's geometry is
+    given relative to the pin's own origin and transformed by the
+    orientation, so an `E` pin's 2.0 x 0.3 rect is 0.3 x 2.0 on the die.
+    Both loaders do this since #912 -- until then NEITHER did, and this
+    docstring recorded the divergence as deliberate on the grounds that a
+    drawing depending on whether the extension is built is worse than both
+    being wrong the same way.  That reasoning was sound and is now spent:
+    the reader was fixed and this moved with it, in one change, because the
+    parity test asserts the two agree and fails in EITHER direction.
     """
     with open(def_path) as f:
         content = f.read()
@@ -145,11 +203,14 @@ def parse_def_pins(def_path: str) -> dict:
             r"\(\s*(-?\d+)\s+(-?\d+)\s*\)\s*\(\s*(-?\d+)\s+(-?\d+)\s*\)"
             r"[^;]*?\+\s*(?:PLACED|FIXED)\s*\(\s*(-?\d+)\s+(-?\d+)\s*\)\s+(\S+)",
             sec.group(1), re.DOTALL):
-        name, rx1, ry1, rx2, ry2, px, py, _orient = m.groups()
-        xs, ys = (int(rx1), int(rx2)), (int(ry1), int(ry2))
+        name, rx1, ry1, rx2, ry2, px, py, orient = m.groups()
         px, py = int(px), int(py)
-        out[f"PIN/{name}"] = ((px + min(xs)) / units, (py + min(ys)) / units,
-                              (px + max(xs)) / units, (py + max(ys)) / units)
+        ax, ay = _def_orient_xf(orient, int(rx1), int(ry1))
+        bx, by = _def_orient_xf(orient, int(rx2), int(ry2))
+        out[f"PIN/{name}"] = ((px + min(ax, bx)) / units,
+                              (py + min(ay, by)) / units,
+                              (px + max(ax, bx)) / units,
+                              (py + max(ay, by)) / units)
     return out
 
 
@@ -220,10 +281,7 @@ class DefVizData:
         """Fast load using the BDB C++ module. Reuses existing .bdb if newer than .def."""
         import os as _os, tempfile
         db_path = _buda_mod.BDB.db_path(def_path)
-        reuse = (
-            _os.path.exists(db_path) and
-            _os.path.getmtime(db_path) >= _os.path.getmtime(def_path)
-        )
+        reuse = bdb_cache_is_fresh(db_path, def_path)
         db = _buda_mod.BDB(db_path)
         if not reuse:
             effective_lef = lef_path

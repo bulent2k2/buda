@@ -17,6 +17,9 @@ apply the LEF `SIZE` axis-aligned regardless — so a rotated macro got the
 wrong bbox and no orientation. It now maps the DEF token to BDB's orient
 convention and swaps the placed dims for 90/270, so a DEF-placed design
 exports to GDSII with orientation intact.
+
+A die `PIN` carries an orientation too, and it transforms the pin's `PORT`
+geometry exactly as a component's transforms the cell's (#912).
 """
 
 import textwrap
@@ -99,3 +102,77 @@ def test_def_unknown_orient_defaults_identity(tmp_path):
     db = _import(tmp_path, ("c_x", 100, 100, "ZZ"))
     (c,) = db.all_components()
     assert (c.orient, c.x2 - c.x1, c.y2 - c.y1) == ("N", 100.0, 40.0)
+
+
+_PIN_DEF = """\
+VERSION 5.8 ;
+UNITS DISTANCE MICRONS 1000 ;
+DIEAREA ( 0 0 ) ( 128000 150000 ) ;
+PINS {n} ;
+{rows}
+END PINS
+END DESIGN
+"""
+
+
+def _import_pins(tmp_path, orients, rect="( -1000 -150 ) ( 1000 150 )"):
+    """One pin per orientation, every one carrying the SAME offset rect."""
+    rows = "\n".join(
+        f"  - p_{o} + NET p_{o} + DIRECTION INPUT + USE SIGNAL"
+        f" + LAYER met3 {rect} + PLACED ( {5000 + 1000 * i} 24820 ) {o} ;"
+        for i, o in enumerate(orients))
+    (tmp_path / "e.lef").write_text("VERSION 5.8 ;\nEND LIBRARY\n")
+    (tmp_path / "p.def").write_text(_PIN_DEF.format(n=len(orients), rows=rows))
+    db = buda.BDB(str(tmp_path / "p.bdb"))
+    db.import_def_lef(str(tmp_path / "p.def"), str(tmp_path / "e.lef"))
+    return {c.name: (round(c.x2 - c.x1, 4), round(c.y2 - c.y1, 4))
+            for c in db.all_components()}
+
+
+def test_a_pins_orientation_transforms_its_port_rect(tmp_path):
+    """DEF 5.8 gives a `PORT`'s geometry relative to the pin's own origin and
+    transforms it by the pin's orientation.  The reader ignored that, so every
+    orientation imported with the shape an `N` pin would have and the four 90
+    degree ones came out with width and height exchanged (#912).
+
+    The four direction-preserving ones were already right — a mirror of a
+    rect about its own origin is that rect once the corners are re-min/maxed
+    — which is why it went unseen: `emit_pin_def` writes `N` for every pin,
+    so nothing in the LibreLane study could reach it.  Only somebody else's
+    DEF can."""
+    wh = _import_pins(tmp_path, ["N", "S", "FN", "FS", "W", "E", "FW", "FE"])
+    for o in ("N", "S", "FN", "FS"):
+        assert wh[f"PIN/p_{o}"] == (2.0, 0.3), (o, wh)
+    for o in ("W", "E", "FW", "FE"):
+        assert wh[f"PIN/p_{o}"] == (0.3, 2.0), (o, wh)
+
+
+def test_a_pin_rect_is_transformed_about_its_origin_not_a_box(tmp_path):
+    """The transform is anchored at the pin's origin, which is what makes it
+    different from a component's: a cell rect is normalized inside the cell's
+    `w x h` box so the transformed box keeps its lower-left, while a `PORT`
+    rect has no box and may be negative on either axis.
+
+    Measured with an ASYMMETRIC rect, where a box-normalized transform and an
+    origin-anchored one give different answers rather than merely different
+    reasoning: `( 0 0 ) ( 2000 500 )` under `S` is (-2000, -500)..(0, 0)
+    about the origin, so the pin's extent runs BELOW and LEFT of its placed
+    point."""
+    orients = ["N", "S"]
+    wh = _import_pins(tmp_path, orients, rect="( 0 0 ) ( 2000 500 )")
+    assert wh["PIN/p_N"] == (2.0, 0.5) and wh["PIN/p_S"] == (2.0, 0.5)
+
+    rows = "\n".join(
+        f"  - p_{o} + NET p_{o} + DIRECTION INPUT + USE SIGNAL"
+        f" + LAYER met3 ( 0 0 ) ( 2000 500 ) + PLACED ( 40000 24000 ) {o} ;"
+        for o in orients)
+    (tmp_path / "e2.lef").write_text("VERSION 5.8 ;\nEND LIBRARY\n")
+    (tmp_path / "p2.def").write_text(_PIN_DEF.format(n=2, rows=rows))
+    db = buda.BDB(str(tmp_path / "p2.bdb"))
+    db.import_def_lef(str(tmp_path / "p2.def"), str(tmp_path / "e2.lef"))
+    box = {c.name: tuple(round(v, 4) for v in (c.x1, c.y1, c.x2, c.y2))
+           for c in db.all_components()}
+    # N: the rect runs up-and-right from the placed point
+    assert box["PIN/p_N"] == (40.0, 24.0, 42.0, 24.5), box
+    # S: down-and-left of it — a box-normalized transform cannot produce this
+    assert box["PIN/p_S"] == (38.0, 23.5, 40.0, 24.0), box

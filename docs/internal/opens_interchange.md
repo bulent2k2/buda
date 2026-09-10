@@ -9,7 +9,8 @@ described in [`lefdef_interface_plan.md`](lefdef_interface_plan.md) (phases
 this page is the backlog behind them.
 
 Snapshot index — last verified against `main`: **2026-08-14** (item 16
-added 2026-08-25).  Everything here has landed except **item 8, the
+added 2026-08-25; item 17 added and resolved 2026-09-09).  Everything here
+has landed except **item 8, the
 packaged wheel**, which is a CI and packaging project rather than an
 interchange defect and is the only entry still owed code, and **item 16**,
 whose STORAGE half closed 2026-08-27 (a BDB cell can carry a multi-rect
@@ -1292,33 +1293,193 @@ declaration is the answer for good.
 
 ---
 
-## 17. A DEF `PIN`'s orientation is not applied to its PORT rectangle
+## 17. ~~A DEF `PIN`'s orientation is not applied to its PORT rectangle~~ — RESOLVED 2026-09-09
 
 DEF 5.8 gives a `PIN`'s `PORT` geometry relative to the pin's own origin and
 transforms it by the pin's orientation, exactly as it does a component's
-geometry.  `import_def_lef` offsets the rectangle by the `PLACED` origin and
-ignores the orientation, so an `E` pin comes out with the shape an `N` pin
+geometry.  `import_def_lef` offset the rectangle by the `PLACED` origin and
+ignored the orientation, so an `E` pin came out with the shape an `N` pin
 would have.
 
 Measured on a synthetic DEF carrying one pin per orientation with the same
-`( -1000 -150 ) ( 1000 150 )` offset rect: all eight import 2.0 x 0.3 µm,
-where the four 90° ones (`E`, `W`, `FE`, `FW`) should be 0.3 x 2.0.  The
-four direction-preserving ones (`N`, `S`, `FN`, `FS`) are correct — a
-mirror of a rect about its own origin is the same rect here — so the fault
-is exactly the 90° family, the same family that needed its own handling in
-`set_bottom_up`'s rotation classes.
+`( -1000 -150 ) ( 1000 150 )` offset rect: all eight imported 2.0 x 0.3 µm,
+where the four 90° ones (`E`, `W`, `FE`, `FW`) are 0.3 x 2.0.  The four
+direction-preserving ones (`N`, `S`, `FN`, `FS`) were already correct — a
+mirror of a rect about its own origin is that rect once the corners are
+re-min/maxed — so the fault was exactly the 90° family, the same family
+that needed its own handling in `set_bottom_up`'s rotation classes.
 
-**Not fixed here because it is a reader change with reach**: pin rects are
-what `derive_busterms` puts on a block's faces, so every imported design's
-routing interface moves the day it lands, and the corpus is the only thing
-that can say by how much.  Nothing in the LibreLane study is affected —
-`emit_pin_def` writes `N` for every pin, which is where the reader is right.
+**What landed.**  The transform is applied where the boundary component's
+bbox is built, and it is the SAME function the macro-`OBS` path already
+used: `def_orient_xf` (`bdb.cpp`) takes a point in the oriented object's own
+frame over a `w x h` box whose transformed lower-left stays at the origin.
+That extraction REMOVED a copy rather than adding one — the OBS lambda was
+an inline second spelling of the same table — and it is DEF's own tokens,
+not the BDB ones `def_orient_to_bdb` maps to, because both callers hold a
+token straight out of the file and the flips differ between the two
+conventions.
 
-Found while giving `def_viz_shared`'s pure-Python fallback a PINS reader
-(#911): the natural thing was to apply the transform, and cross-checking the
-two loaders pin for pin is what showed they disagreed.  The fallback matches
-the READER deliberately, so the picture cannot depend on whether the
-extension is built; when the reader is fixed, that test is what will say so.
+**A pin needs the ORIGIN-relative form, and one function still serves both.**
+A cell rect is normalized inside the cell's extent so the transformed box
+keeps its lower-left; a `PORT` rect is anchored at the pin's own origin and
+may be negative on either axis, so there is no box to normalize against.
+The box form degenerates to the origin form EXACTLY at `w = h = 0` — `S` is
+`(w-x, h-y)` over a box and `(-x, -y)` about a point, the same expression —
+so the PINS loop calls it with a degenerate box rather than carrying a
+second rule.  Pinned by a test with an ASYMMETRIC rect, where the two forms
+give different ANSWERS rather than merely different reasoning: `( 0 0 )
+( 2000 500 )` under `S` puts the pin's extent BELOW and LEFT of its placed
+point, which a box-normalized transform cannot produce.
+
+The boundary component's own `component.orient` stays `N`: the transform is
+already in the bbox, and a `__PORT__` cell has no internal frame or
+`cell_rect` footprint for a token to mean anything about, so storing one
+would invite a second application on the way out.
+
+**Both loaders now apply it.**  `def_viz_shared`'s pure-Python fallback
+matched the reader DELIBERATELY (so the picture cannot depend on whether the
+extension is built) and that reasoning is spent the moment the reader is
+right — the parity test now fails in EITHER direction, and it asserts the
+SHAPE as well as the agreement, since two loaders wrong the same way agree
+perfectly.
+
+Found while giving that fallback a PINS reader (#911): the natural thing was
+to apply the transform, and cross-checking the two loaders pin for pin is
+what showed they disagreed.  Nothing in the LibreLane study could reach it —
+`emit_pin_def` writes `N` for every pin it emits, which is where the reader
+was right; only somebody else's DEF carries a rotated one.
+
+**Measured, and the interesting part is what did NOT move.**  The corpus is
+**0 better / 0 worse / 56 unchanged, abstract AND detailed WL +0** — and that
+verdict says less than it looks, because the corpus row for the one design
+with rotated pins reads NOT COMPARABLE: `flow/ariane133`'s inputs are fetched
+and `.gitignore`-d, so a baseline worktree does not have them.  So that flow
+was measured directly against a build of the baseline commit — `ariane133`
+abstract WL 60,803,990 both ways, `ariane133_heal` detailed WL 66,648,920 both
+ways, same violations, same 92 placed segments.
+
+**Which designs could move at all, censused correctly** (the first attempt at
+this was wrong, see below): of the six **git-tracked** DEFs, only
+`demo/ariane/ariane.def` carries a non-`N` pin — 495, all `E`.  But a tracked
+census is not the census that matters, because two more classes of DEF are read
+by checked-in flows and are `.gitignore`-d rather than absent:
+
+* **`flow/ariane133/ariane_keepout.def`**, read by `ariane133_ndr_straps.buda`.
+  It is `demo/ariane/ariane.def` with a pdngen PDN spliced into its
+  `SPECIALNETS` (recipe §8.1), so it carries the same 495 `E` pins — and it is
+  in NEITHER arm of the evidence above: `qor_corpus.py` takes
+  `ariane133_heal.buda` for ariane and never `ndr_straps`, and the direct
+  measurement covered `ariane133` and `ariane133_heal`.  It matters more than a
+  gap-in-coverage usually would, because that flow is the vehicle for the NDR
+  rail/credit/bond machinery — the only design here whose rails come from a
+  real `SPECIALNETS` PDN (2,923 bonds).
+* **LibreLane run outputs** (`out/placed.def`, `two_reg32_fp.def`), whose pins
+  are placed by OpenROAD's IO placement rather than by `emit_pin_def`, so
+  unlike anything BUDA writes they may legitimately be rotated.
+
+**The strap case was then RUN** (by the issue's author, who has the generated
+input): `ariane133_ndr_straps` is **bit-identical** across the fix — abstract WL
+60,972,078, detailed WL 68,412,060, 111 bundles / 101 bit-wires, 0 overlaps, 0
+unplaced, the same 61-item audit (56 `NDR_BOND`, 2 `BUSTERM_OPEN`, 3
+`NDR_SPACING`) and the same `check_design` 32/31/18, both ways — while all 495
+port rectangles MOVED, so the run was sensitive to the change rather than blind
+to it.  Their two additions are worth keeping over the framing above.  First,
+those rects are **square** (140x140 and 280x280), so the rotation changes the
+box's ANCHOR and not its dimensions, translating each by half its own side —
+which is why "half the metal outside the die" is exact here rather than
+approximate, and why a census by SHAPE cannot see this design move at all.
+Second, the band effect has a cause: the out-of-die port metal put a Hanan line
+at `x = -140`, giving M6 a **half-width sliver band**, and with the ports inside
+the die that band is gone and the minimum doubles — the two ariane runs above
+presumably did the same thing silently.  Their verification also avoided the
+`sys.path` trap by probing BEHAVIOUR rather than a path: an `E` pin imported
+immediately before each run, reporting `2.0 x 0.3 -> BASELINE` and
+`0.3 x 2.0 -> FIXED`.
+
+What was measured for that flow BEFORE the real run, in place of a generated
+9.5 MB input and an OpenROAD install: a **no-PDN control** of that
+exact flow — same m4-m7 stack, same NDR rules, same shields, same 495 `E`
+pins, with the input DEF substituted for the unspliced `demo/ariane/ariane.def`.
+Result byte-identical on the flow log apart from ONE line: detailed WL
+66,813,840 both ways, 38 governed bundles, 56 `NDR_BOND` (correct with no
+straps — no rails, so every emitted shield is unbonded), 60 violations in 19
+bundles.  The one line that moves is the tightest Hanan band swapping layers,
+`M6 min_band_cap 70 / M7 140` becoming `M6 140 / M7 70` — the pin edges moving
+70 DBU, since a die-port pin's edge IS a Hanan line.  That is the mechanism by
+which a PDN run could differ and the control cannot rule out, so the strap case
+is owed the real before/after rather than an expectation.
+
+**A cache made the fix invisible on an upgrade** (Codex on PR #915, fixed with
+it): a `<def>.bdb` beside a DEF is a CACHE of two inputs — the DEF and the
+reader — and `def_viz_shared` tested freshness against the DEF alone, so
+upgrading BUDA left every existing cache in place and the viz kept drawing the
+old import.  Silently, since a cache hit prints nothing.  Reproduced with the
+two builds: a cache written by the pre-fix build and read by the fixed one
+returns the UNROTATED pin, and only deleting it or touching the DEF recovers
+the corrected geometry — and the ariane test masked it by deleting `*.bdb`
+first.  The freshness rule now also requires the cache to be newer than the
+compiled importer's build time (`_importer_mtime`), which is the right stamp
+because `import_def_lef` IS the extension: the BDB SCHEMA version cannot serve,
+since this fix changed what the reader COMPUTES without changing what the
+tables HOLD, and a hand-maintained constant only works if every future reader
+change remembers it.  A rebuild that changes nothing costs one re-import, the
+safe direction; a module with no readable file keeps the DEF-only rule rather
+than inventing a stamp.  The rule existed TWICE (`bdb_is_fresh`, which
+`def_viz_o1`/`o2` ask before offering to build, and the loader's own `reuse`)
+and is now one function — a cache the loader declines while the pre-check calls
+it fresh is a re-import the caller was told it could skip.  Reproducing it also
+caught a trap in the reproduction itself: the two builds here are in REVERSE
+chronological order relative to their semantics, so the first attempt showed
+nothing and proved only that a cache newer than both inputs is fresh.  The shape
+that matters is an UPGRADE, and the test builds it by mtime.
+
+**The first census of this was wrong, in the same way as the vacuous
+verifications below.**  It said "of every DEF in the tree, only
+`demo/ariane/ariane.def` carries a non-`N` pin", from a `find` over the working
+container — which cannot see a `.gitignore`-d generated input, and cannot see
+an untracked local corpus either (a reviewer's `chip_designs/` tree holds seven
+more DEFs with rotated pins, none of them read by any flow, tool or test, so
+the impact conclusion survives — but the census did not establish that, it
+merely failed to look).  A census over WHAT IS PRESENT answers a question about
+one machine; the claim was about what the repository can read.
+
+The geometry DID move; no decision did.  Every one of those 495 pins is
+placed at **x = 0**, the die's west edge, with its rect spanning `-70..+70`
+DBU about it — so before this fix **every die port had half its metal
+outside the die** (495 of 495 with a negative corner), and after it none does
+(0 of 495): `E` at x = 0 turns `( -70 0 ) ( 70 140 )` into `0..140`, flush
+inside the edge, which is plainly what the floorplanner meant.  The ports are
+140-DBU squares on a 2,714,720-DBU die, which is why a 70-DBU correction
+changes where the metal is without changing which candidate wins.
+
+**The reproduction is worth keeping honest**: two of the first three
+"verifications" of this were vacuous, and in the same way — a probe script
+with `sys.path.insert(0, ".../build")` hard-coded, and a pytest run whose
+`conftest.py` puts the repo's own `build/` at `sys.path[0]` regardless of
+`PYTHONPATH`. Both reported the FIXED extension while claiming to test the
+baseline. The two new tests were re-run from a directory outside the suite,
+against the baseline build: both fail there (`PIN/p_S` comes back identical
+to `PIN/p_N`, which is the fault exactly) and pass against the fixed one.
+Where a project pins its own extension to `sys.path[0]` for good reasons, "I
+pointed `PYTHONPATH` at the other build" is not a measurement.
+
+**Residual, found BY the fix and left on purpose: the loader's placed test is
+`x1 >= 0`, and the sentinel is `-1`.**  `def_viz_shared._build_maps_from_bdb`
+reads a component as placed when `x1 >= 0`, treating anything negative as the
+no-placement sentinel `import_verilog` writes — which is exactly
+`(-1, -1, -1, -1)` on all four fields, so the precise test is available and
+the loose one conflates a real placement outside the die with no placement at
+all.  It bit here: the pre-fix ariane pins imported with `x1 = -0.07`, so all
+495 were dropped from `inst_info` WITHOUT A WORD, and the visualizer drew a
+133-instance design where the DEF has 628.  `test_ariane_pair_mismatch`'s
+expectation of 133 was therefore an artifact of the defect above, and moves to
+628 with it.
+
+Not fixed here because nothing in the tree can now reach the ambiguous case —
+this fix is what removed the one design that did, and a DEF with a genuinely
+negative `DIEAREA` corner is the vehicle a fix would need.  Recorded rather
+than done: the same reasoning item 12 offers for why the cheapest place to
+catch a wrong fix is a probe of real data, applied one step earlier.
 
 ---
 
