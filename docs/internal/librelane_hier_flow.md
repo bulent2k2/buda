@@ -2078,11 +2078,14 @@ have: every netlist here is either authored or uniquified.
    violations** in two corners — and so did the baseline (`top/h.log`
    line 14544, the same checker on the same corners), so that is
    pre-existing and slightly IMPROVED, not a cost of the patch; what left
-   the deferred set is the DRC.  And `RUN_MAGIC_DRC` is `False` in this
-   arm's config, in both runs, so the H+size rows carry **no Magic overlap
-   count at all** — §7.4's floor gates on that number, and for this arm it
-   has never been measured.  The 0 in the H+B column is not evidence about
-   this one.
+   the deferred set is the DRC.  And `RUN_MAGIC_DRC` is `False` here — as
+   it is on every top run in this tree — so there is no `magic__drc_error__count`
+   for either row.  That is NOT the overlap number §7.4's floor gates on:
+   the overlap check rides Magic's stream-out rather than its DRC deck and
+   reports `magic__illegal_overlap__count`, which IS present on both runs
+   and is **0 → 0**.  Which is the check that mattered here, since the
+   rejected met2 BLANKET closed the same DRC and cost 6,233 illegal
+   overlaps doing it: the surgical patch closes it and adds none.
 
 12. **`pdn_phase.py` detects, but its REMEDY is wrong** (measured
    2026-09-07 on the N = 8 artefacts).  The model now fails the
