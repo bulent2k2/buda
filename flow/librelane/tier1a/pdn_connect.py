@@ -949,6 +949,9 @@ def run_audit(def_text, lefs, layers, via_min=VIA_MIN, explain=None):
             "stranded_terminals": stranded, "explained": explained,
             "sources": {n: len(v) for n, v in sources.items()},
             "via_layers_known": len(via_layers),
+            # the MAP as well as the count: the reporter needs it to say
+            # whether a via can join the partner it is about to name.
+            "via_layers": {k: sorted(v) for k, v in via_layers.items()},
             "terminal_rows": terminal_rows, "n_terminals": len(terminals),
             "floating": floating, "rows": rows, "findings": findings,
             "nets": sorted(snets), "unplaced": unplaced,
@@ -1126,7 +1129,21 @@ def report(res, out=sys.stdout, limit=12):
             # via alone, which is all that is established.
             v = f["via"]
             px1, py1, px2, py2 = p["rect"]
-            if px1 - EPS <= v["x"] <= px2 + EPS and py1 - EPS <= v["y"] <= py2 + EPS:
+            covered = (px1 - EPS <= v["x"] <= px2 + EPS
+                       and py1 - EPS <= v["y"] <= py2 + EPS)
+            # XY containment is still not enough.  `audit_instance` accepts a
+            # via that leaves the pair UPWARD (its :443 comment says so): such
+            # a via is WRITTEN on a layer of the pair but spans neither this
+            # rect's layer nor the partner's, so it can sit exactly on the
+            # crossing and join nothing here (Codex, PR #921 round 2).  Ask
+            # the DEF's VIAS section what it actually joins.
+            vl = res.get("via_layers", {}).get(v["via"])
+            # Unknown layers fall back to the coordinate form.  `net_components`
+            # treats an unknown via as joining EVERY layer, which is the safe
+            # direction for CONNECTIVITY (never falsely disconnect); for a
+            # sentence ASSERTING a join the safe direction is the opposite.
+            spans = vl is not None and f["layer"] in vl and p["layer"] in vl
+            if covered and spans:
                 onto = f" onto the {p['kind']} on {p['layer']} at {p['rect']}"
             else:
                 onto = f" at ({v['x']}, {v['y']})"

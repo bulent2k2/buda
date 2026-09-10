@@ -991,3 +991,75 @@ def test_the_detail_line_still_names_the_partner_when_the_via_is_on_it(tmp_path)
     met5 = [l for l in r.stdout.splitlines() if "u1.VGND" in l and "met5 [0.0, 150.0" in l]
     assert len(met5) == 1, r.stdout
     assert "onto the pin on met4 at [30.0, 0.0, 32.0, 200.0]" in met5[0], met5[0]
+
+
+# A via WRITTEN on a layer of the audited pair that leaves the pair UPWARD --
+# `audit_instance` accepts it deliberately (:443), and it spans neither rect
+# involved, so XY containment alone cannot license the `onto` form (#921).
+UPVIA_LEF = """MACRO upvia
+  CLASS BLOCK ;
+  SIZE 200 BY 200 ;
+  PIN VGND
+    USE GROUND ;
+    PORT
+      LAYER met4 ;
+        RECT 30 0 32 200 ;
+      LAYER met5 ;
+        RECT 0 150 200 152 ;
+    END
+  END VGND
+END upvia
+"""
+
+UPVIA_DEF = """VERSION 5.8 ;
+DESIGN top ;
+UNITS DISTANCE MICRONS 1000 ;
+DIEAREA ( 0 0 ) ( 600000 700000 ) ;
+VIAS 1 ;
+    - via6_7_2000_2000_1_1_1600_1600
+      + VIARULE M5M6_PR
+      + CUTSIZE 800 800
+      + LAYERS met5 via5 met6
+      + CUTSPACING 800 800
+      + ENCLOSURE 600 600 600 600
+      + ROWCOL 1 1
+       ;
+END VIAS
+COMPONENTS 1 ;
+- u1 upvia + PLACED ( 0 0 ) N ;
+END COMPONENTS
+SPECIALNETS 1 ;
+- VGND ( * VGND )
+  + ROUTED met5 0 + SHAPE STRIPE ( 31000 151000 ) via6_7_2000_2000_1_1_1600_1600
+  + USE GROUND ;
+END SPECIALNETS
+END DESIGN
+"""
+
+
+def test_a_via_leaving_the_pair_upward_does_not_get_an_onto(tmp_path):
+    """The met4 and met5 pins cross at (31, 151) and the only via sits exactly
+    there -- but it joins met5 to met6, so it spans NO met4 and cannot be what
+    joins either rect to the other.  `audit_instance` still accepts it (its
+    :443 comment keeps an upward-out-of-pair via, since the DEF names only the
+    writer's layer), so the reporter has to consult the VIAS section rather
+    than trust the coordinates."""
+    r = _cli(tmp_path, UPVIA_DEF, UPVIA_LEF)
+    lines = [l for l in r.stdout.splitlines() if "u1.VGND" in l]
+    assert len(lines) == 2, r.stdout
+    for l in lines:
+        assert "via6_7_2000_2000_1_1_1600_1600" in l, l
+        assert " onto the " not in l, ("claimed a join a met5/met6 via cannot make:\n" + l)
+        assert "at (31.0, 151.0)" in l, l
+
+
+def test_a_via_whose_layers_the_def_does_not_define_gets_no_onto(tmp_path):
+    """Same rule, the unknown case.  `net_components` treats an unknown via as
+    joining EVERY layer -- safe for connectivity, since it never falsely
+    disconnects -- but for a sentence ASSERTING a join the safe direction is
+    the opposite, so an undefined via name keeps the coordinate form."""
+    no_vias = UPVIA_DEF[:UPVIA_DEF.index("VIAS 1 ;")] + UPVIA_DEF[UPVIA_DEF.index("END VIAS") + 9:]
+    assert "VIARULE" not in no_vias, no_vias
+    r = _cli(tmp_path, no_vias, UPVIA_LEF)
+    for l in [l for l in r.stdout.splitlines() if "u1.VGND" in l]:
+        assert " onto the " not in l, l
