@@ -1906,9 +1906,18 @@ have: every netlist here is either authored or uniquified.
    as free and overhangs the top's wire into it — 0.130 µm against m2.2's
    0.140; the same notch beside `wbuf_cell`'s `rst` gives the N=2 H+B run
    its one marker (0.040 µm).  The block's own DRC is 0 because the partner
-   shape is the top's wire.  Candidates: have the top read the
-   `-bloat_occupied_layers` abstract (`<cell>.openroad.lef`), or grow the
-   met2 OBS to cover the macro's real metal.
+   shape is the top's wire.
+
+   **The DRC half is CLOSED** (2026-09-10, run tag `hsnt`; §11 item 13):
+   `notch_obs.py` takes it 5 → 0 with illegal overlaps still 0 and top wire
+   +0.067 %.  Both candidates this item used to name were then MEASURED and
+   are the wrong answers — the `-bloat_occupied_layers` abstract adds
+   met4/met5 OBS the PDN cannot cross (125,800 power-grid violations, never
+   routed), and growing the met2 OBS to a blanket closes the DRC and costs
+   **6,233 illegal overlaps**; what works is claiming only the metal the
+   abstract omits.  **The hold half stays open** at −0.220 ns (60
+   violations, improved from −0.238 / 67 but still a deferred error), and
+   it is item 6's clock question, not an abstract question.
 9. **Two bundles for one cell-local link** (found on the way to §8 step
    7f, not chased): at N = 2 the row's activation chain comes out as TWO
    hbundles — `hb-11 D1 cell:row_cell "DRV:row_0/pe_0|REC:row_0/pe_1"
@@ -2050,6 +2059,42 @@ have: every netlist here is either authored or uniquified.
    re-run over the N = 8 artefacts it produced all four `.notch.lef` files
    **byte-identical** to the hand-run ones the table above was measured on,
    in 17 s for the set.
+
+   **It was also the H+size arm's only DRC** (measured 2026-09-10, run tag
+   `hsnt`).  That arm was the one dirty cell left in §7.3's table at 5
+   KLayout markers, and `drc_locate.py` reads them as ONE defect repeated
+   per instance — `acc_cell` local ~(69.4, 0.1), both edges in an abstract
+   hole, nearest claimed shape pin `in[22]` at 0.010 µm — character for
+   character the #896 notch.  Re-running the top against the patched
+   abstracts (the blocks were already hardened, so `notch.sh` plus the top
+   alone):
+
+   | | baseline `h` | notched `hsnt` |
+   |---|---|---|
+   | KLayout DRC | **5** | **0** |
+   | route wirelength | 749,932 | 750,432 (+0.067 %) |
+   | route DRC | 0 | 0 |
+   | hold WS / violations | −0.2380 ns / 67 | **−0.2200 ns / 60** |
+   | setup WS | +0.4637 | +0.4762 |
+   | die area, instances | 3,935,420 / 528,542 | 3,935,420 / 528,536 |
+
+   So the fix carries across arms: +0.067 % of top wire here against
+   +0.004 % on H+B, and timing moves the right way on both hold measures
+   rather than being traded away.
+
+   Two things this run does NOT say, both worth stating because the flow
+   still exits non-zero.  The run ends on a DEFERRED ERROR for **hold
+   violations** in two corners — and so did the baseline (`top/h.log`
+   line 14544, the same checker on the same corners), so that is
+   pre-existing and slightly IMPROVED, not a cost of the patch; what left
+   the deferred set is the DRC.  And `RUN_MAGIC_DRC` is `False` here — as
+   it is on every top run in this tree — so there is no `magic__drc_error__count`
+   for either row.  That is NOT the overlap number §7.4's floor gates on:
+   the overlap check rides Magic's stream-out rather than its DRC deck and
+   reports `magic__illegal_overlap__count`, which IS present on both runs
+   and is **0 → 0**.  Which is the check that mattered here, since the
+   rejected met2 BLANKET closed the same DRC and cost 6,233 illegal
+   overlaps doing it: the surgical patch closes it and adds none.
 
 12. **`pdn_phase.py` detects, but its REMEDY is wrong** (measured
    2026-09-07 on the N = 8 artefacts).  The model now fails the
