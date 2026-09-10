@@ -287,7 +287,12 @@ def test_harm_sh_writes_the_h_arm_from_the_emitted_set(tmp_path, n):
     # the notch step, and the two checks that read the macro LEFs by GLOB:
     # with `<cell>.notch.lef` beside `<cell>.lef`, a `*.lef` glob would hand
     # each tool BOTH abstracts of every cell
-    assert f"../../notch.sh {n}" in readme
+    # the notch line RESOLVES from the arm directory (its depth depends on where
+    # the emitted set sits, so a hardcoded `../../` is right only sometimes)
+    notch_line = next(l.strip() for l in readme.splitlines()
+                      if "notch.sh" in l and l.startswith(" "))
+    notch_path = re.search(r"(\S*notch\.sh)", notch_line).group(1)
+    assert (h / notch_path).exists(), f"{notch_line!r} -> {(h / notch_path)}"
     assert f"notch.sh {n} --arm" not in readme    # this arm IS in h/
     assert "final/lef/*.lef" not in readme and "final/lef/*.notch.lef" in readme
     for c in cells:
@@ -1317,17 +1322,33 @@ def test_an_arm_outside_h_tells_you_its_own_notch_command(tmp_path):
     loud much later when this top stops on a `.notch.lef` that is not there.
     """
     d = _emit(tmp_path, 2)
-    for out, expect in ((d / "h", f"../../notch.sh 2"),
-                        (d / "hs", f"../../notch.sh 2 --arm hs")):
-        r = subprocess.run([sys.executable, str(_T1A / "harm.py"), str(d), "--out", str(out)],
-                           capture_output=True, text=True, timeout=600)
-        assert r.returncode == 0, r.stdout + r.stderr
-        readme = (out / "README.md").read_text()
-        line = next(l.strip() for l in readme.splitlines() if "notch.sh" in l)
-        assert line == expect, f"{out.name}: {line!r} != {expect!r}"
-    # the two arms must not be told the same thing
-    assert (d / "h" / "README.md").read_text().count("notch.sh 2 --arm") == 0
-    assert (d / "hs" / "README.md").read_text().count("notch.sh 2 --arm hs") == 1
+    # BOTH root shapes: an emitted set directly under the arm's parent, and one
+    # inside a COMPARISON ROOT (`hb4/n4/`), which is what the study uses to hold
+    # several arms of one N.  The depth differs between them, so a README with a
+    # hardcoded `../../` is right for one and points at nothing for the other.
+    deep = tmp_path / "cmp"
+    deep.mkdir()
+    shutil.copytree(d, deep / "n2")
+    for base in (d, deep / "n2"):
+        for out, armed in ((base / "h", False), (base / "hs", True)):
+            r = subprocess.run([sys.executable, str(_T1A / "harm.py"), str(base),
+                                "--out", str(out)], capture_output=True, text=True, timeout=600)
+            assert r.returncode == 0, r.stdout + r.stderr
+            readme = (out / "README.md").read_text()
+            line = next(l.strip() for l in readme.splitlines()
+                        if "notch.sh" in l and l.startswith(" "))
+            # the arm names itself only when it is not `h`
+            assert ("--arm hs" in line) == armed, f"{out}: {line!r}"
+            # RESOLVE every tool path the README prints, rather than matching a
+            # string: the string was right and the path was not, for four of the
+            # eight recorded arms (Codex #917).
+            bad = [t for t in re.findall(r"(?<![\w/.])((?:\.\./)+[\w./-]+\.(?:sh|py|tcl|jsonl))", readme)
+                   if not (out / t).exists()]
+            assert not bad, f"{out}: unresolvable from the arm dir: {sorted(set(bad))}"
+            # and a set outside the scripts' own directory must carry T1A_DIR,
+            # or the tool derives the DEFAULT root and patches somebody else
+            need_env = base.parent != _T1A
+            assert line.startswith("T1A_DIR=") == need_env, f"{out}: {line!r}"
 
 
 def test_notch_sh_refuses_an_unhardened_cell_and_clears_the_stale_patch(tmp_path):
@@ -1386,11 +1407,28 @@ def test_notch_sh_refuses_an_unhardened_cell_and_clears_the_stale_patch(tmp_path
     assert "pe_cell is not hardened" in r.stderr          # it looked in hs/, not h/
     assert "/hs/pe_cell/" in r.stderr, r.stderr
     assert not (alt / "lef" / "pe_cell.notch.lef").exists()   # stale patch still cleared
-    # an arm directory that is not there names the option in its remedy
-    r = subprocess.run(["bash", str(_T1A / "notch.sh"), "2", "--arm", "nope"],
-                       env={**os.environ, "T1A_DIR": str(tmp_path)},
-                       capture_output=True, text=True, timeout=300)
-    assert r.returncode == 1 and "--arm" in r.stderr and "/nope" in r.stderr
+    # A missing arm directory names `--arm` in its remedy ONLY for somebody who
+    # did not pass it; to one who did, it is noise about the option they just
+    # used.  (My first cut asserted the opposite, and spelled the condition as
+    # `${arm:+...}`, which cannot distinguish anything reachable -- `arm`
+    # defaults to `h` -- and printed the FLAG's value.  Codex #917.)
+    def run(*extra):
+        return subprocess.run(["bash", str(_T1A / "notch.sh"), "2", *extra],
+                              env={**os.environ, "T1A_DIR": str(tmp_path)},
+                              capture_output=True, text=True, timeout=300)
+    r = run("--arm", "nope")
+    assert r.returncode == 1 and "/nope" in r.stderr
+    assert "--arm" not in r.stderr, r.stderr          # they used it; do not suggest it
+    assert " 1" not in r.stderr.rstrip(), r.stderr    # nor print the flag's value
+    (d / "h").rename(d / "moved")                     # now `h` itself is missing
+    r = run()
+    assert r.returncode == 1 and "--arm <dir>" in r.stderr, r.stderr
+    (d / "moved").rename(d / "h")
+    # and an EMPTY --arm is refused BY NAME, like the empty --layers above it:
+    # `$d/` is a directory, so it otherwise sails past the guard and fails per
+    # cell with a doubled slash pointing at the cell rather than the option
+    r = run("--arm", "")
+    assert r.returncode == 1 and "--arm ''" in r.stderr and "names no arm" in r.stderr
 
 
 def test_notch_sh_refuses_an_empty_layer_list_instead_of_renaming_the_deliverables(tmp_path):

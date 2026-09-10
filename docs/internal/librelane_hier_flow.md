@@ -464,13 +464,57 @@ study exists to answer and stays.
 
   Monotone, and it crosses between N = 2 and N = 4.  The reason is not the
   one it looks like: the top's SHARE of arm wire is essentially constant
-  (~44 % at every N), so the crossover is not a shifting mix.  It is that
-  the corridor saving DEEPENS with N (−45 → −55 → −60 %) while the pin
-  template's block cost stays nearly flat (+37.5 → +38.5 → +40.8 %) — a
-  bigger mesh gives the planned corridors more to win, and costs the
-  templates no more per block.  Which also says the N = 2 row is not
-  evidence against the mechanism: it is the point where a 45 % saving on
-  44 % of the wire has not yet paid for a 37 % rise on the other 56 %.  The comparison is STRICT, and it is strict on
+  (~44 % at every N), so the crossover is not a shifting mix.  `arm =
+  s·top + (1−s)·blocks` at the baseline's `s` is an identity, exact at all
+  three N, so the question is only which of the two ratios moves.
+
+  **The block half is not "nearly flat" — it is a computable mix climbing
+  to a ceiling.**  Per-cell block wire is fixed (below), so the block ratio
+  is that mix weighted by instance counts (N², N, N, 3N), and `pe_cell` is
+  the only N² term, so it converges to `pe_cell`'s own **19264/13401 =
+  +43.75 %**.  The model reproduces the measurement exactly where the
+  per-cell values hold, and its two free extrapolations follow:
+
+  | N | 2 | 4 | 8 | 16 | 32 |
+  |---|---|---|---|---|---|
+  | predicted | +35.18 % | **+38.50 %** | **+40.80 %** | +42.17 % | +42.93 % |
+  | measured | +37.50 % | +38.50 % | +40.80 % | — | — |
+
+  So the honest form of "monotone" is a race against a rising bar.  The
+  top saving needed to break even is `(1−s)/s × blocks`, which RISES with N:
+
+  | N | break-even top saving | measured | margin |
+  |---|---|---|---|
+  | 2 | ≥ 46.7 % | 45.4 % | **−1.3 pts** |
+  | 4 | ≥ 49.7 % | 54.8 % | +5.1 |
+  | 8 | ≥ 53.4 % | 59.9 % | +6.6 |
+
+  The N = 2 row misses by **1.3 points** — that is what "has not yet paid"
+  means, precisely.  And the margin grows but DECELERATES (+5.1 → +6.6
+  against a bar rising 3–4 points per doubling), so the trade improves only
+  for as long as the corridor saving outruns a ceiling-bounded block cost.
+  The block half is now predictable in closed form; the top half is not.
+
+  **Per-cell block wire is N-independent for N ≥ 4, not for all N.**  The
+  H+B templates and the hardened block LEFs (notch patches included) are
+  BYTE-IDENTICAL between N = 4 and N = 8, so block hardening is per
+  size-set rather than per point and any cross-N difference is a top-level
+  effect.  But `pe_cell` breaks it at N = 2 — **19,754** against 19,264 at
+  both larger N, the other three cells and every H+size cell being fixed at
+  all three.  So the mechanism as first stated ("one template per cell TYPE
+  from a reference instance, so the plan cannot depend on instance count")
+  over-reaches: a template MERGES what each instance routes (BUDA-1715),
+  and a 2×2 mesh has no interior PE, so the merge has genuinely different
+  inputs.  That is also exactly why the mix model above misses N = 2 by
+  2.3 points and lands on the other two.  The supportable claim is
+  **converged by N = 4**, which is still what makes the hardening reusable.
+
+  One more thing the three-point table should not leave silent: the N = 2
+  H+B row carries `klayout__drc_error__count: 1` where the other two carry
+  0 — it is the pre-notch run, the N = 8 practice having been to supersede
+  such a run with a clean twin (`hb` → `hbnt`).  That pair moved the arm by
+  11 units in 1.68 M (0.0007 %), so this is a footnote rather than grounds
+  for a re-run — but it is the row the crossover is anchored on.  The comparison is STRICT, and it is strict on
   MEASURED grounds rather than for want of a measurement: **run-to-run
   timing noise is ZERO** (measured 2026-09-08 — an independent repeat of
   the N = 8 H+B arm, all three legs, against the run it repeats:

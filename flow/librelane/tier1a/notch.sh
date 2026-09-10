@@ -62,13 +62,22 @@ arm=h
 # so the only route was the per-cell hand recipe the README offers as a
 # fallback for a cell the decomposition cannot handle -- which is not what an
 # arm in the wrong directory is.
+arm_given=
 while [ $# -ge 2 ]; do
     case $1 in
         --layers) layers=$2; shift 2 ;;
-        --arm)    arm=$2;    shift 2 ;;
+        --arm)    arm=$2; arm_given=1; shift 2 ;;
         *) break ;;
     esac
 done
+# An EMPTY `--arm` is refused by NAME, like the empty `--layers` above it.
+# It otherwise sails past the directory guard -- `$d/` IS a directory -- and
+# fails per cell with a doubled slash (`n4//pe_cell`) pointing at the cell
+# rather than at the option that caused it (Codex #917).
+if [ -z "$arm" ]; then
+    echo "notch.sh: --arm '' names no arm directory -- the default is 'h'" >&2
+    exit 1
+fi
 if [ $# -ne 0 ]; then echo "notch.sh: unexpected arguments: $*" >&2; exit 1; fi
 # An EMPTY layer list is refused HERE rather than run.  Zero passes leaves
 # `src`/`inlef` pointing at the cell's own hardened `.gds` and Magic's
@@ -87,8 +96,15 @@ here=$(cd "$(dirname "$0")" && pwd)
 d="${T1A_DIR:-$here}/n$N"
 h="$d/$arm"
 [ -f "$d/tpu.lef" ] || { echo "notch.sh: $d has no tpu.lef -- run gen.sh $N first" >&2; exit 1; }
-[ -d "$h" ] || { echo "notch.sh: no $h -- run ./harm.sh $N first" \
-    "${arm:+(or --arm <dir> if the arm is not in h/)}" >&2; exit 1; }
+# The hint is for somebody who did NOT pass --arm; to one who did it is noise
+# about the option they just used.  (`${arm:+...}` read as that distinction and
+# was not: `arm` defaults to `h`, so it is non-empty on every path that reaches
+# here, and the one way to empty it is refused above.  Spelled out rather than
+# as a parameter expansion, which is how the first attempt printed the FLAG's
+# value -- "run ./harm.sh 4 first 1".)
+hint=
+[ -n "$arm_given" ] || hint=" (or --arm <dir> if the arm is not in h/)"
+[ -d "$h" ] || { echo "notch.sh: no $h -- run ./harm.sh $N first$hint" >&2; exit 1; }
 cells=$(sed -n 's/^MACRO \([A-Za-z_][A-Za-z0-9_]*\).*/\1/p' "$d/tpu.lef")
 if [ -z "$cells" ]; then echo "notch.sh: $d/tpu.lef declares no MACRO" >&2; exit 1; fi
 : "${LIBRELANE_IMAGE:=ghcr.io/librelane/librelane:3.0.11}"
