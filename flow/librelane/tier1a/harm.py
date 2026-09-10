@@ -899,6 +899,14 @@ def render_readme(n_dir, out_dir, cells, counts, sizes, D, dx, dy, vplan, hplan,
     plef = " ".join(f"predicted_lef/{c}.lef" for c in cells)
     arm = "H+B" if pinned else "H"
     tag = "hb" if pinned else "h"
+    # `notch.sh` defaults to the arm directory `h`, so an arm that `--out` put
+    # somewhere else has to SAY so in its own recipe.  Without this the `hs`
+    # arm's README told you to run the bare command, which patches the SIBLING
+    # `h` arm and reports success while this arm's abstracts stay missing --
+    # silent then, loud much later when this top stops on a LEF that is not
+    # there (Codex #917).
+    arm_dir = os.path.basename(os.path.normpath(out_dir))
+    notch_cmd = f"../../notch.sh {n_arr}" + ("" if arm_dir == "h" else f" --arm {arm_dir}")
     if pinned:
         top_section = f"""## 4. The top -- in three parts, because BUDA's corridors go in mid-flow
 
@@ -1017,7 +1025,7 @@ RTL: regenerate the whole set with a larger `-PEPAD` (see the utilization line a
 
 ## 2. Close the abstraction notch in every block's LEF -- NOT optional
 
-    ../../notch.sh {n_arr}
+    {notch_cmd}
 
 Magic's `final/lef/<cell>.lef` abstracts the block rect by rect and leaves a NOTCH uncovered where a pin rect
 ends and the OBS blanket begins.  The macro's real metal sits in it, the top's router reads it as free and

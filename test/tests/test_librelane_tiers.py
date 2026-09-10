@@ -288,6 +288,7 @@ def test_harm_sh_writes_the_h_arm_from_the_emitted_set(tmp_path, n):
     # with `<cell>.notch.lef` beside `<cell>.lef`, a `*.lef` glob would hand
     # each tool BOTH abstracts of every cell
     assert f"../../notch.sh {n}" in readme
+    assert f"notch.sh {n} --arm" not in readme    # this arm IS in h/
     assert "final/lef/*.lef" not in readme and "final/lef/*.notch.lef" in readme
     for c in cells:
         assert f"../{c}/runs/h/final/lef/{c}.notch.lef" in readme
@@ -1304,6 +1305,29 @@ def _walk_blocks(doc, t1a, _ROOT):
                         f"be pasted")
                     checked += 1
     return checked
+
+
+@pytest.mark.skipif(not _HAS_TCLSH, reason="gen.sh emits the set through tclsh")
+def test_an_arm_outside_h_tells_you_its_own_notch_command(tmp_path):
+    """`harm.py --out` can put an arm anywhere, and the study does it: `n2/hs`
+    and `hb4/n4/hs` are H+size arms beside their H+B twin in ONE emitted set.
+    `notch.sh` defaults to the arm directory `h`, so such an arm's README has
+    to name `--arm` or its own recipe patches the SIBLING and reports success
+    while this arm's abstracts stay missing (Codex #917) -- silent then, and
+    loud much later when this top stops on a `.notch.lef` that is not there.
+    """
+    d = _emit(tmp_path, 2)
+    for out, expect in ((d / "h", f"../../notch.sh 2"),
+                        (d / "hs", f"../../notch.sh 2 --arm hs")):
+        r = subprocess.run([sys.executable, str(_T1A / "harm.py"), str(d), "--out", str(out)],
+                           capture_output=True, text=True, timeout=600)
+        assert r.returncode == 0, r.stdout + r.stderr
+        readme = (out / "README.md").read_text()
+        line = next(l.strip() for l in readme.splitlines() if "notch.sh" in l)
+        assert line == expect, f"{out.name}: {line!r} != {expect!r}"
+    # the two arms must not be told the same thing
+    assert (d / "h" / "README.md").read_text().count("notch.sh 2 --arm") == 0
+    assert (d / "hs" / "README.md").read_text().count("notch.sh 2 --arm hs") == 1
 
 
 def test_notch_sh_refuses_an_unhardened_cell_and_clears_the_stale_patch(tmp_path):
