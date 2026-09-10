@@ -1353,12 +1353,52 @@ was right; only somebody else's DEF carries a rotated one.
 **0 better / 0 worse / 56 unchanged, abstract AND detailed WL +0** — and that
 verdict says less than it looks, because the corpus row for the one design
 with rotated pins reads NOT COMPARABLE: `flow/ariane133`'s inputs are fetched
-and `.gitignore`-d, so a baseline worktree does not have them.  A census
-settles which designs could move at all: of every DEF in the tree, only
-`demo/ariane/ariane.def` carries a non-`N` pin, and it carries 495 of them,
-all `E`.  So that flow was measured directly against a build of the baseline
-commit — `ariane133` abstract WL 60,803,990 both ways, `ariane133_heal`
-detailed WL 66,648,920 both ways, same violations, same 92 placed segments.
+and `.gitignore`-d, so a baseline worktree does not have them.  So that flow
+was measured directly against a build of the baseline commit — `ariane133`
+abstract WL 60,803,990 both ways, `ariane133_heal` detailed WL 66,648,920 both
+ways, same violations, same 92 placed segments.
+
+**Which designs could move at all, censused correctly** (the first attempt at
+this was wrong, see below): of the six **git-tracked** DEFs, only
+`demo/ariane/ariane.def` carries a non-`N` pin — 495, all `E`.  But a tracked
+census is not the census that matters, because two more classes of DEF are read
+by checked-in flows and are `.gitignore`-d rather than absent:
+
+* **`flow/ariane133/ariane_keepout.def`**, read by `ariane133_ndr_straps.buda`.
+  It is `demo/ariane/ariane.def` with a pdngen PDN spliced into its
+  `SPECIALNETS` (recipe §8.1), so it carries the same 495 `E` pins — and it is
+  in NEITHER arm of the evidence above: `qor_corpus.py` takes
+  `ariane133_heal.buda` for ariane and never `ndr_straps`, and the direct
+  measurement covered `ariane133` and `ariane133_heal`.  It matters more than a
+  gap-in-coverage usually would, because that flow is the vehicle for the NDR
+  rail/credit/bond machinery — the only design here whose rails come from a
+  real `SPECIALNETS` PDN (2,923 bonds).
+* **LibreLane run outputs** (`out/placed.def`, `two_reg32_fp.def`), whose pins
+  are placed by OpenROAD's IO placement rather than by `emit_pin_def`, so
+  unlike anything BUDA writes they may legitimately be rotated.
+
+What was measured for the first of those, in place of the run needing a
+generated 9.5 MB input and an OpenROAD install: a **no-PDN control** of that
+exact flow — same m4-m7 stack, same NDR rules, same shields, same 495 `E`
+pins, with the input DEF substituted for the unspliced `demo/ariane/ariane.def`.
+Result byte-identical on the flow log apart from ONE line: detailed WL
+66,813,840 both ways, 38 governed bundles, 56 `NDR_BOND` (correct with no
+straps — no rails, so every emitted shield is unbonded), 60 violations in 19
+bundles.  The one line that moves is the tightest Hanan band swapping layers,
+`M6 min_band_cap 70 / M7 140` becoming `M6 140 / M7 70` — the pin edges moving
+70 DBU, since a die-port pin's edge IS a Hanan line.  That is the mechanism by
+which a PDN run could differ and the control cannot rule out, so the strap case
+is owed the real before/after rather than an expectation.
+
+**The first census of this was wrong, in the same way as the vacuous
+verifications below.**  It said "of every DEF in the tree, only
+`demo/ariane/ariane.def` carries a non-`N` pin", from a `find` over the working
+container — which cannot see a `.gitignore`-d generated input, and cannot see
+an untracked local corpus either (a reviewer's `chip_designs/` tree holds seven
+more DEFs with rotated pins, none of them read by any flow, tool or test, so
+the impact conclusion survives — but the census did not establish that, it
+merely failed to look).  A census over WHAT IS PRESENT answers a question about
+one machine; the claim was about what the repository can read.
 
 The geometry DID move; no decision did.  Every one of those 495 pins is
 placed at **x = 0**, the die's west edge, with its rect spanning `-70..+70`
