@@ -336,8 +336,39 @@ verified now, and it is narrower than the prose above implies:
   `PDN_HOFFSET 109.3` DEF the via the source predicts character for
   character, `via5_6_2000_2000_1_1_1600_1600`, is placed **2,664 times**
   (1,520 VPWR, 1,144 VGND), with **zero** `PDN-0110`/`PDN-0195` — the only
-  two voices a declined pair has.  A 2.0 × 2.0 intersection cannot involve
-  a strap, straps being 1.6 wide, so those are pin-on-pin.
+  two voices a declined pair has.
+
+  That those are PIN-ON-PIN rests on the via-name FAMILY, not on reading
+  one number.  The DEF draws four `via5_6_*` names, and the trailing
+  `1600_1600` is CONSTANT across all four — so it is not the shape widths,
+  which is the misreading available to anyone who notices that 1.6 is also
+  the strap width.  The LEADING pair varies over {1600, 2000}, and the only
+  nonzero strap widths in `SPECIALNETS` are met4 1600 and met5 1600, so a
+  leading 1600 says THAT SIDE is a strap and `2000_2000` says neither is.
+  All four combinations appear, in the proportions the geometry predicts:
+  pin×pin 2,664, strap×strap 705, strap×pin 256, pin×strap 248.  A closed
+  family is the argument; the width comparison alone was not.
+
+  Locating each via inside its instance (`COMPONENTS` origins + each cell's
+  `SIZE`, bucketing every `SPECIALNETS` placement by containing instance)
+  then meets the refuted claim on its OWN subject, which the aggregate does
+  not: the claim was 512 **pe_cell VGND** crossings and NONE of them made.
+
+  | cell | VGND | VPWR |
+  |---|---|---|
+  | **pe_cell** | **1,024** | 1,280 |
+  | acc_cell | 72 | 144 |
+  | feed_cell | 24 | 48 |
+  | wbuf_cell | 24 | 48 |
+  | **outside any macro** | **0** | **0** |
+
+  pe_cell VGND alone carries **1,024** — 16 per instance across all 64 —
+  where the old reading said zero.  Two things fall out.  **All 2,664 sit
+  inside a macro bbox and none in the channels**, which is what pin-derived
+  vias look like and is evidence independent of the width argument.  And
+  **1,024 = 2 × 512**: the old "512 crossings" was itself short by half (16
+  per instance, not 8), so the broken instrument was wrong in more than one
+  digit — which is the whole lesson below, arriving twice.
 
   This paragraph said the opposite for a day, on a reading of the same DEF
   that reported all 512 `partner-no-via`, and the correction is worth more

@@ -971,8 +971,23 @@ def self_cross(lefs, layers, via_min=VIA_MIN):
     `PDN_HOFFSET 109.3` DEF the via the source predicts character for
     character -- `via5_6_2000_2000_1_1_1600_1600` -- is placed **2,664**
     times (1,520 VPWR, 1,144 VGND), with ZERO `PDN-0110`/`PDN-0195`, the
-    only two voices a declined pair has.  A 2.0 x 2.0 intersection cannot
-    involve a strap (straps are 1.6 wide), so those are pin-on-pin (#905).
+    only two voices a declined pair has (#905).
+
+    That those are PIN-ON-PIN is the via-name FAMILY, not one number: the
+    trailing `1600_1600` is CONSTANT across all four `via5_6_*` names the
+    DEF draws, so it is not the shape widths -- the misreading waiting for
+    anyone who notices 1.6 is also the strap width.  The LEADING pair
+    varies over {1600, 2000}, and met4/met5 straps are the only 1600-wide
+    shapes in `SPECIALNETS`, so a leading 1600 means THAT SIDE is a strap
+    and `2000_2000` means neither is.  All four combinations appear:
+    pin x pin 2,664, strap x strap 705, strap x pin 256, pin x strap 248.
+
+    Bucketing each via by containing instance meets the refuted claim on
+    its own subject -- it named 512 **pe_cell VGND** crossings and NONE
+    made -- where the aggregate above does not: pe_cell VGND carries
+    **1,024** of them, 16 per instance across all 64, and all 2,664 sit
+    inside a macro bbox with none in the channels.  1,024 is 2 x 512, so
+    that count was short by half as well.
 
     An earlier reading of the same DEF said it made NONE of 512 and this
     docstring carried that as "measured otherwise".  It was wrong, and the
