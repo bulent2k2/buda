@@ -174,4 +174,13 @@ if [ ${#fail[@]} -ne 0 ]; then
     exit 1
 fi
 n=$(echo "$cells" | wc -l | tr -d ' ')
-echo "tier1a: N=$N $arm -> $n patched abstract(s) ($layers), one <cell>.notch.lef per cell; next: README.md step 3"
+# Name the DIRECTORY, not just N and the arm.  Every REFUSAL above names `$h`
+# and this line did not, so the diagnostics were path-explicit exactly when
+# they failed and path-blind exactly when they worked -- which is the only
+# case that can mislead.  `notch.sh 4 --arm h` in a tree holding both `n4/`
+# and `hb4/n4/` resolves to the FIRST (T1A_DIR picks the set root, and its
+# default is this directory), patches a set the caller did not mean, and
+# reports success in words that fit either one.  Measured: it silently
+# rewrote the plain-H arm's abstracts while the H+B arm it was meant to
+# repair stayed broken.
+echo "tier1a: $h -> $n patched abstract(s) ($layers), one <cell>.notch.lef per cell; next: README.md step 3"

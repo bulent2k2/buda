@@ -2214,6 +2214,34 @@ have: every netlist here is either authored or uniquified.
    **byte-identical** to the hand-run ones the table above was measured on,
    in 17 s for the set.
 
+   **That claim was about the `.lef`, and the `.gds` did not hold it until
+   #918.**  Re-confirmed at N = 4 on 2026-09-10 — three cells' `.notch.lef`
+   came back byte-identical to the ones the H+B top actually consumed — but
+   the `<cell>.rect.gds` written beside them did not reproduce: two
+   derivations of one source gave identical byte SIZE and different SHA256
+   (`pe_cell.rect.gds`, 1,836,104 bytes both times, 248 differing bytes).
+
+   The cause was NOT GDSII.  Every differing byte sat in a `BGNLIB` or
+   `BGNSTR` modification/access time field, because `rectify_gds.py` ended
+   in a bare `ly.write(out)` and KLayout stamps the current time into those
+   records by default — while `src/gds_io.cpp` has always zeroed exactly
+   those fields (`zero12()`), so the repository already had the convention
+   and this one script was not following it.  The first draft of this note
+   said the file "cannot be" reproducible, which was wrong in the way that
+   matters: it blamed the format for a property of one call (Codex, PR
+   #918).  It now writes with `gds2_write_timestamps = False`, and BOTH
+   artefacts reproduce — measured over two runs on all four cells,
+   `.rect.gds` and `.notch.lef` byte-identical each time, with the fix
+   changing nothing but the headers (868 bytes differ from a pre-fix file,
+   **all** of them in those two record types, none outside, and the
+   `.notch.lef` derived from it identical to the abstract the H+B top
+   consumed).
+
+   One residual, and it is the reason to keep the distinction in mind: a
+   `.rect.gds` written BEFORE this change carries real timestamps, so it
+   will not match a fresh one however deterministic both runs are.  Compare
+   an old artefact by geometry, not by digest.
+
    **It was also the H+size arm's only DRC** (measured 2026-09-10, run tag
    `hsnt`).  That arm was the one dirty cell left in §7.3's table at 5
    KLayout markers, and `drc_locate.py` reads them as ONE defect repeated
