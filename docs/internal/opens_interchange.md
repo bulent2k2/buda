@@ -1380,6 +1380,24 @@ to `PIN/p_N`, which is the fault exactly) and pass against the fixed one.
 Where a project pins its own extension to `sys.path[0]` for good reasons, "I
 pointed `PYTHONPATH` at the other build" is not a measurement.
 
+**Residual, found BY the fix and left on purpose: the loader's placed test is
+`x1 >= 0`, and the sentinel is `-1`.**  `def_viz_shared._build_maps_from_bdb`
+reads a component as placed when `x1 >= 0`, treating anything negative as the
+no-placement sentinel `import_verilog` writes — which is exactly
+`(-1, -1, -1, -1)` on all four fields, so the precise test is available and
+the loose one conflates a real placement outside the die with no placement at
+all.  It bit here: the pre-fix ariane pins imported with `x1 = -0.07`, so all
+495 were dropped from `inst_info` WITHOUT A WORD, and the visualizer drew a
+133-instance design where the DEF has 628.  `test_ariane_pair_mismatch`'s
+expectation of 133 was therefore an artifact of the defect above, and moves to
+628 with it.
+
+Not fixed here because nothing in the tree can now reach the ambiguous case —
+this fix is what removed the one design that did, and a DEF with a genuinely
+negative `DIEAREA` corner is the vehicle a fix would need.  Recorded rather
+than done: the same reasoning item 12 offers for why the cheapest place to
+catch a wrong fix is a probe of real data, applied one step earlier.
+
 ---
 
 ## Resolved (by 2026-08-09)

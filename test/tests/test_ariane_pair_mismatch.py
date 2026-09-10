@@ -174,7 +174,21 @@ def test_the_visualizers_no_lef_mode_still_works():
                 stale.unlink()
             except PermissionError:
                 pass   # best-effort cleanup; the pre-clean above is the gate
-    assert "133 instances" in summary, summary
+    # 133 SRAM macros + 495 die ports.  It read 133 until #912, and the
+    # missing 495 were an artifact of the very defect that issue fixed: every
+    # one of ariane's pins is placed at x = 0 with a rect spanning -70..+70
+    # DBU, so with the pin's `E` orientation ignored each imported with a
+    # NEGATIVE x1 — and `_build_maps_from_bdb` reads "placed" as `x1 >= 0`,
+    # so a real placement just outside the die was taken for the unplaced
+    # sentinel and dropped from `inst_info` without a word.  Applying the
+    # orientation puts them at 0..140, inside the edge, and they appear.
+    #
+    # That conflation is a second, narrower defect and is deliberately not
+    # fixed here: the sentinel `import_verilog` writes is exactly
+    # (-1, -1, -1, -1) on all four fields, so the exact test is available,
+    # but nothing in the tree now reaches the ambiguous case and a fix with
+    # no vehicle is a fix with no evidence (opens_interchange.md item 17).
+    assert "628 instances" in summary, summary
     # …and the die it reports is the DEF's real one, not the 226 um the
     # ReadMe used to claim from a different design's description.
     assert "1357" in summary, summary
