@@ -1349,6 +1349,37 @@ what showed they disagreed.  Nothing in the LibreLane study could reach it —
 `emit_pin_def` writes `N` for every pin it emits, which is where the reader
 was right; only somebody else's DEF carries a rotated one.
 
+**Measured, and the interesting part is what did NOT move.**  The corpus is
+**0 better / 0 worse / 56 unchanged, abstract AND detailed WL +0** — and that
+verdict says less than it looks, because the corpus row for the one design
+with rotated pins reads NOT COMPARABLE: `flow/ariane133`'s inputs are fetched
+and `.gitignore`-d, so a baseline worktree does not have them.  A census
+settles which designs could move at all: of every DEF in the tree, only
+`demo/ariane/ariane.def` carries a non-`N` pin, and it carries 495 of them,
+all `E`.  So that flow was measured directly against a build of the baseline
+commit — `ariane133` abstract WL 60,803,990 both ways, `ariane133_heal`
+detailed WL 66,648,920 both ways, same violations, same 92 placed segments.
+
+The geometry DID move; no decision did.  Every one of those 495 pins is
+placed at **x = 0**, the die's west edge, with its rect spanning `-70..+70`
+DBU about it — so before this fix **every die port had half its metal
+outside the die** (495 of 495 with a negative corner), and after it none does
+(0 of 495): `E` at x = 0 turns `( -70 0 ) ( 70 140 )` into `0..140`, flush
+inside the edge, which is plainly what the floorplanner meant.  The ports are
+140-DBU squares on a 2,714,720-DBU die, which is why a 70-DBU correction
+changes where the metal is without changing which candidate wins.
+
+**The reproduction is worth keeping honest**: two of the first three
+"verifications" of this were vacuous, and in the same way — a probe script
+with `sys.path.insert(0, ".../build")` hard-coded, and a pytest run whose
+`conftest.py` puts the repo's own `build/` at `sys.path[0]` regardless of
+`PYTHONPATH`. Both reported the FIXED extension while claiming to test the
+baseline. The two new tests were re-run from a directory outside the suite,
+against the baseline build: both fail there (`PIN/p_S` comes back identical
+to `PIN/p_N`, which is the fault exactly) and pass against the fixed one.
+Where a project pins its own extension to `sys.path[0]` for good reasons, "I
+pointed `PYTHONPATH` at the other build" is not a measurement.
+
 ---
 
 ## Resolved (by 2026-08-09)
