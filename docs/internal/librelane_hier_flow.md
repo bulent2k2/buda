@@ -2170,6 +2170,24 @@ have: every netlist here is either authored or uniquified.
    **byte-identical** to the hand-run ones the table above was measured on,
    in 17 s for the set.
 
+   **That claim is about the `.lef`, and only the `.lef`.**  Re-confirmed at
+   N = 4 on 2026-09-10 — three cells' `.notch.lef` came back byte-identical
+   to the ones the H+B top actually consumed — but the `<cell>.rect.gds`
+   the same run writes is **not** byte-reproducible, and cannot be: GDSII
+   records a write timestamp in its `BGNLIB`/`BGNSTR` headers, so a
+   re-derived copy differs in SHA256 at identical byte SIZE (measured:
+   `pe_cell.rect.gds`, 1,836,104 bytes both times, different digest — and
+   the difference is exactly that and nothing else: **all 248 differing
+   bytes fall inside a `BGNLIB` or `BGNSTR` record's modification/access
+   time fields**, every other byte of the 1.8 MB equal).  The
+   distinction matters because the obvious way to check the claim is to
+   checksum the directory, and doing that reports a failure that is not
+   one.  The `.lef` is the artefact the flow consumes — it is what
+   `MACROS.<cell>.lef` names — and it is plain text with no timestamp in
+   it; the `.gds` is an intermediate the next stage re-derives.  So compare
+   the `.lef` files, and compare the GDS by its geometry rather than its
+   bytes.
+
    **It was also the H+size arm's only DRC** (measured 2026-09-10, run tag
    `hsnt`).  That arm was the one dirty cell left in §7.3's table at 5
    KLayout markers, and `drc_locate.py` reads them as ONE defect repeated
