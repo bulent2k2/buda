@@ -196,3 +196,66 @@ def test_where_the_two_conventions_actually_diverge(tmp_path):
     pdiffer = [o for o in ORIENTS
                if bdb_point(o, 7, 3) != DEF_ORIENT_POINT[o](7, 3)]
     assert pdiffer == ["FN", "FS"], pdiffer
+
+
+_RT_LEF = ("MACRO m\n  SIZE 20 BY 10 ;\n  PIN A\n    DIRECTION INPUT ;\n"
+           "    PORT\n      LAYER met1 ;\n        RECT 1 1 2 2 ;\n    END\n"
+           "  END A\nEND m\n")
+
+_RT_DEF = """\
+VERSION 5.8 ;
+UNITS DISTANCE MICRONS 1000 ;
+DIEAREA ( 0 0 ) ( 128000 150000 ) ;
+COMPONENTS 1 ;
+  - u1 m + PLACED ( 60000 60000 ) N ;
+END COMPONENTS
+PINS 1 ;
+  - vout + NET vout + DIRECTION OUTPUT + USE SIGNAL
+    + LAYER met3 ( {x1} {y1} ) ( {x2} {y2} )
+    + PLACED ( 40000 24000 ) N ;
+END PINS
+NETS 1 ;
+  - vout ( PIN vout ) ( u1 A ) ;
+END NETS
+END DESIGN
+"""
+
+
+def _port_round_trip(tmp_path, rect, tag):
+    (tmp_path / f"{tag}.lef").write_text(_RT_LEF)
+    (tmp_path / f"{tag}.def").write_text(_RT_DEF.format(
+        x1=rect[0], y1=rect[1], x2=rect[2], y2=rect[3]))
+    db = buda.BDB(str(tmp_path / f"{tag}a.bdb"))
+    db.import_def_lef(str(tmp_path / f"{tag}.def"), str(tmp_path / f"{tag}.lef"))
+    pin = next(p for p in db.all_pins() if p.pin_name == "vout")
+    db.export_gds(str(tmp_path / f"{tag}.gds"))
+    db2 = buda.BDB(str(tmp_path / f"{tag}b.bdb"))
+    st = db2.import_gds(str(tmp_path / f"{tag}.gds"), [63])
+    return (round(pin.px, 4), round(pin.py, 4)), st.n_labels_skipped, len(db2.all_pins())
+
+
+def test_a_die_ports_pin_sits_on_its_metal_not_its_placed_origin(tmp_path):
+    """A macro pin is placed at the centroid of its own RECTs
+    (`LefPinDef::centroid`); a die port used its PLACED origin, which is not on
+    its metal at all once the `PORT` rect is clear of that origin.
+
+    That became load-bearing the moment the bbox stopped stretching to the
+    origin (the test above): `export_gds` writes the net label at the pin's
+    stored position and `import_gds` gives a label to the component CONTAINING
+    it, so an off-metal position drops the port's pin on a DEF -> BDB -> GDS ->
+    BDB round trip.  Reported by Codex on #923 and reproduced before fixing --
+    the label came back `outside every component -- skipped (nearest:
+    'PIN/vout', 0.2 um away)`.
+
+    The bbox CENTRE is used rather than a centroid of rect centres because the
+    property needed is a point inside the port component, which the centre is
+    by construction and a centroid of disjoint rects need not be."""
+    # symmetric about its origin: centre IS the origin, so nothing moves --
+    # which is every DEF in this tree, and why the corpus cannot see this.
+    pos, skipped, npins = _port_round_trip(tmp_path, (-1000, -150, 1000, 150), "sym")
+    assert pos == (40.0, 24.0) and skipped == 0 and npins == 2
+
+    # clear of its origin on x: the pin moves onto its metal and survives.
+    pos, skipped, npins = _port_round_trip(tmp_path, (200, -1500, 2000, 500), "off")
+    assert pos == (41.1, 23.5), pos      # metal centre, not the placed (40, 24)
+    assert skipped == 0 and npins == 2

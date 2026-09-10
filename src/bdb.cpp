@@ -1956,6 +1956,15 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
     // (Codex P2 on #647).  An internal name that cannot collide keeps them
     // apart; `port_comp` maps the external name back to it.
     std::map<std::string, std::string> port_comp;
+    // Each port's METAL centre, for its pin row's position.  A macro pin is
+    // placed at the centroid of its own RECTs (`LefPinDef::centroid`), and a
+    // die port used its PLACED origin instead -- which is not on its metal at
+    // all once the PORT rect is clear of that origin.  The bbox centre is used
+    // rather than a centroid of centres because what a consumer needs is a
+    // point INSIDE the port component: `export_gds` writes the net label here
+    // and `import_gds` attributes a label to the component CONTAINING it, so
+    // an outside point loses the pin on a GDS round trip.
+    std::map<std::string, std::pair<double,double>> port_pos;
     // The __PORT__ cell rows (opens item 3): the boundary components
     // reference them, and without a cell row the GDS export emits SREFs to
     // a structure that is never defined — and with the port components gone
@@ -2038,6 +2047,7 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
                 x2 = std::max(x2, rx2);  y2 = std::max(y2, ry2);
             }
         }
+        port_pos[p.name] = {(x1 + x2) / 2.0, (y1 + y2) / 2.0};
         const std::string pcell = port_cell_for(x2 - x1, y2 - y1);
         sqlite3_bind_text  (s_comp,1,cname.c_str(),-1,SQLITE_TRANSIENT);
         sqlite3_bind_text  (s_comp,2,pcell.c_str(),-1,SQLITE_TRANSIENT);
@@ -2080,6 +2090,8 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
                 ppx = dbu_to_lu(dp->second->x);
                 ppy = dbu_to_lu(dp->second->y);
             }
+            auto pp = port_pos.find(pc.pin);            // on the metal, not the origin
+            if (pp != port_pos.end()) { ppx = pp->second.first; ppy = pp->second.second; }
             sqlite3_bind_int   (s_pin,1,pc.nid);
             sqlite3_bind_int   (s_pin,2,cid);
             sqlite3_bind_text  (s_pin,3,pc.pin.c_str(),-1,SQLITE_TRANSIENT);
