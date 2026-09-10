@@ -980,7 +980,18 @@ def self_cross(lefs, layers, via_min=VIA_MIN):
     varies over {1600, 2000}, and met4/met5 straps are the only 1600-wide
     shapes in `SPECIALNETS`, so a leading 1600 means THAT SIDE is a strap
     and `2000_2000` means neither is.  All four combinations appear:
-    pin x pin 2,664, strap x strap 705, strap x pin 256, pin x strap 248.
+    pin x pin 2,664, strap x strap 705, pin x strap 256, strap x pin 248
+    -- naming the met4 side first, which is the order `via5_6` reads in
+    (met4 is layer 5, met5 layer 6).  The leading pair is the via's x/y
+    EXTENT, not its met4/met5 sides, so those two are easy to transpose
+    and the first cut of this paragraph did.
+
+    None of that has to be inferred from a name.  Asking the DEF which
+    layer carries a STRAP under each placement settles it directly:
+    every one of the 2,664 sits where NEITHER met4 nor met5 has a strap,
+    while the 705 sit where both do and the two mixed families sit on
+    exactly one each.  That is the pin-on-pin claim measured rather than
+    read, and it does not depend on the via-name argument at all.
 
     Bucketing each via by containing instance meets the refuted claim on
     its own subject -- it named 512 **pe_cell VGND** crossings and NONE
