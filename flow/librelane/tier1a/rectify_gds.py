@@ -77,5 +77,15 @@ for c in ly.each_cell():
     c.clear(li)
 for r in rects.each():
     top.shapes(li).insert(r.bbox())
-ly.write(out)
+# DETERMINISTIC bytes, the convention `src/gds_io.cpp` already writes to
+# (`zero12()` into BGNLIB and BGNSTR).  A bare `ly.write` stamps the current
+# time into every library and structure header, so two runs over one source
+# differ in SHA256 at identical size -- measured on `pe_cell.rect.gds`, 248
+# differing bytes, all of them in those fields.  Nothing downstream reads a
+# timestamp, and the reproducibility of this step is the thing #907/#908
+# claim, so the claim should hold for the GDS as well as for the `.notch.lef`
+# derived from it (Codex, PR #918).
+opts = pya.SaveLayoutOptions()
+opts.gds2_write_timestamps = False
+ly.write(out, opts)
 print(f"    wrote {out}")
