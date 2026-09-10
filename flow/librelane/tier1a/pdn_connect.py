@@ -962,10 +962,12 @@ def self_cross(lefs, layers, via_min=VIA_MIN):
 
     This needs no DEF and no placement, because it is a property of the CELL.
 
-    **pdngen DOES via such a crossing**, and that is measured rather than
-    read: `InstanceGrid::getInstancePins` injects the macro's own pins into
-    the shape set `Grid::getIntersections` searches, that loop pairs every
-    same-net lower shape with every upper one, and on the N=8
+    **pdngen PAIRS such a crossing** -- it is not categorically declined,
+    which is what the first cut of this docstring claimed, and that is
+    measured rather than read: `InstanceGrid::getInstancePins` injects the
+    macro's own pins into the shape set `Grid::getIntersections` searches,
+    that loop pairs every same-net lower shape with every upper one, and
+    on the N=8
     `PDN_HOFFSET 109.3` DEF the via the source predicts character for
     character -- `via5_6_2000_2000_1_1_1600_1600` -- is placed **2,664**
     times (1,520 VPWR, 1,144 VGND), with ZERO `PDN-0110`/`PDN-0195`, the
@@ -979,10 +981,17 @@ def self_cross(lefs, layers, via_min=VIA_MIN):
     end -- in the source's favour, against the measurement that overturned
     it first.
 
-    So a `yes` means the pin IS joined to its own net on the other layer.
-    It does NOT mean the terminal is fed: **a via is not a source.**  That
+    What that count does NOT make this is a PLACEMENT check.  Everything
+    here is LEF geometry against a fixed floor, so a `yes` is a crossing
+    pdngen's search will pair -- via generation may still decline that
+    candidate on a rule no LEF pin rect can express (an intermediate-layer
+    obstruction, spacing, enclosure), and `partner-no-via` is the verdict
+    that says so when it does.  Whether a via was PLACED is a fact about
+    the written DEF, which is `run_audit`'s to read, not this function's.
+
+    Nor does a placed via feed anything: **a via is not a source.**  That
     island reaches the supply only if a surviving strap fragment touches
-    it, which is reachability -- `run_audit`'s verdict, from the DEF, not
+    it, which is reachability -- `run_audit` again, from the DEF, not
     anything the LEFs alone can answer.  A cell whose two power nets differ
     here (`SPLIT`) is a cell to look at (#900)."""
     lo, hi = layers
@@ -1013,12 +1022,13 @@ def report_self(res, out=sys.stdout):
     lo, hi = res["layers"]
     out.write(f"pdn_connect --self-cross: does a power pin cross its own net on "
               f"the other connect layer?\n"
-              f"  pair {lo}/{hi}, via floor {res['via_min']} um.  pdngen DOES via such a "
-              f"crossing (InstanceGrid::getInstancePins\n  puts the pins in the search set; "
-              f"measured on the N=8 PDN DEF, 2664 placements, 0 PDN-0110/0195).\n"
-              f"  But a via is not a SOURCE: a `yes` says the pin is joined to its own net on "
-              f"the other\n  layer, not that the supply reaches it.  That verdict is "
-              f"pdn_connect on the written DEF, and PSM.\n\n")
+              f"  pair {lo}/{hi}, via floor {res['via_min']} um.  A crossing pdngen's search "
+              f"PAIRS, not one it made\n  here (InstanceGrid::getInstancePins puts the pins in "
+              f"the search set; measured on the N=8 PDN\n  DEF, 2664 such vias placed, 0 "
+              f"PDN-0110/0195 -- so they are not categorically declined).\n"
+              f"  This is LEF geometry: a `yes` is a CANDIDATE.  Whether a via was placed "
+              f"(`partner-no-via`\n  says when it was not) and whether supply reaches it are "
+              f"both pdn_connect on the DEF, and PSM.\n\n")
     out.write(f"  cell / pin              {lo:>6} {hi:>6}  overlap  self-crossed\n")
     for r in res["pins"]:
         out.write(f"  {r['cell']:<15} {r['pin']:<6} {r['rects'][lo]:>6} {r['rects'][hi]:>6} "

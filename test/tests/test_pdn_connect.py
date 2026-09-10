@@ -832,10 +832,12 @@ def test_a_via_is_not_a_source(tmp_path):
 
 
 def test_self_cross_sees_the_crossing_the_def_vias(tmp_path):
-    """`--self-cross` asks the same question from the LEF alone, and must
-    answer it the same way for the same cell -- the LEF-only half and the
-    DEF half disagreeing is how a per-cell property becomes a verdict it is
-    not."""
+    """`--self-cross` asks the CANDIDATE half from the LEF alone: is the
+    crossing there to seat a via on.  Here it is, and the DEF above places
+    a via on exactly it -- so the two halves are reading one crossing, and
+    a disagreement would be a geometry bug in the LEF-only path.  It is not
+    a claim that a candidate is always placed; via generation may decline
+    one, which is what `partner-no-via` is for."""
     res = P.self_cross(_lefs(SELF_LEF, tmp_path), LAYERS)
     (pin,) = res["pins"]
     assert pin["self_crossed"] and pin["overlap"] == 2.0, pin

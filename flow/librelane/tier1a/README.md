@@ -103,13 +103,16 @@ The first names every power pin with no via, says whether it had anything to
 reach, and whether a via it has REACHES a source (the top's own pins) -- an
 `unsourced` terminal is one whose via joins metal the supply never enters,
 PSM-0038's shape; the second asks, from the LEFs alone, whether each power
-pin crosses its OWN net on the other connect layer.  pdngen DOES via such a
-crossing -- `InstanceGrid::getInstancePins` puts a macro's pins in the set
-`Grid::getIntersections` searches, and the N=8 PDN DEF carries 2,664
-placements of the via that pairing predicts, with zero `PDN-0110`/`PDN-0195`
-(#905).  Read it for what that is worth and no more: a via is not a SOURCE,
-so a `yes` says the pin is joined to its own net on the other layer, never
-that the supply reaches it, and a `SPLIT:` line is a cell to look at.
+pin crosses its OWN net on the other connect layer.  pdngen PAIRS such a
+crossing rather than categorically declining it -- `InstanceGrid::getInstancePins`
+puts a macro's pins in the set `Grid::getIntersections` searches, and the N=8
+PDN DEF carries 2,664 placements of the via that pairing predicts, with zero
+`PDN-0110`/`PDN-0195` (#905).  Read it for what that is worth and no more:
+it is LEF geometry, so a `yes` is a CANDIDATE -- via generation may still
+decline one on a rule no pin rect expresses, which is what `partner-no-via`
+reports -- and a placed via is still not a SOURCE.  Both of those are
+questions about the written DEF, which the first command answers; a `SPLIT:`
+line is a cell to look at.
 The verdict before a top run is `pdn_phase.py`; after it, the first command
 here, and PSM.
 
