@@ -346,8 +346,28 @@ verified now, and it is narrower than the prose above implies:
   nonzero strap widths in `SPECIALNETS` are met4 1600 and met5 1600, so a
   leading 1600 says THAT SIDE is a strap and `2000_2000` says neither is.
   All four combinations appear, in the proportions the geometry predicts:
-  pin×pin 2,664, strap×strap 705, strap×pin 256, pin×strap 248.  A closed
-  family is the argument; the width comparison alone was not.
+  pin×pin 2,664, strap×strap 705, **pin×strap 256, strap×pin 248** —
+  naming the met4 side first, the order `via5_6` reads in (met4 is layer
+  5, met5 layer 6).  Those two were printed the other way round when
+  this paragraph landed: the leading pair is the via's x/y EXTENT rather
+  than its met4/met5 sides, so a met4 PIN crossing a met5 STRAP is
+  `2000_1600` (2.0 from the pin in x, 1.6 from the strap in y) and reads
+  naturally as "strap second".  It changes nothing about `2000_2000`.
+
+  **And none of it needs to be inferred from a name.**  Asking the DEF
+  which layer carries a strap beneath each placement answers the
+  question directly, and that is the measurement worth keeping:
+
+  | via | met4 strap | met5 strap | count |
+  |---|---|---|---|
+  | `2000_2000` | **no** | **no** | **2,664** |
+  | `2000_1600` | no | yes | 256 |
+  | `1600_2000` | yes | no | 248 |
+  | `1600_1600` | yes | yes | 705 |
+
+  Every one of the 2,664 sits where neither connect layer has a strap.
+  The via-name family predicts that and the geometry confirms it, which
+  is the right order to trust them in.
 
   Locating each via inside its instance (`COMPONENTS` origins + each cell's
   `SIZE`, bucketing every `SPECIALNETS` placement by containing instance)
