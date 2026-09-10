@@ -103,12 +103,13 @@ The first names every power pin with no via, says whether it had anything to
 reach, and whether a via it has REACHES a source (the top's own pins) -- an
 `unsourced` terminal is one whose via joins metal the supply never enters,
 PSM-0038's shape; the second asks, from the LEFs alone, whether each power
-pin crosses its OWN net on the other connect layer.  Read the second for
-less than it first claimed: `InstanceGrid::getInstancePins` puts a macro's
-pins in the set `Grid::getIntersections` searches, so such a crossing is one
-pdngen MAY via -- but the N=8 `PDN_HOFFSET 109.3` run offered it 512 pe_cell
-VGND pin-on-pin crossings over the floor and it made none (#900), so a `yes`
-is not a connection and a `SPLIT:` line is a cell to look at, not a verdict.
+pin crosses its OWN net on the other connect layer.  pdngen DOES via such a
+crossing -- `InstanceGrid::getInstancePins` puts a macro's pins in the set
+`Grid::getIntersections` searches, and the N=8 PDN DEF carries 2,664
+placements of the via that pairing predicts, with zero `PDN-0110`/`PDN-0195`
+(#905).  Read it for what that is worth and no more: a via is not a SOURCE,
+so a `yes` says the pin is joined to its own net on the other layer, never
+that the supply reaches it, and a `SPLIT:` line is a cell to look at.
 The verdict before a top run is `pdn_phase.py`; after it, the first command
 here, and PSM.
 
