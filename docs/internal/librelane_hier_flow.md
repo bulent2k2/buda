@@ -1906,9 +1906,18 @@ have: every netlist here is either authored or uniquified.
    as free and overhangs the top's wire into it — 0.130 µm against m2.2's
    0.140; the same notch beside `wbuf_cell`'s `rst` gives the N=2 H+B run
    its one marker (0.040 µm).  The block's own DRC is 0 because the partner
-   shape is the top's wire.  Candidates: have the top read the
-   `-bloat_occupied_layers` abstract (`<cell>.openroad.lef`), or grow the
-   met2 OBS to cover the macro's real metal.
+   shape is the top's wire.
+
+   **The DRC half is CLOSED** (2026-09-10, run tag `hsnt`; §11 item 13):
+   `notch_obs.py` takes it 5 → 0 with illegal overlaps still 0 and top wire
+   +0.067 %.  Both candidates this item used to name were then MEASURED and
+   are the wrong answers — the `-bloat_occupied_layers` abstract adds
+   met4/met5 OBS the PDN cannot cross (125,800 power-grid violations, never
+   routed), and growing the met2 OBS to a blanket closes the DRC and costs
+   **6,233 illegal overlaps**; what works is claiming only the metal the
+   abstract omits.  **The hold half stays open** at −0.220 ns (60
+   violations, improved from −0.238 / 67 but still a deferred error), and
+   it is item 6's clock question, not an abstract question.
 9. **Two bundles for one cell-local link** (found on the way to §8 step
    7f, not chased): at N = 2 the row's activation chain comes out as TWO
    hbundles — `hb-11 D1 cell:row_cell "DRV:row_0/pe_0|REC:row_0/pe_1"
