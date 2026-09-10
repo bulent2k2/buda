@@ -890,6 +890,38 @@ def write_h(n_dir, out_dir, halo, pins_dir=None):
             "pin_templates": sorted(templates)}
 
 
+def readme_prefixes(n_dir, out_dir, t1a=None):
+    """`(prefix, env)` for a generated README: how to reach `tier1a/` from the
+    ARM directory, and the `T1A_DIR=` the scripts need to find the design.
+
+    A pure function of three paths so the rule can be tested on the case the
+    integration test structurally cannot build — an emitted set sitting
+    directly under `tier1a/`, which is where every checked-in arm lives and
+    the only shape that needs no `T1A_DIR` (Codex #917).
+
+    RELATIVE while the arm lives inside the checkout — that is every arm the
+    study writes, and it keeps the recipe copy-pasteable between clones.
+    ABSOLUTE otherwise, because a `relpath` between two unrelated trees is
+    only correct by accident: it counts `..` up to the filesystem root and
+    back down, so ONE symlink anywhere on the way breaks it.  Rendering into
+    `/tmp` does exactly that on macOS (`/tmp` -> `/private/tmp`), where
+    `../../Users/...` lands in `/private/Users/...` and resolves to nothing
+    (Codex #917).
+    """
+    t1a = t1a or os.path.dirname(os.path.abspath(__file__))
+    out = os.path.abspath(out_dir)
+    repo = os.path.dirname(os.path.dirname(os.path.dirname(t1a)))
+    prefix = os.path.relpath(t1a, out) if os.path.commonpath([out, repo]) == repo else t1a
+    # The scripts derive the design root themselves (`${T1A_DIR:-$here}/n$N`),
+    # so a set NOT directly under `tier1a/` must say where it is -- else the
+    # tool finds the default root's arm, which exists and is hardened, patches
+    # it and reports success.  Relative is fine: `notch.sh` absolutises before
+    # anything reaches a docker bind source.
+    set_root = os.path.dirname(os.path.normpath(os.path.abspath(n_dir)))
+    env = "" if set_root == t1a else "T1A_DIR=%s " % os.path.relpath(set_root, out)
+    return prefix, env
+
+
 def render_readme(n_dir, out_dir, cells, counts, sizes, D, dx, dy, vplan, hplan, advice,
                   dry_run_failed=False, pinned=False):
     blocks = " ".join(f"--block {c}/runs/h:{counts[c]}" for c in cells)
@@ -915,14 +947,12 @@ def render_readme(n_dir, out_dir, cells, counts, sizes, D, dx, dy, vplan, hplan,
     # exist -- and `>> {rel}/results.jsonl` would have written a SECOND results
     # file inside the comparison root (Codex #917).
     t1a = os.path.dirname(os.path.abspath(__file__))
-    rel = os.path.relpath(t1a, out_dir)
+    rel, env = readme_prefixes(n_dir, out_dir, t1a)
     # ...and the scripts derive the design root themselves (`${T1A_DIR:-$here}/n$N`),
     # so a set outside `tier1a/` needs T1A_DIR too.  Without it the path fix
     # alone just relocates the failure: `notch.sh 4` run for `hb4/n4/h` finds
     # `tier1a/n4/h`, which EXISTS and is hardened, patches it and reports
     # success while this arm's abstracts stay missing.
-    set_root = os.path.dirname(os.path.normpath(os.path.abspath(n_dir)))
-    env = "" if set_root == t1a else f"T1A_DIR={os.path.relpath(set_root, out_dir)} "
     notch_cmd = (env + f"{rel}/notch.sh {n_arr}"
                  + ("" if arm_dir == "h" else f" --arm {arm_dir}"))
     guides_cmd = env + f"{rel}/guides.sh {n_arr}"
@@ -993,7 +1023,7 @@ piece is the top's corridors -- `guides.sh`, step 4b below.
 ...and, on this arm, the pins landed where BUDA put them:
 
     for c in """ + " ".join(cells) + """; do
-        python3 {rel}/../../../tools/pin_def_verify.py ../pins/$c.def $c/runs/h/final/def/$c.def || echo "$c: PINS MOVED"
+        python3 """ + rel + """/../../../tools/pin_def_verify.py ../pins/$c.def $c/runs/h/final/def/$c.def || echo "$c: PINS MOVED"
     done
 
 Every TEMPLATE pin must be in the hardened DEF at the same ABSOLUTE

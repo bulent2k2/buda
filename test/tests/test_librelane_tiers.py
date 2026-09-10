@@ -1312,6 +1312,48 @@ def _walk_blocks(doc, t1a, _ROOT):
     return checked
 
 
+def _assert_readme_paths_resolve(out, readme):
+    """Every tool path a generated README prints must RESOLVE from the arm
+    directory, and no `{placeholder}` may survive into it.
+
+    Both halves are here because both were shipped.  The path half: `../../`
+    was hardcoded, right only for a set directly under `tier1a/` and pointing
+    into nothing for the four arms in comparison roots.  The placeholder half:
+    the fix put `{rel}` inside `pin_verify_note`, which is a PLAIN string
+    (`\"\"\"` nested in an f-string field is PEP 701, and CI pins 3.11), so it
+    reached the file verbatim -- on the H+B arm only, i.e. the arm the study is
+    about (Codex #917).  The regex takes ABSOLUTE and `{`-bearing paths too;
+    the first version required a leading `../` and skipped both new defects."""
+    left = re.findall(r"\{[a-z_]+\}", readme)
+    assert not left, f"{out}: unexpanded placeholder(s) {sorted(set(left))}"
+    toks = re.findall(r"(?<![\w/.])((?:/|\.\./)[\w{}./-]*\.(?:sh|py|tcl|jsonl))", readme)
+    assert toks, f"{out}: no tool path found at all -- has the README changed shape?"
+    bad = [t for t in set(toks) if not (out / t).exists()]
+    assert not bad, f"{out}: unresolvable from the arm dir: {sorted(bad)}"
+
+
+def test_readme_prefixes_is_relative_in_tree_and_absolute_out_of_it():
+    """The path/root rule as a pure function, because the integration test
+    structurally cannot build the case that matters most: an emitted set
+    sitting directly under `tier1a/`, which is where every checked-in arm
+    lives and the ONLY shape needing no `T1A_DIR` (Codex #917)."""
+    sys.path.insert(0, str(_T1A))
+    import harm                                      # noqa: E402
+    t1a = str(_T1A)
+    # in-tree, default root: relative prefix, NO env
+    pre, env = harm.readme_prefixes(str(_T1A / "n2"), str(_T1A / "n2" / "h"), t1a)
+    assert pre == "../.." and env == ""
+    # in-tree, COMPARISON root: relative prefix, and env or the tool finds n2/h
+    pre, env = harm.readme_prefixes(str(_T1A / "hb4" / "n4"),
+                                    str(_T1A / "hb4" / "n4" / "hs"), t1a)
+    assert pre == "../../.." and env == "T1A_DIR=../.. "
+    # outside the checkout: ABSOLUTE, since a relpath between unrelated trees
+    # counts `..` to the root and one symlink on the way breaks it
+    pre, env = harm.readme_prefixes("/tmp/x/n2", "/tmp/x/n2/h", t1a)
+    assert pre == t1a and env == "T1A_DIR=../.. "
+    assert os.path.isabs(pre)
+
+
 @pytest.mark.skipif(not _HAS_TCLSH, reason="gen.sh emits the set through tclsh")
 def test_an_arm_outside_h_tells_you_its_own_notch_command(tmp_path):
     """`harm.py --out` can put an arm anywhere, and the study does it: `n2/hs`
@@ -1330,25 +1372,24 @@ def test_an_arm_outside_h_tells_you_its_own_notch_command(tmp_path):
     deep.mkdir()
     shutil.copytree(d, deep / "n2")
     for base in (d, deep / "n2"):
-        for out, armed in ((base / "h", False), (base / "hs", True)):
+        # `--pins` only needs the templates to EXIST for the README to render,
+        # and the H+B arm is where the `{rel}` placeholder defect lived, so it
+        # has to be one of the arms rendered here
+        (base / "pins").mkdir(exist_ok=True)
+        for c in _lef_sizes(base / "tpu.lef"):
+            (base / "pins" / f"{c}.def").write_text("DESIGN %s ;\nEND DESIGN\n" % c)
+        for out, armed, pins in ((base / "h", False, False), (base / "hs", True, False),
+                                 (base / "hb", False, True)):
             r = subprocess.run([sys.executable, str(_T1A / "harm.py"), str(base),
-                                "--out", str(out)], capture_output=True, text=True, timeout=600)
+                                "--out", str(out)] + (["--pins", "pins"] if pins else []),
+                               capture_output=True, text=True, timeout=600)
             assert r.returncode == 0, r.stdout + r.stderr
             readme = (out / "README.md").read_text()
             line = next(l.strip() for l in readme.splitlines()
                         if "notch.sh" in l and l.startswith(" "))
             # the arm names itself only when it is not `h`
-            assert ("--arm hs" in line) == armed, f"{out}: {line!r}"
-            # RESOLVE every tool path the README prints, rather than matching a
-            # string: the string was right and the path was not, for four of the
-            # eight recorded arms (Codex #917).
-            bad = [t for t in re.findall(r"(?<![\w/.])((?:\.\./)+[\w./-]+\.(?:sh|py|tcl|jsonl))", readme)
-                   if not (out / t).exists()]
-            assert not bad, f"{out}: unresolvable from the arm dir: {sorted(set(bad))}"
-            # and a set outside the scripts' own directory must carry T1A_DIR,
-            # or the tool derives the DEFAULT root and patches somebody else
-            need_env = base.parent != _T1A
-            assert line.startswith("T1A_DIR=") == need_env, f"{out}: {line!r}"
+            assert ("--arm " in line) == (out.name != "h"), f"{out}: {line!r}"
+            _assert_readme_paths_resolve(out, readme)
 
 
 def test_notch_sh_refuses_an_unhardened_cell_and_clears_the_stale_patch(tmp_path):

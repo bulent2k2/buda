@@ -105,6 +105,13 @@ h="$d/$arm"
 hint=
 [ -n "$arm_given" ] || hint=" (or --arm <dir> if the arm is not in h/)"
 [ -d "$h" ] || { echo "notch.sh: no $h -- run ./harm.sh $N first$hint" >&2; exit 1; }
+# ABSOLUTE from here on.  `$d` becomes a docker bind SOURCE below, and a bind
+# source must be absolute -- a relative `T1A_DIR` (which is what the generated
+# README hands an arm in a comparison root) reaches docker as
+# `-v ../../n4:../../n4` and is rejected as an invalid mount config.  Done here
+# rather than in the generator so it holds for every caller, including a
+# hand-typed `T1A_DIR=../..` (Codex #917).
+d=$(cd "$d" && pwd); h=$(cd "$h" && pwd)
 cells=$(sed -n 's/^MACRO \([A-Za-z_][A-Za-z0-9_]*\).*/\1/p' "$d/tpu.lef")
 if [ -z "$cells" ]; then echo "notch.sh: $d/tpu.lef declares no MACRO" >&2; exit 1; fi
 : "${LIBRELANE_IMAGE:=ghcr.io/librelane/librelane:3.0.11}"
