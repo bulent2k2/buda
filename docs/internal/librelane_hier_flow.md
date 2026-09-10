@@ -452,7 +452,25 @@ study exists to answer and stays.
   the blocks BY DESIGN, and that trade is the point — at N = 8 the top's
   wire fell 59.9 % while the blocks' rose 40.8 %, for an arm total 2.8 %
   under H+size and 15 % under H.  A floor that forbids the block half
-  forbids the mechanism.  The comparison is STRICT, and it is strict on
+  forbids the mechanism.  **That trade is now measured at three points**
+  (N = 4 added 2026-09-10, `hb4/`), against H+size so the block sizes are
+  held equal and only BUDA's pins and corridors vary:
+
+  | N | blocks | top | arm | top's share of arm wire |
+  |---|---|---|---|---|
+  | 2 | +37.5 % | −45.4 % | **+0.59 %** | 44.5 % |
+  | 4 | +38.5 % | −54.8 % | **−2.23 %** | 43.7 % |
+  | 8 | +40.8 % | −59.9 % | **−2.84 %** | 43.3 % |
+
+  Monotone, and it crosses between N = 2 and N = 4.  The reason is not the
+  one it looks like: the top's SHARE of arm wire is essentially constant
+  (~44 % at every N), so the crossover is not a shifting mix.  It is that
+  the corridor saving DEEPENS with N (−45 → −55 → −60 %) while the pin
+  template's block cost stays nearly flat (+37.5 → +38.5 → +40.8 %) — a
+  bigger mesh gives the planned corridors more to win, and costs the
+  templates no more per block.  Which also says the N = 2 row is not
+  evidence against the mechanism: it is the point where a 45 % saving on
+  44 % of the wire has not yet paid for a 37 % rise on the other 56 %.  The comparison is STRICT, and it is strict on
   MEASURED grounds rather than for want of a measurement: **run-to-run
   timing noise is ZERO** (measured 2026-09-08 — an independent repeat of
   the N = 8 H+B arm, all three legs, against the run it repeats:

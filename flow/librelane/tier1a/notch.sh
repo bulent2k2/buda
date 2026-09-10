@@ -3,7 +3,7 @@
 # item 13, issue #896): close the ABSTRACTION NOTCH in every hardened
 # block's LEF, so the top run reads the macro's real metal.
 #
-#   flow/librelane/tier1a/notch.sh N [--layers met2]
+#   flow/librelane/tier1a/notch.sh N [--layers met2] [--arm h]
 #
 # Run it from anywhere, AFTER the blocks have hardened (README.md step 1)
 # and BEFORE the top runs.  It is not optional and cannot be quietly
@@ -52,9 +52,23 @@
 # is no host KLayout in this recipe and `pya` is KLayout's own module.
 # `notch_obs.py` is plain Python and runs on the host.
 set -euo pipefail
-N=${1:?usage: notch.sh N [--layers met2]   (after the blocks harden)}; shift || true
+N=${1:?usage: notch.sh N [--layers met2] [--arm h]   (after the blocks harden)}; shift || true
 layers=met2
-if [ $# -ge 2 ] && [ "$1" = "--layers" ]; then layers=$2; shift 2; fi
+arm=h
+# `--arm` because the arm directory is not always `h`: `harm.py --out` puts one
+# wherever it is told, and the study already does that -- `n2/hs` and
+# `hb4/n4/hs` are the H+size arms sitting beside their H+B twin in the SAME
+# emitted set.  Hard-coding `h` left those arms with no way to run this at all,
+# so the only route was the per-cell hand recipe the README offers as a
+# fallback for a cell the decomposition cannot handle -- which is not what an
+# arm in the wrong directory is.
+while [ $# -ge 2 ]; do
+    case $1 in
+        --layers) layers=$2; shift 2 ;;
+        --arm)    arm=$2;    shift 2 ;;
+        *) break ;;
+    esac
+done
 if [ $# -ne 0 ]; then echo "notch.sh: unexpected arguments: $*" >&2; exit 1; fi
 # An EMPTY layer list is refused HERE rather than run.  Zero passes leaves
 # `src`/`inlef` pointing at the cell's own hardened `.gds` and Magic's
@@ -71,9 +85,10 @@ fi
 here=$(cd "$(dirname "$0")" && pwd)
 # T1A_DIR overrides where the design lives (the tests use a temp dir), as in gen.sh.
 d="${T1A_DIR:-$here}/n$N"
-h="$d/h"
+h="$d/$arm"
 [ -f "$d/tpu.lef" ] || { echo "notch.sh: $d has no tpu.lef -- run gen.sh $N first" >&2; exit 1; }
-[ -d "$h" ] || { echo "notch.sh: no $h -- run ./harm.sh $N first" >&2; exit 1; }
+[ -d "$h" ] || { echo "notch.sh: no $h -- run ./harm.sh $N first" \
+    "${arm:+(or --arm <dir> if the arm is not in h/)}" >&2; exit 1; }
 cells=$(sed -n 's/^MACRO \([A-Za-z_][A-Za-z0-9_]*\).*/\1/p' "$d/tpu.lef")
 if [ -z "$cells" ]; then echo "notch.sh: $d/tpu.lef declares no MACRO" >&2; exit 1; fi
 : "${LIBRELANE_IMAGE:=ghcr.io/librelane/librelane:3.0.11}"
@@ -136,4 +151,4 @@ if [ ${#fail[@]} -ne 0 ]; then
     exit 1
 fi
 n=$(echo "$cells" | wc -l | tr -d ' ')
-echo "tier1a: N=$N -> $n patched abstract(s) ($layers), one <cell>.notch.lef per cell; next: README.md step 3"
+echo "tier1a: N=$N $arm -> $n patched abstract(s) ($layers), one <cell>.notch.lef per cell; next: README.md step 3"

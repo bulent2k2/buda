@@ -1347,6 +1347,27 @@ def test_notch_sh_refuses_an_unhardened_cell_and_clears_the_stale_patch(tmp_path
                        capture_output=True, text=True, timeout=300)
     assert r.returncode == 1 and "gen.sh 3" in r.stderr
 
+    # `--arm`: the arm directory is not always `h`.  `harm.py --out` puts one
+    # wherever it is told and the study does exactly that -- `n2/hs` is the
+    # H+size arm beside its H+B twin in one emitted set -- so hard-coding `h`
+    # left those arms unable to run this at all.
+    alt = d / "hs" / "pe_cell" / "runs" / "h" / "final"
+    (alt / "gds").mkdir(parents=True)
+    (alt / "lef").mkdir(parents=True)
+    (alt / "lef" / "pe_cell.notch.lef").write_text("last run's patch\n")
+    r = subprocess.run(["bash", str(_T1A / "notch.sh"), "2", "--arm", "hs"],
+                       env={**os.environ, "T1A_DIR": str(tmp_path)},
+                       capture_output=True, text=True, timeout=300)
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "pe_cell is not hardened" in r.stderr          # it looked in hs/, not h/
+    assert "/hs/pe_cell/" in r.stderr, r.stderr
+    assert not (alt / "lef" / "pe_cell.notch.lef").exists()   # stale patch still cleared
+    # an arm directory that is not there names the option in its remedy
+    r = subprocess.run(["bash", str(_T1A / "notch.sh"), "2", "--arm", "nope"],
+                       env={**os.environ, "T1A_DIR": str(tmp_path)},
+                       capture_output=True, text=True, timeout=300)
+    assert r.returncode == 1 and "--arm" in r.stderr and "/nope" in r.stderr
+
 
 def test_notch_sh_refuses_an_empty_layer_list_instead_of_renaming_the_deliverables(tmp_path):
     """`--layers ''` (or a comma-only value) ran ZERO passes, and the moves
