@@ -211,7 +211,7 @@ COMPONENTS 1 ;
 END COMPONENTS
 PINS 1 ;
   - vout + NET vout + DIRECTION OUTPUT + USE SIGNAL
-    + LAYER met3 ( {x1} {y1} ) ( {x2} {y2} )
+{layers}
     + PLACED ( 40000 24000 ) N ;
 END PINS
 NETS 1 ;
@@ -221,17 +221,26 @@ END DESIGN
 """
 
 
-def _port_round_trip(tmp_path, rect, tag):
+def _port_round_trip(tmp_path, rects, tag):
+    """Import a DEF whose one die port carries `rects` (DBU, origin-relative),
+    export to GDS, re-import.  Returns the pin position, the port component
+    bbox, the skipped-label count and the pin count after the round trip."""
+    if rects and not isinstance(rects[0], (list, tuple)):
+        rects = [rects]
+    layers = "\n".join(f"    + LAYER met3 ( {r[0]} {r[1]} ) ( {r[2]} {r[3]} )"
+                        for r in rects)
     (tmp_path / f"{tag}.lef").write_text(_RT_LEF)
-    (tmp_path / f"{tag}.def").write_text(_RT_DEF.format(
-        x1=rect[0], y1=rect[1], x2=rect[2], y2=rect[3]))
+    (tmp_path / f"{tag}.def").write_text(_RT_DEF.format(layers=layers))
     db = buda.BDB(str(tmp_path / f"{tag}a.bdb"))
     db.import_def_lef(str(tmp_path / f"{tag}.def"), str(tmp_path / f"{tag}.lef"))
     pin = next(p for p in db.all_pins() if p.pin_name == "vout")
+    (bb,) = [(c.x1, c.y1, c.x2, c.y2) for c in db.all_components()
+             if c.name.startswith("PIN/")]
     db.export_gds(str(tmp_path / f"{tag}.gds"))
     db2 = buda.BDB(str(tmp_path / f"{tag}b.bdb"))
     st = db2.import_gds(str(tmp_path / f"{tag}.gds"), [63])
-    return (round(pin.px, 4), round(pin.py, 4)), st.n_labels_skipped, len(db2.all_pins())
+    return ((round(pin.px, 4), round(pin.py, 4)), bb,
+            st.n_labels_skipped, len(db2.all_pins()))
 
 
 def test_a_die_ports_pin_sits_on_its_metal_not_its_placed_origin(tmp_path):
@@ -250,12 +259,68 @@ def test_a_die_ports_pin_sits_on_its_metal_not_its_placed_origin(tmp_path):
     The bbox CENTRE is used rather than a centroid of rect centres because the
     property needed is a point inside the port component, which the centre is
     by construction and a centroid of disjoint rects need not be."""
-    # symmetric about its origin: centre IS the origin, so nothing moves --
-    # which is every DEF in this tree, and why the corpus cannot see this.
-    pos, skipped, npins = _port_round_trip(tmp_path, (-1000, -150, 1000, 150), "sym")
+    # The PLACED point is on the rect here, so it stands: that is every DEF in
+    # this tree, and why the corpus cannot see any of this.
+    pos, _bb, skipped, npins = _port_round_trip(
+        tmp_path, (-1000, -150, 1000, 150), "sym")
     assert pos == (40.0, 24.0) and skipped == 0 and npins == 2
 
     # clear of its origin on x: the pin moves onto its metal and survives.
-    pos, skipped, npins = _port_round_trip(tmp_path, (200, -1500, 2000, 500), "off")
-    assert pos == (41.1, 23.5), pos      # metal centre, not the placed (40, 24)
+    pos, _bb, skipped, npins = _port_round_trip(
+        tmp_path, (200, -1500, 2000, 500), "off")
+    assert pos == (41.1, 23.5), pos      # the rect's centre, not the placed point
+    assert skipped == 0 and npins == 2
+
+
+def _on_metal(pos, rects_um):
+    return any(x1 <= pos[0] <= x2 and y1 <= pos[1] <= y2
+               for (x1, y1, x2, y2) in rects_um)
+
+
+def test_a_multi_rect_ports_pin_is_on_a_rect_and_never_in_the_gap(tmp_path):
+    """The bbox MIDPOINT is not a pin.  For disjoint rects it can fall in the
+    gap between them, on no metal at all -- which
+    `test_a_die_ports_pin_survives_the_merge_unchanged` already recorded from an
+    earlier review of this same reasoning (Codex P2 on #650), and which the
+    first cut of this fix walked straight into: rects at 39.8..40.2 and
+    60.0..60.4 um put the pin at 50.1, in open die.
+
+    So: the PLACED point wins whenever it lies on a rect -- the DEF's own
+    statement, and nothing moves where nothing was wrong -- and otherwise the
+    LARGEST rect's centre, which is on metal by construction and inside the
+    component bbox because the bbox is the union.  Reported by Codex on #923."""
+    # (a) two disjoint rects, the placed point on the FIRST: it stands, and the
+    #     bbox midpoint (50.1) is not used.
+    pos, bb, skipped, npins = _port_round_trip(
+        tmp_path, [(-200, -200, 200, 200), (20000, -200, 20400, 200)], "gap")
+    metal = [(39.8, 23.8, 40.2, 24.2), (60.0, 23.8, 60.4, 24.2)]
+    assert pos == (40.0, 24.0), pos
+    assert _on_metal(pos, metal), (pos, metal)
+    assert pos[0] != 50.1                      # the midpoint of that bbox
+    assert bb[0] <= pos[0] <= bb[2] and bb[1] <= pos[1] <= bb[3]
+    assert skipped == 0 and npins == 2
+
+    # (b) two disjoint rects, the placed point on NEITHER: the LARGER rect's
+    #     centre, still on metal and still inside the component.
+    pos, bb, skipped, npins = _port_round_trip(
+        tmp_path, [(5000, -200, 5400, 200), (20000, -2000, 24000, 2000)], "big")
+    metal = [(45.0, 23.8, 45.4, 24.2), (60.0, 22.0, 64.0, 26.0)]
+    assert pos == (62.0, 24.0), pos             # centre of the 4 x 4 um rect
+    assert _on_metal(pos, metal), (pos, metal)
+    assert bb[0] <= pos[0] <= bb[2] and bb[1] <= pos[1] <= bb[3]
+    assert skipped == 0 and npins == 2
+
+    # (c) the placed point on the SMALLER rect, a much larger one elsewhere.
+    #     This is the case that separates the two halves of the rule: "keep the
+    #     placed point when it is on metal" answers (40, 24) and "always the
+    #     largest rect" answers (62, 24).  Cases (a) and (b) above cannot tell
+    #     them apart -- (a)'s two rects have EQUAL area, so first-wins returns
+    #     the placed point by coincidence -- which a mutation run is how I found
+    #     out rather than assumed.
+    pos, bb, skipped, npins = _port_round_trip(
+        tmp_path, [(-200, -200, 200, 200), (20000, -2000, 24000, 2000)], "small")
+    metal = [(39.8, 23.8, 40.2, 24.2), (60.0, 22.0, 64.0, 26.0)]
+    assert pos == (40.0, 24.0), pos             # the DEF's own point, kept
+    assert _on_metal(pos, metal), (pos, metal)
+    assert bb[0] <= pos[0] <= bb[2] and bb[1] <= pos[1] <= bb[3]
     assert skipped == 0 and npins == 2

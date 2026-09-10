@@ -1956,14 +1956,21 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
     // (Codex P2 on #647).  An internal name that cannot collide keeps them
     // apart; `port_comp` maps the external name back to it.
     std::map<std::string, std::string> port_comp;
-    // Each port's METAL centre, for its pin row's position.  A macro pin is
-    // placed at the centroid of its own RECTs (`LefPinDef::centroid`), and a
-    // die port used its PLACED origin instead -- which is not on its metal at
-    // all once the PORT rect is clear of that origin.  The bbox centre is used
-    // rather than a centroid of centres because what a consumer needs is a
-    // point INSIDE the port component: `export_gds` writes the net label here
-    // and `import_gds` attributes a label to the component CONTAINING it, so
-    // an outside point loses the pin on a GDS round trip.
+    // Each port's pin position: a point ON ITS METAL and inside its component.
+    // A macro pin is placed at the centroid of its own RECTs
+    // (`LefPinDef::centroid`); a die port used its PLACED origin, which is not
+    // on its metal once the PORT rect is clear of that origin -- and the point
+    // must be inside the component too, since `export_gds` writes the net label
+    // here and `import_gds` gives a label to the component CONTAINING it.
+    //
+    // The PLACED point wins whenever it lies on a rect: it is the DEF's own
+    // statement of where the pin is, so nothing moves where nothing was wrong.
+    // Otherwise the LARGEST rect's centre -- the most metal to land on.  NOT
+    // the bbox midpoint, which for disjoint rects can fall in the GAP between
+    // them (measured: rects at 39.8..40.2 and 60.0..60.4 put it at 50.1, on no
+    // metal at all).  `test_a_die_ports_pin_survives_the_merge_unchanged` had
+    // already recorded that trap from an earlier review, and the first cut of
+    // this fix walked into it.
     std::map<std::string, std::pair<double,double>> port_pos;
     // The __PORT__ cell rows (opens item 3): the boundary components
     // reference them, and without a cell row the GDS export emits SREFs to
@@ -2034,7 +2041,9 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
         // straddles its origin (+-70 DBU) and `emit_pin_def` anchors rects at
         // it -- so, like #912 itself, only somebody else's DEF reaches it.
         double x1 = px, y1 = py, x2 = px, y2 = py;
-        bool seeded = false;
+        bool seeded = false, on_metal = false;
+        double best_area = -1, bcx = px, bcy = py;
+        constexpr double kEps = 1e-9;
         for (const auto& r : p.rects) {          // shapes are relative to PLACED
             double ax, ay, bx, by;
             def_orient_xf(po, dbu_to_lu(r.x1), dbu_to_lu(r.y1), 0, 0, ax, ay);
@@ -2046,8 +2055,15 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
                 x1 = std::min(x1, rx1);  y1 = std::min(y1, ry1);
                 x2 = std::max(x2, rx2);  y2 = std::max(y2, ry2);
             }
+            if (px >= rx1 - kEps && px <= rx2 + kEps &&
+                py >= ry1 - kEps && py <= ry2 + kEps) on_metal = true;
+            const double area = (rx2 - rx1) * (ry2 - ry1);
+            if (area > best_area) {              // first rect always wins (-1)
+                best_area = area;
+                bcx = (rx1 + rx2) / 2.0;  bcy = (ry1 + ry2) / 2.0;
+            }
         }
-        port_pos[p.name] = {(x1 + x2) / 2.0, (y1 + y2) / 2.0};
+        if (seeded && !on_metal) port_pos[p.name] = {bcx, bcy};
         const std::string pcell = port_cell_for(x2 - x1, y2 - y1);
         sqlite3_bind_text  (s_comp,1,cname.c_str(),-1,SQLITE_TRANSIENT);
         sqlite3_bind_text  (s_comp,2,pcell.c_str(),-1,SQLITE_TRANSIENT);
