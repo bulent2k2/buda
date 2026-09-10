@@ -376,11 +376,28 @@ verified now, and it is narrower than the prose above implies:
   overturned it was the broken instrument.**  A count settled it, in the
   source's favour, against a measurement — so "measured otherwise" is not
   automatically the end of an argument; the instrument is evidence too.
-  (Which of `pdn_connect.py`'s halves misreported is not yet found: its
-  via reader is NOT the culprit — it reads 6,781 of 6,781 via placements
-  across three of OpenROAD's own pdngen goldens, and a synthetic
-  pin-on-pin crossing round-trips to `connected` on today's tool.  So the
-  hunt starts at the artefacts, not in `read_vias`.)
+  **Which half misreported is now found, and it was neither reader.**  The
+  suspects were cleared in turn — `read_vias` reads 6,781 of 6,781 via
+  placements across three of OpenROAD's own pdngen goldens, and the
+  SPECIALNETS placement map finds all four vias inside the very rect the
+  tool called empty, on net `VGND`, so the net-name mismatch that was the
+  standing hypothesis is ruled out.  The defect is in `report()`: its
+  detail block lists **every** finding of a floating terminal, not only
+  findings that lack something, and the branch describing them fell
+  through to `"…but no via"` without ever testing `f["via"]`.
+
+  On the 109.3 DEF every one of the **1,448** findings is `connected`
+  **with a via** — there is no `partner-no-via` anywhere in the data.  The
+  512 lines were 8 rects × 64 `pe_cell` instances whose TERMINAL is
+  `unsourced`, each correctly joined and each described as unjoined.  So
+  the artefact that overturned a correct source reading was one `elif` in
+  a reporter, and the JSON beside it was right the whole time.
+
+  The terminals really are `unsourced` — the vias join the macro's own
+  pins and nothing feeds that island — which is why the substantive
+  verdict never moved; only the sentence explaining it was false.  Pinned
+  now by a test on the TEXT, the thing no fixture asserted, since every
+  fixture carrying this shape checked the JSON.
 
   What the via does NOT do is source anything: it joins the macro's pins
   to each other, and the island is fed only if a surviving strap fragment

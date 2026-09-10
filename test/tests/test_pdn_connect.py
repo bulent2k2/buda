@@ -876,3 +876,43 @@ def test_the_via_reader_reads_every_placement_a_pdn_generator_writes(name):
     # and every via NAME the file ends a wire statement with is one of them
     truth = len(re.findall(r"\)\s+(via\w+)\s*[;\n]", body))
     assert got >= truth, f"{name}: {truth} in the text, reader found {got}"
+
+
+# ── the detail line must not deny a via the finding HAS (#905) ─────────────
+
+def test_an_unsourced_terminal_is_not_reported_as_having_no_via(tmp_path):
+    """The detail block lists every finding of a FLOATING terminal, not only
+    findings that lack something.  `SELF_DEF`'s rects are all `connected` --
+    partner AND via -- while the terminal is `unsourced`, so all of them get
+    listed, and the branch that describes them used to fall through to
+    "but no via".
+
+    That is the sentence #905 was read off.  On the N=8 `PDN_HOFFSET 109.3`
+    DEF it printed 512 such lines, every one naming a rect that HAS its via
+    (the JSON says `connected` with a via for all 1,448 findings there), and
+    they were taken as "pdngen made none of 512 pin-on-pin crossings" -- a
+    claim about the generator, produced entirely by the reporter.
+
+    So this asserts the TEXT, which nothing did: the fixtures that carry the
+    shape assert the JSON, and the JSON was right the whole time.
+    """
+    r = _cli(tmp_path, SELF_DEF, SELF_LEF)
+    assert "unsourced" in r.stdout, r.stdout
+    # the rects are joined, and the report must say so
+    assert "but no via" not in r.stdout, (
+        "a `connected` finding was described as having no via:\n" + r.stdout)
+    assert "via5_6_2000_2000_1_1_1600_1600" in r.stdout, r.stdout
+    assert "this RECT is fine" in r.stdout, r.stdout
+
+
+def test_a_rect_that_really_has_no_via_still_says_so(tmp_path):
+    """The guard above must not silence the true form.  Strip the via
+    PLACEMENT from `SELF_DEF` (keeping the crossing and the VIAS entry) and
+    the same rects become `partner-no-via`, which is what "but no via" is
+    for."""
+    no_via = SELF_DEF.replace(
+        "  + ROUTED met4 0 + SHAPE STRIPE ( 131000 261000 ) via5_6_2000_2000_1_1_1600_1600\n",
+        "  + ROUTED met4 0 + SHAPE STRIPE ( 131000 261000 ) ( 131000 261001 )\n")
+    assert no_via != SELF_DEF, "fixture edit did not apply"
+    r = _cli(tmp_path, no_via, SELF_LEF)
+    assert "but no via" in r.stdout, r.stdout

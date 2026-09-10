@@ -1107,6 +1107,18 @@ def report(res, out=sys.stdout, limit=12):
         if f["verdict"] == "via-no-partner":
             why = (f"via {f['via']['via']} at ({f['via']['x']}, {f['via']['y']}) with NOTHING "
                    f"on {o} overlapping it -- the reader missed a shape")
+        elif f["verdict"] == "connected":
+            # Listed because its TERMINAL is floating -- never because this
+            # rect wants anything: it has a partner AND a via.  Falling into
+            # the "but no via" branch below is what produced the #905
+            # misreading: on the N=8 `PDN_HOFFSET 109.3` DEF this printed 512
+            # such lines, every one naming a rect that HAS its via, and they
+            # were read as "pdngen made none of 512 pin-on-pin crossings".
+            # The rect is joined; what fails is one level up, and the terminal
+            # table already says so.
+            why = (f"joined by {f['via']['via']} onto the {p['kind']} on "
+                   f"{p['layer']} at {p['rect']} -- this RECT is fine; its "
+                   f"TERMINAL is what fails (the island reaches no source)")
         elif p:
             why = (f"crossed by a {p['kind']} on {p['layer']} at {p['rect']} "
                    f"(overlap {p['overlap']}) but no via")
