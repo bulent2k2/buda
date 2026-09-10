@@ -1116,8 +1116,21 @@ def report(res, out=sys.stdout, limit=12):
             # were read as "pdngen made none of 512 pin-on-pin crossings".
             # The rect is joined; what fails is one level up, and the terminal
             # table already says so.
-            why = (f"joined by {f['via']['via']} onto the {p['kind']} on "
-                   f"{p['layer']} at {p['rect']} -- this RECT is fine; its "
+            #
+            # `partner` is the FIRST qualifying crossing and `via` the FIRST
+            # via inside the rect, chosen independently -- so on a pin that
+            # crosses several shapes the via may sit over a later one, and
+            # naming this partner as the thing it joins would be a claim the
+            # audit never made (Codex, PR #921).  Assert the join only when
+            # this partner actually covers the via point; otherwise give the
+            # via alone, which is all that is established.
+            v = f["via"]
+            px1, py1, px2, py2 = p["rect"]
+            if px1 - EPS <= v["x"] <= px2 + EPS and py1 - EPS <= v["y"] <= py2 + EPS:
+                onto = f" onto the {p['kind']} on {p['layer']} at {p['rect']}"
+            else:
+                onto = f" at ({v['x']}, {v['y']})"
+            why = (f"joined by {v['via']}{onto} -- this RECT is fine; its "
                    f"TERMINAL is what fails (the island reaches no source)")
         elif p:
             why = (f"crossed by a {p['kind']} on {p['layer']} at {p['rect']} "

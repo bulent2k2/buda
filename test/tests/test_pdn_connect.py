@@ -916,3 +916,78 @@ def test_a_rect_that_really_has_no_via_still_says_so(tmp_path):
     assert no_via != SELF_DEF, "fixture edit did not apply"
     r = _cli(tmp_path, no_via, SELF_LEF)
     assert "but no via" in r.stdout, r.stdout
+
+
+# A met4 pin crossing TWO met5 pins with the via over the SECOND only -- the
+# shape that separates "has a via" from "joins onto THIS crossing" (#921).
+TWOCROSS_LEF = """MACRO twocross
+  CLASS BLOCK ;
+  SIZE 200 BY 200 ;
+  PIN VGND
+    USE GROUND ;
+    PORT
+      LAYER met4 ;
+        RECT 30 0 32 200 ;
+      LAYER met5 ;
+        RECT 0 10 200 12 ;
+        RECT 0 150 200 152 ;
+    END
+  END VGND
+END twocross
+"""
+
+TWOCROSS_DEF = """VERSION 5.8 ;
+DESIGN top ;
+UNITS DISTANCE MICRONS 1000 ;
+DIEAREA ( 0 0 ) ( 600000 700000 ) ;
+VIAS 1 ;
+    - via5_6_2000_2000_1_1_1600_1600
+      + VIARULE M4M5_PR
+      + CUTSIZE 800 800
+      + LAYERS met4 via4 met5
+      + CUTSPACING 800 800
+      + ENCLOSURE 600 600 600 600
+      + ROWCOL 1 1
+       ;
+END VIAS
+COMPONENTS 1 ;
+- u1 twocross + PLACED ( 0 0 ) N ;
+END COMPONENTS
+SPECIALNETS 1 ;
+- VGND ( * VGND )
+  + ROUTED met4 0 + SHAPE STRIPE ( 31000 151000 ) via5_6_2000_2000_1_1_1600_1600
+  + USE GROUND ;
+END SPECIALNETS
+END DESIGN
+"""
+
+
+def test_the_detail_line_does_not_invent_which_crossing_the_via_lands_on(tmp_path):
+    """`audit_instance` picks the first qualifying `partner` and the first via
+    inside the rect INDEPENDENTLY, so on a pin crossing several shapes the via
+    may sit over a later one.  Naming that partner as the thing the via joins
+    would be a claim the audit never made (#921).
+
+    Here the met4 pin crosses met5 at y 10..12 and again at y 150..152, and
+    the only via is at (31, 151) -- over the second.  The met4 line must not
+    say it joins onto the first.
+    """
+    r = _cli(tmp_path, TWOCROSS_DEF, TWOCROSS_LEF)
+    met4 = [l for l in r.stdout.splitlines() if "u1.VGND" in l and "met4 [30.0" in l]
+    assert len(met4) == 1, r.stdout
+    line = met4[0]
+    assert "via5_6_2000_2000_1_1_1600_1600" in line, line
+    assert "[0.0, 10.0, 200.0, 12.0]" not in line, (
+        "named a crossing the via does not sit on:\n" + line)
+    assert "at (31.0, 151.0)" in line, line
+
+
+def test_the_detail_line_still_names_the_partner_when_the_via_is_on_it(tmp_path):
+    """The guard above must not cost the useful case: where the recorded
+    partner DOES cover the via, saying so is both true and worth saying.  The
+    met5 rect at y 150..152 is crossed by the met4 pin and the via sits inside
+    that met4 rect, so that line keeps the `onto the ...` form."""
+    r = _cli(tmp_path, TWOCROSS_DEF, TWOCROSS_LEF)
+    met5 = [l for l in r.stdout.splitlines() if "u1.VGND" in l and "met5 [0.0, 150.0" in l]
+    assert len(met5) == 1, r.stdout
+    assert "onto the pin on met4 at [30.0, 0.0, 32.0, 200.0]" in met5[0], met5[0]
