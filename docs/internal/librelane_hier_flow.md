@@ -330,20 +330,64 @@ verified now, and it is narrower than the prose above implies:
   could explain.
 * `InstanceGrid::getInstancePins` (`:1609`) injects the macro's OWN pins as
   fixed shapes on their own layers and `InstanceGrid::getIntersections`
-  (`:1654`) merges them into the search set.  ~~So a macro's met4 pin can
-  be the partner that connects its met5 pin, with no strap anywhere.~~
-  **Measured otherwise** (PR #900, the N=8 `PDN_HOFFSET 109.3` run): that
-  plan offered pdngen 512 pe_cell VGND pin-on-pin crossings of 2.0 × 2.0 µm
-  over the 1.4 floor and it made NONE of them — `pdn_connect.py` reports
-  every one `partner-no-via`, and PSM counts exactly those 512 shapes
-  unconnected — while on the working plan the same pins are fed by a
-  strap's via.  What in `makeVias` declines a pin-on-pin pair is not
-  settled; the source loop pairs them.  So a self-crossing is one pdngen
-  MAY via, never one it did: `pdn_connect.py --self-cross <lef>...` still
-  asks the question from the LEFs alone, and its `yes` is a cell to look
-  at, not a connection.  The model does not depend on it either way — it
-  strands the island for want of a source — which is why direction B
-  fails correctly.
+  (`:1654`) merges them into the search set.  **So a macro's met4 pin IS
+  the partner that vias its met5 pin, with no strap anywhere** — and that
+  is now counted rather than argued (#905, 2026-09-09): on the N=8
+  `PDN_HOFFSET 109.3` DEF the via the source predicts character for
+  character, `via5_6_2000_2000_1_1_1600_1600`, is placed **2,664 times**
+  (1,520 VPWR, 1,144 VGND), with **zero** `PDN-0110`/`PDN-0195` — the only
+  two voices a declined pair has.
+
+  That those are PIN-ON-PIN rests on the via-name FAMILY, not on reading
+  one number.  The DEF draws four `via5_6_*` names, and the trailing
+  `1600_1600` is CONSTANT across all four — so it is not the shape widths,
+  which is the misreading available to anyone who notices that 1.6 is also
+  the strap width.  The LEADING pair varies over {1600, 2000}, and the only
+  nonzero strap widths in `SPECIALNETS` are met4 1600 and met5 1600, so a
+  leading 1600 says THAT SIDE is a strap and `2000_2000` says neither is.
+  All four combinations appear, in the proportions the geometry predicts:
+  pin×pin 2,664, strap×strap 705, strap×pin 256, pin×strap 248.  A closed
+  family is the argument; the width comparison alone was not.
+
+  Locating each via inside its instance (`COMPONENTS` origins + each cell's
+  `SIZE`, bucketing every `SPECIALNETS` placement by containing instance)
+  then meets the refuted claim on its OWN subject, which the aggregate does
+  not: the claim was 512 **pe_cell VGND** crossings and NONE of them made.
+
+  | cell | VGND | VPWR |
+  |---|---|---|
+  | **pe_cell** | **1,024** | 1,280 |
+  | acc_cell | 72 | 144 |
+  | feed_cell | 24 | 48 |
+  | wbuf_cell | 24 | 48 |
+  | **outside any macro** | **0** | **0** |
+
+  pe_cell VGND alone carries **1,024** — 16 per instance across all 64 —
+  where the old reading said zero.  Two things fall out.  **All 2,664 sit
+  inside a macro bbox and none in the channels**, which is what pin-derived
+  vias look like and is evidence independent of the width argument.  And
+  **1,024 = 2 × 512**: the old "512 crossings" was itself short by half (16
+  per instance, not 8), so the broken instrument was wrong in more than one
+  digit — which is the whole lesson below, arriving twice.
+
+  This paragraph said the opposite for a day, on a reading of the same DEF
+  that reported all 512 `partner-no-via`, and the correction is worth more
+  than the fact: **the source reading was right and the measurement that
+  overturned it was the broken instrument.**  A count settled it, in the
+  source's favour, against a measurement — so "measured otherwise" is not
+  automatically the end of an argument; the instrument is evidence too.
+  (Which of `pdn_connect.py`'s halves misreported is not yet found: its
+  via reader is NOT the culprit — it reads 6,781 of 6,781 via placements
+  across three of OpenROAD's own pdngen goldens, and a synthetic
+  pin-on-pin crossing round-trips to `connected` on today's tool.  So the
+  hunt starts at the artefacts, not in `read_vias`.)
+
+  What the via does NOT do is source anything: it joins the macro's pins
+  to each other, and the island is fed only if a surviving strap fragment
+  touches it.  So `--self-cross`'s `yes` is a cell property, never a
+  connection, and the model does not depend on it either way — it strands
+  the island for want of a source, which is why direction B fails
+  correctly.
 * `Grid::makeVias` (`:827`) pulls into the macro's search area every shape
   from every OTHER grid, so the macro grid connects using the CORE grid's
   straps.  LibreLane's macro grid draws no metal of its own: `pdn_cfg.tcl`
@@ -2258,12 +2302,13 @@ have: every netlist here is either authored or uniquified.
    closed cut needs) and the y-remedy from -5.0 to -5.005.  The corrected
    remedy for the 109.3 plan is UNMEASURED: the next `check_grid.tcl` run
    reads it, and until one passes the remedy stays a hypothesis.  The
-   pin-on-pin question (#905) resolved the same way: nothing in the
-   source declines the pair — `InstanceGrid::getIntersections` injects
-   the pins, the generator builds a 2.0 × 2.0 crossing with one cut, and
-   nothing removes it — so the "none of 512" reading contradicts the
-   README's earlier "every rect carried one" and is settled by
-   `grep -c via5_6_2000_2000` on the pdngen DEF.  Either way that via
+   pin-on-pin question (#905) resolved the same way, and then the grep
+   was actually run: nothing in the source declines the pair —
+   `InstanceGrid::getIntersections` injects the pins, the generator builds
+   a 2.0 × 2.0 crossing with one cut, and nothing removes it — and the DEF
+   carries **2,664** placements of exactly that via with zero
+   `PDN-0110`/`PDN-0195`.  So the "none of 512" reading was the wrong one
+   and the README's earlier "every rect carried one" was right.  Either way that via
    sources nothing: it joins the macro's pins to each other, and the
    island is fed only by a surviving strap fragment.
 

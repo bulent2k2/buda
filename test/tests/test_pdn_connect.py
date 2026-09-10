@@ -23,6 +23,7 @@ the reading is wrong — a via with no same-net cross-layer crossing, which
 pdngen's rule (`Grid::getIntersections`) makes impossible.
 """
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -92,6 +93,54 @@ END DESIGN
 """
 
 LAYERS = ("met4", "met5")
+
+# The macro's own two layers CROSS here -- 2.0 x 2.0 um, the shape of the real
+# pe_cell crossing -- where `LEF` above deliberately has them miss (met4 at
+# x 10..12, met5 at x 60..128).  So the pin-on-pin path, which is the ONE
+# thing `--self-cross` and the study's section 7.2 make a claim about, had no
+# coverage at all, and that claim flipped twice without a test noticing (#905).
+SELF_LEF = """MACRO pe_cell
+  CLASS BLOCK ;
+  SIZE 128 BY 150 ;
+  PIN VGND
+    USE GROUND ;
+    PORT
+      LAYER met4 ;
+        RECT 30 0 32 150 ;
+      LAYER met5 ;
+        RECT 0 60 128 62 ;
+    END
+  END VGND
+END pe_cell
+"""
+
+# One placed instance, NO strap anywhere on VGND, and the via pdngen's own
+# name rule produces for that crossing (`via<lvl>_<lvl>_<dx>_<dy>_...`).
+SELF_DEF = """VERSION 5.8 ;
+DESIGN top ;
+UNITS DISTANCE MICRONS 1000 ;
+DIEAREA ( 0 0 ) ( 600000 700000 ) ;
+VIAS 1 ;
+    - via5_6_2000_2000_1_1_1600_1600
+      + VIARULE M4M5_PR
+      + CUTSIZE 800 800
+      + LAYERS met4 via4 met5
+      + CUTSPACING 800 800
+      + ENCLOSURE 600 600 600 600
+      + ROWCOL 1 1
+       ;
+END VIAS
+COMPONENTS 1 ;
+- row_0.pe_0 pe_cell + PLACED ( 100000 200000 ) N ;
+END COMPONENTS
+SPECIALNETS 1 ;
+- VGND ( * VGND )
+  + ROUTED met4 0 + SHAPE STRIPE ( 131000 261000 ) via5_6_2000_2000_1_1_1600_1600
+  + USE GROUND ;
+END SPECIALNETS
+END DESIGN
+"""
+
 
 
 def _lefs(text=LEF, tmp_path=None):
@@ -747,3 +796,83 @@ def test_a_via_onto_the_macros_own_pin_is_not_a_supply(tmp_path):
     r = _cli(tmp_path, deff2, lef)
     assert r.returncode == 1 and "1 floating (1 of them unsourced: a via, but no chain to a source)" in r.stdout
     assert "pe_cell          VGND          unsourced" in r.stdout
+
+
+# ── pin-on-pin: the crossing the source predicts and pdngen makes (#905) ────
+
+def test_a_macros_own_pins_via_each_other_with_no_strap(tmp_path):
+    """`InstanceGrid::getInstancePins` injects the macro's own pins into the
+    set `Grid::getIntersections` searches, so a pin's met4 rect crossing its
+    own met5 rect IS a via candidate with no strap anywhere -- and pdngen
+    makes them: 2,664 placements of exactly this via name on the N=8 PDN DEF,
+    with zero PDN-0110/PDN-0195 (#905).
+
+    This pins the audit's side of that.  The claim in the study's 7.2 was
+    written, then reversed on a reading of the same DEF that reported all 512
+    `partner-no-via`, then reversed BACK by a count -- three states, no test.
+    """
+    res = _run(SELF_DEF, SELF_LEF, tmp_path=tmp_path)
+    for layer in ("met4", "met5"):
+        (f,) = _by(res, "VGND", layer)
+        assert f["verdict"] == "connected", (layer, f)
+        # the partner is the macro's OWN pin, not a strap
+        assert f["partner"]["kind"] == "pin", f
+        assert f["via"]["via"] == "via5_6_2000_2000_1_1_1600_1600", f
+
+
+def test_a_via_is_not_a_source(tmp_path):
+    """The other half of the same claim, and the one the first cut got wrong:
+    the pins are joined to EACH OTHER, which feeds nothing.  With no strap and
+    no top pin the island reaches no supply, so the terminal verdict is
+    `unsourced` even though every rect is `connected` per-pin."""
+    res = _run(SELF_DEF, SELF_LEF, tmp_path=tmp_path)
+    (t,) = [t for t in res["terminals"] if t["net"] == "VGND"]
+    assert not t["reaches_source"], t
+    assert t["verdict"] == "unsourced", t
+
+
+def test_self_cross_sees_the_crossing_the_def_vias(tmp_path):
+    """`--self-cross` asks the CANDIDATE half from the LEF alone: is the
+    crossing there to seat a via on.  Here it is, and the DEF above places
+    a via on exactly it -- so the two halves are reading one crossing, and
+    a disagreement would be a geometry bug in the LEF-only path.  It is not
+    a claim that a candidate is always placed; via generation may decline
+    one, which is what `partner-no-via` is for."""
+    res = P.self_cross(_lefs(SELF_LEF, tmp_path), LAYERS)
+    (pin,) = res["pins"]
+    assert pin["self_crossed"] and pin["overlap"] == 2.0, pin
+    # and the plain LEF, whose pins deliberately miss, must say NO
+    assert not any(p["self_crossed"] for p in P.self_cross(_lefs(LEF, tmp_path), LAYERS)["pins"])
+
+
+# ── the via reader, against real pdngen output ─────────────────────────────
+
+_GOLDEN_DIR = Path(__file__).resolve().parent / "data" / "pdn_goldens"
+_FETCH_CMD = "python3 test/tests/data/pdn_goldens/fetch.py"
+# via PLACEMENTS in SPECIALNETS per golden (`core_grid` draws none)
+_GOLDEN_VIAS = {"core_grid.defok": 0, "core_grid_snap.defok": 3289,
+                "existing.defok": 1806, "macros.defok": 1686}
+
+
+@pytest.mark.parametrize("name", sorted(_GOLDEN_VIAS))
+def test_the_via_reader_reads_every_placement_a_pdn_generator_writes(name):
+    """Not one via placement left unread, on OpenROAD's own pdngen goldens.
+
+    This exists because a claim about pin-on-pin vias was withdrawn on the
+    strength of `pdn_connect.py` reporting none of them, and the follow-up
+    named this reader as the likely culprit (#905).  It is not: across these
+    three goldens it reads 6,781 of 6,781.  Pinning that is what keeps the
+    next search from starting in the same wrong place -- and what would
+    notice if the reader ever DID start dropping a form.
+    """
+    p = _GOLDEN_DIR / name
+    if not p.exists():
+        pytest.skip(f"{name} not fetched -- run: {_FETCH_CMD}")
+    text = p.read_text()
+    body = P._section(text, "SPECIALNETS") or ""
+    got = sum(len(P._vias(m.group(2), 1000.0, {}))
+              for m in re.finditer(r"^\s*-\s+(\S+)(.*?);\s*$", body, re.S | re.M))
+    assert got == _GOLDEN_VIAS[name], f"{name}: read {got}, expected {_GOLDEN_VIAS[name]}"
+    # and every via NAME the file ends a wire statement with is one of them
+    truth = len(re.findall(r"\)\s+(via\w+)\s*[;\n]", body))
+    assert got >= truth, f"{name}: {truth} in the text, reader found {got}"

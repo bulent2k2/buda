@@ -961,19 +961,54 @@ def self_cross(lefs, layers, via_min=VIA_MIN):
     connect layers cross each other far enough to seat a via?
 
     This needs no DEF and no placement, because it is a property of the CELL.
-    Its worth is smaller than the first cut claimed.  The source reads as if
-    such a crossing were a via: `InstanceGrid::getInstancePins` injects the
-    macro's pins into the shape set `Grid::getIntersections` searches, and
-    that loop pairs every same-net lower shape with every upper one.  But
-    the N=8 run measured otherwise: the `PDN_HOFFSET 109.3` plan offered
-    pdngen 512 pe_cell VGND pin-on-pin crossings of 2.0 x 2.0 um over a 1.4
-    floor and it made NONE of them (every one `partner-no-via`, and PSM
-    counting exactly those 512 shapes unconnected) -- while on the working
-    plan the same pins are fed by a STRAP's via, not by each other.  What
-    in `makeVias` declines a pin-on-pin pair is not settled here.  So this
-    reports a crossing pdngen MAY via, never one it did: a `yes` is not a
-    connection, and a cell whose two nets differ here (`SPLIT`) is a cell
-    to look at, not a verdict (#900)."""
+
+    **pdngen PAIRS such a crossing** -- it is not categorically declined,
+    which is what the first cut of this docstring claimed, and that is
+    measured rather than read: `InstanceGrid::getInstancePins` injects the
+    macro's own pins into the shape set `Grid::getIntersections` searches,
+    that loop pairs every same-net lower shape with every upper one, and
+    on the N=8
+    `PDN_HOFFSET 109.3` DEF the via the source predicts character for
+    character -- `via5_6_2000_2000_1_1_1600_1600` -- is placed **2,664**
+    times (1,520 VPWR, 1,144 VGND), with ZERO `PDN-0110`/`PDN-0195`, the
+    only two voices a declined pair has (#905).
+
+    That those are PIN-ON-PIN is the via-name FAMILY, not one number: the
+    trailing `1600_1600` is CONSTANT across all four `via5_6_*` names the
+    DEF draws, so it is not the shape widths -- the misreading waiting for
+    anyone who notices 1.6 is also the strap width.  The LEADING pair
+    varies over {1600, 2000}, and met4/met5 straps are the only 1600-wide
+    shapes in `SPECIALNETS`, so a leading 1600 means THAT SIDE is a strap
+    and `2000_2000` means neither is.  All four combinations appear:
+    pin x pin 2,664, strap x strap 705, strap x pin 256, pin x strap 248.
+
+    Bucketing each via by containing instance meets the refuted claim on
+    its own subject -- it named 512 **pe_cell VGND** crossings and NONE
+    made -- where the aggregate above does not: pe_cell VGND carries
+    **1,024** of them, 16 per instance across all 64, and all 2,664 sit
+    inside a macro bbox with none in the channels.  1,024 is 2 x 512, so
+    that count was short by half as well.
+
+    An earlier reading of the same DEF said it made NONE of 512 and this
+    docstring carried that as "measured otherwise".  It was wrong, and the
+    correction is the point: what the source says a tool does is a
+    hypothesis until somebody counts, and a count is what settled it in the
+    end -- in the source's favour, against the measurement that overturned
+    it first.
+
+    What that count does NOT make this is a PLACEMENT check.  Everything
+    here is LEF geometry against a fixed floor, so a `yes` is a crossing
+    pdngen's search will pair -- via generation may still decline that
+    candidate on a rule no LEF pin rect can express (an intermediate-layer
+    obstruction, spacing, enclosure), and `partner-no-via` is the verdict
+    that says so when it does.  Whether a via was PLACED is a fact about
+    the written DEF, which is `run_audit`'s to read, not this function's.
+
+    Nor does a placed via feed anything: **a via is not a source.**  That
+    island reaches the supply only if a surviving strap fragment touches
+    it, which is reachability -- `run_audit` again, from the DEF, not
+    anything the LEFs alone can answer.  A cell whose two power nets differ
+    here (`SPLIT`) is a cell to look at (#900)."""
     lo, hi = layers
     out = []
     for cell in sorted(lefs):
@@ -1002,10 +1037,13 @@ def report_self(res, out=sys.stdout):
     lo, hi = res["layers"]
     out.write(f"pdn_connect --self-cross: does a power pin cross its own net on "
               f"the other connect layer?\n"
-              f"  pair {lo}/{hi}, via floor {res['via_min']} um.  A crossing pdngen MAY via "
-              f"(InstanceGrid::getInstancePins\n  puts the pins in the search set) -- not one it "
-              f"did: measured on N=8 it made none of 512 such\n  crossings, so a `yes` is not a "
-              f"connection.  The verdict is pdn_connect on the written DEF, and PSM.\n\n")
+              f"  pair {lo}/{hi}, via floor {res['via_min']} um.  A crossing pdngen's search "
+              f"PAIRS, not one it made\n  here (InstanceGrid::getInstancePins puts the pins in "
+              f"the search set; measured on the N=8 PDN\n  DEF, 2664 such vias placed, 0 "
+              f"PDN-0110/0195 -- so they are not categorically declined).\n"
+              f"  This is LEF geometry: a `yes` is a CANDIDATE.  Whether a via was placed "
+              f"(`partner-no-via`\n  says when it was not) and whether supply reaches it are "
+              f"both pdn_connect on the DEF, and PSM.\n\n")
     out.write(f"  cell / pin              {lo:>6} {hi:>6}  overlap  self-crossed\n")
     for r in res["pins"]:
         out.write(f"  {r['cell']:<15} {r['pin']:<6} {r['rects'][lo]:>6} {r['rects'][hi]:>6} "
