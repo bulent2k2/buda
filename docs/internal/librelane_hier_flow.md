@@ -452,7 +452,117 @@ study exists to answer and stays.
   the blocks BY DESIGN, and that trade is the point — at N = 8 the top's
   wire fell 59.9 % while the blocks' rose 40.8 %, for an arm total 2.8 %
   under H+size and 15 % under H.  A floor that forbids the block half
-  forbids the mechanism.  The comparison is STRICT, and it is strict on
+  forbids the mechanism.  **That trade is now measured at three points**
+  (N = 4 added 2026-09-10, `hb4/`), against H+size so the block sizes are
+  held equal and only BUDA's pins and corridors vary:
+
+  | N | blocks | top | arm | top's share of arm wire |
+  |---|---|---|---|---|
+  | 2 | +37.5 % | −45.4 % | **+0.59 %** | 44.5 % |
+  | 4 | +38.5 % | −54.8 % | **−2.23 %** | 43.7 % |
+  | 8 | +40.8 % | −59.9 % | **−2.84 %** | 43.3 % |
+
+  Monotone, and it crosses between N = 2 and N = 4.  The reason is not the
+  one it looks like: the top's SHARE of arm wire is essentially constant
+  (~44 % at every N), so the crossover is not a shifting mix.  `arm =
+  s·top + (1−s)·blocks` at the baseline's `s` is an identity, exact at all
+  three N, so the question is only which of the two ratios moves.
+
+  **The block half is not "nearly flat" — it is a computable mix climbing
+  to a ceiling.**  Per-cell block wire is fixed (below), so the block ratio
+  is that mix weighted by instance counts (N², N, N, 3N), and `pe_cell` is
+  the only N² term, so it converges to `pe_cell`'s own **19264/13401 =
+  +43.75 %**.  The model reproduces the measurement exactly where the
+  per-cell values hold, and its two free extrapolations follow:
+
+  | N | 2 | 4 | 8 | 16 | 32 |
+  |---|---|---|---|---|---|
+  | predicted | +35.18 % | **+38.50 %** | **+40.80 %** | +42.17 % | +42.93 % |
+  | measured | +37.50 % | +38.50 % | +40.80 % | — | — |
+
+  So the honest form of "monotone" is a race against a rising bar.  The
+  top saving needed to break even is `(1−s)/s × blocks`, which RISES with N:
+
+  | N | break-even top saving | measured | margin |
+  |---|---|---|---|
+  | 2 | ≥ 46.7 % | 45.4 % | **−1.3 pts** |
+  | 4 | ≥ 49.7 % | 54.8 % | +5.1 |
+  | 8 | ≥ 53.4 % | 59.9 % | +6.6 |
+
+  The N = 2 row misses by **1.3 points** — that is what "has not yet paid"
+  means, precisely.  And the margin grows but DECELERATES (+5.1 → +6.6
+  against a bar rising 3–4 points per doubling), so the trade improves only
+  for as long as the corridor saving outruns a ceiling-bounded block cost.
+  The block half is now predictable in closed form; the top half is not.
+
+  **What the top half saves is the upper-layer detour, not length
+  everywhere.**  The three top DEFs decompose by layer (a wire-run walk of
+  each `final/def`, which recovers 93–95 % of OpenROAD's own
+  `route__wirelength` because it counts runs and neither vias nor patch
+  rects — so read the shares, not the absolutes):
+
+  | N | met1+met2 | met3+met4+met5 |
+  |---|---|---|
+  | 2 | **+5.5 %** | **−82.4 %** |
+  | 4 | −11.7 % | −87.5 % |
+  | 8 | −17.4 % | −89.5 % |
+
+  At N = 2 the local wire GROWS by 5.5 % and the arm still comes within
+  1.3 points of breaking even; what falls, at every N, is the metal above
+  met2 — met4 alone goes 23,063 → 2,227 µm at N = 2, 73,832 → 3,478 at
+  N = 4 and 272,018 → 9,051 at N = 8.  That names the mechanism rather
+  than assuming it: BUDA's pins land INSIDE the block where the corridor
+  arrives (measured on the hardened LEFs — 82 of `pe_cell`'s 84 pins and
+  50 of `acc_cell`'s 52 move, H+size's sitting on the block boundary at
+  x = 0.3 / y = 0.14 µm where `IOPlacement` put them), the §11 item 13
+  notch opens the OBS over them, and the top reaches them over-the-cell on
+  met2 instead of climbing to met4 to get around a block face.
+
+  The saving is therefore BOUNDED by how much detour there is to remove,
+  which is the same shape the break-even table shows from the other side —
+  it improves with N and decelerates — and it predicts where the top half
+  stops improving: at N = 8 met3+ is already down to **15.1 %** of the
+  top's wire (42,907 of 284,831 µm) against H+size's **58.3 %**, so at most
+  that 15 % remains to be taken.  The top half is still not a closed form,
+  but it is no longer unexplained.
+
+  **The trade is on the clock, and it is visible at all three points.**
+  H+B's worst setup slack is UNDER H+size's by 0.117 ns at N = 2 (0.604 vs
+  0.721), 0.144 at N = 4 (0.298 vs 0.442) and 0.106 at N = 8 (0.371 vs
+  0.476) — all positive, no violations, but consistently worse while the
+  wire is consistently shorter.  Shorter is not faster here because the
+  wire moved DOWN: met2 is thin and resistive where met4 is thick, so
+  trading 272 mm of met4 for a shorter met2 path raises resistance on the
+  paths that take it.  Hold does not pay it (H+B is +0.112 ns with 0
+  violations at all three N; H+size's own N = 8 leg carries −0.220 ns and
+  60 hold violations).
+
+  Two controls make the three-point comparison attributable to pins and
+  corridors alone: the macros are at BYTE-IDENTICAL positions and
+  orientations in both arms at every N (14/14, 36/36, 104/104 checked in
+  the final DEFs), and the arms differ in the pin positions above.  Nothing
+  else about the floorplan moves.
+
+  **Per-cell block wire is N-independent for N ≥ 4, not for all N.**  The
+  H+B templates and the hardened block LEFs (notch patches included) are
+  BYTE-IDENTICAL between N = 4 and N = 8, so block hardening is per
+  size-set rather than per point and any cross-N difference is a top-level
+  effect.  But `pe_cell` breaks it at N = 2 — **19,754** against 19,264 at
+  both larger N, the other three cells and every H+size cell being fixed at
+  all three.  So the mechanism as first stated ("one template per cell TYPE
+  from a reference instance, so the plan cannot depend on instance count")
+  over-reaches: a template MERGES what each instance routes (BUDA-1715),
+  and a 2×2 mesh has no interior PE, so the merge has genuinely different
+  inputs.  That is also exactly why the mix model above misses N = 2 by
+  2.3 points and lands on the other two.  The supportable claim is
+  **converged by N = 4**, which is still what makes the hardening reusable.
+
+  One more thing the three-point table should not leave silent: the N = 2
+  H+B row carries `klayout__drc_error__count: 1` where the other two carry
+  0 — it is the pre-notch run, the N = 8 practice having been to supersede
+  such a run with a clean twin (`hb` → `hbnt`).  That pair moved the arm by
+  11 units in 1.68 M (0.0007 %), so this is a footnote rather than grounds
+  for a re-run — but it is the row the crossover is anchored on.  The comparison is STRICT, and it is strict on
   MEASURED grounds rather than for want of a measurement: **run-to-run
   timing noise is ZERO** (measured 2026-09-08 — an independent repeat of
   the N = 8 H+B arm, all three legs, against the run it repeats:

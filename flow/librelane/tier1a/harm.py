@@ -890,6 +890,38 @@ def write_h(n_dir, out_dir, halo, pins_dir=None):
             "pin_templates": sorted(templates)}
 
 
+def readme_prefixes(n_dir, out_dir, t1a=None):
+    """`(prefix, env)` for a generated README: how to reach `tier1a/` from the
+    ARM directory, and the `T1A_DIR=` the scripts need to find the design.
+
+    A pure function of three paths so the rule can be tested on the case the
+    integration test structurally cannot build — an emitted set sitting
+    directly under `tier1a/`, which is where every checked-in arm lives and
+    the only shape that needs no `T1A_DIR` (Codex #917).
+
+    RELATIVE while the arm lives inside the checkout — that is every arm the
+    study writes, and it keeps the recipe copy-pasteable between clones.
+    ABSOLUTE otherwise, because a `relpath` between two unrelated trees is
+    only correct by accident: it counts `..` up to the filesystem root and
+    back down, so ONE symlink anywhere on the way breaks it.  Rendering into
+    `/tmp` does exactly that on macOS (`/tmp` -> `/private/tmp`), where
+    `../../Users/...` lands in `/private/Users/...` and resolves to nothing
+    (Codex #917).
+    """
+    t1a = t1a or os.path.dirname(os.path.abspath(__file__))
+    out = os.path.abspath(out_dir)
+    repo = os.path.dirname(os.path.dirname(os.path.dirname(t1a)))
+    prefix = os.path.relpath(t1a, out) if os.path.commonpath([out, repo]) == repo else t1a
+    # The scripts derive the design root themselves (`${T1A_DIR:-$here}/n$N`),
+    # so a set NOT directly under `tier1a/` must say where it is -- else the
+    # tool finds the default root's arm, which exists and is hardened, patches
+    # it and reports success.  Relative is fine: `notch.sh` absolutises before
+    # anything reaches a docker bind source.
+    set_root = os.path.dirname(os.path.normpath(os.path.abspath(n_dir)))
+    env = "" if set_root == t1a else "T1A_DIR=%s " % os.path.relpath(set_root, out)
+    return prefix, env
+
+
 def render_readme(n_dir, out_dir, cells, counts, sizes, D, dx, dy, vplan, hplan, advice,
                   dry_run_failed=False, pinned=False):
     blocks = " ".join(f"--block {c}/runs/h:{counts[c]}" for c in cells)
@@ -899,6 +931,31 @@ def render_readme(n_dir, out_dir, cells, counts, sizes, D, dx, dy, vplan, hplan,
     plef = " ".join(f"predicted_lef/{c}.lef" for c in cells)
     arm = "H+B" if pinned else "H"
     tag = "hb" if pinned else "h"
+    # `notch.sh` defaults to the arm directory `h`, so an arm that `--out` put
+    # somewhere else has to SAY so in its own recipe.  Without this the `hs`
+    # arm's README told you to run the bare command, which patches the SIBLING
+    # `h` arm and reports success while this arm's abstracts stay missing --
+    # silent then, loud much later when this top stops on a LEF that is not
+    # there (Codex #917).
+    arm_dir = os.path.basename(os.path.normpath(out_dir))
+    # EVERY tool path in this README is relative to the ARM directory, and the
+    # depth is not fixed: an emitted set may sit directly under `tier1a/`
+    # (`n2/`) or inside a comparison root (`hb/n8/`, `hb4/n4/`), which the
+    # study uses to hold several arms of one N without overwriting each other.
+    # `../../` is right only for the first, so four of the eight recorded arms
+    # got a README whose every command pointed at a directory that does not
+    # exist -- and `>> {rel}/results.jsonl` would have written a SECOND results
+    # file inside the comparison root (Codex #917).
+    t1a = os.path.dirname(os.path.abspath(__file__))
+    rel, env = readme_prefixes(n_dir, out_dir, t1a)
+    # ...and the scripts derive the design root themselves (`${T1A_DIR:-$here}/n$N`),
+    # so a set outside `tier1a/` needs T1A_DIR too.  Without it the path fix
+    # alone just relocates the failure: `notch.sh 4` run for `hb4/n4/h` finds
+    # `tier1a/n4/h`, which EXISTS and is hardened, patches it and reports
+    # success while this arm's abstracts stay missing.
+    notch_cmd = (env + f"{rel}/notch.sh {n_arr}"
+                 + ("" if arm_dir == "h" else f" --arm {arm_dir}"))
+    guides_cmd = env + f"{rel}/guides.sh {n_arr}"
     if pinned:
         top_section = f"""## 4. The top -- in three parts, because BUDA's corridors go in mid-flow
 
@@ -921,9 +978,9 @@ why BUDA's guides go in AFTER this and not before.
 
 ### 4b. BUDA's corridors, into the ODB
 
-    ../../guides.sh {n_arr}                      # -> top/out/buda_bus.guide
+    {guides_cmd}                      # -> top/out/buda_bus.guide
     ODB=$(ls -t top/runs/{tag}/*/*.odb | head -1)
-    ../../../phase0/measure/run_or.sh top/runs/{tag} ../../guide_route.tcl \\
+    {rel}/../phase0/measure/run_or.sh top/runs/{tag} {rel}/guide_route.tcl \\
         ODB=$ODB GUIDE=$PWD/top/out/buda_bus.guide OUT=$PWD/top/out
 
 Pass: `guides.buda` ends in a clean `check_design dnuts`, and `guide_route.tcl`
@@ -966,7 +1023,7 @@ piece is the top's corridors -- `guides.sh`, step 4b below.
 ...and, on this arm, the pins landed where BUDA put them:
 
     for c in """ + " ".join(cells) + """; do
-        python3 ../../../../../tools/pin_def_verify.py ../pins/$c.def $c/runs/h/final/def/$c.def || echo "$c: PINS MOVED"
+        python3 """ + rel + """/../../../tools/pin_def_verify.py ../pins/$c.def $c/runs/h/final/def/$c.def || echo "$c: PINS MOVED"
     done
 
 Every TEMPLATE pin must be in the hardened DEF at the same ABSOLUTE
@@ -994,7 +1051,7 @@ Utilization (rough): {'; '.join(advice)}
 
 ## 0. Dry-run the PDN check on the PREDICTED pins (no tools needed) -- ADVISORY
 
-    python3 ../../pdn_phase.py top/config.json {plef}
+    python3 {rel}/pdn_phase.py top/config.json {plef}
 
 `PASS: {sum(counts.values())} instances, ...` only proves the plan agrees with its own prediction.
 **It is a prediction, not the verdict** ({'it does NOT pass here, and that alone is not a reason to change anything -- ' if dry_run_failed else ''}librelane_hier_flow.md
@@ -1017,7 +1074,7 @@ RTL: regenerate the whole set with a larger `-PEPAD` (see the utilization line a
 
 ## 2. Close the abstraction notch in every block's LEF -- NOT optional
 
-    ../../notch.sh {n_arr}
+    {notch_cmd}
 
 Magic's `final/lef/<cell>.lef` abstracts the block rect by rect and leaves a NOTCH uncovered where a pin rect
 ends and the OBS blanket begins.  The macro's real metal sits in it, the top's router reads it as free and
@@ -1043,9 +1100,9 @@ it by hand rather than working around it; the recipe is the same two tools, per 
 
     c=<the cell that refused>; f=$PWD/$c/runs/h/final       # run from here, n<N>/h
     docker run --rm -v "$HOME:$HOME" -w "$PWD" ghcr.io/librelane/librelane:3.0.11 \\
-        klayout -b -r ../../rectify_gds.py \\
+        klayout -b -r {rel}/rectify_gds.py \\
         -rd gds=$f/gds/$c.gds -rd lnum=69 -rd ldt=20 -rd out=$f/gds/$c.rect.gds
-    python3 ../../notch_obs.py $f/gds/$c.rect.gds $f/lef/$c.lef $f/lef/$c.notch.lef
+    python3 {rel}/notch_obs.py $f/gds/$c.rect.gds $f/lef/$c.lef $f/lef/$c.notch.lef
 
 (met2 is GDS 69/20; `notch_obs.py --gds-layer L/DT` takes another pair.)  A cell whose GDS the decomposition
 genuinely cannot handle can be carried UNPATCHED with `cp $f/lef/$c.lef $f/lef/$c.notch.lef` -- the top
@@ -1054,7 +1111,7 @@ its markers are back.
 
 ## 3. The PDN-phase check on the HARDENED pins -- ADVISORY, same as step 0
 
-    python3 ../../pdn_phase.py top/config.json {lefs}
+    python3 {rel}/pdn_phase.py top/config.json {lefs}
 
 Worth reading for what it SHOWS -- which strap meets which pin (TRIM), which terminal ends up on no grid
 (STRANDED), which strap piece survives trim off the grid (FLOATING), and the shift the MODEL predicts would clear
@@ -1071,8 +1128,8 @@ flattened netlist does not have exits 1 there -- that is the `row_0/pe_0` to `ro
 **This is the PDN verdict** -- `PSM-0040`/`PSM-0069` and `top/runs/{tag}/*/*-grid-errors.rpt`, not step 0 or step 3.
 If it fails, localise it on the DEF pdngen actually wrote before changing anything:
 
-    python3 ../../pdn_connect.py top/runs/{tag}/*-pdn/*.def */runs/h/final/lef/*.notch.lef --json pdn.json
-    python3 ../../pdn_connect.py --self-cross */runs/h/final/lef/*.notch.lef
+    python3 {rel}/pdn_connect.py top/runs/{tag}/*-pdn/*.def */runs/h/final/lef/*.notch.lef --json pdn.json
+    python3 {rel}/pdn_connect.py --self-cross */runs/h/final/lef/*.notch.lef
 
 The first names every power terminal with no via, and every strap FRAGMENT cut off from the grid with the
 terminals it strands -- the two halves of a PSM failure, which need opposite fixes.  The second needs no run
@@ -1081,12 +1138,12 @@ that no PDN offset can change.
 
 ## 5. The row for the table (§7.3: top plus every block, wire per PLACED instance)
 
-    python3 ../../runtimes.py top/runs/{tag} --set N={n_arr} --set arm={arm} --blocks-from top/config.json
-    python3 ../../runtimes.py top/runs/{tag} --set N={n_arr} --set arm={arm} --blocks-from top/config.json --json >> ../../results.jsonl
+    python3 {rel}/runtimes.py top/runs/{tag} --set N={n_arr} --set arm={arm} --blocks-from top/config.json
+    python3 {rel}/runtimes.py top/runs/{tag} --set N={n_arr} --set arm={arm} --blocks-from top/config.json --json >> {rel}/results.jsonl
 
 `--set` puts the benchmark coordinates into the row (a row must say which point it is on its own, #881);
 `--blocks-from` reads the block run directories and instance counts off the MACROS entry; the explicit form is
-`python3 ../../runtimes.py top/runs/{tag} {blocks}`.
+`python3 {rel}/runtimes.py top/runs/{tag} {blocks}`.
 """
 
 

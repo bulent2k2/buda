@@ -287,7 +287,13 @@ def test_harm_sh_writes_the_h_arm_from_the_emitted_set(tmp_path, n):
     # the notch step, and the two checks that read the macro LEFs by GLOB:
     # with `<cell>.notch.lef` beside `<cell>.lef`, a `*.lef` glob would hand
     # each tool BOTH abstracts of every cell
-    assert f"../../notch.sh {n}" in readme
+    # the notch line RESOLVES from the arm directory (its depth depends on where
+    # the emitted set sits, so a hardcoded `../../` is right only sometimes)
+    notch_line = next(l.strip() for l in readme.splitlines()
+                      if "notch.sh" in l and l.startswith(" "))
+    notch_path = re.search(r"(\S*notch\.sh)", notch_line).group(1)
+    assert (h / notch_path).exists(), f"{notch_line!r} -> {(h / notch_path)}"
+    assert f"notch.sh {n} --arm" not in readme    # this arm IS in h/
     assert "final/lef/*.lef" not in readme and "final/lef/*.notch.lef" in readme
     for c in cells:
         assert f"../{c}/runs/h/final/lef/{c}.notch.lef" in readme
@@ -1306,6 +1312,86 @@ def _walk_blocks(doc, t1a, _ROOT):
     return checked
 
 
+def _assert_readme_paths_resolve(out, readme):
+    """Every tool path a generated README prints must RESOLVE from the arm
+    directory, and no `{placeholder}` may survive into it.
+
+    Both halves are here because both were shipped.  The path half: `../../`
+    was hardcoded, right only for a set directly under `tier1a/` and pointing
+    into nothing for the four arms in comparison roots.  The placeholder half:
+    the fix put `{rel}` inside `pin_verify_note`, which is a PLAIN string
+    (`\"\"\"` nested in an f-string field is PEP 701, and CI pins 3.11), so it
+    reached the file verbatim -- on the H+B arm only, i.e. the arm the study is
+    about (Codex #917).  The regex takes ABSOLUTE and `{`-bearing paths too;
+    the first version required a leading `../` and skipped both new defects."""
+    left = re.findall(r"\{[a-z_]+\}", readme)
+    assert not left, f"{out}: unexpanded placeholder(s) {sorted(set(left))}"
+    toks = re.findall(r"(?<![\w/.])((?:/|\.\./)[\w{}./-]*\.(?:sh|py|tcl|jsonl))", readme)
+    assert toks, f"{out}: no tool path found at all -- has the README changed shape?"
+    bad = [t for t in set(toks) if not (out / t).exists()]
+    assert not bad, f"{out}: unresolvable from the arm dir: {sorted(bad)}"
+
+
+def test_readme_prefixes_is_relative_in_tree_and_absolute_out_of_it():
+    """The path/root rule as a pure function, because the integration test
+    structurally cannot build the case that matters most: an emitted set
+    sitting directly under `tier1a/`, which is where every checked-in arm
+    lives and the ONLY shape needing no `T1A_DIR` (Codex #917)."""
+    sys.path.insert(0, str(_T1A))
+    import harm                                      # noqa: E402
+    t1a = str(_T1A)
+    # in-tree, default root: relative prefix, NO env
+    pre, env = harm.readme_prefixes(str(_T1A / "n2"), str(_T1A / "n2" / "h"), t1a)
+    assert pre == "../.." and env == ""
+    # in-tree, COMPARISON root: relative prefix, and env or the tool finds n2/h
+    pre, env = harm.readme_prefixes(str(_T1A / "hb4" / "n4"),
+                                    str(_T1A / "hb4" / "n4" / "hs"), t1a)
+    assert pre == "../../.." and env == "T1A_DIR=../.. "
+    # outside the checkout: ABSOLUTE, since a relpath between unrelated trees
+    # counts `..` to the root and one symlink on the way breaks it
+    pre, env = harm.readme_prefixes("/tmp/x/n2", "/tmp/x/n2/h", t1a)
+    assert pre == t1a and env == "T1A_DIR=../.. "
+    assert os.path.isabs(pre)
+
+
+@pytest.mark.skipif(not _HAS_TCLSH, reason="gen.sh emits the set through tclsh")
+def test_an_arm_outside_h_tells_you_its_own_notch_command(tmp_path):
+    """`harm.py --out` can put an arm anywhere, and the study does it: `n2/hs`
+    and `hb4/n4/hs` are H+size arms beside their H+B twin in ONE emitted set.
+    `notch.sh` defaults to the arm directory `h`, so such an arm's README has
+    to name `--arm` or its own recipe patches the SIBLING and reports success
+    while this arm's abstracts stay missing (Codex #917) -- silent then, and
+    loud much later when this top stops on a `.notch.lef` that is not there.
+    """
+    d = _emit(tmp_path, 2)
+    # BOTH root shapes: an emitted set directly under the arm's parent, and one
+    # inside a COMPARISON ROOT (`hb4/n4/`), which is what the study uses to hold
+    # several arms of one N.  The depth differs between them, so a README with a
+    # hardcoded `../../` is right for one and points at nothing for the other.
+    deep = tmp_path / "cmp"
+    deep.mkdir()
+    shutil.copytree(d, deep / "n2")
+    for base in (d, deep / "n2"):
+        # `--pins` only needs the templates to EXIST for the README to render,
+        # and the H+B arm is where the `{rel}` placeholder defect lived, so it
+        # has to be one of the arms rendered here
+        (base / "pins").mkdir(exist_ok=True)
+        for c in _lef_sizes(base / "tpu.lef"):
+            (base / "pins" / f"{c}.def").write_text("DESIGN %s ;\nEND DESIGN\n" % c)
+        for out, armed, pins in ((base / "h", False, False), (base / "hs", True, False),
+                                 (base / "hb", False, True)):
+            r = subprocess.run([sys.executable, str(_T1A / "harm.py"), str(base),
+                                "--out", str(out)] + (["--pins", "pins"] if pins else []),
+                               capture_output=True, text=True, timeout=600)
+            assert r.returncode == 0, r.stdout + r.stderr
+            readme = (out / "README.md").read_text()
+            line = next(l.strip() for l in readme.splitlines()
+                        if "notch.sh" in l and l.startswith(" "))
+            # the arm names itself only when it is not `h`
+            assert ("--arm " in line) == (out.name != "h"), f"{out}: {line!r}"
+            _assert_readme_paths_resolve(out, readme)
+
+
 def test_notch_sh_refuses_an_unhardened_cell_and_clears_the_stale_patch(tmp_path):
     """`notch.sh N` closes #896's abstraction notch per cell, and the whole
     point of moving it out of the hand recipe (#907) is that it cannot be
@@ -1346,6 +1432,44 @@ def test_notch_sh_refuses_an_unhardened_cell_and_clears_the_stale_patch(tmp_path
                        env={**os.environ, "T1A_DIR": str(tmp_path)},
                        capture_output=True, text=True, timeout=300)
     assert r.returncode == 1 and "gen.sh 3" in r.stderr
+
+    # `--arm`: the arm directory is not always `h`.  `harm.py --out` puts one
+    # wherever it is told and the study does exactly that -- `n2/hs` is the
+    # H+size arm beside its H+B twin in one emitted set -- so hard-coding `h`
+    # left those arms unable to run this at all.
+    alt = d / "hs" / "pe_cell" / "runs" / "h" / "final"
+    (alt / "gds").mkdir(parents=True)
+    (alt / "lef").mkdir(parents=True)
+    (alt / "lef" / "pe_cell.notch.lef").write_text("last run's patch\n")
+    r = subprocess.run(["bash", str(_T1A / "notch.sh"), "2", "--arm", "hs"],
+                       env={**os.environ, "T1A_DIR": str(tmp_path)},
+                       capture_output=True, text=True, timeout=300)
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "pe_cell is not hardened" in r.stderr          # it looked in hs/, not h/
+    assert "/hs/pe_cell/" in r.stderr, r.stderr
+    assert not (alt / "lef" / "pe_cell.notch.lef").exists()   # stale patch still cleared
+    # A missing arm directory names `--arm` in its remedy ONLY for somebody who
+    # did not pass it; to one who did, it is noise about the option they just
+    # used.  (My first cut asserted the opposite, and spelled the condition as
+    # `${arm:+...}`, which cannot distinguish anything reachable -- `arm`
+    # defaults to `h` -- and printed the FLAG's value.  Codex #917.)
+    def run(*extra):
+        return subprocess.run(["bash", str(_T1A / "notch.sh"), "2", *extra],
+                              env={**os.environ, "T1A_DIR": str(tmp_path)},
+                              capture_output=True, text=True, timeout=300)
+    r = run("--arm", "nope")
+    assert r.returncode == 1 and "/nope" in r.stderr
+    assert "--arm" not in r.stderr, r.stderr          # they used it; do not suggest it
+    assert " 1" not in r.stderr.rstrip(), r.stderr    # nor print the flag's value
+    (d / "h").rename(d / "moved")                     # now `h` itself is missing
+    r = run()
+    assert r.returncode == 1 and "--arm <dir>" in r.stderr, r.stderr
+    (d / "moved").rename(d / "h")
+    # and an EMPTY --arm is refused BY NAME, like the empty --layers above it:
+    # `$d/` is a directory, so it otherwise sails past the guard and fails per
+    # cell with a doubled slash pointing at the cell rather than the option
+    r = run("--arm", "")
+    assert r.returncode == 1 and "--arm ''" in r.stderr and "names no arm" in r.stderr
 
 
 def test_notch_sh_refuses_an_empty_layer_list_instead_of_renaming_the_deliverables(tmp_path):
