@@ -24,11 +24,22 @@ same thing at `w = h = 0`, which is how the C++ side gets away with a single
 function -- `def_orient_xf` in `bdb.cpp`, the twin of this table.)
 
 **These are DEF's tokens, not BDB's.**  The two conventions agree on the
-pure rotations and DISAGREE on all four flips (DEF mirrors about Y, so `FN`
-is `(-x, y)`; BDB mirrors about X, so its `FN` is `(x, -y)`).
-`def_orient_to_bdb` in `bdb.cpp` is the permutation between them.  A token
-read straight out of a DEF file belongs here; a `component.orient` read back
-out of a BDB belongs in `src/orient_rect.py`.
+pure rotations and differ on the two DIRECTION-PRESERVING flips: DEF mirrors
+about Y, so `FN` is `(-x, y)`, while BDB mirrors about X and its `FN` is
+`(x, -y)` (and `FS` the same the other way).  They AGREE on the two
+axis-SWAPPING flips -- `FW` is the plain transpose `(y, x)` under both and
+`FE` is `(h-y, w-x)` under both.  This said "all four" until it was measured
+(`test/tests/test_def_orient_twins.py`); the example it gave was `FN`, one of
+the two that do differ.  `def_orient_to_bdb` in `bdb.cpp` permutes all four
+flip TOKENS, which for `FE`/`FW` is a claim about the stored token rather
+than about these transforms -- see that test's note.  A token read straight
+out of a DEF file belongs here; a `component.orient` read back out of a BDB
+belongs in `src/orient_rect.py`.
+
+The twins whose agreement with this table is MEASURED rather than argued
+(#912 is why): `def_orient_xf` in `src/bdb.cpp`, and `_ORIENT` in
+`flow/librelane/tier1a/pdn_phase.py` -- the latter a stdlib-only script that
+must run inside a LibreLane run tree, so it cannot import this.
 
 Lives in `tools/` rather than `src/` because both callers are here and one of
 them (`pin_def_verify.py`) is run as a bare script from an arbitrary

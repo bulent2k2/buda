@@ -2016,15 +2016,27 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
         // The box is DEGENERATE here (0 x 0) because a PORT rect is anchored
         // at a point rather than inside an extent -- see `def_orient_xf`.
         const std::string po = p.orient.empty() ? "N" : p.orient;
+        // The bbox is the PORT metal's extent.  A PIN with no PORT rect has no
+        // metal and degenerates to its placed point -- but that point is only
+        // the FALLBACK, never a corner the rects are unioned with: a PORT rect
+        // is origin-RELATIVE and need not contain the origin, so seeding the
+        // box with the point stretched the extent out to it and claimed metal
+        // the DEF never drew.  Invisible on every DEF here -- `flow/ariane133`
+        // straddles its origin (+-70 DBU) and `emit_pin_def` anchors rects at
+        // it -- so, like #912 itself, only somebody else's DEF reaches it.
         double x1 = px, y1 = py, x2 = px, y2 = py;
+        bool seeded = false;
         for (const auto& r : p.rects) {          // shapes are relative to PLACED
             double ax, ay, bx, by;
             def_orient_xf(po, dbu_to_lu(r.x1), dbu_to_lu(r.y1), 0, 0, ax, ay);
             def_orient_xf(po, dbu_to_lu(r.x2), dbu_to_lu(r.y2), 0, 0, bx, by);
-            x1 = std::min(x1, px + std::min(ax, bx));
-            y1 = std::min(y1, py + std::min(ay, by));
-            x2 = std::max(x2, px + std::max(ax, bx));
-            y2 = std::max(y2, py + std::max(ay, by));
+            const double rx1 = px + std::min(ax, bx), rx2 = px + std::max(ax, bx);
+            const double ry1 = py + std::min(ay, by), ry2 = py + std::max(ay, by);
+            if (!seeded) { x1 = rx1; y1 = ry1; x2 = rx2; y2 = ry2; seeded = true; }
+            else {
+                x1 = std::min(x1, rx1);  y1 = std::min(y1, ry1);
+                x2 = std::max(x2, rx2);  y2 = std::max(y2, ry2);
+            }
         }
         const std::string pcell = port_cell_for(x2 - x1, y2 - y1);
         sqlite3_bind_text  (s_comp,1,cname.c_str(),-1,SQLITE_TRANSIENT);
