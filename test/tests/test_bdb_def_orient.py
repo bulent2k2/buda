@@ -54,8 +54,9 @@ def _import(tmp_path, *placements):
 
 
 def test_def_orient_tokens_and_dims(tmp_path):
-    # DEF's pure rotations coincide with BDB's; the flip tokens permute (DEF
-    # mirrors about Y, BDB about X); 90/270 swap the placed dims vs LEF SIZE.
+    # DEF's pure rotations coincide with BDB's; the DIRECTION-PRESERVING flips
+    # permute (DEF mirrors about Y, BDB about X) while FE/FW do NOT -- the two
+    # conventions agree there (#922); 90/270 swap the placed dims vs LEF SIZE.
     db = _import(
         tmp_path,
         ("c_n",  100, 100, "N"), ("c_w",  300, 100, "W"),
@@ -72,8 +73,8 @@ def test_def_orient_tokens_and_dims(tmp_path):
         "c_e":  ("E",  40.0, 100.0),   # 270 -> swap
         "c_fn": ("FS", 100.0, 40.0),   # DEF FN (mirror-Y) == BDB FS
         "c_fs": ("FN", 100.0, 40.0),   # DEF FS (mirror-X) == BDB FN
-        "c_fe": ("FW", 40.0, 100.0),   # DEF FE == BDB FW, swap
-        "c_fw": ("FE", 40.0, 100.0),   # DEF FW == BDB FE, swap
+        "c_fe": ("FE", 40.0, 100.0),   # DEF FE == BDB FE (agree), swap
+        "c_fw": ("FW", 40.0, 100.0),   # DEF FW == BDB FW (agree), swap
     }
 
 
@@ -176,3 +177,47 @@ def test_a_pin_rect_is_transformed_about_its_origin_not_a_box(tmp_path):
     assert box["PIN/p_N"] == (40.0, 24.0, 42.0, 24.5), box
     # S: down-and-left of it — a box-normalized transform cannot produce this
     assert box["PIN/p_S"] == (38.0, 23.5, 40.0, 24.0), box
+
+
+def test_a_cell_sub_rect_projects_where_the_def_orientation_puts_it(tmp_path):
+    """The dims test above cannot see a transposed token: `FE` and `FW` both
+    swap w/h, so a whole-cell footprint is the same box either way.  A cell
+    SUB-rect is what tells them apart -- the v30 multi-rect footprint
+    (`set_cell_rects`), which `tools/buda2bdb.py` writes and the TEG machinery
+    reads.  `def_orient_to_bdb` transposed `FE`/`FW` and this is what caught it
+    (#922): a DEF `FE` instance stored `FW` and projected its rects to `FW`'s
+    place.
+
+    The two conventions agree on `FE`/`FW` and differ only on `FN`/`FS`, which
+    falls out of what a BDB token MEANS -- mirror about X, then rotate CCW by
+    the angle (`gds_io.cpp`'s `transform_to_orient`).  DEF mirrors about Y for
+    its direction-preserving flips and about the same axes as BDB for the
+    axis-swapping ones."""
+    import orient_rect
+    from def_orient import DEF_ORIENT_POINT
+
+    RECT, W, H = (10.0, 5.0, 40.0, 20.0), 100.0, 40.0   # off-centre on BOTH axes
+
+    def def_box(o):
+        """Where DEF's own orientation puts that rect in the placed frame."""
+        f = DEF_ORIENT_POINT[o]
+        pts = [f(x, y) for x in (RECT[0], RECT[2]) for y in (RECT[1], RECT[3])]
+        cs = [f(x, y) for x in (0, W) for y in (0, H)]
+        ox, oy = min(c[0] for c in cs), min(c[1] for c in cs)
+        return (round(min(p[0] for p in pts) - ox, 3),
+                round(min(p[1] for p in pts) - oy, 3),
+                round(max(p[0] for p in pts) - ox, 3),
+                round(max(p[1] for p in pts) - oy, 3))
+
+    orients = ["N", "S", "W", "E", "FN", "FS", "FE", "FW"]
+    db = _import(tmp_path, *[(f"c_{o}", 200 + 300 * i, 200, o)
+                             for i, o in enumerate(orients)])
+    stored = {c.name.split("_", 1)[1]: c.orient for c in db.all_components()}
+
+    for o in orients:
+        got = orient_rect.oxf_rect(stored[o], *RECT, W, H)
+        assert got == def_box(o), (o, stored[o], got, def_box(o))
+
+    # and the two that were transposed give DIFFERENT answers, so re-swapping
+    # them cannot pass by coincidence the way the dims assertion does
+    assert def_box("FE") != def_box("FW")

@@ -30,9 +30,9 @@ about Y, so `FN` is `(-x, y)`, while BDB mirrors about X and its `FN` is
 axis-SWAPPING flips -- `FW` is the plain transpose `(y, x)` under both and
 `FE` is `(h-y, w-x)` under both.  This said "all four" until it was measured
 (`test/tests/test_def_orient_twins.py`); the example it gave was `FN`, one of
-the two that do differ.  `def_orient_to_bdb` in `bdb.cpp` permutes all four
-flip TOKENS, which for `FE`/`FW` is a claim about the stored token rather
-than about these transforms -- see that test's note.  A token read straight
+the two that do differ.  `def_orient_to_bdb` in `bdb.cpp` is that permutation,
+and it permutes those two TOKENS only -- it exchanged `FE`/`FW` as well until
+#922, which stored a DEF `FE` instance as `FW`.  A token read straight
 out of a DEF file belongs here; a `component.orient` read back out of a BDB
 belongs in `src/orient_rect.py`.
 

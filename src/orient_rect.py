@@ -37,9 +37,9 @@ read the geometry without dragging in the routing engine.  The table mirrors
 # also swap axes -- measured, in both the point and box forms, by
 # `test/tests/test_def_orient_twins.py`; this said "all four" until then.  A
 # token read straight out of a DEF file goes through `tools/def_orient.py`
-# instead; `def_orient_to_bdb` in `bdb.cpp` permutes all four flip TOKENS,
-# which for `FE`/`FW` is a claim about the stored token and not about these
-# transforms (see that test's note).
+# instead; `def_orient_to_bdb` in `bdb.cpp` is that permutation, and it
+# permutes the two DIRECTION-PRESERVING flip TOKENS only -- it exchanged
+# `FE`/`FW` as well until #922, which stored a DEF `FE` instance as `FW`.
 ORIENT_MAPS = {"N":  (0, 0, 0), "S":  (0, 1, 1),
                "FN": (0, 0, 1), "FS": (0, 1, 0),
                "W":  (1, 1, 0), "E":  (1, 0, 1),

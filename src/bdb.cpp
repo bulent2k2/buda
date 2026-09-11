@@ -1362,10 +1362,12 @@ double BDB::die_h() const {
 
 // Map a DEF/LEF orientation token to BDB's component.orient token and whether
 // the placed bbox dims swap vs the LEF SIZE. BDB's orient convention is
-// (mirror-about-X-first, CCW angle); DEF's pure rotations N/W/S/E coincide,
-// but DEF's flip tokens mirror about the Y axis (FN = MY), so they permute
-// under BDB's mirror-about-X form: DEF FN<->BDB FS, DEF FS<->BDB FN,
-// DEF FE<->BDB FW, DEF FW<->BDB FE. swap_wh is set for the 90/270 rotations.
+// (mirror-about-X-first, CCW angle); DEF's pure rotations N/W/S/E coincide.
+// Only the DIRECTION-PRESERVING flips permute -- DEF mirrors about Y there
+// (FN = MY) where BDB mirrors about X -- so DEF FN<->BDB FS and DEF FS<->BDB
+// FN.  The axis-SWAPPING flips are the SAME transform under both conventions
+// (FW is (y, x), FE is (-y, -x)) and map to themselves; this comment said
+// they exchanged too, and the code did (#922). swap_wh is set for 90/270.
 // A die PORT's direction, as seen from INSIDE the design.
 //
 // A boundary component is a stand-in for the world outside the die, and a
@@ -1384,8 +1386,9 @@ static std::string port_dir_inward(const std::string& d) {
 
 // A DEF orientation applied to a point in the oriented object's own frame,
 // over a w x h box whose transformed lower-left stays at the origin.  DEF's
-// own tokens, NOT the BDB ones `def_orient_to_bdb` maps to (the flips
-// differ), because both callers hold a token straight out of the file.
+// own tokens, NOT the BDB ones `def_orient_to_bdb` maps to (FN and FS differ
+// between the conventions), because both callers hold a token straight out of
+// the file.
 //
 // Called with w = h = 0 it is the ORIGIN-RELATIVE transform, which is what a
 // DEF `PIN`'s `PORT` geometry needs: that rect is given relative to the pin's
@@ -1413,8 +1416,17 @@ static std::pair<std::string,bool> def_orient_to_bdb(const std::string& o) {
     if (o == "E")  return {"E",  true};
     if (o == "FN") return {"FS", false};   // DEF FN (MY) == BDB FS (mirrorX,180)
     if (o == "FS") return {"FN", false};   // DEF FS (MX) == BDB FN (mirrorX,0)
-    if (o == "FE") return {"FW", true};    // DEF FE == BDB FW (mirrorX,90)
-    if (o == "FW") return {"FE", true};    // DEF FW == BDB FE (mirrorX,270)
+    // FE and FW are NOT permuted: the two conventions AGREE on them.  A BDB
+    // token means "mirror about X, then rotate CCW by angle" (`gds_io.cpp`
+    // defines it), so BDB FW is (y, x) and BDB FE is (-y, -x) -- which is
+    // exactly what DEF's FW and FE are.  Only the direction-preserving flips
+    // differ, because there DEF mirrors about Y where BDB mirrors about X.
+    // These two rows used to swap as well, so a DEF `FE` instance was stored
+    // `FW`: invisible in a whole-cell bbox (both swap w/h) and self-consistent
+    // through GDS, but it projects a cell SUB-rect to the wrong place and
+    // exports an absolutely-mirrored SREF (#922).
+    if (o == "FE") return {"FE", true};
+    if (o == "FW") return {"FW", true};
     return {"N", false};                   // unknown -> identity
 }
 

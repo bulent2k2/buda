@@ -2458,10 +2458,13 @@ ignored. The LEF supplies cell *sizes* and *pin offsets/directions* only.
 DEF name escaping (`\[`, `\]`) is stripped so instance names match the
 Verilog-elaborated paths. Component **orientation is recorded** in
 `component.orient` (v13): the DEF token maps to BDB's orient convention (DEF's
-pure rotations N/W/S/E coincide; the flip tokens permute because DEF mirrors
-about the Y axis while BDB mirrors about X — DEF `FN`↔BDB `FS`, `FS`↔`FN`,
-`FE`↔`FW`, `FW`↔`FE`) and the placed bbox dims swap for the 90/270
-orientations. Bounding boxes are still axis-aligned (the box's extent, not
+pure rotations N/W/S/E coincide; the two DIRECTION-PRESERVING flips permute,
+because DEF mirrors about the Y axis there while BDB mirrors about X — DEF
+`FN`↔BDB `FS` and `FS`↔`FN` — while `FE` and `FW` are the SAME transform under
+both and map to THEMSELVES) and the placed bbox dims swap for the 90/270
+orientations.  Do not apply a compensating `FE`/`FW` swap in a converter: this
+page and the importer both exchanged them until #922, and a downstream swap
+now re-introduces the mirrored placement. Bounding boxes are still axis-aligned (the box's extent, not
 rotated interior geometry), so the placement round-trips through GDS export.
 `import_def_lef` **clears** the `pin`/`net_props`/`net`/`component`/`cell`
 tables first: it is a fresh load, and the produced components are all depth-0
