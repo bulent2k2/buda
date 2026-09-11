@@ -2158,13 +2158,19 @@ have: every netlist here is either authored or uniquified.
    `;` on its own line (OpenROAD writes it on the `PLACED` line; 0 of 324
    pins read, sources silently off), and the terminal verdict was "a via
    landed" where PSM's is "a chain reaches a source" — on the failing plan
-   every pe_cell VGND rect had a same-net 2.0 × 2.0 µm crossing with the
-   macro's own met5 pin and pdngen made no via there (§7.2), so nothing
+   every pe_cell VGND rect has a same-net 2.0 × 2.0 µm crossing with the
+   macro's own met5 pin and pdngen DID via it — 1,024 of them in that cell
+   (§7.2; the "made no via there" this sentence carried until 2026-09-11
+   was the #905 misreading, and the via joins the macro's own two pins,
+   which feeds nothing).  What that cell has none of is a via onto a
+   STRAP: the met5 VGND strap is cut across every `pe_cell`, so nothing
    the supply enters through reaches those rects: `unsourced`.  "One
    blob" and "the supply reaches it" are different questions, and only
-   the second is PSM's.  The prediction's remedy on that plan — every
-   macro `dy=+1.6`, i.e. `PDN_HOFFSET=107.7` — is a falsifiable claim only
-   a top run checks.
+   the second is PSM's.  The prediction's remedy on that plan was
+   `dy=+1.6` (`PDN_HOFFSET=107.7`) and that was FALSIFIED — the corrected
+   cut rule asks +1.605 (107.695), which `check_grid.tcl` measured PASS
+   on both nets with 107.7 and 109.3 both measured FAIL as controls
+   (item 12).
 13. **Both candidate fixes for the #896 notch FAIL, each differently**
    (measured 2026-09-07 on the N = 8 H+B arm, one top run each).  §11 item 7
    named two: read OpenROAD's bloated abstract at the top, or grow the met2
@@ -2364,9 +2370,42 @@ have: every netlist here is either authored or uniquified.
    the largest component is reported and not failed, and `PDN_SKIPTRIM`
    still loses a via-less fragment at the write (PDN-0200).  On the
    phase-0 toy the remedy moved from -1.1 to -1.105 (the grid step a
-   closed cut needs) and the y-remedy from -5.0 to -5.005.  The corrected
-   remedy for the 109.3 plan is UNMEASURED: the next `check_grid.tcl` run
-   reads it, and until one passes the remedy stays a hypothesis.  The
+   closed cut needs) and the y-remedy from -5.0 to -5.005.
+
+   **The corrected remedy is MEASURED (2026-09-11), and it passes.**  Both
+   failing neighbours were put through the same check first, because a
+   check that passes everything proves nothing:
+
+   | `PDN_HOFFSET` | `pdn_phase.py` predicts | `check_grid.tcl` / PSM measures |
+   |---|---|---|
+   | 109.3 | FAIL — 64 stranded in 64 instance-nets | **FAIL** VGND `PSM-0069`, 512 `PSM-0038` shapes; VPWR PASS |
+   | 107.7 | FAIL — asks a further **dy=+0.005** | **FAIL** VGND `PSM-0069`, 512 shapes; VPWR PASS |
+   | **107.695** | PASS — 104/104 both nets | **PASS both nets**, `PSM-0040`, 0 failing |
+
+   Three for three, the 0.005 µm distinction included, which is the whole
+   of #904.  Run `runs/pdn107695`, config `config_107695.json`, both under
+   `hb/n8/h/top/`.
+
+   The cause is now readable off the ARTEFACTS rather than only out of
+   `src/pdn/src`, and it is item (1) above with a number on it: the met5
+   VGND strap is CUT across every `pe_cell`, surviving only in the
+   32.76 µm channels between them, so `pe_cell` VGND carries **1,024
+   pin-on-pin vias and ZERO vias onto a strap** while VPWR carries 384
+   onto straps.  The cut is a spacing TOUCH — the strap band ends at
+   cell-local 103.28 and the nearest different-net met5 pin (VPWR) starts
+   at 104.88, a gap of **exactly 1.60 µm** against met5 min spacing 1.6.
+   That is why the shift is 1.605 rather than 1.6 and why 107.7 was 0.005
+   short.  It is also why this was hard to see: **VPWR is clean at every
+   one of the three offsets**, so any check that aggregates the two nets
+   calls the plan healthy.
+
+   One cost, since the remedy is not free: the ~107.7 region emits **7
+   `PDN-0110`** ("no via inserted between met4 and met5"), all on VPWR,
+   where 109.3 emits 0 — identical at 107.7 and 107.695, so they belong to
+   the offset region and not to the 0.005 correction, and PSM passes VPWR
+   regardless.  `PDN-0195` is 0 at all three.
+
+   The
    pin-on-pin question (#905) resolved the same way, and then the grep
    was actually run: nothing in the source declines the pair —
    `InstanceGrid::getIntersections` injects the pins, the generator builds
