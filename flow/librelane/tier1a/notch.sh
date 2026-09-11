@@ -129,6 +129,12 @@ for c in $cells; do
     gdsdir="$h/$c/runs/h/final/gds"; lefdir="$h/$c/runs/h/final/lef"
     out="$lefdir/$c.notch.lef"
     rm -f "$out"                       # never leave a stale fix for the top
+    # ...and the per-layer JSON with it.  A narrower `--layers` re-run used to
+    # leave `<cell>.notch.<layer>.json` from the WIDER run standing beside a
+    # LEF that no longer patches that layer, so a reader pairing the two got
+    # metal the top's abstract does not contain (Codex, PR #925).  Same rule as
+    # the line above, applied to the artefact it forgot.
+    rm -f "$lefdir/$c".notch.*.json
     if [ ! -f "$gdsdir/$c.gds" ] || [ ! -f "$lefdir/$c.lef" ]; then
         echo "notch.sh: $c is not hardened ($gdsdir/$c.gds or $lefdir/$c.lef missing)" >&2
         fail+=("$c (not hardened)"); continue

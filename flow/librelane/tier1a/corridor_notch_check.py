@@ -33,6 +33,9 @@ import json
 import os
 import sys
 
+# Slack when comparing a notch JSON against its LEF -- see notch_pieces().
+STALE_S = 2.0
+
 
 def _load_placement(arm):
     p = os.path.join(arm, "top", "placement.json")
@@ -67,9 +70,21 @@ def notch_lefs(arm):
     macros = json.load(open(p)).get("MACROS") or {}
     out = {}
     for cell, m in macros.items():
-        for lef in (m.get("lef") or []):
-            out[cell] = os.path.normpath(os.path.join(
-                arm, "top", lef[len("dir::"):] if lef.startswith("dir::") else lef))
+        # `lef` is a LIST and other readers here consume all of it
+        # (`pdn_phase.py` builds `lef_paths` from every element), so a cell may
+        # legitimately carry a supplemental view beside the patched abstract.
+        # Taking the last would then derive the JSON path from the wrong file.
+        # Select by NAME and refuse ambiguity (Codex, PR #925).
+        cands = [os.path.normpath(os.path.join(
+                     arm, "top", l[len("dir::"):] if l.startswith("dir::") else l))
+                 for l in (m.get("lef") or [])]
+        patched = [c for c in cands if c.endswith(".notch.lef")]
+        if len(patched) > 1:
+            sys.exit("corridor_notch_check: REFUSING -- %s names %d patched LEFs in "
+                     "MACROS: %s.\n  Which one the top used is not decidable here."
+                     % (cell, len(patched), ", ".join(patched)))
+        if patched:
+            out[cell] = patched[0]
     return out
 
 
@@ -96,8 +111,22 @@ def notch_pieces(arm, insts, dbu):
         lef = lefs[cell]
         base = lef[:-len(".notch.lef")] if lef.endswith(".notch.lef") else os.path.splitext(lef)[0]
         found = {}
+        lef_mtime = os.path.getmtime(lef) if os.path.isfile(lef) else None
         for j in sorted(glob.glob(base + ".notch.*.json")):
             lay = os.path.basename(j)[len(os.path.basename(base)) + len(".notch."):-len(".json")]
+            # `notch_obs.py` writes the JSON and the per-layer LEF in one
+            # invocation and `mv` preserves the mtime, so a CURRENT pair shares
+            # a timestamp (measured: equal to the second on every cell of the
+            # N=4 arm).  A JSON meaningfully older than the LEF beside it is
+            # therefore from an earlier run -- which `notch.sh` left standing
+            # until PR #925 -- and pairing the two would read metal the top's
+            # abstract does not contain.  STALE_S is slack for the two writes
+            # straddling a second boundary, not a tolerance for old files.
+            if lef_mtime is not None and os.path.getmtime(j) < lef_mtime - STALE_S:
+                sys.exit("corridor_notch_check: REFUSING -- %s predates the patched "
+                         "LEF beside it by %.0fs.\n  It is from an earlier notch.sh "
+                         "run and describes metal that LEF may not carry; re-run "
+                         "notch.sh." % (j, lef_mtime - os.path.getmtime(j)))
             found[lay] = json.load(open(j)).get("uncovered", [])
         per_cell[cell] = found
         by_cell_layers[cell] = frozenset(found)

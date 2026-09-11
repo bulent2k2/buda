@@ -223,3 +223,56 @@ def test_the_run_is_taken_from_the_tops_config_not_the_first_glob_hit(tmp_path):
     assert r.returncode == 1, r.stdout
     assert "intersection(s)" in r.stdout, ("read the stale `h` run instead of the "
                                            "`hb` one the config names:\n" + r.stdout)
+
+
+# ── the MACROS list and stale artefacts (#925 round 2) ─────────────────────
+
+def test_a_supplemental_lef_beside_the_patched_one_does_not_misdirect_it(tmp_path):
+    """`MACROS.<cell>.lef` is a list and other readers here consume all of it
+    (`pdn_phase.py` builds `lef_paths` from every element), so a cell may carry
+    a supplemental view.  Taking the LAST entry would derive the JSON path from
+    that file; the patched abstract must be selected by name."""
+    a = _arm(tmp_path)
+    d = a / "pe_cell" / "runs" / "h" / "final" / "lef"
+    (d / "pe_cell.extra.lef").write_text("MACRO pe_cell\nEND pe_cell\n")
+    cfg = json.loads((a / "top" / "config.json").read_text())
+    # FIRST, not appended: with the patched LEF second, neither "take the last"
+    # (the original bug) nor "take the first" gets it right, so only selection
+    # BY NAME passes.  Appending it left cands[0] correct by luck.
+    cfg["MACROS"]["pe_cell"]["lef"].insert(
+        0, "dir::../pe_cell/runs/h/final/lef/pe_cell.extra.lef")
+    (a / "top" / "config.json").write_text(json.dumps(cfg))
+    r = _run(a)
+    assert r.returncode == 0, ("followed the supplemental LEF instead of the "
+                               "patched one:\n" + r.stderr)
+    assert "INERT" in r.stdout, r.stdout
+
+
+def test_two_patched_lefs_in_one_entry_are_refused(tmp_path):
+    a = _arm(tmp_path)
+    d = a / "pe_cell" / "runs" / "h" / "final" / "lef"
+    (d / "other.notch.lef").write_text("MACRO pe_cell\nEND pe_cell\n")
+    cfg = json.loads((a / "top" / "config.json").read_text())
+    cfg["MACROS"]["pe_cell"]["lef"].append("dir::../pe_cell/runs/h/final/lef/other.notch.lef")
+    (a / "top" / "config.json").write_text(json.dumps(cfg))
+    r = _run(a)
+    assert r.returncode == 1
+    assert "REFUSING" in r.stderr and "patched LEFs" in r.stderr, r.stderr
+
+
+def test_a_json_predating_its_lef_is_refused_as_stale(tmp_path):
+    """`notch.sh` cleared only `<cell>.notch.lef` until #925, so a narrower
+    `--layers` re-run left the wider run's JSON standing beside a LEF that no
+    longer patches that layer.  Pairing them reads metal the top's abstract
+    does not contain, and the checker must not do it even against a tree whose
+    notch.sh predates the fix."""
+    import os
+    a = _arm(tmp_path)
+    d = a / "pe_cell" / "runs" / "h" / "final" / "lef"
+    j = d / "pe_cell.notch.met2.json"
+    lef_m = os.path.getmtime(d / "pe_cell.notch.lef")
+    os.utime(j, (lef_m - 3600, lef_m - 3600))
+    r = _run(a)
+    assert r.returncode == 1, r.stdout
+    assert "REFUSING" in r.stderr and "predates" in r.stderr, r.stderr
+    assert "INERT" not in r.stdout
