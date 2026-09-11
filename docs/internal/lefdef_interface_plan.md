@@ -295,8 +295,11 @@ reserves bus widths within a few percent of the µm-mode run
 > pattern — the honest reading of LEF alone, since the file says nothing
 > about which tracks a power grid takes (that is the DEF's SPECIALNETS).
 > Layer ids come from the trailing integer in the name, so an imported stack
-> and a script saying `def_layer 4` mean the same layer.  TOP is a BUDA
-> notion LEF does not carry: topmost per direction by default.
+> and a script saying `def_layer 4` mean the same layer — except where the
+> file's OWN names collide there (IHP's `TopMetal1` against `Metal1`), which
+> numbers the whole stack by the file's order instead, reported as
+> BUDA-1617.  TOP is a BUDA notion LEF does not carry: topmost per direction
+> by default.
 >
 > The precedence rule the plan asked to be explicit about is implemented in
 > BOTH directions and tested that way — declared first, the import skips it

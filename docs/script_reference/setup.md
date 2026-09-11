@@ -792,8 +792,28 @@ also has a `PITCH` and `WIDTH` gets a synthesized track pattern.
 `metal5`→5), because that is how hand-written stacks in this repo already
 number their layers — so an imported stack and a script that says
 `def_layer 4` mean the same layer. A name with no number gets the next free
-id; an id already in use is reported and that layer is skipped, never
-silently renumbered.
+id.
+
+That rule is not a property of LEF, and **two kinds of collision have
+different owners**:
+
+- **the script already holds the id** (it declared some other layer at 4) —
+  the script owns its numbering, and the import cannot tell whether the two
+  names describe one layer, so that layer is reported and skipped;
+- **two of the file's own names derive one id** — nobody owns the clash and
+  no per-layer decision can rescue it, so the **whole stack is numbered by
+  the file's own order** instead (LEF lists routing layers bottom-up, which
+  is the fact the ids are for: adjacency decides which layers a via may
+  join), reported as **BUDA-1617** naming the clashing pairs and what moved.
+  Ids the script already claimed are stepped over.
+
+The second is IHP's shape, in both of its open PDKs: `TopMetal1`/`TopMetal2`
+collide with `Metal1`/`Metal2`. Refusing per layer imported 5 of sg13g2's 7
+routing layers — and since `TOP` is *the topmost layer per direction*, `TOP`
+then landed on `Metal4`/`Metal5`, so the planner's TOP-vs-LOW economics ran
+against a stack the technology does not have. A stack whose names are
+distinct (sky130 `met1..met5`, NanGate45 `metal1..metal10`) cannot reach any
+of this — the clash is detected before any id is assigned.
 
 **The synthesized pattern is all-signal**: one `SIGNAL` slot of `WIDTH`, with
 `PITCH - WIDTH` of space, anchored at `OFFSET`. That is the honest reading of
@@ -817,8 +837,8 @@ what keeps every existing hand-typed flow byte-identical. Two *script*
 declarations of one id remain the error they always were.
 
 **Skipped, and said so:** a layer with no `DIRECTION` (BUDA has no undirected
-layer), a `PITCH` that leaves no room for `WIDTH`, an id collision. Nothing
-is dropped in silence.
+layer), a `PITCH` that leaves no room for `WIDTH`, an id the script holds.
+Nothing is dropped in silence, and nothing is renumbered in silence either.
 
 **Example:**
 ```buda
