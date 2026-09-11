@@ -1362,10 +1362,12 @@ double BDB::die_h() const {
 
 // Map a DEF/LEF orientation token to BDB's component.orient token and whether
 // the placed bbox dims swap vs the LEF SIZE. BDB's orient convention is
-// (mirror-about-X-first, CCW angle); DEF's pure rotations N/W/S/E coincide,
-// but DEF's flip tokens mirror about the Y axis (FN = MY), so they permute
-// under BDB's mirror-about-X form: DEF FN<->BDB FS, DEF FS<->BDB FN,
-// DEF FE<->BDB FW, DEF FW<->BDB FE. swap_wh is set for the 90/270 rotations.
+// (mirror-about-X-first, CCW angle); DEF's pure rotations N/W/S/E coincide.
+// Only the DIRECTION-PRESERVING flips permute -- DEF mirrors about Y there
+// (FN = MY) where BDB mirrors about X -- so DEF FN<->BDB FS and DEF FS<->BDB
+// FN.  The axis-SWAPPING flips are the SAME transform under both conventions
+// (FW is (y, x), FE is (-y, -x)) and map to themselves; this comment said
+// they exchanged too, and the code did (#922). swap_wh is set for 90/270.
 // A die PORT's direction, as seen from INSIDE the design.
 //
 // A boundary component is a stand-in for the world outside the die, and a
