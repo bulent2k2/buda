@@ -271,3 +271,97 @@ def test_a_lef_with_no_routing_layers_is_a_reported_no_op(tmp_path):
                   "LAYER via1\n  TYPE CUT ;\nEND via1\nEND LIBRARY\n")
     assert "no ROUTING layers" in out
     assert not s._layer_name_map
+
+
+# ── a stack whose own names collide (IHP sg13g2 / sg13cmos5l) ──────────────
+#
+# The name-derived rule was validated against stacks where the trailing
+# integer IS the stack index (sky130 `met1..met5`, NanGate45
+# `metal1..metal10`).  That is not a property of LEF: IHP calls its two thick
+# top layers `TopMetal1`/`TopMetal2`, which collide with `Metal1`/`Metal2` —
+# in BOTH of its open PDKs.  This is that stack's shape.
+_IHP = "VERSION 5.8 ;\n" + "".join(
+    "LAYER %s\n  TYPE ROUTING ;\n  DIRECTION %s ;\n  PITCH %s ;\n"
+    "  WIDTH %s ;\nEND %s\n" % (n, d, p, w, n)
+    for n, d, p, w in [
+        ("Metal1",    "HORIZONTAL", "0.42", "0.16"),
+        ("Metal2",    "VERTICAL",   "0.48", "0.20"),
+        ("Metal3",    "HORIZONTAL", "0.42", "0.20"),
+        ("Metal4",    "VERTICAL",   "0.48", "0.20"),
+        ("Metal5",    "HORIZONTAL", "0.42", "0.20"),
+        ("TopMetal1", "VERTICAL",   "3.28", "1.64"),
+        ("TopMetal2", "HORIZONTAL", "4.0",  "2.0"),
+    ]) + "END LIBRARY\n"
+
+
+def test_a_stack_whose_own_names_collide_is_numbered_by_the_files_order(tmp_path):
+    """Two of the FILE's names deriving one id is not a per-layer question:
+    no layer owns the clash, and the name-derived reading simply does not
+    apply to this technology.  So the whole stack takes the file's order —
+    which is the fact the ids are for, LEF listing routing layers bottom-up."""
+    s, out = _run(tmp_path, "import_lef_tech @TECH@", _IHP)
+    assert [s._layer_name_map[n] for n in
+            ("Metal1", "Metal2", "Metal3", "Metal4", "Metal5",
+             "TopMetal1", "TopMetal2")] == [1, 2, 3, 4, 5, 6, 7], out
+    assert "BUDA-1617" in out, out
+    # The report names BOTH clashing pairs and what moved, so a script that
+    # says `def_layer 6` can see which layer that now is.
+    assert "Metal1 and TopMetal1" in out and "Metal2 and TopMetal2" in out
+    assert "TopMetal1 1->6" in out and "TopMetal2 2->7" in out
+
+
+def test_the_renumber_puts_TOP_on_the_thick_top_layers(tmp_path):
+    """The consequence that made the refusal serious, not the numbering
+    itself.  TOP is "the topmost layer per direction", so dropping the two
+    highest layers did not merely lose them — it moved TOP onto Metal4/Metal5
+    and ran the planner's whole TOP-vs-LOW economics against a stack this
+    technology does not have."""
+    s, _ = _run(tmp_path, "import_lef_tech @TECH@", _IHP)
+    tops = {n for n in s._layer_name_map
+            if s.layers.get_layer_type(s._layer_name_map[n]) ==
+            buda.LayerType.TOP}
+    assert tops == {"TopMetal1", "TopMetal2"}
+    # ...and they are the layers whose geometry is actually thick: an ~8x
+    # pitch step is what makes a TOP/LOW distinction mean anything here.
+    assert _pitch(s, s._layer_name_map["TopMetal1"]) > \
+        6 * _pitch(s, s._layer_name_map["Metal4"])
+
+
+def test_a_script_held_id_is_stepped_over_and_the_order_still_holds(tmp_path):
+    """The script's numbering is still the script's.  The renumber takes the
+    ids it has not claimed, and the stack stays increasing in file order —
+    which is what BUDA's ids are for, since adjacency decides which layers a
+    via may join."""
+    s, _ = _run(tmp_path, """
+        def_layer 3 MINE V LOW 30
+        import_lef_tech @TECH@
+        """, _IHP)
+    ids = [s._layer_name_map[n] for n in
+           ("Metal1", "Metal2", "Metal3", "Metal4", "Metal5",
+            "TopMetal1", "TopMetal2")]
+    assert 3 not in ids, ids
+    assert ids == sorted(ids) and len(set(ids)) == len(ids), ids
+    assert s._layer_name_map["MINE"] == 3
+
+
+def test_a_file_internal_clash_and_a_script_held_id_are_different_things(tmp_path):
+    """One file, two outcomes, and the difference is who owns the id.  The
+    script holding an id refuses that ONE layer (it may describe something
+    else entirely); the file clashing with itself renumbers the whole stack.
+    Conflating them is how seven layers became five."""
+    _s1, out1 = _run(tmp_path, """
+        def_layer 2 MYM2 V LOW 30
+        import_lef_tech @TECH@
+        """)                                    # _TECH: M1/M2/M3, no clash
+    assert "skipped layer M2" in out1 and "BUDA-1617" not in out1, out1
+
+    _s2, out2 = _run(tmp_path, "import_lef_tech @TECH@", _IHP)
+    assert "BUDA-1617" in out2 and "skipped layer" not in out2, out2
+
+
+def test_a_stack_with_distinct_names_is_untouched_by_any_of_this(tmp_path):
+    """The guard on every flow in the tree: sky130 and NanGate45 name their
+    layers by stack index, so nothing here may reach them."""
+    s, out = _run(tmp_path, "import_lef_tech @TECH@")
+    assert [s._layer_name_map[n] for n in ("M1", "M2", "M3")] == [1, 2, 3]
+    assert "BUDA-1617" not in out, out

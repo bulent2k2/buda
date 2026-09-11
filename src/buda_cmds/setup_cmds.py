@@ -738,26 +738,74 @@ def cmd_set_track_pitch(session, cmd, args, cmd_line):
     session._nuts_pitch = require_distance("set_track_pitch", "<pitch>", args[0], session)
 
 
-def _lef_layer_id(name, taken):
-    """A layer id for a LEF layer NAME.
+def _lef_layer_ids(names, taken):
+    """Ids for a whole STACK of LEF routing-layer names, given in LEF order.
 
-    LEF names layers; BUDA numbers them.  The trailing integer is used when
-    there is one (`M3`->3, `metal5`->5, `Metal10`->10), because that is how
-    every hand-written stack in this repo already numbers its layers — so an
-    imported stack and a script that refers to `def_layer 4` mean the same
-    thing.  A name with no number gets the next free id.
+    Returns `(ids, renumbered)`: `ids` parallel to `names` (None = this layer
+    cannot be given an id), `renumbered` True when the name-derived reading
+    was abandoned for the file's own order.
 
-    Returns None on a COLLISION (two LEF names claiming one id).  Inventing a
-    substitute would silently re-number a stack whose numbers are how the
-    script refers to it."""
-    m = re.search(r"(\d+)\s*$", name)
-    if m:
-        lid = int(m.group(1))
-        return None if lid in taken else lid
-    lid = 1
-    while lid in taken:
-        lid += 1
-    return lid
+    The trailing integer is used when the file's own names give distinct ones
+    (`M3`->3, `metal5`->5, `Metal10`->10), because that is how every
+    hand-written stack in this repo numbers its layers -- so an imported stack
+    and a script that refers to `def_layer 4` mean the same thing.
+
+    TWO DIFFERENT COLLISIONS, and they have different owners:
+
+    * **The script already holds the id** (it declared some other layer at
+      4).  The script owns its numbering, so that layer is refused -- the
+      import cannot tell whether the two names describe one layer, and
+      guessing would either merge two layers or renumber a stack out from
+      under the script.  `ids` carries None for it and the caller says so.
+
+    * **Two of the FILE's own names derive the same id.**  Nobody owns that;
+      the name-derived reading simply does not apply to this technology, and
+      no per-layer decision can rescue it.  IHP names its thick top layers
+      `TopMetal1`/`TopMetal2`, colliding with `Metal1`/`Metal2` in BOTH of its
+      open PDKs -- and refusing per layer was worse than it sounds: sg13g2
+      imported 5 of its 7 layers, and since TOP is "the topmost layer per
+      direction", TOP then landed on Metal4/Metal5, so the planner's whole
+      TOP-vs-LOW economics ran against a stack the technology does not have.
+      The fallback is the FILE'S OWN ORDER for the WHOLE stack at once: LEF
+      lists routing layers bottom-up, which is the fact BUDA's ids actually
+      need (adjacency decides which layers a via may join).  Whole-stack
+      because a partial assignment -- five layers keeping name-derived ids and
+      two dropped -- is neither reading and belongs to no technology.  The
+      caller reports it (BUDA-1617): renumbering silently would move what
+      `def_layer 4` means out from under the script."""
+    def _trailing(name):
+        m = re.search(r"(\d+)\s*$", name)
+        return int(m.group(1)) if m else None
+
+    seen = set()
+    for name in names:
+        lid = _trailing(name)
+        if lid is not None:
+            if lid in seen:
+                # File-internal: the whole stack goes by the file's order,
+                # into the ids the script has not already claimed.
+                ids, lid = [], 1
+                for _n in names:
+                    while lid in taken:
+                        lid += 1
+                    ids.append(lid)
+                    lid += 1
+                return ids, True
+            seen.add(lid)
+
+    ids, used = [], set(taken)
+    for name in names:
+        lid = _trailing(name)
+        if lid is None:
+            lid = 1
+            while lid in used:
+                lid += 1
+        if lid in used:
+            ids.append(None)          # the SCRIPT holds it; refuse this layer
+            continue
+        used.add(lid)
+        ids.append(lid)
+    return ids, False
 
 
 def cmd_import_lef_tech(session, cmd, args, cmd_line):
@@ -808,7 +856,7 @@ def cmd_import_lef_tech(session, cmd, args, cmd_line):
 
     taken = set(session._layer_source) | {
         i for i in session._layer_name_map.values()}
-    plan, geom_only, skipped = [], [], []
+    plan, geom_only, skipped, importable = [], [], [], []
     for l in routing:
         if not l.dir:
             skipped.append((l.name, "no DIRECTION (BUDA has no undirected layer)"))
@@ -830,7 +878,13 @@ def cmd_import_lef_tech(session, cmd, args, cmd_line):
             # below where the pattern is installed.
             geom_only.append((session._layer_name_map[l.name], l))
             continue
-        lid = _lef_layer_id(l.name, taken)
+        importable.append(l)
+
+    # Ids for the whole stack at once, in the file's order (see
+    # `_lef_layer_ids`): a collision between two names' trailing integers is a
+    # property of the STACK, so it cannot be answered one layer at a time.
+    ids, renumbered = _lef_layer_ids([l.name for l in importable], taken)
+    for lid, l in zip(ids, importable):
         if lid is None:
             skipped.append((l.name, "layer id already in use — rename or "
                                     "declare it explicitly"))
@@ -947,6 +1001,31 @@ def cmd_import_lef_tech(session, cmd, args, cmd_line):
     rows = ", ".join(f"{l.name}={lid}{'(TOP)' if lid in top_ids else ''}"
                      for lid, l in sorted(plan))
     print(f"[LEF] imported {len(plan)} routing layer(s): {rows}")
+    if renumbered:
+        # WHICH names forced it, and what each layer would have been called
+        # under the name-derived reading — without that the mapping reads as
+        # an arbitrary choice rather than as the file's own order.
+        by_trailing, trailing = {}, {}
+        for l in importable:
+            m = re.search(r"(\d+)\s*$", l.name)
+            trailing[l.name] = int(m.group(1)) if m else None
+            by_trailing.setdefault(trailing[l.name], []).append(l.name)
+        clashes = "; ".join(
+            " and ".join(v)
+            for k, v in sorted(by_trailing.items(),
+                               key=lambda kv: (kv[0] is None, kv[0]))
+            if k is not None and len(v) > 1)
+        moved = []
+        for lid, l in sorted(plan):
+            was = trailing[l.name]
+            if was is not None and was != lid:
+                moved.append(f"{l.name} {was}->{lid}")
+        buda_diag.emit(
+            "BUDA-1617",
+            f"{lef_arg}: {clashes} share a trailing number, so the stack is "
+            f"numbered by the file's own order instead "
+            f"({', '.join(moved) if moved else 'no layer moved'}). A "
+            f"`def_layer <id>` in this flow refers to the ids above.")
     if n_geom:
         # Named separately because it is a different thing from importing a
         # layer: the script keeps the layer, the file supplies the wire.
