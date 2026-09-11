@@ -87,10 +87,13 @@ these terms the check reports, per net:
     (librelane_hier_flow.md s11 item 12).  The cause was the model's cut
     rule -- a touch spared, one spacing short along, a same-net spare
     pdngen never applies, and sources placed on the largest component --
-    read out of the source and fixed (#904); the corrected remedy for that
-    plan is unmeasured.  So the detection half is validated and the remedy
-    half is a hypothesis; `check_grid.tcl` tests one in minutes, and a
-    remedy that LOOKS verified is worse than none.
+    read out of the source and fixed (#904).  The corrected remedy for that
+    plan HAS since been measured -- 107.695 passes `check_grid.tcl` on both
+    nets, with 109.3 and 107.7 failing the same check as controls
+    (librelane_hier_flow.md s11 item 12, 2026-09-11).  That is ONE offset
+    on ONE design, so the verdict is validated and the shift SEARCH is
+    not: `check_grid.tcl` still tests an offset in minutes, and a remedy
+    that LOOKS verified is worse than none.
 
 PASS looks like `PASS: <n> instances, <m> power-pin rects, <t> trims in <i>
 instances, every terminal on its net's grid, no surviving fragment off it`
