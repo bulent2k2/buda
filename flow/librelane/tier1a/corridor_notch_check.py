@@ -134,7 +134,21 @@ def notch_pieces(arm, insts, dbu):
             if not os.path.isfile(jp):
                 sys.exit("corridor_notch_check: REFUSING -- %s patched %s but %s is "
                          "missing.\n  That layer would go unmeasured." % (cell, lay, jp))
-            found[lay] = json.load(open(jp)).get("uncovered", [])
+            doc = json.load(open(jp))
+            # Believe the PAYLOAD, not the filename.  A mislabelled JSON files
+            # its rectangles under the wrong layer and the check then compares
+            # met2 geometry against met3 guides -- a false verdict rather than
+            # a refusal.  The concrete way to produce one is a hand repair that
+            # names the file after a layer without passing `--layer` to
+            # notch_obs.py, which defaults to met2 (Codex, PR #925).
+            for key, want in (("cell", cell), ("layer", lay)):
+                got = doc.get(key)
+                if got is not None and got != want:
+                    sys.exit("corridor_notch_check: REFUSING -- %s declares %s=%r "
+                             "but is filed as %r.\n  Its rectangles would be "
+                             "compared against the wrong %s."
+                             % (jp, key, got, want, key))
+            found[lay] = doc.get("uncovered", [])
         per_cell[cell] = found
         by_cell_layers[cell] = frozenset(found)
 

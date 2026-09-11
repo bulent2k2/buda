@@ -78,7 +78,10 @@ def _arm(tmp_path, guides=None, notch=NOTCH, run_tag="h", placement=PLACEMENT,
         (d / ("%s.notch.lef" % cell)).write_text("MACRO %s\nEND %s\n" % (cell, cell))
         m[cell] = {"lef": ["dir::../%s/runs/%s/final/lef/%s.notch.lef" % (cell, run_tag, cell)]}
         if notch is not None:
-            (d / ("%s.notch.met2.json" % cell)).write_text(json.dumps(notch))
+            # the payload must name ITS OWN cell -- writing pe_cell's dict into
+            # every directory is what the payload check caught here (#925)
+            own = dict(notch, cell=cell)
+            (d / ("%s.notch.met2.json" % cell)).write_text(json.dumps(own))
             for lay in extra_layers:
                 (d / ("%s.notch.%s.json" % (cell, lay))).write_text(
                     json.dumps({"cell": cell, "layer": lay, "uncovered": [[1.0, 1.0, 1.5, 1.5]]}))
@@ -423,3 +426,28 @@ def test_overlap_area_counts_shared_metal_once(tmp_path):
     (met2,) = [l for l in res["layers"] if l["layer"] == "met2"]
     assert met2["intersections"] == 2, met2
     assert met2["area_um2"] == 100.0, ("counted the shared region twice: %s" % met2)
+
+
+def test_a_mislabelled_notch_json_is_refused(tmp_path):
+    """A JSON filed as met3 whose payload declares met2 would have its met2
+    rectangles compared against met3 guides.  The concrete way to produce one
+    is a hand repair that names the file after a layer without passing
+    `--layer` to notch_obs.py, which defaults to met2 (#925)."""
+    a = _arm(tmp_path, extra_layers=("met3",))
+    d = a / "pe_cell" / "runs" / "h" / "final" / "lef"
+    (d / "pe_cell.notch.met3.json").write_text(json.dumps(
+        {"cell": "pe_cell", "layer": "met2", "uncovered": [[1.0, 1.0, 1.5, 1.5]]}))
+    r = _run(a)
+    assert r.returncode == 1, r.stdout
+    assert "REFUSING" in r.stderr and "layer=" in r.stderr, r.stderr
+    assert "INERT" not in r.stdout
+
+
+def test_a_notch_json_for_the_wrong_cell_is_refused(tmp_path):
+    a = _arm(tmp_path)
+    d = a / "pe_cell" / "runs" / "h" / "final" / "lef"
+    (d / "pe_cell.notch.met2.json").write_text(json.dumps(
+        {"cell": "acc_cell", "layer": "met2", "uncovered": [[1.0, 1.0, 1.5, 1.5]]}))
+    r = _run(a)
+    assert r.returncode == 1
+    assert "REFUSING" in r.stderr and "cell=" in r.stderr, r.stderr

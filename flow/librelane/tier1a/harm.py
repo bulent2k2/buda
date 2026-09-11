@@ -1103,7 +1103,13 @@ it by hand rather than working around it; the recipe is the same two tools, per 
         klayout -b -r {rel}/rectify_gds.py \\
         -rd gds=$f/gds/$c.gds -rd lnum=69 -rd ldt=20 -rd out=$f/gds/$c.rect.gds
     python3 {rel}/notch_obs.py $f/gds/$c.rect.gds $f/lef/$c.lef $f/lef/$c.notch.lef \\
-        --json $f/lef/$c.notch.$L.json        # L = the layer, once per --layers entry
+        --layer $L --json $f/lef/$c.notch.$L.json   # L = the layer, once per
+                                                   # --layers entry.  --layer is
+                                                   # NOT optional: it defaults to
+                                                   # met2, so naming the file
+                                                   # $c.notch.met3.json without it
+                                                   # writes met2 geometry under a
+                                                   # met3 name (#925)
     cp $f/../../../../<a cell that PASSED>/runs/h/final/lef/*.notch.layers \\
        $f/lef/$c.notch.layers                 # the SAME list the run used
 
