@@ -33,9 +33,6 @@ import json
 import os
 import sys
 
-# Slack when comparing a notch JSON against its LEF -- see notch_pieces().
-STALE_S = 2.0
-
 
 def _load_placement(arm):
     p = os.path.join(arm, "top", "placement.json")
@@ -110,24 +107,34 @@ def notch_pieces(arm, insts, dbu):
     for cell in placed_cells:
         lef = lefs[cell]
         base = lef[:-len(".notch.lef")] if lef.endswith(".notch.lef") else os.path.splitext(lef)[0]
+        # The configured LEF must EXIST.  `notch.sh` moves it into place only
+        # on its success path, so when a later layer fails it leaves the early
+        # `<cell>.notch.<layer>.json` behind and no LEF -- and an earlier cut
+        # of this code skipped its freshness check when the LEF was missing,
+        # which let exactly those partial JSONs reach a verdict (Codex, #925).
+        if not os.path.isfile(lef):
+            sys.exit("corridor_notch_check: REFUSING -- %s names %s in MACROS and "
+                     "it does not exist.\n  notch.sh writes it only on success, so "
+                     "the arm is mid-failure; re-run notch.sh." % (cell, lef))
+        # WHICH layers this LEF was built from, from the provenance notch.sh
+        # writes beside it -- not from a glob, and not from mtime.  A glob
+        # cannot tell a current JSON from one a wider earlier run left, and
+        # mtime cannot either: with `--layers met2,met3` the met2 JSON is
+        # written a whole KLayout pass before the LEF gets the met3 pass's
+        # timestamp, so a fresh JSON is legitimately minutes older.
+        prov = base + ".notch.layers"
+        if not os.path.isfile(prov):
+            sys.exit("corridor_notch_check: REFUSING -- no %s.\n  Which layers that "
+                     "LEF was patched from is unrecorded, so a JSON beside it cannot "
+                     "be told from one an earlier, wider run left behind.\n  Re-run "
+                     "notch.sh (it writes this file since PR #925)." % prov)
         found = {}
-        lef_mtime = os.path.getmtime(lef) if os.path.isfile(lef) else None
-        for j in sorted(glob.glob(base + ".notch.*.json")):
-            lay = os.path.basename(j)[len(os.path.basename(base)) + len(".notch."):-len(".json")]
-            # `notch_obs.py` writes the JSON and the per-layer LEF in one
-            # invocation and `mv` preserves the mtime, so a CURRENT pair shares
-            # a timestamp (measured: equal to the second on every cell of the
-            # N=4 arm).  A JSON meaningfully older than the LEF beside it is
-            # therefore from an earlier run -- which `notch.sh` left standing
-            # until PR #925 -- and pairing the two would read metal the top's
-            # abstract does not contain.  STALE_S is slack for the two writes
-            # straddling a second boundary, not a tolerance for old files.
-            if lef_mtime is not None and os.path.getmtime(j) < lef_mtime - STALE_S:
-                sys.exit("corridor_notch_check: REFUSING -- %s predates the patched "
-                         "LEF beside it by %.0fs.\n  It is from an earlier notch.sh "
-                         "run and describes metal that LEF may not carry; re-run "
-                         "notch.sh." % (j, lef_mtime - os.path.getmtime(j)))
-            found[lay] = json.load(open(j)).get("uncovered", [])
+        for lay in open(prov).read().split():
+            jp = "%s.notch.%s.json" % (base, lay)
+            if not os.path.isfile(jp):
+                sys.exit("corridor_notch_check: REFUSING -- %s patched %s but %s is "
+                         "missing.\n  That layer would go unmeasured." % (cell, lay, jp))
+            found[lay] = json.load(open(jp)).get("uncovered", [])
         per_cell[cell] = found
         by_cell_layers[cell] = frozenset(found)
 

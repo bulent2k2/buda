@@ -72,6 +72,9 @@ def _arm(tmp_path, guides=None, notch=NOTCH, run_tag="h", placement=PLACEMENT,
             for lay in extra_layers:
                 (d / ("%s.notch.%s.json" % (cell, lay))).write_text(
                     json.dumps({"cell": cell, "layer": lay, "uncovered": [[1.0, 1.0, 1.5, 1.5]]}))
+            # the provenance notch.sh writes beside the LEF on its success path
+            (d / ("%s.notch.layers" % cell)).write_text(
+                " ".join(["met2", *extra_layers]) + "\n")
     (a / "top" / "config.json").write_text(json.dumps({"MACROS": macros if macros is not None else m}))
     return a
 
@@ -89,7 +92,9 @@ def test_it_refuses_when_there_is_no_notch_json_at_all(tmp_path):
     liveness line keyed on macro boxes rather than on pieces (#913)."""
     r = _run(_arm(tmp_path, notch=None))
     assert r.returncode == 1, r.stdout
-    assert "REFUSING" in r.stderr and "no notch JSON" in r.stderr, r.stderr
+    # the provenance refusal fires first now, and is the sharper message: the
+    # LEF was never built, so nothing records what it was built from
+    assert "REFUSING" in r.stderr and "notch.layers" in r.stderr, r.stderr
     assert "INERT" not in r.stdout, r.stdout
 
 
@@ -198,13 +203,20 @@ def test_it_refuses_when_a_placed_cell_is_not_in_the_tops_macros(tmp_path):
 
 
 def test_it_refuses_when_cells_disagree_on_the_patched_layers(tmp_path):
-    """A cell patched on fewer layers is a cell partly unmeasured."""
+    """Now keyed on PROVENANCE rather than on which JSONs happen to sit there,
+    which also settles whether the rule is too strict: the recorded list is what
+    `notch.sh` was ASKED for (`layer_list`), not what it found, so a cell with
+    no met3 pins still records met3 and writes an empty met3 JSON.  Cells
+    therefore disagree only when they came from DIFFERENT invocations, and that
+    is worth refusing -- a cell patched by an older, narrower run is a cell
+    measured against a different abstract."""
     a = _arm(tmp_path, placement=_TWO, cells=("pe_cell", "acc_cell"))
     d = a / "pe_cell" / "runs" / "h" / "final" / "lef"
-    (d / "pe_cell.notch.met3.json").write_text(
-        json.dumps({"cell": "pe_cell", "layer": "met3", "uncovered": [[1.0, 1.0, 1.5, 1.5]]}))
+    (d / "pe_cell.notch.layers").write_text("met2 met3\n")
+    (d / "pe_cell.notch.met3.json").write_text(json.dumps(
+        {"cell": "pe_cell", "layer": "met3", "uncovered": [[1.0, 1.0, 1.5, 1.5]]}))
     r = _run(a)
-    assert r.returncode == 1
+    assert r.returncode == 1, r.stdout
     assert "REFUSING" in r.stderr and "disagree" in r.stderr, r.stderr
 
 
@@ -260,19 +272,78 @@ def test_two_patched_lefs_in_one_entry_are_refused(tmp_path):
     assert "REFUSING" in r.stderr and "patched LEFs" in r.stderr, r.stderr
 
 
-def test_a_json_predating_its_lef_is_refused_as_stale(tmp_path):
+def test_a_json_from_a_wider_earlier_run_is_ignored_not_read(tmp_path):
     """`notch.sh` cleared only `<cell>.notch.lef` until #925, so a narrower
-    `--layers` re-run left the wider run's JSON standing beside a LEF that no
-    longer patches that layer.  Pairing them reads metal the top's abstract
-    does not contain, and the checker must not do it even against a tree whose
-    notch.sh predates the fix."""
-    import os
-    a = _arm(tmp_path)
+    `--layers` re-run left the wider run's JSON standing.  The layer set comes
+    from the provenance file now, so an unlisted JSON is simply not read --
+    mtime cannot decide this, because with `--layers met2,met3` the met2 JSON
+    is written a whole KLayout pass before the LEF gets met3's timestamp and a
+    FRESH met2 JSON is legitimately minutes older than the LEF beside it.
+
+    The leftover has to be able to CHANGE the answer or this proves nothing:
+    the arm carries a met3 corridor too, and the stale met3 rects sit directly
+    under it.  Read, they make the verdict MEETS; ignored, met3 is simply not
+    live.  (An earlier version put the leftover on met3 with met2-only
+    corridors, where reading it could not alter the outcome -- the mutation
+    that should have failed this test failed a different one, which is how the
+    vacuity showed.)
+    """
+    g = _guides()
+    g["bundles"][0]["corridors"].append(
+        {"seg": 1, "layer": 3, "layer_name": "met3",
+         "x1": 200000, "y1": 0, "x2": 220000, "y2": 100000, "nets": ["n[0]"]})
+    a = _arm(tmp_path, guides=g)
     d = a / "pe_cell" / "runs" / "h" / "final" / "lef"
-    j = d / "pe_cell.notch.met2.json"
-    lef_m = os.path.getmtime(d / "pe_cell.notch.lef")
-    os.utime(j, (lef_m - 3600, lef_m - 3600))
+    (d / "pe_cell.notch.met3.json").write_text(json.dumps(
+        {"cell": "pe_cell", "layer": "met3", "uncovered": [[200.0, 0.0, 220.0, 100.0]]}))
+    r = _run(a)
+    assert r.returncode == 0, ("read a JSON the provenance does not list:\n"
+                               + r.stdout + r.stderr)
+    assert "INERT" in r.stdout, r.stdout
+
+
+def test_a_multi_layer_arm_is_measured_not_refused(tmp_path):
+    """The case an mtime rule broke: two layers patched in one invocation, the
+    met2 JSON older than the LEF by a whole KLayout pass.  Provenance lists
+    both, so both are read and neither is called stale."""
+    import os
+    a = _arm(tmp_path, extra_layers=("met3",))
+    d = a / "pe_cell" / "runs" / "h" / "final" / "lef"
+    old = os.path.getmtime(d / "pe_cell.notch.lef") - 600
+    os.utime(d / "pe_cell.notch.met2.json", (old, old))
+    r = _run(a, "--json", str(tmp_path / "r.json"))
+    assert r.returncode == 0, r.stderr
+    res = json.loads((tmp_path / "r.json").read_text())
+    assert sorted(l["layer"] for l in res["layers"] if l["pieces"]) == ["met2", "met3"], res
+
+
+def test_it_refuses_when_the_configured_patched_lef_is_absent(tmp_path):
+    """`notch.sh` moves the LEF into place only on success, so a run that fails
+    on a later layer leaves early JSONs and no LEF.  An earlier cut skipped its
+    freshness check when the LEF was missing, which let exactly those partial
+    JSONs reach a verdict."""
+    a = _arm(tmp_path)
+    (a / "pe_cell" / "runs" / "h" / "final" / "lef" / "pe_cell.notch.lef").unlink()
     r = _run(a)
     assert r.returncode == 1, r.stdout
-    assert "REFUSING" in r.stderr and "predates" in r.stderr, r.stderr
+    assert "REFUSING" in r.stderr and "does not exist" in r.stderr, r.stderr
     assert "INERT" not in r.stdout
+
+
+def test_it_refuses_when_the_provenance_is_missing(tmp_path):
+    """No record of which layers the LEF was patched from -- so a JSON beside it
+    cannot be told from an earlier run's leftover."""
+    a = _arm(tmp_path)
+    (a / "pe_cell" / "runs" / "h" / "final" / "lef" / "pe_cell.notch.layers").unlink()
+    r = _run(a)
+    assert r.returncode == 1
+    assert "REFUSING" in r.stderr and "notch.layers" in r.stderr, r.stderr
+
+
+def test_it_refuses_when_a_recorded_layer_has_no_json(tmp_path):
+    a = _arm(tmp_path)
+    d = a / "pe_cell" / "runs" / "h" / "final" / "lef"
+    (d / "pe_cell.notch.layers").write_text("met2 met3\n")
+    r = _run(a)
+    assert r.returncode == 1
+    assert "REFUSING" in r.stderr and "met3" in r.stderr, r.stderr
