@@ -451,3 +451,16 @@ def test_a_notch_json_for_the_wrong_cell_is_refused(tmp_path):
     r = _run(a)
     assert r.returncode == 1
     assert "REFUSING" in r.stderr and "cell=" in r.stderr, r.stderr
+
+
+def test_a_notch_json_without_identity_fields_is_refused(tmp_path):
+    """Accepting an absent `cell`/`layer` would restore trust in the filename,
+    which is what this validation removes -- and costs nothing, since
+    `notch_obs.py` has written both since `--json` existed (#925)."""
+    a = _arm(tmp_path)
+    d = a / "pe_cell" / "runs" / "h" / "final" / "lef"
+    (d / "pe_cell.notch.met2.json").write_text(json.dumps({"uncovered": [[1.0, 1.0, 1.5, 1.5]]}))
+    r = _run(a)
+    assert r.returncode == 1, r.stdout
+    assert "REFUSING" in r.stderr and "has no" in r.stderr, r.stderr
+    assert "INERT" not in r.stdout

@@ -1099,25 +1099,25 @@ or a signal-pin polygon in the LEF -- `notch.sh` exits non-zero and leaves that 
 it by hand rather than working around it; the recipe is the same two tools, per layer:
 
     c=<the cell that refused>; f=$PWD/$c/runs/h/final       # run from here, n<N>/h
-    docker run --rm -v "$HOME:$HOME" -w "$PWD" ghcr.io/librelane/librelane:3.0.11 \\
-        klayout -b -r {rel}/rectify_gds.py \\
-        -rd gds=$f/gds/$c.gds -rd lnum=69 -rd ldt=20 -rd out=$f/gds/$c.rect.gds
-    python3 {rel}/notch_obs.py $f/gds/$c.rect.gds $f/lef/$c.lef $f/lef/$c.notch.lef \\
-        --layer $L --json $f/lef/$c.notch.$L.json   # L = the layer, once per
-                                                   # --layers entry.  --layer is
-                                                   # NOT optional: it defaults to
-                                                   # met2, so naming the file
-                                                   # $c.notch.met3.json without it
-                                                   # writes met2 geometry under a
-                                                   # met3 name (#925)
-    cp $f/../../../../<a cell that PASSED>/runs/h/final/lef/*.notch.layers \\
-       $f/lef/$c.notch.layers                 # the SAME list the run used
+    prev=$f/lef/$c.lef; src=$f/gds/$c.gds; i=0
+    for L in met2; do                     # the SAME --layers list you gave notch.sh
+        i=$((i + 1))                      # met2 is GDS 69/20; notch_obs.py --gds-layer
+        docker run --rm -v "$HOME:$HOME" -w "$PWD" ghcr.io/librelane/librelane:3.0.11 \\
+            klayout -b -r {rel}/rectify_gds.py \\
+            -rd gds=$src -rd lnum=69 -rd ldt=20 -rd out=$f/gds/$c.rect$i.gds
+        python3 {rel}/notch_obs.py $f/gds/$c.rect$i.gds $prev $f/lef/$c.notch$i.lef \\
+            --layer $L --json $f/lef/$c.notch.$L.json
+        src=$f/gds/$c.rect$i.gds; prev=$f/lef/$c.notch$i.lef
+    done
+    mv $prev $f/lef/$c.notch.lef; mv $src $f/gds/$c.rect.gds
+    echo "met2" > $f/lef/$c.notch.layers   # the SAME list again
 
-`notch.sh` records the layer list beside each patched LEF and
-`corridor_notch_check.py` refuses a cell without one -- and refuses the ARM if
-cells disagree, so a hand-repaired cell must record the same list as the rest,
-not just `met2` (#925).  With `--layers met2,met3` run `notch_obs.py` once per
-layer, chaining its output LEF into the next as `notch.sh` does.
+Three details are not optional and each cost a round of review (#925).  `--layer $L` SELECTS the layer --
+without it `notch_obs.py` defaults to met2, so a pass named met3 rewrites met2 under a met3 filename.  The
+loop CHAINS (`prev`, `src`), because each pass must read the previous pass's LEF and rectified GDS; reading
+`$c.lef` every time makes the last pass discard every earlier layer's obstruction.  And
+`$c.notch.layers` must record the same list the rest of the arm did, or `corridor_notch_check.py` refuses
+the arm for disagreeing.
 
 (met2 is GDS 69/20; `notch_obs.py --gds-layer L/DT` takes another pair.)  A cell whose GDS the decomposition
 genuinely cannot handle can be carried UNPATCHED with `cp $f/lef/$c.lef $f/lef/$c.notch.lef` -- the top

@@ -142,8 +142,18 @@ def notch_pieces(arm, insts, dbu):
             # names the file after a layer without passing `--layer` to
             # notch_obs.py, which defaults to met2 (Codex, PR #925).
             for key, want in (("cell", cell), ("layer", lay)):
-                got = doc.get(key)
-                if got is not None and got != want:
+                if key not in doc:
+                    # Accepting an absent field would restore the trust in the
+                    # FILENAME this check exists to remove, and costs nothing to
+                    # refuse: notch_obs.py builds its payload in one place
+                    # (`:339`) and has emitted both fields since `--json`
+                    # existed, so there is no older valid shape to keep working
+                    # (Codex, PR #925).
+                    sys.exit("corridor_notch_check: REFUSING -- %s has no %r field.\n"
+                             "  Without it the filename is the only claim about what "
+                             "this geometry is." % (jp, key))
+                got = doc[key]
+                if got != want:
                     sys.exit("corridor_notch_check: REFUSING -- %s declares %s=%r "
                              "but is filed as %r.\n  Its rectangles would be "
                              "compared against the wrong %s."
