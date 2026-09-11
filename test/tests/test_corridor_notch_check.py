@@ -51,15 +51,28 @@ def _guides(layer="met2", x1=200000, x2=220000):
              "x1": x1, "y1": 0, "x2": x2, "y2": 100000, "nets": ["n[0]"]}]}]}
 
 
-def _arm(tmp_path, guides=None, notch=NOTCH, run_tag="h", placement=PLACEMENT):
+def _arm(tmp_path, guides=None, notch=NOTCH, run_tag="h", placement=PLACEMENT,
+         cells=("pe_cell",), macros=None, extra_layers=()):
+    """An arm directory: top/{placement,config}.json, the guides, and a patched
+    LEF plus its notch JSON per cell.  `config.json` matters -- the tool
+    resolves which hardening run to read from `MACROS.<cell>.lef` rather than
+    globbing, so the fixture has to name it the way harm.py does."""
     a = tmp_path / "arm"
     (a / "top" / "out").mkdir(parents=True)
     (a / "top" / "placement.json").write_text(json.dumps(placement))
     (a / "top" / "out" / "buda_guides.json").write_text(json.dumps(guides or _guides()))
-    if notch is not None:
-        d = a / "pe_cell" / "runs" / run_tag / "final" / "lef"
+    m = {}
+    for cell in cells:
+        d = a / cell / "runs" / run_tag / "final" / "lef"
         d.mkdir(parents=True)
-        (d / "pe_cell.notch.met2.json").write_text(json.dumps(notch))
+        (d / ("%s.notch.lef" % cell)).write_text("MACRO %s\nEND %s\n" % (cell, cell))
+        m[cell] = {"lef": ["dir::../%s/runs/%s/final/lef/%s.notch.lef" % (cell, run_tag, cell)]}
+        if notch is not None:
+            (d / ("%s.notch.met2.json" % cell)).write_text(json.dumps(notch))
+            for lay in extra_layers:
+                (d / ("%s.notch.%s.json" % (cell, lay))).write_text(
+                    json.dumps({"cell": cell, "layer": lay, "uncovered": [[1.0, 1.0, 1.5, 1.5]]}))
+    (a / "top" / "config.json").write_text(json.dumps({"MACROS": macros if macros is not None else m}))
     return a
 
 
@@ -70,11 +83,22 @@ def _run(arm, *args):
 
 # ── the refusals: a zero must be unreachable when nothing was measured ──────
 
-def test_it_refuses_when_no_notch_piece_was_placed(tmp_path):
+def test_it_refuses_when_there_is_no_notch_json_at_all(tmp_path):
     """The blocker.  An arm with guides and placement but no notch JSON used to
     print `VERDICT: INERT` and, worse, `the check was live: True` -- the
     liveness line keyed on macro boxes rather than on pieces (#913)."""
     r = _run(_arm(tmp_path, notch=None))
+    assert r.returncode == 1, r.stdout
+    assert "REFUSING" in r.stderr and "no notch JSON" in r.stderr, r.stderr
+    assert "INERT" not in r.stdout, r.stdout
+
+
+def test_it_refuses_when_every_uncovered_list_is_empty(tmp_path):
+    """The other door to a zero with complete coverage: the JSON is present for
+    every cell and every layer, and holds no rectangle.  `notch_obs.py` writes
+    that for a cell it found nothing to patch, so this is a real state, and a
+    verdict from it would be arithmetic rather than measurement."""
+    r = _run(_arm(tmp_path, notch={"cell": "pe_cell", "layer": "met2", "uncovered": []}))
     assert r.returncode == 1, r.stdout
     assert "REFUSING" in r.stderr and "0 notch pieces" in r.stderr, r.stderr
     assert "INERT" not in r.stdout, r.stdout
@@ -141,3 +165,61 @@ def test_json_carries_the_liveness_per_layer(tmp_path):
     assert res["verdict"] == "inert" and res["shared_layers"] == ["met2"]
     (met2,) = [l for l in res["layers"] if l["layer"] == "met2"]
     assert met2["live"] is True and met2["pieces"] == 1
+
+
+# ── coverage must be all-or-nothing (#925) ─────────────────────────────────
+
+_TWO = {"design": "top", "dbu": 1000, "divider": "/", "instances": [
+    dict(PLACEMENT["instances"][0]),
+    {"def_name": "u2", "name": "u2", "cell": "acc_cell", "def_location": [200.0, 0.0],
+     "x": 200.0, "y": 0.0, "orient": "N", "size": [100.0, 100.0]}]}
+
+
+def test_it_refuses_when_one_placed_cell_has_no_notch_json(tmp_path):
+    """Partial coverage.  `pe_cell` supplies pieces, `acc_cell` supplies none,
+    and the global piece count is satisfied -- so the old code printed INERT
+    with every acc_cell instance unmeasured, and the missing one could be
+    exactly where a corridor crosses."""
+    a = _arm(tmp_path, placement=_TWO, cells=("pe_cell", "acc_cell"))
+    for j in (a / "acc_cell").rglob("*.notch.met2.json"):
+        j.unlink()
+    r = _run(a)
+    assert r.returncode == 1, r.stdout
+    assert "REFUSING" in r.stderr and "acc_cell" in r.stderr, r.stderr
+    assert "INERT" not in r.stdout, r.stdout
+
+
+def test_it_refuses_when_a_placed_cell_is_not_in_the_tops_macros(tmp_path):
+    a = _arm(tmp_path, placement=_TWO, cells=("pe_cell", "acc_cell"),
+             macros={"pe_cell": {"lef": ["dir::../pe_cell/runs/h/final/lef/pe_cell.notch.lef"]}})
+    r = _run(a)
+    assert r.returncode == 1
+    assert "REFUSING" in r.stderr and "MACROS" in r.stderr and "acc_cell" in r.stderr, r.stderr
+
+
+def test_it_refuses_when_cells_disagree_on_the_patched_layers(tmp_path):
+    """A cell patched on fewer layers is a cell partly unmeasured."""
+    a = _arm(tmp_path, placement=_TWO, cells=("pe_cell", "acc_cell"))
+    d = a / "pe_cell" / "runs" / "h" / "final" / "lef"
+    (d / "pe_cell.notch.met3.json").write_text(
+        json.dumps({"cell": "pe_cell", "layer": "met3", "uncovered": [[1.0, 1.0, 1.5, 1.5]]}))
+    r = _run(a)
+    assert r.returncode == 1
+    assert "REFUSING" in r.stderr and "disagree" in r.stderr, r.stderr
+
+
+def test_the_run_is_taken_from_the_tops_config_not_the_first_glob_hit(tmp_path):
+    """Two hardenings exist; `MACROS` names `hb`, whose piece sits where the
+    corridor runs.  Globbing would take `h` (lexicographically first) and its
+    piece is elsewhere -- so a stale-run read reports INERT and the correct
+    read reports the overlap."""
+    a = _arm(tmp_path, run_tag="hb", guides=_guides(x1=10000, x2=11000))
+    stale = a / "pe_cell" / "runs" / "h" / "final" / "lef"
+    stale.mkdir(parents=True)
+    (stale / "pe_cell.notch.lef").write_text("MACRO pe_cell\nEND pe_cell\n")
+    (stale / "pe_cell.notch.met2.json").write_text(
+        json.dumps({"cell": "pe_cell", "layer": "met2", "uncovered": [[90.0, 90.0, 90.5, 90.5]]}))
+    r = _run(a)
+    assert r.returncode == 1, r.stdout
+    assert "intersection(s)" in r.stdout, ("read the stale `h` run instead of the "
+                                           "`hb` one the config names:\n" + r.stdout)

@@ -50,23 +50,72 @@ def _load_placement(arm):
     return pl
 
 
-def notch_pieces(arm, insts, dbu, layers=("met2", "met3")):
+def notch_lefs(arm):
+    """{cell: the patched LEF the TOP actually names}, from its own config.
+
+    Resolved rather than searched.  Globbing `runs/*/final/lef` picks the
+    lexicographically first tag when a cell hardened under several (`h` and
+    `hb` both exist in this tree), which is a guess: nothing ties that run to
+    the abstract the top consumed, and two hardenings can differ in geometry,
+    so the check could compare corridors against stale pieces and report
+    INERT (Codex, PR #925).  `MACROS.<cell>.lef` is the authority.
+    """
+    p = os.path.join(arm, "top", "config.json")
+    if not os.path.isfile(p):
+        sys.exit("corridor_notch_check: no %s -- the top's config names the "
+                 "patched LEFs this check has to read" % p)
+    macros = json.load(open(p)).get("MACROS") or {}
+    out = {}
+    for cell, m in macros.items():
+        for lef in (m.get("lef") or []):
+            out[cell] = os.path.normpath(os.path.join(
+                arm, "top", lef[len("dir::"):] if lef.startswith("dir::") else lef))
+    return out
+
+
+def notch_pieces(arm, insts, dbu):
     """Every cell's `uncovered` rects, placed in each instance's frame (DBU).
 
-    The per-cell JSON is `notch_obs.py`'s, beside the patched LEF.  The run
-    tag is DISCOVERED rather than assumed `h`: an arm whose blocks hardened
-    under another tag would otherwise match no file and read as "no notch
-    metal anywhere", which is the silent zero above wearing a second hat.
+    REFUSES on partial coverage.  A cell with no notch JSON used to be skipped
+    while another cell's pieces satisfied the global count, so `INERT` could be
+    printed with a whole cell unmeasured -- and the unmeasured one could be
+    exactly where a corridor crosses (Codex, PR #925).  Coverage is all-or-
+    nothing, and the layer SET must agree across cells for the same reason: a
+    cell patched on fewer layers is a cell partly unmeasured.
     """
-    per_cell, found = {}, {}
-    for cell in sorted({i["cell"] for i in insts}):
-        for lay in layers:
-            hits = sorted(glob.glob(os.path.join(
-                arm, cell, "runs", "*", "final", "lef", "%s.notch.%s.json" % (cell, lay))))
-            if not hits:
-                continue
-            found.setdefault(cell, []).append(hits[0])
-            per_cell.setdefault(cell, {})[lay] = json.load(open(hits[0])).get("uncovered", [])
+    lefs = notch_lefs(arm)
+    placed_cells = sorted({i["cell"] for i in insts})
+    missing = [c for c in placed_cells if c not in lefs]
+    if missing:
+        sys.exit("corridor_notch_check: REFUSING -- %d placed cell(s) are not in "
+                 "the top's MACROS: %s.\n  Their instances would be silently "
+                 "unmeasured." % (len(missing), ", ".join(missing)))
+
+    per_cell, by_cell_layers = {}, {}
+    for cell in placed_cells:
+        lef = lefs[cell]
+        base = lef[:-len(".notch.lef")] if lef.endswith(".notch.lef") else os.path.splitext(lef)[0]
+        found = {}
+        for j in sorted(glob.glob(base + ".notch.*.json")):
+            lay = os.path.basename(j)[len(os.path.basename(base)) + len(".notch."):-len(".json")]
+            found[lay] = json.load(open(j)).get("uncovered", [])
+        per_cell[cell] = found
+        by_cell_layers[cell] = frozenset(found)
+
+    bare = sorted(c for c, l in by_cell_layers.items() if not l)
+    if bare:
+        sys.exit("corridor_notch_check: REFUSING -- %d placed cell(s) have no notch "
+                 "JSON beside the LEF the top names: %s.\n  A verdict over the rest "
+                 "would leave those instances unmeasured; run notch.sh."
+                 % (len(bare), ", ".join(bare)))
+    sets = set(by_cell_layers.values())
+    if len(sets) > 1:
+        sys.exit("corridor_notch_check: REFUSING -- cells disagree on which layers "
+                 "were patched: %s.\n  A cell patched on fewer layers is a cell "
+                 "partly unmeasured."
+                 % "; ".join("%s={%s}" % (c, ",".join(sorted(l)))
+                             for c, l in sorted(by_cell_layers.items())))
+
     pieces = collections.defaultdict(list)
     for i in insts:
         ox, oy = i["x"], i["y"]
@@ -74,7 +123,7 @@ def notch_pieces(arm, insts, dbu, layers=("met2", "met3")):
             for (x1, y1, x2, y2) in rects:
                 pieces[lay].append(((ox + x1) * dbu, (oy + y1) * dbu,
                                     (ox + x2) * dbu, (oy + y2) * dbu))
-    return pieces, found
+    return pieces, {c: lefs[c] for c in placed_cells}
 
 
 def corridors(arm):
