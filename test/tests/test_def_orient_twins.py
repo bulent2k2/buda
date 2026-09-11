@@ -28,9 +28,13 @@ for `_split_args` -- a twin in another language (or another deployment unit)
 needs its agreement MEASURED.
 
 The BDB convention is a DIFFERENT transform with its own twins
-(`src/orient_rect.py` <-> `orient_map` in `src/topology.cpp`); it mirrors about
-X first and so DISAGREES with DEF on all four flips.  `def_orient_to_bdb` in
-`bdb.cpp` is the permutation.  Nothing here should be read as covering it.
+(`src/orient_rect.py` <-> `orient_map` in `src/topology.cpp`): a BDB token
+means "mirror about X, then rotate CCW by the angle".  It therefore disagrees
+with DEF on the two DIRECTION-PRESERVING flips (DEF mirrors about Y there) and
+AGREES on `FE`/`FW` -- which `test_where_the_two_conventions_actually_diverge`
+below measures, and which this paragraph claimed as "all four flips" until
+#922.  `def_orient_to_bdb` in `bdb.cpp` is that permutation.  Nothing here
+should be read as covering it.
 """
 
 import sys
