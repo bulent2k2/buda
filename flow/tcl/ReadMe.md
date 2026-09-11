@@ -294,9 +294,13 @@ Like `tpu.tcl`'s, this `-bottomup` is not only a flow change. The copied
 cell-local routing is a fixed copy at every instance, so what it cannot clear
 is an **overlap** rather than an open, and at the top-down channel the design
 leaves two standing after both healer rounds. Measured at NQ = 4 the cheapest
-channel that clears it is 24 (+7.8 % WL), which the flag sets unless the
-caller passed `-GAP` — an explicit channel is the experiment and must not be
-overridden by a flag.
+channel that clears it is 24 (+7.8 % WL), and the flag supplies `GAP` and `M`
+**atomically** — naming *either* suppresses the whole pair, because a caller
+who names one is doing the geometry by hand. Filling each half in
+independently made the flag's own contribution partial: `-bottomup -GAP 16`
+left `M` at 24 and gave a 4976 × 1576 die where the default geometry is
+4720 × 1440, so a sweep meant to vary the channel alone varied two things
+(and `-bottomup -M 16` leaked the other way, 4840 × 1472).
 
 `align_bottom_up` then reports that nested marked parents place children at
 incompatible phases, and that is measured rather than tuned away: the track

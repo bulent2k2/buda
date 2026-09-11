@@ -156,29 +156,34 @@ def test_bottom_up_gets_the_channel_it_needs_but_never_overrides_the_caller(tmp_
     """`-bottomup` changes the GEOMETRY, not just the flow (as `tpu.tcl`'s
     does): a fixed copy at every instance leaves an OVERLAP the healers
     cannot clear at the top-down channel, and 24 is the cheapest that does.
-    An explicit `-GAP` is the experiment, so the flag must yield to it."""
-    probe = tmp_path / "probe2.tcl"
-    probe.write_text(
-        'source [file join {%s} flow tcl soc_lib.tcl]\n'
-        'soc_vehicle::configure {}\n'
-        'puts "default [soc_vehicle::get GAP]"\n' % _ROOT)
-    r = subprocess.run(["tclsh", str(probe)], capture_output=True,
-                       encoding="utf-8", cwd=tmp_path, timeout=120)
-    default_gap = int(r.stdout.split()[1])
 
-    bu = _run(tmp_path, 2, "-bottomup", "-dry")
-    assert bu.returncode == 0, bu.stdout + bu.stderr
+    The pair is supplied ATOMICALLY, and the single-knob forms are the ones
+    that matter — filling each half in independently made the flag's own
+    contribution partial, so `-bottomup -GAP 16` left `M` at 24 and gave a
+    4976x1576 die where the default geometry is 4720x1440: a sweep meant to
+    vary the channel alone varied two things (Codex P2, #930).  The first
+    version of this test passed `-GAP` AND `-M` together, which is precisely
+    why it did not see that."""
     plain = _run(tmp_path, 2, "-dry")
-    assert plain.returncode == 0, plain.stdout + plain.stderr
+    bu = _run(tmp_path, 2, "-bottomup", "-dry")
+    assert plain.returncode == 0 and bu.returncode == 0, plain.stdout + bu.stdout
     # the flag widened the die, so it widened the channel
     assert _die(bu.stdout)[0] > _die(plain.stdout)[0], (bu.stdout, plain.stdout)
 
-    # ...and an explicit channel wins over the flag.
-    forced = _run(tmp_path, 2, "-bottomup", "-GAP", default_gap,
-                  "-M", default_gap, "-dry")
-    assert forced.returncode == 0, forced.stdout + forced.stderr
-    assert _die(forced.stdout) == _die(plain.stdout), (forced.stdout,
-                                                       plain.stdout)
+    # ...and naming EITHER knob suppresses the whole pair, so the caller's
+    # geometry is exactly what they asked for.  Both single-knob forms, since
+    # each half leaked on its own.
+    for args in (("-GAP", 16), ("-M", 16), ("-GAP", 16, "-M", 16)):
+        forced = _run(tmp_path, 2, "-bottomup", *args, "-dry")
+        assert forced.returncode == 0, forced.stdout + forced.stderr
+        assert _die(forced.stdout) == _die(plain.stdout), (args, forced.stdout)
+
+    # A channel the caller pins to something else is honoured as given, with
+    # the other knob left at its configured default rather than at 24.
+    other = _run(tmp_path, 2, "-bottomup", "-GAP", 32, "-dry")
+    assert other.returncode == 0, other.stdout + other.stderr
+    assert _die(other.stdout) not in (_die(plain.stdout), _die(bu.stdout)), \
+        other.stdout
 
 
 def _die(out):

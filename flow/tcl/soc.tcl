@@ -93,13 +93,16 @@ while {$argi < $argc} {
 #   GAP    16   24   32   48   64   96
 #   result  X   ok   ok   ok    X   ok       (X = overlaps or bits unplaced)
 #
-# so 24, and only when the caller has not said otherwise -- an explicit
-# `-GAP` is the experiment and must not be overridden by a flag.
-if {$bottomup && [lsearch -exact $overrides GAP] < 0} {
-    lappend overrides GAP 24
-}
-if {$bottomup && [lsearch -exact $overrides M] < 0} {
-    lappend overrides M 24
+# so 24 -- and the pair is supplied ATOMICALLY, only when the caller named
+# NEITHER knob.  Filling in each half independently made the flag's own
+# contribution partial: `-bottomup -GAP 16` left `M` at 24 and gave
+# 4976x1576 where the default geometry is 4720x1440, so a sweep meant to
+# vary the channel alone varied two things (and `-bottomup -M 16` leaked the
+# other way, 4840x1472).  A caller who names either knob is doing the
+# geometry by hand and the flag must not supply the other half for them.
+if {$bottomup && [lsearch -exact $overrides GAP] < 0
+                && [lsearch -exact $overrides M] < 0} {
+    lappend overrides GAP 24 M 24
 }
 
 soc_vehicle::configure $overrides
