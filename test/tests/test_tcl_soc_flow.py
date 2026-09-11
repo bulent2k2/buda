@@ -49,6 +49,28 @@ def _run(tmp_path, *args):
                           errors="replace", cwd=tmp_path, timeout=900)
 
 
+def _verdict(r):
+    """`(overlaps, unplaced, violations)` from the vehicle's own last line.
+
+    `verdict` prints the clean case on stdout and the failure on stderr, so
+    both streams are read; a run that printed neither is a crash, not a
+    result, and asserting that here keeps every caller from re-deriving it.
+    """
+    out = r.stdout + r.stderr
+    if "clean -- 0 overlaps, 0 unplaced, 0 audit violations" in out:
+        return (0, 0, 0)
+    m = re.search(r"FAILED -- (\d+) overlaps, (\d+) unplaced, "
+                  r"(\d+) audit violations", out)
+    assert m, out[-4000:]
+    return tuple(int(g) for g in m.groups())
+
+
+def _wl(r):
+    m = re.findall(r"total detailed WL = (\d+)", r.stdout)
+    assert m, r.stdout[-4000:]
+    return int(m[-1])
+
+
 def _depths(out):
     """The `dump_hbundles` rows tallied by DEPTH (`D0`..`D3`)."""
     k = collections.Counter()
@@ -125,31 +147,92 @@ def test_the_stack_relative_band_also_runs_clean(tmp_path):
     assert "clean -- 0 overlaps, 0 unplaced, 0 audit violations" in r.stdout
 
 
-def test_the_channel_is_a_constant_and_not_derived(tmp_path):
-    """The finding, pinned as a finding.  A face IS derived from the bits
-    that land on it; a channel is NOT, because the relationship is measured
-    non-monotone (at DW=128 the design is clean at GAP 40/48/80 and strands
-    bits at 16/24/32/56/64/96) -- a gap shifts every block and with it which
-    blocks land on which track phase.  So `GAP`/`M` must stay CONSTANTS: a
-    later "improvement" that derives them from the bus widths would assert a
-    law this vehicle's own numbers deny, and would cost 2.6x the wirelength
-    while failing at NQ=16, which is the measurement in `flow/tcl/ReadMe.md`.
+def test_a_wider_channel_is_not_the_lever_a_wider_bus_needs(tmp_path):
+    """The finding, pinned by RUNNING the design rather than by reading
+    `configure` back.
+
+    A face IS derived from the bits that land on it (`soc_lib.tcl`); a
+    CHANNEL is not, and the reason is that widening the channel is not the
+    lever.  Two measurements, both made here:
+
+    (a) At the default bus widths a wider gap buys NO routing — the design
+        is already clean — and costs wire monotonically, inflating the die
+        while the contention sits elsewhere.  That is `tpu.tcl`'s recorded
+        lesson in the direction it recorded it.
+
+    (b) At DW=128 the design does not route, and it does not route at a 6x
+        channel either: the bits are culled for CROSSING A KEEPOUT (one
+        cross-level NoC leg, `…/rtr/fi_out → l2/mc`), which no gap width
+        addresses.  A wider gap moves the count a little because it shifts
+        every block's track phase — a perturbation, not a supply.
+
+    So a derivation from the bus width has nothing to target, and `GAP`/`M`
+    stay CONSTANTS: a design far from the default sweeps `-GAP` and MEASURES
+    the result, which is what this test does.
+
+    Two things this replaces, both worth remembering.  The first version
+    asserted only that `configure` left the two values unchanged — a routing
+    change could not falsify it, so it pinned nothing (Codex P2, #930).  And
+    the numbers it cited in its own docstring had ALREADY gone stale by the
+    time that was asked: the earlier sweep read as non-monotone (clean at
+    GAP 40/48/80, stranded at 16/24/32/56/64/96), and re-running it after a
+    second healer round landed gives no clean point at all.  A recorded
+    measurement that nothing re-runs decays into a claim.
     """
-    probe = tmp_path / "probe.tcl"
-    probe.write_text(
-        'source [file join {%s} flow tcl soc_lib.tcl]\n'
-        'foreach w {16 32 64 128} {\n'
-        '    soc_vehicle::configure [list DW $w IW $w]\n'
-        '    puts "$w [soc_vehicle::get GAP] [soc_vehicle::get M]"\n'
-        '}\n' % _ROOT)
-    r = subprocess.run(["tclsh", str(probe)], capture_output=True,
-                       encoding="utf-8", cwd=tmp_path, timeout=120)
+    # (a) the default widths: clean either way, and the wide one costs wire.
+    narrow = _run(tmp_path, 1, "-GAP", 16)
+    wide = _run(tmp_path, 1, "-GAP", 48)
+    assert _verdict(narrow) == (0, 0, 0), narrow.stdout + narrow.stderr
+    assert _verdict(wide) == (0, 0, 0), wide.stdout + wide.stderr
+    assert _wl(wide) > _wl(narrow), ("a wider channel is supposed to cost "
+                                     "wire and buy nothing here",
+                                     _wl(narrow), _wl(wide))
+
+    # (b) a 4x bus: unroutable at the default channel AND at 6x it, for a
+    # reason a channel cannot reach.
+    for gap in (16, 96):
+        r = _run(tmp_path, 1, "-DW", 128, "-IW", 128, "-GAP", gap)
+        _ov, un, _vi = _verdict(r)
+        assert un > 0, (
+            f"DW=128 at GAP {gap} now routes clean.  If a channel really is "
+            "what this design was short of, the constants are derivable "
+            "after all — update `soc_lib.tcl`'s channel note and the "
+            "`flow/tcl/ReadMe.md` table before relaxing this.", r.stdout)
+        assert "crosses a keepout" in r.stdout, (
+            "the bits are supposed to be CULLED, not short of tracks — a "
+            "different cause means the note above no longer explains it",
+            gap, r.stdout)
+
+
+def test_bottom_up_routes_the_diverse_hierarchy_clean(tmp_path):
+    """`-bottomup` END TO END.  `-dry` exits before `buda::start`, so the
+    flag's whole point — mark, align, solve once, copy, verify the tracks —
+    was covered by nothing at all, and the die-geometry test below runs dry
+    by construction (Codex P2, #930).
+
+    NQ=1 is enough and costs ~2s, because the repetition this path keys on
+    is WITHIN one quadrant: two clusters, two cores, four io pads.  What the
+    DIVERSE hierarchy adds over `tpu.tcl`'s mesh is the failure mode —
+    `align_bottom_up` can only nudge, and a 2-D packing of differently sized
+    cells has no common phase to nudge onto, so instances come out
+    MISALIGNED and `check_template_tracks on_mismatch independent` is what
+    carries them.  That policy is also the declaration ripup's
+    uniformity-break pass is gated on, so a run that never reaches it
+    exercises neither.
+    """
+    r = _run(tmp_path, 1, "-bottomup")
     assert r.returncode == 0, r.stdout + r.stderr
-    seen = {int(ln.split()[0]): (int(ln.split()[1]), int(ln.split()[2]))
-            for ln in r.stdout.split("\n") if ln.strip()}
-    assert set(seen) == {16, 32, 64, 128}, seen
-    assert len(set(seen.values())) == 1, ("the channel moved with the bus "
-                                          "width — see the docstring", seen)
+    assert _verdict(r) == (0, 0, 0), r.stdout + r.stderr
+    # solved once and COPIED — the property the flag exists for, at both
+    # stages (the cell-local NUTS solve and the per-bit DNUTS one).
+    assert re.search(r"\[BottomUp\] cell '\w+': local NUTS placed \d+ "
+                     r"segment\(s\), \d+ overlap\(s\); "
+                     r"copied [1-9]\d* fixed segment", r.stdout), r.stdout
+    assert re.search(r"\[BottomUp\] DNUTS: \d+ reference bit\(s\) solved "
+                     r"once, [1-9]\d* copied to \d+ sibling", r.stdout), r.stdout
+    # ...and the mismatch policy actually ran, on a cell that needed it.
+    assert "check_template_tracks: on_mismatch policy = independent" in r.stdout
+    assert "[TemplateTracks]" in r.stdout and "MISALIGNED" in r.stdout, r.stdout
 
 
 def test_bottom_up_gets_the_channel_it_needs_but_never_overrides_the_caller(tmp_path):

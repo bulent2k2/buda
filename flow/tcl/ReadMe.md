@@ -236,10 +236,15 @@ On a uniform-depth vehicle every cell is one level and this collapses to the
 | 4 | 8 | 115 | 96 | 4720 × 2496 | 2.0 s | clean |
 | 8 | 16 | 219 | 184 | 7056 × 3552 | 5.8 s | clean |
 | 16 | 32 | 427 | 360 | 9392 × 4608 | 23.8 s | clean |
-| 32 | 64 | 843 | 712 | 14064 × 6720 | 61 s | **24 overlaps, 96 unplaced** |
+| 32 | 64 | 843 | 712 | 14064 × 6720 | 293 s | **13 unplaced** (0 overlaps) |
 
 Clean to NQ = 16 top-down, and `-bottomup`, `-caps` and `-bydepth` are clean
-at every size measured. NQ = 32 is the honest limit.
+at every size measured. NQ = 32 is the honest limit — and its two numbers
+moved when the second `heal_if_dirty` round landed: 24 overlaps / 96 unplaced
+in 61 s became 0 / 13 in 293 s. The extra round is what buys the 13, and on a
+design it cannot finish it is also what the wall clock goes into; every clean
+row above pays nothing for it, since a clean design never enters the first
+round.
 
 ## The lesson it paid for: a face is derived, a channel is not
 
@@ -259,44 +264,62 @@ cluster straight to `l2/mc`, which at NQ = 4 gave 72 bits unplaced with four
 bundles committing on planner overflow and *no* supply-doomed seat — real
 congestion, not sizing. A memory controller is arbitrated, not wired to eight
 masters in parallel, and its face is sized for one bus. With the NoC chain in
-its place a full-width channel is **strictly worse**:
+its place a wider channel is **pure cost**:
 
 | GAP | NQ = 8 | NQ = 16 |
 |---|---|---|
 | 16 | clean, WL 2,076,658 | clean, WL 4,326,186 |
-| 48 | clean, WL 2,799,211 | clean, WL 5,806,145 |
-| 96 | clean, WL 3,897,596 | **32 unplaced** |
-| 144 | clean, WL 4,960,422 | **32 unplaced** |
+| 48 | clean, WL 2,475,780 | clean, WL 5,047,839 |
+| 96 | clean, WL 2,954,709 | clean, WL 6,125,943 |
+| 144 | clean, WL 3,469,229 | clean, WL 7,137,372 |
 
-— which is `tpu.tcl`'s lesson in the direction it recorded it: *widening the
-channel made it worse, the channel never having been the binding
-constraint.* The die it inflates makes every wire longer while the congestion
-sits elsewhere.
+Every row routes, so the wider channel buys **nothing** and costs wire
+monotonically — which is `tpu.tcl`'s lesson in the direction it recorded it:
+*the channel was never the binding constraint*, so widening it only inflates
+the die and makes every wire longer.
 
-The obvious repair is a **fraction** of a bus rather than a whole one, and
-that is where it stops being a rule at all. Swept at DW = 128, NQ = 4:
+And where the design does **fail**, a channel is not the lever either. Swept
+at DW = 128 (a 4× datapath), NQ = 4, in bits left unplaced:
 
 | GAP | 16 | 24 | 32 | 40 | 48 | 56 | 64 | 80 | 96 |
 |---|---|---|---|---|---|---|---|---|---|
-| result | ✗ | ✗ | ✗ | ok | ok | ✗ | ✗ | ok | ✗ |
+| unplaced | 65 | 62 | 60 | 60 | 58 | 55 | 53 | 50 | 46 |
 
-Non-monotone, so there is no width a derivation could target: a gap shifts
-every block, and with it which blocks land on which track phase, so the
-channel knob **perturbs** the route rather than feeding it. A vehicle that
-derived this would be asserting a law its own numbers deny. `GAP` and `M` are
-therefore plain constants that work across the whole NQ dial at the default
-bus widths, and a design moving `DW` far from the default sweeps `-GAP`
+Never zero at any width tried — NQ = 1 runs the same way, 65 down to 31 at
+GAP 160 — and the bits are **culled for crossing a keepout**, on one
+cross-level NoC leg (`<cluster>/rtr/fi_out → l2/mc`). No gap width addresses
+that; a wider gap shifts every block's track phase, so it moves the count
+without feeding the constraint. `GAP` and `M` are therefore plain constants
+that work across the whole NQ dial at the default bus widths, and a design
+moving `DW` far from the default sweeps `-GAP` and **measures** the result
 rather than trusting an arithmetic.
+
+The last part of the lesson is that these numbers were re-run. An earlier
+sweep in this section read as *non-monotone* (clean at GAP 40/48/80, stranded
+at the rest) and was presented here as the reason no derivation could exist;
+a second healer round added to `heal_if_dirty` afterwards changed the answer
+at every point, and nothing re-ran the table. A recorded measurement nothing
+re-runs decays into a claim, so
+`test_a_wider_channel_is_not_the_lever_a_wider_bus_needs` now runs the cheap
+end of both directions (NQ = 1, ~9 s) on every test run.
 
 ## `-bottomup` changes the geometry, and exercises the `independent` path
 
 Like `tpu.tcl`'s, this `-bottomup` is not only a flow change. The copied
 cell-local routing is a fixed copy at every instance, so what it cannot clear
 is an **overlap** rather than an open, and at the top-down channel the design
-leaves two standing after both healer rounds. Measured at NQ = 4 the cheapest
-channel that clears it is 24 (+7.8 % WL), and the flag supplies `GAP` and `M`
-**atomically** — naming *either* suppresses the whole pair, because a caller
-who names one is doing the geometry by hand. Filling each half in
+leaves two standing after both healer rounds. Measured at NQ = 4:
+
+| GAP | 16 | 24 | 32 | 48 | 64 | 96 |
+|---|---|---|---|---|---|---|
+| result | ✗ 2 overlaps | ok | ok | ok | ✗ 256 unplaced | ok |
+
+so 24 is the cheapest that clears it (+7.8 % WL over the failing 16). This
+sweep is where the *perturbation* reading has its evidence: 64 fails between
+two clean neighbours, because the copied routing is a **fixed** copy and the
+channel decides which phase each instance lands on. It is also why the flag
+supplies `GAP` and `M` **atomically** — naming *either* suppresses the whole
+pair, because a caller who names one is doing the geometry by hand. Filling each half in
 independently made the flag's own contribution partial: `-bottomup -GAP 16`
 left `M` at 24 and gave a 4976 × 1576 die where the default geometry is
 4720 × 1440, so a sweep meant to vary the channel alone varied two things

@@ -114,33 +114,41 @@ proc soc_vehicle::configure {{overrides {}}} {
     # bus (~136 units at the M6 per-bit channel).  Deriving it that way DOES
     # clear the symptom.  It is still the wrong fix, and only measurement
     # says so: the real cause was a STAR on the memory controller (see
-    # `build_buses`), and with the NoC chain in its place a full-width
-    # channel is strictly worse --
+    # `build_buses`), and with the NoC chain in its place a wider channel
+    # buys NO routing at all and costs wire, monotonically --
     #
-    #   GAP   NQ=8                    NQ=16
-    #    16   clean, WL  2,076,658    clean, WL  4,326,186
-    #    48   clean, WL  2,799,211    clean, WL  5,806,145
-    #    96   clean, WL  3,897,596    32 UNPLACED
-    #   144   clean, WL  4,960,422    32 UNPLACED
+    #   GAP     NQ=8 detailed WL     NQ=16 detailed WL
+    #    16         2,076,658            4,326,186
+    #    48         2,475,780            5,047,839
+    #    96         2,954,709            6,125,943
+    #   144         3,469,229            7,137,372     (every row CLEAN)
     #
     # -- which is `tpu.tcl`'s recorded lesson in the direction it recorded
-    # it: WIDENING THE CHANNEL MADE IT WORSE, the channel never having been
-    # the binding constraint.  The die it inflates makes every wire longer
-    # while the congestion sits elsewhere.
+    # it: the channel was never the binding constraint, so widening it only
+    # inflates the die and makes every wire longer.
     #
-    # The obvious repair is a FRACTION of a bus rather than a whole one, and
-    # that is where it stops being a rule at all.  Swept at DW=128, NQ=4:
+    # Where the design DOES fail, a channel is not the lever either.  Swept
+    # at DW=128 (a 4x datapath), NQ=4, in bits left unplaced:
     #
-    #   GAP    16  24  32  40  48  56  64  80  96
-    #   result  X   X   X   ok  ok   X   X  ok   X      (X = bits unplaced)
+    #   GAP        16  24  32  40  48  56  64  80  96
+    #   unplaced   65  62  60  60  58  55  53  50  46
     #
-    # Non-monotone, so there is no width a derivation could target: a gap
-    # shifts every block, and with it which blocks land on which track phase,
-    # so the channel knob perturbs the route rather than feeding it.  A
-    # vehicle that DERIVED this would be asserting a law its own numbers
-    # deny.  So GAP and M are plain constants that work across the whole NQ
-    # dial at the default bus widths, and a design changing DW far from the
-    # default sweeps `-GAP` rather than trusting an arithmetic.
+    # Never zero at any width tried (NQ=1 runs the same way, 65 down to 31 at
+    # GAP 160), and the bits are CULLED FOR CROSSING A KEEPOUT -- one
+    # cross-level NoC leg, `<cluster>/rtr/fi_out -> l2/mc` -- which no gap
+    # width addresses.  A wider gap shifts every block's track phase, so it
+    # moves the count without feeding the constraint.  So GAP and M are
+    # plain constants that work across the whole NQ dial at the default bus
+    # widths, and a design changing DW far from the default sweeps `-GAP`
+    # and MEASURES the result rather than trusting an arithmetic.
+    #
+    # These numbers are re-runnable and have been re-run, which is the last
+    # part of the lesson: an earlier sweep here read as NON-monotone (clean
+    # at GAP 40/48/80 and stranded at the rest), and a second healer round
+    # added to `heal_if_dirty` afterwards changed the answer at every point.
+    # A recorded measurement nothing re-runs decays into a claim, so
+    # `test_a_wider_channel_is_not_the_lever_a_wider_bus_needs` runs the
+    # cheap end of both directions on every test run.
 
     # ── leaf cells: (bits landing on a vertical face, on a horizontal face)
     # A vertical (north/south) face has to host the bits arriving from above
