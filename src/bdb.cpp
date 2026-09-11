@@ -1956,6 +1956,33 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
     // (Codex P2 on #647).  An internal name that cannot collide keeps them
     // apart; `port_comp` maps the external name back to it.
     std::map<std::string, std::string> port_comp;
+    // Each port's pin position: a point ON ITS METAL and inside its component.
+    // A macro pin is placed at the centroid of its own RECTs
+    // (`LefPinDef::centroid`); a die port used its PLACED origin, which is not
+    // on its metal once the PORT rect is clear of that origin -- and the point
+    // must be inside the component too, since `export_gds` writes the net label
+    // here and `import_gds` gives a label to the component CONTAINING it.
+    //
+    // The PLACED point wins whenever it lies on a rect: it is the DEF's own
+    // statement of where the pin is, so nothing moves where nothing was wrong.
+    // Otherwise the centre of the rect NEAREST that point.
+    //
+    // NOT the bbox midpoint, which for disjoint rects can fall in the GAP
+    // between them (measured: rects at 39.8..40.2 and 60.0..60.4 put it at
+    // 50.1, on no metal at all).
+    // `test_a_die_ports_pin_survives_the_merge_unchanged` had already recorded
+    // that trap from an earlier review, and the first cut of this fix walked
+    // into it.
+    //
+    // And not the LARGEST rect either, which the cut after that used on a
+    // "most metal to land on" argument.  That argument is about the wrong
+    // thing: what routing targets is the port COMPONENT, while this point is
+    // the reference busterm derivation, HPWL and the flylines read -- so what
+    // it owes is fidelity to where the DEF put the pin.  Measured, largest is
+    // actively worse: with a small rect 0.1 um from the placed point and a
+    // huge one 50 um away it lands 60 um from the DEF's own position where
+    // nearest lands 0.3 um away.
+    std::map<std::string, std::pair<double,double>> port_pos;
     // The __PORT__ cell rows (opens item 3): the boundary components
     // reference them, and without a cell row the GDS export emits SREFs to
     // a structure that is never defined — and with the port components gone
@@ -2016,16 +2043,44 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
         // The box is DEGENERATE here (0 x 0) because a PORT rect is anchored
         // at a point rather than inside an extent -- see `def_orient_xf`.
         const std::string po = p.orient.empty() ? "N" : p.orient;
+        // The bbox is the PORT metal's extent.  A PIN with no PORT rect has no
+        // metal and degenerates to its placed point -- but that point is only
+        // the FALLBACK, never a corner the rects are unioned with: a PORT rect
+        // is origin-RELATIVE and need not contain the origin, so seeding the
+        // box with the point stretched the extent out to it and claimed metal
+        // the DEF never drew.  Invisible on every DEF here -- `flow/ariane133`
+        // straddles its origin (+-70 DBU) and `emit_pin_def` anchors rects at
+        // it -- so, like #912 itself, only somebody else's DEF reaches it.
         double x1 = px, y1 = py, x2 = px, y2 = py;
+        bool seeded = false, on_metal = false;
+        double best_d = -1, bcx = px, bcy = py;
+        constexpr double kEps = 1e-9;
         for (const auto& r : p.rects) {          // shapes are relative to PLACED
             double ax, ay, bx, by;
             def_orient_xf(po, dbu_to_lu(r.x1), dbu_to_lu(r.y1), 0, 0, ax, ay);
             def_orient_xf(po, dbu_to_lu(r.x2), dbu_to_lu(r.y2), 0, 0, bx, by);
-            x1 = std::min(x1, px + std::min(ax, bx));
-            y1 = std::min(y1, py + std::min(ay, by));
-            x2 = std::max(x2, px + std::max(ax, bx));
-            y2 = std::max(y2, py + std::max(ay, by));
+            const double rx1 = px + std::min(ax, bx), rx2 = px + std::max(ax, bx);
+            const double ry1 = py + std::min(ay, by), ry2 = py + std::max(ay, by);
+            if (!seeded) { x1 = rx1; y1 = ry1; x2 = rx2; y2 = ry2; seeded = true; }
+            else {
+                x1 = std::min(x1, rx1);  y1 = std::min(y1, ry1);
+                x2 = std::max(x2, rx2);  y2 = std::max(y2, ry2);
+            }
+            if (px >= rx1 - kEps && px <= rx2 + kEps &&
+                py >= ry1 - kEps && py <= ry2 + kEps) on_metal = true;
+            // Box distance from the placed point to this rect, 0 when inside
+            // -- the same form `import_gds` uses to attribute a label.  STRICT
+            // `<`, so equidistant rects resolve to the first in DEF order:
+            // arbitrary but deterministic, and every candidate is on metal.
+            const double ddx = std::max({rx1 - px, 0.0, px - rx2});
+            const double ddy = std::max({ry1 - py, 0.0, py - ry2});
+            const double d = std::hypot(ddx, ddy);
+            if (best_d < 0 || d < best_d) {      // first rect always wins (-1)
+                best_d = d;
+                bcx = (rx1 + rx2) / 2.0;  bcy = (ry1 + ry2) / 2.0;
+            }
         }
+        if (seeded && !on_metal) port_pos[p.name] = {bcx, bcy};
         const std::string pcell = port_cell_for(x2 - x1, y2 - y1);
         sqlite3_bind_text  (s_comp,1,cname.c_str(),-1,SQLITE_TRANSIENT);
         sqlite3_bind_text  (s_comp,2,pcell.c_str(),-1,SQLITE_TRANSIENT);
@@ -2068,6 +2123,8 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
                 ppx = dbu_to_lu(dp->second->x);
                 ppy = dbu_to_lu(dp->second->y);
             }
+            auto pp = port_pos.find(pc.pin);            // on the metal, not the origin
+            if (pp != port_pos.end()) { ppx = pp->second.first; ppy = pp->second.second; }
             sqlite3_bind_int   (s_pin,1,pc.nid);
             sqlite3_bind_int   (s_pin,2,cid);
             sqlite3_bind_text  (s_pin,3,pc.pin.c_str(),-1,SQLITE_TRANSIENT);

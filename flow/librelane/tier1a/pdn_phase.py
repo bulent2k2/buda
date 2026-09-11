@@ -364,7 +364,14 @@ def read_lef(path):
 
 
 # ── orientation: cell-local rect -> instance-local, lower-left at (0,0) ──
-_ORIENT = {  # (x,y) -> rotated/mirrored point about the origin
+# (x,y) -> rotated/mirrored point about the origin, per DEF orientation token.
+# A THIRD copy of `DEF_ORIENT_POINT` in the repo's `tools/def_orient.py`, kept
+# because this script is stdlib-only by design -- it runs inside a LibreLane
+# run tree, where the repo's `tools/` is not importable.  Their agreement is
+# measured by `test/tests/test_def_orient_twins.py`, not assumed: #912 was a
+# fourth copy of this transform being wrong for a day.  These are DEF's tokens;
+# BDB's differ on FN/FS (`src/orient_rect.py`).
+_ORIENT = {
     "N": lambda x, y: (x, y), "S": lambda x, y: (-x, -y),
     "W": lambda x, y: (-y, x), "E": lambda x, y: (y, -x),
     "FN": lambda x, y: (-x, y), "FS": lambda x, y: (x, -y),

@@ -31,10 +31,15 @@ read the geometry without dragging in the routing engine.  The table mirrors
 
 # (swap, reflect_x, reflect_y) per BDB orientation token -- the convention
 # `component.orient` is stored in, which is NOT DEF's: the two agree on the
-# pure rotations and differ on all four flips (BDB mirrors about X, DEF about
-# Y, so BDB `FN` is `(x, h-y)` where DEF's is `(w-x, y)`).  A token read
-# straight out of a DEF file goes through `tools/def_orient.py` instead;
-# `def_orient_to_bdb` in `bdb.cpp` is the permutation between them.
+# pure rotations and differ on the two DIRECTION-PRESERVING flips (BDB mirrors
+# about X, DEF about Y, so BDB `FN` is `(x, h-y)` where DEF's is `(w-x, y)`,
+# and `FS` the same the other way).  They AGREE on `FW` and `FE`, the two that
+# also swap axes -- measured, in both the point and box forms, by
+# `test/tests/test_def_orient_twins.py`; this said "all four" until then.  A
+# token read straight out of a DEF file goes through `tools/def_orient.py`
+# instead; `def_orient_to_bdb` in `bdb.cpp` permutes all four flip TOKENS,
+# which for `FE`/`FW` is a claim about the stored token and not about these
+# transforms (see that test's note).
 ORIENT_MAPS = {"N":  (0, 0, 0), "S":  (0, 1, 1),
                "FN": (0, 0, 1), "FS": (0, 1, 0),
                "W":  (1, 1, 0), "E":  (1, 0, 1),
