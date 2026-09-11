@@ -738,86 +738,103 @@ def cmd_set_track_pitch(session, cmd, args, cmd_line):
     session._nuts_pitch = require_distance("set_track_pitch", "<pitch>", args[0], session)
 
 
-def _lef_layer_ids(names, taken, all_names=None):
-    """Ids for a whole STACK of LEF routing-layer names, given in LEF order.
+def _lef_layer_ids(file_layers, taken):
+    """Ids for a whole STACK of LEF routing layers, in the file's own order.
 
-    `names` are the layers to ASSIGN ids to; `all_names` is every eligible
-    routing layer in the file (default: `names`).  The two differ when the
-    script already declared some of the file's layers by NAME: those keep
-    their own ids and are not assigned here, but they still OCCUPY a trailing
-    number in the FILE, and the clash this function answers is a property of
-    the file's names rather than of the subset left over.  Testing only the
-    subset reopens the very defect: with `Metal1`/`Metal2` predeclared, the
-    remaining names are `Metal3`..`Metal5`, `TopMetal1`, `TopMetal2`, whose
-    trailing numbers are all distinct -- so no clash is seen, ids 1 and 2 read
-    as merely script-held, and both top metals are skipped again (Codex P1 on
-    #929, reproduced: `imported 3 routing layer(s)` plus two skips).
-
-    Returns `(ids, renumbered)`: `ids` parallel to `names` (None = this layer
-    cannot be given an id), `renumbered` True when the name-derived reading
-    was abandoned for the file's own order.
+    `file_layers` is every eligible routing layer as `(name, script_id)` —
+    `script_id` set when the script already declared that layer BY NAME, in
+    which case it keeps that id and is not assigned one here.  Returns
+    `(ids, renumbered)`: `ids` for the layers this call assigns (script_id
+    None), in their order, `None` for one that cannot be given an id;
+    `renumbered` True when the name-derived reading was abandoned for the
+    file's own order.
 
     The trailing integer is used when the file's own names give distinct ones
     (`M3`->3, `metal5`->5, `Metal10`->10), because that is how every
-    hand-written stack in this repo numbers its layers -- so an imported stack
+    hand-written stack in this repo numbers its layers — so an imported stack
     and a script that refers to `def_layer 4` mean the same thing.
 
-    TWO DIFFERENT COLLISIONS, and they have different owners:
+    TWO DIFFERENT COLLISIONS, and they have different OWNERS.  That is the
+    whole rule, and it is answered by ONE walk of the file rather than by a
+    separate test per shape — two detectors is how both of the misses below
+    happened:
 
-    * **The script already holds the id** (it declared some other layer at
-      4).  The script owns its numbering, so that layer is refused -- the
-      import cannot tell whether the two names describe one layer, and
-      guessing would either merge two layers or renumber a stack out from
-      under the script.  `ids` carries None for it and the caller says so.
-
-    * **Two of the FILE's own names derive the same id.**  Nobody owns that;
+    * **Another FILE layer already claims the id.**  Nobody owns that clash:
       the name-derived reading simply does not apply to this technology, and
-      no per-layer decision can rescue it.  IHP names its thick top layers
-      `TopMetal1`/`TopMetal2`, colliding with `Metal1`/`Metal2` in BOTH of its
-      open PDKs -- and refusing per layer was worse than it sounds: sg13g2
-      imported 5 of its 7 layers, and since TOP is "the topmost layer per
-      direction", TOP then landed on Metal4/Metal5, so the planner's whole
-      TOP-vs-LOW economics ran against a stack the technology does not have.
-      The fallback is the FILE'S OWN ORDER for the WHOLE stack at once: LEF
-      lists routing layers bottom-up, which is the fact BUDA's ids actually
-      need (adjacency decides which layers a via may join).  Whole-stack
-      because a partial assignment -- five layers keeping name-derived ids and
-      two dropped -- is neither reading and belongs to no technology.  The
-      caller reports it (BUDA-1617): renumbering silently would move what
-      `def_layer 4` means out from under the script."""
+      no per-layer decision can rescue it.  The fallback is the FILE'S OWN
+      ORDER for the WHOLE stack at once — LEF lists routing layers bottom-up,
+      which is the fact BUDA's ids are for, since adjacency decides which
+      layers a via may join.  Whole-stack because a partial assignment is
+      neither reading and belongs to no technology.  The caller reports it
+      (BUDA-1617); renumbering SILENTLY would move what `def_layer 4` means
+      out from under the script, which is the hazard a per-layer refusal was
+      built to avoid.
+
+      IHP is the shape that forced this: `TopMetal1`/`TopMetal2` collide with
+      `Metal1`/`Metal2` in BOTH of its open PDKs, and refusing per layer
+      imported 5 of sg13g2's 7 routing layers — with TOP then landing on
+      Metal4/Metal5, so the planner's whole TOP-vs-LOW economics ran against
+      a stack the technology does not have.
+
+      A script-declared layer still COUNTS as a file layer here (it occupies
+      its trailing number in the file), and an UNNUMBERED name counts once it
+      takes a next-free id.  Both were misses: testing only the layers left
+      to assign let `def_layer 1 Metal1` hide the IHP clash (Codex P1 on
+      #929), and ignoring the ids unnumbered names take let `local` followed
+      by `M1` drop `M1` while blaming a script that held nothing (Codex P2).
+
+    * **The SCRIPT holds the id** — it declared some OTHER layer at 4.  The
+      script owns its numbering and the import cannot tell whether the two
+      names describe one layer, so that layer is refused, as it always was.
+    """
     def _trailing(name):
         m = re.search(r"(\d+)\s*$", name)
         return int(m.group(1)) if m else None
 
-    seen = set()
-    for name in (all_names if all_names is not None else names):
-        lid = _trailing(name)
-        if lid is not None:
-            if lid in seen:
-                # File-internal: the whole stack goes by the file's order,
-                # into the ids the script has not already claimed.
-                ids, lid = [], 1
-                for _n in names:
-                    while lid in taken:
-                        lid += 1
-                    ids.append(lid)
-                    lid += 1
-                return ids, True
-            seen.add(lid)
-
-    ids, used = [], set(taken)
-    for name in names:
+    used, by_file = set(taken), {}
+    ids = []
+    for name, script_id in file_layers:
+        if script_id is not None:
+            # The script declared this very layer; it keeps that id, and the
+            # id is claimed by a FILE layer for the purposes above.
+            by_file[script_id] = name
+            continue
         lid = _trailing(name)
         if lid is None:
             lid = 1
             while lid in used:
                 lid += 1
+        if lid in by_file:
+            # file-internal: the whole stack goes by the file's order
+            # `other` claimed the id first.  Either both names derive it, or
+            # `other` is the UNNUMBERED one — an unnumbered name takes the
+            # first id not already in `used`, and every `by_file` id is in
+            # `used`, so it can never be the one landing on a claimed id.
+            other = by_file[lid]
+            cause = (f"{other} and {name} share a trailing number"
+                     if _trailing(other) is not None
+                     else f"{other} has no trailing number and takes id "
+                          f"{lid}, which {name} derives from its own name")
+            break
         if lid in used:
-            ids.append(None)          # the SCRIPT holds it; refuse this layer
+            ids.append(None)            # the SCRIPT holds it; refuse this one
             continue
         used.add(lid)
+        by_file[lid] = name
         ids.append(lid)
-    return ids, False
+    else:
+        return ids, False, ""
+
+    # By the file's order, into the ids the script has not already claimed.
+    ids, lid = [], 1
+    for _name, script_id in file_layers:
+        if script_id is not None:
+            continue
+        while lid in taken:
+            lid += 1
+        ids.append(lid)
+        lid += 1
+    return ids, True, cause
 
 
 def cmd_import_lef_tech(session, cmd, args, cmd_line):
@@ -895,12 +912,14 @@ def cmd_import_lef_tech(session, cmd, args, cmd_line):
     # Ids for the whole stack at once, in the file's order (see
     # `_lef_layer_ids`): a collision between two names' trailing integers is a
     # property of the STACK, so it cannot be answered one layer at a time.
-    ids, renumbered = _lef_layer_ids(
-        [l.name for l in importable], taken,
-        # Every eligible routing layer in the FILE, script-declared ones
-        # included: a name the script also declared still occupies its
-        # trailing number here, and the clash is the file's (see the docstring).
-        all_names=[l.name for l in routing if l.dir])
+    # Every eligible routing layer in the FILE, in file order, each carrying
+    # the id the script gave it BY NAME if any: a script-declared layer still
+    # occupies its number here, and so does an unnumbered one once it takes a
+    # next-free id, so both belong in the walk (see `_lef_layer_ids`).  The
+    # eligibility test is `l.dir`, the same one the partition loop applied.
+    ids, renumbered, clashes = _lef_layer_ids(
+        [(l.name, session._layer_name_map.get(l.name))
+         for l in routing if l.dir], taken)
     for lid, l in zip(ids, importable):
         if lid is None:
             skipped.append((l.name, "layer id already in use — rename or "
@@ -1019,37 +1038,23 @@ def cmd_import_lef_tech(session, cmd, args, cmd_line):
                      for lid, l in sorted(plan))
     print(f"[LEF] imported {len(plan)} routing layer(s): {rows}")
     if renumbered:
-        # WHICH names forced it, and what each layer would have been called
-        # under the name-derived reading — without that the mapping reads as
-        # an arbitrary choice rather than as the file's own order.
-        # Over the FILE's own eligible layers, not just the ones assigned
-        # here: with `Metal1`/`Metal2` predeclared by the script the clashing
-        # PAIRS are split across the two groups, and reading only `importable`
-        # printed an empty list ("  share a trailing number") — the report has
-        # to name what the detector detected.
-        by_trailing, trailing = {}, {}
-        for l in routing:
-            if not l.dir:
-                continue
-            m = re.search(r"(\d+)\s*$", l.name)
-            trailing[l.name] = int(m.group(1)) if m else None
-            by_trailing.setdefault(trailing[l.name], []).append(l.name)
-        clashes = "; ".join(
-            " and ".join(v)
-            for k, v in sorted(by_trailing.items(),
-                               key=lambda kv: (kv[0] is None, kv[0]))
-            if k is not None and len(v) > 1)
+        # What each layer would have been called under the name-derived
+        # reading — without that the mapping reads as an arbitrary choice
+        # rather than as the file's own order.  The CAUSE comes from the
+        # detector (see `_lef_layer_ids`), never re-derived here.
         moved = []
         for lid, l in sorted(plan):
-            was = trailing[l.name]
+            m = re.search(r"(\d+)\s*$", l.name)
+            was = int(m.group(1)) if m else None
             if was is not None and was != lid:
                 moved.append(f"{l.name} {was}->{lid}")
         buda_diag.emit(
             "BUDA-1617",
-            f"{lef_arg}: {clashes} share a trailing number, so the stack is "
-            f"numbered by the file's own order instead "
+            f"{lef_arg}: {clashes}, so the stack is numbered by the file's "
+            f"own order instead "
             f"({', '.join(moved) if moved else 'no layer moved'}). A "
             f"`def_layer <id>` in this flow refers to the ids above.")
+
     if n_geom:
         # Named separately because it is a different thing from importing a
         # layer: the script keeps the layer, the file supplies the wire.
