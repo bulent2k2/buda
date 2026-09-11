@@ -1,0 +1,167 @@
+# Copyright 2026 Ben Bulent Basaran
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# ============================================================
+# flow/tcl/soc.tcl — the SoC-shaped vehicle, end to end.
+#
+#   btcl flow/tcl/soc.tcl                    # NQ=2 quadrants
+#   btcl flow/tcl/soc.tcl 4                  # 4 quadrants -- THE DIAL
+#   btcl flow/tcl/soc.tcl 2 -NC 4 -NBANK 4   # wider clusters, bigger L1
+#   btcl flow/tcl/soc.tcl 2 -bottomup        # solve one cluster, copy it
+#   btcl flow/tcl/soc.tcl 8 -dry             # print the size, build nothing
+#   btcl flow/tcl/soc.tcl 2 -caps            # reserve the top pair for the top
+#
+# Every knob in `soc_vehicle::configure` is settable as `-<NAME> <value>`
+# (NQ, NC, NBANK, NBANK2, NIO, DW/AW/IW/CW, BITPITCH, PAD, M, GAP), so a
+# larger experiment is an argument rather than an edit.  The design is
+# `soc_lib.tcl` — one source, so a future save/resume driver cannot drift
+# from this one (array_lib.tcl's rule).
+#
+# WHY THIS VEHICLE, against `tpu.tcl`: a mesh is one cell tiled, so every
+# leaf is the same cell at the same depth.  This is DIVERSE (eleven leaf cell
+# types, several appearing once) and RAGGED IN DEPTH (an ALU sits four levels
+# down, a UART two) — see `soc_lib.tcl`'s header for what that buys.
+#
+# `-caps` is the experiment the ragged depth exists for: `reserve_top_layers`
+# gives the top level the top pair and caps every cell below it by how deep
+# its OWN content goes.  On a uniform-depth design that collapses to one
+# case; here the quadrant branch and the peripheral branch get different
+# bands from one declaration.
+# ============================================================
+
+set repo [file dirname [file dirname [file dirname [file normalize [info script]]]]]
+source [file join $repo tools buda.tcl]
+source [file join $repo flow tcl soc_lib.tcl]
+
+# ── the command line ──────────────────────────────────────────────────────
+# A bare leading integer is NQ (the common case); everything else is
+# -NAME value, validated by `configure` — an unknown knob is an ERROR rather
+# than a silently ignored word, because a typo in a sweep that runs for an
+# hour must not report on a design nobody asked for.
+set overrides {}
+set bottomup 0
+set caps 0
+set bydepth ""
+set dry 0
+set argi 0
+if {$argc > 0 && [string is integer -strict [lindex $argv 0]]} {
+    lappend overrides NQ [lindex $argv 0]
+    incr argi
+}
+while {$argi < $argc} {
+    set opt [lindex $argv $argi]
+    switch -- $opt {
+        -bottomup { set bottomup 1; incr argi }
+        -caps     { set caps 1; incr argi }
+        -bydepth {
+            if {$argi + 1 >= $argc} {
+                error "soc.tcl: -bydepth needs a cap list, e.g. -bydepth {M3 M4 M5}"
+            }
+            set bydepth [lindex $argv [expr {$argi+1}]]
+            incr argi 2
+        }
+        -dry      { set dry 1; incr argi }
+        default {
+            if {[string index $opt 0] ne "-"} {
+                error "soc.tcl: unexpected argument '$opt' (NQ comes first)"
+            }
+            if {$argi + 1 >= $argc} { error "soc.tcl: $opt needs a value" }
+            lappend overrides [string range $opt 1 end] \
+                              [lindex $argv [expr {$argi+1}]]
+            incr argi 2
+        }
+    }
+}
+
+# `-bottomup` changes the GEOMETRY, not just the flow (as `tpu.tcl`'s does):
+# the copied cell-local routing is a fixed copy at every instance, so the
+# residue it cannot clear is an OVERLAP rather than an open, and at the
+# default channel this design leaves two of them standing after both healer
+# rounds.  Measured at NQ=4, the cheapest channel that clears it:
+#
+#   GAP    16   24   32   48   64   96
+#   result  X   ok   ok   ok    X   ok       (X = overlaps or bits unplaced)
+#
+# so 24, and only when the caller has not said otherwise -- an explicit
+# `-GAP` is the experiment and must not be overridden by a flag.
+if {$bottomup && [lsearch -exact $overrides GAP] < 0} {
+    lappend overrides GAP 24
+}
+if {$bottomup && [lsearch -exact $overrides M] < 0} {
+    lappend overrides M 24
+}
+
+soc_vehicle::configure $overrides
+soc_vehicle::banner "soc.tcl"
+if {$dry} { exit 0 }
+
+buda::start
+
+soc_vehicle::declare_stack
+buda::open_bdb :memory:
+soc_vehicle::build_hierarchy
+
+if {$bottomup} {
+    # Mark BEFORE deriving busterms: `align_bottom_up` nudges instances onto
+    # a shared track phase and must run while the floorplan is still the only
+    # thing derived from these coordinates.  `*` marks every eligible cell,
+    # which on a DIVERSE design is the interesting case — a cell with one
+    # instance is solved once and frozen as a keepout rather than copied.
+    buda::set_bottom_up *
+    buda::align_bottom_up
+}
+
+# The band declarations this vehicle exists to exercise.
+#
+# `-caps` is STACK-RELATIVE (`reserve_top_layers 2`): the same line is
+# correct whatever stack is declared, where an absolute band is only right
+# for the stack it was written against.  It gives every cell below the top
+# ONE band, so what it exercises here is the top/not-top split.
+#
+# `-bydepth` is the one that needs the ragged depth: a cell's LEVEL is
+# intrinsic (how deep its own content goes), so `sram_cell` (1), `l1_cell`
+# (2), `cluster_cell` (3) and `quad_cell` (4) take DIFFERENT caps from one
+# declaration.  On a uniform-depth vehicle every cell is one level and the
+# per-level behaviour collapses to the `-caps` case.
+if {$caps} { buda::reserve_top_layers 2 }
+if {$bydepth ne ""} { buda::set_layer_caps_by_depth {*}$bydepth }
+
+soc_vehicle::derive_interface
+soc_vehicle::load_blocks
+soc_vehicle::build_buses
+
+# ── the hier pipeline ─────────────────────────────────────────────────────
+buda::run_hier_bundler depth 4
+
+set nb [buda::query bundles]
+if {$nb == 0} { error "soc.tcl: nothing bundled" }
+puts "soc.tcl: $nb bundles"
+# The structure, printed: this design's whole point is that its bundles land
+# at SEVERAL levels, and this is where that shows.
+buda::dump_hbundles
+
+buda::generate_hier_topologies
+buda::run_planner hier 5
+buda::run_nuts
+buda::check_design nuts
+
+if {$bottomup} { buda::check_template_tracks on_mismatch independent }
+
+buda::run_detailed_nuts
+buda::check_design dnuts
+
+soc_vehicle::heal_if_dirty "soc.tcl"
+buda::report_wirelength
+
+soc_vehicle::verdict "soc.tcl"
