@@ -189,9 +189,14 @@ def test_a_wider_channel_is_not_the_lever_a_wider_bus_needs(tmp_path):
                                      _wl(narrow), _wl(wide))
 
     # (b) a 4x bus: unroutable at the default channel AND at 6x it, for a
-    # reason a channel cannot reach.
+    # reason a channel cannot reach.  `-DW` ALONE, which is the sweep the
+    # two documents record: `-IW` sizes `dec_cell` and every cell enclosing
+    # it, so passing both would guard a different design than the one whose
+    # numbers are written down, and the documented one could then regress
+    # while this still passed (Codex P2, #930).  Here they happen to agree
+    # bit for bit, but that is a measurement, not a reason to conflate them.
     for gap in (16, 96):
-        r = _run(tmp_path, 1, "-DW", 128, "-IW", 128, "-GAP", gap)
+        r = _run(tmp_path, 1, "-DW", 128, "-GAP", gap)
         _ov, un, _vi = _verdict(r)
         assert un > 0, (
             f"DW=128 at GAP {gap} now routes clean.  If a channel really is "

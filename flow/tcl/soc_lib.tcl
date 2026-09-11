@@ -133,6 +133,11 @@ proc soc_vehicle::configure {{overrides {}}} {
     #   GAP        16  24  32  40  48  56  64  80  96
     #   unplaced   65  62  60  60  58  55  53  50  46
     #
+    # -- `-DW` ALONE, since `IW` sizes `dec_cell` and every cell enclosing it
+    # and would make this a different design from the one written down (it
+    # happens to give the same counts here at a 30% lower WL, but that is a
+    # measurement, not a reason to conflate the two knobs).
+    #
     # Never zero at any width tried (NQ=1 runs the same way, 65 down to 31 at
     # GAP 160), and the bits are CULLED FOR CROSSING A KEEPOUT -- one
     # cross-level NoC leg, `<cluster>/rtr/fi_out -> l2/mc` -- which no gap

@@ -285,6 +285,11 @@ at DW = 128 (a 4× datapath), NQ = 4, in bits left unplaced:
 |---|---|---|---|---|---|---|---|---|---|
 | unplaced | 65 | 62 | 60 | 60 | 58 | 55 | 53 | 50 | 46 |
 
+`-DW` alone: `IW` sizes `dec_cell` and every cell enclosing it, so setting it
+too would measure a different design from the one recorded here — it gives
+the same counts at a ~30 % lower WL, which is a measurement rather than a
+reason to move the two knobs together.
+
 Never zero at any width tried — NQ = 1 runs the same way, 65 down to 31 at
 GAP 160 — and the bits are **culled for crossing a keepout**, on one
 cross-level NoC leg (`<cluster>/rtr/fi_out → l2/mc`). No gap width addresses
