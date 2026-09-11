@@ -744,10 +744,13 @@ def _lef_layer_ids(file_layers, taken):
     `file_layers` is every eligible routing layer as `(name, script_id)` —
     `script_id` set when the script already declared that layer BY NAME, in
     which case it keeps that id and is not assigned one here.  Returns
-    `(ids, renumbered)`: `ids` for the layers this call assigns (script_id
-    None), in their order, `None` for one that cannot be given an id;
-    `renumbered` True when the name-derived reading was abandoned for the
-    file's own order.
+    `(ids, renumbered, cause)`: `ids` for the layers this call assigns
+    (script_id None), in their order, `None` for one that cannot be given an
+    id; `renumbered` True when the name-derived reading was abandoned for the
+    file's own order; `cause` the collision that abandoned it, in words, so
+    the caller's report never RE-DERIVES the finding — twice now a report
+    that reconstructed it said something the detector did not (an empty pair
+    list, then a shared trailing number two distinct names do not have).
 
     The trailing integer is used when the file's own names give distinct ones
     (`M3`->3, `metal5`->5, `Metal10`->10), because that is how every
@@ -776,12 +779,20 @@ def _lef_layer_ids(file_layers, taken):
       Metal4/Metal5, so the planner's whole TOP-vs-LOW economics ran against
       a stack the technology does not have.
 
-      A script-declared layer still COUNTS as a file layer here (it occupies
-      its trailing number in the file), and an UNNUMBERED name counts once it
-      takes a next-free id.  Both were misses: testing only the layers left
-      to assign let `def_layer 1 Metal1` hide the IHP clash (Codex P1 on
-      #929), and ignoring the ids unnumbered names take let `local` followed
-      by `M1` drop `M1` while blaming a script that held nothing (Codex P2).
+      A script-declared layer still COUNTS as a file layer here, and an
+      UNNUMBERED name counts once it takes a next-free id.  Both were misses:
+      testing only the layers left to assign let `def_layer 1 Metal1` hide the
+      IHP clash (Codex P1 on #929), and ignoring the ids unnumbered names take
+      let `local` followed by `M1` drop `M1` while blaming a script that held
+      nothing (Codex P2).
+
+      What a script-declared layer contributes is the claim its NAME makes —
+      its TRAILING NUMBER, which is not the id the script gave it.  Those are
+      two different numbers for one layer (`def_layer 2 M1`: the script holds
+      2, the file's `M1` claims 1), and conflating them made the file's own
+      `M2` read as a file-internal clash on a stack whose names are all
+      distinct — renumbering it, and INVERTING it, since `M2` then landed at
+      1 below the script's `M1` at 2 (Codex P2, third round).
 
     * **The SCRIPT holds the id** — it declared some OTHER layer at 4.  The
       script owns its numbering and the import cannot tell whether the two
@@ -791,31 +802,44 @@ def _lef_layer_ids(file_layers, taken):
         m = re.search(r"(\d+)\s*$", name)
         return int(m.group(1)) if m else None
 
-    used, by_file = set(taken), {}
+    def _clash(first, second, lid):
+        """`first` claimed `lid`; `second` lands on it.  Which is which
+        matters to the reader — the two ways to collide read differently."""
+        if _trailing(first) is not None and _trailing(second) is not None:
+            return f"{first} and {second} share a trailing number"
+        numbered, bare = ((first, second) if _trailing(first) is not None
+                          else (second, first))
+        return (f"{bare} has no trailing number and takes id {lid}, which "
+                f"{numbered} derives from its own name")
+
+    used, by_file, cause = set(taken), {}, ""
     ids = []
     for name, script_id in file_layers:
-        if script_id is not None:
-            # The script declared this very layer; it keeps that id, and the
-            # id is claimed by a FILE layer for the purposes above.
-            by_file[script_id] = name
-            continue
         lid = _trailing(name)
-        if lid is None:
+        if lid is None and script_id is None:
+            # An unnumbered name takes the first id nobody holds.
             lid = 1
             while lid in used:
                 lid += 1
-        if lid in by_file:
-            # file-internal: the whole stack goes by the file's order
-            # `other` claimed the id first.  Either both names derive it, or
-            # `other` is the UNNUMBERED one — an unnumbered name takes the
-            # first id not already in `used`, and every `by_file` id is in
-            # `used`, so it can never be the one landing on a claimed id.
-            other = by_file[lid]
-            cause = (f"{other} and {name} share a trailing number"
-                     if _trailing(other) is not None
-                     else f"{other} has no trailing number and takes id "
-                          f"{lid}, which {name} derives from its own name")
-            break
+        if lid is not None and lid in by_file:
+            cause = _clash(by_file[lid], name, lid)
+            break                       # the whole stack goes by file order
+        if script_id is not None:
+            # The script declared this very layer BY NAME, so it keeps that
+            # id and is assigned none here.  What it contributes to the walk
+            # is the claim its NAME makes, which is NOT the same number:
+            # `def_layer 2 M1` holds 2 for the SCRIPT while `M1` still claims
+            # 1 in the file.  Recording the script's id as a file claim read
+            # the file's own `M2` as a file-internal clash and renumbered a
+            # stack whose names are all distinct — inverting it, since `M2`
+            # then landed at 1 under the script's `M1` at 2, and reporting a
+            # shared trailing number the two names do not have (Codex P2 on
+            # #929).  The script's id lives in `used`, which is the right
+            # home for it: it REFUSES one layer, it does not abandon the
+            # name-derived reading for the stack.
+            if lid is not None:
+                by_file[lid] = name
+            continue
         if lid in used:
             ids.append(None)            # the SCRIPT holds it; refuse this one
             continue
@@ -914,9 +938,10 @@ def cmd_import_lef_tech(session, cmd, args, cmd_line):
     # property of the STACK, so it cannot be answered one layer at a time.
     # Every eligible routing layer in the FILE, in file order, each carrying
     # the id the script gave it BY NAME if any: a script-declared layer still
-    # occupies its number here, and so does an unnumbered one once it takes a
-    # next-free id, so both belong in the walk (see `_lef_layer_ids`).  The
-    # eligibility test is `l.dir`, the same one the partition loop applied.
+    # claims its own NAME's number here (not the script's id — see
+    # `_lef_layer_ids`), and an unnumbered one claims whatever it takes, so
+    # both belong in the walk.  The eligibility test is `l.dir`, the same one
+    # the partition loop applied.
     ids, renumbered, clashes = _lef_layer_ids(
         [(l.name, session._layer_name_map.get(l.name))
          for l in routing if l.dir], taken)

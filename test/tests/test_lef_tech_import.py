@@ -436,6 +436,37 @@ def test_a_file_internal_clash_and_a_script_held_id_are_different_things(tmp_pat
     assert "BUDA-1617" in out2 and "skipped layer" not in out2, out2
 
 
+def test_a_script_id_that_differs_from_the_names_number_is_not_a_file_claim(tmp_path):
+    """The script's id and the file's claim are DIFFERENT NUMBERS for the
+    same layer, and treating them as one renumbers a stack that never
+    clashed (Codex P2, #929).
+
+    `def_layer 2 M1` holds **2** for the script; the file's `M1` still claims
+    **1** by its name.  Recording the script's 2 as a file claim made the
+    file's own `M2` look like a file-internal collision, so the whole stack
+    took file order — putting `M2` at 1, *below* the script-owned `M1` at 2.
+    Stack order is the one thing BUDA's ids are for, since adjacency decides
+    which layers a via may join, so an inversion is worse than a refusal.
+
+    The BUDA-1617 it printed was false in its own terms too — *"M1 and M2
+    share a trailing number"* about two names whose trailing numbers are 1
+    and 2 — which is the tell: a report that can say something untrue about
+    the file is reading the wrong thing, as it was twice before here.
+
+    Under the documented ownership rule id 2 is held by the SCRIPT, so `M2`
+    is refused and nothing else moves.
+    """
+    s, out = _run(tmp_path, """
+        def_layer 2 M1 H LOW 30
+        import_lef_tech @TECH@
+        """)                                    # _TECH: M1/M2/M3, distinct
+    assert "BUDA-1617" not in out, out
+    assert "skipped layer M2" in out, out
+    assert s._layer_name_map["M1"] == 2, out    # the script's, untouched
+    assert s._layer_name_map["M3"] == 3, out    # its own name's, untouched
+    assert "M2" not in s._layer_name_map, out
+
+
 def test_a_stack_with_distinct_names_is_untouched_by_any_of_this(tmp_path):
     """The guard on every flow in the tree: sky130 and NanGate45 name their
     layers by stack index, so nothing here may reach them."""
