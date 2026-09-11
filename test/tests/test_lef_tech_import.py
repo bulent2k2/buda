@@ -327,6 +327,38 @@ def test_the_renumber_puts_TOP_on_the_thick_top_layers(tmp_path):
         6 * _pitch(s, s._layer_name_map["Metal4"])
 
 
+def test_the_clash_is_the_FILES_and_survives_a_script_predeclaring_its_names(tmp_path):
+    """A name the script also declared still OCCUPIES its trailing number in
+    the file.  The first cut detected the clash over only the layers left to
+    assign, so predeclaring `Metal1`/`Metal2` by name — a supported
+    precedence path — left `Metal3`..`Metal5`, `TopMetal1`, `TopMetal2`,
+    whose trailing numbers are all distinct: no clash seen, ids 1 and 2 read
+    as merely script-held, and both top metals skipped again.  Measured
+    before the fix: `imported 3 routing layer(s)` plus two skips, i.e. the
+    five-layer IHP model this whole change exists to remove (Codex P1, #929).
+    """
+    s, out = _run(tmp_path, """
+        def_layer 1 Metal1 H 50
+        def_layer 2 Metal2 V 50
+        import_lef_tech @TECH@
+        """, _IHP)
+    assert "skipped layer" not in out, out
+    assert "BUDA-1617" in out, out
+    # every one of the file's seven layers is present, and the two the script
+    # declared keep the ids it gave them
+    assert s._layer_name_map["Metal1"] == 1 and s._layer_name_map["Metal2"] == 2
+    assert [s._layer_name_map[n] for n in
+            ("Metal3", "Metal4", "Metal5", "TopMetal1", "TopMetal2")] == \
+        [3, 4, 5, 6, 7], out
+    # ...and the report names the clashing pairs, which are SPLIT across the
+    # two groups here — reading only the assigned ones printed an empty list.
+    assert "Metal1 and TopMetal1" in out and "Metal2 and TopMetal2" in out, out
+    tops = {n for n in s._layer_name_map
+            if s.layers.get_layer_type(s._layer_name_map[n]) ==
+            buda.LayerType.TOP}
+    assert tops == {"TopMetal1", "TopMetal2"}, out
+
+
 def test_a_script_held_id_is_stepped_over_and_the_order_still_holds(tmp_path):
     """The script's numbering is still the script's.  The renumber takes the
     ids it has not claimed, and the stack stays increasing in file order —

@@ -738,8 +738,20 @@ def cmd_set_track_pitch(session, cmd, args, cmd_line):
     session._nuts_pitch = require_distance("set_track_pitch", "<pitch>", args[0], session)
 
 
-def _lef_layer_ids(names, taken):
+def _lef_layer_ids(names, taken, all_names=None):
     """Ids for a whole STACK of LEF routing-layer names, given in LEF order.
+
+    `names` are the layers to ASSIGN ids to; `all_names` is every eligible
+    routing layer in the file (default: `names`).  The two differ when the
+    script already declared some of the file's layers by NAME: those keep
+    their own ids and are not assigned here, but they still OCCUPY a trailing
+    number in the FILE, and the clash this function answers is a property of
+    the file's names rather than of the subset left over.  Testing only the
+    subset reopens the very defect: with `Metal1`/`Metal2` predeclared, the
+    remaining names are `Metal3`..`Metal5`, `TopMetal1`, `TopMetal2`, whose
+    trailing numbers are all distinct -- so no clash is seen, ids 1 and 2 read
+    as merely script-held, and both top metals are skipped again (Codex P1 on
+    #929, reproduced: `imported 3 routing layer(s)` plus two skips).
 
     Returns `(ids, renumbered)`: `ids` parallel to `names` (None = this layer
     cannot be given an id), `renumbered` True when the name-derived reading
@@ -778,7 +790,7 @@ def _lef_layer_ids(names, taken):
         return int(m.group(1)) if m else None
 
     seen = set()
-    for name in names:
+    for name in (all_names if all_names is not None else names):
         lid = _trailing(name)
         if lid is not None:
             if lid in seen:
@@ -883,7 +895,12 @@ def cmd_import_lef_tech(session, cmd, args, cmd_line):
     # Ids for the whole stack at once, in the file's order (see
     # `_lef_layer_ids`): a collision between two names' trailing integers is a
     # property of the STACK, so it cannot be answered one layer at a time.
-    ids, renumbered = _lef_layer_ids([l.name for l in importable], taken)
+    ids, renumbered = _lef_layer_ids(
+        [l.name for l in importable], taken,
+        # Every eligible routing layer in the FILE, script-declared ones
+        # included: a name the script also declared still occupies its
+        # trailing number here, and the clash is the file's (see the docstring).
+        all_names=[l.name for l in routing if l.dir])
     for lid, l in zip(ids, importable):
         if lid is None:
             skipped.append((l.name, "layer id already in use — rename or "
@@ -1005,8 +1022,15 @@ def cmd_import_lef_tech(session, cmd, args, cmd_line):
         # WHICH names forced it, and what each layer would have been called
         # under the name-derived reading — without that the mapping reads as
         # an arbitrary choice rather than as the file's own order.
+        # Over the FILE's own eligible layers, not just the ones assigned
+        # here: with `Metal1`/`Metal2` predeclared by the script the clashing
+        # PAIRS are split across the two groups, and reading only `importable`
+        # printed an empty list ("  share a trailing number") — the report has
+        # to name what the detector detected.
         by_trailing, trailing = {}, {}
-        for l in importable:
+        for l in routing:
+            if not l.dir:
+                continue
             m = re.search(r"(\d+)\s*$", l.name)
             trailing[l.name] = int(m.group(1)) if m else None
             by_trailing.setdefault(trailing[l.name], []).append(l.name)
