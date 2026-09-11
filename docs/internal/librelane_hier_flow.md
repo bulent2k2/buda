@@ -2399,13 +2399,16 @@ have: every netlist here is either authored or uniquified.
    cell-local 103.28 and the nearest different-net met5 pin (VPWR) starts
    at 104.88, a gap of **exactly 1.60 µm** against met5 min spacing 1.6.
    That is why the shift is 1.605 rather than 1.6 and why 107.7 was 0.005
-   short.  The failure is also NET-ASYMMETRIC — **VPWR is clean at every
-   one of the three offsets** — so it is visible only to a check that
-   reports PER NET.  `check_grid.tcl` does exactly that (it runs
-   `check_power_grid` per net and fails if either does), which is why it
-   catches this; what would hide it is a check reading a single pooled
-   number, a total shape or via count across both nets, where VPWR's
-   health dilutes VGND's 512.
+   short.  The failure is also NET-ASYMMETRIC, measurably:
+   **VPWR is clean at all three offsets while VGND fails at two of them**.
+   `check_grid.tcl` runs `check_power_grid` per net and fails if either
+   does, so a VPWR PASS printed beside a VGND FAIL is the expected shape
+   here rather than a contradiction.  (An earlier draft of this paragraph
+   went on to warn that a check pooling the two nets would hide it.  No
+   such consumer exists in this tree — `check_grid.tcl`, `pdn_phase.py`,
+   `pdn_connect.py` and PSM all keep net identity — and an aggregate that
+   merely ORs the per-net verdicts catches it perfectly well, so the
+   warning was a hypothetical dressed as a finding, #924.)
 
    One cost, since the remedy is not free: the ~107.7 region emits **7
    `PDN-0110`** ("no via inserted between met4 and met5"), all on VPWR,
