@@ -179,17 +179,36 @@ def corridors(arm, dbu, die_um):
         sys.exit("corridor_notch_check: no %s -- that is the file `read_guides` "
                  "consumes; run guides.sh first" % gp)
     out = collections.defaultdict(list)
-    net = None
-    for line in open(gp):
+    net, inside = None, False
+    for ln, line in enumerate(open(gp), 1):
         t = line.split()
-        if len(t) == 5 and t[4].startswith("met"):
+        if not t:
+            continue
+        if t[0] == "(":
+            inside = True
+            continue
+        if t[0] == ")":
+            inside = False
+            continue
+        if not inside:
+            net = t[0]
+            continue
+        if net is not None and inside and t:
+            # Inside a net block every row is geometry.  A row this cannot
+            # parse is DROPPED if we `continue`, `n_cor` stays non-zero, and
+            # the verdict can come back INERT with the dropped row the only
+            # one that intersected -- the silent zero this tool exists to
+            # prevent, in its own reader (Codex, PR #925).
+            if len(t) != 5 or not t[4].startswith("met"):
+                sys.exit("corridor_notch_check: REFUSING -- %s:%d is inside net %r "
+                         "and is not a geometry row: %r.\n  Dropping it could hide "
+                         "the only intersection." % (gp, ln, net, line.rstrip()))
             try:
                 x1, y1, x2, y2 = (float(v) for v in t[:4])
             except ValueError:
-                continue
+                sys.exit("corridor_notch_check: REFUSING -- %s:%d has a non-numeric "
+                         "coordinate: %r." % (gp, ln, line.rstrip()))
             out[t[4]].append((min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2)))
-        elif len(t) == 1 and t[0] not in ("(", ")"):
-            net = t[0]
     n_manifest = 0
     mp = os.path.join(arm, "top", "out", "buda_guides.json")
     if os.path.isfile(mp):
@@ -205,6 +224,30 @@ def corridors(arm, dbu, die_um):
     # hypothetical by refusing real designs is the wrong trade (Codex, #924).
     # The two extents are printed instead, where a mismatch is visible.
     return out, n_manifest
+
+
+def union_area(boxes):
+    """Area covered by a set of axis-aligned rects, counting overlap once."""
+    if not boxes:
+        return 0.0
+    xs = sorted({v for b in boxes for v in (b[0], b[2])})
+    total = 0.0
+    for i in range(len(xs) - 1):
+        x0, x1 = xs[i], xs[i + 1]
+        if x1 <= x0:
+            continue
+        spans = sorted((b[1], b[3]) for b in boxes if b[0] <= x0 and b[2] >= x1)
+        cy = None
+        cov = 0.0
+        for lo, hi in spans:
+            if cy is None or lo > cy:
+                cov += hi - lo
+                cy = hi
+            elif hi > cy:
+                cov += hi - cy
+                cy = hi
+        total += (x1 - x0) * cov
+    return total
 
 
 def inter_area(a, b):
@@ -247,17 +290,23 @@ def check(arm):
     for lay in sorted(set(cor) | set(pieces)):
         cs, ps = cor.get(lay, []), pieces.get(lay, [])
         hits = 0
-        area = 0.0
+        boxes = []
         for a in cs:
             for b in ps:
-                v = inter_area(a, b)
-                if v > 0:
+                if inter_area(a, b) > 0:
                     hits += 1
-                    area += v
+                    boxes.append((max(a[0], b[0]), max(a[1], b[1]),
+                                  min(a[2], b[2]), min(a[3], b[3])))
+        # UNION, not the pairwise sum.  The per-net terminal strips overlap
+        # each other heavily, so summing every (box, piece) pair counts the
+        # same physical metal once per guide box and inflates the figure by a
+        # large factor (Codex, PR #925).  Coordinate compression over the
+        # intersection rects gives the real area.
+        area = union_area(boxes)
         hits_total += hits
         closest = min((gap(a, b) for a in cs for b in ps), default=None)
         rows.append({"layer": lay, "corridors": len(cs), "pieces": len(ps),
-                     "intersections": hits, "area_um2": round(area / (dbu * dbu), 6),
+                     "intersections": hits, "area_um2": round(area / (dbu * dbu), 6),  # union, not pair-sum
                      "closest_um": None if closest is None else round(closest / dbu, 3),
                      "live": bool(cs and ps)})
     return {"arm": os.path.abspath(arm), "instances": len(insts), "dbu": dbu,

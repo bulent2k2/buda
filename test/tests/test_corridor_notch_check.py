@@ -394,3 +394,32 @@ def test_it_reports_both_extents_so_a_scale_mismatch_is_visible(tmp_path):
     res = json.loads((tmp_path / "r.json").read_text())
     assert res["die_extent"] == 700000.0, res
     assert res["guide_extent"] > 0, res
+
+
+def test_a_malformed_guide_row_is_refused_not_skipped(tmp_path):
+    """Inside a net block every row is geometry.  Skipping one it cannot parse
+    leaves `n_cor` non-zero, so the verdict can come back INERT with the
+    dropped row the only intersector -- the silent zero this tool exists to
+    prevent, in its own reader (#925)."""
+    a = _arm(tmp_path)
+    (a / "top" / "out" / "buda_bus.guide").write_text(
+        "n\n(\n200000 0 220000 100000 met2\nGARBAGE ROW HERE\n)\n")
+    r = _run(a)
+    assert r.returncode == 1, r.stdout
+    assert "REFUSING" in r.stderr and "not a geometry row" in r.stderr, r.stderr
+    assert "INERT" not in r.stdout
+
+
+def test_overlap_area_counts_shared_metal_once(tmp_path):
+    """Two guide boxes over the same piece -- what the per-net terminal strips
+    do constantly.  A pairwise sum counts that metal twice; on the real N=4 arm
+    it inflated 51.3 um^2 to 289.5 (#925)."""
+    a = _arm(tmp_path, notch={"cell": "pe_cell", "layer": "met2",
+                              "uncovered": [[10.0, 10.0, 20.0, 20.0]]})
+    (a / "top" / "out" / "buda_bus.guide").write_text(
+        "n\n(\n10000 10000 20000 20000 met2\n10000 10000 20000 20000 met2\n)\n")
+    r = _run(a, "--json", str(tmp_path / "r.json"))
+    res = json.loads((tmp_path / "r.json").read_text())
+    (met2,) = [l for l in res["layers"] if l["layer"] == "met2"]
+    assert met2["intersections"] == 2, met2
+    assert met2["area_um2"] == 100.0, ("counted the shared region twice: %s" % met2)
