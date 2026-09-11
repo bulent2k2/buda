@@ -118,7 +118,7 @@ updating this table, which is exactly the drift the guard now prevents):
 | BUDA-1614 | WARNING | a GDS TEXT label lands outside every component, so its net was not recovered |
 | BUDA-1615 | WARNING | imported obstruction was thinner than one layout unit and was dropped when its coordinates were rounded to integers |
 | BUDA-1616 | WARNING | the DEF's `TRACKS` pitch and the tech LEF's `PITCH` disagree for a layer; the DEF's grid is used |
-| BUDA-1617 | WARNING | two of a technology LEF's routing layers share a trailing number, so the stack was numbered by the file's own order rather than by those names |
+| BUDA-1617 | WARNING | two of a technology LEF's routing layers derive the same layer id, so the stack was numbered by the file's own order rather than by its names |
 | BUDA-1701 | WARNING | nothing to emit: no placed bus segments |
 | BUDA-1711 | WARNING | `emit_pin_def` has no detailed-NUTS result: pins are placed from the abstract bus positions, which are not on signal tracks |
 | BUDA-1712 | WARNING | a pin whose net is on a routed bundle was reached by no bit-wire at the block face; it is spread with the unrouted pins |

@@ -467,6 +467,70 @@ def test_a_script_id_that_differs_from_the_names_number_is_not_a_file_claim(tmp_
     assert "M2" not in s._layer_name_map, out
 
 
+# The minimal stack whose ONLY file-internal clash lands on the script-held
+# id.  `_IHP` will not do: its `TopMetal2`/`Metal2` pair collides on an id
+# nobody holds, so the fallback fires by that route whatever happens on id 1
+# — measured, the mutation (drop the file claim at the refusal) passes an
+# `_IHP` version of the test below.  A test for a specific path has to be run
+# on the input that has only that path.
+_ONE_CLASH = "VERSION 5.8 ;\n" + "".join(
+    "LAYER %s\n  TYPE ROUTING ;\n  DIRECTION %s ;\n  PITCH 0.42 ;\n"
+    "  WIDTH 0.16 ;\nEND %s\n" % (n, d, n)
+    for n, d in [("Metal1", "HORIZONTAL"), ("Metal2", "VERTICAL"),
+                 ("TopMetal1", "HORIZONTAL")]) + "END LIBRARY\n"
+
+
+def test_an_unrelated_script_id_cannot_hide_the_files_own_clash(tmp_path):
+    """The two collisions are INDEPENDENT, and the walk has to answer both
+    even when they land on the same id (Codex P1, #929).
+
+    `def_layer 1 OTHER` names no layer in this file — it just holds id 1.
+    The file's `Metal1` derives 1 and is refused for that (correct); but the
+    refusal used to skip recording the FILE's claim, so `TopMetal1` deriving
+    the same 1 was refused for the same reason and the clash BETWEEN THEM was
+    never seen: **1 of 3 layers imported, no BUDA-1617, no fallback** — the
+    five-layer IHP model the branch exists to remove, reached through a third
+    door.
+
+    Recording the claim at the refusal is what separates the questions: the
+    script's id refuses one layer, the file's own duplicate abandons the
+    name-derived reading for the stack.  Here both fire — file order, into
+    the ids the script does not hold.
+    """
+    s, out = _run(tmp_path, """
+        def_layer 1 OTHER H LOW 30
+        import_lef_tech @TECH@
+        """, _ONE_CLASH)
+    assert "BUDA-1617" in out, out
+    assert "skipped layer" not in out, out
+    assert s._layer_name_map["OTHER"] == 1, out       # the script keeps its id
+    # every file layer imported, in file order, stepping over the held 1
+    assert [s._layer_name_map[n] for n in
+            ("Metal1", "Metal2", "TopMetal1")] == [2, 3, 4], out
+
+
+def test_the_catalogue_describes_every_shape_the_id_is_raised_for(tmp_path):
+    """`dump_messages` is what a methodology reads to decide what it may
+    waive or gate on BEFORE the message fires, so a catalogue line narrower
+    than the id's real scope is wrong even while every runtime line is right
+    (Codex P2, #929).
+
+    BUDA-1617 covered two names sharing a trailing number; the unnumbered
+    collision shares no trailing number at all — `local` takes the next free
+    id and `M1` derives that same id — so a reader gating on the catalogue
+    text would not expect this run to raise it.  The condition is colliding
+    file-derived IDS; the CAUSE stays specific on the line itself.
+    """
+    import buda_diag
+    _sev, text = buda_diag.MESSAGES["BUDA-1617"]
+    assert "trailing number" not in text, text
+    assert "same layer id" in text, text
+
+    # ...and the specific cause is still named where it belongs: the line.
+    _s, out = _run(tmp_path, "import_lef_tech @TECH@", _UNNUMBERED)
+    assert "BUDA-1617" in out and "no trailing number" in out, out
+
+
 def test_a_stack_with_distinct_names_is_untouched_by_any_of_this(tmp_path):
     """The guard on every flow in the tree: sky130 and NanGate45 name their
     layers by stack index, so nothing here may reach them."""

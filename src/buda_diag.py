@@ -125,9 +125,9 @@ MESSAGES = {
     "BUDA-1616": (WARNING, "The DEF's TRACKS pitch and the technology LEF's "
                            "PITCH disagree for a layer; the DEF's grid is "
                            "used."),
-    "BUDA-1617": (WARNING, "Two of a technology LEF's routing layers share a "
-                           "trailing number, so the stack was numbered by the "
-                           "file's own order rather than by those names."),
+    "BUDA-1617": (WARNING, "Two of a technology LEF's routing layers derive "
+                           "the same layer id, so the stack was numbered by "
+                           "the file's own order rather than by its names."),
     # ── advisory writer ────────────────────────────────────────────────────
     "BUDA-1701": (WARNING, "Nothing to emit: the plan has no placed bus "
                            "segments."),

@@ -797,6 +797,11 @@ def _lef_layer_ids(file_layers, taken):
     * **The SCRIPT holds the id** — it declared some OTHER layer at 4.  The
       script owns its numbering and the import cannot tell whether the two
       names describe one layer, so that layer is refused, as it always was.
+
+      A refusal still RECORDS the file's claim, because the two collisions
+      are independent even when they land on the same id: `def_layer 1 OTHER`
+      over a `Metal1`/`TopMetal1` stack refused both, one at a time, and the
+      clash BETWEEN them was never seen (Codex P1 on #929).
     """
     def _trailing(name):
         m = re.search(r"(\d+)\s*$", name)
@@ -841,7 +846,17 @@ def _lef_layer_ids(file_layers, taken):
                 by_file[lid] = name
             continue
         if lid in used:
-            ids.append(None)            # the SCRIPT holds it; refuse this one
+            # The SCRIPT holds it, so THIS layer is refused — but the FILE
+            # still claims the id by its name, and the two questions are
+            # independent.  Leaving the claim unrecorded let a script id
+            # unrelated to any of these names hide a clash BETWEEN them:
+            # `def_layer 1 OTHER` over a `Metal1`/`TopMetal1` stack refused
+            # both, one at a time, with no BUDA-1617 and no fallback — the
+            # five-layer IHP model again, through a third door (Codex P1 on
+            # #929).  Recording it here is what lets the NEXT name deriving
+            # the same id be seen as the file-internal clash it is.
+            by_file[lid] = name
+            ids.append(None)
             continue
         used.add(lid)
         by_file[lid] = name
