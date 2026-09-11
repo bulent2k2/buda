@@ -162,15 +162,49 @@ def notch_pieces(arm, insts, dbu):
     return pieces, {c: lefs[c] for c in placed_cells}
 
 
-def corridors(arm):
-    p = os.path.join(arm, "top", "out", "buda_guides.json")
-    if not os.path.isfile(p):
-        sys.exit("corridor_notch_check: no %s -- run guides.sh first" % p)
+def corridors(arm, dbu, die_um):
+    """What CONSTRAINS the router, read from the file it is handed.
+
+    `guides.sh` writes two artefacts and only one of them reaches OpenROAD:
+    `out/buda_bus.guide` is what `read_guides` consumes, and
+    `out/buda_guides.json` is the abstract bundle-level manifest beside it.
+    They are not the same geometry -- the `.guide` is gcell-expanded per bit
+    and carries the `terminal met2,met3` pin-access strips -- so a notch piece
+    meeting only an added strip is invisible in the manifest while being very
+    much present in what the router was told (Codex, PR #925).  The manifest
+    is still read, for the cross-check below.
+    """
+    gp = os.path.join(arm, "top", "out", "buda_bus.guide")
+    if not os.path.isfile(gp):
+        sys.exit("corridor_notch_check: no %s -- that is the file `read_guides` "
+                 "consumes; run guides.sh first" % gp)
     out = collections.defaultdict(list)
-    for b in json.load(open(p))["bundles"]:
-        for s in b["corridors"]:
-            out[s["layer_name"]].append((s["x1"], s["y1"], s["x2"], s["y2"]))
-    return out
+    net = None
+    for line in open(gp):
+        t = line.split()
+        if len(t) == 5 and t[4].startswith("met"):
+            try:
+                x1, y1, x2, y2 = (float(v) for v in t[:4])
+            except ValueError:
+                continue
+            out[t[4]].append((min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2)))
+        elif len(t) == 1 and t[0] not in ("(", ")"):
+            net = t[0]
+    n_manifest = 0
+    mp = os.path.join(arm, "top", "out", "buda_guides.json")
+    if os.path.isfile(mp):
+        n_manifest = sum(len(b["corridors"]) for b in json.load(open(mp))["bundles"])
+
+    # UNITS are REPORTED, not guarded.  `guides.sh` declares
+    # `set_import_scale dbu`, so the guide is in DBU beside a placement that
+    # multiplies microns by `dbu` -- verified on the N=4 arm (guide extent
+    # 772720 against a 944000 DBU die).  A guard was tried and removed: the
+    # only signal available is the guide's extent against the die, and a
+    # legitimately small corridor near the origin is indistinguishable from a
+    # 1000x scale error, so it rejected valid inputs.  Defending a
+    # hypothetical by refusing real designs is the wrong trade (Codex, #924).
+    # The two extents are printed instead, where a mismatch is visible.
+    return out, n_manifest
 
 
 def inter_area(a, b):
@@ -189,7 +223,7 @@ def check(arm):
     pl = _load_placement(arm)
     dbu, insts = pl["dbu"], pl["instances"]
     pieces, found = notch_pieces(arm, insts, dbu)
-    cor = corridors(arm)
+    cor, n_manifest = corridors(arm, dbu, pl.get("die_um"))
 
     n_pieces = sum(len(v) for v in pieces.values())
     n_cor = sum(len(v) for v in cor.values())
@@ -229,7 +263,10 @@ def check(arm):
     return {"arm": os.path.abspath(arm), "instances": len(insts), "dbu": dbu,
             "cells_with_notch": {c: v for c, v in sorted(found.items())},
             "pieces_placed": n_pieces, "corridors": n_cor,
+            "manifest_corridors": n_manifest,
             "shared_layers": shared, "layers": rows,
+            "guide_extent": round(max((b[2] for v in cor.values() for b in v), default=0.0), 3),
+            "die_extent": round(max(pl.get("die_um") or [0])* dbu, 3),
             "intersections": hits_total,
             "verdict": "inert" if hits_total == 0 else "meets"}
 
@@ -237,11 +274,15 @@ def check(arm):
 def report(res, out=sys.stdout):
     w = out.write
     w("corridor_notch_check: do BUDA's corridors meet the notch metal?\n")
-    w("  arm %s\n  %d instance(s), %d notch piece(s) placed, %d corridor(s)\n\n"
-      % (res["arm"], res["instances"], res["pieces_placed"], res["corridors"]))
-    w("  layer  corridors   pieces   intersections     area um^2   closest um   live\n")
+    w("  arm %s\n  %d instance(s), %d notch piece(s) placed, %d guide box(es) from\n"
+      "  buda_bus.guide -- what read_guides consumes -- beside %d manifest corridor(s)\n\n"
+      % (res["arm"], res["instances"], res["pieces_placed"], res["corridors"],
+         res["manifest_corridors"]))
+    w("  guide extent %.0f, die %.0f (same units, or nothing below means anything)\n\n"
+      % (res["guide_extent"], res["die_extent"]))
+    w("  layer  guideboxes   pieces   intersections     area um^2   closest um   live\n")
     for r in res["layers"]:
-        w("  %-5s  %9d %8d %15d %13.4f %12s   %s\n"
+        w("  %-5s  %10d %8d %15d %13.4f %12s   %s\n"
           % (r["layer"], r["corridors"], r["pieces"], r["intersections"], r["area_um2"],
              "-" if r["closest_um"] is None else "%.3f" % r["closest_um"], r["live"]))
     w("\n  a layer is LIVE when it carries both a corridor and a notch piece --\n"

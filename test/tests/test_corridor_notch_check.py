@@ -36,7 +36,7 @@ _TOOL = _T1A / "corridor_notch_check.py"
 # shape (BUDA plans corridors between the blocks; the notch patches metal
 # within them), so the honest answer is a zero on a layer that could have met.
 PLACEMENT = {
-    "design": "top", "dbu": 1000, "divider": "/",
+    "design": "top", "dbu": 1000, "divider": "/", "die_um": [0.0, 0.0, 600.0, 700.0],
     "instances": [{"def_name": "u1", "name": "u1", "cell": "pe_cell",
                    "def_location": [0.0, 0.0], "x": 0.0, "y": 0.0,
                    "orient": "N", "size": [100.0, 100.0]}],
@@ -60,7 +60,17 @@ def _arm(tmp_path, guides=None, notch=NOTCH, run_tag="h", placement=PLACEMENT,
     a = tmp_path / "arm"
     (a / "top" / "out").mkdir(parents=True)
     (a / "top" / "placement.json").write_text(json.dumps(placement))
-    (a / "top" / "out" / "buda_guides.json").write_text(json.dumps(guides or _guides()))
+    g = guides or _guides()
+    (a / "top" / "out" / "buda_guides.json").write_text(json.dumps(g))
+    # `buda_bus.guide` is what `read_guides` consumes and what the checker reads;
+    # the manifest beside it is only cross-checked (#925).
+    lines = []
+    for b in g.get("bundles", []):
+        for i, c in enumerate(b["corridors"]):
+            lines.append("%s_%d\n(\n%d %d %d %d %s\n)\n" % (
+                b["nets"][0].replace("[", "\\[").replace("]", "\\]"), i,
+                c["x1"], c["y1"], c["x2"], c["y2"], c["layer_name"]))
+    (a / "top" / "out" / "buda_bus.guide").write_text("".join(lines))
     m = {}
     for cell in cells:
         d = a / cell / "runs" / run_tag / "final" / "lef"
@@ -347,3 +357,40 @@ def test_it_refuses_when_a_recorded_layer_has_no_json(tmp_path):
     r = _run(a)
     assert r.returncode == 1
     assert "REFUSING" in r.stderr and "met3" in r.stderr, r.stderr
+
+
+# ── the artefact that reaches the router, and the units it is in (#925) ────
+
+def test_it_reads_the_guide_openroad_consumes_not_the_manifest(tmp_path):
+    """`guides.sh` writes two files and only `buda_bus.guide` reaches
+    `read_guides`.  The `.guide` is gcell-expanded per bit and carries the
+    `terminal met2,met3` pin-access strips, so it is a SUPERSET of the manifest
+    -- on the real N=4 arm the manifest reads 0 intersections while the guide
+    reads 11,311.  A box present only in the guide must be seen."""
+    a = _arm(tmp_path)
+    # the manifest keeps its far-away corridor; the guide gains one over the piece
+    (a / "top" / "out" / "buda_bus.guide").write_text(
+        "n\n(\n10000 10000 11000 11000 met2\n)\n")
+    r = _run(a)
+    assert r.returncode == 1, ("read the manifest instead of the guide:\\n" + r.stdout)
+    assert "intersection(s)" in r.stdout, r.stdout
+
+
+def test_it_reports_both_extents_so_a_scale_mismatch_is_visible(tmp_path):
+    """Codex (#925) suspected the guide was in microns while the placement was
+    in DBU, which would make every comparison arithmetic on unrelated numbers
+    and fail silently toward INERT.  It is not: `guides.sh` declares
+    `set_import_scale dbu` (line 87), and on the real N=4 arm the guide's
+    extent is 772720 against a 944000 DBU die.
+
+    A guard was written and removed.  The only available signal is the guide
+    extent against the die, and a legitimately small corridor near the origin
+    is indistinguishable from a 1000x error -- it rejected valid fixtures.
+    Refusing real designs to defend a hypothetical is the trade #924 already
+    corrected.  Both numbers are printed instead."""
+    r = _run(_arm(tmp_path), "--json", str(tmp_path / "r.json"))
+    assert r.returncode == 0, r.stderr
+    assert "guide extent" in r.stdout and "die" in r.stdout, r.stdout
+    res = json.loads((tmp_path / "r.json").read_text())
+    assert res["die_extent"] == 700000.0, res
+    assert res["guide_extent"] > 0, res

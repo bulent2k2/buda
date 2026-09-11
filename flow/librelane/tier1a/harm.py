@@ -1102,7 +1102,10 @@ it by hand rather than working around it; the recipe is the same two tools, per 
     docker run --rm -v "$HOME:$HOME" -w "$PWD" ghcr.io/librelane/librelane:3.0.11 \\
         klayout -b -r {rel}/rectify_gds.py \\
         -rd gds=$f/gds/$c.gds -rd lnum=69 -rd ldt=20 -rd out=$f/gds/$c.rect.gds
-    python3 {rel}/notch_obs.py $f/gds/$c.rect.gds $f/lef/$c.lef $f/lef/$c.notch.lef
+    python3 {rel}/notch_obs.py $f/gds/$c.rect.gds $f/lef/$c.lef $f/lef/$c.notch.lef \\
+        --json $f/lef/$c.notch.met2.json
+    echo met2 > $f/lef/$c.notch.layers        # what notch.sh records; without it
+                                              # corridor_notch_check.py refuses
 
 (met2 is GDS 69/20; `notch_obs.py --gds-layer L/DT` takes another pair.)  A cell whose GDS the decomposition
 genuinely cannot handle can be carried UNPATCHED with `cp $f/lef/$c.lef $f/lef/$c.notch.lef` -- the top
