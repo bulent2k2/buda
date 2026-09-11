@@ -2330,15 +2330,19 @@ have: every netlist here is either authored or uniquified.
    `PSM-0069` on VGND with **512 unconnected shapes whose coordinate list
    is byte-identical to 109.3's** — the remedy moved nothing that mattered,
    though it did apply (the met5 straps moved exactly 1.6 µm, 120180 →
-   118580 DBU).  `pdn_phase.py` predicts `PASS` for it.  So the detection
-   half is validated and the remedy half is not, and a remedy that looks
-   verified is worse than none: §11 item 10's whole lesson was that acting
-   on this tool by hand broke a working design.  So the FAIL line now says
-   so itself ("is PREDICTED to leave nothing failing.  A HYPOTHESIS, not a
-   fix … judge it with check_grid.tcl"), and the generated README calls it
-   the shift the MODEL predicts.  Until the shift search is checked the
-   same way the verdict now is, treat the offset it names as a hypothesis
-   and test it with `check_grid.tcl`, which costs minutes:
+   118580 DBU).  `pdn_phase.py` predicts `PASS` for it.  The detection
+   half was validated first and the remedy half only later — the
+   *historical* remedy, `dy=+1.600` (`PDN_HOFFSET=107.7`), was measured
+   WRONG, and the 1.605 one that replaced it measured right (the table
+   below).  A remedy that looks verified is worse than none: §11 item 10's
+   whole lesson was that acting on this tool by hand broke a working
+   design.  So the FAIL line says so itself ("is PREDICTED to leave
+   nothing failing.  A HYPOTHESIS, not a fix … judge it with
+   check_grid.tcl"), and the generated README calls it the shift the MODEL
+   predicts.  That wording stays even though the search is now checked at
+   one point: one measured offset on one design does not make the shift
+   SEARCH verified, only this answer from it.  Test an offset it names
+   with `check_grid.tcl`, which costs minutes:
 
    ```bash
    cd n<N>/h/top
@@ -2395,15 +2399,22 @@ have: every netlist here is either authored or uniquified.
    cell-local 103.28 and the nearest different-net met5 pin (VPWR) starts
    at 104.88, a gap of **exactly 1.60 µm** against met5 min spacing 1.6.
    That is why the shift is 1.605 rather than 1.6 and why 107.7 was 0.005
-   short.  It is also why this was hard to see: **VPWR is clean at every
-   one of the three offsets**, so any check that aggregates the two nets
-   calls the plan healthy.
+   short.  The failure is also NET-ASYMMETRIC — **VPWR is clean at every
+   one of the three offsets** — so it is visible only to a check that
+   reports PER NET.  `check_grid.tcl` does exactly that (it runs
+   `check_power_grid` per net and fails if either does), which is why it
+   catches this; what would hide it is a check reading a single pooled
+   number, a total shape or via count across both nets, where VPWR's
+   health dilutes VGND's 512.
 
    One cost, since the remedy is not free: the ~107.7 region emits **7
    `PDN-0110`** ("no via inserted between met4 and met5"), all on VPWR,
-   where 109.3 emits 0 — identical at 107.7 and 107.695, so they belong to
-   the offset region and not to the 0.005 correction, and PSM passes VPWR
-   regardless.  `PDN-0195` is 0 at all three.
+   where 109.3 emits 0 — **the same seven**, not merely the same
+   count: identical coordinates and net in both runs (seven x positions,
+   all at y = 894.78, all VPWR), so the 0.005 correction demonstrably
+   neither introduced nor moved them.  How WIDE the offset band that
+   carries them is, is unmeasured — two points cannot say — and PSM passes
+   VPWR regardless.  `PDN-0195` is 0 at all three.
 
    The
    pin-on-pin question (#905) resolved the same way, and then the grep
