@@ -18,7 +18,8 @@ What the corpus was missing here is not SIZE.  `tpu.tcl` is a mesh, so every
 leaf is the same cell at the same depth; `flow/chip` is heterogeneous but
 uniform in depth; `flow/ariane133` is a real design whose synthesized netlist
 is uniquified, so nothing repeats.  This vehicle is many DIFFERENT cell types
-(most appearing once) at RAGGED DEPTH — an ALU four levels down, a UART two.
+at RAGGED DEPTH — an ALU four levels down, a UART two — each type repeating a
+different number of times (1 to 20; `-census` counts them).
 
 These pin the claims that make it worth having, and each is chosen so that a
 vehicle which quietly became a mesh, or flattened, would fail it.  Sizes are
@@ -123,6 +124,40 @@ def test_cell_local_templates_form_at_two_different_nesting_levels(tmp_path):
     assert k["cross-level"] > 0, k
     # A template carries every occurrence, so the dump lists them.
     assert "quad_0/cl_0/core, quad_0/cl_1/core" in r.stdout
+
+
+def test_the_leaf_census_is_what_the_documents_claim(tmp_path):
+    """The diversity claim is a COUNT, so it gets measured (Codex P2, #930).
+
+    Three documents said "eleven leaf cell types, **most appearing once**"
+    and named `xbar_cell` as one of the singletons — it has an instance per
+    router, four at the default.  The census is eleven types with **two**
+    singletons, `bridge_cell` and `memctl_cell`, and that is narrower than
+    what was claimed.
+
+    What is real, and what those documents say now, is that the counts span
+    an order of magnitude where a mesh gives one count for every cell — and
+    the two extremes are different code paths: `set_bottom_up *` copies a
+    template to many instances and FREEZES a single-instance cell as a
+    keepout with nothing to copy, so a design with no singleton exercises
+    only half of it.
+
+    `soc_vehicle::leaf_census` walks the structure `_fill` builds the
+    instances from, so this measures the design rather than a second model
+    of it — the failure mode that let the wrong sentence stand in the first
+    place.
+    """
+    r = _run(tmp_path, 2, "-census")
+    assert r.returncode == 0, r.stdout + r.stderr
+    census = {ln.split()[1]: int(ln.split()[2])
+              for ln in r.stdout.splitlines() if ln.startswith("census ")}
+    assert len(census) == 11, census            # ELEVEN leaf types
+    assert sum(census.values()) == 63, census   # ...and the banner's leaf count
+    assert {c for c, n in census.items() if n == 1} == \
+        {"bridge_cell", "memctl_cell"}, census  # TWO singletons, named
+    assert census["xbar_cell"] == 4, census     # one per router, NOT a singleton
+    # the spread is the property: an order of magnitude, not one count
+    assert max(census.values()) == 20 and min(census.values()) == 1, census
 
 
 def test_one_by_depth_declaration_gives_a_different_band_per_level(tmp_path):

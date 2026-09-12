@@ -21,6 +21,7 @@
 #   btcl flow/tcl/soc.tcl 2 -bottomup        # solve one cluster, copy it
 #   btcl flow/tcl/soc.tcl 8 -dry             # print the size, build nothing
 #   btcl flow/tcl/soc.tcl 2 -caps            # reserve the top pair for the top
+#   btcl flow/tcl/soc.tcl 2 -census          # instances per leaf cell type
 #
 # Every knob in `soc_vehicle::configure` is settable as `-<NAME> <value>`
 # (NQ, NC, NBANK, NBANK2, NIO, DW/AW/IW/CW, BITPITCH, PAD, M, GAP), so a
@@ -30,8 +31,9 @@
 #
 # WHY THIS VEHICLE, against `tpu.tcl`: a mesh is one cell tiled, so every
 # leaf is the same cell at the same depth.  This is DIVERSE (eleven leaf cell
-# types, several appearing once) and RAGGED IN DEPTH (an ALU sits four levels
-# down, a UART two) — see `soc_lib.tcl`'s header for what that buys.
+# types repeating 1 to 20 times each -- `-census` counts them) and RAGGED IN
+# DEPTH (an ALU sits four levels down, a UART two) — see `soc_lib.tcl`'s
+# header for what that buys.
 #
 # `-caps` is the experiment the ragged depth exists for: `reserve_top_layers`
 # gives the top level the top pair and caps every cell below it by how deep
@@ -54,6 +56,7 @@ set bottomup 0
 set caps 0
 set bydepth ""
 set dry 0
+set census 0
 set argi 0
 if {$argc > 0 && [string is integer -strict [lindex $argv 0]]} {
     lappend overrides NQ [lindex $argv 0]
@@ -72,6 +75,7 @@ while {$argi < $argc} {
             incr argi 2
         }
         -dry      { set dry 1; incr argi }
+        -census   { set census 1; incr argi }
         default {
             if {[string index $opt 0] ne "-"} {
                 error "soc.tcl: unexpected argument '$opt' (NQ comes first)"
@@ -114,6 +118,17 @@ buda::start
 soc_vehicle::declare_stack
 buda::open_bdb :memory:
 soc_vehicle::build_hierarchy
+
+# `-census` answers the one claim about this vehicle that is a COUNT rather
+# than a shape: how many instances each leaf cell type has.  Derived from the
+# structure the hierarchy was built from (`soc_lib.tcl`'s `_fill`), so it
+# reports the design and not a model of it.
+if {$census} {
+    set n [soc_vehicle::leaf_census]
+    foreach c [lsort [dict keys $n]] { puts "census $c [dict get $n $c]" }
+    buda::stop
+    exit 0
+}
 
 if {$bottomup} {
     # Mark BEFORE deriving busterms: `align_bottom_up` nudges instances onto

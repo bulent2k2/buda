@@ -22,9 +22,24 @@
 # else's files, and a synthesized netlist is uniquified, so nothing repeats.
 # Between them, two shapes a real SoC has were unexercised:
 #
-#   * MANY DIFFERENT CELL TYPES, most of them appearing ONCE.  A mesh
-#     measures solve-once-copy; it says nothing about a design where the
-#     planner meets a new floorplan at every block.
+#   * MANY DIFFERENT CELL TYPES, repeating a DIFFERENT NUMBER OF TIMES each.
+#     A mesh measures solve-once-copy on one cell tiled N times, so every
+#     count is the same count; here they span an order of magnitude, and the
+#     two extremes are separate code paths — `set_bottom_up *` copies a
+#     template to many instances and FREEZES a single-instance cell as a
+#     keepout with nothing to copy.  Measured, `soc.tcl 2 -census`:
+#
+#       sram_cell 20   tag_cell 9   fifo_cell 8
+#       alu_cell 4   dec_cell 4   io_cell 4   mul_cell 4   regf_cell 4
+#       xbar_cell 4                                  <- one per router
+#       bridge_cell 1   memctl_cell 1                <- the singletons
+#
+#     ELEVEN types with TWO singletons, which is what the census says and is
+#     narrower than the claim this said first: "most of them appearing ONCE",
+#     with `xbar_cell` named as one of them when it has an instance per
+#     router (Codex P2, #930).  `leaf_census` derives from the same argument
+#     `_fill` builds the instances from, so the sentence above is now a
+#     measurement and a test pins it.
 #   * RAGGED DEPTH.  Here a leaf sits 2, 3 or 4 levels down depending on
 #     which subsystem it is in — an ALU is inside a core inside a cluster
 #     inside a quadrant, while a UART is one level under the top.  That is
@@ -358,6 +373,8 @@ proc soc_vehicle::declare_stack {} {
 proc soc_vehicle::build_hierarchy {} {
     variable P
     variable SZ
+    variable KIDS
+    array unset KIDS
 
     buda::set_die $P(DIEW) $P(DIEH)
 
@@ -393,6 +410,9 @@ proc soc_vehicle::build_hierarchy {} {
 
     # the top: the quadrants packed, the l2 and io block in a band below.
     set qpos [_pack_pos [lrepeat $P(NQ) quad_cell]]
+    variable TOPCELLS
+    set TOPCELLS [lrepeat $P(NQ) quad_cell]
+    lappend TOPCELLS l2_cell io_blk_cell
     for {set q 0} {$q < $P(NQ)} {incr q} {
         lassign [lindex $qpos $q] x y
         buda::add_inst quad_$q quad_cell - $x $y
@@ -409,11 +429,40 @@ proc soc_vehicle::build_hierarchy {} {
 # grid `_pack` sized the parent from — one walk, so the declared size and
 # where the children land cannot disagree.
 proc soc_vehicle::_fill {parent cells names} {
+    variable KIDS
+    # Recorded from the SAME argument the instances are built from, so
+    # `leaf_census` reports the design rather than a second model of it —
+    # the claim about this vehicle's diversity is a measurement (see the
+    # header), and a hand-kept twin of the structure is how such a claim
+    # goes quietly false.
+    lappend KIDS($parent) {*}$cells
     set pos [_pack_pos $cells]
     foreach c $cells n $names xy $pos {
         lassign $xy x y
         buda::add_inst_to_cell $parent $n $c $x $y
     }
+}
+
+proc soc_vehicle::leaf_census {} {
+    # cell type -> how many INSTANCES of it the built design holds, counting
+    # through the hierarchy from the top.  A cell with no recorded children
+    # is a leaf.  Requires `build_hierarchy` to have run.
+    variable KIDS
+    variable TOPCELLS
+    set n [dict create]
+    set stack {}
+    foreach c $TOPCELLS { lappend stack [list $c 1] }
+    while {[llength $stack]} {
+        set item [lindex $stack end]
+        set stack [lrange $stack 0 end-1]
+        lassign $item cell mult
+        if {![info exists KIDS($cell)]} {
+            dict incr n $cell $mult
+            continue
+        }
+        foreach k $KIDS($cell) { lappend stack [list $k $mult] }
+    }
+    return $n
 }
 
 proc soc_vehicle::derive_interface {} { buda::derive_busterms 4 }

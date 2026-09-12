@@ -190,12 +190,25 @@ every leaf sits at one level. `flow/ariane133` is somebody else's real
 design, and a synthesized netlist is uniquified, so nothing repeats. Between
 them two shapes a real SoC has went unexercised:
 
-* **Many different cell types, most appearing once.** A mesh measures
-  solve-once-copy; it says nothing about a planner meeting a new floorplan at
-  every block. Here eleven leaf cell types, of which `memctl_cell`,
-  `bridge_cell`, `xbar_cell` and `tag_cell` appear once per subsystem while
-  `sram_cell` and `cluster_cell` repeat — both in one design, which is what a
-  real SoC is.
+* **Many different cell types, each repeating a different number of times.**
+  A mesh tiles one cell, so every count is the same count. Here eleven leaf
+  types spanning an order of magnitude, and the two extremes are separate
+  code paths — `set_bottom_up *` copies a template to many instances and
+  *freezes* a single-instance cell as a keepout with nothing to copy.
+  Measured, `btcl flow/tcl/soc.tcl 2 -census`:
+
+  ```
+  sram_cell 20   tag_cell 9   fifo_cell 8
+  alu_cell 4   dec_cell 4   io_cell 4   mul_cell 4   regf_cell 4
+  xbar_cell 4                          <- one per router
+  bridge_cell 1   memctl_cell 1        <- the singletons
+  ```
+
+  **Eleven types with two singletons**, which is narrower than what this
+  section claimed first — *"most appearing once"*, with `xbar_cell` named as
+  one of them when it has an instance per router (Codex P2, #930).
+  `leaf_census` derives from the same argument `_fill` builds the instances
+  from, so the counts are a measurement and a test pins them.
 * **Ragged depth.** A leaf sits 2, 3 or 4 levels down depending on which
   subsystem it is in.
 
