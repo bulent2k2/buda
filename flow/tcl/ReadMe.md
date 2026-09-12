@@ -259,7 +259,8 @@ off this table** (Codex P2, #930): at the default channel it is clean at
 NQ = 1/2/4/8 and comes back **dirty at NQ = 16, NQ = 32 and NQ = 64** (8 bits
 of one bundle, the same one, the seat analysed at the end of this page). The
 whole advertised dial has now been run bottom-up; a named channel is measured
-to rescue 16 and 32, and that sweep is still running for 64. The bottom-up section below is the one to read for it, and
+to rescue 16 and 32; for 64 it is **not measured** — the attempt ran 90
+minutes without finishing (see the bottom-up section). The bottom-up section below is the one to read for it, and
 it carries its own per-gap tables; extending an all-sizes claim to the flag
 contradicted them two hundred lines later in the same document. NQ = 32 used to be **the honest limit** here —
 13 bits unplaced after 293 s — and it is neither the limit nor slow any
@@ -694,9 +695,24 @@ expensive option costs, and "N× less" has no arithmetic meaning. The two
 numbers it was derived from were printed in the table directly above it. That is a *stronger* statement than the hedge it
 replaces, in both directions — NQ = 32 does need a channel, **and** a gap that
 routes it is known — and it extends the cost argument against a built-in 96 to
-a fifth size rather than weakening it. Only **NQ = 64** remains entirely
-unmeasured bottom-up. The operational rule needs no threshold either way: **if
-a bottom-up run comes back dirty, sweep the channel.**
+a fifth size rather than weakening it.
+
+**NQ = 64 is measured at the default gap and *not* at a named one**, and the
+attempt is recorded rather than dropped. At the default it is dirty — 7 ovl /
+8 unpl, detailed WL 16,654,709 over 2451 bundles / 76,096 bit-wires, the same
+`bundle 2 seg 0` M7 seat. `64 -bottomup -GAP 24 -M 24` then ran **90 minutes
+without finishing** and was killed by the harness timeout (not hung: 2 h 17 m
+of CPU at 183 % on that bundle count). Its last reported state was its
+*second* healer round at **2 overlaps / 2 unplaced** — six of the eight bits
+placed, against 7/8 at the default — so the channel is doing something at
+this size, and that is the whole of what the evidence supports. Whether it
+reaches clean is **unknown**, and "nearly clean" is not clean: the NQ = 16
+curve is non-monotone, so 16 and 32 agreeing at 24 is not even a safe guess
+for 64.
+
+The operational rule needs no threshold either way: **if a bottom-up run comes
+back dirty, sweep the channel** — and at this size, budget hours rather than
+minutes for it.
 
 Worth noting for the seat analysis below: the clean NQ = 32 / GAP 24 run
 **still reports the doomed seat** and heals past it, exactly as NQ = 16 /

@@ -167,8 +167,16 @@ while {$argi < $argc} {
 # `pc_0` SEGMENT again.  So the whole advertised dial is now run bottom-up,
 # and the recurring-segment reading holds across a genuine 4x span (NQ=16 to
 # NQ=64: 32 -> 128 clusters, 427 -> 1675 leaves).  Whether a NAMED CHANNEL
-# rescues NQ=64 as it does 16 and 32 is NOT yet measured -- that sweep is
-# running -- so nothing is claimed about it here.  The rule needs no threshold either way: if a bottom-up run is
+# rescues NQ=64 as it does 16 and 32 is NOT MEASURED, and the attempt is
+# worth recording rather than silently dropping: `64 -bottomup -GAP 24 -M 24`
+# ran 90 MINUTES without finishing (killed by the harness timeout, not hung
+# -- 2h17m of CPU at 183% on a 2451-bundle design).  The last state it
+# reported was its SECOND healer round at 2 overlaps / 2 unplaced, i.e. six
+# of the eight bits placed where the default gap ends at 7/8 -- so the
+# channel is doing something here, and that is ALL the evidence supports.
+# Whether it reaches clean is unknown.  Do not read "nearly clean" as clean:
+# at NQ=16 the gap curve is NON-MONOTONE, so 24 is not even a safe guess
+# from 16 and 32 agreeing.  The rule needs no threshold either way: if a bottom-up run is
 # dirty, SWEEP the channel.
 #
 # The MECHANISM is not established: the earlier claim that a fixed copy
