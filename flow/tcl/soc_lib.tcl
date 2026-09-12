@@ -841,7 +841,8 @@ proc soc_vehicle::heal_if_dirty {who} {
     # through NQ=8.  A note left beside a healer saying a geometry knob
     # is the remedy will send the next investigation to tune geometry for a
     # failure that no longer exists (Codex P2, #930).  Where a fixed copy
-    # DOES need a channel (NQ>=16 under `-bottomup`) the caller names it, and
+    # DOES need a channel (measured at NQ=16 under `-bottomup`; larger sizes
+    # unmeasured, so no threshold is claimed) the caller names it, and
     # the measured curve lives in soc.tcl beside the removal.
     puts "$who: still dirty ([buda::query overlaps] overlaps,\
           [buda::query unplaced] unplaced) -- second round"

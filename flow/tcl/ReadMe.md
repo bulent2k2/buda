@@ -508,8 +508,18 @@ the three that are already clean at the default 16 and need no channel at
 all — to rescue the one that is not. That is precisely the trade the *"a
 wider channel buys no routing and costs wire monotonically"* measurement
 above refuses, so the flag declines to make it on the caller's behalf. A
-bottom-up run at NQ ≥ 16 names the channel itself and measures it:
+bottom-up run **at NQ = 16** names the channel itself and measures it:
 `soc.tcl 16 -bottomup -GAP 24 -M 24`.
+
+**NQ = 16 and not NQ ≥ 16** (Codex P2, #930). 16 is the only size *measured*
+to need a channel; NQ = 32 and NQ = 64 are advertised sizes that were never
+run bottom-up, so nothing here establishes that they need one or that any of
+these gaps routes them. Directing those runs away from the default geometry
+on an extrapolation is the same fault as recommending a gap that had stopped
+routing, one section up. The operational rule needs no threshold at all: **if
+a bottom-up run comes back dirty, sweep the channel** — the table says only
+where a sweep is *known* to be necessary, which is a smaller claim and the
+one the evidence supports.
 
 The **mechanism** is not established and the earlier claim that a fixed copy
 "lands each instance on whatever track phase the channel gives it" was an

@@ -134,8 +134,17 @@ while {$argi < $argc} {
 # three that need no channel at all -- to rescue the one that does.  That is
 # the trade the "a wider channel buys no routing and costs wire" measurement
 # above refuses, so the flag does not make it on the caller's behalf.  A
-# bottom-up run at NQ>=16 asks for the channel EXPLICITLY
+# bottom-up run AT NQ=16 asks for the channel EXPLICITLY
 # (`soc.tcl 16 -bottomup -GAP 24 -M 24`) and MEASURES it.
+#
+# NQ=16 and not NQ>=16 (Codex P2, #930): 16 is the only size MEASURED to
+# need one.  NQ=32 and NQ=64 are advertised and were never run bottom-up,
+# so nothing here establishes that they need a channel or that any of these
+# gaps routes them -- and directing those runs away from the default
+# geometry on an extrapolation is the same fault as naming a gap that
+# stopped routing.  The rule is the same at any size and needs no threshold
+# to state it: if a bottom-up run is dirty, SWEEP the channel; the table
+# says only where a sweep is known to be necessary.
 #
 # The MECHANISM is not established: the earlier claim that a fixed copy
 # "lands each instance on whatever track phase the channel gives it" was an
