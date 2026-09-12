@@ -469,19 +469,32 @@ NQ = 16 is where a fixed copy still needs one, and there the curve is
 **genuinely non-monotone** — measured on the honestly sized design this time,
 not as an artefact:
 
-| GAP (NQ = 16) | 16 | 24 | 32 | 48 | 96 |
+| GAP = M (NQ = 16, `-bottomup`) | 16 | 24 | 32 | 48 | 96 |
 |---|---|---|---|---|---|
-| result | ✗ 3 ovl | ok | ✗ 8 unpl | ok | ok |
-| detailed WL | 4,100,702 | 4,603,772 | 4,892,848 | 5,834,639 | 8,354,767 |
+| result | ✗ 3 ovl / 8 unpl | ok | ✗ 8 unpl | ✗ 1 ovl / 8 unpl | ok |
+| detailed WL | 4,319,399 | 4,648,190 | 5,058,836 | 5,856,977 | 8,621,243 |
+
+Re-measuring this one **changed** a row rather than confirming it: GAP 48 was
+clean last revision and fails now, so the working region has shrunk to **two
+of the five gaps swept**. That is a real effect of the three added buses, not
+a re-reading — and it makes the case against a built-in number stronger while
+making the practical advice narrower, which is worth stating in that order.
+At this size a bottom-up run has to sweep, not guess.
 
 That irregularity was reported once and **withdrawn** when its cause turned
 out to be the stars. It is back on different evidence: with the faces honest
 and the coefficients gone, a fixed copy at NQ = 16 still lands each instance
-on whatever track phase the channel gives it, and 32 is *worse* than 24.
-Which is the whole argument against a built-in number — the flag cannot pick
-one, because the answer is not monotone in the knob it would set. A
-bottom-up run at NQ ≥ 16 names the channel itself and measures it:
-`soc.tcl 16 -bottomup -GAP 48 -M 48`.
+on whatever track phase the channel gives it, and **both 32 and 48** are
+*worse* than 24. Which is the whole argument against a built-in number — the
+flag cannot pick one, because the answer is not monotone in the knob it would
+set. A bottom-up run at NQ ≥ 16 names the channel itself and measures it:
+`soc.tcl 16 -bottomup -GAP 24 -M 24`.
+
+That example is the point restated at its own expense: it read `-GAP 48
+-M 48` until this revision, because 48 was clean when the line was written.
+Three added buses made it fail, so a sentence telling the reader to measure
+was itself recommending a configuration that does not route. The recipe is
+**sweep**, and a named gap in it is an illustration with a shelf life.
 
 The atomicity rule it needed is kept as history rather than as code: while
 the flag *did* supply the pair it had to supply both or neither, since
