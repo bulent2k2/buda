@@ -459,6 +459,12 @@ through NQ = 8, and at NQ = 8 *every* gap is clean:
 | result | ok | ok | ok | ok | ok | ok |
 | detailed WL | 2,175,864 | 2,401,550 | 2,595,391 | 3,031,186 | 3,571,607 | 4,329,443 |
 
+Wiring the two **dead instances** (above) did *not* push it further — NQ = 8
+stays clean and NQ = 16 stays dirty at the default channel — which is worth
+recording as the negative result it is: three sizing faults moved this
+threshold and this one did not, because it added workload without changing a
+single face.
+
 NQ = 16 is where a fixed copy still needs one, and there the curve is
 **genuinely non-monotone** — measured on the honestly sized design this time,
 not as an artefact:
