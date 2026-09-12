@@ -512,14 +512,21 @@ lesson pointed at the flag:
 | 4 | 16 (the default) | 1,088,063 | 2,210,154 | **2.03×** |
 | 8 | 16 (the default) | 2,175,864 | 4,329,443 | **1.99×** |
 | 16 | 24 | 4,648,190 | 8,621,243 | **1.85×** |
+| 32 | 24 | 8,938,821 | 16,671,389 | **1.87×** |
+
+The NQ = 32 row was missing while the sentence below claimed the conclusion
+held at every measured size (Codex P2, #930) — the fifth measurement added a
+few paragraphs later and not carried up into the table it belongs in, which
+is the same summary-versus-detail gap as the top-down/bottom-up line, and in
+the same document.
 
 A default of 96 would roughly **double the wire at every size** — including
 the three that are already clean at the default 16 and need no channel at
-all — to rescue the one that is not. That is precisely the trade the *"a
+all — to rescue the **two** that are not. That is precisely the trade the *"a
 wider channel buys no routing and costs wire monotonically"* measurement
 above refuses, so the flag declines to make it on the caller's behalf. A
-bottom-up run **at NQ = 16** names the channel itself and measures it:
-`soc.tcl 16 -bottomup -GAP 24 -M 24`.
+bottom-up run **at NQ = 16 or NQ = 32** names the channel itself and measures
+it: `soc.tcl 16 -bottomup -GAP 24 -M 24` (or `32 -bottomup -GAP 24 -M 24`).
 
 ### What the bottom-up failure actually is
 
@@ -543,8 +550,15 @@ Measured, and the invariant is the point:
 | 16 | 48 | `bundle 2 seg 0` (LOW) | ✗ 1 ovl / 8 unpl |
 | 32 | 16 | `bundle 2 seg 0` M7 (TOP), 7 tracks < 8 bits | ✗ 3 ovl / 8 unpl |
 
-The same bundle, the same segment, the same eight bits, at two sizes 4× apart
-and at every gap — **including the clean one**.
+The same bundle, the same segment, the same eight bits, at **two sizes 2×
+apart** (NQ = 16 and 32) and at every gap — **including the clean one**.
+
+That separation read *"4× apart"* until Codex checked it (P2, #930). It is
+2×: 16 → 32 in the dial, 32 → 64 clusters, and roughly 2× in leaves and
+routed workload. Plain arithmetic, wrong since the paragraph was written,
+surviving my own audit of this very section and four review rounds over
+it — and it *overstated the scale range* supporting the conclusion, which is
+the direction that flatters the claim.
 
 **What repeats is the segment, not the seat** (Codex P2, #930). Read the rows:
 the assigned layer moves M7/TOP → M4/LOW → M7/TOP, and changing `GAP` moves

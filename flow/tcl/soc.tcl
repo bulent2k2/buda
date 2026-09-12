@@ -128,13 +128,16 @@ while {$argi < $argc} {
 # lesson pointed at the flag -- detailed WL against the cheapest clean gap
 # at each size:
 #
-#   NQ= 2   591,230 -> 1,231,210   2.08x     (clean at the default 16)
-#   NQ= 4 1,088,063 -> 2,210,154   2.03x     (clean at the default 16)
-#   NQ= 8 2,175,864 -> 4,329,443   1.99x     (clean at the default 16)
-#   NQ=16 4,648,190 -> 8,621,243   1.85x     (cheapest clean is 24)
+#   NQ= 2   591,230 ->  1,231,210   2.08x    (clean at the default 16)
+#   NQ= 4 1,088,063 ->  2,210,154   2.03x    (clean at the default 16)
+#   NQ= 8 2,175,864 ->  4,329,443   1.99x    (clean at the default 16)
+#   NQ=16 4,648,190 ->  8,621,243   1.85x    (cheapest clean is 24)
+#   NQ=32 8,938,821 -> 16,671,389   1.87x    (cheapest clean is 24)
 #
 # A default of 96 roughly DOUBLES the wire at every size -- including the
-# three that need no channel at all -- to rescue the one that does.  That is
+# three that need no channel at all -- to rescue the TWO that do (the NQ=32
+# row was missing while the sentence claimed every measured size; Codex P2,
+# #930).  That is
 # the trade the "a wider channel buys no routing and costs wire" measurement
 # above refuses, so the flag does not make it on the caller's behalf.  A
 # bottom-up run AT NQ=16 asks for the channel EXPLICITLY

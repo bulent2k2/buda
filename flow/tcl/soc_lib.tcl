@@ -128,6 +128,49 @@ proc soc_vehicle::configure {{overrides {}}} {
         }
     }
 
+    # The MIRROR of that rule, on the PHYSICAL sizing knobs (Codex P2, #930).
+    # The loop above guards every COUNT and left `BITPITCH`, `PAD`, `M` and
+    # `GAP` unchecked -- four knobs, not the two the finding named, which is
+    # why this is a loop over all of them rather than two `if`s.
+    #
+    # What goes wrong is NOT what went wrong for `-DW 0`, and the difference
+    # is worth stating because it decides how hard to fail.  A routed run
+    # with `-BITPITCH 0` or `-PAD -100` comes back LOUDLY dirty (measured at
+    # NQ=1: 89 ovl / 1408 unplaced and 10 ovl / 1008 unplaced), so it does
+    # not report success over a broken design the way `-DW 0` did.  Two other
+    # things break instead:
+    #
+    #   (a) THE FACE GUARD IS COMPLICIT.  This vehicle's whole claim is that
+    #       a too-narrow face is reported AT DECLARATION -- `tpu.tcl`'s
+    #       lesson.  But `check_bus_faces` prices a face through `_dim`, the
+    #       same `_dim` that just multiplied by zero, so the check computes
+    #       the identical wrong number and passes.  A guard cannot audit the
+    #       arithmetic it is written in, which is exactly the shape of every
+    #       instrument failure in this PR.
+    #   (b) `-dry` REPORTS A PLAUSIBLE DIE.  `-dry` is the advertised way to
+    #       sweep geometry without paying for a route, so a harness reading
+    #       it gets 1136x480 and no complaint at all.
+    #
+    # Per-knob rules, and ZERO IS MEASURED rather than assumed (NQ=1):
+    #   BITPITCH  > 0   a pitch of zero makes a face stop depending on its
+    #                   bits; it is a DOUBLE (4.0), so not `string is integer`
+    #   PAD      >= 0   0 is legal and TIGHT -- it routes to 8 unplaced and
+    #                   SAYS so (rc=1), an honest report, so it is allowed;
+    #                   negative shrinks a face BELOW its own bits
+    #   GAP      >= 0   0 is abutment: dirty (2 ovl / 160 unplaced) but
+    #                   loudly, so allowed; negative would OVERLAP blocks
+    #   M        >= 0   0 is CLEAN, measured
+    foreach {k floor kind} {BITPITCH 0 pos PAD 0 nonneg GAP 0 nonneg M 0 nonneg} {
+        set v $P($k)
+        set numeric [expr {$k eq "BITPITCH" ? [string is double -strict $v]
+                                           : [string is integer -strict $v]}]
+        set bad [expr {!$numeric || ($kind eq "pos" ? $v <= $floor : $v < $floor)}]
+        if {$bad} {
+            set want [expr {$kind eq "pos" ? "> 0" : ">= 0"}]
+            error "soc_vehicle: $k must be a number $want (got '$v')"
+        }
+    }
+
     # ── the CHANNEL: a constant, and that is the finding ──────────────────
     # A face IS derived from the bits that land on it (below).  A CHANNEL is
     # not -- and this vehicle has now paid for the difference THREE times,

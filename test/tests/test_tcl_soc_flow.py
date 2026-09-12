@@ -891,6 +891,54 @@ def test_every_bus_family_wires_one_kind_of_thing_to_one_kind(tmp_path):
         "accepts", {f: sorted(s) for f, s in inconsistent.items()})
 
 
+def test_a_nonphysical_sizing_knob_is_refused_at_declaration(tmp_path):
+    """The MIRROR of the zero-width guard, on the PHYSICAL sizing knobs
+    (Codex P2, #930).  `-DW 0` was refused because it reported a CLEAN design
+    over a deleted datapath; the count loop that fixed it left `BITPITCH`,
+    `PAD`, `M` and `GAP` unchecked — four knobs, not the two the finding
+    named, which is why the fix is a loop and this test sweeps all four.
+
+    What breaks here is NOT what broke for `-DW 0`, and measuring the
+    difference is what set the per-knob rules.  A ROUTED run with
+    `-BITPITCH 0` or `-PAD -100` comes back loudly dirty (NQ=1: 89 ovl /
+    1408 unplaced, 10 ovl / 1008 unplaced), so neither ever claimed success.
+    Two other things broke:
+
+      (a) the FACE GUARD was complicit — `check_bus_faces` prices a face
+          through the same `_dim` that had just multiplied by zero, so this
+          vehicle's advertised declaration-time too-narrow-face report could
+          not fire.  A guard cannot audit the arithmetic it is written in.
+      (b) `-dry`, the advertised way to sweep geometry without paying for a
+          route, reported a plausible 1136x480 die and no complaint.
+
+    So the assertion is on the DECLARATION, not on the routed endpoint: the
+    run must stop before a route it would only fail anyway.
+
+    ZERO IS ALLOWED where it was MEASURED honest, which is the other half —
+    a guard that refuses working configurations is its own defect.  `-M 0`
+    routes CLEAN; `-PAD 0` (a face exactly its bits) and `-GAP 0`
+    (abutment) route DIRTY but report it with a non-zero exit, and an
+    honest failure is a legitimate experiment to run.  Only `BITPITCH`
+    takes `> 0`, since a zero pitch makes a face stop depending on its bits
+    at all."""
+    # every defect the guard claims to catch, re-injected
+    for knob, val in (("-BITPITCH", 0), ("-BITPITCH", -1), ("-BITPITCH", "abc"),
+                      ("-PAD", -100), ("-PAD", -1),
+                      ("-GAP", -1), ("-M", -5)):
+        r = _run(tmp_path, 1, knob, val, "-dry")
+        assert r.returncode != 0, (knob, val, r.stdout)
+        out = r.stdout + r.stderr
+        assert "soc_vehicle: %s must be a number" % knob.lstrip("-") in out, \
+            (knob, val, out)
+
+    # ...and the values measured legal are still accepted, -dry being enough
+    # since the refusal above is a DECLARATION-time one
+    for knob, val in (("-GAP", 0), ("-M", 0), ("-PAD", 0), ("-BITPITCH", 2.5)):
+        r = _run(tmp_path, 1, knob, val, "-dry")
+        assert r.returncode == 0, (knob, val, r.stdout + r.stderr)
+        assert _die(r.stdout), (knob, val, r.stdout)
+
+
 def test_an_unknown_knob_is_an_error_not_a_silent_default(tmp_path):
     """`array set P {...}` holds no `;#` comments, because Tcl does not treat
     `#` as a comment inside braces — every one would become key/value
