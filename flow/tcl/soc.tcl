@@ -155,6 +155,36 @@ while {$argi < $argc} {
 # buses made it fail -- so the example itself decayed into advice for a
 # configuration that does not route.  Two of the five gaps swept work here.
 #
+# AND THE CHANNEL IS NOT THE CAUSE -- the fifth time on this vehicle a
+# channel reading turned out to be a seat or a face.  EVERY failing run
+# strands the same eight bits of the same bundle:
+#
+#   hb-2  D0  cross-level  "DRV:io/p_0|REC:quad_0/cl_0/rtr/xbar"  nets=8
+#
+# i.e. `pc_0`, the first io pad into cluster 0's crossbar, 8 bits of CW.
+# Measured -- and the seat occurs at every gap INCLUDING the clean one:
+#
+#   NQ  GAP  seat reported                          endpoint
+#   16   16  bundle 2 seg 0  M7 (TOP)  7 < 8 bits   X 3 ovl / 8 unpl
+#   16   24  bundle 2 seg 0  M4 (LOW)  0 < 8 bits   CLEAN
+#   16   32  bundle 2 seg 0  M7 (TOP)  7 < 8 bits   X 0 ovl / 8 unpl
+#   16   48  bundle 2 seg 0      (LOW)              X 1 ovl / 8 unpl
+#   32   16  bundle 2 seg 0  M7 (TOP)  7 < 8 bits   X 3 ovl / 8 unpl
+#
+# The seat is INVARIANT; what varies is whether the HEALERS clear it.  The
+# tool names the category itself every time -- "static width-infeasibility,
+# not reservation conflicts" -- so this is the #536 supply-doomed seat class
+# and the gap only changes the geometry the healers then repair, which is why
+# the curve is non-monotone and why no threshold predicted it.  WHY healing
+# succeeds at 24 and not at 16/32/48 is NOT established, and this file just
+# withdrew one asserted mechanism, so it will not supply another.
+#
+# The lever a 7-tracks-for-8-bits seat wants is the SEAT --
+# `set_max_bundle_bits 4 for pc_`, a wider `io_cell` face, or the re-seat
+# heal -- none of which is GAP.  The channel guidance stays because it is
+# what was MEASURED to change the outcome, labelled a workaround, not a
+# cause.
+#
 # The atomicity rule it needed is kept as history: when the flag DID supply
 # the pair it had to supply BOTH or NEITHER, since `-bottomup -GAP 16` left
 # `M` at 24 and gave 4976x1576 where THAT revision's default geometry was

@@ -511,6 +511,52 @@ above refuses, so the flag declines to make it on the caller's behalf. A
 bottom-up run **at NQ = 16** names the channel itself and measures it:
 `soc.tcl 16 -bottomup -GAP 24 -M 24`.
 
+### What the bottom-up failure actually is
+
+Chasing the threshold found the cause, and it is not a channel — the fifth
+time on this vehicle that a channel reading turned out to be a seat or a
+face. **Every** failing bottom-up run strands the same eight bits of the same
+bundle:
+
+```
+hb-2   D0  cross-level  "DRV:io/p_0|REC:quad_0/cl_0/rtr/xbar"  nets=8
+```
+
+That is `pc_0` — the first io pad into cluster 0's crossbar, 8 bits of `CW`.
+Measured, and the invariant is the point:
+
+| NQ | GAP | the seat the tool reports | endpoint |
+|---|---|---|---|
+| 16 | 16 | `bundle 2 seg 0` M7 (TOP), 7 tracks < 8 bits | ✗ 3 ovl / 8 unpl |
+| 16 | 24 | `bundle 2 seg 0` M4 (LOW), 0 tracks < 8 bits | **clean** |
+| 16 | 32 | `bundle 2 seg 0` M7 (TOP), 7 tracks < 8 bits | ✗ 0 ovl / 8 unpl |
+| 16 | 48 | `bundle 2 seg 0` (LOW) | ✗ 1 ovl / 8 unpl |
+| 32 | 16 | `bundle 2 seg 0` M7 (TOP), 7 tracks < 8 bits | ✗ 3 ovl / 8 unpl |
+
+The same bundle, the same segment, the same eight bits, at two sizes 4× apart
+and at every gap — **including the clean one**. The seat is *invariant*; what
+varies is whether the **healers clear it**. And the tool has been saying the
+category in plain text at every one of those runs:
+
+```
+Advisory: 1 supply-doomed seat(s) — static width-infeasibility,
+          not reservation conflicts.
+```
+
+So this is the **#536 supply-doomed seat** class, not congestion. A gap sweep
+works on it only indirectly, by changing the geometry the healers then have to
+repair — which is exactly why the curve is non-monotone and why no threshold
+predicted it. *Why* healing succeeds at 24 and fails at 16/32/48 is **not**
+established here, and after withdrawing one asserted mechanism this round I am
+not about to supply another.
+
+The consequence for the advice is that "a fixed copy needs a channel" was
+always naming the symptom. The lever a 7-tracks-for-8-bits seat wants is the
+seat: `set_max_bundle_bits 4 for pc_`, a wider `io_cell` face, or the re-seat
+heal — none of which is `GAP`. The channel guidance stays because it is what
+was *measured* to change the outcome, and it is now labelled as a workaround
+rather than as a cause.
+
 **Both sides of that trade, priced.** The argument above counts only wire,
 which is half a comparison — so here is what the dirty endpoint costs at the
 one size measured to need a channel. At NQ = 16 the default gap strands
