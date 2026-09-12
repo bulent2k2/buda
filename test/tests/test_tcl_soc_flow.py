@@ -248,9 +248,13 @@ def test_every_cell_a_bus_lands_on_is_sized_from_that_bus(tmp_path):
     """The face rule has to hold for EVERY endpoint of a bus, not just the
     one whose knob names it (Codex P2 x2, #930).  Three cells broke it:
 
-    * `sram_cell` drives `id_[IW]` out of `l1i/bank_0` and `alu_cell`
+    * `sram_cell` drives `l1id_*[IW]` out of each `l1i` bank and `alu_cell`
       receives `i_[IW]`, both sized from `DW` — so `-IW` widened `dec_cell`
-      and every container above it while both other ends stayed narrow;
+      and every container above it while both other ends stayed narrow.
+      (Written as `id_[IW]` out of `l1i/bank_0` until the banks were wired;
+      `id_` now leaves `l1i/tag.d_out` and touches no SRAM, so the citation
+      outlived the netlist — Codex P2, #930.  The size is unchanged; what was
+      wrong is the dependency a later face change would trace.)
     * `xbar_cell` was `2*DW` on both axes while `nr_[AW]` joins two routers
       directly and `pc_[CW]` arrives from an io pad.
 

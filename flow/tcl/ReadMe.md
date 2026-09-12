@@ -267,10 +267,13 @@ faces* — has to hold for **every endpoint of a bus**, and it has to be read
 on the **sum at each pin**. This vehicle broke both readings in turn, and
 the second one was hiding everything else on this page.
 
-**Per bus.** `sram_cell` drives `id_[IW]` and `alu_cell` receives `i_[IW]`,
-both sized from `DW`; `xbar_cell` was `2*DW` on both axes while `nr_[AW]`
-joins two routers directly and `pc_[CW]` arrives from an io pad (Codex P2 ×
-2, #930). Every face became a `max` over the buses landing on it.
+**Per bus.** `sram_cell` drives `l1id_*[IW]` out of each `l1i` bank and
+`alu_cell` receives `i_[IW]`, both sized from `DW`; `xbar_cell` was `2*DW` on
+both axes while `nr_[AW]` joins two routers directly and `pc_[CW]` arrives
+from an io pad (Codex P2 × 2, #930). Every face became a `max` over the buses
+landing on it. (This cited `id_[IW]` until the bank wiring landed — `id_` now
+leaves `l1i/tag.d_out`, so it names no SRAM at all, and a stale dependency is
+what a future face change would follow. Codex P2 again.)
 
 **Per pin.** A pin is *one place*, so what has to fit there is every bit that
 lands on it, not the widest bus taken alone. `NBANK`/`NBANK2` were advertised

@@ -185,9 +185,15 @@ proc soc_vehicle::configure {{overrides {}}} {
     #
     # PER BUS first: `-IW` grew `dec_cell` and every container above it while
     # both OTHER ends of the IW buses stayed sized from `DW` -- `sram_cell`
-    # drives `id_[IW]`, `alu_cell` receives `i_[IW]` -- and `xbar_cell` was
-    # `2*DW` on both axes while `nr_[AW]` joins two of them directly and
-    # `pc_[CW]` arrives from an io pad (Codex P2 x2, #930).
+    # drives `l1id_*[IW]` out of each `l1i` bank, `alu_cell` receives
+    # `i_[IW]` -- and `xbar_cell` was `2*DW` on both axes while `nr_[AW]`
+    # joins two of them directly and `pc_[CW]` arrives from an io pad
+    # (Codex P2 x2, #930).  The `sram_cell` citation here read `id_[IW]`
+    # until the bank wiring below landed: `id_` now leaves `l1i/tag.d_out`,
+    # so the IW dependency on a bank runs through the bank-to-tag read bus
+    # and the sentence named a bus that no longer touches an SRAM (Codex P2
+    # again) -- the SIZE was right, the traced dependency was not, which is
+    # the half a future face change reads.
     #
     # PER PIN second, and it is the one that mattered: a pin is ONE PLACE, so
     # what has to fit there is every bit that lands on it.  Wiring the banks
