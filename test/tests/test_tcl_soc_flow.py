@@ -280,11 +280,19 @@ def test_every_cell_a_bus_lands_on_is_sized_from_that_bus(tmp_path):
     rows = [_sizes(tmp_path, knob, cells)
             for knob in ((), ("IW", 128), ("AW", 128))]
     # (sram_w, sram_h, alu_w, alu_h, xbar_w, xbar_h, dec_w, dec_h)
-    assert rows[0] == [152, 152, 280, 152, 280, 280, 152, 152], rows[0]
+    # Every one is 152 at the defaults now, because every face is EXACTLY
+    # the bits on its busiest pin (`test_every_leaf_face_is_exactly_the_bits`)
+    # and at DW == IW == 32 that is one 32-bit bus everywhere.  The 280s here
+    # were the `2*DW` coefficients, which had nothing behind them.
+    assert rows[0] == [152, 152, 152, 152, 152, 152, 152, 152], rows[0]
     # -IW: every face the IW buses land on grows with them, to the same size
     assert rows[1][0] == rows[1][2] == rows[1][3] == rows[1][6] == 536, rows[1]
+    # ...and a face NO IW bus reaches does not move: `xbar` sees DW/AW/CW
+    assert rows[1][4] == rows[1][5] == 152, rows[1]
     # -AW: the router pair, which `2*DW` used to cap at 280
     assert rows[2][4] == rows[2][5] == 536, rows[2]
+    # ...while `alu`, which no AW bus reaches, stays put
+    assert rows[2][2] == rows[2][3] == 152, rows[2]
 
     # ...and the routing says so: both knobs are CLEAN where the rule was
     # broken, which is the correction, not just the derivation.
@@ -358,40 +366,46 @@ def test_bottom_up_changes_the_flow_and_not_the_geometry(tmp_path):
     assert _verdict(routed) == (0, 0, 0), routed.stdout + routed.stderr
 
 
-def test_no_cell_is_sized_from_a_knob_no_bus_brings_it(tmp_path):
-    """The face rule has a MIRROR the other tests do not cover: every knob a
-    cell's size mentions must be the width of some bus that lands on that
-    cell.
+def test_every_leaf_face_is_exactly_the_bits_that_land_on_it(tmp_path):
+    """The face rule, enforced as an EQUALITY on the sum at each pin.
 
-    The forward direction — every bus's endpoints are sized for it — is what
-    `test_every_cell_a_bus_lands_on_is_sized_from_that_bus` and the per-pin
-    test assert.  The mirror is a PHANTOM DEPENDENCY: a term left in the
-    table for a bus that never existed, or that moved.  `dec_cell` carried
-    `2*CW` from the vehicle's first draft while nothing with `CW` ever
-    touched `dec`, and `-CW 128` therefore grew the whole core/cluster stack
-    (die 4576x5600 against 4320x4704), so a CW experiment was measuring
-    unrelated whitespace and could credit a clean route to the wrong
-    geometry (Codex P2, #930).  `tag_cell` and `bridge_cell` carried the
-    same shape LATENT — dominated at the defaults, binding at small
-    `NBANK`/`NIO`.
+    `check_bus_faces` enforces the `>=` half at declaration.  This is the
+    `<=` half, and it is the rule the vehicle's own thesis states: a leaf's
+    size IS derived from the bits that land on its faces, so a term with no
+    bits behind it is wrong whether it is a whole knob or a coefficient.
 
-    This is the one guard in this file that exists because a hand audit
-    found the defect twice in a row.  It is MECHANICAL on both halves,
-    since reading the table is what let all three survive:
+    Three rounds of review walked in from the weak end and each fix was too
+    narrow (Codex P2 x3, #930):
 
-    * which cells DEPEND on a knob: perturb that knob alone and diff
-      `soc_vehicle::size` over every cell — no parsing of the expressions;
-    * which cells a knob LANDS on: run the flow under `BUDA_RECORD` with
-      every width knob set to a DISTINCT value, so each recorded bus's bit
-      count identifies its knob, and resolve each endpoint path through the
-      vehicle's OWN `cell_at` (the engine calls `build_hierarchy` makes are
-      stubbed, so `CELLOF` fills with no engine — the mapping is the
-      vehicle's, not a copy of it here).
+    * PHANTOM KNOBS -- `dec_cell`'s `2*CW`, `tagpin`'s `CW`,
+      `bridge_cell`'s `DW`, sizing cells no bus of that width touches.
+      `-CW 128` grew the whole core/cluster stack for nothing (die
+      4576x5600 against 4320x4704).
+    * PHANTOM COEFFICIENTS -- `mul_cell`'s `2*DW` over a cell with ONE bus
+      on ONE pin (`-DW 128` die 8784x6624 against 7760x6624), and the same
+      `2*DW` on `alu_cell`, `regf_cell` and `xbar_cell`.  The guard this
+      replaces could not see any of them: it asked whether a knob APPEARS,
+      never whether its coefficient matches the endpoint multiplicity.
+    * ...and it skipped a leaf absent from the landing map as though it were
+      a container, so a leaf that lost its last bus made every one of its
+      terms phantom and still read clean.
 
-    Then `depends ⊆ lands`, per knob.  Swept in two regimes so a term that
-    is merely dominated at one setting is still caught: the distinct-value
-    baseline, and a MINIMAL one (`NBANK`/`NIO` at 1 with narrow buses) where
-    a `max(..., CW)` or `max(..., DW)` floor is the binding term."""
+    Asking what the INSTRUMENT cannot witness is what those cost, so this
+    one is direct rather than differential: for every leaf, the declared
+    size must EQUAL `_dim` of the worst per-pin bit sum -- the same quantity
+    `check_bus_faces` accumulates, taken from the recorder rather than from
+    a model of it.  There is no perturbation and no regime to choose (the
+    open question I had about the previous guard's coverage): a wrong
+    expression is falsified wherever it disagrees, and the settings below
+    only have to make the knobs distinguishable and put each in turn on top.
+
+    `fifo_cell`'s `2*DW` SURVIVES, which is the check earning its keep: at
+    the chain head `fi_in.in` receives `nl_` AND `mr`, so two DW buses land
+    on one pin and the coefficient is the real multiplicity.  Likewise
+    `xbar_cell` legitimately depends on `NQ`/`NC` through
+    `percl = ceil(NIO/(NQ*NC))`, because `xbar.p_in` aggregates that many
+    peripherals -- a dependency on a topology dial that is honest, which I
+    could not settle by reading."""
     stub = tmp_path / "stub.tcl"
     stub.write_text(
         "namespace eval buda {}\n"
@@ -405,34 +419,45 @@ def test_no_cell_is_sized_from_a_knob_no_bus_brings_it(tmp_path):
         "    puts \"[soc_vehicle::cell_at $path]|$path\"\n"
         "}\n" % _ROOT)
 
-    def sizes(knobs):
-        probe = tmp_path / ("sz_%s.tcl" % "_".join(map(str, knobs)))
+    def declared_sizes(flat):
+        """Every LEAF cell's (w, h) and `_dim` of one bit, from the vehicle."""
+        probe = tmp_path / ("sz_%s.tcl" % "_".join(flat))
         probe.write_text(
             "source [file join {%s} flow tcl soc_lib.tcl]\n"
             "soc_vehicle::configure [list %s]\n"
-            "foreach c [lsort [array names soc_vehicle::SZ]] "
+            "foreach c [lsort [array names soc_vehicle::LEAF]] "
             "{ puts \"$c [soc_vehicle::size $c]\" }\n"
-            % (_ROOT, " ".join(map(str, knobs))))
+            % (_ROOT, " ".join(flat)))
         r = subprocess.run(["tclsh", str(probe)], capture_output=True,
                            encoding="utf-8", cwd=tmp_path, timeout=120)
         assert r.returncode == 0, r.stdout + r.stderr
-        return dict(ln.split(None, 1) for ln in r.stdout.splitlines())
+        out = {}
+        for ln in r.stdout.split("\n"):
+            f = ln.split()
+            if len(f) == 3:
+                out[f[0]] = (int(f[1]), int(f[2]))
+        assert out, r.stdout
+        return out
 
-    def audit(knobs, widths, tag):
-        """`knobs` is {name: value}; `widths` the width knobs among them,
-        which must be pairwise DISTINCT so a bus names its own knob.
+    def dim(bits, flat):
+        """`soc_vehicle::_dim`, asked of the vehicle rather than copied."""
+        probe = tmp_path / ("dim_%s_%d.tcl" % ("_".join(flat), bits))
+        probe.write_text(
+            "source [file join {%s} flow tcl soc_lib.tcl]\n"
+            "soc_vehicle::configure [list %s]\n"
+            "puts [soc_vehicle::_dim %d]\n" % (_ROOT, " ".join(flat), bits))
+        r = subprocess.run(["tclsh", str(probe)], capture_output=True,
+                           encoding="utf-8", cwd=tmp_path, timeout=120)
+        assert r.returncode == 0, r.stdout + r.stderr
+        return int(r.stdout.strip())
 
-        Two spellings of the same setting: the vehicle's CLI takes
-        `-NAME value`, while `soc_vehicle::configure` takes bare pairs.
-        Both are built from the one dict rather than written twice."""
-        rec = tmp_path / ("phantom_%s.buda" % tag)
+    def check(knobs, tag):
+        flat = ["NQ", "1"] + [s for k, v in knobs.items() for s in (k, str(v))]
         dashed = [s for k, v in knobs.items() for s in ("-%s" % k, str(v))]
-        flat = [s for k, v in knobs.items() for s in (k, str(v))]
-        # The route's VERDICT is irrelevant here — this audits DECLARATIONS,
-        # and a regime with one knob at 200 is deliberately lopsided enough
-        # to strand bits.  What must hold is that the flow got as far as
-        # declaring its buses, which the emptiness check below is.  (`-dry`
-        # cannot serve: it exits before `build_buses`, so it records none.)
+        rec = tmp_path / ("faces_%s.buda" % tag)
+        # The route's verdict is irrelevant: this audits DECLARATIONS, and a
+        # lopsided regime strands bits by design.  What must hold is that the
+        # flow reached its buses, which the emptiness check is.
         r = subprocess.run(["tclsh", str(_VEHICLE), "1", *dashed],
                            capture_output=True, encoding="utf-8",
                            errors="replace", cwd=tmp_path, timeout=900,
@@ -440,11 +465,10 @@ def test_no_cell_is_sized_from_a_knob_no_bus_brings_it(tmp_path):
         buses = [(f[1], f[2], f[3]) for f in
                  (ln.split() for ln in (rec.read_text() if rec.exists() else "")
                   .splitlines()) if f and f[0] == "add_bus"]
-        assert buses, ("the flow declared no bus in regime %s, so there is "
-                       "nothing to audit against" % tag,
+        assert buses, ("the flow declared no bus in regime %s" % tag,
                        r.stdout[-2000:], r.stderr[-2000:])
         paths = sorted({p for _n, d, rr in buses for p in (d, rr)})
-        out = subprocess.run(["tclsh", str(stub), "NQ", "1", *flat],
+        out = subprocess.run(["tclsh", str(stub), *flat],
                              input="\n".join(paths), capture_output=True,
                              encoding="utf-8", cwd=tmp_path, timeout=120)
         assert out.returncode == 0, out.stdout + out.stderr
@@ -453,48 +477,48 @@ def test_no_cell_is_sized_from_a_knob_no_bus_brings_it(tmp_path):
             if "|" in ln:
                 cell, path = ln.split("|", 1)
                 cell_of[path] = cell
-        by_width = {v: k for k, v in widths.items()}
-        assert len(by_width) == len(widths), ("the regime's widths must be "
-                                             "DISTINCT or a bus cannot name "
-                                             "its knob", widths)
-        lands = {}
+        # the per-PIN sum, which is what `check_bus_faces` accumulates
+        per_pin = collections.Counter()
         for name, d, rr in buses:
             m = re.search(r"\[(\d+)\]", name)
-            knob = by_width.get(int(m.group(1))) if m else None
-            if knob is None:
-                continue                      # a derived width, not a knob
+            assert m, name
             for path in (d, rr):
-                lands.setdefault(cell_of.get(path, "?"), set()).add(knob)
-        assert lands, "no bus width matched a knob value in this regime"
+                per_pin[path] += int(m.group(1))
+        worst = {}
+        for path, bits in per_pin.items():
+            cell = cell_of.get(path)
+            assert cell, ("no cell for endpoint %s -- the vehicle's own "
+                          "cell_at could not resolve it" % path)
+            worst[cell] = max(worst.get(cell, 0), bits)
 
-        base = sizes(["NQ", "1", *flat])
-        phantoms = []
-        for knob, val in widths.items():
-            moved = dict(knobs, **{knob: val * 2})
-            moved_flat = [s for k, v in moved.items() for s in (k, str(v))]
-            for cell, sz in sizes(["NQ", "1", *moved_flat]).items():
-                if base.get(cell) == sz or cell not in lands:
-                    continue                  # unchanged, or a container
-                if knob not in lands[cell]:
-                    phantoms.append((tag, knob, cell))
-        return phantoms
+        wrong = []
+        for cell, (w, h) in declared_sizes(flat).items():
+            if cell not in worst:
+                wrong.append((tag, cell, "declared but NO bus lands on it",
+                              (w, h), None))
+                continue
+            want = dim(worst[cell], flat)
+            if (w, h) != (want, want):
+                wrong.append((tag, cell, "%d bits on its busiest pin"
+                              % worst[cell], (w, h), want))
+        return wrong
 
-    # ONE REGIME PER KNOB, each with that knob DOMINANT and the
-    # multiplicities at 1.  A single regime is not enough and the first cut
-    # of this test proved it: with `CW` large, `bridge_cell`'s phantom
-    # `max(NIO*CW, DW)` is CW-dominated, so re-injecting the `DW` term
-    # changed no size and the guard passed.  A term can only be caught in a
-    # regime where its knob is what binds, so each knob gets one.
-    small = {"DW": 8, "AW": 9, "IW": 10, "CW": 11}
+    # Enough settings to distinguish the knobs and put each in turn on top,
+    # plus one with the multiplicities above 1 so an aggregating pin (a tag's
+    # `d_in`, `xbar.p_in`) is exercised rather than degenerate.
     found = []
-    for knob in small:
-        widths = dict(small, **{knob: 200})
-        assert len(set(widths.values())) == len(widths), widths
-        found += audit({"NBANK": 1, "NIO": 1, **widths}, widths, knob.lower())
+    found += check({"NBANK": 1, "NIO": 1,
+                    "DW": 8, "AW": 9, "IW": 10, "CW": 11}, "flat")
+    for knob in ("DW", "AW", "IW", "CW"):
+        found += check({"NBANK": 1, "NIO": 1,
+                        **dict({"DW": 8, "AW": 9, "IW": 10, "CW": 11},
+                               **{knob: 200})}, knob.lower())
+    found += check({"NBANK": 3, "NBANK2": 5, "NIO": 6,
+                    "DW": 8, "AW": 9, "IW": 10, "CW": 11}, "aggregating")
     assert not found, (
-        "a cell's size depends on a knob no bus of that width lands on -- a "
-        "PHANTOM dependency, so that knob's experiment measures unrelated "
-        "whitespace.  Either remove the term or wire the bus it implies.",
+        "a leaf's declared face is not the bits that land on it.  More than "
+        "the busiest pin needs is whitespace that pollutes that knob's "
+        "experiment; less is caught at declaration by check_bus_faces.",
         found)
 
 

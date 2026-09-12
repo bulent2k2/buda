@@ -114,8 +114,18 @@ proc soc_vehicle::configure {{overrides {}}} {
         if {![info exists P($k)]} { error "soc_vehicle: unknown parameter '$k'" }
         set P($k) $v
     }
-    foreach {k min} {NQ 1 NC 1 NBANK 1 NBANK2 1 NIO 1} {
-        if {$P($k) < $min} { error "soc_vehicle: $k must be >= $min (got $P($k))" }
+    # Every knob here is a COUNT -- of quadrants, clusters, banks, pads, or
+    # of BITS.  Zero is the one value that passes every later check while
+    # deleting the thing it counts: `-DW 0` names a bus `m_0_0[0]`, `add_bus`
+    # expands `[N]` over `0..N-1` and so creates no net, `check_bus_faces`
+    # accepts a zero contribution, and `describe` still counts the
+    # declaration -- so the sweep reports a clean design over a datapath that
+    # is not there (Codex P2, #930).  A width is refused for the same reason
+    # a multiplicity is.
+    foreach k {NQ NC NBANK NBANK2 NIO DW AW IW CW} {
+        if {![string is integer -strict $P($k)] || $P($k) < 1} {
+            error "soc_vehicle: $k must be an integer >= 1 (got '$P($k)')"
+        }
     }
 
     # ── the CHANNEL: a constant, and that is the finding ──────────────────
@@ -253,16 +263,16 @@ proc soc_vehicle::configure {{overrides {}}} {
     array set LEAF [list \
         dec_cell    [list [expr {max($P(IW), $P(AW))}] \
                           [expr {max($P(IW), $P(AW))}]   ] \
-        alu_cell    [list [expr {max(2*$P(DW), $P(IW))}] \
+        alu_cell    [list [expr {max($P(DW), $P(IW))}] \
                           [expr {max($P(DW), $P(IW))}]   ] \
-        mul_cell    [list [expr {2*$P(DW)}]          [expr {$P(DW)}]       ] \
+        mul_cell    [list [expr {$P(DW)}]            [expr {$P(DW)}]       ] \
         regf_cell   [list [expr {max($P(DW), $P(AW))}] \
-                          [expr {max(2*$P(DW), $P(AW))}] ] \
+                          [expr {max($P(DW), $P(AW))}] ] \
         sram_cell   [list [expr {max($P(DW), $P(IW), $P(AW))}] \
                           [expr {max($P(DW), $P(IW), $P(AW))}] ] \
         tag_cell    [list [expr {$tagpin}]           [expr {$tagpin}]      ] \
-        xbar_cell   [list [expr {max(2*$P(DW), $P(AW), $percl*$P(CW))}] \
-                          [expr {max(2*$P(DW), $P(AW), $percl*$P(CW))}] ] \
+        xbar_cell   [list [expr {max($P(DW), $P(AW), $percl*$P(CW))}] \
+                          [expr {max($P(DW), $P(AW), $percl*$P(CW))}] ] \
         fifo_cell   [list [expr {2*$P(DW)}]          [expr {2*$P(DW)}]     ] \
         io_cell     [list [expr {$P(CW)}]            [expr {$P(CW)}]       ] \
         bridge_cell [list [expr {$P(NIO)*$P(CW)}]    [expr {$P(NIO)*$P(CW)}] ] \
