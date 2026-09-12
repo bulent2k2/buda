@@ -511,6 +511,18 @@ above refuses, so the flag declines to make it on the caller's behalf. A
 bottom-up run **at NQ = 16** names the channel itself and measures it:
 `soc.tcl 16 -bottomup -GAP 24 -M 24`.
 
+**Both sides of that trade, priced.** The argument above counts only wire,
+which is half a comparison — so here is what the dirty endpoint costs at the
+one size measured to need a channel. At NQ = 16 the default gap strands
+**8 bits of 19,424 (0.041 %)** with 3 overlaps; `-GAP 24 -M 24` clears it for
+**+7.6 %** wire, and the built-in candidate 96 would cost **+100 %**. So the
+case against a default is not merely that 96 is expensive — it is that the
+caller's own remedy at the affected size is *thirteen times cheaper than the
+default would be*, which is exactly why naming it beats building it in. A
+methodology that would rather pay 2× everywhere than strand 0.04 % of one
+size's bits can still do so; it just has to say so, and it now has both
+numbers to decide on.
+
 **NQ = 16 and not NQ ≥ 16** (Codex P2, #930). 16 is the only size *measured*
 to need a channel; NQ = 32 and NQ = 64 are advertised sizes that were never
 run bottom-up, so nothing here establishes that they need one or that any of
