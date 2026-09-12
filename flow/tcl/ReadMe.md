@@ -238,36 +238,44 @@ $ btcl flow/tcl/soc.tcl 2 -bydepth "M3 M4 M5"
 
 On a uniform-depth vehicle every cell is one level and this collapses to the
 `reserve_top_layers` case. The bundles land at four depths too — at NQ = 2,
-`D0: 8, D1: 16, D2: 20, D3: 48`.
+`D0: 9, D1: 18, D2: 20, D3: 48`.
 
 ## Measured, this container
 
 | NQ | clusters | leaves | bundles | bit-wires | die | wall | endpoint |
 |---|---|---|---|---|---|---|---|
-| 1 | 2 | 37 | 54 | 1 528 | 2128 × 2016 | 1 s | clean |
-| 2 | 4 | 63 | 92 | 2 576 | 4208 × 2016 | 1 s | clean |
-| 4 | 8 | 115 | 168 | 4 736 | 4208 × 3200 | 2 s | clean |
-| 8 | 16 | 219 | 320 | 9 120 | 6288 × 4384 | 4 s | clean |
-| 16 | 32 | 427 | 624 | 17 624 | 8368 × 5568 | 15 s | clean |
-| 32 | 64 | 843 | 1232 | 34 576 | 12528 × 7936 | 42 s | clean |
-| 64 | 128 | 1675 | 2448 | 68 696 | 16688 × 10304 | 117 s | clean |
+| 1 | 2 | 37 | 57 | 1 664 | 2128 × 2016 | 1 s | clean |
+| 2 | 4 | 63 | 95 | 2 656 | 4208 × 2016 | 1 s | clean |
+| 4 | 8 | 115 | 171 | 5 024 | 4208 × 3200 | 2 s | clean |
+| 8 | 16 | 219 | 323 | 9 328 | 6288 × 4384 | 5 s | clean |
+| 16 | 32 | 427 | 627 | 18 080 | 8368 × 5568 | 14 s | clean |
+| 32 | 64 | 843 | 1235 | 35 096 | 12528 × 7936 | 36 s | clean |
+| 64 | 128 | 1675 | 2451 | 69 592 | 16688 × 10304 | 120 s | clean |
 
 Clean at every size measured, top-down, and `-caps`, `-bydepth` and
 `-bottomup` are clean too. NQ = 32 used to be **the honest limit** here —
 13 bits unplaced after 293 s — and it is neither the limit nor slow any
 more: removing three stars took it to clean, and removing the phantom
 coefficients (below) then took ~16 % off the wire and a fifth off the die at
-every row. **Every number on this table has now moved three times** — when a
-second `heal_if_dirty` round landed, when the stars went, and when the
-coefficients went — and each time because something re-ran it rather than
-because anyone re-read it.
+every row. **Every number on this table has now moved four times** — when a
+second `heal_if_dirty` round landed, when the stars went, when the
+coefficients went, and when the two dead instances below were wired — and
+each time because something re-ran it rather than because anyone re-read it.
 
-## Every endpoint, every bit: the face rule read twice
+The last of those moved the **bundle** and **bit-wire** columns (+3 buses at
+every size: the L2 tag lookup both ways and the bridge's injection at the
+chain start) and left every **die** unchanged — including at `-DW 128` and
+`-CW 128`, measured — which is the point of it: the geometry was always paid
+for, only the workload was missing.
+
+## Every endpoint, every bit, every instance: the face rule read three ways
 
 The face rule — *a leaf's size is derived from the bits that land on its
-faces* — has to hold for **every endpoint of a bus**, and it has to be read
-on the **sum at each pin**. This vehicle broke both readings in turn, and
-the second one was hiding everything else on this page.
+faces* — has to hold for **every endpoint of a bus**, on the **sum at each
+pin**, and for **every instance** rather than every cell type. This vehicle
+broke all three readings in turn; the second was hiding everything else on
+this page, and the third was invisible to every guard written for the first
+two.
 
 **Per bus.** `sram_cell` drives `l1id_*[IW]` out of each `l1i` bank and
 `alu_cell` receives `i_[IW]`, both sized from `DW`; `xbar_cell` was `2*DW` on
@@ -289,6 +297,44 @@ with each of those buses passing the per-bus check. `check_bus_faces`
 accumulates per **endpoint path** now — and refuses outright when it cannot
 resolve a path, since a guard that checks nothing must not pass — so
 `NBANK`/`NBANK2`/`NIO` grow the cells they feed.
+
+**Per instance**, which is a different question and the one the guards kept
+answering by accident. Every check on this page reduces the design to cell
+**types** before comparing — a census by type, a declared size by type — and
+an unwired *occurrence* of a type that is wired elsewhere is invisible to all
+of them, however exact they are about the type. Two were:
+
+* **`l2/tag`** — an L2 tag array instantiated and named by no bus, in the
+  census and in the die with nothing on it, while the four live L1 tags
+  answered for `tag_cell` (Codex P2, #930). Now wired the way a controller
+  really works: the address out to the tag, the tag's answer back, on the
+  controller's own pin (`mc.t_in`, not `mc.d_in`, which already aggregates
+  every bank — the per-pin rule above). Both faces already held it, so this
+  wired a dead instance **without moving a single size**, which is the honest
+  reading: the geometry was always paid for, only the workload was missing.
+* **`quad_0/cl_0/rtr/fi_in`** — found by the guard written for the first one,
+  in the same run. `nl_` wires hop *i* to hop *i+1*, so the chain's first hop
+  has nothing upstream of it — one dead `fifo_cell` at *every* size, that
+  being a derivation rather than an extrapolation from the two sizes measured:
+  a chain has exactly one first hop whatever `NQ`/`NC` say. A peripheral
+  bridge is a NoC master, so it injects at the chain head — one bus, and the
+  physical answer. `bridge_cell` therefore takes a `DW` pin beside its
+  `NIO*CW` star, so its face is `max` of the two; that does not move the
+  default (both are 32 bits) and at `-DW 128` it grows 152 → 536 units with
+  the **die unchanged**, the io block not being what binds there.
+
+  The cheaper-looking fix was to close the chain into a **ring** (`mr` back to
+  `chain[0]`), and it is wrong for a reason worth keeping: that leaves every
+  `fi_in.in` with exactly one bus, which would make `fifo_cell`'s `2*DW`
+  phantom — and that coefficient is this vehicle's one *measured-honest*
+  multiplicity. A fix that wires a dead instance by deleting the aggregation
+  another face is sized from just trades one fault for the other.
+
+So `soc_vehicle::leaf_paths` enumerates the leaf **instance paths** (and
+`leaf_census` is now derived from it, one walk), and the face test requires
+each path to appear as some bus's endpoint *before* anything is reduced by
+type. Mutation-tested both ways: delete either bus and it names the instance,
+in every regime.
 
 What it cost was never the sizes. It was a **causal claim**, made twice.
 First `-AW 128` was reported as 128 bits unplaced on a *supply-doomed seat*
@@ -318,11 +364,20 @@ against 4320 × 4704), so that experiment was measuring unrelated whitespace
 and could credit a clean route to the wrong geometry. The other two were
 dominated at the defaults and bind at `NBANK`/`NIO` = 1. Removing all three
 leaves the defaults **unchanged**, which is precisely why reading the table
-never found them — and why the guard
-(`test_no_cell_is_sized_from_a_knob_no_bus_brings_it`) perturbs each knob
-and diffs the sizes rather than parsing the expressions, with **one regime
-per knob**, since a term is invisible in any regime where its knob is not
-what binds.
+never found them.
+
+`bridge_cell`'s `DW` has since come **back**, and honestly: it was a phantom
+because no `DW` bus landed on the bridge, and the bridge's injection into the
+chain start (above) is one. The form was never wrong — the bus was missing.
+That is worth keeping as the shape of the mistake: a term with nothing behind
+it and a term whose bus the design forgot to declare look identical in the
+expression, and only the endpoints tell them apart.
+
+The guard for all of this is
+`test_every_leaf_face_is_exactly_the_bits_that_land_on_it`, which **replaced**
+a perturb-and-diff version: that one asked whether a knob *appears*, so it
+could not see a wrong COEFFICIENT at all, and needed one regime per knob to
+defend. The equality form needs neither.
 
 ## The lesson it paid for: a face is derived, a channel is not
 
@@ -344,12 +399,12 @@ congestion, not sizing. A memory controller is arbitrated, not wired to eight
 masters in parallel, and its face is sized for one bus. With the NoC chain in
 its place a wider channel is **pure cost**:
 
-| GAP | NQ = 8 | NQ = 16 |
+| GAP = M | NQ = 8 | NQ = 16 |
 |---|---|---|
-| 16 | clean, WL 1,839,653 | clean, WL 3,729,697 |
-| 48 | clean, WL 2,660,799 | clean, WL 5,347,299 |
-| 96 | clean, WL 3,822,548 | clean, WL 7,778,438 |
-| 144 | clean, WL 5,045,381 | clean, WL 10,231,262 |
+| 16 | clean, WL 1,968,672 | clean, WL 3,935,746 |
+| 48 | clean, WL 2,826,579 | clean, WL 5,553,364 |
+| 96 | clean, WL 4,024,854 | clean, WL 8,034,294 |
+| 144 | clean, WL 5,290,204 | clean, WL 10,561,015 |
 
 Every row routes, so the wider channel buys **nothing** and costs wire
 monotonically — which is `tpu.tcl`'s lesson in the direction it recorded it:
@@ -365,9 +420,9 @@ NoC leg. The advice was right and the *cause* was wrong: three stars were
 still in the netlist, and with those faces sized from what lands on them
 `-DW 128` is clean at every gap, the channel still pure cost:
 
-| GAP (NQ = 4, DW = 128) | 16 | 32 | 64 | 96 |
+| GAP = M (NQ = 4, DW = 128) | 16 | 32 | 64 | 96 |
 |---|---|---|---|---|
-| detailed WL | 8,262,878 | 8,887,848 | 10,187,423 | 11,476,897 |
+| detailed WL | 9,253,086 | 9,865,420 | 11,400,415 | 12,698,056 |
 | endpoint | clean | clean | clean | clean |
 
 `-DW` alone: `IW` sizes `dec_cell` and every cell enclosing it, so setting it
@@ -399,10 +454,10 @@ The **phantom coefficients** — `2*DW` on four cells with nothing behind it —
 took it from NQ = 8 to NQ = 16. At the default channel the flag is now clean
 through NQ = 8, and at NQ = 8 *every* gap is clean:
 
-| GAP (NQ = 8) | 16 | 24 | 32 | 48 | 64 | 96 |
+| GAP = M (NQ = 8, `-bottomup`) | 16 | 24 | 32 | 48 | 64 | 96 |
 |---|---|---|---|---|---|---|
 | result | ok | ok | ok | ok | ok | ok |
-| detailed WL | 2,064,286 | 2,276,208 | 2,464,947 | 2,887,618 | 3,397,741 | 4,134,838 |
+| detailed WL | 2,175,864 | 2,401,550 | 2,595,391 | 3,031,186 | 3,571,607 | 4,329,443 |
 
 NQ = 16 is where a fixed copy still needs one, and there the curve is
 **genuinely non-monotone** — measured on the honestly sized design this time,

@@ -66,7 +66,7 @@
 #   |       |- l1i, l1d   -> sram_<b> x NBANK, tag
 #   |       `- rtr        -> xbar, fifo x2
 #   |- l2                  x 1         -> sram_<b> x NBANK2, tag, memctl
-#   `- io                  x 1         -> io_<k> x NIO, bridge
+#   `- io                  x 1         -> p_<k> x NIO, bridge
 #
 # so `sram_cell` and `cluster_cell` REPEAT (the bottom-up family has
 # something to work on) while `l2_cell`, `io_blk_cell`, `memctl_cell` and
@@ -144,11 +144,11 @@ proc soc_vehicle::configure {{overrides {}}} {
     # `build_buses`), and with the NoC chain in its place a wider channel
     # buys NO routing at all and costs wire, monotonically --
     #
-    #   GAP     NQ=8 detailed WL     NQ=16 detailed WL
-    #    16         1,839,653            3,729,697
-    #    48         2,660,799            5,347,299
-    #    96         3,822,548            7,778,438
-    #   144         5,045,381           10,231,262     (every row CLEAN)
+    #   GAP=M   NQ=8 detailed WL     NQ=16 detailed WL
+    #    16         1,968,672            3,935,746
+    #    48         2,826,579            5,553,364
+    #    96         4,024,854            8,034,294
+    #   144         5,290,204           10,561,015     (every row CLEAN)
     #
     # -- which is `tpu.tcl`'s recorded lesson in the direction it recorded
     # it: the channel was never the binding constraint, so widening it only
@@ -165,8 +165,8 @@ proc soc_vehicle::configure {{overrides {}}} {
     # with those faces sized from what lands on them `-DW 128` is CLEAN at
     # every gap, with the channel still pure cost:
     #
-    #   GAP (NQ=4, DW=128)    16          32          64          96
-    #   detailed WL        8,262,878   8,887,848  10,187,423  11,476,897
+    #   GAP=M (NQ=4, DW=128)  16          32          64          96
+    #   detailed WL        9,253,086   9,865,420  11,400,415  12,698,056
     #                                                     (every row CLEAN)
     #
     # -- `-DW` ALONE, since `IW` sizes `dec_cell` and every cell enclosing it
@@ -277,7 +277,8 @@ proc soc_vehicle::configure {{overrides {}}} {
                           [expr {max($P(DW), $P(AW), $percl*$P(CW))}] ] \
         fifo_cell   [list [expr {2*$P(DW)}]          [expr {2*$P(DW)}]     ] \
         io_cell     [list [expr {$P(CW)}]            [expr {$P(CW)}]       ] \
-        bridge_cell [list [expr {$P(NIO)*$P(CW)}]    [expr {$P(NIO)*$P(CW)}] ] \
+        bridge_cell [list [expr {max($P(NIO)*$P(CW), $P(DW))}] \
+                          [expr {max($P(NIO)*$P(CW), $P(DW))}] ] \
         memctl_cell [list [expr {$P(NBANK2)*max($P(DW), $P(AW))}] \
                           [expr {$P(NBANK2)*max($P(DW), $P(AW))}] ] \
     ]
@@ -432,7 +433,9 @@ proc soc_vehicle::build_hierarchy {} {
     variable P
     variable SZ
     variable KIDS
+    variable CELLOF
     array unset KIDS
+    array unset CELLOF
 
     buda::set_die $P(DIEW) $P(DIEH)
 
@@ -468,19 +471,23 @@ proc soc_vehicle::build_hierarchy {} {
 
     # the top: the quadrants packed, the l2 and io block in a band below.
     set qpos [_pack_pos [lrepeat $P(NQ) quad_cell]]
-    variable TOPCELLS
-    set TOPCELLS [lrepeat $P(NQ) quad_cell]
-    lappend TOPCELLS l2_cell io_blk_cell
+    # The TOP instances, as the same {name cell} pairs `_fill` records for
+    # every other level, appended where each one is actually instantiated.
+    variable TOPKIDS
+    set TOPKIDS {}
     for {set q 0} {$q < $P(NQ)} {incr q} {
         lassign [lindex $qpos $q] x y
         buda::add_inst quad_$q quad_cell - $x $y
+        lappend TOPKIDS [list quad_$q quad_cell]
     }
     set by [expr {$P(M) + $P(TOPH) + $P(M)}]
     set bpos [_pack_pos {l2_cell io_blk_cell}]
     lassign [lindex $bpos 0] lx ly
     lassign [lindex $bpos 1] ix iy
     buda::add_inst l2 l2_cell     - $lx [expr {$by + $ly}]
+    lappend TOPKIDS [list l2 l2_cell]
     buda::add_inst io io_blk_cell - $ix [expr {$by + $iy}]
+    lappend TOPKIDS [list io io_blk_cell]
 }
 
 # Instantiate `names` (cells `cells`) inside `parent`, in the same packed
@@ -488,14 +495,20 @@ proc soc_vehicle::build_hierarchy {} {
 # where the children land cannot disagree.
 proc soc_vehicle::_fill {parent cells names} {
     variable KIDS
-    # Recorded from the SAME argument the instances are built from, so
-    # `leaf_census` reports the design rather than a second model of it —
-    # the claim about this vehicle's diversity is a measurement (see the
-    # header), and a hand-kept twin of the structure is how such a claim
-    # goes quietly false.
     variable CELLOF
-    lappend KIDS($parent) {*}$cells
-    foreach c $cells n $names { set CELLOF($parent,$n) $c }
+    # Recorded from the SAME arguments the instances are built from, so
+    # `leaf_paths` and `leaf_census` report the design rather than a second
+    # model of it — the claim about this vehicle's diversity is a measurement
+    # (see the header), and a hand-kept twin of the structure is how such a
+    # claim goes quietly false.
+    #
+    # ONE list of {name cell} PAIRS rather than two parallel lists, because a
+    # `foreach n $KIDNAMES c $KIDS` over two arrays truncates silently to the
+    # shorter: nothing would report the desync.
+    foreach c $cells n $names {
+        lappend KIDS($parent) [list $n $c]
+        set CELLOF($parent,$n) $c
+    }
     set pos [_pack_pos $cells]
     foreach c $cells n $names xy $pos {
         lassign $xy x y
@@ -565,25 +578,43 @@ proc soc_vehicle::check_bus_faces {bits args} {
     }
 }
 
-proc soc_vehicle::leaf_census {} {
-    # cell type -> how many INSTANCES of it the built design holds, counting
-    # through the hierarchy from the top.  A cell with no recorded children
-    # is a leaf.  Requires `build_hierarchy` to have run.
+proc soc_vehicle::leaf_paths {} {
+    # Every LEAF INSTANCE's full path (`quad_0/cl_0/l1i/tag`, `l2/bank_3`),
+    # walked from the top through the same name->cell pairs `_fill` recorded.
+    # A cell with no recorded children is a leaf.  Requires
+    # `build_hierarchy` to have run.
+    #
+    # This exists because an aggregate by cell TYPE cannot answer a question
+    # about an OCCURRENCE.  `l2/tag` was instantiated and wired by nothing,
+    # and the guard meant to catch exactly that reduced the design to types
+    # before comparing -- so the four live L1 tags answered for `tag_cell`
+    # and the dead one passed behind them (Codex P2, #930).  The same shape
+    # hid the unwired SRAM banks one round earlier.  `leaf_census` is now
+    # DERIVED from this list, so the census and the paths are one walk and
+    # cannot disagree.
     variable KIDS
-    variable TOPCELLS
-    set n [dict create]
+    variable TOPKIDS
+    set out {}
     set stack {}
-    foreach c $TOPCELLS { lappend stack [list $c 1] }
+    foreach nc $TOPKIDS { lassign $nc n c ; lappend stack [list $c $n] }
     while {[llength $stack]} {
         set item [lindex $stack end]
         set stack [lrange $stack 0 end-1]
-        lassign $item cell mult
-        if {![info exists KIDS($cell)]} {
-            dict incr n $cell $mult
-            continue
+        lassign $item cell path
+        if {![info exists KIDS($cell)]} { lappend out $path ; continue }
+        foreach nc $KIDS($cell) {
+            lassign $nc n c
+            lappend stack [list $c $path/$n]
         }
-        foreach k $KIDS($cell) { lappend stack [list $k $mult] }
     }
+    return [lsort $out]
+}
+
+proc soc_vehicle::leaf_census {} {
+    # cell type -> how many INSTANCES of it the built design holds.  Derived
+    # from `leaf_paths` so there is ONE walk of the hierarchy.
+    set n [dict create]
+    foreach path [leaf_paths] { dict incr n [cell_at $path] }
     return $n
 }
 
@@ -701,6 +732,48 @@ proc soc_vehicle::build_buses {} {
     }
     buda::add_bus "mr\[$P(DW)\]" l2/mc.d_out $head/rtr/fi_in.in
     check_bus_faces $P(DW) l2/mc.d_out $head/rtr/fi_in.in
+    #     The L2 TAG is wired for the same reason, and was found the same
+    #     way one level further in: `l2/tag` was instantiated and named by
+    #     no bus at all, so a tag array sat in the L2 footprint, in the
+    #     census and in the die with nothing on it (Codex P2, #930).  It is
+    #     the bank fault again, and what HID it is worth more than the fix:
+    #     the guard that was supposed to catch exactly this reduced the
+    #     design to cell TYPES before comparing, so the four wired L1 tags
+    #     answered for `tag_cell` and the dead L2 one passed behind them.
+    #     An unwired INSTANCE is invisible to any check that aggregates by
+    #     type, however exact that check is about the type.
+    #
+    #     A controller looks a line up before it reads a bank, so that is
+    #     what this declares -- the address out to the tag, the tag's answer
+    #     back.  The answer arrives on its OWN pin (`mc.t_in`, not
+    #     `mc.d_in`): `d_in` already aggregates every bank, and a pin is one
+    #     place (the SUM note in `configure`).  Both faces already hold it
+    #     -- `NBANK2*max(DW,AW)` on the controller and `tagpin` on the tag
+    #     are each >= AW for any legal dial -- so this wires a dead instance
+    #     without moving a single size, which is the honest reading: the
+    #     geometry was always paid for, only the workload was missing.
+    buda::add_bus "l2ta\[$P(AW)\]" l2/mc.a_out l2/tag.a_in
+    check_bus_faces $P(AW) l2/mc.a_out l2/tag.a_in
+    buda::add_bus "l2tr\[$P(AW)\]" l2/tag.d_out l2/mc.t_in
+    check_bus_faces $P(AW) l2/tag.d_out l2/mc.t_in
+    #     And the OTHER end of the chain, found by the same guard in the same
+    #     run: `nl_` wires hop i to hop i+1, so the FIRST hop's inbound fifo
+    #     has nothing upstream of it and `chain[0]/rtr/fi_in` was a whole
+    #     `fifo_cell` instance carrying no net -- at every size, since there
+    #     is exactly one chain start.  A peripheral bridge is a NoC master,
+    #     so it injects at the head of the chain, which is both the physical
+    #     answer and the one that costs one bus.
+    #
+    #     NOT closed into a RING (`mr` back to `chain[0]`), which was the
+    #     first idea and the cheaper-looking one: that leaves every
+    #     `fi_in.in` with exactly ONE bus, which would make `fifo_cell`'s
+    #     `2*DW` phantom -- and that coefficient is the vehicle's one
+    #     MEASURED-honest multiplicity (the chain head takes `nl_` AND `mr`).
+    #     A fix that wires a dead instance by deleting the aggregation
+    #     another face is sized from trades one fault for the other.
+    set start [lindex $chain 0]
+    buda::add_bus "pn\[$P(DW)\]" io/bridge.n_out $start/rtr/fi_in.in
+    check_bus_faces $P(DW) io/bridge.n_out $start/rtr/fi_in.in
 
     # 4. the peripherals: shallow (depth 1) reaching a router four levels
     #    down -- the widest level span in the design.
@@ -721,8 +794,11 @@ proc soc_vehicle::describe {} {
     set cl [expr {$P(NQ)*$P(NC)}]
     set leaves [expr {$cl*(4 + 2*(1+$P(NBANK)) + 3)
                       + 2 + $P(NBANK2) + 1 + $P(NIO)}]
+    #   per cluster 9 + 4*NBANK, one pair per NoC hop, then the L2 (ml, mr
+    #   and the two tag-lookup buses), the bridge's injection at the chain
+    #   start, the L2 banks, and two per peripheral.
     set buses  [expr {$cl*(9 + 4*$P(NBANK)) + 2*($cl-1)
-                      + 2 + 2*$P(NBANK2) + 2*$P(NIO)}]
+                      + 4 + 1 + 2*$P(NBANK2) + 2*$P(NIO)}]
     return [list clusters $cl leaves $leaves buses $buses \
                  die "$P(DIEW)x$P(DIEH)"]
 }
@@ -761,11 +837,11 @@ proc soc_vehicle::heal_if_dirty {who} {
     # This used to add "-- which is why `-bottomup` widens the channel
     # instead", and that advice OUTLIVED its cause: the copy-induced overlaps
     # it pointed at were the STAR FACES, the flag's automatic `GAP 24 M 24`
-    # is gone (soc.tcl), and at the sizes this round reaches the default
-    # channel is clean.  A note left beside a healer saying a geometry knob
+    # is gone (soc.tcl), and at the default channel a bottom-up run is clean
+    # through NQ=8.  A note left beside a healer saying a geometry knob
     # is the remedy will send the next investigation to tune geometry for a
     # failure that no longer exists (Codex P2, #930).  Where a fixed copy
-    # DOES need a channel (NQ>=8 under `-bottomup`) the caller names it, and
+    # DOES need a channel (NQ>=16 under `-bottomup`) the caller names it, and
     # the measured curve lives in soc.tcl beside the removal.
     puts "$who: still dirty ([buda::query overlaps] overlaps,\
           [buda::query unplaced] unplaced) -- second round"

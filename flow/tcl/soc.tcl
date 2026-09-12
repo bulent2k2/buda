@@ -98,7 +98,7 @@ while {$argi < $argc} {
 # worth recording: the STAR faces took it from NQ=4 to NQ=8, and the PHANTOM
 # COEFFICIENTS (`2*DW` on four cells, with nothing behind them) took it from
 # NQ=8 to NQ=16.  At the default channel `-bottomup` is clean through NQ=8
-# (2,064,286 detailed WL) and every gap at NQ=8 is clean:
+# (2,175,864 detailed WL) and every gap at NQ=8 is clean:
 #
 #   NQ=8   GAP     16   24   32   48   64   96      all CLEAN
 #

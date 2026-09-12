@@ -143,10 +143,16 @@ def test_the_leaf_census_is_what_the_documents_claim(tmp_path):
     keepout with nothing to copy, so a design with no singleton exercises
     only half of it.
 
-    `soc_vehicle::leaf_census` walks the structure `_fill` builds the
-    instances from, so this measures the design rather than a second model
-    of it — the failure mode that let the wrong sentence stand in the first
-    place.
+    `soc_vehicle::leaf_census` is derived from `leaf_paths`, which walks the
+    structure `_fill` builds the instances from, so this measures the design
+    rather than a second model of it — the failure mode that let the wrong
+    sentence stand in the first place.
+
+    A census counts instances and says NOTHING about whether they are wired,
+    which is the hole two of them fell through (`l2/tag`, and `rtr/fi_in` at
+    the chain start).  That question needs the paths rather than the tally,
+    and it is asked by
+    `test_every_leaf_face_is_exactly_the_bits_that_land_on_it`.
     """
     r = _run(tmp_path, 2, "-census")
     assert r.returncode == 0, r.stdout + r.stderr
@@ -367,7 +373,8 @@ def test_bottom_up_changes_the_flow_and_not_the_geometry(tmp_path):
 
 
 def test_every_leaf_face_is_exactly_the_bits_that_land_on_it(tmp_path):
-    """The face rule, enforced as an EQUALITY on the sum at each pin.
+    """The face rule, enforced as an EQUALITY on the sum at each pin -- and,
+    FIRST, that every leaf INSTANCE has a bus at all.
 
     `check_bus_faces` enforces the `>=` half at declaration.  This is the
     `<=` half, and it is the rule the vehicle's own thesis states: a leaf's
@@ -382,8 +389,13 @@ def test_every_leaf_face_is_exactly_the_bits_that_land_on_it(tmp_path):
       `-CW 128` grew the whole core/cluster stack for nothing (die
       4576x5600 against 4320x4704).
     * PHANTOM COEFFICIENTS -- `mul_cell`'s `2*DW` over a cell with ONE bus
-      on ONE pin (`-DW 128` die 8784x6624 against 7760x6624), and the same
-      `2*DW` on `alu_cell`, `regf_cell` and `xbar_cell`.  The guard this
+      on ONE pin, and the same `2*DW` on `alu_cell`, `regf_cell` and
+      `xbar_cell`.  `-DW 128` gives die 8784x6624 with them and 6736x6624
+      without -- a pair now taken from the repository's OWN HISTORY
+      (`git worktree` at 53f1f91b and 56ffdb4e, `-dry` needing no build)
+      rather than transcribed, because the second figure was written down by
+      hand as 7760x6624 in the very commit whose subject was "re-measure
+      every table", understating the saving by half.  The guard this
       replaces could not see any of them: it asked whether a knob APPEARS,
       never whether its coefficient matches the endpoint multiplicity.
     * ...and it skipped a leaf absent from the landing map as though it were
@@ -398,6 +410,19 @@ def test_every_leaf_face_is_exactly_the_bits_that_land_on_it(tmp_path):
     open question I had about the previous guard's coverage): a wrong
     expression is falsified wherever it disagrees, and the settings below
     only have to make the knobs distinguishable and put each in turn on top.
+
+    The FOURTH round is the one the size comparison cannot reach, and it is
+    the same lesson a level down: this check reduced the design to cell TYPES
+    before comparing, and an unwired OCCURRENCE of a type that is wired
+    elsewhere is invisible to that however exact it is about the type.
+    `l2/tag` was instantiated and named by no bus while four live L1 tags
+    answered for `tag_cell` (Codex P2, #930).  So the leaf INSTANCE PATHS are
+    asked of the vehicle and each one must appear as some bus's endpoint
+    before anything is reduced -- which immediately found the other one, the
+    chain-start `rtr/fi_in` that `nl_` never reaches because there is no hop
+    upstream of the first.  Both are now wired; the check is what keeps them
+    so, and mutation-tested in both directions (delete either bus and it
+    names the INSTANCE, in every regime).
 
     `fifo_cell`'s `2*DW` SURVIVES, which is the check earning its keep: at
     the chain head `fi_in.in` receives `nl_` AND `mr`, so two DW buses land
@@ -414,6 +439,7 @@ def test_every_leaf_face_is_exactly_the_bits_that_land_on_it(tmp_path):
         "source [file join {%s} flow tcl soc_lib.tcl]\n"
         "soc_vehicle::configure [lrange $argv 0 end]\n"
         "soc_vehicle::build_hierarchy\n"
+        "foreach path [soc_vehicle::leaf_paths] { puts \"LEAF|$path\" }\n"
         "foreach path [split [read stdin] \"\\n\"] {\n"
         "    if {[string trim $path] eq \"\"} continue\n"
         "    puts \"[soc_vehicle::cell_at $path]|$path\"\n"
@@ -473,10 +499,15 @@ def test_every_leaf_face_is_exactly_the_bits_that_land_on_it(tmp_path):
                              encoding="utf-8", cwd=tmp_path, timeout=120)
         assert out.returncode == 0, out.stdout + out.stderr
         cell_of = {}
+        leaf_paths = []
         for ln in out.stdout.splitlines():
             if "|" in ln:
                 cell, path = ln.split("|", 1)
-                cell_of[path] = cell
+                if cell == "LEAF":
+                    leaf_paths.append(path)
+                else:
+                    cell_of[path] = cell
+        assert leaf_paths, out.stdout
         # the per-PIN sum, which is what `check_bus_faces` accumulates
         per_pin = collections.Counter()
         for name, d, rr in buses:
@@ -484,6 +515,12 @@ def test_every_leaf_face_is_exactly_the_bits_that_land_on_it(tmp_path):
             assert m, name
             for path in (d, rr):
                 per_pin[path] += int(m.group(1))
+        # PER INSTANCE first, because the reduction below cannot see this.
+        # An endpoint is `<instance path>.<pin>`, so a leaf instance is wired
+        # iff some bus names one of its pins.
+        landed = {p.split(".")[0] for p in per_pin}
+        dead = [(tag, lp) for lp in leaf_paths if lp not in landed]
+
         worst = {}
         for path, bits in per_pin.items():
             cell = cell_of.get(path)
@@ -501,20 +538,35 @@ def test_every_leaf_face_is_exactly_the_bits_that_land_on_it(tmp_path):
             if (w, h) != (want, want):
                 wrong.append((tag, cell, "%d bits on its busiest pin"
                               % worst[cell], (w, h), want))
-        return wrong
+        return wrong, dead
 
     # Enough settings to distinguish the knobs and put each in turn on top,
     # plus one with the multiplicities above 1 so an aggregating pin (a tag's
     # `d_in`, `xbar.p_in`) is exercised rather than degenerate.
-    found = []
-    found += check({"NBANK": 1, "NIO": 1,
-                    "DW": 8, "AW": 9, "IW": 10, "CW": 11}, "flat")
+    regimes = [({"NBANK": 1, "NIO": 1,
+                 "DW": 8, "AW": 9, "IW": 10, "CW": 11}, "flat")]
     for knob in ("DW", "AW", "IW", "CW"):
-        found += check({"NBANK": 1, "NIO": 1,
-                        **dict({"DW": 8, "AW": 9, "IW": 10, "CW": 11},
-                               **{knob: 200})}, knob.lower())
-    found += check({"NBANK": 3, "NBANK2": 5, "NIO": 6,
-                    "DW": 8, "AW": 9, "IW": 10, "CW": 11}, "aggregating")
+        regimes.append(({"NBANK": 1, "NIO": 1,
+                         **dict({"DW": 8, "AW": 9, "IW": 10, "CW": 11},
+                                **{knob: 200})}, knob.lower()))
+    regimes.append(({"NBANK": 3, "NBANK2": 5, "NIO": 6,
+                     "DW": 8, "AW": 9, "IW": 10, "CW": 11}, "aggregating"))
+    found, orphans = [], []
+    for knobs, tag in regimes:
+        w, d = check(knobs, tag)
+        found += w
+        orphans += d
+
+    # The per-INSTANCE verdict first, because it is the one the size
+    # comparison below structurally cannot reach.
+    assert not orphans, (
+        "a leaf INSTANCE carries no bus: it occupies die area, is counted by "
+        "`leaf_census` as workload, and routes nothing.  Wire it or stop "
+        "instantiating it.  This is the check that was missing when `l2/tag` "
+        "sat unwired behind four live L1 tags and when `rtr/fi_in` at the "
+        "chain start had nothing upstream of it (Codex P2, #930) -- both "
+        "invisible to any audit that reduces the design to cell TYPES, "
+        "however exact it is about the type.", orphans)
     assert not found, (
         "a leaf's declared face is not the bits that land on it.  More than "
         "the busiest pin needs is whitespace that pollutes that knob's "
@@ -565,6 +617,13 @@ def test_a_pin_is_sized_from_every_bit_that_lands_on_it(tmp_path):
                                                       152, 152]
     assert _sizes(tmp_path, ("NIO", 8), cells) == [280, 280, 536, 536,
                                                    280, 280]
+    # `bridge_cell` has TWO kinds of pin -- the `NIO*CW` star into the pads
+    # and one `DW` injection into the NoC chain start -- so its face is the
+    # busier of them and `-DW` moves it once DW passes `NIO*CW`.  The bus
+    # exists because the chain's first hop has no hop upstream of it, so its
+    # inbound fifo was a leaf instance with no net at all (Codex P2, #930).
+    assert _sizes(tmp_path, ("DW", 128), cells) == [1048, 1048, 2072, 2072,
+                                                    536, 536]
 
     # ...and the guard is a guard: pin `tag_cell` to its one-bank size while
     # asking for four banks, and declaring the buses must FAIL.  Without the
@@ -646,19 +705,22 @@ def test_every_configured_bank_carries_a_net(tmp_path):
                 buses.append((f[1], f[2], f[3]))      # name, driver, receiver
         said = re.search(r"(\d+) buses", r.stdout)
         built = re.search(r"HierBundler: (\d+) hbundles", r.stdout)
-        assert said and built, r.stdout
-        return buses, int(said.group(1)), int(built.group(1))
+        cl = re.search(r"(\d+) clusters", r.stdout)
+        assert said and built and cl, r.stdout
+        return buses, int(said.group(1)), int(built.group(1)), int(cl.group(1))
 
-    def assert_banks_wired(buses, nbank, nbank2):
+    def assert_banks_wired(buses, clusters, nbank, nbank2):
         # The recorder hands over (name, driver, receiver) TRIPLES, so the
         # association is asserted, not just the membership: two independent
         # sets are satisfied by a CROSS-WIRED bank (an l1i bank driving the
         # l1d tag, an address arriving from the wrong tag) with every count
         # and every endpoint still present (Codex P2, #930).
         pairs = {(d, r) for _n, d, r in buses}
-        # every L1 of every cluster (NQ=1, so NC=2 clusters), then the L2
+        # every L1 of every cluster, then the L2.  The cluster count comes
+        # from the banner rather than from NQ*NC restated here, so this walks
+        # whatever design the flow built.
         holders = [("quad_0/cl_%d/%s" % (c, side), "tag", nbank)
-                   for c in range(2) for side in ("l1i", "l1d")]
+                   for c in range(clusters) for side in ("l1i", "l1d")]
         holders.append(("l2", "mc", nbank2))
         for holder, arb, n in holders:
             for b in range(n):
@@ -672,17 +734,25 @@ def test_every_configured_bank_carries_a_net(tmp_path):
                 assert want_read in pairs, (
                     "no read bus runs %s -> %s" % want_read)
 
-    base, base_said, base_built = declared()
+    base, base_said, base_built, clusters = declared()
     assert base_said == base_built, (base_said, base_built)
-    assert_banks_wired(base, 2, 4)                     # the defaults
+    assert_banks_wired(base, clusters, 2, 4)           # the defaults
 
-    # ...and raising either knob wires the banks it adds, not just counts them
-    for knobs, nbank, nbank2, delta in ((("-NBANK", 3), 3, 4, 8),
-                                        (("-NBANK2", 6), 2, 6, 4)):
-        buses, said, built = declared(*knobs)
+    # ...and raising either knob wires the banks it adds, not just counts
+    # them.  The expected delta is DERIVED from what a bank costs -- an
+    # address bus and a read bus -- times how many caches gain one: every L1
+    # of every cluster for `NBANK`, the single L2 for `NBANK2`.  Restating it
+    # as a literal 8 and 4 would have to be re-derived by hand the next time
+    # a bank grows a third bus.
+    for knobs, nbank, nbank2, caches in ((("-NBANK", 3), 3, 4, 2 * clusters),
+                                         (("-NBANK2", 6), 2, 6, 1)):
+        added = (nbank - 2) * caches + (nbank2 - 4) * 1
+        buses, said, built, cl = declared(*knobs)
+        assert cl == clusters, (knobs, cl, clusters)
         assert said == built, (knobs, said, built)
-        assert built == base_built + delta, (knobs, base_built, built)
-        assert_banks_wired(buses, nbank, nbank2)
+        assert built == base_built + 2 * added, (knobs, base_built, built,
+                                                 2 * added)
+        assert_banks_wired(buses, clusters, nbank, nbank2)
 
 
 def _die(out):
