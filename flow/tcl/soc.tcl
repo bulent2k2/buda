@@ -134,10 +134,16 @@ while {$argi < $argc} {
 #   NQ=16 4,648,190 ->  8,621,243   1.85x    (cheapest clean is 24)
 #   NQ=32 8,938,821 -> 16,671,389   1.87x    (cheapest clean is 24)
 #
-# A default of 96 roughly DOUBLES the wire at every size -- including the
-# three that need no channel at all -- to rescue the TWO that do (the NQ=32
-# row was missing while the sentence claimed every measured size; Codex P2,
-# #930).  That is
+# A default of 96 roughly DOUBLES the wire ACROSS THE FIVE SIZES IN THAT
+# TABLE (NQ=2..32) -- including the three already clean at the default and
+# needing no channel at all -- to rescue the TWO that are not.  TWO earlier
+# versions of this sentence were wrong in the same place and both were Codex
+# P2s on #930: the NQ=32 row was missing while it claimed "every measured
+# size", and then it claimed "every size" once NQ=64 existed.  NQ=64 IS
+# EXCLUDED FROM THIS ARGUMENT, NOT COVERED BY IT: it is dirty at the default
+# and no named-channel run there has FINISHED, so neither a clean gap nor a
+# cost is known for it, and an unfinished sweep must not be presented as
+# part of a whole-dial cost claim.  Over the five it does cover, that is
 # the trade the "a wider channel buys no routing and costs wire" measurement
 # above refuses, so the flag does not make it on the caller's behalf.  A
 # bottom-up run AT NQ=16 asks for the channel EXPLICITLY

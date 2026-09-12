@@ -522,13 +522,19 @@ few paragraphs later and not carried up into the table it belongs in, which
 is the same summary-versus-detail gap as the top-down/bottom-up line, and in
 the same document.
 
-A default of 96 would roughly **double the wire at every size** — including
-the three that are already clean at the default 16 and need no channel at
-all — to rescue the **two** that are not. That is precisely the trade the *"a
-wider channel buys no routing and costs wire monotonically"* measurement
-above refuses, so the flag declines to make it on the caller's behalf. A
-bottom-up run **at NQ = 16 or NQ = 32** names the channel itself and measures
-it: `soc.tcl 16 -bottomup -GAP 24 -M 24` (or `32 -bottomup -GAP 24 -M 24`).
+A default of 96 would roughly **double the wire across the five sizes in that
+table** (NQ = 2 … 32) — including the three already clean at the default 16
+and needing no channel at all — to rescue the **two** that are not. **NQ = 64
+is excluded from this argument, not covered by it** (Codex P2, #930): it is
+dirty at the default and *no* named-channel run there has finished, so
+neither a clean gap nor a cost is known for it, and presenting an unfinished
+sweep as part of a whole-dial cost claim is exactly the overreach the rest of
+this page keeps retracting. Over the five it does cover, this is precisely
+the trade the *"a wider channel buys no routing and costs wire
+monotonically"* measurement above refuses, so the flag declines to make it on
+the caller's behalf. A bottom-up run **at NQ = 16 or NQ = 32** names the
+channel itself and measures it: `soc.tcl 16 -bottomup -GAP 24 -M 24` (or
+`32 -bottomup -GAP 24 -M 24`).
 
 ### What the bottom-up failure actually is
 
@@ -699,8 +705,14 @@ a fifth size rather than weakening it.
 
 **NQ = 64 is measured at the default gap and *not* at a named one**, and the
 attempt is recorded rather than dropped. At the default it is dirty — 7 ovl /
-8 unpl, detailed WL 16,654,709 over 2451 bundles / 76,096 bit-wires, the same
-`bundle 2 seg 0` M7 seat. `64 -bottomup -GAP 24 -M 24` then ran **90 minutes
+8 unpl, detailed WL 16,654,709 over 2451 bundles / 76,096 bit-wires, and
+**the same segment landing on an M7 seat** — `bundle 2 seg 0`, 7 tracks < 8
+bits. Not "the same seat" (Codex P2, #930): a seat is its layer *plus its
+span × slide window*, and the windows were never compared across two layouts
+of different size, so what the run establishes is the segment, the layer and
+the 7 < 8 deficit. That distinction was corrected two commits earlier and
+**reintroduced here**, in the very commit that measured NQ = 64 — a
+retraction undone by its own follow-up. `64 -bottomup -GAP 24 -M 24` then ran **90 minutes
 without finishing** and was killed by the harness timeout (not hung: 2 h 17 m
 of CPU at 183 % on that bundle count). Its last reported state was its
 *second* healer round at **2 overlaps / 2 unplaced** — six of the eight bits
