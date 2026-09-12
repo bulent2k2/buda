@@ -209,6 +209,59 @@ def test_a_wider_channel_is_not_the_lever_a_wider_bus_needs(tmp_path):
             gap, r.stdout)
 
 
+def test_every_cell_a_bus_lands_on_is_sized_from_that_bus(tmp_path):
+    """The face rule has to hold for EVERY endpoint of a bus, not just the
+    one whose knob names it (Codex P2, #930).
+
+    `-IW` is advertised as an independent knob, and it grew `dec_cell` and
+    every container above it — while the two cells at the OTHER ends of the
+    IW buses stayed sized from `DW`: `sram_cell`, which drives `id_[IW]` out
+    of `l1i/bank_0`, and `alu_cell`, which receives `i_[IW]`.  So the
+    instruction path got wider at one end only, which is not the stated rule
+    ("a face is derived from the bits that land on it") in either direction.
+    Measured at NQ=1, `-IW 128`: **512 bits unplaced**.
+
+    Both are SHARED cell types — `sram_cell` also serves `l1d` and the L2,
+    `alu_cell` also takes `r_[DW]` — so the derivation is `max` over the
+    buses that land on them rather than a second cell type.  At the default
+    `DW == IW` that max is `DW`, so the whole design is unchanged (the sizes
+    below, and every table in `flow/tcl/ReadMe.md`).
+
+    What it buys is measured and NOT a clean run: 512 → 40 unplaced.  The
+    residual is segments placed ON keepouts, the same cull class the DW=128
+    sweep documents, so it is congestion at a 4x bus and not a face
+    shortfall — this test asserts the derivation, and asserts the routing
+    only in the direction the fix can be responsible for.
+    """
+    probe = tmp_path / "probe.tcl"
+    probe.write_text(
+        'source [file join {%s} flow tcl soc_lib.tcl]\n'
+        'foreach knob {{} {IW 128}} {\n'
+        '    soc_vehicle::configure $knob\n'
+        '    puts "[llength $knob] [soc_vehicle::size sram_cell]'
+        ' [soc_vehicle::size alu_cell] [soc_vehicle::size dec_cell]"\n'
+        '}\n' % _ROOT)
+    r = subprocess.run(["tclsh", str(probe)], capture_output=True,
+                       encoding="utf-8", cwd=tmp_path, timeout=120)
+    assert r.returncode == 0, r.stdout + r.stderr
+    rows = [[int(v) for v in ln.split()]
+            for ln in r.stdout.split("\n") if ln.strip()]
+    (_d, sram_w, _sh, alu_w, _ah, dec_w, _dh) = rows[0]
+    assert (sram_w, alu_w, dec_w) == (152, 280, 152), rows[0]   # unchanged
+    (_d, sram_w, _sh, alu_w, _ah, dec_w, _dh) = rows[1]
+    # every cell the IW buses land on grows WITH them, to the same face
+    assert sram_w == dec_w == 536, rows[1]
+    assert alu_w == 536, rows[1]
+
+    # ...and it is a routing fact, not only an arithmetic one.  512 was the
+    # DW-sized-face result; the residual is the keepout-cull class.
+    r = _run(tmp_path, 1, "-IW", 128)
+    _ov, un, _vi = _verdict(r)
+    assert 0 < un < 100, ("-IW 128 stranded 512 bits when only `dec_cell` "
+                          "grew; if this is clean now, say so in "
+                          "`soc_lib.tcl` rather than relaxing the bound", un)
+
+
 def test_bottom_up_routes_the_diverse_hierarchy_clean(tmp_path):
     """`-bottomup` END TO END.  `-dry` exits before `buda::start`, so the
     flag's whole point — mark, align, solve once, copy, verify the tracks —

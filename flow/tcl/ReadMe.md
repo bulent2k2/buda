@@ -246,6 +246,28 @@ design it cannot finish it is also what the wall clock goes into; every clean
 row above pays nothing for it, since a clean design never enters the first
 round.
 
+## The knob range it is measured over
+
+The defaults and the **`NQ` dial**. Every other knob is settable and honest
+about what it does, but a width pushed to 4× is not clean, and the reasons
+differ enough to be worth recording rather than chasing (NQ = 1, value 128):
+
+| knob | result | why |
+|---|---|---|
+| `-IW` | 40 unplaced | segments placed on keepouts — congestion at a 4× instruction bus |
+| `-DW` | 65 unplaced | the NoC leg's bits culled for crossing a keepout (the sweep below) |
+| `-AW` | 128 unplaced | a **supply-doomed seat**: 64 signal tracks in the placed window against 128 member bits |
+| `-CW` | 741 unplaced | the same, five seats |
+
+The last two are the channel finding from the other side: a 16-unit gap does
+not host a 128-bit bus **at any face size**. `-IW` used to be 512, and that
+one *was* a sizing defect — the face rule has to hold for every endpoint of a
+bus, not just the one the knob names, and `-IW` grew `dec_cell` while
+`sram_cell` (which drives `id_[IW]`) and `alu_cell` (which receives `i_[IW]`)
+stayed sized from `DW`. Both are shared cell types, so the derivation is a
+`max` over what lands on them; at the default `DW == IW` that max is `DW` and
+nothing in the design moves.
+
 ## The lesson it paid for: a face is derived, a channel is not
 
 A leaf's size **is** derived from the bits that land on its faces — that is
