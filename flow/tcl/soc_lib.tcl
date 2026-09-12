@@ -840,10 +840,14 @@ proc soc_vehicle::heal_if_dirty {who} {
     # is gone (soc.tcl), and at the default channel a bottom-up run is clean
     # through NQ=8.  A note left beside a healer saying a geometry knob
     # is the remedy will send the next investigation to tune geometry for a
-    # failure that no longer exists (Codex P2, #930).  Where a fixed copy
-    # DOES need a channel (measured at NQ=16 under `-bottomup`; larger sizes
-    # unmeasured, so no threshold is claimed) the caller names it, and
-    # the measured curve lives in soc.tcl beside the removal.
+    # failure that no longer exists (Codex P2, #930).  And the channel is
+    # not what such a run NEEDS: a dirty bottom-up run at NQ=16 or NQ=32
+    # repeatedly supply-dooms ONE segment (8 bits of `pc_0`), which a gap
+    # only re-seats incidentally -- so a channel is a MEASURED WORKAROUND
+    # the caller names, never a cause (Codex P2 again, #930: this sentence
+    # still said "needs a channel" after soc.tcl had retracted it).  The
+    # measured curves, the seat, and the cheaper seat-scoped remedy all
+    # live in soc.tcl beside the removal.
     puts "$who: still dirty ([buda::query overlaps] overlaps,\
           [buda::query unplaced] unplaced) -- second round"
     buda::refine_selection

@@ -102,9 +102,11 @@ while {$argi < $argc} {
 #
 #   NQ=8   GAP     16   24   32   48   64   96      all CLEAN
 #
-# It is NQ=16 where a fixed copy still needs a channel, and there the curve
-# is genuinely NON-MONOTONE -- measured on the honestly sized design, not as
-# an artefact this time:
+# It is NQ=16 where a fixed copy at the default channel first comes back
+# DIRTY -- stated as the OBSERVATION it is, since what the run actually
+# needs is argued at the end of this comment and is not a channel -- and
+# there the gap sweep is genuinely NON-MONOTONE -- measured on the honestly
+# sized design, not as an artefact this time:
 #
 #   NQ=16  GAP=M   16       24   32       48       96
 #   result          X(3/8)  ok   X(0/8)   X(1/8)   ok   (overlaps/unplaced)
@@ -118,8 +120,9 @@ while {$argi < $argc} {
 # search -- step up from a clean 24 and you land on a dirty 32 -- so a sweep
 # must be a sweep and not a ramp.  It does NOT show that no fixed default
 # exists, and the table above refutes that reading: GAP=M=96 is CLEAN at
-# every size measured (NQ=2, 4, 8, 16).  A conservative built-in value is
-# available.
+# every size measured (NQ=2, 4, 8, 16 -- and NQ=32, measured since, so the
+# range is wider than when this paragraph was written).  A conservative
+# built-in value is available.
 #
 # The argument against building it in is COST, which is this file's own
 # lesson pointed at the flag -- detailed WL against the cheapest clean gap
@@ -137,14 +140,22 @@ while {$argi < $argc} {
 # bottom-up run AT NQ=16 asks for the channel EXPLICITLY
 # (`soc.tcl 16 -bottomup -GAP 24 -M 24`) and MEASURES it.
 #
-# NQ=16 and not NQ>=16 (Codex P2, #930): 16 is the only size MEASURED to
-# need one.  NQ=32 and NQ=64 are advertised and were never run bottom-up,
-# so nothing here establishes that they need a channel or that any of these
-# gaps routes them -- and directing those runs away from the default
-# geometry on an extrapolation is the same fault as naming a gap that
-# stopped routing.  The rule is the same at any size and needs no threshold
-# to state it: if a bottom-up run is dirty, SWEEP the channel; the table
-# says only where a sweep is known to be necessary.
+# NQ=32 IS MEASURED NOW (Codex P2, #930: the table above had recorded an
+# NQ=32 bottom-up run while this paragraph still said NQ=32 was never run
+# bottom-up -- my own data refuting my own sentence, printed thirty lines
+# apart).  Measured, `-bottomup` at NQ=32:
+#
+#   GAP=M   16                    24        96
+#   result  X 3 ovl / 8 unpl      CLEAN     CLEAN
+#   det WL  --                    8,938,821 16,671,389
+#
+# So NQ=32 behaves like NQ=16: dirty at the default channel, and the
+# caller's own remedy `-GAP 24 -M 24` routes it at 1.87x less wire than the
+# conservative 96 would cost.  That is a STRONGER statement than the hedge
+# it replaces, in both directions -- NQ=32 does need a channel, AND a gap
+# that routes it is known.  Only NQ=64 remains entirely unmeasured
+# bottom-up.  The rule needs no threshold either way: if a bottom-up run is
+# dirty, SWEEP the channel.
 #
 # The MECHANISM is not established: the earlier claim that a fixed copy
 # "lands each instance on whatever track phase the channel gives it" was an
@@ -162,17 +173,30 @@ while {$argi < $argc} {
 #   hb-2  D0  cross-level  "DRV:io/p_0|REC:quad_0/cl_0/rtr/xbar"  nets=8
 #
 # i.e. `pc_0`, the first io pad into cluster 0's crossbar, 8 bits of CW.
-# Measured -- and the seat occurs at every gap INCLUDING the clean one:
+# Measured -- and a doomed seat is reported for THAT SEGMENT at every gap
+# INCLUDING the clean one (which seat differs -- see below the table):
 #
-#   NQ  GAP  seat reported                          endpoint
+#   NQ  GAP  seat reported for that segment         endpoint
 #   16   16  bundle 2 seg 0  M7 (TOP)  7 < 8 bits   X 3 ovl / 8 unpl
 #   16   24  bundle 2 seg 0  M4 (LOW)  0 < 8 bits   CLEAN
 #   16   32  bundle 2 seg 0  M7 (TOP)  7 < 8 bits   X 0 ovl / 8 unpl
 #   16   48  bundle 2 seg 0      (LOW)              X 1 ovl / 8 unpl
 #   32   16  bundle 2 seg 0  M7 (TOP)  7 < 8 bits   X 3 ovl / 8 unpl
 #
-# The seat is invariant UNDER THE GAP KNOB; what varies is whether the
-# HEALERS clear it.  The tool names the category itself every time --
+# WHAT REPEATS IS THE SEGMENT, NOT THE SEAT (Codex P2, #930).  Read the
+# rows: the assigned layer moves M7/TOP -> M4/LOW -> M7/TOP, and changing
+# GAP changes the placed span and slide window too.  A SEAT is defined by
+# exactly those things -- `_report_doomed_seats` derives it from the
+# segment's ASSIGNED LAYER and its span x slide window
+# (src/buda_session/nutsflow.py) -- so two rows reporting different layers
+# are different SEATS.  What the table establishes is that the same
+# LOGICAL bundle/segment (`hb-2` seg 0, the 8 bits of `pc_0`) is
+# repeatedly supply-doomed however the gap is set; what varies is both the
+# seat it lands on AND whether the HEALERS clear it.  Calling the seat
+# invariant overstated the evidence, and it did so one paragraph before
+# admitting the healing mechanism is unknown -- the same fault as the
+# withdrawn phase-lottery mechanism, in the sentence written to replace
+# it.  The tool names the category itself every time --
 # "static width-infeasibility, not reservation conflicts" -- so this is the
 # #536 supply-doomed seat class and the gap only changes the geometry the
 # healers then repair, which is why the curve is non-monotone and why no
@@ -180,9 +204,8 @@ while {$argi < $argc} {
 # NOT established, and this file just withdrew one asserted mechanism, so it
 # will not supply another.
 #
-# "INVARIANT" WAS FIRST WRITTEN UNQUALIFIED, WHICH OVERREACHED IN THE SAME
-# DIRECTION AS EVERYTHING ELSE THIS FILE HAS RETRACTED.  Two measurements
-# bound it, and the second is the one that matters:
+# THE REPEAT IS ALSO NOT SIZE-INDEPENDENT.  Two measurements bound it, and
+# the second is the one that matters:
 #
 #   NQ=2/4/8  -bottomup            NO doomed seat reported at all
 #   NQ=16     PLAIN (top-down)     clean, NO doomed seat reported at all

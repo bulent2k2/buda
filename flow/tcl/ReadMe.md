@@ -252,8 +252,15 @@ On a uniform-depth vehicle every cell is one level and this collapses to the
 | 32 | 64 | 843 | 1235 | 35 096 | 12528 × 7936 | 36 s | clean |
 | 64 | 128 | 1675 | 2451 | 69 592 | 16688 × 10304 | 120 s | clean |
 
-Clean at every size measured, top-down, and `-caps`, `-bydepth` and
-`-bottomup` are clean too. NQ = 32 used to be **the honest limit** here —
+Clean at every size measured — **top-down**, which is what this table is.
+`-caps` and `-bydepth` are clean where they were measured (NQ = 2, what the
+tests run). **`-bottomup` is not clean at every size and must not be read
+off this table** (Codex P2, #930): at the default channel it is clean at
+NQ = 1/2/4/8 and comes back **dirty at NQ = 16 and NQ = 32** (8 bits of one
+bundle, the seat analysed at the end of this page), with NQ = 64 never run
+bottom-up at all. The bottom-up section below is the one to read for it, and
+it carries its own per-gap tables; extending an all-sizes claim to the flag
+contradicted them two hundred lines later in the same document. NQ = 32 used to be **the honest limit** here —
 13 bits unplaced after 293 s — and it is neither the limit nor slow any
 more: removing three stars took it to clean, and removing the phantom
 coefficients (below) then took ~16 % off the wire and a fifth off the die at
@@ -465,9 +472,11 @@ recording as the negative result it is: three sizing faults moved this
 threshold and this one did not, because it added workload without changing a
 single face.
 
-NQ = 16 is where a fixed copy still needs one, and there the curve is
-**genuinely non-monotone** — measured on the honestly sized design this time,
-not as an artefact:
+NQ = 16 is where a fixed copy at the default channel first comes back
+**dirty** — the observation, not a claim about what it needs, which is argued
+at the end of this page and is not a channel — and there the gap sweep is
+**genuinely non-monotone**, measured on the honestly sized design this time
+rather than as an artefact:
 
 | GAP = M (NQ = 16, `-bottomup`) | 16 | 24 | 32 | 48 | 96 |
 |---|---|---|---|---|---|
@@ -491,7 +500,8 @@ first write-up got it wrong (Codex P2, #930). Non-monotonicity rules out
 24 lands on a dirty 32 — so a sweep has to be a sweep and not a ramp. It does
 **not** show that no fixed default exists, and the table above refutes that
 reading directly: **GAP = M = 96 is clean at every size measured** — NQ = 2,
-4, 8 and 16. A conservative built-in value is available.
+4, 8, 16, and NQ = 32 (measured since this paragraph was written, so the range
+is wider than it claimed). A conservative built-in value is available.
 
 The argument against building it in is **cost**, which is this page's own
 lesson pointed at the flag:
@@ -534,9 +544,24 @@ Measured, and the invariant is the point:
 | 32 | 16 | `bundle 2 seg 0` M7 (TOP), 7 tracks < 8 bits | ✗ 3 ovl / 8 unpl |
 
 The same bundle, the same segment, the same eight bits, at two sizes 4× apart
-and at every gap — **including the clean one**. The seat is invariant **under
-the gap knob**; what varies is whether the **healers clear it**. And the tool
-has been saying the category in plain text at every one of those runs:
+and at every gap — **including the clean one**.
+
+**What repeats is the segment, not the seat** (Codex P2, #930). Read the rows:
+the assigned layer moves M7/TOP → M4/LOW → M7/TOP, and changing `GAP` moves
+the placed span and slide window too — and a *seat* is defined by exactly
+those things, since `_report_doomed_seats` derives it from the segment's
+**assigned layer** and its span × slide window
+(`src/buda_session/nutsflow.py`). So two rows naming different layers are
+different **seats**. What the table establishes is that the same *logical*
+bundle/segment — `hb-2` seg 0, the eight bits of `pc_0` — is repeatedly
+supply-doomed however the gap is set; what varies is both the seat it lands on
+*and* whether the **healers clear it**. Calling the seat invariant overstated
+the evidence, and it did so one paragraph above admitting the healing
+mechanism is unknown — the same fault as the withdrawn phase-lottery
+mechanism, committed in the sentence written to replace it.
+
+And the tool has been saying the category in plain text at every one of those
+runs:
 
 ```
 Advisory: 1 supply-doomed seat(s) — static width-infeasibility,
@@ -550,10 +575,9 @@ predicted it. *Why* healing succeeds at 24 and fails at 16/32/48 is **not**
 established here, and after withdrawing one asserted mechanism this round I am
 not about to supply another.
 
-#### "Invariant" was first written unqualified, and that overreached
+#### The repeat is not size-independent either
 
-In the same direction as everything else this page has retracted. Two further
-measurements bound it, and the second is the one that matters:
+Two further measurements bound it, and the second is the one that matters:
 
 | run | doomed seat? |
 |---|---|
@@ -614,7 +638,8 @@ guidance stays, labelled a workaround rather than a cause.
 
 **Both sides of that trade, priced.** The argument above counts only wire,
 which is half a comparison — so here is what the dirty endpoint costs at the
-one size measured to need a channel. At NQ = 16 the default gap strands
+first size measured to come back dirty (NQ = 32 is the second; see above). At
+NQ = 16 the default gap strands
 **8 bits of 19,424 (0.041 %)** with 3 overlaps; `-GAP 24 -M 24` clears it for
 **+7.6 %** wire, and the built-in candidate 96 would cost **+100 %**. So the
 case against a default is not merely that 96 is expensive — it is that the
@@ -624,15 +649,30 @@ methodology that would rather pay 2× everywhere than strand 0.04 % of one
 size's bits can still do so; it just has to say so, and it now has both
 numbers to decide on.
 
-**NQ = 16 and not NQ ≥ 16** (Codex P2, #930). 16 is the only size *measured*
-to need a channel; NQ = 32 and NQ = 64 are advertised sizes that were never
-run bottom-up, so nothing here establishes that they need one or that any of
-these gaps routes them. Directing those runs away from the default geometry
-on an extrapolation is the same fault as recommending a gap that had stopped
-routing, one section up. The operational rule needs no threshold at all: **if
-a bottom-up run comes back dirty, sweep the channel** — the table says only
-where a sweep is *known* to be necessary, which is a smaller claim and the
-one the evidence supports.
+**NQ = 32 is measured now** (Codex P2, #930 — and the shape of that finding is
+the recurring one: the seat table above had already *recorded* an NQ = 32
+bottom-up run while this paragraph still said NQ = 32 had never been run
+bottom-up. My own data refuting my own sentence, a hundred lines apart in one
+document, for the second time in this PR.) Measured, `-bottomup` at NQ = 32:
+
+| GAP = M (NQ = 32, `-bottomup`) | 16 | 24 | 96 |
+|---|---|---|---|
+| result | ✗ 3 ovl / 8 unpl | **clean** | **clean** |
+| detailed WL | — | 8,938,821 | 16,671,389 |
+
+So NQ = 32 behaves like NQ = 16: dirty at the default channel, and the
+caller's own remedy `-GAP 24 -M 24` routes it at **1.87× less wire** than the
+conservative 96 would cost. That is a *stronger* statement than the hedge it
+replaces, in both directions — NQ = 32 does need a channel, **and** a gap that
+routes it is known — and it extends the cost argument against a built-in 96 to
+a fifth size rather than weakening it. Only **NQ = 64** remains entirely
+unmeasured bottom-up. The operational rule needs no threshold either way: **if
+a bottom-up run comes back dirty, sweep the channel.**
+
+Worth noting for the seat analysis below: the clean NQ = 32 / GAP 24 run
+**still reports the doomed seat** and heals past it, exactly as NQ = 16 /
+GAP 24 does. That is independent support for the reading that the *segment*
+repeats while the healers' success varies.
 
 The **mechanism** is not established and the earlier claim that a fixed copy
 "lands each instance on whatever track phase the channel gives it" was an

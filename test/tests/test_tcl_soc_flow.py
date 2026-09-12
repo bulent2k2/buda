@@ -343,7 +343,10 @@ def test_bottom_up_routes_the_diverse_hierarchy_clean(tmp_path):
     # that was first written too strongly.  At NQ=16 `-bottomup` strands 8
     # bits of `pc_0` on a seat the tool reports at EVERY gap swept including
     # the clean one, and that was written up as the seat being "invariant".
-    # It is invariant under the GAP knob and not otherwise: NQ=2/4/8
+    # It is not: the assigned layer moves M7/TOP <-> M4/LOW across those
+    # rows, and a seat IS its layer plus span x slide, so what repeats is
+    # the SEGMENT (Codex P2, #930).  Nor is the repeat size-independent --
+    # NQ=2/4/8
     # bottom-up report no seat at all, and NQ=16 TOP-DOWN — the same design,
     # the same size, the same `pc_0` and the same `io_cell` face — is clean
     # with none either.  So the seat is a product of the bottom-up fixed copy
@@ -387,9 +390,13 @@ def test_bottom_up_changes_the_flow_and_not_the_geometry(tmp_path):
     Every sizing fix since pushed the need further out -- the stars from
     NQ=4 to NQ=8, the phantom coefficients from NQ=8 to NQ=16 -- so the flag
     is clean at the default channel through NQ=8, where EVERY gap is clean,
-    and NQ=16 is where a fixed copy still needs one.  There the curve is
-    NON-monotone (16 X, 24 ok, 32 X, 48 X, 96 ok) and `-GAP 24 -M 24` is the
-    cheapest clean point, which is what the two documents recommend.
+    and NQ=16 is where a fixed copy at the default channel first comes back
+    DIRTY -- the observation; what such a run actually needs is ONE segment
+    re-seated and not a channel (Codex P2, #930: this docstring still said
+    "needs one" after the documents had retracted that cause).  There the gap
+    sweep is NON-monotone (16 X, 24 ok, 32 X, 48 X, 96 ok) and `-GAP 24 -M 24`
+    is the cheapest clean point, which is the workaround the two documents
+    name.
 
     This docstring said the opposite of all three until 2026-09-12 -- NQ=8
     needing a channel, a monotone curve, and 24 not being enough (Codex P2,
