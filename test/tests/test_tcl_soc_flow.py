@@ -787,6 +787,69 @@ def _die(out):
     return int(m.group(1)), int(m.group(2))
 
 
+def test_every_bus_family_wires_one_kind_of_thing_to_one_kind(tmp_path):
+    """The cross-wire check, generalized off the banks — and the reason it
+    can be general is that it restates NOTHING.
+
+    `test_every_configured_bank_carries_a_net` asserts the exact expected
+    pair per holder and bank, which is what catches a bank cross-wired to
+    the other cache's tag.  That form does not generalize: writing the
+    expected endpoints for all 24 bus families would be a second
+    implementation of `build_buses`, and a hand-kept twin of the thing under
+    test is exactly what `_fill`/`leaf_paths` were unified to avoid.
+
+    What generalizes is an INTERNAL consistency claim.  Every bus of one
+    family must run between the same KINDS of endpoint — same holder, same
+    leaf, same pin, with a trailing index normalized away (`bank_0` and
+    `bank_3` are one kind; `p_0` and `p_2` are one kind).  Measured on the
+    recorder at the defaults: 24 families, every one with exactly ONE
+    signature.  Nothing here says what any signature SHOULD be, so a
+    deliberate re-wire of a whole family passes and only an INCONSISTENT one
+    fails — which is the half the per-bank test cannot cover for the other
+    nine cell types.
+
+    It is the answer to a question I raised on the PR rather than one a
+    reviewer asked: the per-instance landing guard tests PRESENCE, and this
+    is as far towards CORRECTNESS as one can go without restating the
+    design.  What it still cannot see is a swap between two siblings of the
+    same kind in the same holder — `l1i/bank_0` and `l1i/bank_1` trading
+    buses gives the identical signature — and that is precisely what the
+    per-bank pair assertion is for.  Neither test subsumes the other."""
+    rec = tmp_path / "families.buda"
+    r = subprocess.run(["tclsh", str(_VEHICLE), "2"],
+                       capture_output=True, encoding="utf-8", errors="replace",
+                       cwd=tmp_path, timeout=900,
+                       env={**os.environ, "BUDA_RECORD": str(rec)})
+    assert r.returncode == 0, r.stdout + r.stderr
+    buses = [(f[1], f[2], f[3]) for f in
+             (ln.split() for ln in rec.read_text().splitlines())
+             if f and f[0] == "add_bus"]
+    assert buses, r.stdout
+
+    def kind(path):
+        """`quad_0/cl_1/l1i/bank_3.out` -> `l1i/bank_#.out` — the holder and
+        leaf with a trailing index collapsed, which is what makes an indexed
+        family one kind rather than N."""
+        inst, pin = path.rsplit(".", 1)
+        parts = inst.split("/")
+        leaf = re.sub(r"_\d+$", "_#", parts[-1])
+        holder = re.sub(r"_\d+$", "_#", parts[-2]) if len(parts) > 1 else ""
+        return "%s/%s.%s" % (holder, leaf, pin)
+
+    sigs = collections.defaultdict(set)
+    for name, drv, rcv in buses:
+        family = re.sub(r"_\d+(_\d+)*$", "", name.split("[")[0])
+        sigs[family].add((kind(drv), kind(rcv)))
+
+    assert len(sigs) > 20, sigs.keys()          # the families are all present
+    inconsistent = {f: s for f, s in sigs.items() if len(s) > 1}
+    assert not inconsistent, (
+        "a bus family runs between more than one KIND of endpoint, so some "
+        "bus of it is wired somewhere its siblings are not — a cross-wire "
+        "that every count, every set and every per-instance landing check "
+        "accepts", {f: sorted(s) for f, s in inconsistent.items()})
+
+
 def test_an_unknown_knob_is_an_error_not_a_silent_default(tmp_path):
     """`array set P {...}` holds no `;#` comments, because Tcl does not treat
     `#` as a comment inside braces — every one would become key/value
