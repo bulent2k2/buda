@@ -153,8 +153,11 @@ while {$argi < $argc} {
 #   det WL  --                    8,938,821 16,671,389
 #
 # So NQ=32 behaves like NQ=16: dirty at the default channel, and the
-# caller's own remedy `-GAP 24 -M 24` routes it at 1.87x less wire than the
-# conservative 96 would cost.  That is a STRONGER statement than the hedge
+# caller's own remedy `-GAP 24 -M 24` routes it for 46% LESS wire than the
+# conservative 96, which costs 1.87x AS MUCH (8,938,821 against 16,671,389).
+# Both directions, because this read "1.87x less wire" (Codex P2, #930) --
+# an invalid construction: a ratio > 1 says how much MORE the dearer option
+# costs, and "Nx less" means nothing arithmetically.  That is a STRONGER statement than the hedge
 # it replaces, in both directions -- NQ=32 does need a channel, AND a gap
 # that routes it is known.  Only NQ=64 remains entirely unmeasured
 # bottom-up.  The rule needs no threshold either way: if a bottom-up run is

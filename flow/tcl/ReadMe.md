@@ -657,8 +657,11 @@ NQ = 16 the default gap strands
 **8 bits of 19,424 (0.041 %)** with 3 overlaps; `-GAP 24 -M 24` clears it for
 **+7.6 %** wire, and the built-in candidate 96 would cost **+100 %**. So the
 case against a default is not merely that 96 is expensive — it is that the
-caller's own remedy at the affected size is *thirteen times cheaper than the
-default would be*, which is exactly why naming it beats building it in. A
+caller's own remedy at the affected size costs *about a thirteenth of what the
+default would* (+7.6 % against +100 %), which is exactly why naming it beats
+building it in. Phrased as a fraction rather than as "thirteen times cheaper":
+the same reversed idiom the NQ = 32 ratio was caught in below, and fixing one
+while leaving the other is the partial-fix pattern this PR keeps paying for. A
 methodology that would rather pay 2× everywhere than strand 0.04 % of one
 size's bits can still do so; it just has to say so, and it now has both
 numbers to decide on.
@@ -675,8 +678,12 @@ document, for the second time in this PR.) Measured, `-bottomup` at NQ = 32:
 | detailed WL | — | 8,938,821 | 16,671,389 |
 
 So NQ = 32 behaves like NQ = 16: dirty at the default channel, and the
-caller's own remedy `-GAP 24 -M 24` routes it at **1.87× less wire** than the
-conservative 96 would cost. That is a *stronger* statement than the hedge it
+caller's own remedy `-GAP 24 -M 24` routes it for **46 % less wire** than the
+conservative 96, which costs **1.87× as much** (8,938,821 against 16,671,389).
+Stated in both directions because the first version said *"1.87× less wire"*
+(Codex P2, #930) — an invalid construction: a ratio > 1 says how much MORE the
+expensive option costs, and "N× less" has no arithmetic meaning. The two
+numbers it was derived from were printed in the table directly above it. That is a *stronger* statement than the hedge it
 replaces, in both directions — NQ = 32 does need a channel, **and** a gap that
 routes it is known — and it extends the cost argument against a built-in 96 to
 a fifth size rather than weakening it. Only **NQ = 64** remains entirely
