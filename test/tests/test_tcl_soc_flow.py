@@ -195,24 +195,26 @@ def test_a_wider_channel_is_not_the_lever_a_wider_bus_needs(tmp_path):
         while the contention sits elsewhere.  That is `tpu.tcl`'s recorded
         lesson in the direction it recorded it.
 
-    (b) At DW=128 the design does not route, and it does not route at a 6x
-        channel either: the bits are culled for CROSSING A KEEPOUT (one
-        cross-level NoC leg, `…/rtr/fi_out → l2/mc`), which no gap width
-        addresses.  A wider gap moves the count a little because it shifts
-        every block's track phase — a perturbation, not a supply.
+    (b) At DW=128 — a 4x datapath — the same holds: the design routes at the
+        default channel and a 6x channel only costs more wire.
 
     So a derivation from the bus width has nothing to target, and `GAP`/`M`
     stay CONSTANTS: a design far from the default sweeps `-GAP` and MEASURES
     the result, which is what this test does.
 
-    Two things this replaces, both worth remembering.  The first version
+    Three things this replaces, all worth remembering.  The first version
     asserted only that `configure` left the two values unchanged — a routing
-    change could not falsify it, so it pinned nothing (Codex P2, #930).  And
-    the numbers it cited in its own docstring had ALREADY gone stale by the
-    time that was asked: the earlier sweep read as non-monotone (clean at
-    GAP 40/48/80, stranded at 16/24/32/56/64/96), and re-running it after a
-    second healer round landed gives no clean point at all.  A recorded
-    measurement that nothing re-runs decays into a claim.
+    change could not falsify it, so it pinned nothing (Codex P2, #930).  The
+    numbers it cited in its own docstring had ALREADY gone stale by the time
+    that was asked: an earlier sweep read as non-monotone (clean at GAP
+    40/48/80), and a second healer round changed every point.  And then part
+    (b) itself was wrong about the CAUSE — it asserted DW=128 could not
+    route at any channel because the bits were "culled for crossing a
+    keepout", when they were culled because three faces were stars (see
+    `test_a_pin_is_sized_from_every_bit_that_lands_on_it`).  With those
+    sized, DW=128 is clean at every gap swept.  A recorded measurement that
+    nothing re-runs decays into a claim — and one that nothing re-runs
+    against its own explanation decays into a wrong one.
     """
     # (a) the default widths: clean either way, and the wide one costs wire.
     narrow = _run(tmp_path, 1, "-GAP", 16)
@@ -223,25 +225,22 @@ def test_a_wider_channel_is_not_the_lever_a_wider_bus_needs(tmp_path):
                                      "wire and buy nothing here",
                                      _wl(narrow), _wl(wide))
 
-    # (b) a 4x bus: unroutable at the default channel AND at 6x it, for a
-    # reason a channel cannot reach.  `-DW` ALONE, which is the sweep the
-    # two documents record: `-IW` sizes `dec_cell` and every cell enclosing
-    # it, so passing both would guard a different design than the one whose
-    # numbers are written down, and the documented one could then regress
-    # while this still passed (Codex P2, #930).  Here they happen to agree
-    # bit for bit, but that is a measurement, not a reason to conflate them.
-    for gap in (16, 96):
-        r = _run(tmp_path, 1, "-DW", 128, "-GAP", gap)
-        _ov, un, _vi = _verdict(r)
-        assert un > 0, (
-            f"DW=128 at GAP {gap} now routes clean.  If a channel really is "
-            "what this design was short of, the constants are derivable "
-            "after all — update `soc_lib.tcl`'s channel note and the "
-            "`flow/tcl/ReadMe.md` table before relaxing this.", r.stdout)
-        assert "crosses a keepout" in r.stdout, (
-            "the bits are supposed to be CULLED, not short of tracks — a "
-            "different cause means the note above no longer explains it",
-            gap, r.stdout)
+    # (b) a 4x bus: clean at the default channel AND at 6x it, the wide one
+    # only costing wire.  `-DW` ALONE, which is the sweep the two documents
+    # record: `-IW` sizes `dec_cell` and every cell enclosing it, so passing
+    # both would guard a different design than the one whose numbers are
+    # written down, and the documented one could then regress while this
+    # still passed (Codex P2, #930).
+    wide_bus = [_run(tmp_path, 1, "-DW", 128, "-GAP", g) for g in (16, 96)]
+    for gap, r in zip((16, 96), wide_bus):
+        assert _verdict(r) == (0, 0, 0), (
+            f"DW=128 at GAP {gap} strands bits again.  It used to, and the "
+            "cause was a FACE (three stars), not the channel — find which "
+            "face before touching GAP/M or the tables that quote them",
+            r.stdout + r.stderr)
+    assert _wl(wide_bus[1]) > _wl(wide_bus[0]), (
+        "even at a 4x bus the wider channel is supposed to be pure cost",
+        _wl(wide_bus[0]), _wl(wide_bus[1]))
 
 
 def test_every_cell_a_bus_lands_on_is_sized_from_that_bus(tmp_path):
@@ -256,9 +255,7 @@ def test_every_cell_a_bus_lands_on_is_sized_from_that_bus(tmp_path):
 
     All are SHARED cell types (an `sram_cell` also serves `l1d` and the L2,
     an `alu_cell` also takes `r_[DW]`), so each face is a `max` over what
-    lands on it rather than a second cell type.  At the defaults every max IS
-    the old expression, which is why the sizes below are asserted at BOTH
-    settings: the whole design and every recorded table are unchanged.
+    lands on it rather than a second cell type.
 
     What this cost was not the sizes but a CAUSAL CLAIM, and that is the part
     worth keeping.  `-AW 128` was reported here and in two documents as 128
@@ -267,22 +264,18 @@ def test_every_cell_a_bus_lands_on_is_sized_from_that_bus(tmp_path):
     to land on, which pushed the bus into a window that could not host it.
     Completing the rule makes `-IW` and `-AW` both CLEAN.  A symptom the tool
     reports is not a cause; the advisory named the seat and never the reason.
+
+    A `max` over buses is only half the rule; the SUM at each pin is the
+    other half, and it has its own test below.
     """
-    probe = tmp_path / "probe.tcl"
     cells = ("sram_cell", "alu_cell", "xbar_cell", "dec_cell")
-    probe.write_text(
-        'source [file join {%s} flow tcl soc_lib.tcl]\n'
-        'foreach knob {{} {IW 128} {AW 128}} {\n'
-        '    soc_vehicle::configure $knob\n'
-        '    puts "[join [list %s] { }]"\n'
-        '}\n' % (_ROOT, " ".join("[soc_vehicle::size %s]" % c for c in cells)))
-    r = subprocess.run(["tclsh", str(probe)], capture_output=True,
-                       encoding="utf-8", cwd=tmp_path, timeout=120)
-    assert r.returncode == 0, r.stdout + r.stderr
-    rows = [[int(v) for v in ln.split()]
-            for ln in r.stdout.split("\n") if ln.strip()]
+    # ONE interpreter per setting: `configure` mutates the namespace, so a
+    # loop over knobs measures {IW 128}, then {IW 128, AW 128}, and reports
+    # the second as if `-AW` alone had done it.
+    rows = [_sizes(tmp_path, knob, cells)
+            for knob in ((), ("IW", 128), ("AW", 128))]
     # (sram_w, sram_h, alu_w, alu_h, xbar_w, xbar_h, dec_w, dec_h)
-    assert rows[0] == [152, 88, 280, 152, 280, 280, 152, 88], rows[0]
+    assert rows[0] == [152, 152, 280, 152, 280, 280, 152, 152], rows[0]
     # -IW: every face the IW buses land on grows with them, to the same size
     assert rows[1][0] == rows[1][2] == rows[1][3] == rows[1][6] == 536, rows[1]
     # -AW: the router pair, which `2*DW` used to cap at 280
@@ -329,38 +322,137 @@ def test_bottom_up_routes_the_diverse_hierarchy_clean(tmp_path):
     assert "[TemplateTracks]" in r.stdout and "MISALIGNED" in r.stdout, r.stdout
 
 
-def test_bottom_up_gets_the_channel_it_needs_but_never_overrides_the_caller(tmp_path):
-    """`-bottomup` changes the GEOMETRY, not just the flow (as `tpu.tcl`'s
-    does): a fixed copy at every instance leaves an OVERLAP the healers
-    cannot clear at the top-down channel, and 24 is the cheapest that does.
+def test_bottom_up_changes_the_flow_and_not_the_geometry(tmp_path):
+    """`-bottomup` used to widen the channel behind the caller's back
+    (`GAP 24 M 24`), because a fixed copy at every instance left overlaps
+    the healers could not clear.  It does not any more, and the reason is
+    the point: both the overlaps AND the non-monotone sweep that justified
+    the number (NQ=4: 16 X, 24 ok, 32 ok, 48 ok, **64 X**, 96 ok, read at
+    the time as a fixed copy making the channel a phase lottery) were the
+    STAR faces.  With those sized from the bits that land on them the flag
+    needs no channel through NQ=4, and at NQ=8, where it does, the curve is
+    plain monotone and 24 is not enough anyway.
 
-    The pair is supplied ATOMICALLY, and the single-knob forms are the ones
-    that matter — filling each half in independently made the flag's own
-    contribution partial, so `-bottomup -GAP 16` left `M` at 24 and gave a
-    4976x1576 die where the default geometry is 4720x1440: a sweep meant to
-    vary the channel alone varied two things (Codex P2, #930).  The first
-    version of this test passed `-GAP` AND `-M` together, which is precisely
-    why it did not see that."""
+    So the flag is a FLOW flag again and the geometry is the caller's.  That
+    is asserted rather than asserted-away: `-dry` must give the SAME die
+    with and without it, and the routed endpoint must be clean at the
+    default channel — the die check alone would also pass if the flag broke
+    the run."""
     plain = _run(tmp_path, 2, "-dry")
     bu = _run(tmp_path, 2, "-bottomup", "-dry")
     assert plain.returncode == 0 and bu.returncode == 0, plain.stdout + bu.stdout
-    # the flag widened the die, so it widened the channel
-    assert _die(bu.stdout)[0] > _die(plain.stdout)[0], (bu.stdout, plain.stdout)
+    assert _die(bu.stdout) == _die(plain.stdout), (bu.stdout, plain.stdout)
 
-    # ...and naming EITHER knob suppresses the whole pair, so the caller's
-    # geometry is exactly what they asked for.  Both single-knob forms, since
-    # each half leaked on its own.
-    for args in (("-GAP", 16), ("-M", 16), ("-GAP", 16, "-M", 16)):
-        forced = _run(tmp_path, 2, "-bottomup", *args, "-dry")
-        assert forced.returncode == 0, forced.stdout + forced.stderr
-        assert _die(forced.stdout) == _die(plain.stdout), (args, forced.stdout)
-
-    # A channel the caller pins to something else is honoured as given, with
-    # the other knob left at its configured default rather than at 24.
-    other = _run(tmp_path, 2, "-bottomup", "-GAP", 32, "-dry")
+    # a channel the caller names is honoured exactly, and moves the die
+    other = _run(tmp_path, 2, "-bottomup", "-GAP", 32, "-M", 32, "-dry")
     assert other.returncode == 0, other.stdout + other.stderr
-    assert _die(other.stdout) not in (_die(plain.stdout), _die(bu.stdout)), \
-        other.stdout
+    assert _die(other.stdout) != _die(plain.stdout), other.stdout
+
+    # ...and no widening is needed for the run to be clean here.
+    routed = _run(tmp_path, 1, "-bottomup")
+    assert _verdict(routed) == (0, 0, 0), routed.stdout + routed.stderr
+
+
+def _sizes(tmp_path, knob, cells):
+    """`soc_vehicle::size` for each of `cells`, in a FRESH interpreter under
+    exactly the one override in `knob`."""
+    probe = tmp_path / ("sz_%s.tcl" % ("_".join(str(k) for k in knob) or "def"))
+    probe.write_text(
+        'source [file join {%s} flow tcl soc_lib.tcl]\n'
+        'soc_vehicle::configure [list %s]\n'
+        'puts "[join [list %s] { }]"\n'
+        % (_ROOT, " ".join(str(k) for k in knob),
+           " ".join("[soc_vehicle::size %s]" % c for c in cells)))
+    r = subprocess.run(["tclsh", str(probe)], capture_output=True,
+                       encoding="utf-8", cwd=tmp_path, timeout=120)
+    assert r.returncode == 0, r.stdout + r.stderr
+    return [int(v) for v in r.stdout.split()]
+
+
+def test_a_pin_is_sized_from_every_bit_that_lands_on_it(tmp_path):
+    """A pin is ONE PLACE, so what has to fit there is the SUM of the bits
+    that land on it — not the widest bus taken alone.
+
+    Reading the face rule per BUS is what let the star through, three times.
+    §3b's first cut wired every cluster straight to `l2/mc`; then wiring the
+    banks (below) put every `NBANK` bank on one `tag.d_in`, every `NBANK2`
+    bank on one `mc.d_in`, and every peripheral of a cluster on one
+    `xbar.p_in`.  Each of those buses passed a per-bus check and the pin did
+    not, and what the tool then reported was a supply-doomed seat somewhere
+    downstream — which is how `-DW`/`-CW` came to be written up as a keepout
+    cull and a dead span.
+
+    So `check_bus_faces` accumulates per ENDPOINT PATH, and the multiplicity
+    knobs grow the cells they feed.  Both halves are asserted: the SIZE moves
+    with the knob, and the enforcement REFUSES a design where it does not.
+    """
+    cells = ("tag_cell", "memctl_cell", "bridge_cell")
+    base = _sizes(tmp_path, (), cells)
+    assert base == [280, 280, 536, 536, 152, 152], base
+    # each knob grows exactly the pin it stars into, and nothing else
+    assert _sizes(tmp_path, ("NBANK", 4), cells) == [536, 536, 536, 536,
+                                                     152, 152]
+    assert _sizes(tmp_path, ("NBANK2", 8), cells) == [280, 280, 1048, 1048,
+                                                      152, 152]
+    assert _sizes(tmp_path, ("NIO", 8), cells) == [280, 280, 536, 536,
+                                                   280, 280]
+
+    # ...and the guard is a guard: pin `tag_cell` to its one-bank size while
+    # asking for four banks, and declaring the buses must FAIL.  Without the
+    # accumulator every one of those buses fits on its own.
+    probe = tmp_path / "starve.tcl"
+    probe.write_text(
+        'source [file join {%s} flow tcl soc_lib.tcl]\n'
+        'soc_vehicle::configure {NBANK 4}\n'
+        'set soc_vehicle::SZ(tag_cell) [list 280 280]\n'
+        'array set soc_vehicle::CELLOF {quad_cell,cl_0 cluster_cell\n'
+        '                               cluster_cell,l1i l1_cell\n'
+        '                               l1_cell,tag tag_cell}\n'
+        'set pin quad_0/cl_0/l1i/tag.d_in\n'
+        'if {[catch {soc_vehicle::check_bus_faces 32 $pin $pin $pin $pin} e]} {\n'
+        '    puts "REFUSED $e"\n'
+        '} else { puts "ACCEPTED" }\n' % _ROOT)
+    r = subprocess.run(["tclsh", str(probe)], capture_output=True,
+                       encoding="utf-8", cwd=tmp_path, timeout=120)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert r.stdout.startswith("REFUSED"), (
+        "four 32-bit buses on one 280-unit pin have to be refused; a per-bus"
+        " check accepts every one of them", r.stdout)
+    # it refuses at the bus that first breaks the pin (96 bits, the third of
+    # the four), naming the RUNNING TOTAL and not that bus's own width
+    assert "96 bits land" in r.stdout and "contributes 32" in r.stdout, r.stdout
+
+
+def test_every_configured_bank_carries_a_net(tmp_path):
+    """`NBANK`/`NBANK2` are advertised as dials, so every bank they add has
+    to be WIRED.  Only `bank_0` ever was: at the defaults 11 of the 20
+    `sram_cell` instances carried no net, so raising either knob added
+    filler geometry, moved the die and the census, and left the routed
+    workload alone (Codex P2, #930).
+
+    Pinned by comparing the banner's advertised bus count against the number
+    of buses the ENGINE actually received — the bundler's hbundle count,
+    which is one per bus in this design.  Both halves matter and the first
+    draft of this test had neither: it read the advertised count at two
+    `NBANK` settings and asserted the difference, which `describe` computes
+    by arithmetic from the very knob being varied.  Re-wiring only `bank_0`
+    left all thirteen tests passing.  A count a flow COMPUTES cannot witness
+    what that flow DECLARED."""
+    def counts(*knobs):
+        r = _run(tmp_path, 1, *knobs)
+        assert r.returncode == 0, r.stdout + r.stderr
+        said = re.search(r"(\d+) buses", r.stdout)
+        built = re.search(r"HierBundler: (\d+) hbundles", r.stdout)
+        assert said and built, r.stdout
+        return int(said.group(1)), int(built.group(1))
+
+    base_said, base_built = counts()
+    assert base_said == base_built, (base_said, base_built)
+    # 2 clusters x 2 caches x 2 buses per extra L1 bank; 2 per extra L2 bank
+    for knobs, delta in ((("-NBANK", 3), 8), (("-NBANK2", 6), 4)):
+        said, built = counts(*knobs)
+        assert said == built, (knobs, said, built)
+        assert built == base_built + delta, (knobs, base_built, built)
 
 
 def _die(out):

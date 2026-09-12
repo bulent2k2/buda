@@ -53,7 +53,8 @@
 # does not survive synthesis, while a DIVERSE hierarchy survives it fine.
 # It is generated because SIZE MUST BE A DIAL: the crossover the LibreLane
 # study measures needs a curve, and a real SoC gives one point.
-# `flow/librelane/tier1c/` is the imported twin of this shape.
+# An imported twin of this shape under `flow/librelane/` is the natural next
+# tier and does NOT exist yet; this file is the generated half.
 #
 # THE SHAPE.  Cells nest four deep on one branch and two on another:
 #
@@ -119,8 +120,9 @@ proc soc_vehicle::configure {{overrides {}}} {
 
     # ── the CHANNEL: a constant, and that is the finding ──────────────────
     # A face IS derived from the bits that land on it (below).  A CHANNEL is
-    # not, and the arc that establishes it is worth keeping because every
-    # step of it looked right:
+    # not -- and this vehicle has now paid for the difference THREE times,
+    # each time with the same shape: a symptom that reads as congestion, a
+    # channel that measurably moves it, and a FACE underneath.
     #
     # The first cut derived every face and left gaps flat, and
     # `check_design` reported a supply-doomed seat -- 19 signal tracks in a
@@ -133,40 +135,43 @@ proc soc_vehicle::configure {{overrides {}}} {
     # buys NO routing at all and costs wire, monotonically --
     #
     #   GAP     NQ=8 detailed WL     NQ=16 detailed WL
-    #    16         2,076,658            4,326,186
-    #    48         2,475,780            5,047,839
-    #    96         2,954,709            6,125,943
-    #   144         3,469,229            7,137,372     (every row CLEAN)
+    #    16         2,160,182            4,416,873
+    #    48         2,932,536            6,022,953
+    #    96         4,147,638            8,491,122
+    #   144         5,362,445           10,915,654     (every row CLEAN)
     #
     # -- which is `tpu.tcl`'s recorded lesson in the direction it recorded
     # it: the channel was never the binding constraint, so widening it only
     # inflates the die and makes every wire longer.
     #
-    # Where the design DOES fail, a channel is not the lever either.  Swept
-    # at DW=128 (a 4x datapath), NQ=4, in bits left unplaced:
+    # WHERE THE DESIGN USED TO FAIL, a channel was not the lever either, and
+    # this is the part that had to be re-run.  Swept at DW=128 (a 4x
+    # datapath), NQ=4, the table here read 65 bits unplaced at GAP 16 and
+    # never reached zero at any width tried (46 at 96; NQ=1 ran the same
+    # way, 65 down to 31 at GAP 160), and concluded the bits were CULLED FOR
+    # CROSSING A KEEPOUT on one cross-level NoC leg.  The advice was right
+    # and the CAUSE was wrong: three stars were still in the netlist
+    # (`tag.d_in`, `mc.d_in`, `xbar.p_in` -- see the SUM note below), and
+    # with those faces sized from what lands on them `-DW 128` is CLEAN at
+    # every gap, with the channel still pure cost:
     #
-    #   GAP        16  24  32  40  48  56  64  80  96
-    #   unplaced   65  62  60  60  58  55  53  50  46
+    #   GAP (NQ=4, DW=128)    16          32          64          96
+    #   detailed WL       11,037,234  12,126,257  12,338,910  14,065,232
+    #                                                     (every row CLEAN)
     #
     # -- `-DW` ALONE, since `IW` sizes `dec_cell` and every cell enclosing it
-    # and would make this a different design from the one written down (it
-    # happens to give the same counts here at a 30% lower WL, but that is a
-    # measurement, not a reason to conflate the two knobs).
+    # and would make this a different design from the one written down.
     #
-    # Never zero at any width tried (NQ=1 runs the same way, 65 down to 31 at
-    # GAP 160), and the bits are CULLED FOR CROSSING A KEEPOUT -- one
-    # cross-level NoC leg, `<cluster>/rtr/fi_out -> l2/mc` -- which no gap
-    # width addresses.  A wider gap shifts every block's track phase, so it
-    # moves the count without feeding the constraint.  So GAP and M are
-    # plain constants that work across the whole NQ dial at the default bus
-    # widths, and a design changing DW far from the default sweeps `-GAP`
-    # and MEASURES the result rather than trusting an arithmetic.
+    # So GAP and M are plain constants across the whole NQ dial AND across a
+    # 4x datapath, which is a stronger claim than the one it replaced -- and
+    # it was reached by removing faces, never by tuning a gap.
     #
-    # These numbers are re-runnable and have been re-run, which is the last
-    # part of the lesson: an earlier sweep here read as NON-monotone (clean
-    # at GAP 40/48/80 and stranded at the rest), and a second healer round
-    # added to `heal_if_dirty` afterwards changed the answer at every point.
-    # A recorded measurement nothing re-runs decays into a claim, so
+    # These numbers are re-runnable and have now been re-run TWICE, which is
+    # the durable part of the lesson.  An earlier sweep here read as
+    # NON-monotone (clean at GAP 40/48/80, stranded at the rest); a second
+    # healer round added to `heal_if_dirty` changed the answer at every
+    # point; and the star fix then turned a whole failing table CLEAN.  A
+    # recorded measurement nothing re-runs decays into a claim, so
     # `test_a_wider_channel_is_not_the_lever_a_wider_bus_needs` runs the
     # cheap end of both directions on every test run.
 
@@ -175,53 +180,70 @@ proc soc_vehicle::configure {{overrides {}}} {
     # or below, so it constrains WIDTH; a horizontal face constrains HEIGHT.
     #
     # The rule has to hold for EVERY endpoint of a bus, not just the one
-    # whose knob names it, and this table did not.  `-IW` grew `dec_cell` and
-    # every container above it while both OTHER ends of the IW buses stayed
-    # sized from `DW` -- `sram_cell` drives `id_[IW]` out of `l1i/bank_0`,
-    # `alu_cell` receives `i_[IW]` -- and `xbar_cell` was sized `2*DW` on both
-    # axes while `nr_[AW]` joins two of them directly and `pc_[CW]` arrives
-    # from an io pad.  Every face is now a `max` over the buses that land on
-    # it (Codex P2 x2, #930); shared types make that a max rather than a
-    # second cell type, and at the defaults every max IS the old expression,
-    # so nothing in the design moves.
+    # whose knob names it, and it has to be read on the SUM at each pin, not
+    # one bus at a time.  This table broke both readings in turn.
     #
-    # What it cost to get wrong was not the sizes -- it was a CAUSAL CLAIM.
-    # The knob table below first read `-AW 128` as 128 unplaced on a
-    # SUPPLY-DOOMED seat and called it "the channel from the other side".
-    # The seat was real; it was a CONSEQUENCE of a face too narrow to land on,
-    # which pushed the bus into a window that could not host it.  Complete the
-    # rule and the knob is CLEAN.  A symptom the tool reports is not a cause,
-    # and the advisory named the seat, never the reason for it.
+    # PER BUS first: `-IW` grew `dec_cell` and every container above it while
+    # both OTHER ends of the IW buses stayed sized from `DW` -- `sram_cell`
+    # drives `id_[IW]`, `alu_cell` receives `i_[IW]` -- and `xbar_cell` was
+    # `2*DW` on both axes while `nr_[AW]` joins two of them directly and
+    # `pc_[CW]` arrives from an io pad (Codex P2 x2, #930).
     #
-    # Measured at NQ=1, each width knob alone at 128 (4x the default):
+    # PER PIN second, and it is the one that mattered: a pin is ONE PLACE, so
+    # what has to fit there is every bit that lands on it.  Wiring the banks
+    # (each `NBANK` bank drives one `tag.d_in`, each `NBANK2` bank one
+    # `mc.d_in`, every peripheral of a cluster one `xbar.p_in`) re-created
+    # the STAR of `build_buses` 3b in three more places -- and each of those
+    # buses passed a per-bus check.  `check_bus_faces` accumulates per
+    # ENDPOINT PATH now, so the guard sees what the netlist actually asks of
+    # a face.
     #
-    #   knob   before   after   what remains
-    #   -IW      512    clean   --
-    #   -AW      128    clean   --
-    #   -DW       65      65    bits culled for crossing a keepout, on the
-    #                           one cross-level NoC leg (the GAP sweep above)
-    #   -CW      741     166    seats reporting ZERO signal tracks in the
-    #                           placed window -- a dead-span shape, and NOT
-    #                           diagnosed further here rather than guessed at
+    # What it cost to get wrong was never the sizes -- it was a CAUSAL CLAIM,
+    # made twice.  `-AW 128` was first reported as 128 unplaced on a
+    # SUPPLY-DOOMED seat and called "the channel from the other side"; then
+    # `-DW`/`-CW` were reported as a keepout cull and a dead span "not
+    # diagnosed further here".  Every one of them was a face:
     #
-    # So three of the four were sizing; only `-DW` is the routing story the
-    # channel sweep tells, and `-CW` is honestly open.
+    #   knob at 128    first cut    per-bus max    per-pin SUM
+    #     -IW             512          clean          clean
+    #     -AW             128          clean          clean
+    #     -DW              65            65           clean
+    #     -CW             741           166           clean
+    #
+    # (NQ=1, each knob alone.)  A symptom the tool reports is not a cause:
+    # the advisory named the seat every time and never once the reason for
+    # it, and the two readings that sounded most like physics -- a keepout
+    # cull, a dead span -- were the two that survived longest.
+
+    # Two faces are sized by a SUM rather than by one bus, because a pin is
+    # one place: every bank of a cache drives `tag.d_in`, every L2 bank
+    # drives `mc.d_in`, and every peripheral of a cluster arrives at one
+    # `xbar.p_in` — a star each, and the star is the mistake this vehicle has
+    # now made three times (see 3b).  `NBANK`/`NBANK2`/`NIO` therefore grow
+    # the cells they feed, which is what makes those knobs mean something.
+    set tagpin [expr {max($P(CW), $P(NBANK)*max($P(AW), $P(DW), $P(IW)))}]
+    set percl  [expr {int(ceil(double($P(NIO))/($P(NQ)*$P(NC))))}]
 
     variable LEAF
     array set LEAF [list \
-        dec_cell    [list [expr {$P(IW)}]            [expr {2*$P(CW)}]     ] \
+        dec_cell    [list [expr {max($P(IW), $P(AW))}] \
+                          [expr {max($P(IW), $P(AW), 2*$P(CW))}] ] \
         alu_cell    [list [expr {max(2*$P(DW), $P(IW))}] \
                           [expr {max($P(DW), $P(IW))}]   ] \
         mul_cell    [list [expr {2*$P(DW)}]          [expr {$P(DW)}]       ] \
-        regf_cell   [list [expr {max($P(DW), $P(AW))}] [expr {2*$P(DW)}]   ] \
-        sram_cell   [list [expr {max($P(DW), $P(IW))}]  [expr {$P(AW)}]       ] \
-        tag_cell    [list [expr {$P(AW)}]            [expr {$P(CW)}]       ] \
-        xbar_cell   [list [expr {max(2*$P(DW), $P(AW), $P(CW))}] \
-                          [expr {max(2*$P(DW), $P(AW), $P(CW))}] ] \
-        fifo_cell   [list [expr {$P(DW)}]            [expr {$P(DW)}]       ] \
+        regf_cell   [list [expr {max($P(DW), $P(AW))}] \
+                          [expr {max(2*$P(DW), $P(AW))}] ] \
+        sram_cell   [list [expr {max($P(DW), $P(IW), $P(AW))}] \
+                          [expr {max($P(DW), $P(IW), $P(AW))}] ] \
+        tag_cell    [list [expr {$tagpin}]           [expr {$tagpin}]      ] \
+        xbar_cell   [list [expr {max(2*$P(DW), $P(AW), $percl*$P(CW))}] \
+                          [expr {max(2*$P(DW), $P(AW), $percl*$P(CW))}] ] \
+        fifo_cell   [list [expr {2*$P(DW)}]          [expr {2*$P(DW)}]     ] \
         io_cell     [list [expr {$P(CW)}]            [expr {$P(CW)}]       ] \
-        bridge_cell [list [expr {2*$P(CW)}]          [expr {max($P(DW), $P(CW))}] ] \
-        memctl_cell [list [expr {$P(DW) + $P(AW)}]   [expr {$P(DW)}]       ] \
+        bridge_cell [list [expr {max($P(NIO)*$P(CW), $P(DW))}] \
+                          [expr {max($P(NIO)*$P(CW), $P(DW))}] ] \
+        memctl_cell [list [expr {$P(NBANK2)*max($P(DW), $P(AW))}] \
+                          [expr {$P(NBANK2)*max($P(DW), $P(AW))}] ] \
     ]
     variable SZ
     array unset SZ
@@ -435,11 +457,75 @@ proc soc_vehicle::_fill {parent cells names} {
     # the claim about this vehicle's diversity is a measurement (see the
     # header), and a hand-kept twin of the structure is how such a claim
     # goes quietly false.
+    variable CELLOF
     lappend KIDS($parent) {*}$cells
+    foreach c $cells n $names { set CELLOF($parent,$n) $c }
     set pos [_pack_pos $cells]
     foreach c $cells n $names xy $pos {
         lassign $xy x y
         buda::add_inst_to_cell $parent $n $c $x $y
+    }
+}
+
+proc soc_vehicle::cell_at {path} {
+    # `quad_0/cl_0/core/dec` -> `dec_cell`, walked through the same name->cell
+    # pairs `_fill` built the instances from.  Top-level instances are named
+    # `quad_<q>`, `l2` and `io`.
+    variable CELLOF
+    set parts [split [lindex [split $path .] 0] /]
+    set head [lindex $parts 0]
+    if {[string match "quad_*" $head]} {
+        set cell quad_cell
+    } elseif {$head eq "l2"} {
+        set cell l2_cell
+    } elseif {$head eq "io"} {
+        set cell io_blk_cell
+    } else {
+        return ""
+    }
+    foreach n [lrange $parts 1 end] {
+        if {![info exists CELLOF($cell,$n)]} { return "" }
+        set cell $CELLOF($cell,$n)
+    }
+    return $cell
+}
+
+proc soc_vehicle::check_bus_faces {bits args} {
+    # The face rule, ENFORCED rather than asserted, and enforced on the SUM.
+    # A pin is one place on one face, so what has to fit there is every bit
+    # that lands on it — not the widest bus taken alone.  Checking one bus at
+    # a time is what let the STAR through three times (memctl in 3b, and then
+    # `tag.d_in`, which every bank of a banked cache drives): each bus fits,
+    # the pin does not, and the tool reports a supply-doomed seat somewhere
+    # downstream rather than the face that caused it.  So bits accumulate per
+    # ENDPOINT PATH and the cell must host the running total on both faces
+    # (both, because which face a bus arrives on is the placer's business).
+    #
+    # The sizes come from a declared table and the buses from `build_buses`,
+    # two places that can drift — this is what stops them, and it is how the
+    # `-IW`/`-AW`/`xbar_cell` misses (Codex, #930) would have been caught at
+    # declaration instead of by a reviewer.
+    variable SZ
+    variable ACC
+    foreach path $args {
+        set cell [cell_at $path]
+        if {$cell eq ""} {
+            # A guard that cannot resolve its endpoint checks NOTHING, and
+            # says so rather than passing.  This is the same silent-skip
+            # shape the guard exists to remove.
+            error "soc_vehicle: check_bus_faces cannot resolve '$path' to a\
+                   cell -- run build_hierarchy first, or fix the path"
+        }
+        if {![info exists SZ($cell)]} { continue }
+        if {![info exists ACC($path)]} { set ACC($path) 0 }
+        incr ACC($path) $bits
+        lassign $SZ($cell) w h
+        set need [_dim $ACC($path)]
+        if {$w < $need || $h < $need} {
+            error "soc_vehicle: $cell is ${w}x${h} but $ACC($path) bits land\
+                   on it at $path (this bus contributes ${bits}; the pin\
+                   needs ${need}); widen its entry in LEAF"
+        }
     }
 }
 
@@ -480,6 +566,8 @@ proc soc_vehicle::load_blocks {} {
 # two nesting depths AND cross-level bundles spanning up to four.
 proc soc_vehicle::build_buses {} {
     variable P
+    variable ACC
+    array unset ACC
     buda::bdb_net_mode on
 
     for {set q 0} {$q < $P(NQ)} {incr q} {
@@ -489,19 +577,53 @@ proc soc_vehicle::build_buses {} {
             # 1. INSIDE a core -- the deepest cell-local template.  Solved
             #    once per `core_cell` and copied to every occurrence.
             buda::add_bus "i_${q}_${c}\[$P(IW)\]" $cl/core/dec.out $cl/core/alu.i_in
+            check_bus_faces $P(IW) $cl/core/dec.out $cl/core/alu.i_in
             buda::add_bus "m_${q}_${c}\[$P(DW)\]" $cl/core/mul.out $cl/core/regf.m_in
+            check_bus_faces $P(DW) $cl/core/mul.out $cl/core/regf.m_in
             buda::add_bus "r_${q}_${c}\[$P(DW)\]" $cl/core/regf.out $cl/core/alu.r_in
+            check_bus_faces $P(DW) $cl/core/regf.out $cl/core/alu.r_in
             buda::add_bus "x_${q}_${c}\[$P(DW)\]" $cl/core/alu.out $cl/core/regf.a_in
+            check_bus_faces $P(DW) $cl/core/alu.out $cl/core/regf.a_in
 
             # 2. INSIDE a cluster, core <-> its two caches -- a cell-local
             #    template one level UP, whose own children are templates.
+            #
+            #    EVERY bank is wired, which it was not: only `bank_0` was
+            #    ever named, so at the defaults 11 of the 20 `sram_cell`
+            #    instances carried no net -- `NBANK`/`NBANK2` added filler
+            #    geometry and the census reported it as workload (Codex P2,
+            #    #930).  A banked cache addresses each bank from its tag and
+            #    reads each bank back, so that is what this declares: the
+            #    address bus is CELL-LOCAL to `l1_cell` (a template at a
+            #    level the vehicle had none at, solved once and copied to
+            #    every l1i/l1d of every cluster), and each bank reads back
+            #    through the tag -- through it, because wiring the banks
+            #    STRAIGHT to the core is 3b's star again, and that is what
+            #    the first cut of this did.
             buda::add_bus "ia_${q}_${c}\[$P(AW)\]" $cl/core/dec.a_out $cl/l1i/tag.a_in
-            buda::add_bus "id_${q}_${c}\[$P(IW)\]" $cl/l1i/bank_0.out  $cl/core/dec.i_in
+            check_bus_faces $P(AW) $cl/core/dec.a_out $cl/l1i/tag.a_in
             buda::add_bus "da_${q}_${c}\[$P(AW)\]" $cl/core/regf.a_out $cl/l1d/tag.a_in
-            buda::add_bus "dd_${q}_${c}\[$P(DW)\]" $cl/l1d/bank_0.out  $cl/core/regf.d_in
+            check_bus_faces $P(AW) $cl/core/regf.a_out $cl/l1d/tag.a_in
+            foreach {side dw} [list l1i $P(IW) l1d $P(DW)] {
+                for {set b 0} {$b < $P(NBANK)} {incr b} {
+                    buda::add_bus "${side}a_${q}_${c}_${b}\[$P(AW)\]" \
+                        $cl/$side/tag.b_out $cl/$side/bank_$b.a_in
+                    check_bus_faces $P(AW) \
+                        $cl/$side/tag.b_out $cl/$side/bank_$b.a_in
+                    buda::add_bus "${side}d_${q}_${c}_${b}\[$dw\]" \
+                        $cl/$side/bank_$b.out $cl/$side/tag.d_in
+                    check_bus_faces $dw \
+                        $cl/$side/bank_$b.out $cl/$side/tag.d_in
+                }
+            }
+            buda::add_bus "id_${q}_${c}\[$P(IW)\]" $cl/l1i/tag.d_out $cl/core/dec.i_in
+            check_bus_faces $P(IW) $cl/l1i/tag.d_out $cl/core/dec.i_in
+            buda::add_bus "dd_${q}_${c}\[$P(DW)\]" $cl/l1d/tag.d_out $cl/core/regf.d_in
+            check_bus_faces $P(DW) $cl/l1d/tag.d_out $cl/core/regf.d_in
 
             # 3. cluster -> its own router: cell-local again, one level up.
             buda::add_bus "rq_${q}_${c}\[$P(DW)\]" $cl/l1d/tag.out $cl/rtr/xbar.in
+            check_bus_faces $P(DW) $cl/l1d/tag.out $cl/rtr/xbar.in
         }
     }
 
@@ -526,11 +648,23 @@ proc soc_vehicle::build_buses {} {
     for {set i 0} {$i < [llength $chain] - 1} {incr i} {
         set a [lindex $chain $i] ; set b [lindex $chain [expr {$i+1}]]
         buda::add_bus "nl_${i}\[$P(DW)\]" $a/rtr/fi_out.out $b/rtr/fi_in.in
+        check_bus_faces $P(DW) $a/rtr/fi_out.out $b/rtr/fi_in.in
         buda::add_bus "nr_${i}\[$P(AW)\]" $b/rtr/xbar.r_out $a/rtr/xbar.r_in
+        check_bus_faces $P(AW) $b/rtr/xbar.r_out $a/rtr/xbar.r_in
     }
     set head [lindex $chain end]
     buda::add_bus "ml\[$P(DW)\]" $head/rtr/fi_out.out l2/mc.in
-    buda::add_bus "mr\[$P(DW)\]" l2/bank_0.out $head/rtr/fi_in.in
+    check_bus_faces $P(DW) $head/rtr/fi_out.out l2/mc.in
+    #     Every L2 bank is wired for the reason above: the controller
+    #     addresses each one and each one reads back to the chain head.
+    for {set b 0} {$b < $P(NBANK2)} {incr b} {
+        buda::add_bus "l2a_${b}\[$P(AW)\]" l2/mc.b_out l2/bank_$b.a_in
+        check_bus_faces $P(AW) l2/mc.b_out l2/bank_$b.a_in
+        buda::add_bus "l2d_${b}\[$P(DW)\]" l2/bank_$b.out l2/mc.d_in
+        check_bus_faces $P(DW) l2/bank_$b.out l2/mc.d_in
+    }
+    buda::add_bus "mr\[$P(DW)\]" l2/mc.d_out $head/rtr/fi_in.in
+    check_bus_faces $P(DW) l2/mc.d_out $head/rtr/fi_in.in
 
     # 4. the peripherals: shallow (depth 1) reaching a router four levels
     #    down -- the widest level span in the design.
@@ -539,7 +673,9 @@ proc soc_vehicle::build_buses {} {
         set c [expr {($k / $P(NQ)) % $P(NC)}]
         buda::add_bus "pc_${k}\[$P(CW)\]" io/p_$k.out \
             quad_$q/cl_$c/rtr/xbar.p_in
+        check_bus_faces $P(CW) io/p_$k.out quad_$q/cl_$c/rtr/xbar.p_in
         buda::add_bus "pb_${k}\[$P(CW)\]" io/bridge.out io/p_$k.in
+        check_bus_faces $P(CW) io/bridge.out io/p_$k.in
     }
 }
 
@@ -549,7 +685,8 @@ proc soc_vehicle::describe {} {
     set cl [expr {$P(NQ)*$P(NC)}]
     set leaves [expr {$cl*(4 + 2*(1+$P(NBANK)) + 3)
                       + 2 + $P(NBANK2) + 1 + $P(NIO)}]
-    set buses  [expr {$cl*9 + 2*($cl-1) + 2 + 2*$P(NIO)}]
+    set buses  [expr {$cl*(9 + 4*$P(NBANK)) + 2*($cl-1)
+                      + 2 + 2*$P(NBANK2) + 2*$P(NIO)}]
     return [list clusters $cl leaves $leaves buses $buses \
                  die "$P(DIEW)x$P(DIEH)"]
 }

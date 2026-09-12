@@ -88,26 +88,36 @@ while {$argi < $argc} {
     }
 }
 
-# `-bottomup` changes the GEOMETRY, not just the flow (as `tpu.tcl`'s does):
-# the copied cell-local routing is a fixed copy at every instance, so the
-# residue it cannot clear is an OVERLAP rather than an open, and at the
-# default channel this design leaves two of them standing after both healer
-# rounds.  Measured at NQ=4, the cheapest channel that clears it:
+# `-bottomup` USED TO widen the channel here, and no longer does -- which is
+# worth writing down, because the reason it did was a fault elsewhere.
 #
-#   GAP    16   24   32   48   64   96
-#   result  X   ok   ok   ok    X   ok       (X = overlaps or bits unplaced)
+# The copied cell-local routing is a fixed copy at every instance, so the
+# residue it cannot clear is an OVERLAP rather than an open, and the flag
+# quietly supplied `GAP 24 M 24` to clear two of them at NQ=4.  The sweep
+# that justified it read NON-monotone (16 X, 24 ok, 32 ok, 48 ok, 64 X,
+# 96 ok) and that irregularity was reported as evidence that a fixed copy
+# makes the channel a phase lottery.  Both halves were the STAR faces (see
+# `soc_lib.tcl`): with those sized from the bits that land on them the flag
+# needs NO channel at all up to NQ=4, and the curve where it does need one
+# is plain monotone -- NQ=8, `-bottomup`:
 #
-# so 24 -- and the pair is supplied ATOMICALLY, only when the caller named
-# NEITHER knob.  Filling in each half independently made the flag's own
-# contribution partial: `-bottomup -GAP 16` left `M` at 24 and gave
-# 4976x1576 where the default geometry is 4720x1440, so a sweep meant to
-# vary the channel alone varied two things (and `-bottomup -M 16` leaked the
-# other way, 4840x1472).  A caller who names either knob is doing the
-# geometry by hand and the flag must not supply the other half for them.
-if {$bottomup && [lsearch -exact $overrides GAP] < 0
-                && [lsearch -exact $overrides M] < 0} {
-    lappend overrides GAP 24 M 24
-}
+#   GAP     16      24      32      48   64   96
+#   result  X(1/6)  X(0/5)  X(0/4)  ok   ok   ok    (overlaps/unplaced)
+#
+# So the widening is gone: at NQ<=4 it bought nothing and cost wire
+# (NQ=4: 1,237,977 at the default against 1,329,561 at 24), and at NQ=8 it
+# was not enough anyway.  Nor is there a fixed number that would have been
+# -- NQ=16 still strands one bit at 48 and wants 96 -- so what a fixed copy
+# needs is a function of SIZE.  A bottom-up run above NQ=4 asks for the
+# channel EXPLICITLY (`soc.tcl 8 -bottomup -GAP 48 -M 48`), which is the
+# caller doing the geometry, the only party that can measure it.
+#
+# The atomicity rule it needed is kept as history: when the flag DID supply
+# the pair it had to supply BOTH or NEITHER, since `-bottomup -GAP 16` left
+# `M` at 24 and gave 4976x1576 where THAT revision's default geometry was
+# 4720x1440, while `-bottomup -M 16` leaked the other way -- a sweep meant to
+# vary the channel varied two things.  Nothing supplies a knob behind the
+# caller's back now.
 
 soc_vehicle::configure $overrides
 soc_vehicle::banner "soc.tcl"

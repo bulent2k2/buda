@@ -238,57 +238,71 @@ $ btcl flow/tcl/soc.tcl 2 -bydepth "M3 M4 M5"
 
 On a uniform-depth vehicle every cell is one level and this collapses to the
 `reserve_top_layers` case. The bundles land at four depths too — at NQ = 2,
-`D0: 8, D1: 8, D2: 20, D3: 16`.
+`D0: 8, D1: 16, D2: 20, D3: 48`.
 
 ## Measured, this container
 
-| NQ | clusters | leaves | bundles | die | wall | endpoint |
-|---|---|---|---|---|---|---|
-| 1 | 2 | 37 | 30 | 2384 × 1440 | 0.5 s | clean |
-| 2 | 4 | 63 | 52 | 4720 × 1440 | 1.1 s | clean |
-| 4 | 8 | 115 | 96 | 4720 × 2496 | 2.0 s | clean |
-| 8 | 16 | 219 | 184 | 7056 × 3552 | 5.8 s | clean |
-| 16 | 32 | 427 | 360 | 9392 × 4608 | 23.8 s | clean |
-| 32 | 64 | 843 | 712 | 14064 × 6720 | 293 s | **13 unplaced** (0 overlaps) |
+| NQ | clusters | leaves | bundles | bit-wires | die | wall | endpoint |
+|---|---|---|---|---|---|---|---|
+| 1 | 2 | 37 | 54 | 1 536 | 2640 × 2016 | 1 s | clean |
+| 2 | 4 | 63 | 92 | 2 568 | 5232 × 2016 | 1 s | clean |
+| 4 | 8 | 115 | 168 | 4 800 | 5232 × 3200 | 3 s | clean |
+| 8 | 16 | 219 | 320 | 9 064 | 7824 × 4384 | 6 s | clean |
+| 16 | 32 | 427 | 624 | 17 536 | 10416 × 5568 | 15 s | clean |
+| 32 | 64 | 843 | 1232 | 34 480 | 15600 × 7936 | 40 s | clean |
+| 64 | 128 | 1675 | 2448 | 68 400 | 20784 × 10304 | 139 s | clean |
 
-Clean to NQ = 16 top-down, and `-bottomup`, `-caps` and `-bydepth` are clean
-at every size measured. NQ = 32 is the honest limit — and its two numbers
-moved when the second `heal_if_dirty` round landed: 24 overlaps / 96 unplaced
-in 61 s became 0 / 13 in 293 s. The extra round is what buys the 13, and on a
-design it cannot finish it is also what the wall clock goes into; every clean
-row above pays nothing for it, since a clean design never enters the first
-round.
+Clean at every size measured, top-down, and `-caps`, `-bydepth` and
+`-bottomup` are clean too. NQ = 32 used to be **the honest limit** here —
+13 bits unplaced after 293 s — and it is neither the limit nor slow any
+more: removing three stars (below) took it to clean in 40 s and put NQ = 64
+within reach. Every row on this table has now moved twice, once when a
+second `heal_if_dirty` round landed and once when the stars went, and both
+times because something re-ran it.
 
-## Every endpoint of a bus, and what it cost to get wrong
+## Every endpoint, every bit: the face rule read twice
 
 The face rule — *a leaf's size is derived from the bits that land on its
-faces* — has to hold for **every endpoint of a bus**, not just the one whose
-knob names it. Three cells broke it: `sram_cell` drives `id_[IW]` out of
-`l1i/bank_0` and `alu_cell` receives `i_[IW]`, both sized from `DW`; and
-`xbar_cell` was `2*DW` on both axes while `nr_[AW]` joins two routers
-directly and `pc_[CW]` arrives from an io pad. Every face is a `max` over the
-buses that land on it now — shared cell types make that a max rather than a
-second type — and at the defaults every max **is** the old expression, so the
-design and every table on this page are unchanged.
+faces* — has to hold for **every endpoint of a bus**, and it has to be read
+on the **sum at each pin**. This vehicle broke both readings in turn, and
+the second one was hiding everything else on this page.
 
-What it cost was not the sizes. It was a **causal claim**: this section first
-reported `-AW 128` as 128 bits unplaced on a *supply-doomed seat* and called
-it "the channel from the other side". The seat was real — and it was a
-*consequence* of a face too narrow to land on, which pushed the bus into a
-window that could not host it. Complete the rule and the knob is clean.
+**Per bus.** `sram_cell` drives `id_[IW]` and `alu_cell` receives `i_[IW]`,
+both sized from `DW`; `xbar_cell` was `2*DW` on both axes while `nr_[AW]`
+joins two routers directly and `pc_[CW]` arrives from an io pad (Codex P2 ×
+2, #930). Every face became a `max` over the buses landing on it.
 
-| knob at 128 | before | after | what remains |
+**Per pin.** A pin is *one place*, so what has to fit there is every bit that
+lands on it, not the widest bus taken alone. `NBANK`/`NBANK2` were advertised
+as dials while only `bank_0` was ever wired — at the defaults 11 of the 20
+`sram_cell` instances carried **no net**, so raising either knob added filler
+geometry and left the routed workload alone (Codex P2, #930) — and wiring
+them put each `NBANK` bank on one `tag.d_in`, each `NBANK2` bank on one
+`mc.d_in` and every peripheral of a cluster on one `xbar.p_in`: the same
+**star** the memory controller taught (next section), in three more places,
+with each of those buses passing the per-bus check. `check_bus_faces`
+accumulates per **endpoint path** now — and refuses outright when it cannot
+resolve a path, since a guard that checks nothing must not pass — so
+`NBANK`/`NBANK2`/`NIO` grow the cells they feed.
+
+What it cost was never the sizes. It was a **causal claim**, made twice.
+First `-AW 128` was reported as 128 bits unplaced on a *supply-doomed seat*
+and called "the channel from the other side". Then `-DW` and `-CW` were
+written up as a keepout cull and a dead span "deliberately not diagnosed
+further here". Every one of them was a face:
+
+| knob at 128 | first cut | per-bus `max` | per-pin **sum** |
 |---|---|---|---|
-| `-IW` | 512 unplaced | **clean** | — |
-| `-AW` | 128 unplaced | **clean** | — |
-| `-DW` | 65 unplaced | 65 unplaced | bits culled for crossing a keepout, on the one cross-level NoC leg |
-| `-CW` | 741 unplaced | 166 unplaced | seats reporting **zero** signal tracks in the placed window — a dead-span shape, deliberately not diagnosed further here |
+| `-IW` | 512 unplaced | **clean** | **clean** |
+| `-AW` | 128 unplaced | **clean** | **clean** |
+| `-DW` | 65 unplaced | 65 unplaced | **clean** |
+| `-CW` | 741 unplaced | 166 unplaced | **clean** |
 
-So three of the four were sizing, only `-DW` is the routing story the channel
-sweep below tells, and `-CW` is honestly open. A symptom the tool reports is
-not a cause: the advisory named the seat and never the reason for it.
+(NQ = 1, each knob alone.) A symptom the tool reports is not a cause: the
+advisory named the seat every time and never once the reason for it — and
+the two readings that sounded most like physics, a keepout cull and a dead
+span, were the two that survived longest.
 
-## The lesson it paid for: a face is derived, a channel is not
 ## The lesson it paid for: a face is derived, a channel is not
 
 A leaf's size **is** derived from the bits that land on its faces — that is
@@ -311,67 +325,74 @@ its place a wider channel is **pure cost**:
 
 | GAP | NQ = 8 | NQ = 16 |
 |---|---|---|
-| 16 | clean, WL 2,076,658 | clean, WL 4,326,186 |
-| 48 | clean, WL 2,475,780 | clean, WL 5,047,839 |
-| 96 | clean, WL 2,954,709 | clean, WL 6,125,943 |
-| 144 | clean, WL 3,469,229 | clean, WL 7,137,372 |
+| 16 | clean, WL 2,160,182 | clean, WL 4,416,873 |
+| 48 | clean, WL 2,932,536 | clean, WL 6,022,953 |
+| 96 | clean, WL 4,147,638 | clean, WL 8,491,122 |
+| 144 | clean, WL 5,362,445 | clean, WL 10,915,654 |
 
 Every row routes, so the wider channel buys **nothing** and costs wire
 monotonically — which is `tpu.tcl`'s lesson in the direction it recorded it:
 *the channel was never the binding constraint*, so widening it only inflates
 the die and makes every wire longer.
 
-And where the design does **fail**, a channel is not the lever either. Swept
-at DW = 128 (a 4× datapath), NQ = 4, in bits left unplaced:
+Where the design used to **fail**, a channel was not the lever either — and
+it is not what fixed it. Swept at DW = 128 (a 4× datapath), NQ = 4, this
+table read 65 bits unplaced at GAP 16 and never reached zero at any width
+tried (46 at 96; NQ = 1 ran the same way, 65 down to 31 at GAP 160), and it
+concluded the bits were **culled for crossing a keepout** on one cross-level
+NoC leg. The advice was right and the *cause* was wrong: three stars were
+still in the netlist, and with those faces sized from what lands on them
+`-DW 128` is clean at every gap, the channel still pure cost:
 
-| GAP | 16 | 24 | 32 | 40 | 48 | 56 | 64 | 80 | 96 |
-|---|---|---|---|---|---|---|---|---|---|
-| unplaced | 65 | 62 | 60 | 60 | 58 | 55 | 53 | 50 | 46 |
+| GAP (NQ = 4, DW = 128) | 16 | 32 | 64 | 96 |
+|---|---|---|---|---|
+| detailed WL | 11,037,234 | 12,126,257 | 12,338,910 | 14,065,232 |
+| endpoint | clean | clean | clean | clean |
 
 `-DW` alone: `IW` sizes `dec_cell` and every cell enclosing it, so setting it
-too would measure a different design from the one recorded here — it gives
-the same counts at a ~30 % lower WL, which is a measurement rather than a
-reason to move the two knobs together.
+too would measure a different design from the one recorded here. So `GAP`
+and `M` are plain constants across the whole NQ dial **and** across a 4×
+datapath — a stronger claim than the one it replaced, and one reached by
+removing faces rather than by tuning a gap.
 
-Never zero at any width tried — NQ = 1 runs the same way, 65 down to 31 at
-GAP 160 — and the bits are **culled for crossing a keepout**, on one
-cross-level NoC leg (`<cluster>/rtr/fi_out → l2/mc`). No gap width addresses
-that; a wider gap shifts every block's track phase, so it moves the count
-without feeding the constraint. `GAP` and `M` are therefore plain constants
-that work across the whole NQ dial at the default bus widths, and a design
-moving `DW` far from the default sweeps `-GAP` and **measures** the result
-rather than trusting an arithmetic.
+The last part of the lesson is that these numbers get re-run, and have now
+moved **twice**. An earlier sweep read as *non-monotone* (clean at GAP
+40/48/80, stranded at the rest) and was presented here as the reason no
+derivation could exist; a second healer round changed the answer at every
+point; then the star fix turned a whole failing table clean. A recorded
+measurement nothing re-runs decays into a claim, so
+`test_a_wider_channel_is_not_the_lever_a_wider_bus_needs` runs the cheap end
+of both directions on every test run.
 
-The last part of the lesson is that these numbers were re-run. An earlier
-sweep in this section read as *non-monotone* (clean at GAP 40/48/80, stranded
-at the rest) and was presented here as the reason no derivation could exist;
-a second healer round added to `heal_if_dirty` afterwards changed the answer
-at every point, and nothing re-ran the table. A recorded measurement nothing
-re-runs decays into a claim, so
-`test_a_wider_channel_is_not_the_lever_a_wider_bus_needs` now runs the cheap
-end of both directions (NQ = 1, ~9 s) on every test run.
+## `-bottomup`: the channel it used to need was a face
 
-## `-bottomup` changes the geometry, and exercises the `independent` path
+`-bottomup` used to widen the channel behind the caller's back (`GAP 24
+M 24`), and the sweep that justified it read **non-monotone** at NQ = 4 —
+16 ✗, 24 ok, 32 ok, 48 ok, **64 ✗**, 96 ok — which was written up here as
+evidence that a *fixed* copy turns the channel into a phase lottery.
 
-Like `tpu.tcl`'s, this `-bottomup` is not only a flow change. The copied
-cell-local routing is a fixed copy at every instance, so what it cannot clear
-is an **overlap** rather than an open, and at the top-down channel the design
-leaves two standing after both healer rounds. Measured at NQ = 4:
+Both halves were the star faces. With those sized from the bits that land on
+them, `-bottomup` needs **no channel at all** through NQ = 4, and where it
+does need one the curve is plain monotone. Measured at NQ = 8:
 
 | GAP | 16 | 24 | 32 | 48 | 64 | 96 |
 |---|---|---|---|---|---|---|
-| result | ✗ 2 overlaps | ok | ok | ok | ✗ 256 unplaced | ok |
+| result | ✗ 1 ovl / 6 unpl | ✗ 0 / 5 | ✗ 0 / 4 | ok | ok | ok |
+| detailed WL | 2,504,030 | 2,475,632 | 2,704,106 | 3,177,507 | 3,717,129 | 4,477,478 |
 
-so 24 is the cheapest that clears it (+7.8 % WL over the failing 16). This
-sweep is where the *perturbation* reading has its evidence: 64 fails between
-two clean neighbours, because the copied routing is a **fixed** copy and the
-channel decides which phase each instance lands on. It is also why the flag
-supplies `GAP` and `M` **atomically** — naming *either* suppresses the whole
-pair, because a caller who names one is doing the geometry by hand. Filling each half in
-independently made the flag's own contribution partial: `-bottomup -GAP 16`
-left `M` at 24 and gave a 4976 × 1576 die where the default geometry is
-4720 × 1440, so a sweep meant to vary the channel alone varied two things
-(and `-bottomup -M 16` leaked the other way, 4840 × 1472).
+So the widening is gone: at NQ ≤ 4 it bought nothing and cost wire (NQ = 4:
+1,237,977 at the default against 1,329,561 at 24), and at NQ = 8 it was not
+enough anyway. Nor is there a number that would have been: NQ = 16 still
+strands one bit at 48 and wants **96**. What a fixed copy needs is a
+function of the size, which is the caller's to measure — a bottom-up run
+above NQ = 4 names the channel itself, `soc.tcl 8 -bottomup -GAP 48 -M 48`.
+
+The atomicity rule it needed is kept as history rather than as code: while
+the flag *did* supply the pair it had to supply both or neither, since
+`-bottomup -GAP 16` left `M` at 24 and gave 4976 × 1576 where that revision's
+default geometry was 4720 × 1440, while `-bottomup -M 16` leaked the other
+way — a sweep meant to vary the channel varied two things. Nothing supplies a knob behind the
+caller's back now.
 
 `align_bottom_up` then reports that nested marked parents place children at
 incompatible phases, and that is measured rather than tuned away: the track
