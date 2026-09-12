@@ -720,9 +720,17 @@ proc soc_vehicle::heal_if_dirty {who} {
     # `refine_selection` re-pins on the MEASURED result and changes the
     # contention geometry they stalled on, and negotiate re-plans its targets
     # unpinned so refine's pins do not block it.  Byte-identical no-op on a
-    # residue it cannot improve -- measured here, where it does not rescue
-    # the `-bottomup` overlaps, which is why that flag widens the channel
-    # instead (see `soc.tcl`).
+    # residue it cannot improve.
+    #
+    # This used to add "-- which is why `-bottomup` widens the channel
+    # instead", and that advice OUTLIVED its cause: the copy-induced overlaps
+    # it pointed at were the STAR FACES, the flag's automatic `GAP 24 M 24`
+    # is gone (soc.tcl), and at the sizes this round reaches the default
+    # channel is clean.  A note left beside a healer saying a geometry knob
+    # is the remedy will send the next investigation to tune geometry for a
+    # failure that no longer exists (Codex P2, #930).  Where a fixed copy
+    # DOES need a channel (NQ>=8 under `-bottomup`) the caller names it, and
+    # the measured curve lives in soc.tcl beside the removal.
     puts "$who: still dirty ([buda::query overlaps] overlaps,\
           [buda::query unplaced] unplaced) -- second round"
     buda::refine_selection

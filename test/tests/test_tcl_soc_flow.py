@@ -27,6 +27,7 @@ deliberately small (NQ=1..2) so the tier stays fast; the sweep to NQ=16 and
 the two lessons the vehicle paid for are in `flow/tcl/ReadMe.md`.
 """
 import collections
+import os
 import re
 import shutil
 import subprocess
@@ -430,29 +431,72 @@ def test_every_configured_bank_carries_a_net(tmp_path):
     filler geometry, moved the die and the census, and left the routed
     workload alone (Codex P2, #930).
 
-    Pinned by comparing the banner's advertised bus count against the number
-    of buses the ENGINE actually received — the bundler's hbundle count,
-    which is one per bus in this design.  Both halves matter and the first
-    draft of this test had neither: it read the advertised count at two
-    `NBANK` settings and asserted the difference, which `describe` computes
-    by arithmetic from the very knob being varied.  Re-wiring only `bank_0`
-    left all thirteen tests passing.  A count a flow COMPUTES cannot witness
-    what that flow DECLARED."""
-    def counts(*knobs):
-        r = _run(tmp_path, 1, *knobs)
+    Asserted on ENDPOINT IDENTITY, which took two goes to get right, and the
+    two wrong versions are the reason the docstring is this long:
+
+    * v1 read the banner's advertised bus count at two `NBANK` settings and
+      asserted the difference.  But `describe` COMPUTES that count by
+      arithmetic from the very knob being varied, and `-dry` exits before a
+      single bus is declared — re-wiring only `bank_0` left every test in
+      this file passing.  A count a flow computes cannot witness what that
+      flow declared.
+    * v2 compared the advertised count against the bundler's hbundle count,
+      which does come from the declarations.  Still not enough (Codex P2
+      again): a regression from `bank_$b` to `bank_0` that KEEPS the
+      uniquely-named buses leaves both counts and both deltas identical
+      while every nonzero bank is disconnected — exactly the defect.  An
+      AGGREGATE cannot witness WHICH endpoint a bus reached.
+
+    So this reads the endpoints themselves, out of the recorder
+    (`BUDA_RECORD` writes every command as it reaches `do_command`, so the
+    `add_bus` lines carry the paths the flow actually passed), and requires
+    each configured bank to drive its own read bus and receive its own
+    address bus.  The count check is kept as the second half, since it is
+    what catches `describe` going stale."""
+    def declared(*knobs):
+        rec = tmp_path / ("rec_%s.buda" % ("_".join(map(str, knobs)) or "def"))
+        r = subprocess.run(["tclsh", str(_VEHICLE), "1", *map(str, knobs)],
+                           capture_output=True, encoding="utf-8",
+                           errors="replace", cwd=tmp_path, timeout=900,
+                           env={**os.environ, "BUDA_RECORD": str(rec)})
         assert r.returncode == 0, r.stdout + r.stderr
+        buses = []
+        for ln in rec.read_text().splitlines():
+            f = ln.split()
+            if f and f[0] == "add_bus":
+                buses.append((f[1], f[2], f[3]))      # name, driver, receiver
         said = re.search(r"(\d+) buses", r.stdout)
         built = re.search(r"HierBundler: (\d+) hbundles", r.stdout)
         assert said and built, r.stdout
-        return int(said.group(1)), int(built.group(1))
+        return buses, int(said.group(1)), int(built.group(1))
 
-    base_said, base_built = counts()
+    def assert_banks_wired(buses, nbank, nbank2):
+        drivers = {d for _n, d, _r in buses}
+        receivers = {r for _n, _d, r in buses}
+        # every L1 of every cluster (NQ=1, so NC=2 clusters), then the L2
+        holders = [("quad_0/cl_%d/%s" % (c, side), nbank)
+                   for c in range(2) for side in ("l1i", "l1d")]
+        holders.append(("l2", nbank2))
+        for holder, n in holders:
+            for b in range(n):
+                bank = "%s/bank_%d" % (holder, b)
+                assert "%s.a_in" % bank in receivers, (
+                    "no address bus reaches %s -- a configured bank is "
+                    "disconnected, which is what this test exists for" % bank)
+                assert "%s.out" % bank in drivers, (
+                    "%s drives no read bus" % bank)
+
+    base, base_said, base_built = declared()
     assert base_said == base_built, (base_said, base_built)
-    # 2 clusters x 2 caches x 2 buses per extra L1 bank; 2 per extra L2 bank
-    for knobs, delta in ((("-NBANK", 3), 8), (("-NBANK2", 6), 4)):
-        said, built = counts(*knobs)
+    assert_banks_wired(base, 2, 4)                     # the defaults
+
+    # ...and raising either knob wires the banks it adds, not just counts them
+    for knobs, nbank, nbank2, delta in ((("-NBANK", 3), 3, 4, 8),
+                                        (("-NBANK2", 6), 2, 6, 4)):
+        buses, said, built = declared(*knobs)
         assert said == built, (knobs, said, built)
         assert built == base_built + delta, (knobs, base_built, built)
+        assert_banks_wired(buses, nbank, nbank2)
 
 
 def _die(out):
