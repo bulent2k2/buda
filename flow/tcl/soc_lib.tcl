@@ -156,7 +156,7 @@ proc soc_vehicle::configure {{overrides {}}} {
     # every gap, with the channel still pure cost:
     #
     #   GAP (NQ=4, DW=128)    16          32          64          96
-    #   detailed WL       11,037,234  12,126,257  12,338,910  14,065,232
+    #   detailed WL       11,040,362  12,129,097  12,341,964  13,936,468
     #                                                     (every row CLEAN)
     #
     # -- `-DW` ALONE, since `IW` sizes `dec_cell` and every cell enclosing it
@@ -221,19 +221,38 @@ proc soc_vehicle::configure {{overrides {}}} {
     # it, and the two readings that sounded most like physics -- a keepout
     # cull, a dead span -- were the two that survived longest.
 
+    # And the MIRROR of the face rule, which cost a fourth reading: a knob
+    # may appear in a cell's size ONLY IF some bus of that width lands on
+    # that cell.  Three terms broke it -- `dec_cell`'s `2*CW`, `tagpin`'s
+    # `CW`, `bridge_cell`'s `DW` -- all PHANTOM dependencies, a knob sizing a
+    # cell no bus of that knob's width ever touches (Codex P2, #930).  Only
+    # the first was live: `-CW 128` grew the whole core/cluster stack for
+    # nothing (die 4576x5600 against 4320x4704), so that experiment was
+    # measuring unrelated whitespace and could credit a clean route to the
+    # wrong geometry; the other two were dominated at the defaults and bind
+    # at `NBANK`/`NIO` 1.  The defaults are UNCHANGED by their removal,
+    # which is exactly why reading the table never found them.
+    #
+    # `test_no_cell_is_sized_from_a_knob_no_bus_brings_it` is the guard, and
+    # it is the one test here that exists because a HAND audit found this
+    # class twice running: it perturbs each knob and diffs the sizes (no
+    # parsing), resolves each recorded bus endpoint through this file's own
+    # `cell_at`, and requires depends ⊆ lands -- ONE REGIME PER KNOB, since
+    # a term is invisible in any regime where its knob is not what binds.
+    #
     # Two faces are sized by a SUM rather than by one bus, because a pin is
     # one place: every bank of a cache drives `tag.d_in`, every L2 bank
     # drives `mc.d_in`, and every peripheral of a cluster arrives at one
     # `xbar.p_in` — a star each, and the star is the mistake this vehicle has
     # now made three times (see 3b).  `NBANK`/`NBANK2`/`NIO` therefore grow
     # the cells they feed, which is what makes those knobs mean something.
-    set tagpin [expr {max($P(CW), $P(NBANK)*max($P(AW), $P(DW), $P(IW)))}]
+    set tagpin [expr {$P(NBANK)*max($P(AW), $P(DW), $P(IW))}]
     set percl  [expr {int(ceil(double($P(NIO))/($P(NQ)*$P(NC))))}]
 
     variable LEAF
     array set LEAF [list \
         dec_cell    [list [expr {max($P(IW), $P(AW))}] \
-                          [expr {max($P(IW), $P(AW), 2*$P(CW))}] ] \
+                          [expr {max($P(IW), $P(AW))}]   ] \
         alu_cell    [list [expr {max(2*$P(DW), $P(IW))}] \
                           [expr {max($P(DW), $P(IW))}]   ] \
         mul_cell    [list [expr {2*$P(DW)}]          [expr {$P(DW)}]       ] \
@@ -246,8 +265,7 @@ proc soc_vehicle::configure {{overrides {}}} {
                           [expr {max(2*$P(DW), $P(AW), $percl*$P(CW))}] ] \
         fifo_cell   [list [expr {2*$P(DW)}]          [expr {2*$P(DW)}]     ] \
         io_cell     [list [expr {$P(CW)}]            [expr {$P(CW)}]       ] \
-        bridge_cell [list [expr {max($P(NIO)*$P(CW), $P(DW))}] \
-                          [expr {max($P(NIO)*$P(CW), $P(DW))}] ] \
+        bridge_cell [list [expr {$P(NIO)*$P(CW)}]    [expr {$P(NIO)*$P(CW)}] ] \
         memctl_cell [list [expr {$P(NBANK2)*max($P(DW), $P(AW))}] \
                           [expr {$P(NBANK2)*max($P(DW), $P(AW))}] ] \
     ]

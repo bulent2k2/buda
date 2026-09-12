@@ -358,6 +358,146 @@ def test_bottom_up_changes_the_flow_and_not_the_geometry(tmp_path):
     assert _verdict(routed) == (0, 0, 0), routed.stdout + routed.stderr
 
 
+def test_no_cell_is_sized_from_a_knob_no_bus_brings_it(tmp_path):
+    """The face rule has a MIRROR the other tests do not cover: every knob a
+    cell's size mentions must be the width of some bus that lands on that
+    cell.
+
+    The forward direction — every bus's endpoints are sized for it — is what
+    `test_every_cell_a_bus_lands_on_is_sized_from_that_bus` and the per-pin
+    test assert.  The mirror is a PHANTOM DEPENDENCY: a term left in the
+    table for a bus that never existed, or that moved.  `dec_cell` carried
+    `2*CW` from the vehicle's first draft while nothing with `CW` ever
+    touched `dec`, and `-CW 128` therefore grew the whole core/cluster stack
+    (die 4576x5600 against 4320x4704), so a CW experiment was measuring
+    unrelated whitespace and could credit a clean route to the wrong
+    geometry (Codex P2, #930).  `tag_cell` and `bridge_cell` carried the
+    same shape LATENT — dominated at the defaults, binding at small
+    `NBANK`/`NIO`.
+
+    This is the one guard in this file that exists because a hand audit
+    found the defect twice in a row.  It is MECHANICAL on both halves,
+    since reading the table is what let all three survive:
+
+    * which cells DEPEND on a knob: perturb that knob alone and diff
+      `soc_vehicle::size` over every cell — no parsing of the expressions;
+    * which cells a knob LANDS on: run the flow under `BUDA_RECORD` with
+      every width knob set to a DISTINCT value, so each recorded bus's bit
+      count identifies its knob, and resolve each endpoint path through the
+      vehicle's OWN `cell_at` (the engine calls `build_hierarchy` makes are
+      stubbed, so `CELLOF` fills with no engine — the mapping is the
+      vehicle's, not a copy of it here).
+
+    Then `depends ⊆ lands`, per knob.  Swept in two regimes so a term that
+    is merely dominated at one setting is still caught: the distinct-value
+    baseline, and a MINIMAL one (`NBANK`/`NIO` at 1 with narrow buses) where
+    a `max(..., CW)` or `max(..., DW)` floor is the binding term."""
+    stub = tmp_path / "stub.tcl"
+    stub.write_text(
+        "namespace eval buda {}\n"
+        "foreach p {set_die add_cell add_inst_to_cell add_inst} "
+        "{ proc buda::$p args {} }\n"
+        "source [file join {%s} flow tcl soc_lib.tcl]\n"
+        "soc_vehicle::configure [lrange $argv 0 end]\n"
+        "soc_vehicle::build_hierarchy\n"
+        "foreach path [split [read stdin] \"\\n\"] {\n"
+        "    if {[string trim $path] eq \"\"} continue\n"
+        "    puts \"[soc_vehicle::cell_at $path]|$path\"\n"
+        "}\n" % _ROOT)
+
+    def sizes(knobs):
+        probe = tmp_path / ("sz_%s.tcl" % "_".join(map(str, knobs)))
+        probe.write_text(
+            "source [file join {%s} flow tcl soc_lib.tcl]\n"
+            "soc_vehicle::configure [list %s]\n"
+            "foreach c [lsort [array names soc_vehicle::SZ]] "
+            "{ puts \"$c [soc_vehicle::size $c]\" }\n"
+            % (_ROOT, " ".join(map(str, knobs))))
+        r = subprocess.run(["tclsh", str(probe)], capture_output=True,
+                           encoding="utf-8", cwd=tmp_path, timeout=120)
+        assert r.returncode == 0, r.stdout + r.stderr
+        return dict(ln.split(None, 1) for ln in r.stdout.splitlines())
+
+    def audit(knobs, widths, tag):
+        """`knobs` is {name: value}; `widths` the width knobs among them,
+        which must be pairwise DISTINCT so a bus names its own knob.
+
+        Two spellings of the same setting: the vehicle's CLI takes
+        `-NAME value`, while `soc_vehicle::configure` takes bare pairs.
+        Both are built from the one dict rather than written twice."""
+        rec = tmp_path / ("phantom_%s.buda" % tag)
+        dashed = [s for k, v in knobs.items() for s in ("-%s" % k, str(v))]
+        flat = [s for k, v in knobs.items() for s in (k, str(v))]
+        # The route's VERDICT is irrelevant here — this audits DECLARATIONS,
+        # and a regime with one knob at 200 is deliberately lopsided enough
+        # to strand bits.  What must hold is that the flow got as far as
+        # declaring its buses, which the emptiness check below is.  (`-dry`
+        # cannot serve: it exits before `build_buses`, so it records none.)
+        r = subprocess.run(["tclsh", str(_VEHICLE), "1", *dashed],
+                           capture_output=True, encoding="utf-8",
+                           errors="replace", cwd=tmp_path, timeout=900,
+                           env={**os.environ, "BUDA_RECORD": str(rec)})
+        buses = [(f[1], f[2], f[3]) for f in
+                 (ln.split() for ln in (rec.read_text() if rec.exists() else "")
+                  .splitlines()) if f and f[0] == "add_bus"]
+        assert buses, ("the flow declared no bus in regime %s, so there is "
+                       "nothing to audit against" % tag,
+                       r.stdout[-2000:], r.stderr[-2000:])
+        paths = sorted({p for _n, d, rr in buses for p in (d, rr)})
+        out = subprocess.run(["tclsh", str(stub), "NQ", "1", *flat],
+                             input="\n".join(paths), capture_output=True,
+                             encoding="utf-8", cwd=tmp_path, timeout=120)
+        assert out.returncode == 0, out.stdout + out.stderr
+        cell_of = {}
+        for ln in out.stdout.splitlines():
+            if "|" in ln:
+                cell, path = ln.split("|", 1)
+                cell_of[path] = cell
+        by_width = {v: k for k, v in widths.items()}
+        assert len(by_width) == len(widths), ("the regime's widths must be "
+                                             "DISTINCT or a bus cannot name "
+                                             "its knob", widths)
+        lands = {}
+        for name, d, rr in buses:
+            m = re.search(r"\[(\d+)\]", name)
+            knob = by_width.get(int(m.group(1))) if m else None
+            if knob is None:
+                continue                      # a derived width, not a knob
+            for path in (d, rr):
+                lands.setdefault(cell_of.get(path, "?"), set()).add(knob)
+        assert lands, "no bus width matched a knob value in this regime"
+
+        base = sizes(["NQ", "1", *flat])
+        phantoms = []
+        for knob, val in widths.items():
+            moved = dict(knobs, **{knob: val * 2})
+            moved_flat = [s for k, v in moved.items() for s in (k, str(v))]
+            for cell, sz in sizes(["NQ", "1", *moved_flat]).items():
+                if base.get(cell) == sz or cell not in lands:
+                    continue                  # unchanged, or a container
+                if knob not in lands[cell]:
+                    phantoms.append((tag, knob, cell))
+        return phantoms
+
+    # ONE REGIME PER KNOB, each with that knob DOMINANT and the
+    # multiplicities at 1.  A single regime is not enough and the first cut
+    # of this test proved it: with `CW` large, `bridge_cell`'s phantom
+    # `max(NIO*CW, DW)` is CW-dominated, so re-injecting the `DW` term
+    # changed no size and the guard passed.  A term can only be caught in a
+    # regime where its knob is what binds, so each knob gets one.
+    small = {"DW": 8, "AW": 9, "IW": 10, "CW": 11}
+    found = []
+    for knob in small:
+        widths = dict(small, **{knob: 200})
+        assert len(set(widths.values())) == len(widths), widths
+        found += audit({"NBANK": 1, "NIO": 1, **widths}, widths, knob.lower())
+    assert not found, (
+        "a cell's size depends on a knob no bus of that width lands on -- a "
+        "PHANTOM dependency, so that knob's experiment measures unrelated "
+        "whitespace.  Either remove the term or wire the bus it implies.",
+        found)
+
+
 def _sizes(tmp_path, knob, cells):
     """`soc_vehicle::size` for each of `cells`, in a FRESH interpreter under
     exactly the one override in `knob`."""
@@ -486,20 +626,27 @@ def test_every_configured_bank_carries_a_net(tmp_path):
         return buses, int(said.group(1)), int(built.group(1))
 
     def assert_banks_wired(buses, nbank, nbank2):
-        drivers = {d for _n, d, _r in buses}
-        receivers = {r for _n, _d, r in buses}
+        # The recorder hands over (name, driver, receiver) TRIPLES, so the
+        # association is asserted, not just the membership: two independent
+        # sets are satisfied by a CROSS-WIRED bank (an l1i bank driving the
+        # l1d tag, an address arriving from the wrong tag) with every count
+        # and every endpoint still present (Codex P2, #930).
+        pairs = {(d, r) for _n, d, r in buses}
         # every L1 of every cluster (NQ=1, so NC=2 clusters), then the L2
-        holders = [("quad_0/cl_%d/%s" % (c, side), nbank)
+        holders = [("quad_0/cl_%d/%s" % (c, side), "tag", nbank)
                    for c in range(2) for side in ("l1i", "l1d")]
-        holders.append(("l2", nbank2))
-        for holder, n in holders:
+        holders.append(("l2", "mc", nbank2))
+        for holder, arb, n in holders:
             for b in range(n):
                 bank = "%s/bank_%d" % (holder, b)
-                assert "%s.a_in" % bank in receivers, (
-                    "no address bus reaches %s -- a configured bank is "
-                    "disconnected, which is what this test exists for" % bank)
-                assert "%s.out" % bank in drivers, (
-                    "%s drives no read bus" % bank)
+                want_addr = ("%s/%s.b_out" % (holder, arb), "%s.a_in" % bank)
+                want_read = ("%s.out" % bank, "%s/%s.d_in" % (holder, arb))
+                assert want_addr in pairs, (
+                    "no address bus runs %s -> %s: a configured bank is "
+                    "disconnected or CROSS-WIRED, which is what this test "
+                    "exists for" % want_addr)
+                assert want_read in pairs, (
+                    "no read bus runs %s -> %s" % want_read)
 
     base, base_said, base_built = declared()
     assert base_said == base_built, (base_said, base_built)

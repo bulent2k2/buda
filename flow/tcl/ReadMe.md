@@ -306,6 +306,22 @@ advisory named the seat every time and never once the reason for it — and
 the two readings that sounded most like physics, a keepout cull and a dead
 span, were the two that survived longest.
 
+**The mirror**, which cost a fourth reading of the same rule: a knob may
+appear in a cell's size **only if** some bus of that width lands on that
+cell. Three terms broke it — `dec_cell`'s `2*CW`, `tagpin`'s `CW`,
+`bridge_cell`'s `DW` — each a **phantom dependency**, a knob sizing a cell
+no bus of that width ever touches. Only the first was live, and it mattered:
+`-CW 128` grew the whole core/cluster stack for nothing (die 4576 × 5600
+against 4320 × 4704), so that experiment was measuring unrelated whitespace
+and could credit a clean route to the wrong geometry. The other two were
+dominated at the defaults and bind at `NBANK`/`NIO` = 1. Removing all three
+leaves the defaults **unchanged**, which is precisely why reading the table
+never found them — and why the guard
+(`test_no_cell_is_sized_from_a_knob_no_bus_brings_it`) perturbs each knob
+and diffs the sizes rather than parsing the expressions, with **one regime
+per knob**, since a term is invisible in any regime where its knob is not
+what binds.
+
 ## The lesson it paid for: a face is derived, a channel is not
 
 A leaf's size **is** derived from the bits that land on its faces — that is
@@ -349,7 +365,7 @@ still in the netlist, and with those faces sized from what lands on them
 
 | GAP (NQ = 4, DW = 128) | 16 | 32 | 64 | 96 |
 |---|---|---|---|---|
-| detailed WL | 11,037,234 | 12,126,257 | 12,338,910 | 14,065,232 |
+| detailed WL | 11,040,362 | 12,129,097 | 12,341,964 | 13,936,468 |
 | endpoint | clean | clean | clean | clean |
 
 `-DW` alone: `IW` sizes `dec_cell` and every cell enclosing it, so setting it
