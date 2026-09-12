@@ -817,62 +817,65 @@ def _lef_layer_ids(file_layers, taken):
         return (f"{bare} has no trailing number and takes id {lid}, which "
                 f"{numbered} derives from its own name")
 
-    used, by_file, cause = set(taken), {}, ""
-    ids = []
-    for name, script_id in file_layers:
+    # ── pass 1: the FILE's own reading, with the SCRIPT playing no part.
+    # Every eligible routing layer claims an id by its NAME: its trailing
+    # number, or — having none — the first id the FILE has not claimed yet.
+    # A script-declared layer claims here too (it is in the file), and it
+    # claims by its NAME, never by the id the script gave it.
+    #
+    # Computing this against what the script HOLDS was the recurring fault.
+    # The clash is a property of the FILE's names, so a script id must not
+    # be able to make one appear (`def_layer 2 M1` over a distinct
+    # `M1`/`M2`/`M3` stack) or disappear (`def_layer 1 local` over
+    # `local`/`M1`/`M2`, where the file's own reading collides on 1 and the
+    # script's hold on 1 hid it).  Separating the passes is what makes both
+    # impossible rather than each one a case.
+    claims, seen, cause = [], {}, ""
+    for name, _script_id in file_layers:
         lid = _trailing(name)
-        if lid is None and script_id is None:
-            # An unnumbered name takes the first id nobody holds.
+        if lid is None:
             lid = 1
-            while lid in used:
+            while lid in seen:
                 lid += 1
-        if lid is not None and lid in by_file:
-            cause = _clash(by_file[lid], name, lid)
+        if lid in seen:
+            cause = _clash(seen[lid], name, lid)
             break                       # the whole stack goes by file order
-        if script_id is not None:
-            # The script declared this very layer BY NAME, so it keeps that
-            # id and is assigned none here.  What it contributes to the walk
-            # is the claim its NAME makes, which is NOT the same number:
-            # `def_layer 2 M1` holds 2 for the SCRIPT while `M1` still claims
-            # 1 in the file.  Recording the script's id as a file claim read
-            # the file's own `M2` as a file-internal clash and renumbered a
-            # stack whose names are all distinct — inverting it, since `M2`
-            # then landed at 1 under the script's `M1` at 2, and reporting a
-            # shared trailing number the two names do not have (Codex P2 on
-            # #929).  The script's id lives in `used`, which is the right
-            # home for it: it REFUSES one layer, it does not abandon the
-            # name-derived reading for the stack.
-            if lid is not None:
-                by_file[lid] = name
-            continue
-        if lid in used:
-            # The SCRIPT holds it, so THIS layer is refused — but the FILE
-            # still claims the id by its name, and the two questions are
-            # independent.  Leaving the claim unrecorded let a script id
-            # unrelated to any of these names hide a clash BETWEEN them:
-            # `def_layer 1 OTHER` over a `Metal1`/`TopMetal1` stack refused
-            # both, one at a time, with no BUDA-1617 and no fallback — the
-            # five-layer IHP model again, through a third door (Codex P1 on
-            # #929).  Recording it here is what lets the NEXT name deriving
-            # the same id be seen as the file-internal clash it is.
-            by_file[lid] = name
-            ids.append(None)
-            continue
-        used.add(lid)
-        by_file[lid] = name
-        ids.append(lid)
-    else:
+        seen[lid] = name
+        claims.append(lid)
+
+    if not cause:
+        # ── pass 2: assign, and only here does the script exist.  Claims are
+        # distinct by construction, so the one way an id is unavailable is
+        # that the SCRIPT holds it for some other layer — that layer alone is
+        # refused, exactly as before this change.
+        ids = []
+        for (_name, script_id), lid in zip(file_layers, claims):
+            if script_id is not None:
+                continue                # keeps the id the script gave it
+            ids.append(None if lid in taken else lid)
         return ids, False, ""
 
-    # By the file's order, into the ids the script has not already claimed.
-    ids, lid = [], 1
+    # ── the fallback: the FILE's own order, which means MONOTONE.  A
+    # script-declared layer is an ANCHOR at a fixed id in the middle of the
+    # stack, so allocation continues ABOVE it rather than restarting at 1 —
+    # restarting put `Metal2` at 1 beneath an anchored `Metal1` at 2 and
+    # recreated the very inversion this fallback exists to avoid (Codex P2 on
+    # #929).  Ids the script holds are stepped over as before.
+    #
+    # `max` on the anchor is the honest limit: a script whose own `def_layer`
+    # ids run against the file's order cannot be made monotone by anything
+    # here — the script owns its numbering — so this refuses to add to the
+    # inversion rather than pretending to fix it.
+    ids, prev = [], 0
     for _name, script_id in file_layers:
         if script_id is not None:
+            prev = max(prev, script_id)
             continue
+        lid = prev + 1
         while lid in taken:
             lid += 1
         ids.append(lid)
-        lid += 1
+        prev = lid
     return ids, True, cause
 
 

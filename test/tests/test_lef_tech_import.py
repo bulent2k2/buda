@@ -509,6 +509,86 @@ def test_an_unrelated_script_id_cannot_hide_the_files_own_clash(tmp_path):
             ("Metal1", "Metal2", "TopMetal1")] == [2, 3, 4], out
 
 
+def test_the_renumber_continues_above_a_script_anchor_rather_than_under_it(tmp_path):
+    """The fallback exists to keep ids increasing in FILE order, and
+    restarting the allocation at 1 broke exactly that (Codex P2, #929).
+
+    `def_layer 2 Metal1` anchors the file's FIRST layer at 2 and does not
+    stop the file's own `Metal1`/`TopMetal1` clash, so the fallback runs —
+    and put `Metal2` at **1**, beneath the anchor, inverting the two lowest
+    layers of the stack.  Since adjacency decides which layers a via may
+    join, an inversion is silently wrong geometry, which is the whole reason
+    the fallback prefers file order to the names.
+
+    A script-declared layer is an ANCHOR: allocation continues ABOVE it.
+    """
+    s, out = _run(tmp_path, """
+        def_layer 2 Metal1 H LOW 30
+        import_lef_tech @TECH@
+        """, _ONE_CLASH)
+    assert "BUDA-1617" in out, out
+    ids = [s._layer_name_map[n] for n in ("Metal1", "Metal2", "TopMetal1")]
+    assert ids == [2, 3, 4], (ids, out)          # anchored, then increasing
+    assert ids == sorted(ids), ids               # ...said as the property
+
+
+def test_a_script_declared_unnumbered_layer_still_makes_the_files_claim(tmp_path):
+    """The combination of two shapes already covered separately, and it fell
+    between them (Codex P2, #929): an unnumbered name that is ALSO
+    script-declared.
+
+    `def_layer 1 local` over a `local`/`M1`/`M2` stack — the file's own
+    reading has `local` taking 1 and `M1` deriving 1, which is a clash and
+    should renumber the stack.  Instead `local`'s claim was never computed
+    (it has no trailing number, and the next-free branch was gated on the
+    layer being unassigned), so `M1` read as colliding with the script alone
+    and was dropped: **1 of 3 imported, no BUDA-1617**.
+
+    The fix is structural — the file's claims are computed in a pass where
+    the SCRIPT does not exist at all, so a script id can neither invent a
+    clash nor hide one.  That is the same sentence four of these findings
+    turned on, finally enforced by the shape of the code rather than by a
+    branch per case.
+    """
+    s, out = _run(tmp_path, """
+        def_layer 1 local H LOW 30
+        import_lef_tech @TECH@
+        """, _UNNUMBERED)
+    assert "BUDA-1617" in out, out
+    assert "skipped layer" not in out, out
+    assert [s._layer_name_map[n] for n in ("local", "M1", "M2")] == [1, 2, 3], out
+
+
+def test_a_held_id_cannot_shift_an_unnumbered_names_claim_and_hide_a_clash(tmp_path):
+    """The property the two-pass split exists for, pinned directly — because
+    it was NOT pinned by the shapes above.  A mutation that consults `taken`
+    while computing the file's claims passed all of them.
+
+    An unnumbered name takes the first id THE FILE has not claimed.  Let what
+    the SCRIPT holds shift that, and an unrelated `def_layer 1 OTHER` moves
+    `local` off 1, so `M1` no longer collides with it in the file's reading
+    and is dropped as a mere script collision — the clash between two of the
+    FILE's own names, invisible because of a third name in neither.
+
+    That sentence — the clash is a property of the FILE's names, not of what
+    the script holds — is what four of these findings turned on.  It is
+    enforced by the passes now, so this test guards the SHAPE of the code.
+    """
+    tech = "VERSION 5.8 ;\n" + "".join(
+        "LAYER %s\n  TYPE ROUTING ;\n  DIRECTION %s ;\n  PITCH 0.2 ;\n"
+        "  WIDTH 0.1 ;\nEND %s\n" % (n, d, n)
+        for n, d in [("local", "HORIZONTAL"), ("M1", "VERTICAL")]) + \
+        "END LIBRARY\n"
+    s, out = _run(tmp_path, """
+        def_layer 1 OTHER H LOW 30
+        import_lef_tech @TECH@
+        """, tech)
+    assert "BUDA-1617" in out, out
+    assert "skipped layer" not in out, out
+    assert s._layer_name_map["OTHER"] == 1, out
+    assert [s._layer_name_map[n] for n in ("local", "M1")] == [2, 3], out
+
+
 def test_the_catalogue_describes_every_shape_the_id_is_raised_for(tmp_path):
     """`dump_messages` is what a methodology reads to decide what it may
     waive or gate on BEFORE the message fires, so a catalogue line narrower
