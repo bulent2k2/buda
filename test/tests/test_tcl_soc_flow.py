@@ -441,18 +441,29 @@ def test_every_configured_bank_carries_a_net(tmp_path):
       this file passing.  A count a flow computes cannot witness what that
       flow declared.
     * v2 compared the advertised count against the bundler's hbundle count,
-      which does come from the declarations.  Still not enough (Codex P2
-      again): a regression from `bank_$b` to `bank_0` that KEEPS the
-      uniquely-named buses leaves both counts and both deltas identical
-      while every nonzero bank is disconnected — exactly the defect.  An
-      AGGREGATE cannot witness WHICH endpoint a bus reached.
+      which does come from the declarations.  Better, and still the wrong
+      INSTRUMENT (Codex P2 again): an AGGREGATE cannot witness WHICH
+      endpoint a bus reached, so whether it catches a bank being
+      disconnected is a property of the BUNDLER rather than of the design.
+      Here it happens to catch it — `bank_$b` → `bank_0` was MEASURED at
+      54 declared buses against 50 hbundles, because STRICT grouping merges
+      the duplicate-endpoint bus that takes the dead bank's place, and the
+      degenerate substitutions are refused outright ("used as both driver
+      and receiver").  Saying instead that the mutation SLIPS PAST the count
+      is the claim this docstring first made, and it contradicted the four
+      measurements recorded beside it (Codex P2 a third time): the count is
+      adequate on today's grouping rule, and the point is that it should not
+      have to be.
 
     So this reads the endpoints themselves, out of the recorder
     (`BUDA_RECORD` writes every command as it reaches `do_command`, so the
     `add_bus` lines carry the paths the flow actually passed), and requires
     each configured bank to drive its own read bus and receive its own
-    address bus.  The count check is kept as the second half, since it is
-    what catches `describe` going stale."""
+    address bus — no coupling to how nets are grouped.  The count check is
+    kept as the second half, since it is what catches `describe` going
+    stale.  Verified non-vacuous against the real data rather than by a flow
+    mutation, since none isolates it: the recorded 54-bus list passes, and
+    the same list with one bank's two lines removed fails naming the bank."""
     def declared(*knobs):
         rec = tmp_path / ("rec_%s.buda" % ("_".join(map(str, knobs)) or "def"))
         r = subprocess.run(["tclsh", str(_VEHICLE), "1", *map(str, knobs)],
