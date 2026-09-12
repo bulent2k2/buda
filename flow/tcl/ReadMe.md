@@ -534,9 +534,9 @@ Measured, and the invariant is the point:
 | 32 | 16 | `bundle 2 seg 0` M7 (TOP), 7 tracks < 8 bits | ✗ 3 ovl / 8 unpl |
 
 The same bundle, the same segment, the same eight bits, at two sizes 4× apart
-and at every gap — **including the clean one**. The seat is *invariant*; what
-varies is whether the **healers clear it**. And the tool has been saying the
-category in plain text at every one of those runs:
+and at every gap — **including the clean one**. The seat is invariant **under
+the gap knob**; what varies is whether the **healers clear it**. And the tool
+has been saying the category in plain text at every one of those runs:
 
 ```
 Advisory: 1 supply-doomed seat(s) — static width-infeasibility,
@@ -550,12 +550,67 @@ predicted it. *Why* healing succeeds at 24 and fails at 16/32/48 is **not**
 established here, and after withdrawing one asserted mechanism this round I am
 not about to supply another.
 
+#### "Invariant" was first written unqualified, and that overreached
+
+In the same direction as everything else this page has retracted. Two further
+measurements bound it, and the second is the one that matters:
+
+| run | doomed seat? |
+|---|---|
+| NQ = 2 / 4 / 8, `-bottomup` | **none reported at all** |
+| NQ = 16, **plain** (top-down) | clean, **none reported at all** |
+| NQ = 16, `-bottomup` | the seat, at every gap swept |
+
+The same design, at the same size, with the same `pc_0` and the same `io_cell`
+face, is **clean top-down**. So the seat is a product of the **bottom-up fixed
+copy at scale**, not of a declared width — which is why *"a wider `io_cell`
+face"* has been dropped from the remedies below. It was an untested guess, and
+the top-down run is evidence against it.
+
+Trying to make the seat appear at NQ = 1 — to give the test a live mutation —
+failed three times, and the failures are independent evidence for the same
+reading:
+
+| attempt | result |
+|---|---|
+| `io_cell` face ÷ 4 | the flow **refuses at declaration** — a too-narrow face never reaches the router |
+| `-GAP 4`, `-GAP 8` | clean, no seat: a starved channel does not produce one either |
+| `-CW 64` (4×) | clean, no seat |
+
+At this size the seat is reachable by **neither width nor channel**, so the
+`not in stdout` assertion in `test_bottom_up_routes_the_diverse_hierarchy_clean`
+is labelled in the test as a **canary** rather than as a guard with a
+demonstrated mutation. The negative result is worth more than the assertion.
+
+#### The seat lever, measured rather than asserted
+
 The consequence for the advice is that "a fixed copy needs a channel" was
 always naming the symptom. The lever a 7-tracks-for-8-bits seat wants is the
-seat: `set_max_bundle_bits 4 for pc_`, a wider `io_cell` face, or the re-seat
-heal — none of which is `GAP`. The channel guidance stays because it is what
-was *measured* to change the outcome, and it is now labelled as a workaround
-rather than as a cause.
+**seat** — and that is now measured (NQ = 16 `-bottomup`, one knob at a time)
+instead of listed:
+
+| remedy | ovl | unpl | viol | detailed WL |
+|---|---|---|---|---|
+| none (default GAP 16) | 3 | 8 | 8 | 4,319,399 |
+| `set_max_bundle_bits 4 for pc_` | 3 | **0** | **0** | 4,284,321 |
+| `-GAP 24 -M 24` | **0** | 0 | 0 | 4,648,190 |
+| both | 0 | 0 | 0 | 4,762,874 |
+
+That **decomposes the failure into two independent faults**. The seat lever
+removes *exactly* the seat — the eight stranded bits and the eight audit
+violations, with no doomed seat reported — at slightly **less** wire than doing
+nothing, and leaves the three overlaps untouched, because those are the
+fixed-copy residue and a different problem. The channel clears **both**, which
+is precisely why it looked like the cause for five revisions: it is the remedy
+for the overlaps and it re-seats the doomed segment incidentally.
+
+**The practical advice does not change**, and saying so plainly matters more
+than the diagnosis being new: for a *clean* endpoint the channel alone is still
+the cheapest point, and stacking both is redundant and costs 2.5 % more wire
+than the channel by itself. What the seat lever buys is a correct account of
+which fault is which — and a remedy for the stranding alone, at less wire than
+the default, for a methodology that can live with three overlaps. The channel
+guidance stays, labelled a workaround rather than a cause.
 
 **Both sides of that trade, priced.** The argument above counts only wire,
 which is half a comparison — so here is what the dirty endpoint costs at the

@@ -171,18 +171,60 @@ while {$argi < $argc} {
 #   16   48  bundle 2 seg 0      (LOW)              X 1 ovl / 8 unpl
 #   32   16  bundle 2 seg 0  M7 (TOP)  7 < 8 bits   X 3 ovl / 8 unpl
 #
-# The seat is INVARIANT; what varies is whether the HEALERS clear it.  The
-# tool names the category itself every time -- "static width-infeasibility,
-# not reservation conflicts" -- so this is the #536 supply-doomed seat class
-# and the gap only changes the geometry the healers then repair, which is why
-# the curve is non-monotone and why no threshold predicted it.  WHY healing
-# succeeds at 24 and not at 16/32/48 is NOT established, and this file just
-# withdrew one asserted mechanism, so it will not supply another.
+# The seat is invariant UNDER THE GAP KNOB; what varies is whether the
+# HEALERS clear it.  The tool names the category itself every time --
+# "static width-infeasibility, not reservation conflicts" -- so this is the
+# #536 supply-doomed seat class and the gap only changes the geometry the
+# healers then repair, which is why the curve is non-monotone and why no
+# threshold predicted it.  WHY healing succeeds at 24 and not at 16/32/48 is
+# NOT established, and this file just withdrew one asserted mechanism, so it
+# will not supply another.
 #
-# The lever a 7-tracks-for-8-bits seat wants is the SEAT --
-# `set_max_bundle_bits 4 for pc_`, a wider `io_cell` face, or the re-seat
-# heal -- none of which is GAP.  The channel guidance stays because it is
-# what was MEASURED to change the outcome, labelled a workaround, not a
+# "INVARIANT" WAS FIRST WRITTEN UNQUALIFIED, WHICH OVERREACHED IN THE SAME
+# DIRECTION AS EVERYTHING ELSE THIS FILE HAS RETRACTED.  Two measurements
+# bound it, and the second is the one that matters:
+#
+#   NQ=2/4/8  -bottomup            NO doomed seat reported at all
+#   NQ=16     PLAIN (top-down)     clean, NO doomed seat reported at all
+#   NQ=16     -bottomup            the seat, at every gap swept
+#
+# The same design, the same size, the same `pc_0` and the same `io_cell`
+# face is CLEAN top-down.  So the seat is a product of the BOTTOM-UP FIXED
+# COPY AT SCALE, not of a declared width -- which is why "a wider `io_cell`
+# face" was dropped from the remedies below: it was an untested guess, and
+# the top-down run is evidence against it.
+#
+# Trying to make the seat appear at NQ=1 -- to give the test a live mutation
+# -- failed THREE times, and the failures are independent evidence for the
+# same reading: an `io_cell` face /4 is REFUSED AT DECLARATION (a too-narrow
+# face never reaches the router), and `-GAP 4`/`-GAP 8` and `-CW 64` all come
+# back clean with no seat.  At that size the seat is reachable by NEITHER
+# width NOR channel.
+#
+# The lever a 7-tracks-for-8-bits seat wants is the SEAT, and this is
+# MEASURED now rather than asserted (NQ=16 -bottomup, one knob at a time):
+#
+#   remedy                             ovl  unpl  viol   detailed WL
+#   none (default GAP 16)               3     8     8     4,319,399
+#   set_max_bundle_bits 4 for pc_       3     0     0     4,284,321
+#   -GAP 24 -M 24                       0     0     0     4,648,190
+#   both                                0     0     0     4,762,874
+#
+# That DECOMPOSES the failure into two independent faults.  The seat lever
+# removes EXACTLY the seat -- the 8 stranded bits and the 8 audit violations
+# -- and no doomed seat is reported, at slightly LESS wire than doing
+# nothing; the 3 overlaps are untouched, because they are the fixed-copy
+# residue and a different problem.  The channel clears BOTH, which is
+# precisely why it looked like the cause for five revisions: it is the
+# remedy for the overlaps and it re-seats the doomed segment incidentally.
+#
+# The practical advice does NOT change, and saying so plainly matters more
+# than the diagnosis being new: for a CLEAN endpoint the channel alone is
+# still the cheapest point, and stacking both is redundant and costs 2.5%
+# more wire than the channel by itself.  What the seat lever buys is a
+# correct account of WHICH fault is which -- and a remedy for the stranding
+# alone, at less wire than the default, for a methodology that can live with
+# the 3 overlaps.  The channel guidance stays, labelled a workaround, not a
 # cause.
 #
 # The atomicity rule it needed is kept as history: when the flag DID supply

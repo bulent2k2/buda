@@ -339,6 +339,40 @@ def test_bottom_up_routes_the_diverse_hierarchy_clean(tmp_path):
     # ...and the mismatch policy actually ran, on a cell that needed it.
     assert "check_template_tracks: on_mismatch policy = independent" in r.stdout
     assert "[TemplateTracks]" in r.stdout and "MISALIGNED" in r.stdout, r.stdout
+    # ...and NO supply-doomed seat here, which is the cheap half of a claim
+    # that was first written too strongly.  At NQ=16 `-bottomup` strands 8
+    # bits of `pc_0` on a seat the tool reports at EVERY gap swept including
+    # the clean one, and that was written up as the seat being "invariant".
+    # It is invariant under the GAP knob and not otherwise: NQ=2/4/8
+    # bottom-up report no seat at all, and NQ=16 TOP-DOWN — the same design,
+    # the same size, the same `pc_0` and the same `io_cell` face — is clean
+    # with none either.  So the seat is a product of the bottom-up fixed copy
+    # AT SCALE, not of a declared width.
+    #
+    # This pins the size-dependence at the only price the mid tier can pay
+    # (the NQ=16 contrast is minutes, and is measured in the two documents).
+    #
+    # What it is WORTH is stated from measurement rather than asserted, and
+    # the first version of this comment got it wrong: it claimed narrowing
+    # `io_cell`'s face would produce the seat here.  It does not.  Three
+    # attempts to make this line fire at NQ=1 all failed, and each failed
+    # differently:
+    #
+    #   io_cell face /4      the flow REFUSES at declaration (rc=1) — a
+    #                        too-narrow face never reaches the router, which
+    #                        is `tpu.tcl`'s lesson already baked in here
+    #   -GAP 4 / -GAP 8      clean, no seat — a starved channel does not
+    #                        produce one either
+    #   -CW 64 (4x)          clean, no seat
+    #
+    # So this is a CANARY, not a guard with a demonstrated live mutation,
+    # and that is the honest label for it.  The negative result is worth
+    # more than the assertion: at this size the seat is not reachable by
+    # width OR by channel, which is independent evidence for the finding it
+    # accompanies — the seat is a bottom-up-fixed-copy-at-scale artifact,
+    # not a declared-width fault.  The line stays because it costs nothing
+    # and pins one row of a table two documents now publish.
+    assert "supply-doomed" not in r.stdout, r.stdout
 
 
 def test_bottom_up_changes_the_flow_and_not_the_geometry(tmp_path):
