@@ -348,9 +348,24 @@ def test_bottom_up_changes_the_flow_and_not_the_geometry(tmp_path):
     the point: both the overlaps AND the non-monotone sweep that justified
     the number (NQ=4: 16 X, 24 ok, 32 ok, 48 ok, **64 X**, 96 ok, read at
     the time as a fixed copy making the channel a phase lottery) were the
-    STAR faces.  With those sized from the bits that land on them the flag
-    needs no channel through NQ=4, and at NQ=8, where it does, the curve is
-    plain monotone and 24 is not enough anyway.
+    STAR faces.
+
+    Every sizing fix since pushed the need further out -- the stars from
+    NQ=4 to NQ=8, the phantom coefficients from NQ=8 to NQ=16 -- so the flag
+    is clean at the default channel through NQ=8, where EVERY gap is clean,
+    and NQ=16 is where a fixed copy still needs one.  There the curve is
+    NON-monotone (16 X, 24 ok, 32 X, 48 X, 96 ok) and `-GAP 24 -M 24` is the
+    cheapest clean point, which is what the two documents recommend.
+
+    This docstring said the opposite of all three until 2026-09-12 -- NQ=8
+    needing a channel, a monotone curve, and 24 not being enough (Codex P2,
+    #930) -- and the last of those directly contradicted the recipe the same
+    revision published.  Why the grep missed it is the lesson: I searched
+    for the SENTENCES I remembered writing ("the flag cannot pick one",
+    "GAP 48 -M 48") and this docstring uses neither.  A moved threshold is
+    found by grepping the VALUE (`NQ=8`, `monotone`) across the whole tree,
+    which is what finally turned it up -- and the fourth instance of a
+    remedy outliving its cause in one PR.
 
     So the flag is a FLOW flag again and the geometry is the caller's.  That
     is asserted rather than asserted-away: `-dry` must give the SAME die
