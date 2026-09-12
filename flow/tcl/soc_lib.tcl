@@ -160,40 +160,52 @@ proc soc_vehicle::configure {{overrides {}}} {
     # or below, so it constrains WIDTH; a horizontal face constrains HEIGHT.
     #
     # The rule has to hold for EVERY endpoint of a bus, not just the one
-    # whose knob names it -- which is where `-IW` went wrong.  It grew
-    # `dec_cell` and every container above it, while the two cells at the
-    # OTHER ends of the IW buses stayed sized from `DW`: `sram_cell` drives
-    # `id_[IW]` out of `l1i/bank_0` and `alu_cell` receives `i_[IW]`.  The
-    # instruction path got wider at one end only, and at NQ=1 `-IW 128`
-    # stranded 512 bits (Codex P2, #930).  Both are SHARED types -- an
-    # `sram_cell` also serves `l1d` and the L2, an `alu_cell` also takes
-    # `r_[DW]` -- so it is a `max` over what lands on them rather than a
-    # second cell type, and at the default `DW == IW` the max IS `DW`, so
-    # nothing in the design moves.
+    # whose knob names it, and this table did not.  `-IW` grew `dec_cell` and
+    # every container above it while both OTHER ends of the IW buses stayed
+    # sized from `DW` -- `sram_cell` drives `id_[IW]` out of `l1i/bank_0`,
+    # `alu_cell` receives `i_[IW]` -- and `xbar_cell` was sized `2*DW` on both
+    # axes while `nr_[AW]` joins two of them directly and `pc_[CW]` arrives
+    # from an io pad.  Every face is now a `max` over the buses that land on
+    # it (Codex P2 x2, #930); shared types make that a max rather than a
+    # second cell type, and at the defaults every max IS the old expression,
+    # so nothing in the design moves.
     #
-    # The KNOB RANGE this vehicle is measured over is the defaults and the
-    # `NQ` dial; a width knob pushed to 4x is not clean, and the reasons
-    # differ, which is why they are recorded rather than chased (NQ=1, 128):
+    # What it cost to get wrong was not the sizes -- it was a CAUSAL CLAIM.
+    # The knob table below first read `-AW 128` as 128 unplaced on a
+    # SUPPLY-DOOMED seat and called it "the channel from the other side".
+    # The seat was real; it was a CONSEQUENCE of a face too narrow to land on,
+    # which pushed the bus into a window that could not host it.  Complete the
+    # rule and the knob is CLEAN.  A symptom the tool reports is not a cause,
+    # and the advisory named the seat, never the reason for it.
     #
-    #   -IW   40 unplaced   segments placed ON keepouts -- congestion at a
-    #                       4x instruction bus (512 before the fix above)
-    #   -DW   65 unplaced   the NoC leg's bits culled for crossing a keepout
-    #   -AW  128 unplaced   a SUPPLY-DOOMED seat: 64 signal tracks in the
-    #   -CW  741 unplaced   placed window against 128 member bits.  That is
-    #                       the channel, from the other side -- a 16-unit
-    #                       gap does not host a 128-bit bus at any face size
+    # Measured at NQ=1, each width knob alone at 128 (4x the default):
+    #
+    #   knob   before   after   what remains
+    #   -IW      512    clean   --
+    #   -AW      128    clean   --
+    #   -DW       65      65    bits culled for crossing a keepout, on the
+    #                           one cross-level NoC leg (the GAP sweep above)
+    #   -CW      741     166    seats reporting ZERO signal tracks in the
+    #                           placed window -- a dead-span shape, and NOT
+    #                           diagnosed further here rather than guessed at
+    #
+    # So three of the four were sizing; only `-DW` is the routing story the
+    # channel sweep tells, and `-CW` is honestly open.
+
     variable LEAF
     array set LEAF [list \
         dec_cell    [list [expr {$P(IW)}]            [expr {2*$P(CW)}]     ] \
-        alu_cell    [list [expr {max(2*$P(DW), $P(IW))}] [expr {$P(DW)}]   ] \
+        alu_cell    [list [expr {max(2*$P(DW), $P(IW))}] \
+                          [expr {max($P(DW), $P(IW))}]   ] \
         mul_cell    [list [expr {2*$P(DW)}]          [expr {$P(DW)}]       ] \
-        regf_cell   [list [expr {$P(DW)}]            [expr {2*$P(DW)}]     ] \
+        regf_cell   [list [expr {max($P(DW), $P(AW))}] [expr {2*$P(DW)}]   ] \
         sram_cell   [list [expr {max($P(DW), $P(IW))}]  [expr {$P(AW)}]       ] \
         tag_cell    [list [expr {$P(AW)}]            [expr {$P(CW)}]       ] \
-        xbar_cell   [list [expr {2*$P(DW)}]          [expr {2*$P(DW)}]     ] \
+        xbar_cell   [list [expr {max(2*$P(DW), $P(AW), $P(CW))}] \
+                          [expr {max(2*$P(DW), $P(AW), $P(CW))}] ] \
         fifo_cell   [list [expr {$P(DW)}]            [expr {$P(DW)}]       ] \
         io_cell     [list [expr {$P(CW)}]            [expr {$P(CW)}]       ] \
-        bridge_cell [list [expr {2*$P(CW)}]          [expr {$P(DW)}]       ] \
+        bridge_cell [list [expr {2*$P(CW)}]          [expr {max($P(DW), $P(CW))}] ] \
         memctl_cell [list [expr {$P(DW) + $P(AW)}]   [expr {$P(DW)}]       ] \
     ]
     variable SZ

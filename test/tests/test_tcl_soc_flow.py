@@ -211,55 +211,56 @@ def test_a_wider_channel_is_not_the_lever_a_wider_bus_needs(tmp_path):
 
 def test_every_cell_a_bus_lands_on_is_sized_from_that_bus(tmp_path):
     """The face rule has to hold for EVERY endpoint of a bus, not just the
-    one whose knob names it (Codex P2, #930).
+    one whose knob names it (Codex P2 x2, #930).  Three cells broke it:
 
-    `-IW` is advertised as an independent knob, and it grew `dec_cell` and
-    every container above it — while the two cells at the OTHER ends of the
-    IW buses stayed sized from `DW`: `sram_cell`, which drives `id_[IW]` out
-    of `l1i/bank_0`, and `alu_cell`, which receives `i_[IW]`.  So the
-    instruction path got wider at one end only, which is not the stated rule
-    ("a face is derived from the bits that land on it") in either direction.
-    Measured at NQ=1, `-IW 128`: **512 bits unplaced**.
+    * `sram_cell` drives `id_[IW]` out of `l1i/bank_0` and `alu_cell`
+      receives `i_[IW]`, both sized from `DW` — so `-IW` widened `dec_cell`
+      and every container above it while both other ends stayed narrow;
+    * `xbar_cell` was `2*DW` on both axes while `nr_[AW]` joins two routers
+      directly and `pc_[CW]` arrives from an io pad.
 
-    Both are SHARED cell types — `sram_cell` also serves `l1d` and the L2,
-    `alu_cell` also takes `r_[DW]` — so the derivation is `max` over the
-    buses that land on them rather than a second cell type.  At the default
-    `DW == IW` that max is `DW`, so the whole design is unchanged (the sizes
-    below, and every table in `flow/tcl/ReadMe.md`).
+    All are SHARED cell types (an `sram_cell` also serves `l1d` and the L2,
+    an `alu_cell` also takes `r_[DW]`), so each face is a `max` over what
+    lands on it rather than a second cell type.  At the defaults every max IS
+    the old expression, which is why the sizes below are asserted at BOTH
+    settings: the whole design and every recorded table are unchanged.
 
-    What it buys is measured and NOT a clean run: 512 → 40 unplaced.  The
-    residual is segments placed ON keepouts, the same cull class the DW=128
-    sweep documents, so it is congestion at a 4x bus and not a face
-    shortfall — this test asserts the derivation, and asserts the routing
-    only in the direction the fix can be responsible for.
+    What this cost was not the sizes but a CAUSAL CLAIM, and that is the part
+    worth keeping.  `-AW 128` was reported here and in two documents as 128
+    bits unplaced on a *supply-doomed seat*, i.e. "the channel from the other
+    side".  The seat was real — and it was a CONSEQUENCE of a face too narrow
+    to land on, which pushed the bus into a window that could not host it.
+    Completing the rule makes `-IW` and `-AW` both CLEAN.  A symptom the tool
+    reports is not a cause; the advisory named the seat and never the reason.
     """
     probe = tmp_path / "probe.tcl"
+    cells = ("sram_cell", "alu_cell", "xbar_cell", "dec_cell")
     probe.write_text(
         'source [file join {%s} flow tcl soc_lib.tcl]\n'
-        'foreach knob {{} {IW 128}} {\n'
+        'foreach knob {{} {IW 128} {AW 128}} {\n'
         '    soc_vehicle::configure $knob\n'
-        '    puts "[llength $knob] [soc_vehicle::size sram_cell]'
-        ' [soc_vehicle::size alu_cell] [soc_vehicle::size dec_cell]"\n'
-        '}\n' % _ROOT)
+        '    puts "[join [list %s] { }]"\n'
+        '}\n' % (_ROOT, " ".join("[soc_vehicle::size %s]" % c for c in cells)))
     r = subprocess.run(["tclsh", str(probe)], capture_output=True,
                        encoding="utf-8", cwd=tmp_path, timeout=120)
     assert r.returncode == 0, r.stdout + r.stderr
     rows = [[int(v) for v in ln.split()]
             for ln in r.stdout.split("\n") if ln.strip()]
-    (_d, sram_w, _sh, alu_w, _ah, dec_w, _dh) = rows[0]
-    assert (sram_w, alu_w, dec_w) == (152, 280, 152), rows[0]   # unchanged
-    (_d, sram_w, _sh, alu_w, _ah, dec_w, _dh) = rows[1]
-    # every cell the IW buses land on grows WITH them, to the same face
-    assert sram_w == dec_w == 536, rows[1]
-    assert alu_w == 536, rows[1]
+    # (sram_w, sram_h, alu_w, alu_h, xbar_w, xbar_h, dec_w, dec_h)
+    assert rows[0] == [152, 88, 280, 152, 280, 280, 152, 88], rows[0]
+    # -IW: every face the IW buses land on grows with them, to the same size
+    assert rows[1][0] == rows[1][2] == rows[1][3] == rows[1][6] == 536, rows[1]
+    # -AW: the router pair, which `2*DW` used to cap at 280
+    assert rows[2][4] == rows[2][5] == 536, rows[2]
 
-    # ...and it is a routing fact, not only an arithmetic one.  512 was the
-    # DW-sized-face result; the residual is the keepout-cull class.
-    r = _run(tmp_path, 1, "-IW", 128)
-    _ov, un, _vi = _verdict(r)
-    assert 0 < un < 100, ("-IW 128 stranded 512 bits when only `dec_cell` "
-                          "grew; if this is clean now, say so in "
-                          "`soc_lib.tcl` rather than relaxing the bound", un)
+    # ...and the routing says so: both knobs are CLEAN where the rule was
+    # broken, which is the correction, not just the derivation.
+    for knob in ("-IW", "-AW"):
+        r = _run(tmp_path, 1, knob, 128)
+        assert _verdict(r) == (0, 0, 0), (
+            f"{knob} 128 used to strand bits because a face at the far end of"
+            " its bus was sized from DW; if it strands again, find which face"
+            " before blaming the channel", knob, r.stdout + r.stderr)
 
 
 def test_bottom_up_routes_the_diverse_hierarchy_clean(tmp_path):

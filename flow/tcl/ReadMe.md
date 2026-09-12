@@ -246,28 +246,36 @@ design it cannot finish it is also what the wall clock goes into; every clean
 row above pays nothing for it, since a clean design never enters the first
 round.
 
-## The knob range it is measured over
+## Every endpoint of a bus, and what it cost to get wrong
 
-The defaults and the **`NQ` dial**. Every other knob is settable and honest
-about what it does, but a width pushed to 4× is not clean, and the reasons
-differ enough to be worth recording rather than chasing (NQ = 1, value 128):
+The face rule — *a leaf's size is derived from the bits that land on its
+faces* — has to hold for **every endpoint of a bus**, not just the one whose
+knob names it. Three cells broke it: `sram_cell` drives `id_[IW]` out of
+`l1i/bank_0` and `alu_cell` receives `i_[IW]`, both sized from `DW`; and
+`xbar_cell` was `2*DW` on both axes while `nr_[AW]` joins two routers
+directly and `pc_[CW]` arrives from an io pad. Every face is a `max` over the
+buses that land on it now — shared cell types make that a max rather than a
+second type — and at the defaults every max **is** the old expression, so the
+design and every table on this page are unchanged.
 
-| knob | result | why |
-|---|---|---|
-| `-IW` | 40 unplaced | segments placed on keepouts — congestion at a 4× instruction bus |
-| `-DW` | 65 unplaced | the NoC leg's bits culled for crossing a keepout (the sweep below) |
-| `-AW` | 128 unplaced | a **supply-doomed seat**: 64 signal tracks in the placed window against 128 member bits |
-| `-CW` | 741 unplaced | the same, five seats |
+What it cost was not the sizes. It was a **causal claim**: this section first
+reported `-AW 128` as 128 bits unplaced on a *supply-doomed seat* and called
+it "the channel from the other side". The seat was real — and it was a
+*consequence* of a face too narrow to land on, which pushed the bus into a
+window that could not host it. Complete the rule and the knob is clean.
 
-The last two are the channel finding from the other side: a 16-unit gap does
-not host a 128-bit bus **at any face size**. `-IW` used to be 512, and that
-one *was* a sizing defect — the face rule has to hold for every endpoint of a
-bus, not just the one the knob names, and `-IW` grew `dec_cell` while
-`sram_cell` (which drives `id_[IW]`) and `alu_cell` (which receives `i_[IW]`)
-stayed sized from `DW`. Both are shared cell types, so the derivation is a
-`max` over what lands on them; at the default `DW == IW` that max is `DW` and
-nothing in the design moves.
+| knob at 128 | before | after | what remains |
+|---|---|---|---|
+| `-IW` | 512 unplaced | **clean** | — |
+| `-AW` | 128 unplaced | **clean** | — |
+| `-DW` | 65 unplaced | 65 unplaced | bits culled for crossing a keepout, on the one cross-level NoC leg |
+| `-CW` | 741 unplaced | 166 unplaced | seats reporting **zero** signal tracks in the placed window — a dead-span shape, deliberately not diagnosed further here |
 
+So three of the four were sizing, only `-DW` is the routing story the channel
+sweep below tells, and `-CW` is honestly open. A symptom the tool reports is
+not a cause: the advisory named the seat and never the reason for it.
+
+## The lesson it paid for: a face is derived, a channel is not
 ## The lesson it paid for: a face is derived, a channel is not
 
 A leaf's size **is** derived from the bits that land on its faces — that is
