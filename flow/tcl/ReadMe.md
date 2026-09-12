@@ -483,12 +483,38 @@ At this size a bottom-up run has to sweep, not guess.
 
 That irregularity was reported once and **withdrawn** when its cause turned
 out to be the stars. It is back on different evidence: with the faces honest
-and the coefficients gone, a fixed copy at NQ = 16 still lands each instance
-on whatever track phase the channel gives it, and **both 32 and 48** are
-*worse* than 24. Which is the whole argument against a built-in number — the
-flag cannot pick one, because the answer is not monotone in the knob it would
-set. A bottom-up run at NQ ≥ 16 names the channel itself and measures it:
+and the coefficients gone, **both 32 and 48** are *worse* than 24 at NQ = 16.
+
+What that does and does not license is worth being exact about, because the
+first write-up got it wrong (Codex P2, #930). Non-monotonicity rules out
+**"increase until clean"** as a search — a caller stepping up from a clean
+24 lands on a dirty 32 — so a sweep has to be a sweep and not a ramp. It does
+**not** show that no fixed default exists, and the table above refutes that
+reading directly: **GAP = M = 96 is clean at every size measured** — NQ = 2,
+4, 8 and 16. A conservative built-in value is available.
+
+The argument against building it in is **cost**, which is this page's own
+lesson pointed at the flag:
+
+| NQ | cheapest clean gap | detailed WL | at GAP 96 | ratio |
+|---|---|---|---|---|
+| 2 | 16 (the default) | 591,230 | 1,231,210 | **2.08×** |
+| 4 | 16 (the default) | 1,088,063 | 2,210,154 | **2.03×** |
+| 8 | 16 (the default) | 2,175,864 | 4,329,443 | **1.99×** |
+| 16 | 24 | 4,648,190 | 8,621,243 | **1.85×** |
+
+A default of 96 would roughly **double the wire at every size** — including
+the three that are already clean at the default 16 and need no channel at
+all — to rescue the one that is not. That is precisely the trade the *"a
+wider channel buys no routing and costs wire monotonically"* measurement
+above refuses, so the flag declines to make it on the caller's behalf. A
+bottom-up run at NQ ≥ 16 names the channel itself and measures it:
 `soc.tcl 16 -bottomup -GAP 24 -M 24`.
+
+The **mechanism** is not established and the earlier claim that a fixed copy
+"lands each instance on whatever track phase the channel gives it" was an
+assertion, not a measurement — it is a hypothesis consistent with four points
+on one design, and nothing here separates it from the alternatives.
 
 That example is the point restated at its own expense: it read `-GAP 48
 -M 48` until this revision, because 48 was clean when the line was written.

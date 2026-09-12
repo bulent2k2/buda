@@ -111,13 +111,35 @@ while {$argi < $argc} {
 #
 # That irregularity was reported once before and WITHDRAWN when its cause
 # turned out to be the stars.  It is back on different evidence: with the
-# faces honest and the coefficients gone, a fixed copy at NQ=16 still lands
-# each instance on whatever track phase the channel gives it, and BOTH 32
-# and 48 are worse than 24.  Which is the whole argument against a built-in
-# number -- the flag cannot pick one, because the answer is not monotone in
-# the knob it would set.  A bottom-up run at NQ>=16 asks for the channel
-# EXPLICITLY (`soc.tcl 16 -bottomup -GAP 24 -M 24`) and MEASURES it, which
-# is the caller's job and not the flag's.
+# faces honest and the coefficients gone, BOTH 32 and 48 are worse than 24.
+#
+# What that licenses needs care, because the first write-up overreached
+# (Codex P2, #930).  Non-monotonicity rules out "INCREASE UNTIL CLEAN" as a
+# search -- step up from a clean 24 and you land on a dirty 32 -- so a sweep
+# must be a sweep and not a ramp.  It does NOT show that no fixed default
+# exists, and the table above refutes that reading: GAP=M=96 is CLEAN at
+# every size measured (NQ=2, 4, 8, 16).  A conservative built-in value is
+# available.
+#
+# The argument against building it in is COST, which is this file's own
+# lesson pointed at the flag -- detailed WL against the cheapest clean gap
+# at each size:
+#
+#   NQ= 2   591,230 -> 1,231,210   2.08x     (clean at the default 16)
+#   NQ= 4 1,088,063 -> 2,210,154   2.03x     (clean at the default 16)
+#   NQ= 8 2,175,864 -> 4,329,443   1.99x     (clean at the default 16)
+#   NQ=16 4,648,190 -> 8,621,243   1.85x     (cheapest clean is 24)
+#
+# A default of 96 roughly DOUBLES the wire at every size -- including the
+# three that need no channel at all -- to rescue the one that does.  That is
+# the trade the "a wider channel buys no routing and costs wire" measurement
+# above refuses, so the flag does not make it on the caller's behalf.  A
+# bottom-up run at NQ>=16 asks for the channel EXPLICITLY
+# (`soc.tcl 16 -bottomup -GAP 24 -M 24`) and MEASURES it.
+#
+# The MECHANISM is not established: the earlier claim that a fixed copy
+# "lands each instance on whatever track phase the channel gives it" was an
+# assertion rather than a measurement, and stays a hypothesis.
 #
 # The 48 row is why the recipe says MEASURE rather than naming a number: it
 # was clean last revision, this line recommended it by name, and three added

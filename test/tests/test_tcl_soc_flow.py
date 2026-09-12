@@ -691,6 +691,17 @@ def test_every_configured_bank_carries_a_net(tmp_path):
     stale.  Verified non-vacuous against the real data rather than by a flow
     mutation, since none isolates it: the recorded 54-bus list passes, and
     the same list with one bank's two lines removed fails naming the bank."""
+    # `declared()` inherits `os.environ`, which I have twice flagged as an
+    # open soft spot; the audit rather than the gesture: of the 31 `BUDA_*`
+    # knobs in the tree, none can change what this test asserts.  It reads
+    # `add_bus` lines -- DECLARATIONS, made before any knob-governed stage
+    # runs; `BUDA_RECORD_NOTE`, the only knob that writes into the record
+    # file, emits `#` comment lines the parser skips; `BUDA_UNIT_CHECK` can
+    # abort a run, which the returncode assert catches LOUDLY; and
+    # `BUDA_HIER_DEEP_FIRST` inverts a PLANNER level key, not the bundler,
+    # so the hbundle count compared below is untouched.  Everything else
+    # governs topology/planner/NUTS/threads/output.  Scrubbing the
+    # environment would look careful and check nothing new.
     def declared(*knobs):
         rec = tmp_path / ("rec_%s.buda" % ("_".join(map(str, knobs)) or "def"))
         r = subprocess.run(["tclsh", str(_VEHICLE), "1", *map(str, knobs)],
