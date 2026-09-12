@@ -256,9 +256,10 @@ Clean at every size measured — **top-down**, which is what this table is.
 `-caps` and `-bydepth` are clean where they were measured (NQ = 2, what the
 tests run). **`-bottomup` is not clean at every size and must not be read
 off this table** (Codex P2, #930): at the default channel it is clean at
-NQ = 1/2/4/8 and comes back **dirty at NQ = 16 and NQ = 32** (8 bits of one
-bundle, the seat analysed at the end of this page), with NQ = 64 never run
-bottom-up at all. The bottom-up section below is the one to read for it, and
+NQ = 1/2/4/8 and comes back **dirty at NQ = 16, NQ = 32 and NQ = 64** (8 bits
+of one bundle, the same one, the seat analysed at the end of this page). The
+whole advertised dial has now been run bottom-up; a named channel is measured
+to rescue 16 and 32, and that sweep is still running for 64. The bottom-up section below is the one to read for it, and
 it carries its own per-gap tables; extending an all-sizes claim to the flag
 contradicted them two hundred lines later in the same document. NQ = 32 used to be **the honest limit** here —
 13 bits unplaced after 293 s — and it is neither the limit nor slow any
@@ -549,16 +550,23 @@ Measured, and the invariant is the point:
 | 16 | 32 | `bundle 2 seg 0` M7 (TOP), 7 tracks < 8 bits | ✗ 0 ovl / 8 unpl |
 | 16 | 48 | `bundle 2 seg 0` (LOW) | ✗ 1 ovl / 8 unpl |
 | 32 | 16 | `bundle 2 seg 0` M7 (TOP), 7 tracks < 8 bits | ✗ 3 ovl / 8 unpl |
+| 32 | 24 | `bundle 2 seg 0` M4 (LOW), 0 tracks < 8 bits | **clean** |
+| 64 | 16 | `bundle 2 seg 0` M7 (TOP), 7 tracks < 8 bits | ✗ 7 ovl / 8 unpl |
 
-The same bundle, the same segment, the same eight bits, at **two sizes 2×
-apart** (NQ = 16 and 32) and at every gap — **including the clean one**.
+The same bundle, the same segment, the same eight bits, across a **4× span**
+(NQ = 16 → 64) and at every gap — **including the clean ones**.
 
-That separation read *"4× apart"* until Codex checked it (P2, #930). It is
-2×: 16 → 32 in the dial, 32 → 64 clusters, and roughly 2× in leaves and
-routed workload. Plain arithmetic, wrong since the paragraph was written,
-surviving my own audit of this very section and four review rounds over
-it — and it *overstated the scale range* supporting the conclusion, which is
-the direction that flatters the claim.
+That "4×" is now measured rather than asserted, and the history is the point.
+The paragraph originally claimed *"two sizes 4× apart"* while the table held
+only NQ = 16 and 32, which are **2×** apart — plain arithmetic, wrong from the
+day it was written, surviving my own audit of this very section plus four
+review rounds, and wrong in the direction that *flattered* the claim by
+overstating its scale range. Codex caught it (P2, #930) and offered two
+remedies: say 2×, or measure something fourfold away. The first landed at
+once; then **NQ = 64 bottom-up** was run and reports the same `bundle 2
+seg 0`, M7, 7 tracks < 8 bits. So the span is genuinely 4× — 32 → 128
+clusters, 427 → 1675 leaves — and the claim ends up *stronger* than the one
+that was wrong, rather than merely narrower.
 
 **What repeats is the segment, not the seat** (Codex P2, #930). Read the rows:
 the assigned layer moves M7/TOP → M4/LOW → M7/TOP, and changing `GAP` moves

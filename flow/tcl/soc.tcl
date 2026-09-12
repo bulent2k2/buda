@@ -159,8 +159,16 @@ while {$argi < $argc} {
 # an invalid construction: a ratio > 1 says how much MORE the dearer option
 # costs, and "Nx less" means nothing arithmetically.  That is a STRONGER statement than the hedge
 # it replaces, in both directions -- NQ=32 does need a channel, AND a gap
-# that routes it is known.  Only NQ=64 remains entirely unmeasured
-# bottom-up.  The rule needs no threshold either way: if a bottom-up run is
+# that routes it is known.
+#
+# NQ=64 IS MEASURED NOW TOO, at the DEFAULT gap: 7 ovl / 8 unpl / 8 viol,
+# detailed WL 16,654,709 over 2451 bundles / 76,096 bit-wires -- and the
+# doomed seat is `bundle 2 seg 0` on M7, 7 tracks < 8 bits, i.e. THE SAME
+# `pc_0` SEGMENT again.  So the whole advertised dial is now run bottom-up,
+# and the recurring-segment reading holds across a genuine 4x span (NQ=16 to
+# NQ=64: 32 -> 128 clusters, 427 -> 1675 leaves).  Whether a NAMED CHANNEL
+# rescues NQ=64 as it does 16 and 32 is NOT yet measured -- that sweep is
+# running -- so nothing is claimed about it here.  The rule needs no threshold either way: if a bottom-up run is
 # dirty, SWEEP the channel.
 #
 # The MECHANISM is not established: the earlier claim that a fixed copy
