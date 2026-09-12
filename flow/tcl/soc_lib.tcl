@@ -145,10 +145,10 @@ proc soc_vehicle::configure {{overrides {}}} {
     # buys NO routing at all and costs wire, monotonically --
     #
     #   GAP     NQ=8 detailed WL     NQ=16 detailed WL
-    #    16         2,160,182            4,416,873
-    #    48         2,932,536            6,022,953
-    #    96         4,147,638            8,491,122
-    #   144         5,362,445           10,915,654     (every row CLEAN)
+    #    16         1,839,653            3,729,697
+    #    48         2,660,799            5,347,299
+    #    96         3,822,548            7,778,438
+    #   144         5,045,381           10,231,262     (every row CLEAN)
     #
     # -- which is `tpu.tcl`'s recorded lesson in the direction it recorded
     # it: the channel was never the binding constraint, so widening it only
@@ -166,7 +166,7 @@ proc soc_vehicle::configure {{overrides {}}} {
     # every gap, with the channel still pure cost:
     #
     #   GAP (NQ=4, DW=128)    16          32          64          96
-    #   detailed WL       11,040,362  12,129,097  12,341,964  13,936,468
+    #   detailed WL        8,262,878   8,887,848  10,187,423  11,476,897
     #                                                     (every row CLEAN)
     #
     # -- `-DW` ALONE, since `IW` sizes `dec_cell` and every cell enclosing it
@@ -226,7 +226,9 @@ proc soc_vehicle::configure {{overrides {}}} {
     #     -DW              65            65           clean
     #     -CW             741           166           clean
     #
-    # (NQ=1, each knob alone.)  A symptom the tool reports is not a cause:
+    # (NQ=1, each knob alone; detailed WL now 887,223 / 1,365,880 /
+    # 1,745,712 / 2,265,230, every one smaller than before the phantom
+    # coefficients came out.)  A symptom the tool reports is not a cause:
     # the advisory named the seat every time and never once the reason for
     # it, and the two readings that sounded most like physics -- a keepout
     # cull, a dead span -- were the two that survived longest.

@@ -93,30 +93,38 @@ while {$argi < $argc} {
 #
 # The copied cell-local routing is a fixed copy at every instance, so the
 # residue it cannot clear is an OVERLAP rather than an open, and the flag
-# quietly supplied `GAP 24 M 24` to clear two of them at NQ=4.  The sweep
-# that justified it read NON-monotone (16 X, 24 ok, 32 ok, 48 ok, 64 X,
-# 96 ok) and that irregularity was reported as evidence that a fixed copy
-# makes the channel a phase lottery.  Both halves were the STAR faces (see
-# `soc_lib.tcl`): with those sized from the bits that land on them the flag
-# needs NO channel at all up to NQ=4, and the curve where it does need one
-# is plain monotone -- NQ=8, `-bottomup`:
+# quietly supplied `GAP 24 M 24` to clear two of them at NQ=4.  Every
+# SIZING fault since has pushed that need further out, which is the pattern
+# worth recording: the STAR faces took it from NQ=4 to NQ=8, and the PHANTOM
+# COEFFICIENTS (`2*DW` on four cells, with nothing behind them) took it from
+# NQ=8 to NQ=16.  At the default channel `-bottomup` is clean through NQ=8
+# (2,064,286 detailed WL) and every gap at NQ=8 is clean:
 #
-#   GAP     16      24      32      48   64   96
-#   result  X(1/6)  X(0/5)  X(0/4)  ok   ok   ok    (overlaps/unplaced)
+#   NQ=8   GAP     16   24   32   48   64   96      all CLEAN
 #
-# So the widening is gone: at NQ<=4 it bought nothing and cost wire
-# (NQ=4: 1,237,977 at the default against 1,329,561 at 24), and at NQ=8 it
-# was not enough anyway.  Nor is there a fixed number that would have been
-# -- NQ=16 still strands one bit at 48 and wants 96 -- so what a fixed copy
-# needs is a function of SIZE.  A bottom-up run above NQ=4 asks for the
-# channel EXPLICITLY (`soc.tcl 8 -bottomup -GAP 48 -M 48`), which is the
-# caller doing the geometry, the only party that can measure it.
+# It is NQ=16 where a fixed copy still needs a channel, and there the curve
+# is genuinely NON-MONOTONE -- measured on the honestly sized design, not as
+# an artefact this time:
+#
+#   NQ=16  GAP     16       24   32       48   96
+#   result          X(3/0)  ok   X(0/8)   ok   ok    (overlaps/unplaced)
+#
+# That irregularity was reported once before and WITHDRAWN when its cause
+# turned out to be the stars.  It is back on different evidence: with the
+# faces honest and the coefficients gone, a fixed copy at NQ=16 still lands
+# each instance on whatever track phase the channel gives it, and 32 is
+# worse than 24.  Which is the whole argument against a built-in number --
+# the flag cannot pick one, because the answer is not monotone in the knob
+# it would set.  A bottom-up run at NQ>=16 asks for the channel EXPLICITLY
+# (`soc.tcl 16 -bottomup -GAP 48 -M 48`) and measures it, which is the
+# caller's job and not the flag's.
 #
 # The atomicity rule it needed is kept as history: when the flag DID supply
 # the pair it had to supply BOTH or NEITHER, since `-bottomup -GAP 16` left
 # `M` at 24 and gave 4976x1576 where THAT revision's default geometry was
-# 4720x1440, while `-bottomup -M 16` leaked the other way -- a sweep meant to
-# vary the channel varied two things.  Nothing supplies a knob behind the
+# 4720x1440 (both dies since re-measured away by the sizing fixes), while
+# `-bottomup -M 16` leaked the other way -- a sweep meant to vary the channel
+# varied two things.  Nothing supplies a knob behind the
 # caller's back now.
 
 soc_vehicle::configure $overrides

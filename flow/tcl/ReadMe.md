@@ -244,21 +244,23 @@ On a uniform-depth vehicle every cell is one level and this collapses to the
 
 | NQ | clusters | leaves | bundles | bit-wires | die | wall | endpoint |
 |---|---|---|---|---|---|---|---|
-| 1 | 2 | 37 | 54 | 1 536 | 2640 × 2016 | 1 s | clean |
-| 2 | 4 | 63 | 92 | 2 568 | 5232 × 2016 | 1 s | clean |
-| 4 | 8 | 115 | 168 | 4 800 | 5232 × 3200 | 3 s | clean |
-| 8 | 16 | 219 | 320 | 9 064 | 7824 × 4384 | 6 s | clean |
-| 16 | 32 | 427 | 624 | 17 536 | 10416 × 5568 | 15 s | clean |
-| 32 | 64 | 843 | 1232 | 34 480 | 15600 × 7936 | 40 s | clean |
-| 64 | 128 | 1675 | 2448 | 68 400 | 20784 × 10304 | 139 s | clean |
+| 1 | 2 | 37 | 54 | 1 528 | 2128 × 2016 | 1 s | clean |
+| 2 | 4 | 63 | 92 | 2 576 | 4208 × 2016 | 1 s | clean |
+| 4 | 8 | 115 | 168 | 4 736 | 4208 × 3200 | 2 s | clean |
+| 8 | 16 | 219 | 320 | 9 120 | 6288 × 4384 | 4 s | clean |
+| 16 | 32 | 427 | 624 | 17 624 | 8368 × 5568 | 15 s | clean |
+| 32 | 64 | 843 | 1232 | 34 576 | 12528 × 7936 | 42 s | clean |
+| 64 | 128 | 1675 | 2448 | 68 696 | 16688 × 10304 | 117 s | clean |
 
 Clean at every size measured, top-down, and `-caps`, `-bydepth` and
 `-bottomup` are clean too. NQ = 32 used to be **the honest limit** here —
 13 bits unplaced after 293 s — and it is neither the limit nor slow any
-more: removing three stars (below) took it to clean in 40 s and put NQ = 64
-within reach. Every row on this table has now moved twice, once when a
-second `heal_if_dirty` round landed and once when the stars went, and both
-times because something re-ran it.
+more: removing three stars took it to clean, and removing the phantom
+coefficients (below) then took ~16 % off the wire and a fifth off the die at
+every row. **Every number on this table has now moved three times** — when a
+second `heal_if_dirty` round landed, when the stars went, and when the
+coefficients went — and each time because something re-ran it rather than
+because anyone re-read it.
 
 ## Every endpoint, every bit: the face rule read twice
 
@@ -344,10 +346,10 @@ its place a wider channel is **pure cost**:
 
 | GAP | NQ = 8 | NQ = 16 |
 |---|---|---|
-| 16 | clean, WL 2,160,182 | clean, WL 4,416,873 |
-| 48 | clean, WL 2,932,536 | clean, WL 6,022,953 |
-| 96 | clean, WL 4,147,638 | clean, WL 8,491,122 |
-| 144 | clean, WL 5,362,445 | clean, WL 10,915,654 |
+| 16 | clean, WL 1,839,653 | clean, WL 3,729,697 |
+| 48 | clean, WL 2,660,799 | clean, WL 5,347,299 |
+| 96 | clean, WL 3,822,548 | clean, WL 7,778,438 |
+| 144 | clean, WL 5,045,381 | clean, WL 10,231,262 |
 
 Every row routes, so the wider channel buys **nothing** and costs wire
 monotonically — which is `tpu.tcl`'s lesson in the direction it recorded it:
@@ -365,7 +367,7 @@ still in the netlist, and with those faces sized from what lands on them
 
 | GAP (NQ = 4, DW = 128) | 16 | 32 | 64 | 96 |
 |---|---|---|---|---|
-| detailed WL | 11,040,362 | 12,129,097 | 12,341,964 | 13,936,468 |
+| detailed WL | 8,262,878 | 8,887,848 | 10,187,423 | 11,476,897 |
 | endpoint | clean | clean | clean | clean |
 
 `-DW` alone: `IW` sizes `dec_cell` and every cell enclosing it, so setting it
@@ -375,42 +377,57 @@ datapath — a stronger claim than the one it replaced, and one reached by
 removing faces rather than by tuning a gap.
 
 The last part of the lesson is that these numbers get re-run, and have now
-moved **twice**. An earlier sweep read as *non-monotone* (clean at GAP
+moved **three times**. An earlier sweep read as *non-monotone* (clean at GAP
 40/48/80, stranded at the rest) and was presented here as the reason no
 derivation could exist; a second healer round changed the answer at every
-point; then the star fix turned a whole failing table clean. A recorded
+point; the star fix turned a whole failing table clean; and the phantom
+coefficients then took ~25 % off every number in it. A recorded
 measurement nothing re-runs decays into a claim, so
 `test_a_wider_channel_is_not_the_lever_a_wider_bus_needs` runs the cheap end
 of both directions on every test run.
 
-## `-bottomup`: the channel it used to need was a face
+## `-bottomup`: every sizing fix pushed the channel further out
 
 `-bottomup` used to widen the channel behind the caller's back (`GAP 24
-M 24`), and the sweep that justified it read **non-monotone** at NQ = 4 —
-16 ✗, 24 ok, 32 ok, 48 ok, **64 ✗**, 96 ok — which was written up here as
-evidence that a *fixed* copy turns the channel into a phase lottery.
+M 24`) to clear two overlaps at NQ = 4, and the sweep that justified it read
+**non-monotone** — 16 ✗, 24 ok, 32 ok, 48 ok, **64 ✗**, 96 ok — written up
+here as evidence that a *fixed* copy turns the channel into a phase lottery.
 
-Both halves were the star faces. With those sized from the bits that land on
-them, `-bottomup` needs **no channel at all** through NQ = 4, and where it
-does need one the curve is plain monotone. Measured at NQ = 8:
+Every sizing fault since has pushed that need further out, which is the
+pattern worth recording. The **star faces** took it from NQ = 4 to NQ = 8.
+The **phantom coefficients** — `2*DW` on four cells with nothing behind it —
+took it from NQ = 8 to NQ = 16. At the default channel the flag is now clean
+through NQ = 8, and at NQ = 8 *every* gap is clean:
 
-| GAP | 16 | 24 | 32 | 48 | 64 | 96 |
+| GAP (NQ = 8) | 16 | 24 | 32 | 48 | 64 | 96 |
 |---|---|---|---|---|---|---|
-| result | ✗ 1 ovl / 6 unpl | ✗ 0 / 5 | ✗ 0 / 4 | ok | ok | ok |
-| detailed WL | 2,504,030 | 2,475,632 | 2,704,106 | 3,177,507 | 3,717,129 | 4,477,478 |
+| result | ok | ok | ok | ok | ok | ok |
+| detailed WL | 2,064,286 | 2,276,208 | 2,464,947 | 2,887,618 | 3,397,741 | 4,134,838 |
 
-So the widening is gone: at NQ ≤ 4 it bought nothing and cost wire (NQ = 4:
-1,237,977 at the default against 1,329,561 at 24), and at NQ = 8 it was not
-enough anyway. Nor is there a number that would have been: NQ = 16 still
-strands one bit at 48 and wants **96**. What a fixed copy needs is a
-function of the size, which is the caller's to measure — a bottom-up run
-above NQ = 4 names the channel itself, `soc.tcl 8 -bottomup -GAP 48 -M 48`.
+NQ = 16 is where a fixed copy still needs one, and there the curve is
+**genuinely non-monotone** — measured on the honestly sized design this time,
+not as an artefact:
+
+| GAP (NQ = 16) | 16 | 24 | 32 | 48 | 96 |
+|---|---|---|---|---|---|
+| result | ✗ 3 ovl | ok | ✗ 8 unpl | ok | ok |
+| detailed WL | 4,100,702 | 4,603,772 | 4,892,848 | 5,834,639 | 8,354,767 |
+
+That irregularity was reported once and **withdrawn** when its cause turned
+out to be the stars. It is back on different evidence: with the faces honest
+and the coefficients gone, a fixed copy at NQ = 16 still lands each instance
+on whatever track phase the channel gives it, and 32 is *worse* than 24.
+Which is the whole argument against a built-in number — the flag cannot pick
+one, because the answer is not monotone in the knob it would set. A
+bottom-up run at NQ ≥ 16 names the channel itself and measures it:
+`soc.tcl 16 -bottomup -GAP 48 -M 48`.
 
 The atomicity rule it needed is kept as history rather than as code: while
 the flag *did* supply the pair it had to supply both or neither, since
 `-bottomup -GAP 16` left `M` at 24 and gave 4976 × 1576 where that revision's
-default geometry was 4720 × 1440, while `-bottomup -M 16` leaked the other
-way — a sweep meant to vary the channel varied two things. Nothing supplies a knob behind the
+default geometry was 4720 × 1440 (both dies since re-measured away by the
+sizing fixes), while `-bottomup -M 16` leaked the other way — a sweep meant
+to vary the channel varied two things. Nothing supplies a knob behind the
 caller's back now.
 
 `align_bottom_up` then reports that nested marked parents place children at
