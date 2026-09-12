@@ -846,8 +846,19 @@ def _lef_layer_ids(file_layers, taken):
             while lid in seen:
                 lid += 1
         if lid in seen:
-            cause = _clash(seen[lid], name, lid)
-            break                       # the whole stack goes by file order
+            # The file collides with ITSELF here, so under the name-derived
+            # reading this layer cannot have that id at all — record the
+            # refusal and KEEP WALKING.  Stopping at the first collision left
+            # `claims` a PREFIX, and the decline path below zips it against
+            # every layer: `def_layer 1 Metal2` over `Metal1`, `Metal2`,
+            # `TopMetal1`, `Metal3` then dropped `Metal3` (whose own id 3 is
+            # free) and the colliding `TopMetal1` too, with NO skip line for
+            # either — `imported 0 routing layer(s)`, one loss of three
+            # explained (Codex P2 on #929).
+            if not cause:
+                cause = _clash(seen[lid], name, lid)   # report the FIRST
+            claims.append(None)
+            continue
         seen[lid] = name
         claims.append(lid)
 
@@ -899,12 +910,13 @@ def _lef_layer_ids(file_layers, taken):
         # Neither reading applies: the file's names collide, and the script's
         # own numbering forbids the file's order.  Fall back to the per-layer
         # refusal — the behaviour before any of this — so what is imported is
-        # what can be numbered honestly.
+        # what can be numbered honestly, and every layer that is NOT gets the
+        # ordinary skip line rather than vanishing from the count.
         ids = []
         for (_name, script_id), lid in zip(file_layers, claims):
             if script_id is not None:
                 continue
-            ids.append(None if lid in taken else lid)
+            ids.append(None if lid is None or lid in taken else lid)
         return ids, False, cause, blocked
     return ids, True, cause, ""
 

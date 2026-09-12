@@ -629,6 +629,44 @@ def test_an_anchor_the_file_order_cannot_honour_declines_the_renumber(tmp_path):
             ("Metal1", "Metal2", "TopMetal1")] == [2, 3, 4], out2
 
 
+def test_a_declined_renumber_still_imports_what_it_can_and_explains_the_rest(tmp_path):
+    """The decline must leave the PER-LAYER fallback intact, and the first
+    cut did not (Codex P2, #929).
+
+    Claim-building stopped at the first collision, so `claims` was a PREFIX
+    and the decline path zipped it against every layer.  With `def_layer 1
+    Metal2` over `Metal1`, `Metal2`, `TopMetal1`, `Metal3`, that lost
+    `Metal3` — whose own id 3 is free and uncontested — and lost the
+    colliding `TopMetal1` too, both with NO skip line: `imported 0 routing
+    layer(s)` and one loss of three explained.
+
+    This is the report defect of this function a fourth time, from the other
+    side: the count line and the skip list have to account for every eligible
+    layer between them.  So the claim walk runs to the end, marking a layer
+    whose own id the file already gave away, and the FIRST collision is still
+    the one reported.
+    """
+    tech = "VERSION 5.8 ;\n" + "".join(
+        "LAYER %s\n  TYPE ROUTING ;\n  DIRECTION %s ;\n  PITCH 0.42 ;\n"
+        "  WIDTH 0.16 ;\nEND %s\n" % (n, d, n)
+        for n, d in [("Metal1", "HORIZONTAL"), ("Metal2", "VERTICAL"),
+                     ("TopMetal1", "HORIZONTAL"), ("Metal3", "VERTICAL")]) + \
+        "END LIBRARY\n"
+    s, out = _run(tmp_path, """
+        def_layer 1 Metal2 V LOW 30
+        import_lef_tech @TECH@
+        """, tech)
+    assert "BUDA-1618" in out, out
+    # the uncontested layer keeps its own id
+    assert s._layer_name_map["Metal3"] == 3, out
+    assert s._layer_name_map["Metal2"] == 1, out          # the script's
+    # ...and EVERY loss is named, not just the first
+    assert "skipped layer Metal1" in out, out
+    assert "skipped layer TopMetal1" in out, out
+    assert "Metal1" not in s._layer_name_map, out
+    assert "TopMetal1" not in s._layer_name_map, out
+
+
 def test_the_catalogue_describes_every_shape_the_id_is_raised_for(tmp_path):
     """`dump_messages` is what a methodology reads to decide what it may
     waive or gate on BEFORE the message fires, so a catalogue line narrower
