@@ -744,10 +744,12 @@ def _lef_layer_ids(file_layers, taken):
     `file_layers` is every eligible routing layer as `(name, script_id)` —
     `script_id` set when the script already declared that layer BY NAME, in
     which case it keeps that id and is not assigned one here.  Returns
-    `(ids, renumbered, cause)`: `ids` for the layers this call assigns
-    (script_id None), in their order, `None` for one that cannot be given an
-    id; `renumbered` True when the name-derived reading was abandoned for the
-    file's own order; `cause` the collision that abandoned it, in words, so
+    `(ids, renumbered, cause, blocked)`: `ids` for the layers this call
+    assigns (script_id None), in their order, `None` for one that cannot be
+    given an id; `renumbered` True when the name-derived reading was abandoned
+    for the file's own order; `blocked`, when non-empty, the script anchor
+    that made even that reading impossible, so neither applies and the
+    per-layer refusal stands; `cause` the collision that abandoned it, so
     the caller's report never RE-DERIVES the finding — twice now a report
     that reconstructed it said something the detector did not (an empty pair
     list, then a shared trailing number two distinct names do not have).
@@ -802,6 +804,12 @@ def _lef_layer_ids(file_layers, taken):
       are independent even when they land on the same id: `def_layer 1 OTHER`
       over a `Metal1`/`TopMetal1` stack refused both, one at a time, and the
       clash BETWEEN them was never seen (Codex P1 on #929).
+
+      And a script anchor the file's order CANNOT honour — one at or below
+      an id already allocated — makes even the fallback impossible, so the
+      renumber is DECLINED (BUDA-1618) and this per-layer refusal stands.
+      Continuing past it produced [2,1,3] under a line claiming file order,
+      which is a message stating something untrue about its own result.
     """
     def _trailing(name):
         m = re.search(r"(\d+)\s*$", name)
@@ -853,7 +861,7 @@ def _lef_layer_ids(file_layers, taken):
             if script_id is not None:
                 continue                # keeps the id the script gave it
             ids.append(None if lid in taken else lid)
-        return ids, False, ""
+        return ids, False, "", ""
 
     # ── the fallback: the FILE's own order, which means MONOTONE.  A
     # script-declared layer is an ANCHOR at a fixed id in the middle of the
@@ -862,21 +870,43 @@ def _lef_layer_ids(file_layers, taken):
     # recreated the very inversion this fallback exists to avoid (Codex P2 on
     # #929).  Ids the script holds are stepped over as before.
     #
-    # `max` on the anchor is the honest limit: a script whose own `def_layer`
-    # ids run against the file's order cannot be made monotone by anything
-    # here — the script owns its numbering — so this refuses to add to the
-    # inversion rather than pretending to fix it.
-    ids, prev = [], 0
-    for _name, script_id in file_layers:
+    # An anchor at or below what is already allocated CANNOT be honoured, and
+    # continuing past it is the worst of the three answers: `def_layer 1
+    # Metal2` over `Metal1`/`Metal2`/`TopMetal1` sends `Metal1` to 2 (1 being
+    # taken) and then pins `Metal2` at 1 beneath it — physical order [2,1,3]
+    # under a BUDA-1617 line SAYING the stack is in file order.  That is the
+    # same defect as the two empty/false reports before it: a message that
+    # can state something untrue about the result.  So the renumber is
+    # DECLINED (BUDA-1618) and the per-layer refusal stands, which drops the
+    # colliding layers but describes them correctly and names the remedy.
+    ids, prev, blocked = [], 0, ""
+    for name, script_id in file_layers:
         if script_id is not None:
-            prev = max(prev, script_id)
+            if script_id <= prev:
+                blocked = (f"{name} is declared at id {script_id}, at or "
+                           f"below the id already given to a layer the file "
+                           f"lists before it")
+                break
+            prev = script_id
             continue
         lid = prev + 1
         while lid in taken:
             lid += 1
         ids.append(lid)
         prev = lid
-    return ids, True, cause
+
+    if blocked:
+        # Neither reading applies: the file's names collide, and the script's
+        # own numbering forbids the file's order.  Fall back to the per-layer
+        # refusal — the behaviour before any of this — so what is imported is
+        # what can be numbered honestly.
+        ids = []
+        for (_name, script_id), lid in zip(file_layers, claims):
+            if script_id is not None:
+                continue
+            ids.append(None if lid in taken else lid)
+        return ids, False, cause, blocked
+    return ids, True, cause, ""
 
 
 def cmd_import_lef_tech(session, cmd, args, cmd_line):
@@ -960,7 +990,7 @@ def cmd_import_lef_tech(session, cmd, args, cmd_line):
     # `_lef_layer_ids`), and an unnumbered one claims whatever it takes, so
     # both belong in the walk.  The eligibility test is `l.dir`, the same one
     # the partition loop applied.
-    ids, renumbered, clashes = _lef_layer_ids(
+    ids, renumbered, clashes, blocked = _lef_layer_ids(
         [(l.name, session._layer_name_map.get(l.name))
          for l in routing if l.dir], taken)
     for lid, l in zip(ids, importable):
@@ -1097,6 +1127,18 @@ def cmd_import_lef_tech(session, cmd, args, cmd_line):
             f"own order instead "
             f"({', '.join(moved) if moved else 'no layer moved'}). A "
             f"`def_layer <id>` in this flow refers to the ids above.")
+    elif blocked:
+        # NEITHER reading applies, so say that rather than picking one and
+        # describing it wrongly — the failure mode of the two reports before
+        # this.  What was imported is what could be numbered honestly; the
+        # rest carry the ordinary per-layer skip line.
+        buda_diag.emit(
+            "BUDA-1618",
+            f"{lef_arg}: {clashes}, which needs the file's own order — but "
+            f"{blocked}, so that order cannot be given. The layers whose ids "
+            f"collide are skipped instead; renumber that `def_layer` to match "
+            f"the file's order, or drop it and let the import number the "
+            f"stack.")
 
     if n_geom:
         # Named separately because it is a different thing from importing a

@@ -589,6 +589,46 @@ def test_a_held_id_cannot_shift_an_unnumbered_names_claim_and_hide_a_clash(tmp_p
     assert [s._layer_name_map[n] for n in ("local", "M1")] == [2, 3], out
 
 
+def test_an_anchor_the_file_order_cannot_honour_declines_the_renumber(tmp_path):
+    """The answer to the question the previous round left open, and Codex's
+    case is the one that settles it (#929).
+
+    An anchor BELOW what is already allocated cannot be honoured.  With
+    `def_layer 1 Metal2`, `Metal1` takes 2 (1 being held) and the anchor then
+    pins `Metal2` at 1 *beneath* it — physical order [2, 1, 3] under a
+    BUDA-1617 line saying the stack is in the file's own order.  Continuing
+    past the anchor is the worst of the three answers available, because it
+    is the same defect as the empty and the false report before it: a message
+    that can state something untrue about its own result.
+
+    So neither reading applies and the code says exactly that (**BUDA-1618**)
+    rather than picking one: the renumber is declined, the per-layer refusal
+    stands, and the message carries the remedy — renumber that `def_layer` to
+    match the file's order, or drop it.  The cost is real (two layers skipped
+    where a compatible anchor keeps all three) and it is the honest cost: the
+    script owns its numbering, and this one forbids the only order that
+    resolves the file's clash.
+    """
+    s, out = _run(tmp_path, """
+        def_layer 1 Metal2 V LOW 30
+        import_lef_tech @TECH@
+        """, _ONE_CLASH)
+    assert "BUDA-1618" in out and "BUDA-1617" not in out, out
+    assert s._layer_name_map["Metal2"] == 1, out       # the script's, kept
+    assert "Metal1" not in s._layer_name_map, out      # neither reading fits
+    assert "TopMetal1" not in s._layer_name_map, out
+    assert "renumber that `def_layer`" in out, out     # the remedy, named
+
+    # ...and an anchor the order CAN honour still renumbers, all three kept.
+    s2, out2 = _run(tmp_path, """
+        def_layer 2 Metal1 H LOW 30
+        import_lef_tech @TECH@
+        """, _ONE_CLASH)
+    assert "BUDA-1617" in out2 and "BUDA-1618" not in out2, out2
+    assert [s2._layer_name_map[n] for n in
+            ("Metal1", "Metal2", "TopMetal1")] == [2, 3, 4], out2
+
+
 def test_the_catalogue_describes_every_shape_the_id_is_raised_for(tmp_path):
     """`dump_messages` is what a methodology reads to decide what it may
     waive or gate on BEFORE the message fires, so a catalogue line narrower
