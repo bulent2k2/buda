@@ -151,7 +151,7 @@ layers the block was allowed, on the NQ / N dial.
 **Status.**  Pure geometry, no policy loop — the cleanest single plot in the
 set.  **Run and written up: [convergence_e2.md](convergence_e2.md)** — four
 arms (none / blob / bbox / exact keepouts) at NQ = 2, 4, 8, healerless and
-healed: precision orders the outcome monotonically at every size, the blob
+healed: precision orders the outcome monotonically at NQ = 2, 4, 8 and SWAPS bbox/exact at NQ = 16 (195 against 87 stranded — the cause left to the census, not guessed), the blob
 reserves ~60× the layer-area the block's routing occupies and strands an
 order of magnitude more bits than the bbox, and the tables are judged by
 `check_design` until the independent audit (item 2 below) exists.

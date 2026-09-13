@@ -50,7 +50,8 @@ carry the same count, exact more; the layer-areas are strictly ordered.
 
 ## Results — healerless (the primary table)
 
-Every arm routes the same top-level bundles (13 / 21 / 37 at NQ = 2 / 4 / 8);
+Every arm routes the same top-level bundles (13 / 21 / 37 / 69 at NQ = 2 / 4 /
+8 / 16);
 a bit-wire is one bit on one segment, so the count moves with the topologies
 chosen.  A parenthesised wirelength excludes the stranded bits and is not
 comparable to a complete route (`report_wirelength` says so on the line above
@@ -70,11 +71,17 @@ it).
 | 8 | blob | 214 | 71,606,016 | 8 | **449** | 449 in 17 | (1,433,519) |
 | 8 | bbox | 214 | 2,317,305 | 1 | 50 | 50 in 3 | (1,872,602) |
 | 8 | exact | 292 | 1,159,292 | 1 | 41 | 41 in 3 | (1,856,619) |
+| 16 | none | 0 | 0 | 0 | 0 | clean | 3,212,195 |
+| 16 | blob | 422 | 140,136,192 | **79** | **2024** | 2024 in 50 | (1,708,148) |
+| 16 | bbox | 422 | 4,123,641 | 1 | **87** | 88 in 10 | (3,695,152) |
+| 16 | exact | 564 | 2,228,348 | 1 | **195** | 195 in 10 | (3,933,982) |
 
 The source run itself, for reference — BUDA's own bottom-up with every net
-routed, healers as the flow runs them: first DNUTS audit **8 / 117 / 93**
-violations at NQ = 2 / 4 / 8, healed to **0 / 0 / 0** with 0 overlaps and
-0 unplaced at every size.
+routed, healers as the flow runs them: first DNUTS audit **8 / 117 / 93 / 336**
+violations at NQ = 2 / 4 / 8 / 16, healed to **0 / 0 / 0** with 0 overlaps and
+0 unplaced at the first three sizes and to **8 in 1 bundle** (3 overlaps, 8
+unplaced) at NQ = 16 — the E4 fault, the `pc_0` seat, exactly as
+[`soc.md`](../../flow/tcl/soc.md) records it.
 
 ## Results — healed (`negotiate_congestion 10` + `ripup_reroute 20` on every arm)
 
@@ -95,26 +102,34 @@ violations at NQ = 2 / 4 / 8, healed to **0 / 0 / 0** with 0 overlaps and
 
 ## What the tables say
 
-1. **Precision orders the outcome, at every size, in both tables.**
-   none ≤ exact ≤ bbox ≤ blob on unplaced bits, monotone with no crossing,
-   and the guard asserts the ordering at NQ = 2 so an engine change that
-   broke it would be noticed.
+1. **Precision orders the outcome at NQ = 2, 4 and 8, in both tables — and
+   NOT at NQ = 16.**  At the three smaller sizes none ≤ exact ≤ bbox ≤ blob
+   on unplaced bits, monotone with no crossing, and the guard asserts that
+   ordering at NQ = 2 so an engine change that broke it would be noticed.
+   At NQ = 16 the two precise arms **swap**: exact strands 195 bits against
+   the bbox's 87, both in 10 bundles, both with one overlap.  The outer
+   ordering (none ≤ {bbox, exact} ≪ blob) holds at every size; the claim
+   that finer is always better does not, and this write-up was drafted
+   saying it did before the NQ = 16 rows came in.  See "the NQ = 16 swap"
+   below.
 
 2. **The blob is a different regime, not a worse point on the same curve.**
-   Healerless it strands 160 / 432 / 449 bits against the bbox's 8 / 50 / 50,
-   and it is the only arm with more than one overlap.  The healers, which
+   Healerless it strands 160 / 432 / 449 / 2024 bits against the bbox's
+   8 / 50 / 50 / 87, and it is the only arm with more than one overlap (79
+   at NQ = 16 against 1).  The healers, which
    take bbox and exact to clean at NQ = 2 and to 18 / 4 at NQ = 4 and 8, take
-   the blob from 449 to 314.  Its keepout layer-area is **56×, 60×, 62×** the
-   exact arm's at NQ = 2, 4, 8 — the abstract reserves sixty times the metal
+   the blob from 449 to 314.  Its keepout layer-area is **56×, 60×, 62×, 63×** the
+   exact arm's at NQ = 2, 4, 8, 16 — the abstract reserves sixty times the metal
    the block's routing occupies — and the picture shows why: with a ring of 8
    the footprint of a cluster is a wall on every layer its routing touched,
    and a top-level bus has to go round it.
 
-3. **bbox to exact is a 2× area difference and a measurable but small routing
-   one.**  The bbox is 2.69× / 2.26× / 2.00× the exact layer-area — it tightens
-   with size as a cluster's routing fills its own box — and costs 20 % more
-   stranding healerless at NQ = 4 / 8 (50 against 41 / 42) and 4.5× more
-   healed (18 against 4).  At NQ = 2 both heal clean at an **identical**
+3. **bbox to exact is a 2× area difference and a small routing one that
+   changes sign with size.**  The bbox is 2.69× / 2.26× / 2.00× / 1.85× the
+   exact layer-area — it tightens with size as a cluster's routing fills its
+   own box — and costs 20 % more stranding healerless at NQ = 4 / 8 (50
+   against 41 / 42) and 4.5× more healed (18 against 4); at NQ = 16 it
+   strands 87 where exact strands 195.  At NQ = 2 both heal clean at an **identical**
    474,590, i.e. at that size the extra precision changed nothing the top
    used.
 
@@ -122,6 +137,48 @@ violations at NQ = 2 / 4 / 8, healed to **0 / 0 / 0** with 0 overlaps and
    routes with obstruction are the two healed NQ = 2 arms: +6.7 % over the
    floor (474,590 against 444,689).  Every other obstructed row is
    parenthesised, so no other wire comparison is made here.
+
+## The NQ = 16 swap
+
+At NQ = 16 the exact arm strands more than twice what the bbox arm does
+(195 against 87, healerless), reversing the order the three smaller sizes
+show.  What is established: the counts, from the same driver and the same
+audit; that both arms strand in 10 bundles with one overlap each; that the
+exact arm takes twice the time (4.1 s against 2.0 s) with 564 keepouts
+against 422.  The tool names WHAT stranded, read off
+each arm's DetailedNUTS log (deterministic: identical at `BUDA_THREADS=1`
+and unset, in-process and through the CLI):
+
+| NQ = 16, healerless | culled — final span crosses a keepout on its layer | admission strands — a seat short of tracks | total |
+|---|---|---|---|
+| bbox | 55 | 32 | 87 |
+| exact | 99 | 96 | 195 |
+
+The exact arm loses on BOTH counts.  Its admission strands are four M5
+seats the log names — bundles 15, 62, 66 (4 unreserved tracks against 32
+needed) and 57 (12 against 16) — and the built-in cull heal escalated three
+span-starved LOW segments (243 → 211 → 195) before the count settled; the
+bbox arm's two heal trials cut opens to 51 and 74 but raised overlaps 1 → 3
+and 1 → 2, so both were rejected under the componentwise accept and its 87
+stands (finding that out is what made the heals SAY when they reject a
+trial: the flow's one-line summary had quoted the rejected 74 as the
+result).  What is
+NOT established is WHY the finer keepouts strand more, and it is
+deliberately not guessed at — `soc.md` records five channel readings on
+this vehicle that each turned out to be a seat or a face.  Two readings are
+*candidates* to be measured, both testable with knobs that exist: a
+keepout's four edges are Hanan loci, so 564 exact rectangles offer the
+top-level planner trunk positions BETWEEN a block's segments that a bbox
+forbids outright, and a bit seated there is exactly what the cull removes
+and the M5 seats are exactly what the keepouts between them leave short
+(`set_keepout_loci` cannot separate this — the keepouts are not inside a
+block — so it wants an arm whose exact keepouts contribute no loci); and
+the healers, which had not run in this table, may recover one arm and not
+the other (the healed NQ = 16 rows are being measured).  Either way the
+finding stands on its own: **finer obstruction is not monotonically better
+for the top level at every size, and a write-up that said so from three
+sizes was wrong at the fourth.**  The blob's regime is unchanged by it —
+2024 stranded, 79 overlaps, 63× the layer-area.
 
 ## What the tables do not say
 
@@ -147,13 +204,16 @@ violations at NQ = 2 / 4 / 8, healed to **0 / 0 / 0** with 0 overlaps and
   argued.
 - **The control is not a design.**  `none` is what the top-level buses cost
   with the block's metal absent, the floor every other arm is read against.
-- **NQ = 16 is not in the tables.**  The source run at that size is the E4
-  fault — `soc.tcl 16 -bottomup` is dirty at the default channel (3 overlaps,
-  8 unplaced, one supply-doomed seat) and exits 1 on that verdict — and the
-  driver's first cut refused a recording whose flow exits non-zero, reading a
-  verdict as a crash.  The recording is accepted on the verdict line now and
-  the source row reports the dirty endpoint as it ran; the run is in progress
-  and its rows are added below when it finishes.
+- **NQ = 16 nearly went unmeasured.**  The source run at that size is the
+  E4 fault — `soc.tcl 16 -bottomup` is dirty at the default channel (3
+  overlaps, 8 unplaced, one supply-doomed seat) and exits 1 on that verdict —
+  and the driver's first cut refused a recording whose flow exits non-zero,
+  reading a verdict as a crash.  The recording is accepted on the verdict
+  line now and the source row reports the dirty endpoint as it ran.  Had the
+  size been dropped, the swap above would not have been seen.
+- **The healed NQ = 16 rows are pending** (the source alone is 190 s and the
+  healed arms run the two healers each); they are added to the healed table
+  when measured.
 
 ## Pictures
 
@@ -166,7 +226,8 @@ colour, and the top-level bit-wires route round them.
 
 ## Provenance
 
-- Source flows: `soc.tcl 2|4|8 -bottomup`, recorded with `BUDA_RECORD`.
-- Healerless sweep: `e2_abstract_precision.py --nq 2 --nq 4 --nq 8`.
+- Source flows: `soc.tcl 2|4|8|16 -bottomup`, recorded with `BUDA_RECORD`.
+- Healerless sweep: `e2_abstract_precision.py --nq 2 --nq 4 --nq 8`, then
+  `--nq 16` alone (the source at that size takes 190 s).
 - Healed sweep: the same with `--healers`.
 - Pin ring 8, keepout loci default (`all`).
