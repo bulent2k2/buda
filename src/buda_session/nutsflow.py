@@ -1492,6 +1492,13 @@ class NutsFlowMixin:
                     accepted = True
                     break
                 self._rr_restore(snap)
+                # Say so: the trial's own "[DetailedNUTS] N placed, M
+                # unplaced" line is already on the log, and without this the
+                # flow's one-line summary read a REJECTED trial's count as
+                # the result (E2 at NQ=16: 74 quoted, 87 kept).
+                print(f"[DetailedNUTS] CULL-HEAL: trial rejected (opens "
+                      f"{base[0]}->{cur[0]}, ovl {base[1]}->{cur[1]}), "
+                      f"restored", flush=True)
                 batch = batch[:len(batch) // 2]   # bisect: worst-cull half
             if not accepted:
                 break
@@ -1745,6 +1752,9 @@ class NutsFlowMixin:
                     accepted = True
                     break
                 self._rr_restore(snap)
+                print(f"[DetailedNUTS] RESEAT-HEAL: trial rejected (opens "
+                      f"{base[0]}->{cur[0]}, ovl {base[1]}->{cur[1]}), "
+                      f"restored", flush=True)
                 batch = batch[:len(batch) // 2]   # bisect: worst-strand half
             if not accepted:
                 break
@@ -2278,6 +2288,10 @@ class NutsFlowMixin:
                            abort_unplaced=-1, pair_align=None):
         """Execute bit-level track assignment using DetailedNUTSEngine.
 
+        Counts its calls in `_dnuts_solves` (reset by `run_detailed_nuts`)
+        so the command can tell a heal-trialled result from a single solve
+        and print the KEPT state last.
+
         emit_vias=False (RR fast trials): skip the per-bit via emission —
         pure output, never read by the stage-b metric, so the trial metric
         is identical; the commit re-runs with vias on.
@@ -2293,6 +2307,7 @@ class NutsFlowMixin:
         True/False explicitly OVERRIDES it (the measured-accept heal passes
         True).  The sentinel matters: an unconditional False here silently
         disabled the env flag on this path (Codex P2 on #557)."""
+        self._dnuts_solves = getattr(self, '_dnuts_solves', 0) + 1
         if self.nuts_result is None or self.routing_grid is None:
             return None
 
