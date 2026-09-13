@@ -271,3 +271,427 @@ def test_a_lef_with_no_routing_layers_is_a_reported_no_op(tmp_path):
                   "LAYER via1\n  TYPE CUT ;\nEND via1\nEND LIBRARY\n")
     assert "no ROUTING layers" in out
     assert not s._layer_name_map
+
+
+# ── a stack whose own names collide (IHP sg13g2 / sg13cmos5l) ──────────────
+#
+# The name-derived rule was validated against stacks where the trailing
+# integer IS the stack index (sky130 `met1..met5`, NanGate45
+# `metal1..metal10`).  That is not a property of LEF: IHP calls its two thick
+# top layers `TopMetal1`/`TopMetal2`, which collide with `Metal1`/`Metal2` —
+# in BOTH of its open PDKs.  This is that stack's shape.
+_IHP = "VERSION 5.8 ;\n" + "".join(
+    "LAYER %s\n  TYPE ROUTING ;\n  DIRECTION %s ;\n  PITCH %s ;\n"
+    "  WIDTH %s ;\nEND %s\n" % (n, d, p, w, n)
+    for n, d, p, w in [
+        ("Metal1",    "HORIZONTAL", "0.42", "0.16"),
+        ("Metal2",    "VERTICAL",   "0.48", "0.20"),
+        ("Metal3",    "HORIZONTAL", "0.42", "0.20"),
+        ("Metal4",    "VERTICAL",   "0.48", "0.20"),
+        ("Metal5",    "HORIZONTAL", "0.42", "0.20"),
+        ("TopMetal1", "VERTICAL",   "3.28", "1.64"),
+        ("TopMetal2", "HORIZONTAL", "4.0",  "2.0"),
+    ]) + "END LIBRARY\n"
+
+
+def test_a_stack_whose_own_names_collide_is_numbered_by_the_files_order(tmp_path):
+    """Two of the FILE's names deriving one id is not a per-layer question:
+    no layer owns the clash, and the name-derived reading simply does not
+    apply to this technology.  So the whole stack takes the file's order —
+    which is the fact the ids are for, LEF listing routing layers bottom-up."""
+    s, out = _run(tmp_path, "import_lef_tech @TECH@", _IHP)
+    assert [s._layer_name_map[n] for n in
+            ("Metal1", "Metal2", "Metal3", "Metal4", "Metal5",
+             "TopMetal1", "TopMetal2")] == [1, 2, 3, 4, 5, 6, 7], out
+    assert "BUDA-1617" in out, out
+    # The report names the collision that forced it — the FIRST one, since
+    # the whole stack renumbers on it and scanning further is work for
+    # nothing — and EVERY id that moved, which is what a script saying
+    # `def_layer 6` needs to see.
+    assert "Metal1 and TopMetal1 share a trailing number" in out, out
+    assert "TopMetal1 1->6" in out and "TopMetal2 2->7" in out
+
+
+def test_the_renumber_puts_TOP_on_the_thick_top_layers(tmp_path):
+    """The consequence that made the refusal serious, not the numbering
+    itself.  TOP is "the topmost layer per direction", so dropping the two
+    highest layers did not merely lose them — it moved TOP onto Metal4/Metal5
+    and ran the planner's whole TOP-vs-LOW economics against a stack this
+    technology does not have."""
+    s, _ = _run(tmp_path, "import_lef_tech @TECH@", _IHP)
+    tops = {n for n in s._layer_name_map
+            if s.layers.get_layer_type(s._layer_name_map[n]) ==
+            buda.LayerType.TOP}
+    assert tops == {"TopMetal1", "TopMetal2"}
+    # ...and they are the layers whose geometry is actually thick: an ~8x
+    # pitch step is what makes a TOP/LOW distinction mean anything here.
+    assert _pitch(s, s._layer_name_map["TopMetal1"]) > \
+        6 * _pitch(s, s._layer_name_map["Metal4"])
+
+
+def test_the_clash_is_the_FILES_and_survives_a_script_predeclaring_its_names(tmp_path):
+    """A name the script also declared still OCCUPIES its trailing number in
+    the file.  The first cut detected the clash over only the layers left to
+    assign, so predeclaring `Metal1`/`Metal2` by name — a supported
+    precedence path — left `Metal3`..`Metal5`, `TopMetal1`, `TopMetal2`,
+    whose trailing numbers are all distinct: no clash seen, ids 1 and 2 read
+    as merely script-held, and both top metals skipped again.  Measured
+    before the fix: `imported 3 routing layer(s)` plus two skips, i.e. the
+    five-layer IHP model this whole change exists to remove (Codex P1, #929).
+    """
+    s, out = _run(tmp_path, """
+        def_layer 1 Metal1 H 50
+        def_layer 2 Metal2 V 50
+        import_lef_tech @TECH@
+        """, _IHP)
+    assert "skipped layer" not in out, out
+    assert "BUDA-1617" in out, out
+    # every one of the file's seven layers is present, and the two the script
+    # declared keep the ids it gave them
+    assert s._layer_name_map["Metal1"] == 1 and s._layer_name_map["Metal2"] == 2
+    assert [s._layer_name_map[n] for n in
+            ("Metal3", "Metal4", "Metal5", "TopMetal1", "TopMetal2")] == \
+        [3, 4, 5, 6, 7], out
+    # ...and the report names the collision, whose two names are SPLIT across
+    # the script's group and the file's here — reading only the assigned
+    # layers printed an empty list.
+    assert "Metal1 and TopMetal1 share a trailing number" in out, out
+    tops = {n for n in s._layer_name_map
+            if s.layers.get_layer_type(s._layer_name_map[n]) ==
+            buda.LayerType.TOP}
+    assert tops == {"TopMetal1", "TopMetal2"}, out
+
+
+_UNNUMBERED = "VERSION 5.8 ;\n" + "".join(
+    "LAYER %s\n  TYPE ROUTING ;\n  DIRECTION %s ;\n  PITCH 0.2 ;\n"
+    "  WIDTH 0.1 ;\nEND %s\n" % (n, d, n)
+    for n, d in [("local", "HORIZONTAL"), ("M1", "VERTICAL"),
+                 ("M2", "HORIZONTAL")]) + "END LIBRARY\n"
+
+
+def test_an_unnumbered_name_can_collide_too_and_it_is_the_files_clash(tmp_path):
+    """A name with no trailing number takes the next free id, and that id is
+    a claim like any other: `local` takes 1, which `M1` then derives.  The
+    first cut tested only for two names sharing a trailing NUMBER, so it saw
+    no clash — and `M1` was dropped with "layer id already in use — rename or
+    declare it explicitly", blaming a script that had declared nothing
+    (Codex P2, #929; measured `imported 2 routing layer(s)` with M1 skipped).
+
+    Both collisions are the FILE's and neither is per-layer, which is why one
+    walk answers them: an id claimed by a file layer forces the whole-stack
+    fallback, an id held by the SCRIPT refuses that one layer."""
+    s, out = _run(tmp_path, "import_lef_tech @TECH@", _UNNUMBERED)
+    assert "skipped layer" not in out, out
+    assert [s._layer_name_map[n] for n in ("local", "M1", "M2")] == [1, 2, 3], out
+    # ...and the cause is named as what it is, not as a trailing-number clash
+    assert "local has no trailing number and takes id 1" in out, out
+    assert "which M1 derives from its own name" in out, out
+
+
+def test_an_unnumbered_name_after_a_numbered_one_is_not_a_collision(tmp_path):
+    """The mirror, and the reason the check has to mirror the ASSIGNMENT
+    rather than test ids in the abstract: with `M1` first it takes 1, so
+    `local` takes 2 and nothing collides.  A cheaper check that asked only
+    whether some numbered name derives an unnumbered one's id would renumber
+    this stack for no reason."""
+    tech = "VERSION 5.8 ;\n" + "".join(
+        "LAYER %s\n  TYPE ROUTING ;\n  DIRECTION %s ;\n  PITCH 0.2 ;\n"
+        "  WIDTH 0.1 ;\nEND %s\n" % (n, d, n)
+        for n, d in [("M1", "VERTICAL"), ("local", "HORIZONTAL")]) + \
+        "END LIBRARY\n"
+    s, out = _run(tmp_path, "import_lef_tech @TECH@", tech)
+    assert "BUDA-1617" not in out, out
+    assert s._layer_name_map["M1"] == 1 and s._layer_name_map["local"] == 2
+
+
+def test_a_script_held_id_is_stepped_over_and_the_order_still_holds(tmp_path):
+    """The script's numbering is still the script's.  The renumber takes the
+    ids it has not claimed, and the stack stays increasing in file order —
+    which is what BUDA's ids are for, since adjacency decides which layers a
+    via may join."""
+    s, _ = _run(tmp_path, """
+        def_layer 3 MINE V LOW 30
+        import_lef_tech @TECH@
+        """, _IHP)
+    ids = [s._layer_name_map[n] for n in
+           ("Metal1", "Metal2", "Metal3", "Metal4", "Metal5",
+            "TopMetal1", "TopMetal2")]
+    assert 3 not in ids, ids
+    assert ids == sorted(ids) and len(set(ids)) == len(ids), ids
+    assert s._layer_name_map["MINE"] == 3
+
+
+def test_a_file_internal_clash_and_a_script_held_id_are_different_things(tmp_path):
+    """One file, two outcomes, and the difference is who owns the id.  The
+    script holding an id refuses that ONE layer (it may describe something
+    else entirely); the file clashing with itself renumbers the whole stack.
+    Conflating them is how seven layers became five."""
+    _s1, out1 = _run(tmp_path, """
+        def_layer 2 MYM2 V LOW 30
+        import_lef_tech @TECH@
+        """)                                    # _TECH: M1/M2/M3, no clash
+    assert "skipped layer M2" in out1 and "BUDA-1617" not in out1, out1
+
+    _s2, out2 = _run(tmp_path, "import_lef_tech @TECH@", _IHP)
+    assert "BUDA-1617" in out2 and "skipped layer" not in out2, out2
+
+
+def test_a_script_id_that_differs_from_the_names_number_is_not_a_file_claim(tmp_path):
+    """The script's id and the file's claim are DIFFERENT NUMBERS for the
+    same layer, and treating them as one renumbers a stack that never
+    clashed (Codex P2, #929).
+
+    `def_layer 2 M1` holds **2** for the script; the file's `M1` still claims
+    **1** by its name.  Recording the script's 2 as a file claim made the
+    file's own `M2` look like a file-internal collision, so the whole stack
+    took file order — putting `M2` at 1, *below* the script-owned `M1` at 2.
+    Stack order is the one thing BUDA's ids are for, since adjacency decides
+    which layers a via may join, so an inversion is worse than a refusal.
+
+    The BUDA-1617 it printed was false in its own terms too — *"M1 and M2
+    share a trailing number"* about two names whose trailing numbers are 1
+    and 2 — which is the tell: a report that can say something untrue about
+    the file is reading the wrong thing, as it was twice before here.
+
+    Under the documented ownership rule id 2 is held by the SCRIPT, so `M2`
+    is refused and nothing else moves.
+    """
+    s, out = _run(tmp_path, """
+        def_layer 2 M1 H LOW 30
+        import_lef_tech @TECH@
+        """)                                    # _TECH: M1/M2/M3, distinct
+    assert "BUDA-1617" not in out, out
+    assert "skipped layer M2" in out, out
+    assert s._layer_name_map["M1"] == 2, out    # the script's, untouched
+    assert s._layer_name_map["M3"] == 3, out    # its own name's, untouched
+    assert "M2" not in s._layer_name_map, out
+
+
+# The minimal stack whose ONLY file-internal clash lands on the script-held
+# id.  `_IHP` will not do: its `TopMetal2`/`Metal2` pair collides on an id
+# nobody holds, so the fallback fires by that route whatever happens on id 1
+# — measured, the mutation (drop the file claim at the refusal) passes an
+# `_IHP` version of the test below.  A test for a specific path has to be run
+# on the input that has only that path.
+_ONE_CLASH = "VERSION 5.8 ;\n" + "".join(
+    "LAYER %s\n  TYPE ROUTING ;\n  DIRECTION %s ;\n  PITCH 0.42 ;\n"
+    "  WIDTH 0.16 ;\nEND %s\n" % (n, d, n)
+    for n, d in [("Metal1", "HORIZONTAL"), ("Metal2", "VERTICAL"),
+                 ("TopMetal1", "HORIZONTAL")]) + "END LIBRARY\n"
+
+
+def test_an_unrelated_script_id_cannot_hide_the_files_own_clash(tmp_path):
+    """The two collisions are INDEPENDENT, and the walk has to answer both
+    even when they land on the same id (Codex P1, #929).
+
+    `def_layer 1 OTHER` names no layer in this file — it just holds id 1.
+    The file's `Metal1` derives 1 and is refused for that (correct); but the
+    refusal used to skip recording the FILE's claim, so `TopMetal1` deriving
+    the same 1 was refused for the same reason and the clash BETWEEN THEM was
+    never seen: **1 of 3 layers imported, no BUDA-1617, no fallback** — the
+    five-layer IHP model the branch exists to remove, reached through a third
+    door.
+
+    Recording the claim at the refusal is what separates the questions: the
+    script's id refuses one layer, the file's own duplicate abandons the
+    name-derived reading for the stack.  Here both fire — file order, into
+    the ids the script does not hold.
+    """
+    s, out = _run(tmp_path, """
+        def_layer 1 OTHER H LOW 30
+        import_lef_tech @TECH@
+        """, _ONE_CLASH)
+    assert "BUDA-1617" in out, out
+    assert "skipped layer" not in out, out
+    assert s._layer_name_map["OTHER"] == 1, out       # the script keeps its id
+    # every file layer imported, in file order, stepping over the held 1
+    assert [s._layer_name_map[n] for n in
+            ("Metal1", "Metal2", "TopMetal1")] == [2, 3, 4], out
+
+
+def test_the_renumber_continues_above_a_script_anchor_rather_than_under_it(tmp_path):
+    """The fallback exists to keep ids increasing in FILE order, and
+    restarting the allocation at 1 broke exactly that (Codex P2, #929).
+
+    `def_layer 2 Metal1` anchors the file's FIRST layer at 2 and does not
+    stop the file's own `Metal1`/`TopMetal1` clash, so the fallback runs —
+    and put `Metal2` at **1**, beneath the anchor, inverting the two lowest
+    layers of the stack.  Since adjacency decides which layers a via may
+    join, an inversion is silently wrong geometry, which is the whole reason
+    the fallback prefers file order to the names.
+
+    A script-declared layer is an ANCHOR: allocation continues ABOVE it.
+    """
+    s, out = _run(tmp_path, """
+        def_layer 2 Metal1 H LOW 30
+        import_lef_tech @TECH@
+        """, _ONE_CLASH)
+    assert "BUDA-1617" in out, out
+    ids = [s._layer_name_map[n] for n in ("Metal1", "Metal2", "TopMetal1")]
+    assert ids == [2, 3, 4], (ids, out)          # anchored, then increasing
+    assert ids == sorted(ids), ids               # ...said as the property
+
+
+def test_a_script_declared_unnumbered_layer_still_makes_the_files_claim(tmp_path):
+    """The combination of two shapes already covered separately, and it fell
+    between them (Codex P2, #929): an unnumbered name that is ALSO
+    script-declared.
+
+    `def_layer 1 local` over a `local`/`M1`/`M2` stack — the file's own
+    reading has `local` taking 1 and `M1` deriving 1, which is a clash and
+    should renumber the stack.  Instead `local`'s claim was never computed
+    (it has no trailing number, and the next-free branch was gated on the
+    layer being unassigned), so `M1` read as colliding with the script alone
+    and was dropped: **1 of 3 imported, no BUDA-1617**.
+
+    The fix is structural — the file's claims are computed in a pass where
+    the SCRIPT does not exist at all, so a script id can neither invent a
+    clash nor hide one.  That is the same sentence four of these findings
+    turned on, finally enforced by the shape of the code rather than by a
+    branch per case.
+    """
+    s, out = _run(tmp_path, """
+        def_layer 1 local H LOW 30
+        import_lef_tech @TECH@
+        """, _UNNUMBERED)
+    assert "BUDA-1617" in out, out
+    assert "skipped layer" not in out, out
+    assert [s._layer_name_map[n] for n in ("local", "M1", "M2")] == [1, 2, 3], out
+
+
+def test_a_held_id_cannot_shift_an_unnumbered_names_claim_and_hide_a_clash(tmp_path):
+    """The property the two-pass split exists for, pinned directly — because
+    it was NOT pinned by the shapes above.  A mutation that consults `taken`
+    while computing the file's claims passed all of them.
+
+    An unnumbered name takes the first id THE FILE has not claimed.  Let what
+    the SCRIPT holds shift that, and an unrelated `def_layer 1 OTHER` moves
+    `local` off 1, so `M1` no longer collides with it in the file's reading
+    and is dropped as a mere script collision — the clash between two of the
+    FILE's own names, invisible because of a third name in neither.
+
+    That sentence — the clash is a property of the FILE's names, not of what
+    the script holds — is what four of these findings turned on.  It is
+    enforced by the passes now, so this test guards the SHAPE of the code.
+    """
+    tech = "VERSION 5.8 ;\n" + "".join(
+        "LAYER %s\n  TYPE ROUTING ;\n  DIRECTION %s ;\n  PITCH 0.2 ;\n"
+        "  WIDTH 0.1 ;\nEND %s\n" % (n, d, n)
+        for n, d in [("local", "HORIZONTAL"), ("M1", "VERTICAL")]) + \
+        "END LIBRARY\n"
+    s, out = _run(tmp_path, """
+        def_layer 1 OTHER H LOW 30
+        import_lef_tech @TECH@
+        """, tech)
+    assert "BUDA-1617" in out, out
+    assert "skipped layer" not in out, out
+    assert s._layer_name_map["OTHER"] == 1, out
+    assert [s._layer_name_map[n] for n in ("local", "M1")] == [2, 3], out
+
+
+def test_an_anchor_the_file_order_cannot_honour_declines_the_renumber(tmp_path):
+    """The answer to the question the previous round left open, and Codex's
+    case is the one that settles it (#929).
+
+    An anchor BELOW what is already allocated cannot be honoured.  With
+    `def_layer 1 Metal2`, `Metal1` takes 2 (1 being held) and the anchor then
+    pins `Metal2` at 1 *beneath* it — physical order [2, 1, 3] under a
+    BUDA-1617 line saying the stack is in the file's own order.  Continuing
+    past the anchor is the worst of the three answers available, because it
+    is the same defect as the empty and the false report before it: a message
+    that can state something untrue about its own result.
+
+    So neither reading applies and the code says exactly that (**BUDA-1618**)
+    rather than picking one: the renumber is declined, the per-layer refusal
+    stands, and the message carries the remedy — renumber that `def_layer` to
+    match the file's order, or drop it.  The cost is real (two layers skipped
+    where a compatible anchor keeps all three) and it is the honest cost: the
+    script owns its numbering, and this one forbids the only order that
+    resolves the file's clash.
+    """
+    s, out = _run(tmp_path, """
+        def_layer 1 Metal2 V LOW 30
+        import_lef_tech @TECH@
+        """, _ONE_CLASH)
+    assert "BUDA-1618" in out and "BUDA-1617" not in out, out
+    assert s._layer_name_map["Metal2"] == 1, out       # the script's, kept
+    assert "Metal1" not in s._layer_name_map, out      # neither reading fits
+    assert "TopMetal1" not in s._layer_name_map, out
+    assert "renumber that `def_layer`" in out, out     # the remedy, named
+
+    # ...and an anchor the order CAN honour still renumbers, all three kept.
+    s2, out2 = _run(tmp_path, """
+        def_layer 2 Metal1 H LOW 30
+        import_lef_tech @TECH@
+        """, _ONE_CLASH)
+    assert "BUDA-1617" in out2 and "BUDA-1618" not in out2, out2
+    assert [s2._layer_name_map[n] for n in
+            ("Metal1", "Metal2", "TopMetal1")] == [2, 3, 4], out2
+
+
+def test_a_declined_renumber_still_imports_what_it_can_and_explains_the_rest(tmp_path):
+    """The decline must leave the PER-LAYER fallback intact, and the first
+    cut did not (Codex P2, #929).
+
+    Claim-building stopped at the first collision, so `claims` was a PREFIX
+    and the decline path zipped it against every layer.  With `def_layer 1
+    Metal2` over `Metal1`, `Metal2`, `TopMetal1`, `Metal3`, that lost
+    `Metal3` — whose own id 3 is free and uncontested — and lost the
+    colliding `TopMetal1` too, both with NO skip line: `imported 0 routing
+    layer(s)` and one loss of three explained.
+
+    This is the report defect of this function a fourth time, from the other
+    side: the count line and the skip list have to account for every eligible
+    layer between them.  So the claim walk runs to the end, marking a layer
+    whose own id the file already gave away, and the FIRST collision is still
+    the one reported.
+    """
+    tech = "VERSION 5.8 ;\n" + "".join(
+        "LAYER %s\n  TYPE ROUTING ;\n  DIRECTION %s ;\n  PITCH 0.42 ;\n"
+        "  WIDTH 0.16 ;\nEND %s\n" % (n, d, n)
+        for n, d in [("Metal1", "HORIZONTAL"), ("Metal2", "VERTICAL"),
+                     ("TopMetal1", "HORIZONTAL"), ("Metal3", "VERTICAL")]) + \
+        "END LIBRARY\n"
+    s, out = _run(tmp_path, """
+        def_layer 1 Metal2 V LOW 30
+        import_lef_tech @TECH@
+        """, tech)
+    assert "BUDA-1618" in out, out
+    # the uncontested layer keeps its own id
+    assert s._layer_name_map["Metal3"] == 3, out
+    assert s._layer_name_map["Metal2"] == 1, out          # the script's
+    # ...and EVERY loss is named, not just the first
+    assert "skipped layer Metal1" in out, out
+    assert "skipped layer TopMetal1" in out, out
+    assert "Metal1" not in s._layer_name_map, out
+    assert "TopMetal1" not in s._layer_name_map, out
+
+
+def test_the_catalogue_describes_every_shape_the_id_is_raised_for(tmp_path):
+    """`dump_messages` is what a methodology reads to decide what it may
+    waive or gate on BEFORE the message fires, so a catalogue line narrower
+    than the id's real scope is wrong even while every runtime line is right
+    (Codex P2, #929).
+
+    BUDA-1617 covered two names sharing a trailing number; the unnumbered
+    collision shares no trailing number at all — `local` takes the next free
+    id and `M1` derives that same id — so a reader gating on the catalogue
+    text would not expect this run to raise it.  The condition is colliding
+    file-derived IDS; the CAUSE stays specific on the line itself.
+    """
+    import buda_diag
+    _sev, text = buda_diag.MESSAGES["BUDA-1617"]
+    assert "trailing number" not in text, text
+    assert "same layer id" in text, text
+
+    # ...and the specific cause is still named where it belongs: the line.
+    _s, out = _run(tmp_path, "import_lef_tech @TECH@", _UNNUMBERED)
+    assert "BUDA-1617" in out and "no trailing number" in out, out
+
+
+def test_a_stack_with_distinct_names_is_untouched_by_any_of_this(tmp_path):
+    """The guard on every flow in the tree: sky130 and NanGate45 name their
+    layers by stack index, so nothing here may reach them."""
+    s, out = _run(tmp_path, "import_lef_tech @TECH@")
+    assert [s._layer_name_map[n] for n in ("M1", "M2", "M3")] == [1, 2, 3]
+    assert "BUDA-1617" not in out, out
