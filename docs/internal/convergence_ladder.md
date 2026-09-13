@@ -129,8 +129,8 @@ and again at NQ = 32.
 arms are judged by the same audit and the claim is about the *loop*, not the
 route.
 
-**Status.**  Nothing to build.  The write-up is a re-reading of
-[`flow/tcl/soc.md`](../../flow/tcl/soc.md).
+**Status.**  Nothing to build.  **Written up: [convergence_e4.md](convergence_e4.md)** — a
+re-reading of [`flow/tcl/soc.md`](../../flow/tcl/soc.md).
 
 ### E2 — Abstract precision: blob vs tracks *(nothing new)*
 

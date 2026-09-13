@@ -215,6 +215,24 @@ def draw_blocks_faint(ax, cs):
                                    fc="none", ec="#999", lw=0.8, ls=":", zorder=1))
 
 
+def draw_keepouts(ax, s):
+    """Declared keepout zones, hatched in the colour of the layer they block
+    (a zone on several layers takes the first), under the wires: the
+    obstruction the route had to respect is part of the picture, and a design
+    with none draws nothing here."""
+    n = 0
+    for z in s.fp.get_keepout_zones():
+        if not z.layer_ids:
+            continue
+        b = z.bbox
+        c = LAYER_COLOR.get(min(z.layer_ids), "#000")   # layer_ids is a set
+        ax.add_patch(Rectangle((b.x1, b.y1), b.x2 - b.x1, b.y2 - b.y1,
+                               fc="none", ec=c, lw=0.3, hatch="////", alpha=0.35,
+                               zorder=2))
+        n += 1
+    return n
+
+
 def _layer_legend(ax, names, used):
     hs = [Line2D([0], [0], color=LAYER_COLOR.get(l, "#000"), lw=3,
                  label=f"{names.get(l, 'L%d' % l)} ({'H' if h else 'V'})")
@@ -292,6 +310,7 @@ def render(flow, prefix, title=None, dpi=150, label_depth=1):
 
     n_bund = len(s.bundles)
     awl = dwl = abs_unplaced = None
+    n_keep = len(list(s.fp.get_keepout_zones()))
     if s.nuts_result is not None:
         # The metric is the report's, not the drawing's: same-bundle spans
         # sharing a track are one wire, and an unplaced segment is no wire.
@@ -299,6 +318,7 @@ def render(flow, prefix, title=None, dpi=150, label_depth=1):
         awl = round(awl)
         fig, ax = _new_fig(w, h, f"{title} — NUTS: abstract bus tracks ({n_bund} bundles)")
         draw_blocks_faint(ax, cs)
+        n_keep = draw_keepouts(ax, s)
         draw_nuts(ax, s, names)
         fig.savefig(prefix + "_nuts.png", dpi=dpi, bbox_inches="tight")
         plt.close(fig)
@@ -320,6 +340,7 @@ def render(flow, prefix, title=None, dpi=150, label_depth=1):
         shield_wl = round(sum(abs(ns.span_hi - ns.span_lo) for ns in shields))
         fig, ax = _new_fig(w, h, f"{title} — DetailedNUTS: per-bit wires ({n_bits} bit-wires)")
         draw_blocks_faint(ax, cs)
+        draw_keepouts(ax, s)
         draw_dnuts(ax, s, names, signal, shields)
         fig.savefig(prefix + "_dnuts.png", dpi=dpi, bbox_inches="tight")
         plt.close(fig)
@@ -334,7 +355,7 @@ def render(flow, prefix, title=None, dpi=150, label_depth=1):
         components=len(cs), leaves=sum(1 for c in cs if c.is_leaf),
         max_depth=maxd, leaf_cells=cells, bundles=n_bund, bit_wires=n_bits,
         shield_wires=n_shields, abstract_wl=awl, detailed_wl=dwl,
-        shield_wl=shield_wl, abstract_unplaced=abs_unplaced,
+        shield_wl=shield_wl, abstract_unplaced=abs_unplaced, keepouts=n_keep,
         overlaps=(s.nuts_result.num_overlaps if s.nuts_result is not None else None),
         unplaced=(s.detailed_result.num_unplaced if s.detailed_result is not None else None),
         verdicts=verdicts, seconds=round(secs, 1), panels=written)
