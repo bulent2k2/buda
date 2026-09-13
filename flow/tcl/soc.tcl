@@ -221,7 +221,8 @@ while {$argi < $argc} {
 #   32   24  bundle 2 seg 0  M4 (LOW)  0 < 8 bits   CLEAN
 #   64   16  bundle 2 seg 0  M7 (TOP)  7 < 8 bits   X 7 ovl / 8 unpl
 #
-# This table stood at five rows while `flow/tcl/ReadMe.md` carried seven --
+# This table stood at five rows while its prose twin carried seven
+# (`flow/tcl/soc.md`, which was inside `flow/tcl/ReadMe.md` at the time) --
 # the same quantity tabulated twice with only one copy kept up as the runs
 # came in.  A new measurement has to be entered wherever it is TABULATED,
 # not only where it is discussed.

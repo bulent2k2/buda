@@ -24,7 +24,7 @@ different number of times (1 to 20; `-census` counts them).
 These pin the claims that make it worth having, and each is chosen so that a
 vehicle which quietly became a mesh, or flattened, would fail it.  Sizes are
 deliberately small (NQ=1..2) so the tier stays fast; the sweep to NQ=16 and
-the two lessons the vehicle paid for are in `flow/tcl/ReadMe.md`.
+the two lessons the vehicle paid for are in `flow/tcl/soc.md`.
 """
 import collections
 import os

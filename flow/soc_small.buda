@@ -1,0 +1,446 @@
+# soc_small.buda -- the SoC vehicle at NQ=8, as a flat script.
+#
+# GENERATED.  Do not hand-edit: the design lives in flow/tcl/soc.tcl and this
+# is a RECORDING of one run of it.  Regenerate with
+#
+#     tools/tcl2buda.py flow/tcl/soc.tcl 8 -o flow/soc_small.buda
+#
+# and add --verify to have the replay's measured result compared against the
+# Tcl run's (identical on abstract WL, detailed WL, bit-wires and overlaps
+# when this was written).
+#
+# It is a FLATTENING, not a parameterization: one concrete design with the
+# loops unrolled and the branches resolved, so there is no dial in here.  For
+# any other size, shape or flag (-bottomup, -caps, -bydepth, -NC, -DW ...) run
+# soc.tcl itself -- see flow/tcl/soc.md.
+#
+# Measured on the container this was recorded on (~3 s, `bin/buda --no-viz`):
+#   323 bundles / 2023 candidates / 9328 bit-wires
+#   detailed WL 1,968,672, ending clean -- 0 overlaps / 0 unplaced / 0 violations.
+# Read those as a scale, not a target; another box will differ.
+#
+# The design: eleven leaf cell types repeating a different number of times
+# each, leaves 2-4 levels down depending on subsystem, routed hierarchically
+# (run_hier_bundler / generate_hier_topologies / run_planner hier).
+#
+# A recording holds only the commands that RAN, so the two differ in what
+# they cover: here the first `check_design dnuts` comes back DIRTY (40
+# violations in 2 bundles), soc.tcl's heal_if_dirty fires, and the
+# `negotiate_congestion` + `ripup_reroute` lines below are that round -- so
+# this vehicle exercises the healers.  flow/soc_mid.buda does not: it is
+# clean at the first audit and records no healer at all.
+
+# origin: 
+def_layer 2 M2 H 55.56
+def_layer 3 M3 V 55.56
+def_layer 4 M4 H 55.56
+def_layer 5 M5 V TOP 50
+def_layer 6 M6 H TOP 52.94
+def_layer 7 M7 V TOP 56.10
+def_track_pattern 2 -100 POWER 2 1 (SIGNAL 1 0.5)x4 GROUND 2 1 (SIGNAL 1 0.5)x4
+def_track_pattern 3 0 POWER 2 1 (SIGNAL 1 0.5)x4 GROUND 2 1 (SIGNAL 1 0.5)x4
+def_track_pattern 4 -200 POWER 2 1 (SIGNAL 1 0.5)x4 GROUND 2 1 (SIGNAL 1 0.5)x4
+def_track_pattern 5 0 POWER 3 1 (SIGNAL 2 1)x4 GROUND 3 1 (SIGNAL 2 1)x4
+def_track_pattern 6 -400 POWER 4 1 (SIGNAL 2 1)x4 GROUND 4 1 (SIGNAL 2 1)x4
+def_track_pattern 7 -600 POWER 6 2 (SIGNAL 3 2)x3 GROUND 2 1 (SIGNAL 3 2)x3
+corner_margin dx 5 dy 5
+set_min_stub_length 2
+set_planner_param healersAhead 1
+open_bdb :memory:
+set_die 6288 4384
+add_cell alu_cell 152 152
+add_cell bridge_cell 152 152
+add_cell cluster_cell 1008 1136
+add_cell core_cell 352 352
+add_cell dec_cell 152 152
+add_cell fifo_cell 280 280
+add_cell io_blk_cell 328 256
+add_cell io_cell 56 56
+add_cell l1_cell 480 480
+add_cell l2_cell 1032 736
+add_cell memctl_cell 536 536
+add_cell mul_cell 152 152
+add_cell quad_cell 2064 1168
+add_cell regf_cell 152 152
+add_cell rtr_cell 480 608
+add_cell sram_cell 152 152
+add_cell tag_cell 280 280
+add_cell xbar_cell 152 152
+add_inst_to_cell core_cell dec dec_cell 16 16
+add_inst_to_cell core_cell alu alu_cell 184 16
+add_inst_to_cell core_cell mul mul_cell 16 184
+add_inst_to_cell core_cell regf regf_cell 184 184
+add_inst_to_cell rtr_cell fi_in fifo_cell 16 16
+add_inst_to_cell rtr_cell xbar xbar_cell 312 80
+add_inst_to_cell rtr_cell fi_out fifo_cell 16 312
+add_inst_to_cell l1_cell tag tag_cell 16 16
+add_inst_to_cell l1_cell bank_0 sram_cell 312 80
+add_inst_to_cell l1_cell bank_1 sram_cell 80 312
+add_inst_to_cell l2_cell tag tag_cell 16 144
+add_inst_to_cell l2_cell mc memctl_cell 312 16
+add_inst_to_cell l2_cell bank_0 sram_cell 864 208
+add_inst_to_cell l2_cell bank_1 sram_cell 80 568
+add_inst_to_cell l2_cell bank_2 sram_cell 504 568
+add_inst_to_cell l2_cell bank_3 sram_cell 864 568
+add_inst_to_cell io_blk_cell bridge bridge_cell 16 16
+add_inst_to_cell io_blk_cell p_0 io_cell 184 64
+add_inst_to_cell io_blk_cell p_1 io_cell 256 64
+add_inst_to_cell io_blk_cell p_2 io_cell 64 184
+add_inst_to_cell io_blk_cell p_3 io_cell 184 184
+add_inst_to_cell cluster_cell core core_cell 80 80
+add_inst_to_cell cluster_cell l1i l1_cell 512 16
+add_inst_to_cell cluster_cell l1d l1_cell 16 576
+add_inst_to_cell cluster_cell rtr rtr_cell 512 512
+add_inst_to_cell quad_cell cl_0 cluster_cell 16 16
+add_inst_to_cell quad_cell cl_1 cluster_cell 1040 16
+add_inst quad_0 quad_cell - 16 16
+add_inst quad_1 quad_cell - 2096 16
+add_inst quad_2 quad_cell - 4176 16
+add_inst quad_3 quad_cell - 16 1200
+add_inst quad_4 quad_cell - 2096 1200
+add_inst quad_5 quad_cell - 4176 1200
+add_inst quad_6 quad_cell - 16 2384
+add_inst quad_7 quad_cell - 2096 2384
+add_inst l2 l2_cell - 16 3616
+add_inst io io_blk_cell - 1064 3856
+derive_busterms 4
+add_blocks_from_bdb 0
+add_blocks_from_bdb 1 skip
+add_blocks_from_bdb 2 skip
+add_blocks_from_bdb 3 skip
+bdb_net_mode on
+add_bus i_0_0[32] quad_0/cl_0/core/dec.out quad_0/cl_0/core/alu.i_in
+add_bus m_0_0[32] quad_0/cl_0/core/mul.out quad_0/cl_0/core/regf.m_in
+add_bus r_0_0[32] quad_0/cl_0/core/regf.out quad_0/cl_0/core/alu.r_in
+add_bus x_0_0[32] quad_0/cl_0/core/alu.out quad_0/cl_0/core/regf.a_in
+add_bus ia_0_0[16] quad_0/cl_0/core/dec.a_out quad_0/cl_0/l1i/tag.a_in
+add_bus da_0_0[16] quad_0/cl_0/core/regf.a_out quad_0/cl_0/l1d/tag.a_in
+add_bus l1ia_0_0_0[16] quad_0/cl_0/l1i/tag.b_out quad_0/cl_0/l1i/bank_0.a_in
+add_bus l1id_0_0_0[32] quad_0/cl_0/l1i/bank_0.out quad_0/cl_0/l1i/tag.d_in
+add_bus l1ia_0_0_1[16] quad_0/cl_0/l1i/tag.b_out quad_0/cl_0/l1i/bank_1.a_in
+add_bus l1id_0_0_1[32] quad_0/cl_0/l1i/bank_1.out quad_0/cl_0/l1i/tag.d_in
+add_bus l1da_0_0_0[16] quad_0/cl_0/l1d/tag.b_out quad_0/cl_0/l1d/bank_0.a_in
+add_bus l1dd_0_0_0[32] quad_0/cl_0/l1d/bank_0.out quad_0/cl_0/l1d/tag.d_in
+add_bus l1da_0_0_1[16] quad_0/cl_0/l1d/tag.b_out quad_0/cl_0/l1d/bank_1.a_in
+add_bus l1dd_0_0_1[32] quad_0/cl_0/l1d/bank_1.out quad_0/cl_0/l1d/tag.d_in
+add_bus id_0_0[32] quad_0/cl_0/l1i/tag.d_out quad_0/cl_0/core/dec.i_in
+add_bus dd_0_0[32] quad_0/cl_0/l1d/tag.d_out quad_0/cl_0/core/regf.d_in
+add_bus rq_0_0[32] quad_0/cl_0/l1d/tag.out quad_0/cl_0/rtr/xbar.in
+add_bus i_0_1[32] quad_0/cl_1/core/dec.out quad_0/cl_1/core/alu.i_in
+add_bus m_0_1[32] quad_0/cl_1/core/mul.out quad_0/cl_1/core/regf.m_in
+add_bus r_0_1[32] quad_0/cl_1/core/regf.out quad_0/cl_1/core/alu.r_in
+add_bus x_0_1[32] quad_0/cl_1/core/alu.out quad_0/cl_1/core/regf.a_in
+add_bus ia_0_1[16] quad_0/cl_1/core/dec.a_out quad_0/cl_1/l1i/tag.a_in
+add_bus da_0_1[16] quad_0/cl_1/core/regf.a_out quad_0/cl_1/l1d/tag.a_in
+add_bus l1ia_0_1_0[16] quad_0/cl_1/l1i/tag.b_out quad_0/cl_1/l1i/bank_0.a_in
+add_bus l1id_0_1_0[32] quad_0/cl_1/l1i/bank_0.out quad_0/cl_1/l1i/tag.d_in
+add_bus l1ia_0_1_1[16] quad_0/cl_1/l1i/tag.b_out quad_0/cl_1/l1i/bank_1.a_in
+add_bus l1id_0_1_1[32] quad_0/cl_1/l1i/bank_1.out quad_0/cl_1/l1i/tag.d_in
+add_bus l1da_0_1_0[16] quad_0/cl_1/l1d/tag.b_out quad_0/cl_1/l1d/bank_0.a_in
+add_bus l1dd_0_1_0[32] quad_0/cl_1/l1d/bank_0.out quad_0/cl_1/l1d/tag.d_in
+add_bus l1da_0_1_1[16] quad_0/cl_1/l1d/tag.b_out quad_0/cl_1/l1d/bank_1.a_in
+add_bus l1dd_0_1_1[32] quad_0/cl_1/l1d/bank_1.out quad_0/cl_1/l1d/tag.d_in
+add_bus id_0_1[32] quad_0/cl_1/l1i/tag.d_out quad_0/cl_1/core/dec.i_in
+add_bus dd_0_1[32] quad_0/cl_1/l1d/tag.d_out quad_0/cl_1/core/regf.d_in
+add_bus rq_0_1[32] quad_0/cl_1/l1d/tag.out quad_0/cl_1/rtr/xbar.in
+add_bus i_1_0[32] quad_1/cl_0/core/dec.out quad_1/cl_0/core/alu.i_in
+add_bus m_1_0[32] quad_1/cl_0/core/mul.out quad_1/cl_0/core/regf.m_in
+add_bus r_1_0[32] quad_1/cl_0/core/regf.out quad_1/cl_0/core/alu.r_in
+add_bus x_1_0[32] quad_1/cl_0/core/alu.out quad_1/cl_0/core/regf.a_in
+add_bus ia_1_0[16] quad_1/cl_0/core/dec.a_out quad_1/cl_0/l1i/tag.a_in
+add_bus da_1_0[16] quad_1/cl_0/core/regf.a_out quad_1/cl_0/l1d/tag.a_in
+add_bus l1ia_1_0_0[16] quad_1/cl_0/l1i/tag.b_out quad_1/cl_0/l1i/bank_0.a_in
+add_bus l1id_1_0_0[32] quad_1/cl_0/l1i/bank_0.out quad_1/cl_0/l1i/tag.d_in
+add_bus l1ia_1_0_1[16] quad_1/cl_0/l1i/tag.b_out quad_1/cl_0/l1i/bank_1.a_in
+add_bus l1id_1_0_1[32] quad_1/cl_0/l1i/bank_1.out quad_1/cl_0/l1i/tag.d_in
+add_bus l1da_1_0_0[16] quad_1/cl_0/l1d/tag.b_out quad_1/cl_0/l1d/bank_0.a_in
+add_bus l1dd_1_0_0[32] quad_1/cl_0/l1d/bank_0.out quad_1/cl_0/l1d/tag.d_in
+add_bus l1da_1_0_1[16] quad_1/cl_0/l1d/tag.b_out quad_1/cl_0/l1d/bank_1.a_in
+add_bus l1dd_1_0_1[32] quad_1/cl_0/l1d/bank_1.out quad_1/cl_0/l1d/tag.d_in
+add_bus id_1_0[32] quad_1/cl_0/l1i/tag.d_out quad_1/cl_0/core/dec.i_in
+add_bus dd_1_0[32] quad_1/cl_0/l1d/tag.d_out quad_1/cl_0/core/regf.d_in
+add_bus rq_1_0[32] quad_1/cl_0/l1d/tag.out quad_1/cl_0/rtr/xbar.in
+add_bus i_1_1[32] quad_1/cl_1/core/dec.out quad_1/cl_1/core/alu.i_in
+add_bus m_1_1[32] quad_1/cl_1/core/mul.out quad_1/cl_1/core/regf.m_in
+add_bus r_1_1[32] quad_1/cl_1/core/regf.out quad_1/cl_1/core/alu.r_in
+add_bus x_1_1[32] quad_1/cl_1/core/alu.out quad_1/cl_1/core/regf.a_in
+add_bus ia_1_1[16] quad_1/cl_1/core/dec.a_out quad_1/cl_1/l1i/tag.a_in
+add_bus da_1_1[16] quad_1/cl_1/core/regf.a_out quad_1/cl_1/l1d/tag.a_in
+add_bus l1ia_1_1_0[16] quad_1/cl_1/l1i/tag.b_out quad_1/cl_1/l1i/bank_0.a_in
+add_bus l1id_1_1_0[32] quad_1/cl_1/l1i/bank_0.out quad_1/cl_1/l1i/tag.d_in
+add_bus l1ia_1_1_1[16] quad_1/cl_1/l1i/tag.b_out quad_1/cl_1/l1i/bank_1.a_in
+add_bus l1id_1_1_1[32] quad_1/cl_1/l1i/bank_1.out quad_1/cl_1/l1i/tag.d_in
+add_bus l1da_1_1_0[16] quad_1/cl_1/l1d/tag.b_out quad_1/cl_1/l1d/bank_0.a_in
+add_bus l1dd_1_1_0[32] quad_1/cl_1/l1d/bank_0.out quad_1/cl_1/l1d/tag.d_in
+add_bus l1da_1_1_1[16] quad_1/cl_1/l1d/tag.b_out quad_1/cl_1/l1d/bank_1.a_in
+add_bus l1dd_1_1_1[32] quad_1/cl_1/l1d/bank_1.out quad_1/cl_1/l1d/tag.d_in
+add_bus id_1_1[32] quad_1/cl_1/l1i/tag.d_out quad_1/cl_1/core/dec.i_in
+add_bus dd_1_1[32] quad_1/cl_1/l1d/tag.d_out quad_1/cl_1/core/regf.d_in
+add_bus rq_1_1[32] quad_1/cl_1/l1d/tag.out quad_1/cl_1/rtr/xbar.in
+add_bus i_2_0[32] quad_2/cl_0/core/dec.out quad_2/cl_0/core/alu.i_in
+add_bus m_2_0[32] quad_2/cl_0/core/mul.out quad_2/cl_0/core/regf.m_in
+add_bus r_2_0[32] quad_2/cl_0/core/regf.out quad_2/cl_0/core/alu.r_in
+add_bus x_2_0[32] quad_2/cl_0/core/alu.out quad_2/cl_0/core/regf.a_in
+add_bus ia_2_0[16] quad_2/cl_0/core/dec.a_out quad_2/cl_0/l1i/tag.a_in
+add_bus da_2_0[16] quad_2/cl_0/core/regf.a_out quad_2/cl_0/l1d/tag.a_in
+add_bus l1ia_2_0_0[16] quad_2/cl_0/l1i/tag.b_out quad_2/cl_0/l1i/bank_0.a_in
+add_bus l1id_2_0_0[32] quad_2/cl_0/l1i/bank_0.out quad_2/cl_0/l1i/tag.d_in
+add_bus l1ia_2_0_1[16] quad_2/cl_0/l1i/tag.b_out quad_2/cl_0/l1i/bank_1.a_in
+add_bus l1id_2_0_1[32] quad_2/cl_0/l1i/bank_1.out quad_2/cl_0/l1i/tag.d_in
+add_bus l1da_2_0_0[16] quad_2/cl_0/l1d/tag.b_out quad_2/cl_0/l1d/bank_0.a_in
+add_bus l1dd_2_0_0[32] quad_2/cl_0/l1d/bank_0.out quad_2/cl_0/l1d/tag.d_in
+add_bus l1da_2_0_1[16] quad_2/cl_0/l1d/tag.b_out quad_2/cl_0/l1d/bank_1.a_in
+add_bus l1dd_2_0_1[32] quad_2/cl_0/l1d/bank_1.out quad_2/cl_0/l1d/tag.d_in
+add_bus id_2_0[32] quad_2/cl_0/l1i/tag.d_out quad_2/cl_0/core/dec.i_in
+add_bus dd_2_0[32] quad_2/cl_0/l1d/tag.d_out quad_2/cl_0/core/regf.d_in
+add_bus rq_2_0[32] quad_2/cl_0/l1d/tag.out quad_2/cl_0/rtr/xbar.in
+add_bus i_2_1[32] quad_2/cl_1/core/dec.out quad_2/cl_1/core/alu.i_in
+add_bus m_2_1[32] quad_2/cl_1/core/mul.out quad_2/cl_1/core/regf.m_in
+add_bus r_2_1[32] quad_2/cl_1/core/regf.out quad_2/cl_1/core/alu.r_in
+add_bus x_2_1[32] quad_2/cl_1/core/alu.out quad_2/cl_1/core/regf.a_in
+add_bus ia_2_1[16] quad_2/cl_1/core/dec.a_out quad_2/cl_1/l1i/tag.a_in
+add_bus da_2_1[16] quad_2/cl_1/core/regf.a_out quad_2/cl_1/l1d/tag.a_in
+add_bus l1ia_2_1_0[16] quad_2/cl_1/l1i/tag.b_out quad_2/cl_1/l1i/bank_0.a_in
+add_bus l1id_2_1_0[32] quad_2/cl_1/l1i/bank_0.out quad_2/cl_1/l1i/tag.d_in
+add_bus l1ia_2_1_1[16] quad_2/cl_1/l1i/tag.b_out quad_2/cl_1/l1i/bank_1.a_in
+add_bus l1id_2_1_1[32] quad_2/cl_1/l1i/bank_1.out quad_2/cl_1/l1i/tag.d_in
+add_bus l1da_2_1_0[16] quad_2/cl_1/l1d/tag.b_out quad_2/cl_1/l1d/bank_0.a_in
+add_bus l1dd_2_1_0[32] quad_2/cl_1/l1d/bank_0.out quad_2/cl_1/l1d/tag.d_in
+add_bus l1da_2_1_1[16] quad_2/cl_1/l1d/tag.b_out quad_2/cl_1/l1d/bank_1.a_in
+add_bus l1dd_2_1_1[32] quad_2/cl_1/l1d/bank_1.out quad_2/cl_1/l1d/tag.d_in
+add_bus id_2_1[32] quad_2/cl_1/l1i/tag.d_out quad_2/cl_1/core/dec.i_in
+add_bus dd_2_1[32] quad_2/cl_1/l1d/tag.d_out quad_2/cl_1/core/regf.d_in
+add_bus rq_2_1[32] quad_2/cl_1/l1d/tag.out quad_2/cl_1/rtr/xbar.in
+add_bus i_3_0[32] quad_3/cl_0/core/dec.out quad_3/cl_0/core/alu.i_in
+add_bus m_3_0[32] quad_3/cl_0/core/mul.out quad_3/cl_0/core/regf.m_in
+add_bus r_3_0[32] quad_3/cl_0/core/regf.out quad_3/cl_0/core/alu.r_in
+add_bus x_3_0[32] quad_3/cl_0/core/alu.out quad_3/cl_0/core/regf.a_in
+add_bus ia_3_0[16] quad_3/cl_0/core/dec.a_out quad_3/cl_0/l1i/tag.a_in
+add_bus da_3_0[16] quad_3/cl_0/core/regf.a_out quad_3/cl_0/l1d/tag.a_in
+add_bus l1ia_3_0_0[16] quad_3/cl_0/l1i/tag.b_out quad_3/cl_0/l1i/bank_0.a_in
+add_bus l1id_3_0_0[32] quad_3/cl_0/l1i/bank_0.out quad_3/cl_0/l1i/tag.d_in
+add_bus l1ia_3_0_1[16] quad_3/cl_0/l1i/tag.b_out quad_3/cl_0/l1i/bank_1.a_in
+add_bus l1id_3_0_1[32] quad_3/cl_0/l1i/bank_1.out quad_3/cl_0/l1i/tag.d_in
+add_bus l1da_3_0_0[16] quad_3/cl_0/l1d/tag.b_out quad_3/cl_0/l1d/bank_0.a_in
+add_bus l1dd_3_0_0[32] quad_3/cl_0/l1d/bank_0.out quad_3/cl_0/l1d/tag.d_in
+add_bus l1da_3_0_1[16] quad_3/cl_0/l1d/tag.b_out quad_3/cl_0/l1d/bank_1.a_in
+add_bus l1dd_3_0_1[32] quad_3/cl_0/l1d/bank_1.out quad_3/cl_0/l1d/tag.d_in
+add_bus id_3_0[32] quad_3/cl_0/l1i/tag.d_out quad_3/cl_0/core/dec.i_in
+add_bus dd_3_0[32] quad_3/cl_0/l1d/tag.d_out quad_3/cl_0/core/regf.d_in
+add_bus rq_3_0[32] quad_3/cl_0/l1d/tag.out quad_3/cl_0/rtr/xbar.in
+add_bus i_3_1[32] quad_3/cl_1/core/dec.out quad_3/cl_1/core/alu.i_in
+add_bus m_3_1[32] quad_3/cl_1/core/mul.out quad_3/cl_1/core/regf.m_in
+add_bus r_3_1[32] quad_3/cl_1/core/regf.out quad_3/cl_1/core/alu.r_in
+add_bus x_3_1[32] quad_3/cl_1/core/alu.out quad_3/cl_1/core/regf.a_in
+add_bus ia_3_1[16] quad_3/cl_1/core/dec.a_out quad_3/cl_1/l1i/tag.a_in
+add_bus da_3_1[16] quad_3/cl_1/core/regf.a_out quad_3/cl_1/l1d/tag.a_in
+add_bus l1ia_3_1_0[16] quad_3/cl_1/l1i/tag.b_out quad_3/cl_1/l1i/bank_0.a_in
+add_bus l1id_3_1_0[32] quad_3/cl_1/l1i/bank_0.out quad_3/cl_1/l1i/tag.d_in
+add_bus l1ia_3_1_1[16] quad_3/cl_1/l1i/tag.b_out quad_3/cl_1/l1i/bank_1.a_in
+add_bus l1id_3_1_1[32] quad_3/cl_1/l1i/bank_1.out quad_3/cl_1/l1i/tag.d_in
+add_bus l1da_3_1_0[16] quad_3/cl_1/l1d/tag.b_out quad_3/cl_1/l1d/bank_0.a_in
+add_bus l1dd_3_1_0[32] quad_3/cl_1/l1d/bank_0.out quad_3/cl_1/l1d/tag.d_in
+add_bus l1da_3_1_1[16] quad_3/cl_1/l1d/tag.b_out quad_3/cl_1/l1d/bank_1.a_in
+add_bus l1dd_3_1_1[32] quad_3/cl_1/l1d/bank_1.out quad_3/cl_1/l1d/tag.d_in
+add_bus id_3_1[32] quad_3/cl_1/l1i/tag.d_out quad_3/cl_1/core/dec.i_in
+add_bus dd_3_1[32] quad_3/cl_1/l1d/tag.d_out quad_3/cl_1/core/regf.d_in
+add_bus rq_3_1[32] quad_3/cl_1/l1d/tag.out quad_3/cl_1/rtr/xbar.in
+add_bus i_4_0[32] quad_4/cl_0/core/dec.out quad_4/cl_0/core/alu.i_in
+add_bus m_4_0[32] quad_4/cl_0/core/mul.out quad_4/cl_0/core/regf.m_in
+add_bus r_4_0[32] quad_4/cl_0/core/regf.out quad_4/cl_0/core/alu.r_in
+add_bus x_4_0[32] quad_4/cl_0/core/alu.out quad_4/cl_0/core/regf.a_in
+add_bus ia_4_0[16] quad_4/cl_0/core/dec.a_out quad_4/cl_0/l1i/tag.a_in
+add_bus da_4_0[16] quad_4/cl_0/core/regf.a_out quad_4/cl_0/l1d/tag.a_in
+add_bus l1ia_4_0_0[16] quad_4/cl_0/l1i/tag.b_out quad_4/cl_0/l1i/bank_0.a_in
+add_bus l1id_4_0_0[32] quad_4/cl_0/l1i/bank_0.out quad_4/cl_0/l1i/tag.d_in
+add_bus l1ia_4_0_1[16] quad_4/cl_0/l1i/tag.b_out quad_4/cl_0/l1i/bank_1.a_in
+add_bus l1id_4_0_1[32] quad_4/cl_0/l1i/bank_1.out quad_4/cl_0/l1i/tag.d_in
+add_bus l1da_4_0_0[16] quad_4/cl_0/l1d/tag.b_out quad_4/cl_0/l1d/bank_0.a_in
+add_bus l1dd_4_0_0[32] quad_4/cl_0/l1d/bank_0.out quad_4/cl_0/l1d/tag.d_in
+add_bus l1da_4_0_1[16] quad_4/cl_0/l1d/tag.b_out quad_4/cl_0/l1d/bank_1.a_in
+add_bus l1dd_4_0_1[32] quad_4/cl_0/l1d/bank_1.out quad_4/cl_0/l1d/tag.d_in
+add_bus id_4_0[32] quad_4/cl_0/l1i/tag.d_out quad_4/cl_0/core/dec.i_in
+add_bus dd_4_0[32] quad_4/cl_0/l1d/tag.d_out quad_4/cl_0/core/regf.d_in
+add_bus rq_4_0[32] quad_4/cl_0/l1d/tag.out quad_4/cl_0/rtr/xbar.in
+add_bus i_4_1[32] quad_4/cl_1/core/dec.out quad_4/cl_1/core/alu.i_in
+add_bus m_4_1[32] quad_4/cl_1/core/mul.out quad_4/cl_1/core/regf.m_in
+add_bus r_4_1[32] quad_4/cl_1/core/regf.out quad_4/cl_1/core/alu.r_in
+add_bus x_4_1[32] quad_4/cl_1/core/alu.out quad_4/cl_1/core/regf.a_in
+add_bus ia_4_1[16] quad_4/cl_1/core/dec.a_out quad_4/cl_1/l1i/tag.a_in
+add_bus da_4_1[16] quad_4/cl_1/core/regf.a_out quad_4/cl_1/l1d/tag.a_in
+add_bus l1ia_4_1_0[16] quad_4/cl_1/l1i/tag.b_out quad_4/cl_1/l1i/bank_0.a_in
+add_bus l1id_4_1_0[32] quad_4/cl_1/l1i/bank_0.out quad_4/cl_1/l1i/tag.d_in
+add_bus l1ia_4_1_1[16] quad_4/cl_1/l1i/tag.b_out quad_4/cl_1/l1i/bank_1.a_in
+add_bus l1id_4_1_1[32] quad_4/cl_1/l1i/bank_1.out quad_4/cl_1/l1i/tag.d_in
+add_bus l1da_4_1_0[16] quad_4/cl_1/l1d/tag.b_out quad_4/cl_1/l1d/bank_0.a_in
+add_bus l1dd_4_1_0[32] quad_4/cl_1/l1d/bank_0.out quad_4/cl_1/l1d/tag.d_in
+add_bus l1da_4_1_1[16] quad_4/cl_1/l1d/tag.b_out quad_4/cl_1/l1d/bank_1.a_in
+add_bus l1dd_4_1_1[32] quad_4/cl_1/l1d/bank_1.out quad_4/cl_1/l1d/tag.d_in
+add_bus id_4_1[32] quad_4/cl_1/l1i/tag.d_out quad_4/cl_1/core/dec.i_in
+add_bus dd_4_1[32] quad_4/cl_1/l1d/tag.d_out quad_4/cl_1/core/regf.d_in
+add_bus rq_4_1[32] quad_4/cl_1/l1d/tag.out quad_4/cl_1/rtr/xbar.in
+add_bus i_5_0[32] quad_5/cl_0/core/dec.out quad_5/cl_0/core/alu.i_in
+add_bus m_5_0[32] quad_5/cl_0/core/mul.out quad_5/cl_0/core/regf.m_in
+add_bus r_5_0[32] quad_5/cl_0/core/regf.out quad_5/cl_0/core/alu.r_in
+add_bus x_5_0[32] quad_5/cl_0/core/alu.out quad_5/cl_0/core/regf.a_in
+add_bus ia_5_0[16] quad_5/cl_0/core/dec.a_out quad_5/cl_0/l1i/tag.a_in
+add_bus da_5_0[16] quad_5/cl_0/core/regf.a_out quad_5/cl_0/l1d/tag.a_in
+add_bus l1ia_5_0_0[16] quad_5/cl_0/l1i/tag.b_out quad_5/cl_0/l1i/bank_0.a_in
+add_bus l1id_5_0_0[32] quad_5/cl_0/l1i/bank_0.out quad_5/cl_0/l1i/tag.d_in
+add_bus l1ia_5_0_1[16] quad_5/cl_0/l1i/tag.b_out quad_5/cl_0/l1i/bank_1.a_in
+add_bus l1id_5_0_1[32] quad_5/cl_0/l1i/bank_1.out quad_5/cl_0/l1i/tag.d_in
+add_bus l1da_5_0_0[16] quad_5/cl_0/l1d/tag.b_out quad_5/cl_0/l1d/bank_0.a_in
+add_bus l1dd_5_0_0[32] quad_5/cl_0/l1d/bank_0.out quad_5/cl_0/l1d/tag.d_in
+add_bus l1da_5_0_1[16] quad_5/cl_0/l1d/tag.b_out quad_5/cl_0/l1d/bank_1.a_in
+add_bus l1dd_5_0_1[32] quad_5/cl_0/l1d/bank_1.out quad_5/cl_0/l1d/tag.d_in
+add_bus id_5_0[32] quad_5/cl_0/l1i/tag.d_out quad_5/cl_0/core/dec.i_in
+add_bus dd_5_0[32] quad_5/cl_0/l1d/tag.d_out quad_5/cl_0/core/regf.d_in
+add_bus rq_5_0[32] quad_5/cl_0/l1d/tag.out quad_5/cl_0/rtr/xbar.in
+add_bus i_5_1[32] quad_5/cl_1/core/dec.out quad_5/cl_1/core/alu.i_in
+add_bus m_5_1[32] quad_5/cl_1/core/mul.out quad_5/cl_1/core/regf.m_in
+add_bus r_5_1[32] quad_5/cl_1/core/regf.out quad_5/cl_1/core/alu.r_in
+add_bus x_5_1[32] quad_5/cl_1/core/alu.out quad_5/cl_1/core/regf.a_in
+add_bus ia_5_1[16] quad_5/cl_1/core/dec.a_out quad_5/cl_1/l1i/tag.a_in
+add_bus da_5_1[16] quad_5/cl_1/core/regf.a_out quad_5/cl_1/l1d/tag.a_in
+add_bus l1ia_5_1_0[16] quad_5/cl_1/l1i/tag.b_out quad_5/cl_1/l1i/bank_0.a_in
+add_bus l1id_5_1_0[32] quad_5/cl_1/l1i/bank_0.out quad_5/cl_1/l1i/tag.d_in
+add_bus l1ia_5_1_1[16] quad_5/cl_1/l1i/tag.b_out quad_5/cl_1/l1i/bank_1.a_in
+add_bus l1id_5_1_1[32] quad_5/cl_1/l1i/bank_1.out quad_5/cl_1/l1i/tag.d_in
+add_bus l1da_5_1_0[16] quad_5/cl_1/l1d/tag.b_out quad_5/cl_1/l1d/bank_0.a_in
+add_bus l1dd_5_1_0[32] quad_5/cl_1/l1d/bank_0.out quad_5/cl_1/l1d/tag.d_in
+add_bus l1da_5_1_1[16] quad_5/cl_1/l1d/tag.b_out quad_5/cl_1/l1d/bank_1.a_in
+add_bus l1dd_5_1_1[32] quad_5/cl_1/l1d/bank_1.out quad_5/cl_1/l1d/tag.d_in
+add_bus id_5_1[32] quad_5/cl_1/l1i/tag.d_out quad_5/cl_1/core/dec.i_in
+add_bus dd_5_1[32] quad_5/cl_1/l1d/tag.d_out quad_5/cl_1/core/regf.d_in
+add_bus rq_5_1[32] quad_5/cl_1/l1d/tag.out quad_5/cl_1/rtr/xbar.in
+add_bus i_6_0[32] quad_6/cl_0/core/dec.out quad_6/cl_0/core/alu.i_in
+add_bus m_6_0[32] quad_6/cl_0/core/mul.out quad_6/cl_0/core/regf.m_in
+add_bus r_6_0[32] quad_6/cl_0/core/regf.out quad_6/cl_0/core/alu.r_in
+add_bus x_6_0[32] quad_6/cl_0/core/alu.out quad_6/cl_0/core/regf.a_in
+add_bus ia_6_0[16] quad_6/cl_0/core/dec.a_out quad_6/cl_0/l1i/tag.a_in
+add_bus da_6_0[16] quad_6/cl_0/core/regf.a_out quad_6/cl_0/l1d/tag.a_in
+add_bus l1ia_6_0_0[16] quad_6/cl_0/l1i/tag.b_out quad_6/cl_0/l1i/bank_0.a_in
+add_bus l1id_6_0_0[32] quad_6/cl_0/l1i/bank_0.out quad_6/cl_0/l1i/tag.d_in
+add_bus l1ia_6_0_1[16] quad_6/cl_0/l1i/tag.b_out quad_6/cl_0/l1i/bank_1.a_in
+add_bus l1id_6_0_1[32] quad_6/cl_0/l1i/bank_1.out quad_6/cl_0/l1i/tag.d_in
+add_bus l1da_6_0_0[16] quad_6/cl_0/l1d/tag.b_out quad_6/cl_0/l1d/bank_0.a_in
+add_bus l1dd_6_0_0[32] quad_6/cl_0/l1d/bank_0.out quad_6/cl_0/l1d/tag.d_in
+add_bus l1da_6_0_1[16] quad_6/cl_0/l1d/tag.b_out quad_6/cl_0/l1d/bank_1.a_in
+add_bus l1dd_6_0_1[32] quad_6/cl_0/l1d/bank_1.out quad_6/cl_0/l1d/tag.d_in
+add_bus id_6_0[32] quad_6/cl_0/l1i/tag.d_out quad_6/cl_0/core/dec.i_in
+add_bus dd_6_0[32] quad_6/cl_0/l1d/tag.d_out quad_6/cl_0/core/regf.d_in
+add_bus rq_6_0[32] quad_6/cl_0/l1d/tag.out quad_6/cl_0/rtr/xbar.in
+add_bus i_6_1[32] quad_6/cl_1/core/dec.out quad_6/cl_1/core/alu.i_in
+add_bus m_6_1[32] quad_6/cl_1/core/mul.out quad_6/cl_1/core/regf.m_in
+add_bus r_6_1[32] quad_6/cl_1/core/regf.out quad_6/cl_1/core/alu.r_in
+add_bus x_6_1[32] quad_6/cl_1/core/alu.out quad_6/cl_1/core/regf.a_in
+add_bus ia_6_1[16] quad_6/cl_1/core/dec.a_out quad_6/cl_1/l1i/tag.a_in
+add_bus da_6_1[16] quad_6/cl_1/core/regf.a_out quad_6/cl_1/l1d/tag.a_in
+add_bus l1ia_6_1_0[16] quad_6/cl_1/l1i/tag.b_out quad_6/cl_1/l1i/bank_0.a_in
+add_bus l1id_6_1_0[32] quad_6/cl_1/l1i/bank_0.out quad_6/cl_1/l1i/tag.d_in
+add_bus l1ia_6_1_1[16] quad_6/cl_1/l1i/tag.b_out quad_6/cl_1/l1i/bank_1.a_in
+add_bus l1id_6_1_1[32] quad_6/cl_1/l1i/bank_1.out quad_6/cl_1/l1i/tag.d_in
+add_bus l1da_6_1_0[16] quad_6/cl_1/l1d/tag.b_out quad_6/cl_1/l1d/bank_0.a_in
+add_bus l1dd_6_1_0[32] quad_6/cl_1/l1d/bank_0.out quad_6/cl_1/l1d/tag.d_in
+add_bus l1da_6_1_1[16] quad_6/cl_1/l1d/tag.b_out quad_6/cl_1/l1d/bank_1.a_in
+add_bus l1dd_6_1_1[32] quad_6/cl_1/l1d/bank_1.out quad_6/cl_1/l1d/tag.d_in
+add_bus id_6_1[32] quad_6/cl_1/l1i/tag.d_out quad_6/cl_1/core/dec.i_in
+add_bus dd_6_1[32] quad_6/cl_1/l1d/tag.d_out quad_6/cl_1/core/regf.d_in
+add_bus rq_6_1[32] quad_6/cl_1/l1d/tag.out quad_6/cl_1/rtr/xbar.in
+add_bus i_7_0[32] quad_7/cl_0/core/dec.out quad_7/cl_0/core/alu.i_in
+add_bus m_7_0[32] quad_7/cl_0/core/mul.out quad_7/cl_0/core/regf.m_in
+add_bus r_7_0[32] quad_7/cl_0/core/regf.out quad_7/cl_0/core/alu.r_in
+add_bus x_7_0[32] quad_7/cl_0/core/alu.out quad_7/cl_0/core/regf.a_in
+add_bus ia_7_0[16] quad_7/cl_0/core/dec.a_out quad_7/cl_0/l1i/tag.a_in
+add_bus da_7_0[16] quad_7/cl_0/core/regf.a_out quad_7/cl_0/l1d/tag.a_in
+add_bus l1ia_7_0_0[16] quad_7/cl_0/l1i/tag.b_out quad_7/cl_0/l1i/bank_0.a_in
+add_bus l1id_7_0_0[32] quad_7/cl_0/l1i/bank_0.out quad_7/cl_0/l1i/tag.d_in
+add_bus l1ia_7_0_1[16] quad_7/cl_0/l1i/tag.b_out quad_7/cl_0/l1i/bank_1.a_in
+add_bus l1id_7_0_1[32] quad_7/cl_0/l1i/bank_1.out quad_7/cl_0/l1i/tag.d_in
+add_bus l1da_7_0_0[16] quad_7/cl_0/l1d/tag.b_out quad_7/cl_0/l1d/bank_0.a_in
+add_bus l1dd_7_0_0[32] quad_7/cl_0/l1d/bank_0.out quad_7/cl_0/l1d/tag.d_in
+add_bus l1da_7_0_1[16] quad_7/cl_0/l1d/tag.b_out quad_7/cl_0/l1d/bank_1.a_in
+add_bus l1dd_7_0_1[32] quad_7/cl_0/l1d/bank_1.out quad_7/cl_0/l1d/tag.d_in
+add_bus id_7_0[32] quad_7/cl_0/l1i/tag.d_out quad_7/cl_0/core/dec.i_in
+add_bus dd_7_0[32] quad_7/cl_0/l1d/tag.d_out quad_7/cl_0/core/regf.d_in
+add_bus rq_7_0[32] quad_7/cl_0/l1d/tag.out quad_7/cl_0/rtr/xbar.in
+add_bus i_7_1[32] quad_7/cl_1/core/dec.out quad_7/cl_1/core/alu.i_in
+add_bus m_7_1[32] quad_7/cl_1/core/mul.out quad_7/cl_1/core/regf.m_in
+add_bus r_7_1[32] quad_7/cl_1/core/regf.out quad_7/cl_1/core/alu.r_in
+add_bus x_7_1[32] quad_7/cl_1/core/alu.out quad_7/cl_1/core/regf.a_in
+add_bus ia_7_1[16] quad_7/cl_1/core/dec.a_out quad_7/cl_1/l1i/tag.a_in
+add_bus da_7_1[16] quad_7/cl_1/core/regf.a_out quad_7/cl_1/l1d/tag.a_in
+add_bus l1ia_7_1_0[16] quad_7/cl_1/l1i/tag.b_out quad_7/cl_1/l1i/bank_0.a_in
+add_bus l1id_7_1_0[32] quad_7/cl_1/l1i/bank_0.out quad_7/cl_1/l1i/tag.d_in
+add_bus l1ia_7_1_1[16] quad_7/cl_1/l1i/tag.b_out quad_7/cl_1/l1i/bank_1.a_in
+add_bus l1id_7_1_1[32] quad_7/cl_1/l1i/bank_1.out quad_7/cl_1/l1i/tag.d_in
+add_bus l1da_7_1_0[16] quad_7/cl_1/l1d/tag.b_out quad_7/cl_1/l1d/bank_0.a_in
+add_bus l1dd_7_1_0[32] quad_7/cl_1/l1d/bank_0.out quad_7/cl_1/l1d/tag.d_in
+add_bus l1da_7_1_1[16] quad_7/cl_1/l1d/tag.b_out quad_7/cl_1/l1d/bank_1.a_in
+add_bus l1dd_7_1_1[32] quad_7/cl_1/l1d/bank_1.out quad_7/cl_1/l1d/tag.d_in
+add_bus id_7_1[32] quad_7/cl_1/l1i/tag.d_out quad_7/cl_1/core/dec.i_in
+add_bus dd_7_1[32] quad_7/cl_1/l1d/tag.d_out quad_7/cl_1/core/regf.d_in
+add_bus rq_7_1[32] quad_7/cl_1/l1d/tag.out quad_7/cl_1/rtr/xbar.in
+add_bus nl_0[32] quad_0/cl_0/rtr/fi_out.out quad_0/cl_1/rtr/fi_in.in
+add_bus nr_0[16] quad_0/cl_1/rtr/xbar.r_out quad_0/cl_0/rtr/xbar.r_in
+add_bus nl_1[32] quad_0/cl_1/rtr/fi_out.out quad_1/cl_0/rtr/fi_in.in
+add_bus nr_1[16] quad_1/cl_0/rtr/xbar.r_out quad_0/cl_1/rtr/xbar.r_in
+add_bus nl_2[32] quad_1/cl_0/rtr/fi_out.out quad_1/cl_1/rtr/fi_in.in
+add_bus nr_2[16] quad_1/cl_1/rtr/xbar.r_out quad_1/cl_0/rtr/xbar.r_in
+add_bus nl_3[32] quad_1/cl_1/rtr/fi_out.out quad_2/cl_0/rtr/fi_in.in
+add_bus nr_3[16] quad_2/cl_0/rtr/xbar.r_out quad_1/cl_1/rtr/xbar.r_in
+add_bus nl_4[32] quad_2/cl_0/rtr/fi_out.out quad_2/cl_1/rtr/fi_in.in
+add_bus nr_4[16] quad_2/cl_1/rtr/xbar.r_out quad_2/cl_0/rtr/xbar.r_in
+add_bus nl_5[32] quad_2/cl_1/rtr/fi_out.out quad_3/cl_0/rtr/fi_in.in
+add_bus nr_5[16] quad_3/cl_0/rtr/xbar.r_out quad_2/cl_1/rtr/xbar.r_in
+add_bus nl_6[32] quad_3/cl_0/rtr/fi_out.out quad_3/cl_1/rtr/fi_in.in
+add_bus nr_6[16] quad_3/cl_1/rtr/xbar.r_out quad_3/cl_0/rtr/xbar.r_in
+add_bus nl_7[32] quad_3/cl_1/rtr/fi_out.out quad_4/cl_0/rtr/fi_in.in
+add_bus nr_7[16] quad_4/cl_0/rtr/xbar.r_out quad_3/cl_1/rtr/xbar.r_in
+add_bus nl_8[32] quad_4/cl_0/rtr/fi_out.out quad_4/cl_1/rtr/fi_in.in
+add_bus nr_8[16] quad_4/cl_1/rtr/xbar.r_out quad_4/cl_0/rtr/xbar.r_in
+add_bus nl_9[32] quad_4/cl_1/rtr/fi_out.out quad_5/cl_0/rtr/fi_in.in
+add_bus nr_9[16] quad_5/cl_0/rtr/xbar.r_out quad_4/cl_1/rtr/xbar.r_in
+add_bus nl_10[32] quad_5/cl_0/rtr/fi_out.out quad_5/cl_1/rtr/fi_in.in
+add_bus nr_10[16] quad_5/cl_1/rtr/xbar.r_out quad_5/cl_0/rtr/xbar.r_in
+add_bus nl_11[32] quad_5/cl_1/rtr/fi_out.out quad_6/cl_0/rtr/fi_in.in
+add_bus nr_11[16] quad_6/cl_0/rtr/xbar.r_out quad_5/cl_1/rtr/xbar.r_in
+add_bus nl_12[32] quad_6/cl_0/rtr/fi_out.out quad_6/cl_1/rtr/fi_in.in
+add_bus nr_12[16] quad_6/cl_1/rtr/xbar.r_out quad_6/cl_0/rtr/xbar.r_in
+add_bus nl_13[32] quad_6/cl_1/rtr/fi_out.out quad_7/cl_0/rtr/fi_in.in
+add_bus nr_13[16] quad_7/cl_0/rtr/xbar.r_out quad_6/cl_1/rtr/xbar.r_in
+add_bus nl_14[32] quad_7/cl_0/rtr/fi_out.out quad_7/cl_1/rtr/fi_in.in
+add_bus nr_14[16] quad_7/cl_1/rtr/xbar.r_out quad_7/cl_0/rtr/xbar.r_in
+add_bus ml[32] quad_7/cl_1/rtr/fi_out.out l2/mc.in
+add_bus l2a_0[16] l2/mc.b_out l2/bank_0.a_in
+add_bus l2d_0[32] l2/bank_0.out l2/mc.d_in
+add_bus l2a_1[16] l2/mc.b_out l2/bank_1.a_in
+add_bus l2d_1[32] l2/bank_1.out l2/mc.d_in
+add_bus l2a_2[16] l2/mc.b_out l2/bank_2.a_in
+add_bus l2d_2[32] l2/bank_2.out l2/mc.d_in
+add_bus l2a_3[16] l2/mc.b_out l2/bank_3.a_in
+add_bus l2d_3[32] l2/bank_3.out l2/mc.d_in
+add_bus mr[32] l2/mc.d_out quad_7/cl_1/rtr/fi_in.in
+add_bus l2ta[16] l2/mc.a_out l2/tag.a_in
+add_bus l2tr[16] l2/tag.d_out l2/mc.t_in
+add_bus pn[32] io/bridge.n_out quad_0/cl_0/rtr/fi_in.in
+add_bus pc_0[8] io/p_0.out quad_0/cl_0/rtr/xbar.p_in
+add_bus pb_0[8] io/bridge.out io/p_0.in
+add_bus pc_1[8] io/p_1.out quad_1/cl_0/rtr/xbar.p_in
+add_bus pb_1[8] io/bridge.out io/p_1.in
+add_bus pc_2[8] io/p_2.out quad_2/cl_0/rtr/xbar.p_in
+add_bus pb_2[8] io/bridge.out io/p_2.in
+add_bus pc_3[8] io/p_3.out quad_3/cl_0/rtr/xbar.p_in
+add_bus pb_3[8] io/bridge.out io/p_3.in
+run_hier_bundler depth 4
+dump_hbundles
+generate_hier_topologies
+run_planner hier 5
+run_nuts
+check_design nuts
+run_detailed_nuts
+check_design dnuts
+negotiate_congestion 10
+ripup_reroute 20
+check_design dnuts
+report_wirelength
