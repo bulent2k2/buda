@@ -23,6 +23,15 @@ keeps honest by re-running the flow) says 323 bundles, 9328 bit-wires and a
 detailed WL of 1,968,672, and the renderer must read the same session to the
 same numbers -- a picture whose caption disagrees with the flow log is worse
 than no picture.
+
+That pin alone was NOT the parity guard it claimed to be (Codex P1 x2 on
+#931): soc_small shares no tracks and declares no NDR rule, so a raw
+per-record sum matched the report there and over-stated everywhere else.
+Two flows where it does not match are pinned below -- one that shares
+tracks (`big2/b3_bus_023`, raw 8426 against the report's 7768) and one with
+NDR shields (`ndr_shield_flat`, 30 rows of which 10 are shields) -- and a
+third checks that a stage this run does not reach leaves no picture from the
+previous run behind (Codex P2).
 """
 import json
 import subprocess
@@ -81,8 +90,34 @@ def test_hier_flow_numbers_match_the_flows_own_header(tmp_path):
         assert Path(str(prefix) + suffix).exists(), suffix
 
 
+def test_wirelength_is_the_reports_not_a_raw_sum_when_tracks_are_shared(tmp_path):
+    """`big2/b3_bus_023` places same-bundle spans on shared tracks, so the
+    metal on the die is LESS than the sum of the records: the report unions
+    them (7768 detailed / 7765 abstract) where a raw sum says 8426 / 8424.
+    The JSON must carry the report's figure."""
+    _, meta, _ = _render(tmp_path, _ROOT / "flow/big_data_test/big2/b3_bus_023.buda")
+    assert meta["detailed_wl"] == 7768, meta["detailed_wl"]
+    assert meta["abstract_wl"] == 7765, meta["abstract_wl"]
+    assert meta["abstract_unplaced"] == 0
+
+
+def test_ndr_shields_are_counted_and_drawn_apart_from_bit_wires(tmp_path):
+    """`ndr_shield_flat`: 20 signal bits and 10 shield wires.  The report
+    says 12000 signal WL with 6000 of shield metal on its own line; the JSON
+    says the same, and never calls a shield a bit-wire."""
+    _, meta, _ = _render(tmp_path, _ROOT / "flow/ndr_shield_flat.buda")
+    assert meta["bit_wires"] == 20
+    assert meta["shield_wires"] == 10
+    assert meta["detailed_wl"] == 12000, meta["detailed_wl"]
+    assert meta["shield_wl"] == 6000, meta["shield_wl"]
+
+
 def test_a_flow_without_detailed_nuts_skips_that_panel_and_says_so(tmp_path):
-    """Truncate quickstart before run_detailed_nuts: two panels, one note."""
+    """Truncate quickstart before run_detailed_nuts: two panels, one note --
+    and the previous FULL render under the same prefix leaves no dnuts
+    picture behind for the truncated run to be mistaken for."""
+    _render(tmp_path, _ROOT / "demo/quickstart.buda")       # full run, same prefix
+    assert (tmp_path / "out_dnuts.png").exists()
     src = (_ROOT / "demo/quickstart.buda").read_text().splitlines()
     cut = []
     for ln in src:

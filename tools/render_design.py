@@ -26,12 +26,21 @@ quote numbers that came from the same session as the picture:
   <prefix>_nuts.png    abstract bus tracks, one line per placed bus segment
   <prefix>_dnuts.png   per-bit wires on concrete signal tracks
   <prefix>_meta.json   die, component/leaf/bundle/bit-wire counts, abstract and
-                       detailed wirelength, overlaps, unplaced, audit verdicts
+                       detailed wirelength (the report's, see below), shield
+                       count + metal, overlaps, unplaced, audit verdicts
 
 Layer colours are the viewer's own (`viz_common._LAYER_COLOR`), so a picture
-here reads like the GUI.  The detailed wirelength is the sum of every placed
-bit-wire's span — the same quantity `report_wirelength` prints, which is what
-`test_render_design.py` pins them against.
+here reads like the GUI.  Every wirelength in the JSON comes from the session's
+own `_wirelength_by_bundle` — the helper `report_wirelength` prints from, which
+UNIONS same-bundle spans sharing a track (a raw sum over-states there: +8.5%
+on `big2/b3_bus_023`) and skips unplaced abstract segments — and NDR shields
+are kept out of the signal metrics exactly as the report keeps them out
+(R11): counted and drawn separately, never as bit-wires.
+`test_render_design.py` pins all of that against the engine's own figures.
+
+A previous run's panels under the same prefix are REMOVED before the flow
+runs, so a stage this flow does not reach leaves no picture from another
+design behind.
 
 Usage:
   tools/render_design.py <flow.buda> [--out PREFIX] [--title TEXT] [--dpi N]
@@ -214,11 +223,12 @@ def _layer_legend(ax, names, used):
 
 
 def draw_nuts(ax, s, names):
-    used, wl = {}, 0.0
+    used = {}
     for g in s.nuts_result.segments:
+        if getattr(g, "placed", True) is False:
+            continue
         c = LAYER_COLOR.get(g.layer, "#000")
         used[g.layer] = g.horiz
-        wl += abs(g.span_hi - g.span_lo)
         if g.horiz:
             ax.plot([g.span_lo, g.span_hi], [g.track_position] * 2, color=c,
                     lw=1.1, alpha=0.85, zorder=5, solid_capstyle="butt")
@@ -226,30 +236,46 @@ def draw_nuts(ax, s, names):
             ax.plot([g.track_position] * 2, [g.span_lo, g.span_hi], color=c,
                     lw=1.1, alpha=0.85, zorder=5, solid_capstyle="butt")
     _layer_legend(ax, names, used)
-    return wl
 
 
-def draw_dnuts(ax, s, names):
+def draw_dnuts(ax, s, names, signal, shields):
+    """Signal bits in their layer colour; NDR shields (real metal, not signal
+    wirelength — R11) underneath in a neutral dashed stroke so they are visible
+    without reading as bits."""
     horiz = {(g.bundle_id, g.seg_idx): g.horiz for g in s.nuts_result.segments}
-    used, wl = {}, 0.0
-    for ns in s.detailed_result.net_segments:
+    used = {}
+    for ns in shields:
+        h = horiz.get((ns.bundle_id, ns.seg_idx), True)
+        xy = ([ns.span_lo, ns.span_hi], [ns.track_position] * 2) if h else \
+             ([ns.track_position] * 2, [ns.span_lo, ns.span_hi])
+        ax.plot(*xy, color="#555", lw=0.5, ls=(0, (2, 2)), alpha=0.8, zorder=4)
+    for ns in signal:
         c = LAYER_COLOR.get(ns.layer, "#000")
         h = horiz.get((ns.bundle_id, ns.seg_idx), True)
         used[ns.layer] = h
-        wl += abs(ns.span_hi - ns.span_lo)
-        if h:
-            ax.plot([ns.span_lo, ns.span_hi], [ns.track_position] * 2, color=c,
-                    lw=0.35, alpha=0.8, zorder=5)
-        else:
-            ax.plot([ns.track_position] * 2, [ns.span_lo, ns.span_hi], color=c,
-                    lw=0.35, alpha=0.8, zorder=5)
+        xy = ([ns.span_lo, ns.span_hi], [ns.track_position] * 2) if h else \
+             ([ns.track_position] * 2, [ns.span_lo, ns.span_hi])
+        ax.plot(*xy, color=c, lw=0.35, alpha=0.8, zorder=5)
     _layer_legend(ax, names, used)
-    return wl
+    if shields:
+        ax.text(0.0, -0.015, f"dashed grey = {len(shields)} NDR shield wire(s), "
+                "not counted as bit-wires", transform=ax.transAxes, fontsize=8,
+                ha="left", va="top", color="#555")
+
+
+_PANELS = ("_fp.png", "_nuts.png", "_dnuts.png", "_meta.json")
 
 
 def render(flow, prefix, title=None, dpi=150, label_depth=1):
     """Run the flow and write the panels + JSON.  Returns the metadata dict."""
     title = title or os.path.basename(flow)
+    # A stage this flow does not reach must leave no picture from a previous
+    # run under the same prefix: remove every output before the flow runs.
+    for suffix in _PANELS:
+        try:
+            os.remove(prefix + suffix)
+        except FileNotFoundError:
+            pass
     s, log, secs = run_flow(flow)
     cs, hier = components(s)
     if not cs:
@@ -265,23 +291,36 @@ def render(flow, prefix, title=None, dpi=150, label_depth=1):
     written.append(prefix + "_fp.png")
 
     n_bund = len(s.bundles)
-    awl = dwl = None
+    awl = dwl = abs_unplaced = None
     if s.nuts_result is not None:
+        # The metric is the report's, not the drawing's: same-bundle spans
+        # sharing a track are one wire, and an unplaced segment is no wire.
+        _, _, awl, abs_unplaced = s._wirelength_by_bundle(s.nuts_result.segments)
+        awl = round(awl)
         fig, ax = _new_fig(w, h, f"{title} — NUTS: abstract bus tracks ({n_bund} bundles)")
         draw_blocks_faint(ax, cs)
-        awl = draw_nuts(ax, s, names)
+        draw_nuts(ax, s, names)
         fig.savefig(prefix + "_nuts.png", dpi=dpi, bbox_inches="tight")
         plt.close(fig)
         written.append(prefix + "_nuts.png")
     else:
         print("render_design: no run_nuts in the flow — NUTS panel skipped")
 
-    n_bits = 0
+    n_bits = n_shields = 0
+    shield_wl = None
     if s.detailed_result is not None and s.nuts_result is not None:
-        n_bits = len(s.detailed_result.net_segments)
+        rows = s.detailed_result.net_segments
+        signal = [ns for ns in rows if not ns.is_shield]
+        shields = [ns for ns in rows if ns.is_shield]
+        n_bits, n_shields = len(signal), len(shields)
+        _, _, dwl, _ = s._wirelength_by_bundle(signal)
+        dwl = round(dwl)
+        # Shield metal is reported the way report_wirelength reports it: a
+        # plain sum on its own line, never inside the signal total.
+        shield_wl = round(sum(abs(ns.span_hi - ns.span_lo) for ns in shields))
         fig, ax = _new_fig(w, h, f"{title} — DetailedNUTS: per-bit wires ({n_bits} bit-wires)")
         draw_blocks_faint(ax, cs)
-        dwl = draw_dnuts(ax, s, names)
+        draw_dnuts(ax, s, names, signal, shields)
         fig.savefig(prefix + "_dnuts.png", dpi=dpi, bbox_inches="tight")
         plt.close(fig)
         written.append(prefix + "_dnuts.png")
@@ -294,7 +333,8 @@ def render(flow, prefix, title=None, dpi=150, label_depth=1):
         flow=os.path.basename(flow), hierarchical=hier, die=[w, h],
         components=len(cs), leaves=sum(1 for c in cs if c.is_leaf),
         max_depth=maxd, leaf_cells=cells, bundles=n_bund, bit_wires=n_bits,
-        abstract_wl=awl, detailed_wl=dwl,
+        shield_wires=n_shields, abstract_wl=awl, detailed_wl=dwl,
+        shield_wl=shield_wl, abstract_unplaced=abs_unplaced,
         overlaps=(s.nuts_result.num_overlaps if s.nuts_result is not None else None),
         unplaced=(s.detailed_result.num_unplaced if s.detailed_result is not None else None),
         verdicts=verdicts, seconds=round(secs, 1), panels=written)
