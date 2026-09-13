@@ -134,3 +134,32 @@ def test_a_flow_without_detailed_nuts_skips_that_panel_and_says_so(tmp_path):
     assert not Path(str(prefix) + "_dnuts.png").exists()
     assert meta["bit_wires"] == 0 and meta["detailed_wl"] is None
     assert "DNUTS panel skipped" in out
+
+
+def test_a_flat_flow_draws_its_declared_die(tmp_path):
+    """A flat `set_die` is the panel's outline, not the blocks' extent: the
+    die is recorded as declared and the bounds cover it whole (a design
+    whose blocks sit in one corner of a large die was cropped to the corner
+    and its die recorded as the corner)."""
+    flow = tmp_path / "die_flat.buda"
+    flow.write_text("set_die 3000 2000\n"
+                    "def_layer 3 M3 V LOW 0\ndef_layer 4 M4 H LOW 0\n"
+                    "add_block a 100 100 300 300\nadd_block b 500 400 700 600\n"
+                    "add_net n1 a.p b.q\nrun_bundler STRICT\ngenerate_topologies\n"
+                    "run_planner 3\nrun_nuts 1.0\n")
+    _, meta, _ = _render(tmp_path, flow)
+    assert meta["die_declared"] is True
+    assert meta["die"] == [3000.0, 2000.0]
+    assert meta["bounds"] == [0.0, 0.0, 3000.0, 2000.0]
+
+
+def test_negative_coordinates_are_inside_the_bounds(tmp_path):
+    """`flow/two.buda` places blocks from x = -150 and declares no die: the
+    bounds start at the geometry's minimum on each axis (the axes used to
+    start near zero, clipping every block left of the origin) and the
+    recorded die is the placed extent, not the maximum coordinate."""
+    _, meta, _ = _render(tmp_path, _ROOT / "flow/two.buda")
+    assert meta["die_declared"] is False
+    x0, y0, x1, y1 = meta["bounds"]
+    assert x0 == -150.0 and x1 == 750.0 and y0 > 0
+    assert meta["die"] == [x1 - x0, y1 - y0]

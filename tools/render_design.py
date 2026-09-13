@@ -146,23 +146,56 @@ def components(s):
 
 
 def die_extent(s, cs):
+    """The panel's bounds `(x0, y0, x1, y1)` and the DECLARED die `(w, h)`
+    or None.  The die is the BDB's when one is open, else the flat flow's
+    `set_die`; the bounds are that die unioned with everything placed --
+    blocks, keepouts, placed bus tracks -- so a block at a negative
+    coordinate, or routing outside the die, is drawn rather than clipped,
+    and a declared die larger than its blocks is drawn whole."""
+    die = None
     w = h = 0.0
     if s.bdb is not None:
         w, h = s.bdb.die_w(), s.bdb.die_h()
     if w <= 0 or h <= 0:
-        w = max(c.x2 for c in cs)
-        h = max(c.y2 for c in cs)
-    return w, h
+        w, h = s._die_w, s._die_h
+    if w > 0 and h > 0:
+        die = (float(w), float(h))
+    xs = [c.x1 for c in cs] + [c.x2 for c in cs]
+    ys = [c.y1 for c in cs] + [c.y2 for c in cs]
+    for z in s.fp.get_keepout_zones():
+        xs += [z.bbox.x1, z.bbox.x2]
+        ys += [z.bbox.y1, z.bbox.y2]
+    if s.nuts_result is not None:
+        for t in s.nuts_result.segments:
+            if not t.placed:
+                continue
+            if t.horiz:
+                xs += [t.span_lo, t.span_hi]
+                ys.append(t.track_position)
+            else:
+                ys += [t.span_lo, t.span_hi]
+                xs.append(t.track_position)
+    x0, y0, x1, y1 = min(xs), min(ys), max(xs), max(ys)
+    if die is not None:
+        x0, y0, x1, y1 = min(x0, 0.0), min(y0, 0.0), max(x1, die[0]), max(y1, die[1])
+    return (float(x0), float(y0), float(x1), float(y1)), die
 
 
-def _new_fig(w, h, title):
+def _new_fig(bounds, die, title):
+    x0, y0, x1, y1 = bounds
+    w, h = max(x1 - x0, 1.0), max(y1 - y0, 1.0)
     fw = 13.0
     fh = max(6.0, fw * (h / w) + 1.2)
     fig, ax = plt.subplots(figsize=(fw, fh))
     ax.set_aspect("equal")
-    ax.set_xlim(-w * 0.01, w * 1.01)
-    ax.set_ylim(-h * 0.01, h * 1.01)
-    ax.add_patch(Rectangle((0, 0), w, h, fc="white", ec="#222", lw=1.2, zorder=0))
+    ax.set_xlim(x0 - w * 0.01, x1 + w * 0.01)
+    ax.set_ylim(y0 - h * 0.01, y1 + h * 0.01)
+    # the declared die is the outline; with none declared, the outline is
+    # the extent of what was placed
+    if die is not None:
+        ax.add_patch(Rectangle((0, 0), die[0], die[1], fc="white", ec="#222", lw=1.2, zorder=0))
+    else:
+        ax.add_patch(Rectangle((x0, y0), w, h, fc="white", ec="#222", lw=1.2, zorder=0))
     ax.set_title(title, fontsize=12, loc="left")
     ax.set_xticks([])
     ax.set_yticks([])
@@ -298,11 +331,11 @@ def render(flow, prefix, title=None, dpi=150, label_depth=1):
     cs, hier = components(s)
     if not cs:
         sys.exit("render_design: the flow placed no blocks — nothing to draw")
-    w, h = die_extent(s, cs)
+    bounds, die = die_extent(s, cs)
     names = s._make_layer_names()
     written = []
 
-    fig, ax = _new_fig(w, h, f"{title} — floorplan" + (", every level" if hier else ""))
+    fig, ax = _new_fig(bounds, die, f"{title} — floorplan" + (", every level" if hier else ""))
     maxd, cells = draw_floorplan(ax, cs, label_depth)
     fig.savefig(prefix + "_fp.png", dpi=dpi, bbox_inches="tight")
     plt.close(fig)
@@ -316,7 +349,7 @@ def render(flow, prefix, title=None, dpi=150, label_depth=1):
         # sharing a track are one wire, and an unplaced segment is no wire.
         _, _, awl, abs_unplaced = s._wirelength_by_bundle(s.nuts_result.segments)
         awl = round(awl)
-        fig, ax = _new_fig(w, h, f"{title} — NUTS: abstract bus tracks ({n_bund} bundles)")
+        fig, ax = _new_fig(bounds, die, f"{title} — NUTS: abstract bus tracks ({n_bund} bundles)")
         draw_blocks_faint(ax, cs)
         n_keep = draw_keepouts(ax, s)
         draw_nuts(ax, s, names)
@@ -338,7 +371,7 @@ def render(flow, prefix, title=None, dpi=150, label_depth=1):
         # Shield metal is reported the way report_wirelength reports it: a
         # plain sum on its own line, never inside the signal total.
         shield_wl = round(sum(abs(ns.span_hi - ns.span_lo) for ns in shields))
-        fig, ax = _new_fig(w, h, f"{title} — DetailedNUTS: per-bit wires ({n_bits} bit-wires)")
+        fig, ax = _new_fig(bounds, die, f"{title} — DetailedNUTS: per-bit wires ({n_bits} bit-wires)")
         draw_blocks_faint(ax, cs)
         draw_keepouts(ax, s)
         draw_dnuts(ax, s, names, signal, shields)
@@ -351,7 +384,9 @@ def render(flow, prefix, title=None, dpi=150, label_depth=1):
     verdicts = [ln.strip() for ln in log.splitlines()
                 if "Success: no violations" in ln or "violation(s)" in ln]
     meta = dict(
-        flow=os.path.basename(flow), hierarchical=hier, die=[w, h],
+        flow=os.path.basename(flow), hierarchical=hier,
+        die=list(die) if die is not None else [bounds[2] - bounds[0], bounds[3] - bounds[1]],
+        die_declared=die is not None, bounds=list(bounds),
         components=len(cs), leaves=sum(1 for c in cs if c.is_leaf),
         max_depth=maxd, leaf_cells=cells, bundles=n_bund, bit_wires=n_bits,
         shield_wires=n_shields, abstract_wl=awl, detailed_wl=dwl,

@@ -79,8 +79,18 @@ def record(nq, out_path):
     r = subprocess.run([os.path.join(_ROOT, "bin", "btcl"), "flow/tcl/soc.tcl",
                         str(nq), "-bottomup"], cwd=_ROOT, env=env,
                        capture_output=True, text=True, timeout=3600)
-    if r.returncode != 0 or not os.path.exists(out_path):
+    # soc.tcl's exit code is its VERDICT, not its health: a dirty endpoint
+    # exits 1 after the flow has run to its end (and been recorded), which
+    # is exactly what `16 -bottomup` does at the default channel -- the E4
+    # fault.  A recording is accepted on the verdict line's presence; a run
+    # that died before reaching one (no verdict, or no file) is refused.
+    text = r.stdout + r.stderr
+    m = re.search(r"^soc\.tcl: (clean|FAILED) --.*$", text, re.M)
+    if m is None or not os.path.exists(out_path):
         sys.exit(f"e2: recording soc.tcl {nq} -bottomup failed:\n{r.stdout[-2000:]}{r.stderr[-2000:]}")
+    if m.group(1) == "FAILED":
+        print(f"[e2] NQ={nq}: the source flow's own endpoint is DIRTY ({m.group(0)}); "
+              f"recorded as it ran -- the source row reports it")
     return r.stdout
 
 
