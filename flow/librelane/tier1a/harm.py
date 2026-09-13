@@ -1098,11 +1098,25 @@ REFUSES -- `rectify_gds.py` on a decomposition that changed the area, `notch_obs
 or a signal-pin polygon in the LEF -- `notch.sh` exits non-zero and leaves that cell with no `.notch.lef`.  Fix
 it by hand rather than working around it; the recipe is the same two tools, per layer:
 
+    set -e                                  # a failed pass must not look like a repair
     c=<the cell that refused>; f=$PWD/$c/runs/h/final       # run from here, n<N>/h
     docker run --rm -v "$HOME:$HOME" -w "$PWD" ghcr.io/librelane/librelane:3.0.11 \\
         klayout -b -r {rel}/rectify_gds.py \\
         -rd gds=$f/gds/$c.gds -rd lnum=69 -rd ldt=20 -rd out=$f/gds/$c.rect.gds
-    python3 {rel}/notch_obs.py $f/gds/$c.rect.gds $f/lef/$c.lef $f/lef/$c.notch.lef
+    python3 {rel}/notch_obs.py $f/gds/$c.rect.gds $f/lef/$c.lef $f/lef/$c.notch.lef \\
+        --layer met2 --json $f/lef/$c.notch.met2.json
+    echo met2 > $f/lef/$c.notch.layers      # what notch.sh records; the checker
+                                            # refuses a cell without it, and refuses
+                                            # the ARM if cells disagree
+
+This is the SINGLE-LAYER form and it is deliberately the only one written down.  A multi-layer hand repair
+has to chain each pass's LEF and rectified GDS into the next, select the layer in BOTH tools (`--layer` here,
+`lnum`/`ldt` there -- 69/20 is met2 and decomposing the wrong layer leaves the right one untouched), and
+abort the moment a pass fails rather than advancing and writing provenance for work that did not happen.
+That is `notch.sh --layers met2,met3` -- it is that procedure, tested.  Six review rounds of #925 went into
+getting this paragraph's earlier, longer versions wrong in each of those four ways in turn; a procedure with
+that many invariants belongs in a script, not in a docstring.  If `notch.sh` refused for one cell of a
+multi-layer run, fix what made it refuse and re-run it rather than hand-building a partial abstract.
 
 (met2 is GDS 69/20; `notch_obs.py --gds-layer L/DT` takes another pair.)  A cell whose GDS the decomposition
 genuinely cannot handle can be carried UNPATCHED with `cp $f/lef/$c.lef $f/lef/$c.notch.lef` -- the top

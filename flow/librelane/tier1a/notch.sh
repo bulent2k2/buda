@@ -129,6 +129,12 @@ for c in $cells; do
     gdsdir="$h/$c/runs/h/final/gds"; lefdir="$h/$c/runs/h/final/lef"
     out="$lefdir/$c.notch.lef"
     rm -f "$out"                       # never leave a stale fix for the top
+    # ...and the per-layer JSON with it.  A narrower `--layers` re-run used to
+    # leave `<cell>.notch.<layer>.json` from the WIDER run standing beside a
+    # LEF that no longer patches that layer, so a reader pairing the two got
+    # metal the top's abstract does not contain (Codex, PR #925).  Same rule as
+    # the line above, applied to the artefact it forgot.
+    rm -f "$lefdir/$c".notch.*.json "$lefdir/$c.notch.layers"
     if [ ! -f "$gdsdir/$c.gds" ] || [ ! -f "$lefdir/$c.lef" ]; then
         echo "notch.sh: $c is not hardened ($gdsdir/$c.gds or $lefdir/$c.lef missing)" >&2
         fail+=("$c (not hardened)"); continue
@@ -159,6 +165,15 @@ for c in $cells; do
     done
     if [ "$ok" = 1 ] && [ "$i" -gt 0 ]; then
         mv "$src" "$gdsdir/$c.rect.gds"; mv "$inlef" "$out"
+        # PROVENANCE: which layers THIS invocation patched, beside the LEF it
+        # produced.  A reader pairing `<cell>.notch.<layer>.json` with the LEF
+        # cannot otherwise tell a current JSON from one a wider earlier run
+        # left behind, and mtime cannot decide it -- with several layers the
+        # JSONs are written one KLayout pass apart while the LEF carries the
+        # LAST pass's timestamp, so a fresh met2 JSON is legitimately minutes
+        # older than the LEF beside it (Codex, PR #925).  Written only on the
+        # success path, so its presence also means the LEF is real.
+        echo "$layer_list" > "$lefdir/$c.notch.layers"
     else
         fail+=("$c")
     fi
