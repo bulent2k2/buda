@@ -238,3 +238,32 @@ def test_span_clear_tracks_rank_first():
         f"span-clear survivors not claimed: placed={placed}")
     assert r.num_keepout_bits == 4
     assert r.num_unplaced == 4
+
+
+def test_a_rejected_trial_says_so_and_the_kept_state_is_said_last(monkeypatch):
+    """A heal trial re-solves DNUTS and that solve prints its own
+    "N placed, M unplaced" line whether the trial is kept or not; the flow's
+    one-line command summary takes the LAST such line, so a REJECTED trial's
+    count was quoted as the result (measured on an E2 arm at NQ=16: the
+    summary said 74 unplaced, the session held 87).  Force a rejected trial
+    — an escalation that claims a segment but changes nothing, so the
+    re-solve equals the base and fails the strict-improvement accept — and
+    require the rejection to be said and the kept state to be the last
+    placed/unplaced line, matching the session."""
+    s, h_idx = _build("add_keepout 56 0 68 500 2")
+    monkeypatch.setattr(s, "_escalate_dead_low_segments", lambda **kw: 1)
+    out = _nuts(s, heal=True)
+    assert "CULL-HEAL: trial rejected (opens 8->8, ovl 0->0), restored" in out, out
+    assert "CULL-HEAL: escalated" not in out
+    assert s.detailed_result.num_unplaced == 8
+    assert list(s.bundles[0].plan.seg_layers)[h_idx] == 2   # restored LOW M2
+    last = [ln for ln in out.splitlines() if "bits unplaced" in ln][-1]
+    assert last.startswith("[DetailedNUTS] kept:") and "8 bits unplaced" in last, last
+
+
+def test_an_accepted_heal_also_ends_on_the_kept_state():
+    s, _ = _build("add_keepout 56 0 68 500 2")
+    out = _nuts(s, heal=True)
+    assert "CULL-HEAL: escalated" in out
+    last = [ln for ln in out.splitlines() if "bits unplaced" in ln][-1]
+    assert last.startswith("[DetailedNUTS] kept:") and "0 bits unplaced" in last, last

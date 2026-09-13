@@ -169,6 +169,7 @@ def cmd_run_detailed_nuts(session, cmd, args, cmd_line):
     from buda_cmds import ndr_cmds
     ndr_cmds.validate_ndr_realizability(session)
 
+    session._dnuts_solves = 0
     try:
         session._run_detailed_nuts(bit_order=session._detailed_bit_order)
     except RuntimeError as e:
@@ -192,6 +193,15 @@ def cmd_run_detailed_nuts(session, cmd, args, cmd_line):
     # same-net stub pairs aligned, keep only when unplaced/overlaps don't rise
     # and WL strictly drops.  No-op unless set_pair_align_heal on.
     session._final_pair_align_heal()
+    if session._dnuts_solves > 1:
+        # Every heal trial printed its own placed/unplaced line, accepted or
+        # not; the flow's one-line summary takes the LAST such line, which
+        # quoted a rejected trial's count as the result.  The kept state is
+        # said last, so what the summary reports is what the session holds.
+        dr = session.detailed_result
+        print(f"[DetailedNUTS] kept: {len(dr.net_segments)} net segments "
+              f"placed, {dr.num_unplaced} bits unplaced (after "
+              f"{session._dnuts_solves - 1} heal trial(s))", flush=True)
     n_ns, n_nv = session._persist_detailed_nuts()
     if n_ns:
         print(f"[BDB] persisted {n_ns} net segment(s) and {n_nv} "
