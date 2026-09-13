@@ -1,0 +1,621 @@
+# `soc.tcl` — an SoC, deep and diverse
+
+*Split out of [`ReadMe.md`](ReadMe.md), which this chapter had grown to
+four fifths of. Every path below is relative to `flow/tcl/`, unchanged.*
+
+```bash
+btcl flow/tcl/soc.tcl                       # NQ=2 quadrants
+btcl flow/tcl/soc.tcl 4                     # THE DIAL
+btcl flow/tcl/soc.tcl 2 -NC 4 -NBANK 4      # wider clusters, bigger L1
+btcl flow/tcl/soc.tcl 4 -bottomup           # solve one cluster, copy it
+btcl flow/tcl/soc.tcl 2 -bydepth "M3 M4 M5" # a cap per intrinsic level
+btcl flow/tcl/soc.tcl 8 -dry                # print the size, build nothing
+```
+
+## What the corpus was missing, and it is not size
+
+`tpu.tcl` is a **mesh**: one cell tiled N × N, so every leaf is the same cell
+at the same depth. `flow/chip` is heterogeneous but **uniform in depth** —
+every leaf sits at one level. `flow/ariane133` is somebody else's real
+design, and a synthesized netlist is uniquified, so nothing repeats. Between
+them two shapes a real SoC has went unexercised:
+
+* **Many different cell types, each repeating a different number of times.**
+  A mesh tiles one cell, so every count is the same count. Here eleven leaf
+  types spanning an order of magnitude, and the two extremes are separate
+  code paths — `set_bottom_up *` copies a template to many instances and
+  *freezes* a single-instance cell as a keepout with nothing to copy.
+  Measured, `btcl flow/tcl/soc.tcl 2 -census`:
+
+  ```
+  sram_cell 20   tag_cell 9   fifo_cell 8
+  alu_cell 4   dec_cell 4   io_cell 4   mul_cell 4   regf_cell 4
+  xbar_cell 4                          <- one per router
+  bridge_cell 1   memctl_cell 1        <- the singletons
+  ```
+
+  **Eleven types with two singletons**, which is narrower than what this
+  section claimed first — *"most appearing once"*, with `xbar_cell` named as
+  one of them when it has an instance per router (Codex P2, #930).
+  `leaf_census` derives from the same argument `_fill` builds the instances
+  from, so the counts are a measurement and a test pins them.
+* **Ragged depth.** A leaf sits 2, 3 or 4 levels down depending on which
+  subsystem it is in.
+
+```
+soc
+|- quad_<q>  x NQ                                    level 4
+|   `- cl_<c>  x NC                                  level 3
+|       |- core -> dec, alu, mul, regf               level 2 -> 1
+|       |- l1i, l1d -> tag, sram_<b> x NBANK         level 2 -> 1
+|       `- rtr -> fifo, xbar, fifo                   level 2 -> 1
+|- l2  -> tag, memctl, sram_<b> x NBANK2             level 3 -> 1
+`- io  -> bridge, p_<k> x NIO                        level 3 -> 1
+```
+
+## What the ragged depth buys, measured
+
+`set_layer_caps_by_depth` caps a cell by how deep its **own** content goes, so
+one declaration gives **four different bands** here:
+
+```
+$ btcl flow/tcl/soc.tcl 2 -bydepth "M3 M4 M5"
+[LayerCaps] level 1 -> band [lowest..M3]: 11 cell(s): alu_cell, bridge_cell, …
+[LayerCaps] level 2 -> band [lowest..M4]:  5 cell(s): core_cell, io_blk_cell, l1_cell, l2_cell, rtr_cell
+[LayerCaps] level 3 -> band [lowest..M5]:  1 cell(s): cluster_cell
+[LayerCaps] level 4+ unrestricted:         1 cell(s): quad_cell
+```
+
+On a uniform-depth vehicle every cell is one level and this collapses to the
+`reserve_top_layers` case. The bundles land at four depths too — at NQ = 2,
+`D0: 9, D1: 18, D2: 20, D3: 48`.
+
+## Measured, this container
+
+| NQ | clusters | leaves | bundles | bit-wires | die | wall | endpoint |
+|---|---|---|---|---|---|---|---|
+| 1 | 2 | 37 | 57 | 1 664 | 2128 × 2016 | 1 s | clean |
+| 2 | 4 | 63 | 95 | 2 656 | 4208 × 2016 | 1 s | clean |
+| 4 | 8 | 115 | 171 | 5 024 | 4208 × 3200 | 2 s | clean |
+| 8 | 16 | 219 | 323 | 9 328 | 6288 × 4384 | 5 s | clean |
+| 16 | 32 | 427 | 627 | 18 080 | 8368 × 5568 | 14 s | clean |
+| 32 | 64 | 843 | 1235 | 35 096 | 12528 × 7936 | 36 s | clean |
+| 64 | 128 | 1675 | 2451 | 69 592 | 16688 × 10304 | 120 s | clean |
+
+Clean at every size measured — **top-down**, which is what this table is.
+`-caps` and `-bydepth` are clean where they were measured (NQ = 2, what the
+tests run). **`-bottomup` is not clean at every size and must not be read
+off this table** (Codex P2, #930): at the default channel it is clean at
+NQ = 1/2/4/8 and comes back **dirty at NQ = 16, NQ = 32 and NQ = 64** (8 bits
+of one bundle, the same one, the seat analysed at the end of this page). The
+whole advertised dial has now been run bottom-up; a named channel is measured
+to rescue 16 and 32; for 64 it is **not measured** — the attempt ran 90
+minutes without finishing (see the bottom-up section). The bottom-up section below is the one to read for it, and
+it carries its own per-gap tables; extending an all-sizes claim to the flag
+contradicted them two hundred lines later in the same document. NQ = 32 used to be **the honest limit** here —
+13 bits unplaced after 293 s — and it is neither the limit nor slow any
+more: removing three stars took it to clean, and removing the phantom
+coefficients (below) then took ~16 % off the wire and a fifth off the die at
+every row. **Every number on this table has now moved four times** — when a
+second `heal_if_dirty` round landed, when the stars went, when the
+coefficients went, and when the two dead instances below were wired — and
+each time because something re-ran it rather than because anyone re-read it.
+
+The last of those moved the **bundle** and **bit-wire** columns (+3 buses at
+every size: the L2 tag lookup both ways and the bridge's injection at the
+chain start) and left every **die** unchanged — including at `-DW 128` and
+`-CW 128`, measured — which is the point of it: the geometry was always paid
+for, only the workload was missing.
+
+## Every endpoint, every bit, every instance: the face rule read three ways
+
+The face rule — *a leaf's size is derived from the bits that land on its
+faces* — has to hold for **every endpoint of a bus**, on the **sum at each
+pin**, and for **every instance** rather than every cell type. This vehicle
+broke all three readings in turn; the second was hiding everything else on
+this page, and the third was invisible to every guard written for the first
+two.
+
+**Per bus.** `sram_cell` drives `l1id_*[IW]` out of each `l1i` bank and
+`alu_cell` receives `i_[IW]`, both sized from `DW`; `xbar_cell` was `2*DW` on
+both axes while `nr_[AW]` joins two routers directly and `pc_[CW]` arrives
+from an io pad (Codex P2 × 2, #930). Every face became a `max` over the buses
+landing on it. (This cited `id_[IW]` until the bank wiring landed — `id_` now
+leaves `l1i/tag.d_out`, so it names no SRAM at all, and a stale dependency is
+what a future face change would follow. Codex P2 again.)
+
+**Per pin.** A pin is *one place*, so what has to fit there is every bit that
+lands on it, not the widest bus taken alone. `NBANK`/`NBANK2` were advertised
+as dials while only `bank_0` was ever wired — at the defaults 11 of the 20
+`sram_cell` instances carried **no net**, so raising either knob added filler
+geometry and left the routed workload alone (Codex P2, #930) — and wiring
+them put each `NBANK` bank on one `tag.d_in`, each `NBANK2` bank on one
+`mc.d_in` and every peripheral of a cluster on one `xbar.p_in`: the same
+**star** the memory controller taught (next section), in three more places,
+with each of those buses passing the per-bus check. `check_bus_faces`
+accumulates per **endpoint path** now — and refuses outright when it cannot
+resolve a path, since a guard that checks nothing must not pass — so
+`NBANK`/`NBANK2`/`NIO` grow the cells they feed.
+
+**Per instance**, which is a different question and the one the guards kept
+answering by accident. Every check on this page reduces the design to cell
+**types** before comparing — a census by type, a declared size by type — and
+an unwired *occurrence* of a type that is wired elsewhere is invisible to all
+of them, however exact they are about the type. Two were:
+
+* **`l2/tag`** — an L2 tag array instantiated and named by no bus, in the
+  census and in the die with nothing on it, while the four live L1 tags
+  answered for `tag_cell` (Codex P2, #930). Now wired the way a controller
+  really works: the address out to the tag, the tag's answer back, on the
+  controller's own pin (`mc.t_in`, not `mc.d_in`, which already aggregates
+  every bank — the per-pin rule above). Both faces already held it, so this
+  wired a dead instance **without moving a single size**, which is the honest
+  reading: the geometry was always paid for, only the workload was missing.
+* **`quad_0/cl_0/rtr/fi_in`** — found by the guard written for the first one,
+  in the same run. `nl_` wires hop *i* to hop *i+1*, so the chain's first hop
+  has nothing upstream of it — one dead `fifo_cell` at *every* size, that
+  being a derivation rather than an extrapolation from the two sizes measured:
+  a chain has exactly one first hop whatever `NQ`/`NC` say. A peripheral
+  bridge is a NoC master, so it injects at the chain head — one bus, and the
+  physical answer. `bridge_cell` therefore takes a `DW` pin beside its
+  `NIO*CW` star, so its face is `max` of the two; that does not move the
+  default (both are 32 bits) and at `-DW 128` it grows 152 → 536 units with
+  the **die unchanged**, the io block not being what binds there.
+
+  The cheaper-looking fix was to close the chain into a **ring** (`mr` back to
+  `chain[0]`), and it is wrong for a reason worth keeping: that leaves every
+  `fi_in.in` with exactly one bus, which would make `fifo_cell`'s `2*DW`
+  phantom — and that coefficient is this vehicle's one *measured-honest*
+  multiplicity. A fix that wires a dead instance by deleting the aggregation
+  another face is sized from just trades one fault for the other.
+
+So `soc_vehicle::leaf_paths` enumerates the leaf **instance paths** (and
+`leaf_census` is now derived from it, one walk), and the face test requires
+each path to appear as some bus's endpoint *before* anything is reduced by
+type. Mutation-tested both ways: delete either bus and it names the instance,
+in every regime.
+
+What it cost was never the sizes. It was a **causal claim**, made twice.
+First `-AW 128` was reported as 128 bits unplaced on a *supply-doomed seat*
+and called "the channel from the other side". Then `-DW` and `-CW` were
+written up as a keepout cull and a dead span "deliberately not diagnosed
+further here". Every one of them was a face:
+
+| knob at 128 | first cut | per-bus `max` | per-pin **sum** |
+|---|---|---|---|
+| `-IW` | 512 unplaced | **clean** | **clean** |
+| `-AW` | 128 unplaced | **clean** | **clean** |
+| `-DW` | 65 unplaced | 65 unplaced | **clean** |
+| `-CW` | 741 unplaced | 166 unplaced | **clean** |
+
+(NQ = 1, each knob alone.) A symptom the tool reports is not a cause: the
+advisory named the seat every time and never once the reason for it — and
+the two readings that sounded most like physics, a keepout cull and a dead
+span, were the two that survived longest.
+
+**The mirror**, which cost a fourth reading of the same rule: a knob may
+appear in a cell's size **only if** some bus of that width lands on that
+cell. Three terms broke it — `dec_cell`'s `2*CW`, `tagpin`'s `CW`,
+`bridge_cell`'s `DW` — each a **phantom dependency**, a knob sizing a cell
+no bus of that width ever touches. Only the first was live, and it mattered:
+`-CW 128` grew the whole core/cluster stack for nothing (die 4576 × 5600
+against 4320 × 4704), so that experiment was measuring unrelated whitespace
+and could credit a clean route to the wrong geometry. The other two were
+dominated at the defaults and bind at `NBANK`/`NIO` = 1. Removing all three
+leaves the defaults **unchanged**, which is precisely why reading the table
+never found them.
+
+`bridge_cell`'s `DW` has since come **back**, and honestly: it was a phantom
+because no `DW` bus landed on the bridge, and the bridge's injection into the
+chain start (above) is one. The form was never wrong — the bus was missing.
+That is worth keeping as the shape of the mistake: a term with nothing behind
+it and a term whose bus the design forgot to declare look identical in the
+expression, and only the endpoints tell them apart.
+
+The guard for all of this is
+`test_every_leaf_face_is_exactly_the_bits_that_land_on_it`, which **replaced**
+a perturb-and-diff version: that one asked whether a knob *appears*, so it
+could not see a wrong COEFFICIENT at all, and needed one regime per knob to
+defend. The equality form needs neither.
+
+## The lesson it paid for: a face is derived, a channel is not
+
+A leaf's size **is** derived from the bits that land on its faces — that is
+`tpu.tcl`'s lesson and it holds. The arc that says a CHANNEL is different is
+worth keeping, because every step of it looked right:
+
+The first cut derived every face and left gaps flat, and `check_design`
+reported a supply-doomed seat — *19 signal tracks in a 32-bit bus's placed
+window*. A seat's window is a Hanan band, i.e. the gap between two blocks, so
+the reading was that a gap must host a whole bus (~136 units at the M6
+per-bit channel). Deriving it that way **does** clear the symptom.
+
+It is still the wrong fix, and only the measurement says so. The real cause
+was a **star on the memory controller**: the first netlist wired every
+cluster straight to `l2/mc`, which at NQ = 4 gave 72 bits unplaced with four
+bundles committing on planner overflow and *no* supply-doomed seat — real
+congestion, not sizing. A memory controller is arbitrated, not wired to eight
+masters in parallel, and its face is sized for one bus. With the NoC chain in
+its place a wider channel is **pure cost**:
+
+| GAP = M | NQ = 8 | NQ = 16 |
+|---|---|---|
+| 16 | clean, WL 1,968,672 | clean, WL 3,935,746 |
+| 48 | clean, WL 2,826,579 | clean, WL 5,553,364 |
+| 96 | clean, WL 4,024,854 | clean, WL 8,034,294 |
+| 144 | clean, WL 5,290,204 | clean, WL 10,561,015 |
+
+Every row routes, so the wider channel buys **nothing** and costs wire
+monotonically — which is `tpu.tcl`'s lesson in the direction it recorded it:
+*the channel was never the binding constraint*, so widening it only inflates
+the die and makes every wire longer.
+
+Where the design used to **fail**, a channel was not the lever either — and
+it is not what fixed it. Swept at DW = 128 (a 4× datapath), NQ = 4, this
+table read 65 bits unplaced at GAP 16 and never reached zero at any width
+tried (46 at 96; NQ = 1 ran the same way, 65 down to 31 at GAP 160), and it
+concluded the bits were **culled for crossing a keepout** on one cross-level
+NoC leg. The advice was right and the *cause* was wrong: three stars were
+still in the netlist, and with those faces sized from what lands on them
+`-DW 128` is clean at every gap, the channel still pure cost:
+
+| GAP = M (NQ = 4, DW = 128) | 16 | 32 | 64 | 96 |
+|---|---|---|---|---|
+| detailed WL | 9,253,086 | 9,865,420 | 11,400,415 | 12,698,056 |
+| endpoint | clean | clean | clean | clean |
+
+`-DW` alone: `IW` sizes `dec_cell` and every cell enclosing it, so setting it
+too would measure a different design from the one recorded here. So `GAP`
+and `M` are plain constants across the whole NQ dial **and** across a 4×
+datapath — a stronger claim than the one it replaced, and one reached by
+removing faces rather than by tuning a gap.
+
+The last part of the lesson is that these numbers get re-run, and have now
+moved **three times**. An earlier sweep read as *non-monotone* (clean at GAP
+40/48/80, stranded at the rest) and was presented here as the reason no
+derivation could exist; a second healer round changed the answer at every
+point; the star fix turned a whole failing table clean; and the phantom
+coefficients then took ~25 % off every number in it. A recorded
+measurement nothing re-runs decays into a claim, so
+`test_a_wider_channel_is_not_the_lever_a_wider_bus_needs` runs the cheap end
+of both directions on every test run.
+
+## `-bottomup`: every sizing fix pushed the channel further out
+
+`-bottomup` used to widen the channel behind the caller's back (`GAP 24
+M 24`) to clear two overlaps at NQ = 4, and the sweep that justified it read
+**non-monotone** — 16 ✗, 24 ok, 32 ok, 48 ok, **64 ✗**, 96 ok — written up
+here as evidence that a *fixed* copy turns the channel into a phase lottery.
+
+Every sizing fault since has pushed that need further out, which is the
+pattern worth recording. The **star faces** took it from NQ = 4 to NQ = 8.
+The **phantom coefficients** — `2*DW` on four cells with nothing behind it —
+took it from NQ = 8 to NQ = 16. At the default channel the flag is now clean
+through NQ = 8, and at NQ = 8 *every* gap is clean:
+
+| GAP = M (NQ = 8, `-bottomup`) | 16 | 24 | 32 | 48 | 64 | 96 |
+|---|---|---|---|---|---|---|
+| result | ok | ok | ok | ok | ok | ok |
+| detailed WL | 2,175,864 | 2,401,550 | 2,595,391 | 3,031,186 | 3,571,607 | 4,329,443 |
+
+Wiring the two **dead instances** (above) did *not* push it further — NQ = 8
+stays clean and NQ = 16 stays dirty at the default channel — which is worth
+recording as the negative result it is: three sizing faults moved this
+threshold and this one did not, because it added workload without changing a
+single face.
+
+NQ = 16 is where a fixed copy at the default channel first comes back
+**dirty** — the observation, not a claim about what it needs, which is argued
+at the end of this page and is not a channel — and there the gap sweep is
+**genuinely non-monotone**, measured on the honestly sized design this time
+rather than as an artefact:
+
+| GAP = M (NQ = 16, `-bottomup`) | 16 | 24 | 32 | 48 | 96 |
+|---|---|---|---|---|---|
+| result | ✗ 3 ovl / 8 unpl | ok | ✗ 8 unpl | ✗ 1 ovl / 8 unpl | ok |
+| detailed WL | 4,319,399 | 4,648,190 | 5,058,836 | 5,856,977 | 8,621,243 |
+
+Re-measuring this one **changed** a row rather than confirming it: GAP 48 was
+clean last revision and fails now, so the working region has shrunk to **two
+of the five gaps swept**. That is a real effect of the three added buses, not
+a re-reading — and it makes the case against a built-in number stronger while
+making the practical advice narrower, which is worth stating in that order.
+At this size a bottom-up run has to sweep, not guess.
+
+That irregularity was reported once and **withdrawn** when its cause turned
+out to be the stars. It is back on different evidence: with the faces honest
+and the coefficients gone, **both 32 and 48** are *worse* than 24 at NQ = 16.
+
+What that does and does not license is worth being exact about, because the
+first write-up got it wrong (Codex P2, #930). Non-monotonicity rules out
+**"increase until clean"** as a search — a caller stepping up from a clean
+24 lands on a dirty 32 — so a sweep has to be a sweep and not a ramp. It does
+**not** show that no fixed default exists, and the table above refutes that
+reading directly: **GAP = M = 96 is clean at every size measured** — NQ = 2,
+4, 8, 16, and NQ = 32 (measured since this paragraph was written, so the range
+is wider than it claimed). A conservative built-in value is available.
+
+The argument against building it in is **cost**, which is this page's own
+lesson pointed at the flag:
+
+| NQ | cheapest clean gap | detailed WL | at GAP 96 | ratio |
+|---|---|---|---|---|
+| 2 | 16 (the default) | 591,230 | 1,231,210 | **2.08×** |
+| 4 | 16 (the default) | 1,088,063 | 2,210,154 | **2.03×** |
+| 8 | 16 (the default) | 2,175,864 | 4,329,443 | **1.99×** |
+| 16 | 24 | 4,648,190 | 8,621,243 | **1.85×** |
+| 32 | 24 | 8,938,821 | 16,671,389 | **1.87×** |
+
+The NQ = 32 row was missing while the sentence below claimed the conclusion
+held at every measured size (Codex P2, #930) — the fifth measurement added a
+few paragraphs later and not carried up into the table it belongs in, which
+is the same summary-versus-detail gap as the top-down/bottom-up line, and in
+the same document.
+
+A default of 96 would roughly **double the wire across the five sizes in that
+table** (NQ = 2 … 32) — including the three already clean at the default 16
+and needing no channel at all — to rescue the **two** that are not. **NQ = 64
+is excluded from this argument, not covered by it** (Codex P2, #930): it is
+dirty at the default and *no* named-channel run there has finished, so
+neither a clean gap nor a cost is known for it, and presenting an unfinished
+sweep as part of a whole-dial cost claim is exactly the overreach the rest of
+this page keeps retracting. Over the five it does cover, this is precisely
+the trade the *"a wider channel buys no routing and costs wire
+monotonically"* measurement above refuses, so the flag declines to make it on
+the caller's behalf. A bottom-up run **at NQ = 16 or NQ = 32** names the
+channel itself and measures it: `soc.tcl 16 -bottomup -GAP 24 -M 24` (or
+`32 -bottomup -GAP 24 -M 24`).
+
+### What the bottom-up failure actually is
+
+Chasing the threshold found the cause, and it is not a channel — the fifth
+time on this vehicle that a channel reading turned out to be a seat or a
+face. **Every** failing bottom-up run strands the same eight bits of the same
+bundle:
+
+```
+hb-2   D0  cross-level  "DRV:io/p_0|REC:quad_0/cl_0/rtr/xbar"  nets=8
+```
+
+That is `pc_0` — the first io pad into cluster 0's crossbar, 8 bits of `CW`.
+Measured, and the invariant is the point:
+
+| NQ | GAP | the seat the tool reports | endpoint |
+|---|---|---|---|
+| 16 | 16 | `bundle 2 seg 0` M7 (TOP), 7 tracks < 8 bits | ✗ 3 ovl / 8 unpl |
+| 16 | 24 | `bundle 2 seg 0` M4 (LOW), 0 tracks < 8 bits | **clean** |
+| 16 | 32 | `bundle 2 seg 0` M7 (TOP), 7 tracks < 8 bits | ✗ 0 ovl / 8 unpl |
+| 16 | 48 | `bundle 2 seg 0` (LOW) | ✗ 1 ovl / 8 unpl |
+| 32 | 16 | `bundle 2 seg 0` M7 (TOP), 7 tracks < 8 bits | ✗ 3 ovl / 8 unpl |
+| 32 | 24 | `bundle 2 seg 0` M4 (LOW), 0 tracks < 8 bits | **clean** |
+| 64 | 16 | `bundle 2 seg 0` M7 (TOP), 7 tracks < 8 bits | ✗ 7 ovl / 8 unpl |
+| 32 | 16 **+ `set_max_bundle_bits 4 for pc_`** | **none reported** — 0 advisory lines against 4 without it | ✗ 3 ovl / **0 unpl** |
+
+The same bundle, the same segment, the same eight bits, across a **4× span**
+(NQ = 16 → 64) and at every gap — **including the clean ones**.
+
+That "4×" is now measured rather than asserted, and the history is the point.
+The paragraph originally claimed *"two sizes 4× apart"* while the table held
+only NQ = 16 and 32, which are **2×** apart — plain arithmetic, wrong from the
+day it was written, surviving my own audit of this very section plus four
+review rounds, and wrong in the direction that *flattered* the claim by
+overstating its scale range. Codex caught it (P2, #930) and offered two
+remedies: say 2×, or measure something fourfold away. The first landed at
+once; then **NQ = 64 bottom-up** was run and reports the same `bundle 2
+seg 0`, M7, 7 tracks < 8 bits. So the span is genuinely 4× — 32 → 128
+clusters, 427 → 1675 leaves — and the claim ends up *stronger* than the one
+that was wrong, rather than merely narrower.
+
+**What repeats is the segment, not the seat** (Codex P2, #930). Read the rows:
+the assigned layer moves M7/TOP → M4/LOW → M7/TOP, and changing `GAP` moves
+the placed span and slide window too — and a *seat* is defined by exactly
+those things, since `_report_doomed_seats` derives it from the segment's
+**assigned layer** and its span × slide window
+(`src/buda_session/nutsflow.py`). So two rows naming different layers are
+different **seats**. What the table establishes is that the same *logical*
+bundle/segment — `hb-2` seg 0, the eight bits of `pc_0` — is repeatedly
+supply-doomed however the gap is set; what varies is both the seat it lands on
+*and* whether the **healers clear it**. Calling the seat invariant overstated
+the evidence, and it did so one paragraph above admitting the healing
+mechanism is unknown — the same fault as the withdrawn phase-lottery
+mechanism, committed in the sentence written to replace it.
+
+And the tool has been saying the category in plain text at every one of those
+runs:
+
+```
+Advisory: 1 supply-doomed seat(s) — static width-infeasibility,
+          not reservation conflicts.
+```
+
+So this is the **#536 supply-doomed seat** class, not congestion. A gap sweep
+works on it only indirectly, by changing the geometry the healers then have to
+repair — which is exactly why the curve is non-monotone and why no threshold
+predicted it. *Why* healing succeeds at 24 and fails at 16/32/48 is **not**
+established here, and after withdrawing one asserted mechanism this round I am
+not about to supply another.
+
+#### The repeat is not size-independent either
+
+Two further measurements bound it, and the second is the one that matters:
+
+| run | doomed seat? |
+|---|---|
+| NQ = 2 / 4 / 8, `-bottomup` | **none reported at all** |
+| NQ = 16, **plain** (top-down) | clean, **none reported at all** |
+| NQ = 16, `-bottomup` | the seat, at every gap swept |
+
+The same design, at the same size, with the same `pc_0` and the same `io_cell`
+face, is **clean top-down**. So the seat is a product of the **bottom-up fixed
+copy at scale**, not of a declared width — which is why *"a wider `io_cell`
+face"* has been dropped from the remedies below. It was an untested guess, and
+the top-down run is evidence against it.
+
+Trying to make the seat appear at NQ = 1 — to give the test a live mutation —
+failed three times, and the failures are independent evidence for the same
+reading:
+
+| attempt | result |
+|---|---|
+| `io_cell` face ÷ 4 | the flow **refuses at declaration** — a too-narrow face never reaches the router |
+| `-GAP 4`, `-GAP 8` | clean, no seat: a starved channel does not produce one either |
+| `-CW 64` (4×) | clean, no seat |
+
+At this size the seat is reachable by **neither width nor channel**, so the
+`not in stdout` assertion in `test_bottom_up_routes_the_diverse_hierarchy_clean`
+is labelled in the test as a **canary** rather than as a guard with a
+demonstrated mutation. The negative result is worth more than the assertion.
+
+#### The seat lever, measured rather than asserted
+
+The consequence for the advice is that "a fixed copy needs a channel" was
+always naming the symptom. The lever a 7-tracks-for-8-bits seat wants is the
+**seat** — and that is now measured, one knob at a time, **at two sizes**:
+
+| remedy (NQ = 16 `-bottomup`) | ovl | unpl | viol | detailed WL |
+|---|---|---|---|---|
+| none (default GAP 16) | 3 | 8 | 8 | (4,319,399) |
+| `set_max_bundle_bits 4 for pc_` | 3 | **0** | **0** | 4,284,321 |
+| `-GAP 24 -M 24` | **0** | 0 | 0 | 4,648,190 |
+| both | 0 | 0 | 0 | 4,762,874 |
+
+| remedy (NQ = 32 `-bottomup`) | ovl | unpl | viol | detailed WL |
+|---|---|---|---|---|
+| none (default GAP 16) | 3 | 8 | 8 | (8,265,153) |
+| `set_max_bundle_bits 4 for pc_` | 3 | **0** | **0** | 8,293,531 |
+| `-GAP 24 -M 24` | **0** | 0 | 0 | 8,938,821 |
+| `-GAP 96 -M 96` | 0 | 0 | 0 | 16,671,389 |
+
+The NQ = 32 rows exist because a reviewer pointed out that the necessity of a
+channel there had been inferred from the channel alone (Codex P2, #930). They
+are the answer: a **non-channel** remedy clears the stranding at that size too.
+
+**A parenthesised WL excludes stranded bits** and is *not* comparable to a
+complete route — `report_wirelength` prints that caveat on the line above the
+number, and an earlier revision of this very paragraph read those two rows
+against each other anyway (*"at slightly less wire than doing nothing"*). The
+NQ = 32 pair points the other way (+0.34 %), which is what makes it plain that
+the comparison is not one. The **row counts** are what carry the finding.
+
+That **decomposes the failure into two independent faults, at both sizes**. The
+seat lever removes *exactly* the seat — the eight stranded bits and the eight
+audit violations, with no doomed seat reported at all (four advisory lines at
+NQ = 32 without it, **zero** with) — and leaves the three overlaps untouched,
+because those are the fixed-copy residue and a different problem. The channel
+clears **both**, which is precisely why it looked like the cause for five
+revisions: it is the remedy for the overlaps and it re-seats the doomed segment
+incidentally. A non-channel remedy fixing the stranding at two sizes is what
+*retires* "the channel is needed" as a claim, rather than merely narrowing it.
+
+**The practical advice does not change**, and saying so plainly matters more
+than the diagnosis being new: for a *clean* endpoint the channel alone is still
+the cheapest point, and stacking both is redundant and costs 2.5 % more wire
+than the channel by itself. What the seat lever buys is a correct account of
+which fault is which — and a remedy for the stranding alone, for a methodology
+that can live with three overlaps (its wire lands within half a percent of the
+default's at either size, and the default's figure is not a complete route). The channel
+guidance stays, labelled a workaround rather than a cause.
+
+**Both sides of that trade, priced.** The argument above counts only wire,
+which is half a comparison — so here is what the dirty endpoint costs at the
+first size measured to come back dirty (NQ = 32 is the second; see above). At
+NQ = 16 the default gap strands
+**8 bits of 19,424 (0.041 %)** with 3 overlaps; `-GAP 24 -M 24` clears it for
+**+7.6 %** wire, and the built-in candidate 96 would cost **+100 %**. So the
+case against a default is not merely that 96 is expensive — it is that the
+caller's own remedy at the affected size costs *about a thirteenth of what the
+default would* (+7.6 % against +100 %), which is exactly why naming it beats
+building it in. Phrased as a fraction rather than as "thirteen times cheaper":
+the same reversed idiom the NQ = 32 ratio was caught in below, and fixing one
+while leaving the other is the partial-fix pattern this PR keeps paying for. A
+methodology that would rather pay 2× everywhere than strand 0.04 % of one
+size's bits can still do so; it just has to say so, and it now has both
+numbers to decide on.
+
+**NQ = 32 is measured now** (Codex P2, #930 — and the shape of that finding is
+the recurring one: the seat table above had already *recorded* an NQ = 32
+bottom-up run while this paragraph still said NQ = 32 had never been run
+bottom-up. My own data refuting my own sentence, a hundred lines apart in one
+document, for the second time in this PR.) Measured, `-bottomup` at NQ = 32:
+
+| GAP = M (NQ = 32, `-bottomup`) | 16 | 24 | 96 |
+|---|---|---|---|
+| result | ✗ 3 ovl / 8 unpl | **clean** | **clean** |
+| detailed WL | — | 8,938,821 | 16,671,389 |
+
+So NQ = 32 behaves like NQ = 16: dirty at the default channel, and the
+caller's own remedy `-GAP 24 -M 24` routes it for **46 % less wire** than the
+conservative 96, which costs **1.87× as much** (8,938,821 against 16,671,389).
+Stated in both directions because the first version said *"1.87× less wire"*
+(Codex P2, #930) — an invalid construction: a ratio > 1 says how much MORE the
+expensive option costs, and "N× less" has no arithmetic meaning. The two
+numbers it was derived from were printed in the table directly above it. It
+also extends the cost argument against a built-in 96 to a fifth size.
+
+**What it does *not* show is that NQ = 32 NEEDS a channel** — and this
+paragraph said it did (Codex P2, #930). Three gaps establish that the default
+is dirty and that 24 and 96 are clean; *necessity* would require a
+**non-channel** remedy to fail here, and none had been tried at this size.
+Inferring a cause from one successful intervention is the error this page
+retracts on every other paragraph — committed, this time, in the sentence
+written to replace the previous retraction. It is **measured** instead
+([below](#the-seat-lever-measured-rather-than-asserted)): the seat lever
+clears the stranding at NQ = 32 exactly as it does at NQ = 16, so a channel is
+**not** necessary here either.
+
+**NQ = 64 is measured at the default gap and *not* at a named one**, and the
+attempt is recorded rather than dropped. At the default it is dirty — 7 ovl /
+8 unpl, detailed WL 16,654,709 over 2451 bundles / 76,096 bit-wires, and
+**the same segment landing on an M7 seat** — `bundle 2 seg 0`, 7 tracks < 8
+bits. Not "the same seat" (Codex P2, #930): a seat is its layer *plus its
+span × slide window*, and the windows were never compared across two layouts
+of different size, so what the run establishes is the segment, the layer and
+the 7 < 8 deficit. That distinction was corrected two commits earlier and
+**reintroduced here**, in the very commit that measured NQ = 64 — a
+retraction undone by its own follow-up. `64 -bottomup -GAP 24 -M 24` then ran **90 minutes
+without finishing** and was killed by the harness timeout (not hung: 2 h 17 m
+of CPU at 183 % on that bundle count). Its last reported state was its
+*second* healer round at **2 overlaps / 2 unplaced** — six of the eight bits
+placed, against 7/8 at the default — so the channel is doing something at
+this size, and that is the whole of what the evidence supports. Whether it
+reaches clean is **unknown**, and "nearly clean" is not clean: the NQ = 16
+curve is non-monotone, so 16 and 32 agreeing at 24 is not even a safe guess
+for 64.
+
+The operational rule needs no threshold either way: **if a bottom-up run comes
+back dirty, sweep the channel** — and at this size, budget hours rather than
+minutes for it.
+
+Worth noting for the seat analysis below: the clean NQ = 32 / GAP 24 run
+**still reports the doomed seat** and heals past it, exactly as NQ = 16 /
+GAP 24 does. That is independent support for the reading that the *segment*
+repeats while the healers' success varies.
+
+The **mechanism** is not established and the earlier claim that a fixed copy
+"lands each instance on whatever track phase the channel gives it" was an
+assertion, not a measurement — it is a hypothesis consistent with four points
+on one design, and nothing here separates it from the alternatives.
+
+That example is the point restated at its own expense: it read `-GAP 48
+-M 48` until this revision, because 48 was clean when the line was written.
+Three added buses made it fail, so a sentence telling the reader to measure
+was itself recommending a configuration that does not route. The recipe is
+**sweep**, and a named gap in it is an illustration with a shelf life.
+
+The atomicity rule it needed is kept as history rather than as code: while
+the flag *did* supply the pair it had to supply both or neither, since
+`-bottomup -GAP 16` left `M` at 24 and gave 4976 × 1576 where that revision's
+default geometry was 4720 × 1440 (both dies since re-measured away by the
+sizing fixes), while `-bottomup -M 16` leaked the other way — a sweep meant
+to vary the channel varied two things. Nothing supplies a knob behind the
+caller's back now.
+
+`align_bottom_up` then reports that nested marked parents place children at
+incompatible phases, and that is measured rather than tuned away: the track
+period is **per axis**, and on this stack the H layers (pitches 18/18/34)
+give LCM **306** — what `tpu.tcl` snaps its row pitch to — while the V layers
+(18/32/41) give LCM **11808**, larger than most cells here. A mesh tiles on
+one axis and can be phase-aligned; a diverse 2-D packing generally cannot. So
+the flow declares `check_template_tracks on_mismatch independent`, which is
+the honest measurement of what the bottom-up family can do on a design that
+is not an array.
