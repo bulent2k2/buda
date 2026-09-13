@@ -559,6 +559,7 @@ Measured, and the invariant is the point:
 | 32 | 16 | `bundle 2 seg 0` M7 (TOP), 7 tracks < 8 bits | ✗ 3 ovl / 8 unpl |
 | 32 | 24 | `bundle 2 seg 0` M4 (LOW), 0 tracks < 8 bits | **clean** |
 | 64 | 16 | `bundle 2 seg 0` M7 (TOP), 7 tracks < 8 bits | ✗ 7 ovl / 8 unpl |
+| 32 | 16 **+ `set_max_bundle_bits 4 for pc_`** | **none reported** — 0 advisory lines against 4 without it | ✗ 3 ovl / **0 unpl** |
 
 The same bundle, the same segment, the same eight bits, across a **4× span**
 (NQ = 16 → 64) and at every gap — **including the clean ones**.
@@ -639,30 +640,50 @@ demonstrated mutation. The negative result is worth more than the assertion.
 
 The consequence for the advice is that "a fixed copy needs a channel" was
 always naming the symptom. The lever a 7-tracks-for-8-bits seat wants is the
-**seat** — and that is now measured (NQ = 16 `-bottomup`, one knob at a time)
-instead of listed:
+**seat** — and that is now measured, one knob at a time, **at two sizes**:
 
-| remedy | ovl | unpl | viol | detailed WL |
+| remedy (NQ = 16 `-bottomup`) | ovl | unpl | viol | detailed WL |
 |---|---|---|---|---|
-| none (default GAP 16) | 3 | 8 | 8 | 4,319,399 |
+| none (default GAP 16) | 3 | 8 | 8 | (4,319,399) |
 | `set_max_bundle_bits 4 for pc_` | 3 | **0** | **0** | 4,284,321 |
 | `-GAP 24 -M 24` | **0** | 0 | 0 | 4,648,190 |
 | both | 0 | 0 | 0 | 4,762,874 |
 
-That **decomposes the failure into two independent faults**. The seat lever
-removes *exactly* the seat — the eight stranded bits and the eight audit
-violations, with no doomed seat reported — at slightly **less** wire than doing
-nothing, and leaves the three overlaps untouched, because those are the
-fixed-copy residue and a different problem. The channel clears **both**, which
-is precisely why it looked like the cause for five revisions: it is the remedy
-for the overlaps and it re-seats the doomed segment incidentally.
+| remedy (NQ = 32 `-bottomup`) | ovl | unpl | viol | detailed WL |
+|---|---|---|---|---|
+| none (default GAP 16) | 3 | 8 | 8 | (8,265,153) |
+| `set_max_bundle_bits 4 for pc_` | 3 | **0** | **0** | 8,293,531 |
+| `-GAP 24 -M 24` | **0** | 0 | 0 | 8,938,821 |
+| `-GAP 96 -M 96` | 0 | 0 | 0 | 16,671,389 |
+
+The NQ = 32 rows exist because a reviewer pointed out that the necessity of a
+channel there had been inferred from the channel alone (Codex P2, #930). They
+are the answer: a **non-channel** remedy clears the stranding at that size too.
+
+**A parenthesised WL excludes stranded bits** and is *not* comparable to a
+complete route — `report_wirelength` prints that caveat on the line above the
+number, and an earlier revision of this very paragraph read those two rows
+against each other anyway (*"at slightly less wire than doing nothing"*). The
+NQ = 32 pair points the other way (+0.34 %), which is what makes it plain that
+the comparison is not one. The **row counts** are what carry the finding.
+
+That **decomposes the failure into two independent faults, at both sizes**. The
+seat lever removes *exactly* the seat — the eight stranded bits and the eight
+audit violations, with no doomed seat reported at all (four advisory lines at
+NQ = 32 without it, **zero** with) — and leaves the three overlaps untouched,
+because those are the fixed-copy residue and a different problem. The channel
+clears **both**, which is precisely why it looked like the cause for five
+revisions: it is the remedy for the overlaps and it re-seats the doomed segment
+incidentally. A non-channel remedy fixing the stranding at two sizes is what
+*retires* "the channel is needed" as a claim, rather than merely narrowing it.
 
 **The practical advice does not change**, and saying so plainly matters more
 than the diagnosis being new: for a *clean* endpoint the channel alone is still
 the cheapest point, and stacking both is redundant and costs 2.5 % more wire
 than the channel by itself. What the seat lever buys is a correct account of
-which fault is which — and a remedy for the stranding alone, at less wire than
-the default, for a methodology that can live with three overlaps. The channel
+which fault is which — and a remedy for the stranding alone, for a methodology
+that can live with three overlaps (its wire lands within half a percent of the
+default's at either size, and the default's figure is not a complete route). The channel
 guidance stays, labelled a workaround rather than a cause.
 
 **Both sides of that trade, priced.** The argument above counts only wire,
@@ -698,10 +719,19 @@ conservative 96, which costs **1.87× as much** (8,938,821 against 16,671,389).
 Stated in both directions because the first version said *"1.87× less wire"*
 (Codex P2, #930) — an invalid construction: a ratio > 1 says how much MORE the
 expensive option costs, and "N× less" has no arithmetic meaning. The two
-numbers it was derived from were printed in the table directly above it. That is a *stronger* statement than the hedge it
-replaces, in both directions — NQ = 32 does need a channel, **and** a gap that
-routes it is known — and it extends the cost argument against a built-in 96 to
-a fifth size rather than weakening it.
+numbers it was derived from were printed in the table directly above it. It
+also extends the cost argument against a built-in 96 to a fifth size.
+
+**What it does *not* show is that NQ = 32 NEEDS a channel** — and this
+paragraph said it did (Codex P2, #930). Three gaps establish that the default
+is dirty and that 24 and 96 are clean; *necessity* would require a
+**non-channel** remedy to fail here, and none had been tried at this size.
+Inferring a cause from one successful intervention is the error this page
+retracts on every other paragraph — committed, this time, in the sentence
+written to replace the previous retraction. It is **measured** instead
+([below](#the-seat-lever-measured-rather-than-asserted)): the seat lever
+clears the stranding at NQ = 32 exactly as it does at NQ = 16, so a channel is
+**not** necessary here either.
 
 **NQ = 64 is measured at the default gap and *not* at a named one**, and the
 attempt is recorded rather than dropped. At the default it is dirty — 7 ovl /

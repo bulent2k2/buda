@@ -163,9 +163,17 @@ while {$argi < $argc} {
 # conservative 96, which costs 1.87x AS MUCH (8,938,821 against 16,671,389).
 # Both directions, because this read "1.87x less wire" (Codex P2, #930) --
 # an invalid construction: a ratio > 1 says how much MORE the dearer option
-# costs, and "Nx less" means nothing arithmetically.  That is a STRONGER statement than the hedge
-# it replaces, in both directions -- NQ=32 does need a channel, AND a gap
-# that routes it is known.
+# costs, and "Nx less" means nothing arithmetically.
+#
+# WHAT THAT DOES *NOT* SHOW is that NQ=32 NEEDS a channel, and this line
+# said it did (Codex P2, #930).  Three gaps establish that the default is
+# dirty and that 24 and 96 are clean -- necessity would need a NON-channel
+# remedy to FAIL here, and none had been tried at this size.  Inferring a
+# cause from one successful intervention is the error this page retracts
+# on every other paragraph, committed in the sentence that replaced the
+# previous retraction.  So it is MEASURED instead, below: the seat lever
+# clears the stranding at NQ=32 exactly as it does at NQ=16, and a channel
+# is NOT necessary for it.
 #
 # NQ=64 IS MEASURED NOW TOO, at the DEFAULT gap: 7 ovl / 8 unpl / 8 viol,
 # detailed WL 16,654,709 over 2451 bundles / 76,096 bit-wires -- and the
@@ -210,6 +218,18 @@ while {$argi < $argc} {
 #   16   32  bundle 2 seg 0  M7 (TOP)  7 < 8 bits   X 0 ovl / 8 unpl
 #   16   48  bundle 2 seg 0      (LOW)              X 1 ovl / 8 unpl
 #   32   16  bundle 2 seg 0  M7 (TOP)  7 < 8 bits   X 3 ovl / 8 unpl
+#   32   24  bundle 2 seg 0  M4 (LOW)  0 < 8 bits   CLEAN
+#   64   16  bundle 2 seg 0  M7 (TOP)  7 < 8 bits   X 7 ovl / 8 unpl
+#
+# This table stood at five rows while `flow/tcl/ReadMe.md` carried seven --
+# the same quantity tabulated twice with only one copy kept up as the runs
+# came in.  A new measurement has to be entered wherever it is TABULATED,
+# not only where it is discussed.
+#
+# And the row that is NOT a gap at all, which is what settles the cause:
+#
+#   32   16  + `set_max_bundle_bits 4 for pc_`      3 ovl / 0 unpl / 0 viol
+#            NO SEAT REPORTED (0 advisory lines against 4 without it)
 #
 # WHAT REPEATS IS THE SEGMENT, NOT THE SEAT (Codex P2, #930).  Read the
 # rows: the assigned layer moves M7/TOP -> M4/LOW -> M7/TOP, and changing
@@ -255,27 +275,48 @@ while {$argi < $argc} {
 # The lever a 7-tracks-for-8-bits seat wants is the SEAT, and this is
 # MEASURED now rather than asserted (NQ=16 -bottomup, one knob at a time):
 #
-#   remedy                             ovl  unpl  viol   detailed WL
-#   none (default GAP 16)               3     8     8     4,319,399
+#   remedy (NQ=16)                     ovl  unpl  viol   detailed WL
+#   none (default GAP 16)               3     8     8    (4,319,399)
 #   set_max_bundle_bits 4 for pc_       3     0     0     4,284,321
 #   -GAP 24 -M 24                       0     0     0     4,648,190
 #   both                                0     0     0     4,762,874
 #
-# That DECOMPOSES the failure into two independent faults.  The seat lever
-# removes EXACTLY the seat -- the 8 stranded bits and the 8 audit violations
-# -- and no doomed seat is reported, at slightly LESS wire than doing
-# nothing; the 3 overlaps are untouched, because they are the fixed-copy
-# residue and a different problem.  The channel clears BOTH, which is
-# precisely why it looked like the cause for five revisions: it is the
-# remedy for the overlaps and it re-seats the doomed segment incidentally.
+# And AT NQ=32, run because a reviewer pointed out that necessity had been
+# inferred from the channel alone (Codex P2, #930) -- the same two knobs,
+# the same design, twice the size:
+#
+#   remedy (NQ=32)                     ovl  unpl  viol   detailed WL
+#   none (default GAP 16)               3     8     8    (8,265,153)
+#   set_max_bundle_bits 4 for pc_       3     0     0     8,293,531
+#   -GAP 24 -M 24                       0     0     0     8,938,821
+#   -GAP 96 -M 96                       0     0     0    16,671,389
+#
+# A PARENTHESISED WL EXCLUDES STRANDED BITS and is not comparable to a
+# complete route -- `report_wirelength` says so on the line above it, and
+# an earlier revision of this very paragraph read those two rows against
+# each other anyway ("at slightly LESS wire than doing nothing").  The
+# NQ=32 pair points the other way (+0.34%), which is what makes it plain:
+# the comparison is not one.  The row counts are what carry the finding.
+#
+# That DECOMPOSES the failure into two independent faults, at BOTH sizes.
+# The seat lever removes EXACTLY the seat -- the 8 stranded bits and the 8
+# audit violations, with no doomed seat reported at all (4 advisory lines
+# at NQ=32 without it, 0 with) -- and leaves the 3 overlaps untouched,
+# because they are the fixed-copy residue and a different problem.  The
+# channel clears BOTH, which is precisely why it looked like the cause for
+# five revisions: it is the remedy for the overlaps and it re-seats the
+# doomed segment incidentally.  A NON-channel remedy fixing the stranding
+# at two sizes is what retires "the channel is needed" as a claim rather
+# than merely narrowing it.
 #
 # The practical advice does NOT change, and saying so plainly matters more
 # than the diagnosis being new: for a CLEAN endpoint the channel alone is
 # still the cheapest point, and stacking both is redundant and costs 2.5%
 # more wire than the channel by itself.  What the seat lever buys is a
 # correct account of WHICH fault is which -- and a remedy for the stranding
-# alone, at less wire than the default, for a methodology that can live with
-# the 3 overlaps.  The channel guidance stays, labelled a workaround, not a
+# alone, for a methodology that can live with the 3 overlaps (its wire is
+# within half a percent of the default's at either size, and the default's
+# figure is not a complete route anyway).  The channel guidance stays, labelled a workaround, not a
 # cause.
 #
 # The atomicity rule it needed is kept as history: when the flag DID supply
