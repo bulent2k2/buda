@@ -1,6 +1,6 @@
 # BUDA Convergence Ladder — experiment plan
 
-*Draft for discussion, 2026-09-13.  The rendered version with pictures is the
+*Draft, 2026-09-13; the three open questions were decided the same day — see [Decisions](#decisions-2026-09-13).  The rendered version with pictures is the
 artifact [BUDA Convergence Ladder](https://claude.ai/code/artifact/834de29e-3848-487a-b864-eda0a88c8cea);
 this is the same text kept in the tree.  The pictures are not checked in —
 `tools/render_design.py` regenerates them from the flows named below, and the
@@ -91,11 +91,17 @@ flow structurally cannot reach at implementation time, so that is where the
 gap should open — and the ladder shows *which* information closes it, which is
 a stronger claim than "BUDA is better".
 
+**In-house, the ladder is measured on the pre-routes axis only — rung 0 → 3 →
+4.**  Its conventional arm needs no competitor's tool: "blind bottom-up plus a
+LEF abstract" *is* the industry's information flow, not something we imitated.
+The pins axis (rungs 1–2) has no credible in-house baseline (Decisions, Q2) and
+is evaluated with a partner instead.
+
 | rung | the block knows | conventional analogue | BUDA knob |
 |---|---|---|---|
 | 0 | nothing | blind bottom-up; LEF `OBS` abstract handed up | `set_bottom_up`, no caps; the top sees whole-layer keepouts over the footprint |
-| 1 | pin **sides** | a port-direction convention (inputs left, outputs right) | fixed-pin primitive: face-restricted busterm — *to build* |
-| 2 | pin **positions** | floorplanner pin assignment from flylines (HPWL) | fixed-pin primitive, positions from the flyline centroid — *to build* |
+| 1 | pin **sides** | a port-direction convention (inputs left, outputs right) | *partner evaluation* (see Decisions): no in-house baseline is credible |
+| 2 | pin **positions** | a top-level net-based global router + track assignment, or a team by hand | *partner evaluation*; the fixed-pin primitive lets BUDA consume their pins |
 | 3 | + a layer **budget** | the "don't use M6/M7 in blocks" memo | `reserve_top_layers` / `set_cell_layer_cap` — exists |
 | 4 | + exact **track reservations** derived from the top's own plan | does not exist conventionally | derived `set_cell_layer_share` per cell + `hier.locked` copies as track-level keepouts — *derivation to build* |
 
@@ -174,7 +180,16 @@ write-up says so.
 
 **Needs.**  The demand query; `derive_cell_layer_shares`.
 
-### E3 — Pin assignment at scale
+### E3 — Pin assignment at scale *(deferred to a partner evaluation)*
+
+**Decision (Q2).**  Flyline-HPWL is easy to beat, and the real conventional
+method — a top-level net-based global router with track assignment, or a
+large team doing it by hand — is not something we can build in-house without
+building it badly.  Any baseline of ours is a strawman by construction, so
+this experiment is NOT run in-house.  It is re-scoped as: route against a
+partner's own pin assignment (alpha/beta or in-house evaluation) and compare
+what BUDA chooses, which needs no baseline of ours.  What follows is the
+original design, kept for that evaluation.
 
 **Hypothesis.**  Pins chosen for wirelength pile onto one face and exceed that
 face's track supply on the *sum* at a pin; pins chosen with the bus plan land
@@ -194,7 +209,9 @@ than trusted from the engine.
 **Strawman defence.**  The flyline policy gets a spread parameter (how far pins
 may be spaced along the face) and is swept to its best first.
 
-**Needs.**  The fixed-pin primitive.
+**Needs.**  The fixed-pin primitive — now for a different reason: it is what
+lets BUDA *consume* an externally assigned pin placement at all, the
+interoperability prerequisite for the partner evaluation, not a strawman arm.
 
 ### E5 — Feedthrough reservation
 
@@ -244,33 +261,38 @@ every "one round" measured rather than assumed.
 ## What gets built, in order
 
 1. **E4 write-up, E2 run** — nothing new, one clean plot each.
-2. **Per-instance per-layer demand query** — read off the top-down plan;
+2. **`tools/independent_audit.py`** — the judge, before any A/B table is
+   written (Q3: it judges every table; one OpenROAD `read_guides` witness on
+   one row only if the audience needs it).
+3. **Per-instance per-layer demand query** — read off the top-down plan;
    exposed through `buda::query` so a Tcl driver can branch on it.
-3. **`derive_cell_layer_shares`** — the complement of that demand, per cell,
+4. **`derive_cell_layer_shares`** — the complement of that demand, per cell,
    as `set_cell_layer_share` lines.  This is rung 4.
-4. **Fixed-pin primitive** — a busterm restricted to a face, then to a window
-   on a face.  Rungs 1 and 2.
-5. **`tools/independent_audit.py`** — the judge, before any A/B table is
-   written.
-6. **`flow/tcl/converge.tcl`** — the loop driver: runs the conventional policy
-   as a scripted round, counts, and runs the BUDA one-pass, on both vehicles
-   across the dial.
-7. E1 → E3 → E5.
+5. **`flow/tcl/converge.tcl`** — the loop driver: runs the conventional policy
+   as a scripted round, counts, and runs the BUDA one-pass, on soc first
+   (Q1) with tpu as the control, across the dial.
+6. E1 → E5.
+7. **Fixed-pin primitive** — a busterm restricted to a face, then to a window
+   on a face — as the interoperability piece for the partner evaluation (E3),
+   last, since nothing in-house depends on it.
 
-## Open questions
+## Decisions (2026-09-13)
 
-- **Q1 — Which vehicle leads?**  `soc.tcl` is ragged and diverse and already
-  carries half the convergence story; `tpu.tcl` is a mesh where every instance
-  is identical, so rung 0 → 4 reads most cleanly.  *Lean: run both, lead with
-  soc, use tpu as the control where the effect should be purest.*
-- **Q2 — Is flyline-HPWL pin assignment the conventional baseline you would
-  accept as "what a floorplanner does" for rung 2?**  A stronger baseline makes
-  E3 slower to build and harder to win, which is the right direction for
-  credibility.  *Lean: HPWL with a swept spread parameter; name anything
-  stronger you have in mind.*
-- **Q3 — Is an independent Python geometric audit a convincing enough judge
-  for the audience you have in mind?**  Or does the story eventually need one
-  OpenROAD `read_guides` run as an external witness — done once, slowly, on
-  one size — even though the container makes that expensive?  *Lean: the
-  Python audit for every table, one external witness on one row if the
-  audience needs it.*
+The three questions the draft ended on, answered by the owner:
+
+- **Q1 — which vehicle leads: `soc.tcl`**, as leaned; `tpu.tcl` is the control
+  where the effect should be purest.
+- **Q2 — the rung-2 baseline: there is no credible one to build in-house.**
+  Flyline-HPWL is easy to beat, and so is a top-level net-based global router
+  plus track assignment; most design houses do this by hand with a large
+  team.  A baseline we write is a strawman by construction.  So the pins half
+  of the claim is not argued from in-house experiments at all: it goes to an
+  alpha/beta partner or an in-house evaluation on a real flow, where BUDA
+  routes against *their* pin assignment.  In-house, the ladder is measured on
+  the pre-routes axis (rung 0 → 3 → 4), whose conventional arm is the
+  industry's own information flow rather than an imitation of anyone's tool.
+  The fixed-pin primitive survives with a different purpose — consuming a
+  partner's pins — and moves to the end of the build order.
+- **Q3 — the judge: the independent Python geometric audit for every table**,
+  as leaned, with one external OpenROAD `read_guides` witness on one row only
+  if the audience needs it.
