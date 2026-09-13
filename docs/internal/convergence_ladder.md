@@ -149,7 +149,12 @@ layers the block was allowed, on the NQ / N dial.
 **Judge.**  Independent geometric audit (below).
 
 **Status.**  Pure geometry, no policy loop — the cleanest single plot in the
-set.  First thing to run.
+set.  **Run and written up: [convergence_e2.md](convergence_e2.md)** — four
+arms (none / blob / bbox / exact keepouts) at NQ = 2, 4, 8, healerless and
+healed: precision orders the outcome monotonically at every size, the blob
+reserves ~60× the layer-area the block's routing occupies and strands an
+order of magnitude more bits than the bbox, and the tables are judged by
+`check_design` until the independent audit (item 2 below) exists.
 
 ### E1 — Blind bottom-up vs derived budget
 
@@ -260,7 +265,7 @@ every "one round" measured rather than assumed.
 
 ## What gets built, in order
 
-1. **E4 write-up, E2 run** — nothing new, one clean plot each.
+1. **E4 write-up, E2 run** — nothing new, one clean plot each.  **Done**: [convergence_e4.md](convergence_e4.md), [convergence_e2.md](convergence_e2.md).
 2. **`tools/independent_audit.py`** — the judge, before any A/B table is
    written (Q3: it judges every table; one OpenROAD `read_guides` witness on
    one row only if the audience needs it).
