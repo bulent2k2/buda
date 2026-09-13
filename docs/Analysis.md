@@ -277,7 +277,7 @@ parallel `-j`), `qor_table.py` (the checked-in snapshot + nightly diff
 sidecar), `bdb2buda`/`buda2bdb`/`bdb_edit_bus` (BDB ↔ flat-script
 converters and netlist surgery), `build_hier_demo.py` (assembles
 hierarchical demo BDBs up to true 3-level chip vehicles),
-`unit2buda`/`render.py` (test → visual repro), `doomed_seat_forensics`,
+`unit2buda`/`render.py`/`render_design.py` (test → visual repro; whole-design panels), `doomed_seat_forensics`,
 DEF/LEF cluster visualizers, and macOS `.app` bundle generation.
 
 ## Script Language Surface
