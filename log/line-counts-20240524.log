@@ -1,0 +1,106 @@
+
+✻ Baked for 1h 3m 22s
+
+※ recap: Added five real-chip BUDA benchmark flows from MacroPlacement and MemPool DEFs (NVDLA, Ariane133, BlackParrot, three MemPool levels), all running clean through DetailedNUTS. All committed and 
+  pushed; no pending work.
+
+❯ find all the .md files and do a wc -l on them 
+
+⏺ Bash(find /Users/ben/src/buda -name "*.md" | sort | xargs wc -l)
+  ⎿         8 /Users/ben/src/buda/.pytest_cache/README.md
+            8 /Users/ben/src/buda/buda_system_v2/build/.pytest_cache/README.md
+          140 /Users/ben/src/buda/buda_system_v2/docs/bundling_strategies.md
+     … +27 lines (ctrl+o to expand)
+
+⏺ 6896 lines across 29 .md files. The biggest are docs/internal/topology_tree_gen_design.md (1141), docs/BUDA_SCRIPT_REFERENCE.md (955), and the two session logs in log/.
+
+✻ Baked for 9s
+
+❯ find all the .buda files and do a wc -l on them 
+
+⏺ Bash(find /Users/ben/src/buda -name "*.buda" | sort | xargs wc -l)
+  ⎿       104 /Users/ben/src/buda/buda_system_v2/flow/ariane/ariane_core.buda
+           84 /Users/ben/src/buda/buda_system_v2/flow/ariane/ariane.buda
+          109 /Users/ben/src/buda/buda_system_v2/flow/ariane133_cache.buda
+     … +31 lines (ctrl+o to expand)
+
+⏺ 3579 lines across 80 .buda files. The largest are test4_nets.buda (200), bp_tile.buda (145), ariane133_cache.buda (109), and the three MemPool files (101–104 each). The 5 benchmark "real chip" files
+  we added this session together account for 553 lines.
+
+✻ Worked for 9s
+
+❯ find all the .py files and do a wc -l on them 
+
+⏺ Bash(find /Users/ben/src/buda -name "*.py" | sort | xargs wc -l)
+  ⎿       569 /Users/ben/src/buda/archive/setup_buda.py
+          286 /Users/ben/src/buda/buda_system_v2/flow/ariane/def2buda.py
+          102 /Users/ben/src/buda/buda_system_v2/flow/gen_channel_stress.py
+     … +34 lines (ctrl+o to expand)
+
+⏺ 13,699 lines across 57 .py files. The big ones:
+
+  - buda_viz.py — 2736 lines (the visualizer)
+  - buda_cli.py — 1219 lines (the script interpreter)
+  - setup_buda.py — 642 lines
+  - Test files together: ~6500 lines across 20 files
+
+  The test suite is substantial — almost half the Python codebase.
+
+✻ Crunched for 8s
+           34 /Users/ben/src/buda/buda_system/src/global_router.h
+           24 /Users/ben/src/buda/buda_system/src/layering.h
+            4 /Users/ben/src/buda/buda_system/src/nuts.h
+           44 /Users/ben/src/buda/buda_system/src/topology.h
+          881 total
+ 
+                                                                                                                                                                        07:19 AM claude-sonnet-4-6 
+⏺ 881 lines across 13 .h files (9 in v2, 4 in the older v1). The v2 headers: 
+ 
+  - topology.h — 185 lines (the most complex: L/Z/U shapes, multi-rect, TEG, Hanan grid) 
+  - conn_topology.h — 116 lines 
+  - nuts.h — 109 lines 
+  - routing_grid.h — 95 lines 
+  - global_router.h — 82 lines 
+ 
+✻ Sautéed for 6s 
+ 
+❯ Finally the same for .cpp files 
+ 
+⏺ Bash(find /Users/ben/src/buda -name "*.cpp" | sort | xargs wc -l) 
+  ⎿         1 /Users/ben/src/buda/buda_system_v2/build/CMakeFiles/4.2.1/CompilerIdCXX/apple-sdk.cpp 
+          949 /Users/ben/src/buda/buda_system_v2/build/CMakeFiles/4.2.1/CompilerIdCXX/CMakeCXXCompilerId.cpp 
+          362 /Users/ben/src/buda/buda_system_v2/src/bindings.cpp 
+           60 /Users/ben/src/buda/buda_system_v2/src/bundler.cpp 
+          398 /Users/ben/src/buda/buda_system_v2/src/conn_topology.cpp
+          261 /Users/ben/src/buda/buda_system_v2/src/detailed_nuts.cpp
+          489 /Users/ben/src/buda/buda_system_v2/src/global_router.cpp
+           66 /Users/ben/src/buda/buda_system_v2/src/layering.cpp
+          521 /Users/ben/src/buda/buda_system_v2/src/nuts.cpp
+          139 /Users/ben/src/buda/buda_system_v2/src/routing_grid.cpp
+         1345 /Users/ben/src/buda/buda_system_v2/src/topology.cpp
+            1 /Users/ben/src/buda/buda_system/build/CMakeFiles/4.2.1/CompilerIdCXX/apple-sdk.cpp
+          949 /Users/ben/src/buda/buda_system/build/CMakeFiles/4.2.1/CompilerIdCXX/CMakeCXXCompilerId.cpp
+           25 /Users/ben/src/buda/buda_system/src/bindings.cpp
+           47 /Users/ben/src/buda/buda_system/src/bundler.cpp
+           41 /Users/ben/src/buda/buda_system/src/global_router.cpp
+           16 /Users/ben/src/buda/buda_system/src/layering.cpp
+            1 /Users/ben/src/buda/buda_system/src/nuts.cpp
+           59 /Users/ben/src/buda/buda_system/src/topology.cpp 
+         5730 total 
+ 
+                                                                                                                                                                        07:20 AM claude-sonnet-4-6 
+⏺ 5,730 lines across 19 .cpp files (excluding the CMake boilerplate, the v2 source is 3,601 lines). The v2 highlights: 
+ 
+  - topology.cpp — 1,345 lines (the largest: all shape generation, Hanan grid, multi-rect, TEG) 
+  - nuts.cpp — 521 lines (1.5-D rectangle packing solver) 
+  - global_router.cpp — 489 lines (topology selection + layer assignment) 
+  - conn_topology.cpp — 398 lines 
+  - bindings.cpp — 362 lines (pybind11 glue for all exposed types) 
+  - detailed_nuts.cpp — 261 lines (bit-wire snapping to concrete tracks) 
+ 
+✻ Brewed for 6s 
+ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+  Showing detailed transcript · ctrl+o to toggle · ctrl+e to show all                                                                                                                             verbose 
+ 
+ 
