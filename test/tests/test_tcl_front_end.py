@@ -372,6 +372,105 @@ def test_the_violations_query_is_the_audit_leg(tmp_path):
     assert "post=0" in out, out
 
 
+def test_the_demand_query_is_a_list_a_driver_can_branch_on(tmp_path):
+    """`buda::query demand` hands a Tcl driver the per-instance, per-layer
+    demand the rest of the design places over each instance (convergence
+    ladder item 3) as `{inst cell layer bits used supply pct}` rows — the
+    number it hands DOWN as a share.  -1 before there is a NUTS result to
+    read it off; a filter keeps one subtree or one cell's instances; a bad
+    argument raises in Tcl like any other caller error."""
+    tracks = tcl_path(_ROOT / "flow" / "tracks" / "tracks.buda")
+    out = _tcl(tmp_path, f"""
+        puts "pre=[buda::query demand]"
+        buda::source {tracks}
+        buda::open_bdb :memory:
+        buda::add_cell top_cell 600 200
+        buda::add_cell leaf 80 80
+        buda::add_inst_to_cell top_cell a leaf 20 60
+        buda::add_inst_to_cell top_cell b leaf 300 60
+        buda::add_inst u1 top_cell - 50 50
+        buda::add_inst u2 top_cell - 900 50
+        buda::derive_busterms 1
+        buda::add_blocks_from_bdb 0
+        buda::add_blocks_from_bdb 1 skip
+        buda::bdb_net_mode on
+        buda::add_bus loc\\[8\\] u1/a.out u1/b.in
+        buda::add_bus x\\[8\\] u1/b.out u2/a.in
+        buda::run_hier_bundler depth 1
+        buda::generate_hier_topologies
+        buda::run_planner hier 3
+        puts "planned=[buda::query demand]"
+        buda::run_nuts
+        foreach r [buda::query demand u1 M6] {{
+            lassign $r inst cell layer bits used supply pct
+            puts "ROW $inst $cell $layer $bits $used $supply $pct"
+        }}
+        puts "CELL=[llength [buda::query demand cell:leaf M6]]"
+        if {{[catch {{buda::query demand u1 M9}} e]}} {{ puts "E=$e" }}
+        buda::stop""")
+    assert "pre=-1" in out and "planned=-1" in out, out
+    m = re.search(r"ROW u1 top_cell M6 (\d+) (\d+) (\d+) ([\d.]+)", out)
+    assert m, out
+    bits, used, supply = int(m[1]), int(m[2]), int(m[3])
+    assert bits == 8 and 8 <= used <= 9 and supply > used, out
+    assert 0.0 < float(m[4]) < 100.0, out
+    assert "ROW u1/a leaf M6 0 0" in out and "ROW u1/b leaf M6 0 0" in out
+    assert "CELL=4" in out, out
+    assert "E=" in out and "unknown layer" in out, out
+
+
+def test_a_demand_filter_survives_tcl_metacharacters(tmp_path):
+    """An instance named like a Verilog array element — `t[0]` — reaches the
+    server verbatim: interpolating the `$args` LIST braced it and the server
+    looked for the braces, so the filter silently matched nothing (Codex P2
+    on #933).  The words travel through `_join_args` like every command's
+    arguments, and the server reads them with the engine's own tokenizer."""
+    tracks = tcl_path(_ROOT / "flow" / "tracks" / "tracks.buda")
+    out = _tcl(tmp_path, f"""
+        buda::source {tracks}
+        buda::open_bdb :memory:
+        buda::add_cell top_cell 600 200
+        buda::add_cell leaf 80 80
+        buda::add_inst_to_cell top_cell a leaf 20 60
+        buda::add_inst_to_cell top_cell b leaf 300 60
+        buda::add_inst {{t[0]}} top_cell - 50 50
+        buda::add_inst {{t[1]}} top_cell - 900 50
+        buda::derive_busterms 1
+        buda::add_blocks_from_bdb 0
+        buda::add_blocks_from_bdb 1 skip
+        buda::bdb_net_mode on
+        buda::add_bus x\\[8\\] {{t[0]/b.out}} {{t[1]/a.in}}
+        buda::run_hier_bundler depth 1
+        buda::generate_hier_topologies
+        buda::run_planner hier 3
+        buda::run_nuts
+        set rows [buda::query demand {{t[0]}} M6]
+        puts "N=[llength $rows]"
+        lassign [lindex $rows 0] inst cell layer bits
+        puts "FIRST=$inst/$layer/$bits"
+        puts "ALL_M6=[llength [buda::query demand {{}} M6]]"
+        puts "ALL=[llength [buda::query demand {{}} {{}}]]"
+        buda::stop""")
+    assert "N=3" in out, out
+    assert "FIRST=t[0]/M6/8" in out, out
+    # An EMPTY word is a positional placeholder — every instance, one layer
+    # — and must not shift the layer into the instance slot (round 4).
+    assert "ALL_M6=6" in out and "ALL=36" in out, out
+
+
+def test_a_scalar_query_refuses_arguments(tmp_path):
+    """`query` passes extra words along for `demand`; a scalar query given
+    one is a typo in a gate — `buda::query overlaps M6` must raise, not
+    answer the design-wide count as if it were per layer (Codex P2 on
+    #933)."""
+    out = _tcl(tmp_path, """
+        if {[catch {buda::query overlaps M6} e]} { puts "E=$e" }
+        puts "OK=[buda::query overlaps]"
+        buda::stop""")
+    assert "E=" in out and "takes no arguments" in out, out
+    assert "OK=-1" in out, out
+
+
 def test_buda_log_gives_the_terminal_the_cli_gives(tmp_path):
     """`bin/buda` prints one line per command and files the detail; the same
     flow driven from Tcl printed every line of every command, because the

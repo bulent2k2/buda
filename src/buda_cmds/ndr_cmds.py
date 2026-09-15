@@ -2084,6 +2084,44 @@ COMMANDS = {
 }
 
 
+
+def ndr_reserved_run(spec, grid_stack, layer, rows, s_lo, s_hi):
+    """The perpendicular window a governed segment's placed run RESERVES on
+    its layer: `[run_lo, run_hi]` over the placed rows (bits and shields —
+    the inter-bit guards lie between them), extended for an UNSHIELDED rule
+    over the `guard_slots` SIGNAL slots beyond the outermost wires (the
+    run's end guards, which detailed NUTS keeps empty and emits no row
+    for; a shielded rule's ends ARE placed rows already).
+
+    ONE function because two consumers read the same geometry: the R9
+    NDR_SPACING audit (a foreign wire inside this window violates the
+    clearance) and the layer-demand query (`_layer_demand`, convergence
+    ladder item 3 — a cell handed the complement of the top's demand must
+    not be handed the guard tracks, which the emitted rows alone do not
+    show; Codex P2 on #933).  `spec` is the rule as it resolves on `layer`
+    (`ndr_spec_for_layer`), `rows` the segment's placed NetSegments."""
+    run_lo = min(r.track_position - r.width / 2.0 for r in rows)
+    run_hi = max(r.track_position + r.width / 2.0 for r in rows)
+    have_grid = grid_stack is not None and grid_stack.has_layer(layer)
+    if spec.shield_mode == 0 and spec.guard_slots > 0 and have_grid:
+        g = grid_stack.get_layer_grid(layer)
+        mid = 0.5 * (s_lo + s_hi)
+        period = _ndr_effective_period(
+            g, mid, 0.5 * (run_lo + run_hi))
+        if period > 0:
+            reach = (spec.guard_slots + 1) * period
+            eps = 1e-9
+            below = g.signal_tracks_in(mid, run_lo - reach, run_lo - eps)
+            if below:
+                pos, slot = below[max(0, len(below) - spec.guard_slots)]
+                run_lo = min(run_lo, pos - slot.width / 2.0)
+            above = g.signal_tracks_in(mid, run_hi + eps, run_hi + reach)
+            if above:
+                pos, slot = above[min(len(above), spec.guard_slots) - 1]
+                run_hi = max(run_hi, pos + slot.width / 2.0)
+    return run_lo, run_hi
+
+
 # ── R9 typed audit (NDR_WIDTH / NDR_SPACING / NDR_SHIELD) ──────────────────
 # Defense-in-depth at the dnuts stage: phase-1 placement emits correct
 # k-slot/guard/shield geometry BY CONSTRUCTION, so these checks exist to
@@ -2424,31 +2462,10 @@ def audit_ndr_dnuts(session, wrapper, index=None):
                     f"{covered} SIGNAL slot(s), rule '{spec.rule_name}' "
                     f"requires {spec.width_slots} — under-width wire"))
         # Spacing: the run is exclusive — no foreign wire inside it.
-        run_lo = min(r.track_position - r.width / 2.0 for r in rows)
-        run_hi = max(r.track_position + r.width / 2.0 for r in rows)
         s_lo, s_hi, layer = seg_lo, seg_hi, seg_layer
         have_grid = grid_stack is not None and grid_stack.has_layer(layer)
-        # An UNSHIELDED rule's layout reserves guard_slots SIGNAL slots
-        # beyond the outermost wires too (the run's end guards) — the
-        # placed rows alone stop at the outer bit edges, so extend the
-        # audited extent over the nearest guard_slots signal slot centres
-        # on each side (a shielded rule's ends ARE placed rows already).
-        if spec.shield_mode == 0 and spec.guard_slots > 0 and have_grid:
-            g = grid_stack.get_layer_grid(layer)
-            mid = 0.5 * (s_lo + s_hi)
-            period = _ndr_effective_period(
-                g, mid, 0.5 * (run_lo + run_hi))
-            if period > 0:
-                reach = (spec.guard_slots + 1) * period
-                eps = 1e-9
-                below = g.signal_tracks_in(mid, run_lo - reach, run_lo - eps)
-                if below:
-                    pos, slot = below[max(0, len(below) - spec.guard_slots)]
-                    run_lo = min(run_lo, pos - slot.width / 2.0)
-                above = g.signal_tracks_in(mid, run_hi + eps, run_hi + reach)
-                if above:
-                    pos, slot = above[min(len(above), spec.guard_slots) - 1]
-                    run_hi = max(run_hi, pos + slot.width / 2.0)
+        run_lo, run_hi = ndr_reserved_run(spec, grid_stack, layer, rows,
+                                          s_lo, s_hi)
         # Foreign detailed wires, via the shared by-layer index (bisect on
         # the sorted track positions keeps this local to the run window).
         lst, keys = index["by_layer"].get(layer, ((), ()))

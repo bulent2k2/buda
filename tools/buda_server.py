@@ -83,7 +83,9 @@ written, so a cancel cannot tear a frame in half.
 Eight requests are the server's own rather than script commands:
 
     __commands           the command registry, space-separated
-    __query <name>       one scalar about the session (see `_QUERIES`)
+    __query <name> [..]  one value about the session (see `_QUERIES`; a
+                         scalar, or for `demand` a Tcl list, with the
+                         rest of the line as the query's arguments)
     __stream on|off      stream command output as OUT frames (default off)
     __viz [on|off]       may `visualize` open a window (default on); no
                          argument reports the current setting
@@ -196,7 +198,8 @@ import buda_cli                                             # noqa: E402
 import buda                                                 # noqa: E402
 import buda_diag                                            # noqa: E402
 from buda_cmds import COMMANDS                              # noqa: E402
-from buda_script import unquote                             # noqa: E402
+from buda_script import split_quoted_args, unquote          # noqa: E402
+from tcl_quote import tcl_word                              # noqa: E402
 
 
 def _n_bundles(s):
@@ -242,7 +245,42 @@ def _messages(_s):
     return " ".join(f"{{{mid} {sev}}}" for mid, sev, _t in buda_diag.catalogue())
 
 
-# The scalars a flow script actually branches on.  Deliberately few: this is
+def _demand(s, args=""):
+    # Per-instance, per-layer demand (convergence ladder item 3): what the
+    # rest of the design placed over each instance's footprint, in signal
+    # tracks of the layer's pattern — the number a driver hands DOWN as the
+    # complement share.  A Tcl list of rows
+    #     {inst cell layer bits used supply pct}
+    # (`foreach r [buda::query demand] { lassign $r inst cell layer bits
+    # used supply pct }`), optionally filtered: `buda::query demand <inst>`
+    # keeps one instance and its subtree (`cell:<name>` every instance of
+    # a cell), a second word keeps one layer.  -1 until there is a NUTS
+    # result to read the demand off — never computed is not zero.  The
+    # rows are `BudaSession._layer_demand`'s, the same ones
+    # `report_layer_demand` prints, so the two cannot disagree.
+    # The engine's own tokenizer, so a filter travels like any command
+    # argument: `tile[0]` verbatim, a spaced name quoted.
+    toks = [unquote(t) for t in split_quoted_args("demand " + args)]
+    if len(toks) > 2:
+        raise ValueError("usage: demand [<inst-path>|cell:<cell>] [<layer>]")
+    rows = s._layer_demand(toks[0] if toks else "",
+                           toks[1] if len(toks) > 1 else "")
+    if rows is None:
+        return -1
+    # `pct` at FULL precision (Python's shortest round-trip repr): this is
+    # the machine-readable door, and a driver derives a share from
+    # `100 - $pct`, so one decimal turned 1 used of 3000 into 0.0 and the
+    # complement into every track (Codex P2 on #933, round 5).  `used` and
+    # `supply` are the exact integers for a caller that wants the ratio
+    # itself; the printed table rounds, the query does not.
+    return " ".join(
+        "{" + " ".join(tcl_word(str(v)) for v in (
+            r["inst"], r["cell"], r["layer_name"], r["bits"], r["used"],
+            r["supply"], repr(float(r["pct"])))) + "}"
+        for r in rows)
+
+
+# The values a flow script actually branches on.  Deliberately few: this is
 # a bridge, not a second API, and every name here is a promise to keep.
 # A count that has not been computed yet answers -1 rather than 0, because
 # "no NUTS result" and "no overlaps" are opposite conclusions.
@@ -254,7 +292,13 @@ _QUERIES = {
     "unplaced": _n_unplaced,
     "violations": _n_violations,
     "messages": _messages,
+    "demand": _demand,
 }
+# The queries that TAKE arguments.  Every other name is a scalar about the
+# whole session, and a word after it is a typo — `buda::query overlaps M6`
+# must raise (as it did before `query` learnt to pass words along), not
+# answer the design-wide count as if it were per layer.
+_QUERIES_WITH_ARGS = {"demand"}
 
 
 @contextlib.contextmanager
@@ -546,14 +590,26 @@ class Server:
                 self._reply("OK")
             return True
         if req.startswith("__query"):
-            parts = req.split(None, 1)
+            parts = req.split(None, 2)
             name = parts[1].strip() if len(parts) > 1 else ""
+            qargs = parts[2].strip() if len(parts) > 2 else ""
             fn = _QUERIES.get(name)
             if fn is None:
                 self._reply("ERR", f"unknown query {name!r}; known: "
                                    f"{', '.join(sorted(_QUERIES))}")
+            elif qargs and name not in _QUERIES_WITH_ARGS:
+                self._reply("ERR", f"query {name} takes no arguments "
+                                   f"(got {qargs!r})")
             else:
-                self._reply("OK", str(fn(self.session)))
+                try:
+                    self._reply("OK", str(fn(self.session, qargs)
+                                          if name in _QUERIES_WITH_ARGS
+                                          else fn(self.session)))
+                except ValueError as e:
+                    # A malformed request (an unknown layer, too many
+                    # words) is the CALLER's error and raises in Tcl like
+                    # any other; the session is untouched.
+                    self._reply("ERR", f"query {name}: {e}")
             return True
 
         cap = _StreamCapture(self._out_frame) if self.stream else io.StringIO()
