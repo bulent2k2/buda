@@ -271,3 +271,26 @@ def test_ndr_guard_tracks_are_reserved_demand():
     detailed = _row(s._layer_demand("u1", "M6"), "u1", "M6")
     assert detailed["bits"] == 8, detailed
     assert detailed["used"] == 17 == abstract["used"], (abstract, detailed)
+
+
+def test_the_query_sends_pct_at_full_precision():
+    """The Tcl door is the machine-readable one, and a driver derives a
+    share from `100 - $pct`: one decimal turned 1 used of 3000 into 0.0
+    and the complement into every track.  The wire carries the shortest
+    round-trip float, and `used`/`supply` the exact integers (Codex P2 on
+    #933, round 5)."""
+    sys.path.insert(0, str(_ROOT / "tools"))
+    import buda_server
+    s = _session("run_nuts")
+    row = _row(s._layer_demand("u1", "M6"), "u1", "M6")
+    wire = buda_server._demand(s, "u1 M6")
+    first = wire.split("}")[0].lstrip("{").split()
+    assert first[:3] == ["u1", "top_cell", "M6"], first
+    assert float(first[6]) == 100.0 * row["used"] / row["supply"], first
+    # the shape the finding named, through the same encoder
+    s._layer_demand = lambda *_a, **_k: [dict(
+        inst="i", cell="c", layer=6, layer_name="M6", depth=0, bundles=1,
+        bits=1, used=1, supply=3000, pct=100.0 / 3000)]
+    wire = buda_server._demand(s, "")
+    pct = wire.split()[-1].rstrip("}")
+    assert pct != "0.0" and abs(float(pct) - 100.0 / 3000) < 1e-12, wire

@@ -135,7 +135,11 @@ foreach r [buda::query demand cell:sram_cell] {
 ```
 
 `used` counts tracks, `bits` counts traffic (two foreign buses on the same
-tracks are 16 bits and ~8 tracks), and the rows are exactly what
+tracks are 16 bits and ~8 tracks), `pct` is `100 * used / supply` at full
+precision (the printed table rounds to one decimal; the query does not, since
+`100 - $pct` on a rounded 0.0 would hand a cell the one track the top holds
+of 3000 — `used` and `supply` are the exact integers if you want the ratio
+yourself), and the rows are exactly what
 [`report_layer_demand`](script_reference/nuts.md#layer-demand-reporting)
 prints — one instance and its subtree with a path, every instance of a cell
 with `cell:<name>`, one layer with a second word (`buda::query demand {} M6`

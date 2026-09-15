@@ -267,10 +267,16 @@ def _demand(s, args=""):
                            toks[1] if len(toks) > 1 else "")
     if rows is None:
         return -1
+    # `pct` at FULL precision (Python's shortest round-trip repr): this is
+    # the machine-readable door, and a driver derives a share from
+    # `100 - $pct`, so one decimal turned 1 used of 3000 into 0.0 and the
+    # complement into every track (Codex P2 on #933, round 5).  `used` and
+    # `supply` are the exact integers for a caller that wants the ratio
+    # itself; the printed table rounds, the query does not.
     return " ".join(
         "{" + " ".join(tcl_word(str(v)) for v in (
             r["inst"], r["cell"], r["layer_name"], r["bits"], r["used"],
-            r["supply"], f"{r['pct']:.1f}")) + "}"
+            r["supply"], repr(float(r["pct"])))) + "}"
         for r in rows)
 
 
