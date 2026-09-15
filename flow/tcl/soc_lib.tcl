@@ -90,6 +90,12 @@ namespace eval soc_vehicle {
     #   PAD                slack added to every derived leaf dimension
     #   M/GAP              margin inside a cell / gap between siblings --
     #                      constants, deliberately NOT derived (see configure)
+    #   LAYOUT             the TOP-LEVEL floorplan: `band` (the historical
+    #                      one -- quadrants in a ceil(sqrt(NQ))-column grid,
+    #                      the l2 + io pair in a band above, left-aligned;
+    #                      every table in soc.md was measured on it) or
+    #                      `compact` (the grid shape and the pair's place
+    #                      chosen for die UTILIZATION -- see _top_geom)
     array set P {
         NQ       2      NC       2
         NBANK    2      NBANK2   4
@@ -98,6 +104,7 @@ namespace eval soc_vehicle {
         IW      32      CW       8
         BITPITCH 4.0    PAD     24
         M       16      GAP     16
+        LAYOUT  band
     }
 }
 
@@ -126,6 +133,9 @@ proc soc_vehicle::configure {{overrides {}}} {
         if {![string is integer -strict $P($k)] || $P($k) < 1} {
             error "soc_vehicle: $k must be an integer >= 1 (got '$P($k)')"
         }
+    }
+    if {$P(LAYOUT) ni {band compact}} {
+        error "soc_vehicle: LAYOUT must be band or compact (got '$P(LAYOUT)')"
     }
 
     # The MIRROR of that rule, on the PHYSICAL sizing knobs (Codex P2, #930).
@@ -344,15 +354,154 @@ proc soc_vehicle::configure {{overrides {}}} {
     set SZ(quad_cell)    [_pack [lrepeat $P(NC) cluster_cell]]
     set SZ(io_blk_cell)  [_pack [concat bridge_cell [lrepeat $P(NIO) io_cell]]]
 
-    # ── the die: the quadrants in a row, the l2 and the io block below.
-    set top [_pack [lrepeat $P(NQ) quad_cell]]
-    set bot [_pack {l2_cell io_blk_cell}]
-    lassign $top tw th
-    lassign $bot bw bh
-    set P(DIEW) [expr {max($tw,$bw) + 2*$P(M)}]
-    set P(DIEH) [expr {$th + $bh + 3*$P(M)}]
-    set P(TOPW) $tw ; set P(TOPH) $th
-    set P(BOTW) $bw ; set P(BOTH) $bh
+    # ── the die: the quadrants, the l2 and the io block, placed by ONE
+    # walk (`_top_geom`, per LAYOUT) that `build_hierarchy` instantiates
+    # from -- so the declared die and where the top-level blocks land cannot
+    # disagree (the same rule `_pack_geom` keeps for every cell).
+    variable TOP
+    array set TOP [_top_geom]
+    set P(DIEW) $TOP(diew)
+    set P(DIEH) $TOP(dieh)
+}
+
+# The top-level floorplan, as a dict: `diew dieh` (the die), `pos` (a list of
+# {name cell x y}, one per top-level instance -- the NQ quadrants, then l2,
+# then io), and what was decided (`nc nr holes band util`), where `util` is
+# the top-level block area over the die area -- the number the empty
+# corner of the historical layout is measured by.
+#
+#   band     the historical placement, byte for byte: the quadrants in a
+#            ceil(sqrt(NQ))-column grid (`_pack`, so the last row may be
+#            short -- NQ=32 is a 6x6 grid with FOUR empty slots), the l2 and
+#            io in a band ABOVE the grid, left-aligned, and a margin M around
+#            the grid on top of the M inside `_pack`.
+#   compact  every column count 1..NQ is a candidate, and for each the l2 +
+#            io pair either FILLS the grid's empty slots (when it fits the
+#            hole the short last row leaves, at the row's right end) or sits
+#            in a band above, CENTRED; the candidate with the highest
+#            utilization -- the SMALLEST DIE, since every candidate holds
+#            the same blocks, ranked on that integer area rather than on
+#            the rounded ratio -- wins, the aspect ratio held to [1/2, 2]
+#            so a 1x32 strip cannot win on area alone, ties to the aspect
+#            nearest 1 and then the fewer columns.  Chosen, not asserted: whether the
+#            hole or the band is the better home for the pair depends on how
+#            big the pair is against a quadrant, which the widths decide.
+proc soc_vehicle::_top_geom {} {
+    variable P
+    variable SZ
+    set n $P(NQ)
+    set M $P(M) ; set G $P(GAP)
+    lassign $SZ(quad_cell) qw qh
+    lassign $SZ(l2_cell) lw lh
+    lassign $SZ(io_blk_cell) iw ih
+    set qcells [lrepeat $n quad_cell]
+
+    if {$P(LAYOUT) eq "band"} {
+        lassign [_pack $qcells] tw th
+        lassign [_pack {l2_cell io_blk_cell}] bw bh
+        set diew [expr {max($tw,$bw) + 2*$M}]
+        set dieh [expr {$th + $bh + 3*$M}]
+        set pos {}
+        set q 0
+        foreach xy [_pack_pos $qcells] {
+            lassign $xy x y
+            lappend pos [list quad_$q quad_cell $x $y]
+            incr q
+        }
+        set by [expr {$M + $th + $M}]
+        set bpos [_pack_pos {l2_cell io_blk_cell}]
+        lassign [lindex $bpos 0] lx ly
+        lassign [lindex $bpos 1] ix iy
+        lappend pos [list l2 l2_cell $lx [expr {$by + $ly}]]
+        lappend pos [list io io_blk_cell $ix [expr {$by + $iy}]]
+        set nc [_cols $n]
+        set nr [expr {int(ceil(double($n)/$nc))}]
+        return [list diew $diew dieh $dieh pos $pos nc $nc nr $nr \
+                     holes [expr {$nc*$nr - $n}] band 1 \
+                     util [_util $diew $dieh]]
+    }
+
+    # compact: rank every column count.
+    set pw [expr {$lw + $G + $iw}]
+    set ph [expr {max($lh, $ih)}]
+    set best {}
+    for {set nc 1} {$nc <= $n} {incr nc} {
+        set nr [expr {int(ceil(double($n)/$nc))}]
+        set gw [expr {$nc*$qw + ($nc-1)*$G}]
+        set gh [expr {$nr*$qh + ($nr-1)*$G}]
+        set holes [expr {$nc*$nr - $n}]
+        set band 1
+        if {$holes > 0} {
+            set hw [expr {$holes*$qw + ($holes-1)*$G}]
+            if {$pw <= $hw && $ph <= $qh} { set band 0 }
+        }
+        if {$band} {
+            set diew [expr {max($gw, $pw) + 2*$M}]
+            set dieh [expr {$gh + $G + $ph + 2*$M}]
+        } else {
+            set diew [expr {$gw + 2*$M}]
+            set dieh [expr {$gh + 2*$M}]
+        }
+        # Ranked on the DIE AREA, an integer: every candidate holds the same
+        # blocks, so the highest utilization is exactly the smallest die,
+        # and the ratio is only formatted for the report -- ranking on the
+        # three-decimal string tied candidates whose dies differ (Codex P2
+        # on #932: at `16 -NC 2 -NBANK 8 -NBANK2 1 -NIO 32` a 3-column die
+        # of 307,508,992 beat a 4-column one of 307,345,408 on the
+        # tie-breakers, both reading 0.876).
+        set aspect [expr {double($diew)/$dieh}]
+        set ok [expr {$aspect >= 0.5 && $aspect <= 2.0}]
+        set key [list $ok [expr {-$diew*$dieh}] [expr {-abs(log($aspect))}] [expr {-$nc}]]
+        if {$best eq "" || [_key_better $key [lindex $best 0]]} {
+            set best [list $key $nc $nr $holes $band $diew $dieh]
+        }
+    }
+    lassign $best _key nc nr holes band diew dieh
+    set gw [expr {$nc*$qw + ($nc-1)*$G}]
+    set gh [expr {$nr*$qh + ($nr-1)*$G}]
+    set pos {}
+    for {set q 0} {$q < $n} {incr q} {
+        set col [expr {$q % $nc}] ; set row [expr {$q / $nc}]
+        lappend pos [list quad_$q quad_cell \
+                         [expr {$M + $col*($qw + $G)}] \
+                         [expr {$M + $row*($qh + $G)}]]
+    }
+    if {$band} {
+        set yb [expr {$M + $gh + $G}]
+        set x0 [expr {($diew - $pw)/2}]
+        lappend pos [list l2 l2_cell $x0 [expr {$yb + ($ph - $lh)/2}]]
+        lappend pos [list io io_blk_cell [expr {$x0 + $lw + $G}] \
+                         [expr {$yb + ($ph - $ih)/2}]]
+    } else {
+        set hw [expr {$holes*$qw + ($holes-1)*$G}]
+        set x0 [expr {$M + ($n % $nc)*($qw + $G) + ($hw - $pw)/2}]
+        set y0 [expr {$M + ($nr-1)*($qh + $G)}]
+        lappend pos [list l2 l2_cell $x0 [expr {$y0 + ($qh - $lh)/2}]]
+        lappend pos [list io io_blk_cell [expr {$x0 + $lw + $G}] \
+                         [expr {$y0 + ($qh - $ih)/2}]]
+    }
+    return [list diew $diew dieh $dieh pos $pos nc $nc nr $nr \
+                 holes $holes band $band util [_util $diew $dieh]]
+}
+
+# Top-level block area over die area, to three places.
+proc soc_vehicle::_util {diew dieh} {
+    variable P
+    variable SZ
+    lassign $SZ(quad_cell) qw qh
+    lassign $SZ(l2_cell) lw lh
+    lassign $SZ(io_blk_cell) iw ih
+    set blocks [expr {$P(NQ)*$qw*$qh + $lw*$lh + $iw*$ih}]
+    return [format %.3f [expr {double($blocks)/($diew*$dieh)}]]
+}
+
+# Lexicographic "a beats b" over the ranking keys of `_top_geom`.
+proc soc_vehicle::_key_better {a b} {
+    foreach x $a y $b {
+        if {$x > $y} { return 1 }
+        if {$x < $y} { return 0 }
+    }
+    return 0
 }
 
 # A derived leaf dimension: the bits that land on the face, at the stack's
@@ -512,25 +661,18 @@ proc soc_vehicle::build_hierarchy {} {
     for {set c 0} {$c < $P(NC)} {incr c} { lappend qn cl_$c }
     _fill quad_cell $qc $qn
 
-    # the top: the quadrants packed, the l2 and io block in a band below.
-    set qpos [_pack_pos [lrepeat $P(NQ) quad_cell]]
+    # the top: the quadrants, the l2 and the io block where `_top_geom`
+    # put them when `configure` sized the die (one walk, per LAYOUT).
     # The TOP instances, as the same {name cell} pairs `_fill` records for
     # every other level, appended where each one is actually instantiated.
+    variable TOP
     variable TOPKIDS
     set TOPKIDS {}
-    for {set q 0} {$q < $P(NQ)} {incr q} {
-        lassign [lindex $qpos $q] x y
-        buda::add_inst quad_$q quad_cell - $x $y
-        lappend TOPKIDS [list quad_$q quad_cell]
+    foreach inst $TOP(pos) {
+        lassign $inst name cell x y
+        buda::add_inst $name $cell - $x $y
+        lappend TOPKIDS [list $name $cell]
     }
-    set by [expr {$P(M) + $P(TOPH) + $P(M)}]
-    set bpos [_pack_pos {l2_cell io_blk_cell}]
-    lassign [lindex $bpos 0] lx ly
-    lassign [lindex $bpos 1] ix iy
-    buda::add_inst l2 l2_cell     - $lx [expr {$by + $ly}]
-    lappend TOPKIDS [list l2 l2_cell]
-    buda::add_inst io io_blk_cell - $ix [expr {$by + $iy}]
-    lappend TOPKIDS [list io io_blk_cell]
 }
 
 # Instantiate `names` (cells `cells`) inside `parent`, in the same packed
@@ -842,15 +984,20 @@ proc soc_vehicle::describe {} {
     #   start, the L2 banks, and two per peripheral.
     set buses  [expr {$cl*(9 + 4*$P(NBANK)) + 2*($cl-1)
                       + 4 + 1 + 2*$P(NBANK2) + 2*$P(NIO)}]
+    variable TOP
     return [list clusters $cl leaves $leaves buses $buses \
-                 die "$P(DIEW)x$P(DIEH)"]
+                 die "$P(DIEW)x$P(DIEH)" layout $P(LAYOUT) \
+                 grid "$TOP(nc)x$TOP(nr)" holes $TOP(holes) \
+                 band $TOP(band) util $TOP(util)]
 }
 
 proc soc_vehicle::banner {what} {
     variable P
     array set d [describe]
     puts "=== $what: NQ=$P(NQ) NC=$P(NC) -- $d(clusters) clusters,\
-          $d(leaves) leaf instances, $d(buses) buses, die $d(die) ==="
+          $d(leaves) leaf instances, $d(buses) buses, die $d(die)\
+          layout $d(layout) grid $d(grid) holes $d(holes)\
+          util $d(util) ==="
 }
 
 # ── verdict helpers (array_lib's rule: three legs, -1 is dirty) ───────────

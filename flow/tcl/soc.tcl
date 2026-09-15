@@ -20,11 +20,12 @@
 #   btcl flow/tcl/soc.tcl 2 -NC 4 -NBANK 4   # wider clusters, bigger L1
 #   btcl flow/tcl/soc.tcl 2 -bottomup        # solve one cluster, copy it
 #   btcl flow/tcl/soc.tcl 8 -dry             # print the size, build nothing
+#   btcl flow/tcl/soc.tcl 32 -LAYOUT compact # the utilization-chosen floorplan
 #   btcl flow/tcl/soc.tcl 2 -caps            # reserve the top pair for the top
 #   btcl flow/tcl/soc.tcl 2 -census          # instances per leaf cell type
 #
 # Every knob in `soc_vehicle::configure` is settable as `-<NAME> <value>`
-# (NQ, NC, NBANK, NBANK2, NIO, DW/AW/IW/CW, BITPITCH, PAD, M, GAP), so a
+# (NQ, NC, NBANK, NBANK2, NIO, DW/AW/IW/CW, BITPITCH, PAD, M, GAP, LAYOUT), so a
 # larger experiment is an argument rather than an edit.  The design is
 # `soc_lib.tcl` — one source, so a future save/resume driver cannot drift
 # from this one (array_lib.tcl's rule).

@@ -107,6 +107,85 @@ chain start) and left every **die** unchanged — including at `-DW 128` and
 `-CW 128`, measured — which is the point of it: the geometry was always paid
 for, only the workload was missing.
 
+## The floorplan: `band` (measured above) and `-LAYOUT compact`
+
+Every table on this page was measured on the **historical** top level, now
+named `-LAYOUT band` and still the default: the NQ quadrants in a
+ceil(sqrt(NQ))-column grid, the l2 + io pair in a band above it,
+left-aligned.  Its cost is visible in any picture of it — at NQ = 32 the grid
+is 6 × 6 for 32 quadrants, so FOUR slots in the upper right are empty, and the
+band covers a third of the width — and it is measured as the top-level block
+area over the die area, 0.784 at NQ = 32.
+
+**`-LAYOUT compact`** chooses the top level for that number: every column
+count 1..NQ is a candidate, the pair either FILLS the hole a short last row
+leaves (when it fits there) or sits in a band above, CENTRED, and the
+candidate with the highest utilization wins, its aspect ratio held to
+[1/2, 2] so a strip cannot win on area alone.  Chosen rather than asserted,
+because whether the hole or the band is the better home for the pair depends
+on how big the pair is against a quadrant, and the widths decide that.  What
+it picks on the dial, and what routing it gets — top-down, every row clean:
+
+| NQ | layout | grid | die | utilization | abstract WL | detailed WL | Δ det WL | wall |
+|---|---|---|---|---|---|---|---|---|
+| 2 | band | 2 × 1 + band | 4208 × 2016 | 0.668 | 25 200 | 525 144 | | 1.2 s |
+| 2 | compact | 1 × 2 + band | 2096 × 3136 | 0.862 | 24 918 | 497 073 | −5.3 % | 1.3 s |
+| 4 | band | 2 × 2 + band | 4208 × 3200 | 0.779 | 45 251 | 1 007 765 | | 2.2 s |
+| 4 | compact | 2 × 2 + band | 4176 × 3136 | 0.801 | 44 137 | 963 620 | −4.4 % | 3.3 s |
+| 8 | band | 3 × 3, 1 hole + band | 6288 × 4384 | 0.730 | 89 063 | 1 968 672 | | 3.9 s |
+| 8 | compact | 3 × 3, pair in the hole | 6256 × 3568 | 0.902 | 94 652 | 2 000 920 | +1.6 % | 4.8 s |
+| 16 | band | 4 × 4 + band | 8368 × 5568 | 0.846 | 174 599 | 3 935 746 | | 11.1 s |
+| 16 | compact | 3 × 6, pair in the 2-slot hole | 6256 × 7120 | 0.885 | 180 213 | 3 986 186 | +1.3 % | 9.6 s |
+| 32 | band | 6 × 6, 4 holes + band | 12528 × 7936 | 0.784 | 328 264 | 7 461 648 | | 25.8 s |
+| 32 | compact | 4 × 8 + centred band | 8336 × 10240 | 0.914 | 333 298 | 7 570 868 | +1.5 % | 22.3 s |
+
+Read it for what it is.  The die shrinks at every size (14 % less area at
+NQ = 32, 24 % at NQ = 8) and the route stays clean at every size, which is
+the claim the variant makes.  The wire is NOT monotone with it: the two small
+sizes route shorter on the compact die and the three larger ones 1.3–1.6 %
+longer — a denser die puts the global buses through less empty channel and
+past more blocks, and which of the two wins is a property of the size, not
+of the layout.  Stated in both directions rather than as "compact is
+cheaper".  A layout is a FLOW input on this vehicle, not a routing change:
+`-dry` prints the decision (`layout compact grid 4x8 holes 0 util 0.914`)
+before anything is built, and the default is pinned byte for byte by
+`test_tcl_soc_flow.py` so that this page's other tables keep meaning what
+they say.
+
+**Bottom-up is NOT the same story**, and the table says so rather than
+letting the top-down one stand for both (the mistake this page already made
+once, Codex P2 on #930).  `-bottomup`, default channel, both layouts:
+
+| NQ | layout | die | endpoint | detailed WL | what stranded |
+|---|---|---|---|---|---|
+| 8 | band | 6288 × 4384 | **clean** | 2 175 864 | — |
+| 8 | compact | 6256 × 3568 | ✗ 4 ovl / 0 unpl | (2 143 167) | nothing — overlaps only, the fixed-copy residue |
+| 16 | band | 8368 × 5568 | ✗ 3 ovl / 8 unpl | (4 319 399) | `hb-2 seg 0`, 8 bits of `pc_0` — the seat analysed below |
+| 16 | compact | 6256 × 7120 | ✗ 4 ovl / 29 unpl | (4 217 356) | five bundles, 5–7 bits each (114, 379, 417, 493, 607); NO doomed-seat advisory |
+| 32 | band | 12528 × 7936 | ✗ 3 ovl / 8 unpl | (8 265 153) | the same `pc_0` seat |
+| 32 | compact | 8336 × 10240 | ✗ 1 ovl / 32 unpl | (8 329 899) | one 32-bit segment (`bundle 1 seg 2`); NO doomed-seat advisory |
+
+So the compact die is DIRTIER bottom-up at every size measured — dirty at
+NQ = 8 where the band is clean, and stranding 29 / 32 bits at 16 / 32
+against the band's 8 — and it strands DIFFERENT things: the band's
+recurring fault is the one supply-doomed `pc_0` seat, while the compact
+runs report no doomed seat at all and lose bits in bundles the band never
+touches.  A parenthesised wirelength excludes the stranded bits and is not
+comparable to a complete route.  The named channel, the page's measured
+workaround for the fixed copy, does what it does on the band at NQ = 8:
+`compact -bottomup -GAP 24 -M 24` is **clean** at 2 388 211 (+9.8 % over
+the band's clean default) and `-GAP 32 -M 32` clean at 2 704 701; NQ = 16
+and 32 under a named channel are not measured.
+
+What this licenses is narrow.  Top-down, `compact` is the better die at
+every size and the route is clean everywhere.  Bottom-up, the fixed copy
+lands on a tighter die and the residue is larger; whether that is the hole
+the pair sits in (NQ = 8 and 16), the centred band (NQ = 32) or simply the
+gap the compact grid leaves between quadrants is NOT established, and the
+five-bundle / one-bundle strandings are named so the census can be read
+against them rather than guessed at.  The default stays `band` for that
+reason and for the tables above it.
+
 ## Every endpoint, every bit, every instance: the face rule read three ways
 
 The face rule — *a leaf's size is derived from the bits that land on its
