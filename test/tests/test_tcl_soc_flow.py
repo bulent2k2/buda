@@ -953,3 +953,96 @@ def test_an_unknown_knob_is_an_error_not_a_silent_default(tmp_path):
         rj = _run(tmp_path, 2, junk, 3)
         assert rj.returncode != 0, junk
         assert "unknown parameter" in (rj.stdout + rj.stderr), junk
+
+
+# ── the top-level floorplan knob ──────────────────────────────────────────
+_PROBE_TOP = (
+    "source [file join {%s} flow tcl soc_lib.tcl]\n"
+    "soc_vehicle::configure [lrange $argv 0 end]\n"
+    "array set T [soc_vehicle::_top_geom]\n"
+    "puts \"DIE $T(diew) $T(dieh) $T(nc) $T(nr) $T(holes) $T(band) $T(util)\"\n"
+    "foreach inst $T(pos) {\n"
+    "    lassign $inst name cell x y\n"
+    "    lassign $soc_vehicle::SZ($cell) w h\n"
+    "    puts \"BLK $name $cell $x $y $w $h\"\n"
+    "}\n")
+
+
+def _top_geom(tmp_path, *knobs):
+    probe = tmp_path / ("top_%s.tcl" % "_".join(map(str, knobs)))
+    probe.write_text(_PROBE_TOP % _ROOT)
+    r = subprocess.run(["tclsh", str(probe), *map(str, knobs)],
+                       capture_output=True, encoding="utf-8", cwd=tmp_path,
+                       timeout=120)
+    assert r.returncode == 0, r.stdout + r.stderr
+    die = None
+    blocks = []
+    for ln in r.stdout.splitlines():
+        f = ln.split()
+        if f and f[0] == "DIE":
+            die = dict(w=int(f[1]), h=int(f[2]), nc=int(f[3]), nr=int(f[4]),
+                       holes=int(f[5]), band=int(f[6]), util=float(f[7]))
+        elif f and f[0] == "BLK":
+            blocks.append((f[1], f[2], int(f[3]), int(f[4]), int(f[5]), int(f[6])))
+    assert die and blocks, r.stdout
+    return die, blocks
+
+
+def test_both_layouts_place_every_top_level_block_inside_the_die_apart(tmp_path):
+    """`_top_geom` is the ONE walk both the declared die and the placement
+    come from, so what has to hold of it is geometric: every quadrant, the
+    l2 and the io block inside the die, no two overlapping, and NQ + 2 of
+    them -- at every size from 1 to 12 and the two the documents quote, for
+    both layouts.  The compact chooser ranks candidates it never places, so
+    this is what says the one it picked is a legal floorplan."""
+    for nq in list(range(1, 13)) + [16, 32]:
+        for layout in ("band", "compact"):
+            die, blocks = _top_geom(tmp_path, "NQ", nq, "LAYOUT", layout)
+            assert len(blocks) == nq + 2, (nq, layout, blocks)
+            names = [b[0] for b in blocks]
+            assert names[-2:] == ["l2", "io"] and names[0] == "quad_0"
+            for name, _c, x, y, w, h in blocks:
+                assert 0 <= x and 0 <= y and x + w <= die["w"] and y + h <= die["h"], \
+                    (nq, layout, name, (x, y, w, h), die)
+            for i, a in enumerate(blocks):
+                for b in blocks[i + 1:]:
+                    disjoint = (a[2] + a[4] <= b[2] or b[2] + b[4] <= a[2]
+                                or a[3] + a[5] <= b[3] or b[3] + b[5] <= a[3])
+                    assert disjoint, (nq, layout, a, b)
+
+
+def test_the_band_layout_is_the_default_and_the_one_every_table_was_measured_on(tmp_path):
+    """The historical placement must stay byte-identical under the knob,
+    because every die and wirelength in soc.md was measured on it: no
+    `-LAYOUT` is `band`, and `band` gives the dies those tables quote."""
+    for nq, die in ((2, "4208x2016"), (8, "6288x4384"), (32, "12528x7936")):
+        plain = _run(tmp_path, nq, "-dry")
+        band = _run(tmp_path, nq, "-LAYOUT", "band", "-dry")
+        assert plain.returncode == 0 and band.returncode == 0, plain.stderr + band.stderr
+        assert plain.stdout == band.stdout
+        assert ("die %s " % die) in plain.stdout and "layout band" in plain.stdout, plain.stdout
+    r = _run(tmp_path, 2, "-LAYOUT", "diagonal", "-dry")
+    assert r.returncode != 0 and "LAYOUT must be band or compact" in r.stderr, r.stderr
+
+
+def test_compact_never_yields_utilization_to_band_and_fills_the_hole_it_can(tmp_path):
+    """The chooser's contract: `compact` is never worse than `band` on the
+    number it optimizes (the band layout is not among its candidates, so
+    this is the claim that its search space contains something at least as
+    good at every size), and the two shapes it decides between are both
+    reached on the dial -- the l2 + io pair FILLING the short last row's
+    hole (NQ = 8: a 3x3 grid, one hole, band 0) and a full grid with the
+    pair in a centred band (NQ = 32: 4x8, no hole, band 1).  The empty
+    upper-right corner of the historical NQ = 32 floorplan is four empty
+    quadrant slots (6x6 for 32); compact has none."""
+    for nq in list(range(1, 10)) + [16, 32]:
+        band, _ = _top_geom(tmp_path, "NQ", nq, "LAYOUT", "band")
+        compact, _ = _top_geom(tmp_path, "NQ", nq, "LAYOUT", "compact")
+        assert compact["util"] >= band["util"], (nq, band, compact)
+        assert 0.5 <= compact["w"] / compact["h"] <= 2.0, (nq, compact)
+    band32, _ = _top_geom(tmp_path, "NQ", 32, "LAYOUT", "band")
+    assert band32["holes"] == 4
+    c32, _ = _top_geom(tmp_path, "NQ", 32, "LAYOUT", "compact")
+    assert c32["holes"] == 0 and c32["band"] == 1, c32
+    c8, _ = _top_geom(tmp_path, "NQ", 8, "LAYOUT", "compact")
+    assert c8["holes"] == 1 and c8["band"] == 0, c8
