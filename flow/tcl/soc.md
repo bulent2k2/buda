@@ -152,13 +152,39 @@ before anything is built, and the default is pinned byte for byte by
 `test_tcl_soc_flow.py` so that this page's other tables keep meaning what
 they say.
 
-**Bottom-up is NOT the same story**, and the rows are being measured as
-this is written: at NQ = 8, where `band -bottomup` is clean at the default
-channel, `compact -bottomup` comes back with **4 overlaps** (0 unplaced,
-0 audit violations; detailed WL 2 143 167 against 2 175 864) — the
-fixed-copy residue this page's bottom-up section describes, on a die where
-the pair now sits in the hole beside two quadrants.  NQ = 16 and 32 and the
-named-channel remedy at 8 follow in this table when they finish.
+**Bottom-up is NOT the same story**, and the table says so rather than
+letting the top-down one stand for both (the mistake this page already made
+once, Codex P2 on #930).  `-bottomup`, default channel, both layouts:
+
+| NQ | layout | die | endpoint | detailed WL | what stranded |
+|---|---|---|---|---|---|
+| 8 | band | 6288 × 4384 | **clean** | 2 175 864 | — |
+| 8 | compact | 6256 × 3568 | ✗ 4 ovl / 0 unpl | (2 143 167) | nothing — overlaps only, the fixed-copy residue |
+| 16 | band | 8368 × 5568 | ✗ 3 ovl / 8 unpl | (4 319 399) | `hb-2 seg 0`, 8 bits of `pc_0` — the seat analysed below |
+| 16 | compact | 6256 × 7120 | ✗ 4 ovl / 29 unpl | (4 217 356) | five bundles, 5–7 bits each (114, 379, 417, 493, 607); NO doomed-seat advisory |
+| 32 | band | 12528 × 7936 | ✗ 3 ovl / 8 unpl | (8 265 153) | the same `pc_0` seat |
+| 32 | compact | 8336 × 10240 | ✗ 1 ovl / 32 unpl | (8 329 899) | one 32-bit segment (`bundle 1 seg 2`); NO doomed-seat advisory |
+
+So the compact die is DIRTIER bottom-up at every size measured — dirty at
+NQ = 8 where the band is clean, and stranding 29 / 32 bits at 16 / 32
+against the band's 8 — and it strands DIFFERENT things: the band's
+recurring fault is the one supply-doomed `pc_0` seat, while the compact
+runs report no doomed seat at all and lose bits in bundles the band never
+touches.  A parenthesised wirelength excludes the stranded bits and is not
+comparable to a complete route.  The named channel, the page's measured
+workaround for the fixed copy, does what it does on the band at NQ = 8:
+`compact -bottomup -GAP 24 -M 24` is **clean** at 2 388 211 (+9.8 % over
+the band's clean default) and `-GAP 32 -M 32` clean at 2 704 701; NQ = 16
+and 32 under a named channel are not measured.
+
+What this licenses is narrow.  Top-down, `compact` is the better die at
+every size and the route is clean everywhere.  Bottom-up, the fixed copy
+lands on a tighter die and the residue is larger; whether that is the hole
+the pair sits in (NQ = 8 and 16), the centred band (NQ = 32) or simply the
+gap the compact grid leaves between quadrants is NOT established, and the
+five-bundle / one-bundle strandings are named so the census can be read
+against them rather than guessed at.  The default stays `band` for that
+reason and for the tables above it.
 
 ## Every endpoint, every bit, every instance: the face rule read three ways
 
