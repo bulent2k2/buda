@@ -1157,9 +1157,15 @@ class ReportsMixin:
         rather than of its footprint.
 
         Reads the DETAILED result when one exists (each bit's own track —
-        exact) and the abstract NUTS placement otherwise (a bus segment's
-        `width` centred on its track, which is `bits` pitches of metal, so
-        the count is the same up to phase).
+        exact; an NDR shield row is metal that blocks a track but not a
+        member bit, so it counts in `used` and not in `bits`, and a result
+        with every bit unplaced is an authoritative ZERO, never a fallback)
+        and the abstract NUTS placement otherwise (a bus segment's `width`
+        centred on its track, which is `bits` pitches of metal, so the
+        count is the same up to phase).  Either placement may store a
+        segment's span REVERSED (`span_lo > span_hi` keeps the endpoint
+        identity corner logic relies on), so the extent is ordered before
+        it is tested against the instance.
 
         Returns None when there is nothing to read — no open BDB, no placed
         component, no NUTS result — which the Tcl query reports as -1: a
@@ -1226,15 +1232,16 @@ class ReportsMixin:
         # count 1 bit each; an abstract bus segment is `bits` pitches wide.
         det = getattr(self, "detailed_result", None)
         metal = {}
-        detailed = det is not None and bool(getattr(det, "net_segments", []))
-        if detailed:
+        if det is not None:
             for ns in det.net_segments:
                 tp = ns.track_position
                 if tp != tp:      # NaN = unplaced
                     continue
                 metal.setdefault(ns.layer, []).append(
-                    (ns.bundle_id, ns.seg_idx, ns.span_lo, ns.span_hi,
-                     tp - ns.width / 2.0, tp + ns.width / 2.0, 1))
+                    (ns.bundle_id, ns.seg_idx,
+                     min(ns.span_lo, ns.span_hi), max(ns.span_lo, ns.span_hi),
+                     tp - ns.width / 2.0, tp + ns.width / 2.0,
+                     0 if getattr(ns, "is_shield", False) else 1))
         else:
             for ts in self.nuts_result.segments:
                 tp = ts.track_position
@@ -1242,7 +1249,8 @@ class ReportsMixin:
                     continue
                 nb, sb = segbits.get(ts.bundle_id, (0, {}))
                 metal.setdefault(ts.layer, []).append(
-                    (ts.bundle_id, ts.seg_idx, ts.span_lo, ts.span_hi,
+                    (ts.bundle_id, ts.seg_idx,
+                     min(ts.span_lo, ts.span_hi), max(ts.span_lo, ts.span_hi),
                      tp - ts.width / 2.0, tp + ts.width / 2.0,
                      sb.get(ts.seg_idx, nb)))
         eps = 1e-6
@@ -1304,9 +1312,8 @@ class ReportsMixin:
                   "components and a NUTS result (run_nuts) to read the "
                   "demand off")
             return
-        det = getattr(self, "detailed_result", None)
         basis = ("detailed bit tracks"
-                 if det is not None and getattr(det, "net_segments", [])
+                 if getattr(self, "detailed_result", None) is not None
                  else "abstract bus tracks")
         print(f"=== Layer demand ({basis}; used/supply = signal tracks over "
               f"the instance the rest of the design takes) ===")

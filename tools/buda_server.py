@@ -202,29 +202,29 @@ from buda_script import unquote                             # noqa: E402
 from tcl_quote import tcl_word                              # noqa: E402
 
 
-def _n_bundles(s, _args=""):
+def _n_bundles(s):
     return len(getattr(s, "bundles", []) or [])
 
 
-def _n_blocks(s, _args=""):
+def _n_blocks(s):
     return len(s.fp.get_all_blocks()) if getattr(s, "fp", None) else 0
 
 
-def _n_nets(s, _args=""):
+def _n_nets(s):
     return s.netlist.size() if getattr(s, "netlist", None) else 0
 
 
-def _n_overlaps(s, _args=""):
+def _n_overlaps(s):
     r = getattr(s, "nuts_result", None)
     return int(r.num_overlaps) if r is not None else -1
 
 
-def _n_unplaced(s, _args=""):
+def _n_unplaced(s):
     r = getattr(s, "detailed_result", None)
     return int(r.num_unplaced) if r is not None else -1
 
 
-def _n_violations(s, _args=""):
+def _n_violations(s):
     # The MOST RECENT check_design's violation count — the audit leg of
     # cleanliness, which overlaps/unplaced do not cover: a design can place
     # every bit overlap-free and still be electrically wrong (SEG_OPEN,
@@ -239,7 +239,7 @@ def _n_violations(s, _args=""):
     return int(last.get("violations", 0))
 
 
-def _messages(_s, _args=""):
+def _messages(_s):
     # `{id severity}` pairs — a Tcl list of two-element lists, so a flow can
     # `foreach {m} [buda::query messages] { ... }` without parsing text.
     return " ".join(f"{{{mid} {sev}}}" for mid, sev, _t in buda_diag.catalogue())
@@ -286,6 +286,11 @@ _QUERIES = {
     "messages": _messages,
     "demand": _demand,
 }
+# The queries that TAKE arguments.  Every other name is a scalar about the
+# whole session, and a word after it is a typo — `buda::query overlaps M6`
+# must raise (as it did before `query` learnt to pass words along), not
+# answer the design-wide count as if it were per layer.
+_QUERIES_WITH_ARGS = {"demand"}
 
 
 @contextlib.contextmanager
@@ -584,9 +589,14 @@ class Server:
             if fn is None:
                 self._reply("ERR", f"unknown query {name!r}; known: "
                                    f"{', '.join(sorted(_QUERIES))}")
+            elif qargs and name not in _QUERIES_WITH_ARGS:
+                self._reply("ERR", f"query {name} takes no arguments "
+                                   f"(got {qargs!r})")
             else:
                 try:
-                    self._reply("OK", str(fn(self.session, qargs)))
+                    self._reply("OK", str(fn(self.session, qargs)
+                                          if name in _QUERIES_WITH_ARGS
+                                          else fn(self.session)))
                 except ValueError as e:
                     # A malformed request (an unknown layer, too many
                     # words) is the CALLER's error and raises in Tcl like

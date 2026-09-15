@@ -419,6 +419,19 @@ def test_the_demand_query_is_a_list_a_driver_can_branch_on(tmp_path):
     assert "E=" in out and "unknown layer" in out, out
 
 
+def test_a_scalar_query_refuses_arguments(tmp_path):
+    """`query` passes extra words along for `demand`; a scalar query given
+    one is a typo in a gate — `buda::query overlaps M6` must raise, not
+    answer the design-wide count as if it were per layer (Codex P2 on
+    #933)."""
+    out = _tcl(tmp_path, """
+        if {[catch {buda::query overlaps M6} e]} { puts "E=$e" }
+        puts "OK=[buda::query overlaps]"
+        buda::stop""")
+    assert "E=" in out and "takes no arguments" in out, out
+    assert "OK=-1" in out, out
+
+
 def test_buda_log_gives_the_terminal_the_cli_gives(tmp_path):
     """`bin/buda` prints one line per command and files the detail; the same
     flow driven from Tcl printed every line of every command, because the

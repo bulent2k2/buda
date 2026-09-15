@@ -199,3 +199,51 @@ def test_layers_without_a_pattern_are_not_counted():
            *_DESIGN[1:], "run_nuts")
     rows = s._layer_demand()
     assert rows and {r["layer_name"] for r in rows} == {"M6"}
+
+
+def test_a_reversed_span_is_still_demand():
+    """NUTS may store a segment's extent as span_lo > span_hi (endpoint
+    identity the corner logic relies on — see
+    test_reversed_span_connectivity.py).  A raw-bound overlap test would
+    call such a segment disjoint from every instance between its ends;
+    the extent is ordered first, so the demand it places is the same
+    either way round (Codex P1 on #933)."""
+    s = _session("run_nuts")
+    before = _row(s._layer_demand("u1", "M6"), "u1", "M6")
+    assert before["bits"] == 8
+    flipped = 0
+    for ts in s.nuts_result.segments:
+        if ts.layer == 6 and ts.bundle_id == 2:      # the top bus `x`
+            ts.span_lo, ts.span_hi = ts.span_hi, ts.span_lo
+            flipped += 1
+    assert flipped == 1
+    after = _row(s._layer_demand("u1", "M6"), "u1", "M6")
+    assert after == before, (before, after)
+
+
+def test_shield_rows_block_tracks_but_are_not_bits():
+    """An NDR shield is a first-class NetSegment (`is_shield`): metal that
+    takes a track, not a member bit.  It counts in `used` and not in
+    `bits`, so `bits` keeps measuring the traffic (Codex P2 on #933)."""
+    s = _session("run_nuts", "run_detailed_nuts")
+    before = _row(s._layer_demand("u1", "M6"), "u1", "M6")
+    assert before["bits"] == 8 and before["used"] == 8
+    marked = 0
+    for ns in s.detailed_result.net_segments:
+        if ns.layer == 6 and ns.bundle_id == 2 and ns.bit_index == 0:
+            ns.is_shield = True
+            marked += 1
+    assert marked == 1
+    after = _row(s._layer_demand("u1", "M6"), "u1", "M6")
+    assert after["bits"] == 7 and after["used"] == 8, after
+
+
+def test_an_empty_detailed_result_is_zero_not_a_fallback():
+    """A detailed result whose every bit went unplaced is an authoritative
+    answer — no placed metal — and must not resurrect the abstract
+    placement it superseded (Codex P2 on #933)."""
+    s = _session("run_nuts", "run_detailed_nuts")
+    s.detailed_result.net_segments = []
+    rows = s._layer_demand()
+    assert rows and all(r["bits"] == 0 and r["used"] == 0 for r in rows)
+    assert "detailed bit tracks" in _cmd(s, "report_layer_demand u1 M6")
