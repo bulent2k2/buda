@@ -1046,3 +1046,19 @@ def test_compact_never_yields_utilization_to_band_and_fills_the_hole_it_can(tmp_
     assert c32["holes"] == 0 and c32["band"] == 1, c32
     c8, _ = _top_geom(tmp_path, "NQ", 8, "LAYOUT", "compact")
     assert c8["holes"] == 1 and c8["band"] == 0, c8
+
+
+def test_compact_ranks_on_the_die_not_on_the_rounded_ratio(tmp_path):
+    """Codex P2 on #932: the chooser ranked on the utilization formatted to
+    three decimals, so two candidates whose dies differ by 163,584 units of
+    area both read 0.892 and the tie-breakers picked the LARGER die -- at
+    `16 -NC 2 -NBANK 8 -NBANK2 1 -NIO 32` a 3-column 17488 x 17584
+    (307,508,992) over the 4-column 23312 x 13184 (307,345,408).  Every
+    candidate holds the same blocks, so the highest utilization is exactly
+    the smallest die, and the rank is that integer area now; the ratio is
+    formatted only for the report."""
+    knobs = ("NQ", 16, "NC", 2, "NBANK", 8, "NBANK2", 1, "NIO", 32, "LAYOUT", "compact")
+    die, _ = _top_geom(tmp_path, *knobs)
+    assert (die["nc"], die["w"], die["h"]) == (4, 23312, 13184), die
+    assert die["w"] * die["h"] == 307_345_408 < 307_508_992
+    assert die["util"] == 0.892   # the rounded report, unchanged either way

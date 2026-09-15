@@ -379,9 +379,11 @@ proc soc_vehicle::configure {{overrides {}}} {
 #            io pair either FILLS the grid's empty slots (when it fits the
 #            hole the short last row leaves, at the row's right end) or sits
 #            in a band above, CENTRED; the candidate with the highest
-#            utilization wins, the aspect ratio held to [1/2, 2] so a 1x32
-#            strip cannot win on area alone, ties to the aspect nearest 1
-#            and then the fewer columns.  Chosen, not asserted: whether the
+#            utilization -- the SMALLEST DIE, since every candidate holds
+#            the same blocks, ranked on that integer area rather than on
+#            the rounded ratio -- wins, the aspect ratio held to [1/2, 2]
+#            so a 1x32 strip cannot win on area alone, ties to the aspect
+#            nearest 1 and then the fewer columns.  Chosen, not asserted: whether the
 #            hole or the band is the better home for the pair depends on how
 #            big the pair is against a quadrant, which the widths decide.
 proc soc_vehicle::_top_geom {} {
@@ -440,10 +442,16 @@ proc soc_vehicle::_top_geom {} {
             set diew [expr {$gw + 2*$M}]
             set dieh [expr {$gh + 2*$M}]
         }
-        set util [_util $diew $dieh]
+        # Ranked on the DIE AREA, an integer: every candidate holds the same
+        # blocks, so the highest utilization is exactly the smallest die,
+        # and the ratio is only formatted for the report -- ranking on the
+        # three-decimal string tied candidates whose dies differ (Codex P2
+        # on #932: at `16 -NC 2 -NBANK 8 -NBANK2 1 -NIO 32` a 3-column die
+        # of 307,508,992 beat a 4-column one of 307,345,408 on the
+        # tie-breakers, both reading 0.876).
         set aspect [expr {double($diew)/$dieh}]
         set ok [expr {$aspect >= 0.5 && $aspect <= 2.0}]
-        set key [list $ok $util [expr {-abs(log($aspect))}] [expr {-$nc}]]
+        set key [list $ok [expr {-$diew*$dieh}] [expr {-abs(log($aspect))}] [expr {-$nc}]]
         if {$best eq "" || [_key_better $key [lindex $best 0]]} {
             set best [list $key $nc $nr $holes $band $diew $dieh]
         }
