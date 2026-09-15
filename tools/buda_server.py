@@ -198,7 +198,7 @@ import buda_cli                                             # noqa: E402
 import buda                                                 # noqa: E402
 import buda_diag                                            # noqa: E402
 from buda_cmds import COMMANDS                              # noqa: E402
-from buda_script import unquote                             # noqa: E402
+from buda_script import split_quoted_args, unquote          # noqa: E402
 from tcl_quote import tcl_word                              # noqa: E402
 
 
@@ -258,7 +258,9 @@ def _demand(s, args=""):
     # result to read the demand off — never computed is not zero.  The
     # rows are `BudaSession._layer_demand`'s, the same ones
     # `report_layer_demand` prints, so the two cannot disagree.
-    toks = args.split()
+    # The engine's own tokenizer, so a filter travels like any command
+    # argument: `tile[0]` verbatim, a spaced name quoted.
+    toks = [unquote(t) for t in split_quoted_args("demand " + args)]
     if len(toks) > 2:
         raise ValueError("usage: demand [<inst-path>|cell:<cell>] [<layer>]")
     rows = s._layer_demand(toks[0] if toks else "",

@@ -1153,8 +1153,11 @@ class ReportsMixin:
         pattern uniformly over the whole instance: a track the top takes
         anywhere over the instance is a track the cell's uniform thinning
         must leave.  `bits` is the plain sum of the crossing segments' member
-        bits — an upper bound on `used`, and the size of the foreign traffic
-        rather than of its footprint.
+        bits — the size of the foreign traffic, NOT of its footprint: the
+        two coincide for default-width unguarded routing (used <= bits
+        there, since every bit takes one track and tracks can be shared
+        along the instance), while an NDR-governed run's footprint EXCEEDS
+        its traffic (guards and shields take tracks and carry no bit).
 
         Reads the DETAILED result when one exists (each bit's own track —
         exact; an NDR shield row is metal that blocks a track but not a

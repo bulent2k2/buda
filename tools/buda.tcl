@@ -198,9 +198,13 @@ proc ::buda::_restore_stdout {} {
 # `unplaced`, `violations`, `messages`, and `demand ?inst? ?layer?` (a list
 # of {inst cell layer bits used supply pct} rows).  This is why a flow is
 # worth driving from Tcl at all: a command that RETURNS a value can be
-# branched on.  Extra words travel to the query as its arguments.
+# branched on.  Extra words travel to the query as its arguments, encoded
+# the way every command's arguments are (`_join_args`): interpolating the
+# `$args` LIST would brace an instance name like `tile[0]` and the server
+# would look for the braces (Codex P2 on #933).
 proc ::buda::query {name args} {
-    return [string trim [buda::_request "__query $name $args"]]
+    return [string trim [buda::_request \
+        [string trim "__query $name [buda::_join_args $args]"]]]
 }
 
 # The output of the last command, echoed or not.

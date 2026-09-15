@@ -419,6 +419,40 @@ def test_the_demand_query_is_a_list_a_driver_can_branch_on(tmp_path):
     assert "E=" in out and "unknown layer" in out, out
 
 
+def test_a_demand_filter_survives_tcl_metacharacters(tmp_path):
+    """An instance named like a Verilog array element — `t[0]` — reaches the
+    server verbatim: interpolating the `$args` LIST braced it and the server
+    looked for the braces, so the filter silently matched nothing (Codex P2
+    on #933).  The words travel through `_join_args` like every command's
+    arguments, and the server reads them with the engine's own tokenizer."""
+    tracks = tcl_path(_ROOT / "flow" / "tracks" / "tracks.buda")
+    out = _tcl(tmp_path, f"""
+        buda::source {tracks}
+        buda::open_bdb :memory:
+        buda::add_cell top_cell 600 200
+        buda::add_cell leaf 80 80
+        buda::add_inst_to_cell top_cell a leaf 20 60
+        buda::add_inst_to_cell top_cell b leaf 300 60
+        buda::add_inst {{t[0]}} top_cell - 50 50
+        buda::add_inst {{t[1]}} top_cell - 900 50
+        buda::derive_busterms 1
+        buda::add_blocks_from_bdb 0
+        buda::add_blocks_from_bdb 1 skip
+        buda::bdb_net_mode on
+        buda::add_bus x\\[8\\] {{t[0]/b.out}} {{t[1]/a.in}}
+        buda::run_hier_bundler depth 1
+        buda::generate_hier_topologies
+        buda::run_planner hier 3
+        buda::run_nuts
+        set rows [buda::query demand {{t[0]}} M6]
+        puts "N=[llength $rows]"
+        lassign [lindex $rows 0] inst cell layer bits
+        puts "FIRST=$inst/$layer/$bits"
+        buda::stop""")
+    assert "N=3" in out, out
+    assert "FIRST=t[0]/M6/8" in out, out
+
+
 def test_a_scalar_query_refuses_arguments(tmp_path):
     """`query` passes extra words along for `demand`; a scalar query given
     one is a typo in a gate — `buda::query overlaps M6` must raise, not

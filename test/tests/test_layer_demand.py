@@ -25,7 +25,9 @@ worth pinning are the ones a share derivation would silently get wrong:
     metal IS demand on a sibling it crosses and on nothing it does not;
   * a top-level bus is demand on every instance it reaches over and none it
     does not (the tap that ends ON a face reaches over nothing);
-  * `used` counts tracks, `bits` counts traffic, and used <= bits always;
+  * `used` counts tracks, `bits` counts traffic — used <= bits for
+    default-width unguarded routing, and NOT under an NDR (guards and
+    shields take tracks and carry no bit);
   * a demand that was never computed is None (the Tcl query's -1), not 0.
 
 Two vehicles: a hand-built two-instance design where every number can be
@@ -132,8 +134,10 @@ def test_own_routing_is_not_demand_and_a_top_bus_is():
 
 def test_used_counts_tracks_bits_counts_traffic():
     """Two foreign buses over one instance on the SAME tracks are 16 bits of
-    traffic but only ~8 tracks of footprint: used <= bits, and the union is
-    what a uniform share must leave free."""
+    traffic but only ~8 tracks of footprint: used <= bits for this
+    default-width unguarded routing (an NDR run breaks that — see the
+    guard-track test), and the union is what a uniform share must leave
+    free."""
     s = buda_cli.BudaSession()
     s.no_viz = True
     _quiet(s, *_DESIGN[:-3],

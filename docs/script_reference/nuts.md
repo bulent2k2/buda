@@ -953,7 +953,7 @@ number to hand *down* comes from.  A Tcl driver reads the same rows as
 
 | Column | Meaning |
 |---|---|
-| `bits` | Member bits of every foreign segment reaching over the instance — the size of the traffic, and an upper bound on `used` |
+| `bits` | Member bits of every foreign segment reaching over the instance — the size of the **traffic**, not of its footprint: for default-width unguarded routing `used <= bits` (a bit takes one track, and tracks can be shared along the instance), while an NDR-governed run's footprint exceeds its traffic (guards and shields take tracks and carry no bit) |
 | `used` | Signal tracks of the layer's pattern, inside the instance's perpendicular extent, whose centre lies under that foreign metal (the metal unioned along the perpendicular axis) |
 | `supply` | Every signal track in the same window — the count `set_cell_layer_share`'s collective budget is sized from, so demand and lease agree by construction |
 | `pct` | `used / supply`; the complement is the share the instance could still be handed |
