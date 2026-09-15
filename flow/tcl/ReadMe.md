@@ -182,6 +182,7 @@ this file, which made the page about one vehicle rather than about the set.
 btcl flow/tcl/soc.tcl                       # NQ=2 quadrants
 btcl flow/tcl/soc.tcl 4                     # THE DIAL
 btcl flow/tcl/soc.tcl 4 -bottomup           # solve one cluster, copy it
+btcl flow/tcl/soc.tcl 32 -LAYOUT compact    # the utilization-chosen floorplan
 ```
 
 Eleven leaf cell types repeating a different number of times each, and a leaf
