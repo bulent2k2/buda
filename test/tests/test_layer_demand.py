@@ -284,13 +284,15 @@ def test_the_query_sends_pct_at_full_precision():
     s = _session("run_nuts")
     row = _row(s._layer_demand("u1", "M6"), "u1", "M6")
     wire = buda_server._demand(s, "u1 M6")
-    first = wire.split("}")[0].lstrip("{").split()
-    assert first[:3] == ["u1", "top_cell", "M6"], first
-    assert float(first[6]) == 100.0 * row["used"] / row["supply"], first
+    # Every token is brace-quoted (`tcl_word`), so a row reads
+    # `{{u1} {top_cell} {M6} ...}`: strip the braces to get the words.
+    words = wire.replace("{", " ").replace("}", " ").split()
+    assert words[:3] == ["u1", "top_cell", "M6"], words
+    assert float(words[6]) == 100.0 * row["used"] / row["supply"], words
     # the shape the finding named, through the same encoder
     s._layer_demand = lambda *_a, **_k: [dict(
         inst="i", cell="c", layer=6, layer_name="M6", depth=0, bundles=1,
         bits=1, used=1, supply=3000, pct=100.0 / 3000)]
     wire = buda_server._demand(s, "")
-    pct = wire.split()[-1].rstrip("}")
+    pct = wire.replace("{", " ").replace("}", " ").split()[-1]
     assert pct != "0.0" and abs(float(pct) - 100.0 / 3000) < 1e-12, wire
