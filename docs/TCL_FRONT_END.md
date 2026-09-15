@@ -106,6 +106,11 @@ buda::query violations   ;# the LAST check_design's violation count,
                          ;#   -1 if no audit has run (or it could not) —
                          ;#   a gate must not read "never audited" as clean
 buda::query messages     ;# {id severity} pairs — the message catalogue
+buda::query demand ?inst? ?layer?
+                         ;# {inst cell layer bits used supply pct} rows —
+                         ;#   per instance and layer, the signal tracks over
+                         ;#   the instance the REST of the design has placed,
+                         ;#   against the tracks it has; -1 before run_nuts
 ```
 
 A count that has not been computed answers **-1**, not 0: "no NUTS result"
@@ -114,6 +119,33 @@ number has to be able to tell them apart.
 
 Deliberately few names.  This is a bridge, not a second API, and each one is
 a promise to keep.
+
+`demand` is the one that returns a LIST, because what it answers is not a
+number about the design but a number about each *block* in it — the top
+plan's demand on the block, which is what a driver hands DOWN as a
+`set_cell_layer_share` (item 3 of the
+[convergence ladder](internal/convergence_ladder.md)):
+
+```tcl
+foreach r [buda::query demand cell:sram_cell] {
+    lassign $r inst cell layer bits used supply pct
+    if {$pct > $worst($layer)} { set worst($layer) $pct }
+}
+# ... the cell may be handed 100 - $worst($layer) on each layer
+```
+
+`used` counts tracks, `bits` counts traffic (two foreign buses on the same
+tracks are 16 bits and ~8 tracks), `pct` is `100 * used / supply` at full
+precision (the printed table rounds to one decimal; the query does not, since
+`100 - $pct` on a rounded 0.0 would hand a cell the one track the top holds
+of 3000 — `used` and `supply` are the exact integers if you want the ratio
+yourself), and the rows are exactly what
+[`report_layer_demand`](script_reference/nuts.md#layer-demand-reporting)
+prints — one instance and its subtree with a path, every instance of a cell
+with `cell:<name>`, one layer with a second word (`buda::query demand {} M6`
+keeps every instance: an empty word is a positional placeholder).  An unknown layer raises
+in Tcl like any other caller error; a filter matching nothing is an empty
+list; a demand that was never computed is -1, not an empty list.
 
 ## The vehicle
 

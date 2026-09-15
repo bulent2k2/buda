@@ -163,6 +163,24 @@ def cmd_report_wirelength(session, cmd, args, cmd_line):
     session._report_wirelength()
 
 
+def cmd_report_layer_demand(session, cmd, args, cmd_line):
+    # Usage: report_layer_demand [<inst-path>|cell:<cell>] [<layer>]
+    #        (alias: report_demand)
+    # Per instance and layer, the signal tracks over the instance's
+    # footprint that the REST of the design has placed (the top plan's
+    # demand on a block, read off the routed result) against the tracks
+    # the instance has — the number a `set_cell_layer_share` complement
+    # starts from.  Table to the flow log, per-layer worst on the terminal.
+    # After run_nuts (detailed bit tracks once run_detailed_nuts has run).
+    # The same rows reach a Tcl driver as `buda::query demand`.
+    if len(args) > 2:
+        print("Error: usage: report_layer_demand [<inst-path>|cell:<cell>] "
+              "[<layer>]")
+        return
+    session._report_layer_demand(args[0] if args else "",
+                                 args[1] if len(args) > 1 else "")
+
+
 def cmd_check_design(session, cmd, args, cmd_line):
     # Usage: check_design [topo|nuts|dnuts] [all]   (alias: check_connectivity)
     # Design audit at the given stage: connectivity opens, layer-direction
@@ -489,6 +507,8 @@ def cmd_check_template_tracks(session, cmd, args, cmd_line):
 COMMANDS = {
     "report_wirelength": cmd_report_wirelength,
     "report_wl": cmd_report_wirelength,
+    "report_layer_demand": cmd_report_layer_demand,
+    "report_demand": cmd_report_layer_demand,
     "check_design": cmd_check_design,
     "check_connectivity": cmd_check_design,   # legacy alias (pre-rename)
     "check_template_tracks": cmd_check_template_tracks,

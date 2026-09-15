@@ -45,10 +45,14 @@ always the whole component bbox; `PORT` vs `SPATIAL_CLUSTER` is a label, and
 bus lands wherever BUDA likes on the face.  The conventional arm — "the block
 team assigned the pins" — cannot be expressed yet.
 
-**The top plan's per-instance, per-layer demand is not queryable.**
-`buda::query` answers overlaps, unplaced and counts.  `reserve_top_layers` and
-`set_cell_layer_share` take a number a human guessed.  Handing a budget *down*
-is what "BUDA in the loop" means, and that primitive does not exist.
+**The top plan's per-instance, per-layer demand was not queryable** (at the
+time of the draft).  `buda::query` answered overlaps, unplaced and counts;
+`reserve_top_layers` and `set_cell_layer_share` take a number a human guessed.
+Handing a budget *down* is what "BUDA in the loop" means, and that primitive
+did not exist.  **Built (item 3 below, 2026-09-15):** `report_layer_demand`
+and `buda::query demand` read, off the routed result, the signal tracks the
+rest of the design places over each instance on each layer against the
+tracks it has — the number item 4 hands down as the complement share.
 
 Both are small to build, and both *are* the thesis, so building them is the
 experiment rather than scope creep.
@@ -183,7 +187,7 @@ channel — the `pc_0` seat.  "One round" is therefore a measurement, not a
 given; if BUDA needs a second round it is a diagnosed one (E4), and the
 write-up says so.
 
-**Needs.**  The demand query; `derive_cell_layer_shares`.
+**Needs.**  ~~The demand query~~ (built: `buda::query demand`, item 3); `derive_cell_layer_shares`.
 
 ### E3 — Pin assignment at scale *(deferred to a partner evaluation)*
 
@@ -270,7 +274,16 @@ every "one round" measured rather than assumed.
    written (Q3: it judges every table; one OpenROAD `read_guides` witness on
    one row only if the audience needs it).
 3. **Per-instance per-layer demand query** — read off the top-down plan;
-   exposed through `buda::query` so a Tcl driver can branch on it.
+   exposed through `buda::query` so a Tcl driver can branch on it.  **Done**
+   (2026-09-15): [`report_layer_demand`](../script_reference/nuts.md#layer-demand-reporting)
+   / `buda::query demand ?inst? ?layer?` — `{inst cell layer bits used supply
+   pct}` per placed instance and patterned layer, `used` the signal tracks
+   under the UNION of the foreign metal (a share thins uniformly, so a track
+   the top takes anywhere over the instance is one the cell must leave),
+   `supply` the count the collective lease is sized from, ownership by frame
+   instance (own = the instance or its subtree).  Reads DNUTS bit tracks when
+   they exist, the abstract placement before (`bits` or `bits+1` per crossing
+   bus, by phase — conservative).  -1 before `run_nuts`.
 4. **`derive_cell_layer_shares`** — the complement of that demand, per cell,
    as `set_cell_layer_share` lines.  This is rung 4.
 5. **`flow/tcl/converge.tcl`** — the loop driver: runs the conventional policy

@@ -22,6 +22,8 @@ Methods extracted verbatim from buda_cli.BudaSession (the CLI mixin
 split); bodies unchanged — `self` is the composed BudaSession, so
 cross-mixin helper calls resolve through the class as before.
 """
+import math
+
 import buda
 
 import buda_diag
@@ -1128,3 +1130,240 @@ class ReportsMixin:
         total = sum(max(1, len(g["bits"])) for g in groups.values())
         print(f"  Total: {total} violation(s) in {n_groups} group(s) across "
               f"{len(bundles)} bundle(s). Use --verbose-conn for per-bit detail.")
+
+    # ── per-instance, per-layer demand (convergence ladder item 3) ─────────
+
+    def _layer_demand(self, inst_filter="", layer_name=""):
+        """What the REST of the design has placed over each instance's
+        footprint, per layer, in the currency `set_cell_layer_share` speaks
+        (signal tracks of the layer's pattern inside the instance bbox).
+
+        This is the top plan's DEMAND on a block, read off the routed result
+        rather than guessed: for instance I and layer L, every placed segment
+        of a bundle NOT owned by I (owned = the bundle's frame instance is I
+        or lies in I's subtree — a cell-local bundle expanded onto I, or one
+        living deeper inside it) whose along-span overlaps I's extent and
+        whose metal lies inside I's perpendicular extent.  The metal is
+        unioned along the perpendicular axis and the layer's SIGNAL tracks
+        whose centre falls inside that union are counted: `used`.  `supply`
+        is every signal track in the same window (the share budget's own
+        count — `_apply_layer_policies` sizes the collective lease from it,
+        so the two agree by construction), and `pct` is used/supply.  The
+        UNION is the honest figure for a share, which thins the cell's
+        pattern uniformly over the whole instance: a track the top takes
+        anywhere over the instance is a track the cell's uniform thinning
+        must leave.  `bits` is the plain sum of the crossing segments' member
+        bits — the size of the foreign traffic, NOT of its footprint: the
+        two coincide for default-width unguarded routing (used <= bits
+        there, since every bit takes one track and tracks can be shared
+        along the instance), while an NDR-governed run's footprint EXCEEDS
+        its traffic (guards and shields take tracks and carry no bit).
+
+        Reads the DETAILED result when one exists (each bit's own track —
+        exact; an NDR shield row is metal that blocks a track but not a
+        member bit, so it counts in `used` and not in `bits`, and a result
+        with every bit unplaced is an authoritative ZERO, never a fallback)
+        and the abstract NUTS placement otherwise (a bus segment's `width`
+        centred on its track, which is `bits` pitches of metal, so the
+        count is the same up to phase).  Either placement may store a
+        segment's span REVERSED (`span_lo > span_hi` keeps the endpoint
+        identity corner logic relies on), so the extent is ordered before
+        it is tested against the instance.
+
+        Returns None when there is nothing to read — no open BDB, no placed
+        component, no NUTS result — which the Tcl query reports as -1: a
+        demand that was never computed is not a demand of zero.  `inst_filter`
+        restricts the rows to one instance and its subtree (exact path, or
+        `cell:<name>` for every placed instance of a cell); `layer_name` to
+        one layer (unknown name: ValueError).  Rows are dicts ordered by
+        depth, path, layer.  Layers with no `def_track_pattern` have no
+        supply to count against and are skipped."""
+        if self.bdb is None or self.nuts_result is None \
+                or self.routing_grid is None:
+            return None
+        comps = [c for c in self.bdb.all_components() if is_placed(c)]
+        if not comps:
+            return None
+        if inst_filter:
+            if inst_filter.startswith("cell:"):
+                cell = inst_filter[len("cell:"):]
+                comps = [c for c in comps if c.cell == cell]
+            else:
+                pre = inst_filter.rstrip("/")
+                comps = [c for c in comps
+                         if c.name == pre or c.name.startswith(pre + "/")]
+        lids = sorted(
+            list(self.layers.get_layer_ids_by_dir(buda.LayerDir.HORIZONTAL)) +
+            list(self.layers.get_layer_ids_by_dir(buda.LayerDir.VERTICAL)))
+        names = {lid: n for n, lid in
+                 getattr(self, "_layer_name_map", {}).items()}
+
+        def lname(lid):
+            return names.get(lid, f"L{lid}")
+
+        if layer_name:
+            want = [l for l in lids
+                    if lname(l) == layer_name or str(l) == layer_name]
+            if not want:
+                raise ValueError(f"unknown layer {layer_name!r}; known: "
+                                 + ", ".join(lname(l) for l in lids))
+            lids = want
+        lids = [l for l in lids if self.routing_grid.has_layer(l)
+                and self.routing_grid.get_layer_grid(l)
+                        .global_pattern().slots]
+        # Ownership: the frame instance each bundle routes in.  Expanded
+        # cell-local wrappers name their one instance; a same-level bundle
+        # names its LCA container; a top-level one names nothing (owned by
+        # no instance, so it is demand on every instance it crosses).
+        frame, segbits = {}, {}
+        for w in self.bundles:
+            b = w.input.original_bundle
+            frame[b.id] = b.instances[0] if b.instances else ""
+            nb = len(b.net_names)
+            sb = {}
+            sel = w.plan.selected_topology_index
+            if 0 <= sel < len(w.input.candidates):
+                t = w.input.candidates[sel]
+                for si in range(len(t.segments)):
+                    n = nb
+                    if t.seg_bits and si < len(t.seg_bits) and t.seg_bits[si]:
+                        n = len(t.seg_bits[si])
+                    sb[si] = n
+            segbits[b.id] = (nb, sb)
+        # The metal, per layer: (bundle, seg, along_lo, along_hi, perp_lo,
+        # perp_hi, bits).  Detailed bits carry their own track and width and
+        # count 1 bit each; an abstract bus segment is `bits` pitches wide.
+        det = getattr(self, "detailed_result", None)
+        metal = {}
+        if det is not None:
+            governed = {}
+            for ns in det.net_segments:
+                tp = ns.track_position
+                if tp != tp:      # NaN = unplaced
+                    continue
+                metal.setdefault(ns.layer, []).append(
+                    (ns.bundle_id, ns.seg_idx,
+                     min(ns.span_lo, ns.span_hi), max(ns.span_lo, ns.span_hi),
+                     tp - ns.width / 2.0, tp + ns.width / 2.0,
+                     0 if getattr(ns, "is_shield", False) else 1))
+                governed.setdefault((ns.bundle_id, ns.seg_idx), []).append(ns)
+            # An NDR-governed run RESERVES more than its emitted rows: the
+            # guard slots between and beyond its wires are kept empty and
+            # emit no NetSegment, yet a cell cannot use them without
+            # violating the rule's clearance — so the run's reserved
+            # window joins the union too (0 bits: it is footprint, not
+            # traffic), read by the SAME function the NDR_SPACING audit
+            # reads it with.
+            from buda_cmds import ndr_cmds
+            wrappers = {w.input.original_bundle.id: w for w in self.bundles}
+            for (bid, si), rows in governed.items():
+                w = wrappers.get(bid)
+                if w is None or not w.input.ndr.active():
+                    continue
+                layer = rows[0].layer
+                spec = ndr_cmds.ndr_spec_for_layer(self, w.input.ndr, layer, w)
+                if not spec.active():
+                    continue
+                s_lo = min(min(r.span_lo, r.span_hi) for r in rows)
+                s_hi = max(max(r.span_lo, r.span_hi) for r in rows)
+                run_lo, run_hi = ndr_cmds.ndr_reserved_run(
+                    spec, self.routing_grid, layer, rows, s_lo, s_hi)
+                metal.setdefault(layer, []).append(
+                    (bid, si, s_lo, s_hi, run_lo, run_hi, 0))
+        else:
+            for ts in self.nuts_result.segments:
+                tp = ts.track_position
+                if not ts.placed or tp != tp:
+                    continue
+                nb, sb = segbits.get(ts.bundle_id, (0, {}))
+                metal.setdefault(ts.layer, []).append(
+                    (ts.bundle_id, ts.seg_idx,
+                     min(ts.span_lo, ts.span_hi), max(ts.span_lo, ts.span_hi),
+                     tp - ts.width / 2.0, tp + ts.width / 2.0,
+                     sb.get(ts.seg_idx, nb)))
+        eps = 1e-6
+        rows = []
+        for c in sorted(comps, key=lambda c: (c.depth, c.name)):
+            own_pre = c.name + "/"
+            for lid in lids:
+                horiz = (self.layers.get_layer_dir(lid)
+                         == buda.LayerDir.HORIZONTAL)
+                if horiz:
+                    a_lo, a_hi, p_lo, p_hi = c.x1, c.x2, c.y1, c.y2
+                else:
+                    a_lo, a_hi, p_lo, p_hi = c.y1, c.y2, c.x1, c.x2
+                ivals, bits, bundles = [], 0, set()
+                for bid, _si, s_lo, s_hi, m_lo, m_hi, nb in metal.get(lid, []):
+                    f = frame.get(bid)
+                    if f is not None and (f == c.name or f.startswith(own_pre)):
+                        continue          # the instance's own routing
+                    if s_hi <= a_lo + eps or s_lo >= a_hi - eps:
+                        continue          # does not reach over the instance
+                    if m_hi <= p_lo + eps or m_lo >= p_hi - eps:
+                        continue          # beside it, not over it
+                    ivals.append((max(m_lo, p_lo), min(m_hi, p_hi)))
+                    bits += nb
+                    bundles.add(bid)
+                ivals.sort()
+                union = []
+                for lo, hi in ivals:
+                    if union and lo <= union[-1][1] + eps:
+                        union[-1][1] = max(union[-1][1], hi)
+                    else:
+                        union.append([lo, hi])
+                g = self.routing_grid.get_layer_grid(lid)
+                tracks = [pos for pos, _slot in
+                          g.signal_tracks_in(0.5 * (a_lo + a_hi), p_lo, p_hi)]
+                used = sum(1 for pos in tracks
+                           if any(lo - eps < pos < hi + eps for lo, hi in union))
+                supply = len(tracks)
+                rows.append({
+                    "inst": c.name, "cell": c.cell, "depth": c.depth,
+                    "layer": lid, "layer_name": lname(lid),
+                    "bits": bits, "used": used, "supply": supply,
+                    "pct": (100.0 * used / supply) if supply else 0.0,
+                    "bundles": len(bundles),
+                })
+        return rows
+
+    def _report_layer_demand(self, inst_filter="", layer_name=""):
+        """`report_layer_demand`: the `_layer_demand` rows as a table (flow
+        log) with the per-layer worst instance on the terminal — the number
+        a share derivation would start from."""
+        try:
+            rows = self._layer_demand(inst_filter, layer_name)
+        except ValueError as e:
+            print(f"Error: report_layer_demand: {e}")
+            return
+        if rows is None:
+            print("Error: report_layer_demand needs an open BDB with placed "
+                  "components and a NUTS result (run_nuts) to read the "
+                  "demand off")
+            return
+        basis = ("detailed bit tracks"
+                 if getattr(self, "detailed_result", None) is not None
+                 else "abstract bus tracks")
+        print(f"=== Layer demand ({basis}; used/supply = signal tracks over "
+              f"the instance the rest of the design takes) ===")
+        if not rows:
+            print(f"  no placed instance matches {inst_filter!r}")
+            return
+        w_inst = max(len(r["inst"]) for r in rows)
+        w_cell = max(len(r["cell"]) for r in rows)
+        print(f"  {'instance':<{w_inst}}  {'cell':<{w_cell}}  layer  "
+              f"{'bits':>6} {'used':>6} {'supply':>6}  {'pct':>6}  bundles")
+        for r in rows:
+            print(f"  {r['inst']:<{w_inst}}  {r['cell']:<{w_cell}}  "
+                  f"{r['layer_name']:<5}  {r['bits']:>6} {r['used']:>6} "
+                  f"{r['supply']:>6}  {r['pct']:>5.1f}%  {r['bundles']}")
+        worst = {}
+        for r in rows:
+            k = r["layer_name"]
+            if k not in worst or r["pct"] > worst[k]["pct"]:
+                worst[k] = r
+        n_inst = len({r["inst"] for r in rows})
+        print(f"  {n_inst} instance(s) x {len(worst)} layer(s); worst per "
+              f"layer: " + ", ".join(
+                  f"{k} {v['pct']:.1f}% ({v['inst']})"
+                  for k, v in sorted(worst.items(),
+                                     key=lambda kv: kv[1]["layer"])))
