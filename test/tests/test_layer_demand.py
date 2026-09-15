@@ -247,3 +247,23 @@ def test_an_empty_detailed_result_is_zero_not_a_fallback():
     rows = s._layer_demand()
     assert rows and all(r["bits"] == 0 and r["used"] == 0 for r in rows)
     assert "detailed bit tracks" in _cmd(s, "report_layer_demand u1 M6")
+
+
+def test_ndr_guard_tracks_are_reserved_demand():
+    """An NDR rule with spacing keeps guard slots EMPTY between and beyond
+    its wires; detailed NUTS reserves them and emits no row for them, yet
+    a cell cannot use them without violating the clearance.  The detailed
+    reading counts the run the NDR_SPACING audit reads (one shared
+    function), so a governed 8-bit bus with one guard slot per gap is 8
+    bits of traffic and 17 tracks of footprint — the same 17 the abstract
+    width prices (Codex P2 on #933, second round)."""
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    _quiet(s, _DESIGN[0], "def_ndr g spacing x2", "set_ndr x g",
+           *_DESIGN[1:], "run_nuts")
+    abstract = _row(s._layer_demand("u1", "M6"), "u1", "M6")
+    _quiet(s, "run_detailed_nuts")
+    assert s.detailed_result.num_unplaced == 0
+    detailed = _row(s._layer_demand("u1", "M6"), "u1", "M6")
+    assert detailed["bits"] == 8, detailed
+    assert detailed["used"] == 17 == abstract["used"], (abstract, detailed)

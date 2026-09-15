@@ -969,7 +969,11 @@ track the top takes anywhere over the instance is one the cell's uniform
 thinning must leave, so two foreign buses on the same tracks are 16 `bits` of
 traffic and ~8 `used` tracks of footprint.
 
-Reads the **detailed** result when one exists (each bit's own track — exact)
+Reads the **detailed** result when one exists (each bit's own track — exact;
+an [NDR](ndr.md)-governed run counts the tracks it RESERVES — shields and the
+guard slots detailed NUTS keeps empty — in `used` and not in `bits`, through
+the same function the `NDR_SPACING` audit reads the run with; a result with
+every bit unplaced is an authoritative zero, not a fallback)
 and the **abstract** NUTS placement otherwise: a bus segment's `width` centred
 on its track is `bits` pitches of metal, which catches `bits` or `bits + 1`
 track centres depending on phase — never fewer, so the abstract reading errs

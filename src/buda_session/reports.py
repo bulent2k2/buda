@@ -1233,6 +1233,7 @@ class ReportsMixin:
         det = getattr(self, "detailed_result", None)
         metal = {}
         if det is not None:
+            governed = {}
             for ns in det.net_segments:
                 tp = ns.track_position
                 if tp != tp:      # NaN = unplaced
@@ -1242,6 +1243,30 @@ class ReportsMixin:
                      min(ns.span_lo, ns.span_hi), max(ns.span_lo, ns.span_hi),
                      tp - ns.width / 2.0, tp + ns.width / 2.0,
                      0 if getattr(ns, "is_shield", False) else 1))
+                governed.setdefault((ns.bundle_id, ns.seg_idx), []).append(ns)
+            # An NDR-governed run RESERVES more than its emitted rows: the
+            # guard slots between and beyond its wires are kept empty and
+            # emit no NetSegment, yet a cell cannot use them without
+            # violating the rule's clearance — so the run's reserved
+            # window joins the union too (0 bits: it is footprint, not
+            # traffic), read by the SAME function the NDR_SPACING audit
+            # reads it with.
+            from buda_cmds import ndr_cmds
+            wrappers = {w.input.original_bundle.id: w for w in self.bundles}
+            for (bid, si), rows in governed.items():
+                w = wrappers.get(bid)
+                if w is None or not w.input.ndr.active():
+                    continue
+                layer = rows[0].layer
+                spec = ndr_cmds.ndr_spec_for_layer(self, w.input.ndr, layer, w)
+                if not spec.active():
+                    continue
+                s_lo = min(min(r.span_lo, r.span_hi) for r in rows)
+                s_hi = max(max(r.span_lo, r.span_hi) for r in rows)
+                run_lo, run_hi = ndr_cmds.ndr_reserved_run(
+                    spec, self.routing_grid, layer, rows, s_lo, s_hi)
+                metal.setdefault(layer, []).append(
+                    (bid, si, s_lo, s_hi, run_lo, run_hi, 0))
         else:
             for ts in self.nuts_result.segments:
                 tp = ts.track_position
