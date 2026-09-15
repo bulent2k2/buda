@@ -448,9 +448,14 @@ def test_a_demand_filter_survives_tcl_metacharacters(tmp_path):
         puts "N=[llength $rows]"
         lassign [lindex $rows 0] inst cell layer bits
         puts "FIRST=$inst/$layer/$bits"
+        puts "ALL_M6=[llength [buda::query demand {{}} M6]]"
+        puts "ALL=[llength [buda::query demand {{}} {{}}]]"
         buda::stop""")
     assert "N=3" in out, out
     assert "FIRST=t[0]/M6/8" in out, out
+    # An EMPTY word is a positional placeholder — every instance, one layer
+    # — and must not shift the layer into the instance slot (round 4).
+    assert "ALL_M6=6" in out and "ALL=36" in out, out
 
 
 def test_a_scalar_query_refuses_arguments(tmp_path):

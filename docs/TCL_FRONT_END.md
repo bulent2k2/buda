@@ -138,7 +138,8 @@ foreach r [buda::query demand cell:sram_cell] {
 tracks are 16 bits and ~8 tracks), and the rows are exactly what
 [`report_layer_demand`](script_reference/nuts.md#layer-demand-reporting)
 prints — one instance and its subtree with a path, every instance of a cell
-with `cell:<name>`, one layer with a second word.  An unknown layer raises
+with `cell:<name>`, one layer with a second word (`buda::query demand {} M6`
+keeps every instance: an empty word is a positional placeholder).  An unknown layer raises
 in Tcl like any other caller error; a filter matching nothing is an empty
 list; a demand that was never computed is -1, not an empty list.
 

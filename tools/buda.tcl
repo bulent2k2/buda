@@ -201,10 +201,15 @@ proc ::buda::_restore_stdout {} {
 # branched on.  Extra words travel to the query as its arguments, encoded
 # the way every command's arguments are (`_join_args`): interpolating the
 # `$args` LIST would brace an instance name like `tile[0]` and the server
-# would look for the braces (Codex P2 on #933).
+# would look for the braces (Codex P2 on #933).  An EMPTY word is a
+# positional placeholder -- `buda::query demand {} M6` is every instance on
+# one layer -- and is spelled `""`, the engine tokenizer's own spelling for
+# an empty token, since `_join_args` would drop it and shift the layer into
+# the instance slot (Codex P2 on #933, round 4).
 proc ::buda::query {name args} {
+    set words [lmap w $args {expr {$w eq "" ? "\"\"" : $w}}]
     return [string trim [buda::_request \
-        [string trim "__query $name [buda::_join_args $args]"]]]
+        [string trim "__query $name [buda::_join_args $words]"]]]
 }
 
 # The output of the last command, echoed or not.
