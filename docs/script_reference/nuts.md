@@ -931,4 +931,58 @@ Every total carries its **unplaced** count on the same line: WL sums only placed
 wire, so a lower number that comes from dropped segments/bits is flagged rather
 than silently rewarded.
 
+## Layer demand reporting
+
+### `report_layer_demand [<inst-path>|cell:<cell>] [<layer>]` (alias `report_demand`)
+
+```
+report_layer_demand                 # every placed instance, every patterned layer
+report_layer_demand cl_0            # one instance and its subtree
+report_layer_demand cell:sram_cell  # every placed instance of one cell
+report_layer_demand cl_0 M6         # one instance, one layer
+```
+
+Per instance and per layer, what the **rest of the design** has placed over the
+instance's footprint — the top plan's *demand* on a block, read off the routed
+result rather than guessed — in the currency `set_cell_layer_share` speaks:
+signal tracks of the layer's pattern inside the instance bbox.  Item 3 of the
+[convergence ladder](../internal/convergence_ladder.md): `reserve_top_layers`
+and `set_cell_layer_share` take a number a human guessed, and this is where the
+number to hand *down* comes from.  A Tcl driver reads the same rows as
+[`buda::query demand`](../TCL_FRONT_END.md#values-you-can-branch-on).
+
+| Column | Meaning |
+|---|---|
+| `bits` | Member bits of every foreign segment reaching over the instance — the size of the traffic, and an upper bound on `used` |
+| `used` | Signal tracks of the layer's pattern, inside the instance's perpendicular extent, whose centre lies under that foreign metal (the metal unioned along the perpendicular axis) |
+| `supply` | Every signal track in the same window — the count `set_cell_layer_share`'s collective budget is sized from, so demand and lease agree by construction |
+| `pct` | `used / supply`; the complement is the share the instance could still be handed |
+| `bundles` | Distinct foreign bundles contributing |
+
+**Foreign** means not the instance's own: a bundle is owned by an instance when
+its frame instance *is* that instance or lies in its subtree — a cell-local
+bundle expanded onto it, or one living deeper inside it — and everything else
+(a top-level bus, a sibling's routing flown over the cell, an ancestor's
+same-level bus) is demand on it.  The **union** is the honest figure for a
+share, which thins the cell's pattern uniformly over the whole instance: a
+track the top takes anywhere over the instance is one the cell's uniform
+thinning must leave, so two foreign buses on the same tracks are 16 `bits` of
+traffic and ~8 `used` tracks of footprint.
+
+Reads the **detailed** result when one exists (each bit's own track — exact)
+and the **abstract** NUTS placement otherwise: a bus segment's `width` centred
+on its track is `bits` pitches of metal, which catches `bits` or `bits + 1`
+track centres depending on phase — never fewer, so the abstract reading errs
+on the conservative side a budget wants.  The table goes to the flow log; the
+terminal closes with the per-layer worst instance, which is where a share
+derivation starts (a template is solved once for every instance, so the cell
+gets the complement of its *worst* occurrence).
+
+Needs an open BDB with placed components and a NUTS result; before `run_nuts`
+it says so rather than printing zeros (the Tcl query answers -1 there: a
+demand that was never computed is not a demand of zero).  A layer without a
+`def_track_pattern` has no supply to count against and gets no row; a leaf
+cell's LOW layers are its own keepout, so their supply there is 0.  An unknown
+layer name is an error; an instance filter matching nothing prints that.
+
 ---

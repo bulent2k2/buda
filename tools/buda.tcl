@@ -194,11 +194,13 @@ proc ::buda::_restore_stdout {} {
     set saved_stdout_encoding ""
 }
 
-# One scalar about the session -- `bundles`, `blocks`, `nets`, `overlaps`,
-# `unplaced`, `messages`.  This is why a flow is worth driving from Tcl at
-# all: a command that RETURNS a value can be branched on.
-proc ::buda::query {name} {
-    return [string trim [buda::_request "__query $name"]]
+# One value about the session -- `bundles`, `blocks`, `nets`, `overlaps`,
+# `unplaced`, `violations`, `messages`, and `demand ?inst? ?layer?` (a list
+# of {inst cell layer bits used supply pct} rows).  This is why a flow is
+# worth driving from Tcl at all: a command that RETURNS a value can be
+# branched on.  Extra words travel to the query as its arguments.
+proc ::buda::query {name args} {
+    return [string trim [buda::_request "__query $name $args"]]
 }
 
 # The output of the last command, echoed or not.

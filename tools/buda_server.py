@@ -83,7 +83,9 @@ written, so a cancel cannot tear a frame in half.
 Eight requests are the server's own rather than script commands:
 
     __commands           the command registry, space-separated
-    __query <name>       one scalar about the session (see `_QUERIES`)
+    __query <name> [..]  one value about the session (see `_QUERIES`; a
+                         scalar, or for `demand` a Tcl list, with the
+                         rest of the line as the query's arguments)
     __stream on|off      stream command output as OUT frames (default off)
     __viz [on|off]       may `visualize` open a window (default on); no
                          argument reports the current setting
@@ -197,31 +199,32 @@ import buda                                                 # noqa: E402
 import buda_diag                                            # noqa: E402
 from buda_cmds import COMMANDS                              # noqa: E402
 from buda_script import unquote                             # noqa: E402
+from tcl_quote import tcl_word                              # noqa: E402
 
 
-def _n_bundles(s):
+def _n_bundles(s, _args=""):
     return len(getattr(s, "bundles", []) or [])
 
 
-def _n_blocks(s):
+def _n_blocks(s, _args=""):
     return len(s.fp.get_all_blocks()) if getattr(s, "fp", None) else 0
 
 
-def _n_nets(s):
+def _n_nets(s, _args=""):
     return s.netlist.size() if getattr(s, "netlist", None) else 0
 
 
-def _n_overlaps(s):
+def _n_overlaps(s, _args=""):
     r = getattr(s, "nuts_result", None)
     return int(r.num_overlaps) if r is not None else -1
 
 
-def _n_unplaced(s):
+def _n_unplaced(s, _args=""):
     r = getattr(s, "detailed_result", None)
     return int(r.num_unplaced) if r is not None else -1
 
 
-def _n_violations(s):
+def _n_violations(s, _args=""):
     # The MOST RECENT check_design's violation count — the audit leg of
     # cleanliness, which overlaps/unplaced do not cover: a design can place
     # every bit overlap-free and still be electrically wrong (SEG_OPEN,
@@ -236,13 +239,40 @@ def _n_violations(s):
     return int(last.get("violations", 0))
 
 
-def _messages(_s):
+def _messages(_s, _args=""):
     # `{id severity}` pairs — a Tcl list of two-element lists, so a flow can
     # `foreach {m} [buda::query messages] { ... }` without parsing text.
     return " ".join(f"{{{mid} {sev}}}" for mid, sev, _t in buda_diag.catalogue())
 
 
-# The scalars a flow script actually branches on.  Deliberately few: this is
+def _demand(s, args=""):
+    # Per-instance, per-layer demand (convergence ladder item 3): what the
+    # rest of the design placed over each instance's footprint, in signal
+    # tracks of the layer's pattern — the number a driver hands DOWN as the
+    # complement share.  A Tcl list of rows
+    #     {inst cell layer bits used supply pct}
+    # (`foreach r [buda::query demand] { lassign $r inst cell layer bits
+    # used supply pct }`), optionally filtered: `buda::query demand <inst>`
+    # keeps one instance and its subtree (`cell:<name>` every instance of
+    # a cell), a second word keeps one layer.  -1 until there is a NUTS
+    # result to read the demand off — never computed is not zero.  The
+    # rows are `BudaSession._layer_demand`'s, the same ones
+    # `report_layer_demand` prints, so the two cannot disagree.
+    toks = args.split()
+    if len(toks) > 2:
+        raise ValueError("usage: demand [<inst-path>|cell:<cell>] [<layer>]")
+    rows = s._layer_demand(toks[0] if toks else "",
+                           toks[1] if len(toks) > 1 else "")
+    if rows is None:
+        return -1
+    return " ".join(
+        "{" + " ".join(tcl_word(str(v)) for v in (
+            r["inst"], r["cell"], r["layer_name"], r["bits"], r["used"],
+            r["supply"], f"{r['pct']:.1f}")) + "}"
+        for r in rows)
+
+
+# The values a flow script actually branches on.  Deliberately few: this is
 # a bridge, not a second API, and every name here is a promise to keep.
 # A count that has not been computed yet answers -1 rather than 0, because
 # "no NUTS result" and "no overlaps" are opposite conclusions.
@@ -254,6 +284,7 @@ _QUERIES = {
     "unplaced": _n_unplaced,
     "violations": _n_violations,
     "messages": _messages,
+    "demand": _demand,
 }
 
 
@@ -546,14 +577,21 @@ class Server:
                 self._reply("OK")
             return True
         if req.startswith("__query"):
-            parts = req.split(None, 1)
+            parts = req.split(None, 2)
             name = parts[1].strip() if len(parts) > 1 else ""
+            qargs = parts[2].strip() if len(parts) > 2 else ""
             fn = _QUERIES.get(name)
             if fn is None:
                 self._reply("ERR", f"unknown query {name!r}; known: "
                                    f"{', '.join(sorted(_QUERIES))}")
             else:
-                self._reply("OK", str(fn(self.session)))
+                try:
+                    self._reply("OK", str(fn(self.session, qargs)))
+                except ValueError as e:
+                    # A malformed request (an unknown layer, too many
+                    # words) is the CALLER's error and raises in Tcl like
+                    # any other; the session is untouched.
+                    self._reply("ERR", f"query {name}: {e}")
             return True
 
         cap = _StreamCapture(self._out_frame) if self.stream else io.StringIO()
