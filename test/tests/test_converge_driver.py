@@ -151,6 +151,7 @@ def test_a_zero_step_is_refused_before_any_session_starts(tmp_path):
                        # a readable out-of-range one is btcl's to clamp, so
                        # `-j -3` passes and the LATER arm check is what fires
                        (["-j", "foo"], "-j takes an integer or max"),
+                       (["-j", "0x4"], "-j takes an integer or max"),   # Tcl-only spelling
                        (["-j", -3, "-arms", "nosuch"], "unknown arm 'nosuch'")]:
         if msg is None:
             continue

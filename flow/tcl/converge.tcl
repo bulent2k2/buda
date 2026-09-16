@@ -132,7 +132,10 @@ if {![string is integer -strict $informed] || $informed < 0} {
 # or an integer, READABLE here and CLAMPED by the engine to [1, max] with
 # its own warning — `-j 0` and `-j -3` are btcl's to clamp, not this
 # driver's to refuse (Codex P2 on #935, round 11).
-if {$threads ne "" && $threads ne "max" && ![string is integer -strict $threads]} {
+# Readable to the ENGINE, which reads it with Python's int(): an optional
+# sign and decimal digits — Tcl's own integer syntax also admits `0x4` and
+# `0b10`, which the engine would ignore (Codex P2 on #935, round 12).
+if {$threads ne "" && $threads ne "max" && ![regexp {^[+-]?\d+$} $threads]} {
     error "converge.tcl: -j takes an integer or max, got '$threads'"
 }
 set arms [lsearch -all -inline -not -exact $arms ""]
