@@ -207,6 +207,15 @@ def cmd_derive_cell_layer_shares(session, cmd, args, cmd_line):
             path = toks[i + 1]; i += 1
         elif t == "cells" and i + 1 < len(toks):
             cells = [c for c in toks[i + 1].split(",") if c]; i += 1
+            if not cells:
+                # `cells ""` / `cells ,` names NO cell; treating it as an
+                # omitted option would silently widen the scope to the
+                # marked or bundle-owning cells — which `apply` then
+                # replaces shares of (Codex P2 on #934).
+                print("Error: derive_cell_layer_shares: `cells` names no "
+                      "cell — give a comma-separated list, or omit it for "
+                      "the default scope")
+                return
         else:
             print("Error: usage: derive_cell_layer_shares [apply] "
                   "[file <path>] [cells <a,b,...>]")

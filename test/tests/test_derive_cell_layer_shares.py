@@ -271,3 +271,20 @@ def test_marks_on_instance_less_cells_keep_an_empty_scope():
     # an explicit `cells` still overrides the marks
     lines, _, scope = s._derive_cell_layer_shares(["top_cell"])
     assert scope == ["top_cell"] and len(lines) == 1
+
+
+def test_an_empty_cells_argument_is_refused_not_widened():
+    """`cells ""` / `cells ,` name no cell; read as an omitted option the
+    scope silently widened to the default rungs, which `apply` then
+    replaced shares of (Codex P2 on #934).  The handler refuses it, and the
+    API keeps an explicit empty list as an empty scope."""
+    s = _session("run_nuts", "set_cell_layer_share top_cell M5 50")
+    for arg in ('cells ""', "cells ,"):
+        out = _cmd(s, f"derive_cell_layer_shares {arg} apply")
+        assert "Error: derive_cell_layer_shares: `cells` names no cell" \
+            in out, out
+        assert "===" not in out and "applied" not in out, out
+    assert s._cell_layer_shares == {("top_cell", 5): 0.5}   # untouched
+    lines, notes, scope = s._derive_cell_layer_shares([])
+    assert scope == [] and lines == []
+    assert any("0 cell(s) (named)" in n for n in notes), notes

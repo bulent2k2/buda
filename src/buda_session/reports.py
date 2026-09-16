@@ -1419,7 +1419,9 @@ class ReportsMixin:
         by_cell = {}
         for r in rows:
             by_cell.setdefault(r["cell"], []).append(r)
-        if cells:
+        if cells is not None:
+            # An explicit list decides the scope, an EMPTY one included
+            # (no cell — not the default rungs, Codex P2 on #934).
             scope = list(cells)
             unknown = [c for c in scope if c not in by_cell]
             for c in unknown:
