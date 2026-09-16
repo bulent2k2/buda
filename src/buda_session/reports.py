@@ -1563,13 +1563,34 @@ class ReportsMixin:
                         continue
                     if kept_min > kept:
                         pct_floor = int(math.ceil(100.0 * kept_min / n_sig))
+                        # The share is declared in WHOLE percent and the
+                        # command keeps floor(pct/100 x n_sig) slots, so
+                        # the line must report the count the DECLARED
+                        # percent keeps (on a 128-slot pattern 50 slots
+                        # round up to 40%, which keeps 51) — and a floor
+                        # that rounds to 100% is full use, not a share:
+                        # `set_cell_layer_share ... 100` REMOVES the share
+                        # (Codex P2 on #935; 127 of 128 slots is the case).
+                        if pct_floor >= 100:
+                            notes.append(
+                                f"{cell} {lname}: the top leaves "
+                                f"{100.0 - worst['pct']:.1f}% at {worst['inst']} "
+                                f"but {cell}'s own bundle {bid} seg {si} needs "
+                                f"{need} of the {pool} tracks in its seat "
+                                f"({own_pct:.0f}%, at {own['inst']}), "
+                                f"{kept_min} of {n_sig} slots — every whole "
+                                f"percent under 100 keeps fewer; no share "
+                                f"(full use): a uniform share cannot host "
+                                f"both; this wants a positional reservation")
+                            continue
+                        kept_floor = int(pct_floor / 100.0 * n_sig + 1e-9)
                         notes.append(
                             f"{cell} {lname}: share floored {pct}% -> "
-                            f"{pct_floor}% ({kept_min}/{n_sig} slots): "
+                            f"{pct_floor}% ({kept_floor}/{n_sig} slots): "
                             f"{cell}'s own bundle {bid} seg {si} needs "
                             f"{need} of the {pool} tracks in its seat "
                             f"({own_pct:.0f}%, at {own['inst']})")
-                        pct, kept, floored = pct_floor, kept_min, True
+                        pct, kept, floored = pct_floor, kept_floor, True
                 if pct <= 0 or kept == 0:
                     notes.append(
                         f"{cell} {lname}: the top leaves {100.0 - worst['pct']:.1f}% "

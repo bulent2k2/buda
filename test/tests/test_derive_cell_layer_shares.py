@@ -217,6 +217,47 @@ def test_the_file_names_its_whole_scope_not_just_the_cells_with_a_line(tmp_path)
     assert "# scope: (none)" in path.read_text()
 
 
+def test_a_floor_that_rounds_to_100_percent_is_full_use_not_a_share():
+    """The share is declared in WHOLE percent and `set_cell_layer_share
+    ... 100` REMOVES a share, so on a pattern with more than 100 SIGNAL
+    slots an own need of 127/128 rounded to a 100% line that would have
+    run the next session UNRESTRICTED while reporting a 127/128
+    reservation (Codex P2 on #935).  Such a floor is full use, said.  And
+    a floor that does round to a share reports the slot count the
+    DECLARED percent keeps: 50 of 128 rounds up to 40%, which keeps 51."""
+    s = _session("run_nuts")
+    _quiet(s, "def_layer 9 M9 H TOP 20",
+           "def_track_pattern 9 0 VDD 2 1 (_ 1 1)x128 GND 2 1")
+    base = [dict(r) for r in s._layer_demand()
+            if r["cell"] == "top_cell" and r["layer_name"] == "M6"]
+    assert len(base) == 2
+
+    def rows(worst_pct, need, pool):
+        out = []
+        for r in base:
+            r = dict(r, layer=9, layer_name="M9", pct=worst_pct, used=10,
+                     supply=128, used_tracks=[], own_need=need / pool,
+                     own_seat=(4, 0, need, pool))
+            out.append(r)
+        return out
+
+    s._layer_demand = lambda *_a, **_k: rows(10.0, 127, 128)
+    lines, notes, _ = s._derive_cell_layer_shares(["top_cell"])
+    assert not [l for l in lines if l["layer"] == 9], lines
+    assert any("127 of 128 slots" in n and "no share (full use)" in n
+               for n in notes), notes
+    # the complement alone would have been 90%: the floor is what said no
+    lines, _, _ = s._derive_cell_layer_shares(["top_cell"], floor_own=False)
+    assert [l["pct"] for l in lines if l["layer"] == 9] == [90]
+    # a floor that IS a share reports what the declared percent keeps
+    s._layer_demand = lambda *_a, **_k: rows(80.0, 50, 128)
+    lines, notes, _ = s._derive_cell_layer_shares(["top_cell"])
+    l = [l for l in lines if l["layer"] == 9][0]
+    assert (l["pct"], l["kept"], l["n_sig"], l["floored"]) == (40, 51, 128, True), l
+    assert l["kept"] == int(l["pct"] / 100.0 * 128 + 1e-9)   # the command's count
+    assert any("share floored 20% -> 40% (51/128 slots)" in n for n in notes), notes
+
+
 def test_scope_defaults_to_the_bottom_up_marks_and_cells_narrows():
     s = _session("set_bottom_up top_cell", "run_nuts")
     lines, notes, _ = s._derive_cell_layer_shares()
