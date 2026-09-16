@@ -239,8 +239,13 @@ foreach size $sizes {
             if {$reserve > $maxreserve} { break }
             set words [list -bottomup]
             if {$reserve > 0} { lappend words -reserve $reserve }
-            if {$k == 1} { lappend words -derive [file join $out ${p}_bu_shares_r0.buda] }
-            if {$k == 1 && $nofloor} { lappend words -derive_opts nofloor }
+            # Round 1 doubles as bu's measurement, so it derives bu's seed —
+            # only when bu is selected: a blind-only sweep must not pay for
+            # (or time) a derivation no arm reads (Codex P2 on #935).
+            if {$k == 1 && "bu" in $arms} {
+                lappend words -derive [file join $out ${p}_bu_shares_r0.buda]
+                if {$nofloor} { lappend words -derive_opts nofloor }
+            }
             set rep [session ${p}_blind_r$k $size {*}$words]
             if {$k == 1} { set blind1 $rep }
             # A blind round's reservation: the report's own `reserve`, no

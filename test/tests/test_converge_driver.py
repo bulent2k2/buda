@@ -175,6 +175,10 @@ def test_a_rejected_reservation_is_a_failed_round_not_a_row(tmp_path):
     assert (out / "soc2_blind_r1.rep").exists()
     assert not (out / "soc2_blind_r2.rep").exists()
     assert not list(out.glob("e1_*.md"))            # no table, no reserve-5 row
+    # a blind-only sweep derives no bu seed (Codex P2 on #935): the round-1
+    # session is the blind arm's measurement alone, timed as such
+    assert not (out / "soc2_bu_shares_r0.buda").exists()
+    assert _report(out / "soc2_blind_r1.rep")["share"] == []
 
 
 def test_zero_informed_rounds_summarize_the_measurement_itself(tmp_path):
