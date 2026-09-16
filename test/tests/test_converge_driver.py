@@ -146,7 +146,10 @@ def test_a_zero_step_is_refused_before_any_session_starts(tmp_path):
                        # an option-LOOKING value, known or a typo, is missing
                        (["-tag", "-heall"], "-tag needs a value"),
                        (["-out", "-otu"], "-out needs a value"),
-                       (["-arms", "-out", "x"], "-arms needs a value")]:
+                       (["-arms", "-out", "x"], "-arms needs a value"),
+                       # the server IGNORES an unreadable thread request
+                       (["-j", "foo"], "-j takes a positive integer or max"),
+                       (["-j", 0], "-j takes a positive integer or max")]:
         if msg is None:
             continue
         r = _tclsh(_DRIVER, "soc", 2, *words, "-out", out, cwd=tmp_path)

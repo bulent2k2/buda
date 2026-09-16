@@ -125,6 +125,15 @@ if {![string is integer -strict $maxreserve] || $maxreserve < 0} {
 if {![string is integer -strict $informed] || $informed < 0} {
     error "converge.tcl: -informed takes a non-negative integer, got '$informed'"
 }
+# `-j` travels to every session as BUDA_THREADS_REQUEST and the server
+# IGNORES a request it cannot read (prints, keeps the default) — so an
+# unreadable count would run the whole experiment at a concurrency the
+# command line did not ask for (Codex P2 on #935).  btcl's semantics: `max`
+# or a positive integer (the engine clamps it to the machine, LOUD).
+if {$threads ne "" && $threads ne "max"
+    && (![string is integer -strict $threads] || $threads < 1)} {
+    error "converge.tcl: -j takes a positive integer or max, got '$threads'"
+}
 set arms [lsearch -all -inline -not -exact $arms ""]
 if {![llength $arms]} { error "converge.tcl: -arms names no arm (blind, td, bu)" }
 foreach a $arms { if {$a ni {blind td bu}} { error "converge.tcl: unknown arm '$a'" } }
