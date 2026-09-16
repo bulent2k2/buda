@@ -19,14 +19,19 @@ the top actually used there.
 ## The result, in one paragraph
 
 **The claim is refuted for the primitive as built, and the reason is
-measured.**  The blind policy (`reserve_top_layers`, one layer per round)
-reaches a clean endpoint in **three rounds** at NQ = 2, 4 and 16 with
-healers off, and in **one round** at every size with the vehicle's own
-healing — reserving 5 to 8 tracks for every track the top used.  The
+measured.**  The blind policy (`reserve_top_layers`, its step swept to its
+best) reaches a clean endpoint in **two rounds** at NQ = 2, 4 and 16 with
+healers off — reserving 5 to 8 tracks for every track the top used — and
+never at NQ = 8; with the vehicle's own healing it is clean in **one round
+with no reservation at all** at NQ = 2, 4 and 8 and in two at NQ = 16.  The
 derived budget (`derive_cell_layer_shares` → `set_cell_layer_share`) reaches
 a clean endpoint in **no round** with healers off, at any size, and does
-not improve on the blind round it was derived from; with healers on it
-heals to the same endpoint the blind round heals to, at the same cost.  A
+not improve on the round it was derived from; with healers on, the
+top-down-derived arm heals clean in one informed round at NQ = 2, 8 and 16
+(two at 4) — the **same session count as the blind arm**, at 3–8.5× the
+top's used tracks in reservation where the blind arm needed none or 9.2× —
+and the blind-round-derived arm stays dirty at NQ = 16 on the seat the
+blind round left.  A
 `set_cell_layer_share` is a **uniform** budget — the first `floor(s ×
 n_signal)` slots of every period, over the whole instance — and the top's
 demand is **positional**; the block's own buses fill their seats to 89–100
@@ -150,7 +155,48 @@ here, since nothing heals.
 
 ## Results — healers on (`soc_lib`'s heal-if-dirty in every round)
 
-HEALED_TABLE
+The first audit is the healerless verdict of the same session; the final
+verdict is after `heal_if_dirty` (negotiate + ripup, and a second round with
+`refine_selection` when the first leaves a residue).  Healing is where the
+seconds go: the 16-cluster blind round 1 spends 400 s healing 336 stranded
+bits down to 8.
+
+| size | arm | round | policy | first ovl/unpl/viol | final ovl/unpl/viol | detailed WL | reserved | used | reserved ÷ used | s |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 2 | blind | 1 | reserve 0 | 1/8/8 | **0/0/0** | 591,230 | — | — | — | 2.8 |
+| 2 | td | 0 | top-down | 0/0/0 | 0/0/0 | 525,144 | — | — | — | 1.8 |
+| 2 | td | 1 | shares r0 | 2/296/296 | **0/0/0** | 601,617 | 1,140 | 364 | 3.13 | 12.3 |
+| 2 | bu | 1 | shares r0 | 1/8/8 | **0/0/0** | 592,276 | 3,984 | 1,268 | 3.14 | 2.7 |
+| 4 | blind | 1 | reserve 0 | 5/117/117 | **0/0/0** | 1,088,063 | — | — | — | 12.9 |
+| 4 | td | 0 | top-down | 1/16/16 | 0/0/0 | 1,007,765 | — | — | — | 4.3 |
+| 4 | td | 1 | shares r0 | 4/101/101 | 1/0/0 | 1,091,810 | 3,466 | 963 | 3.60 | 15.5 |
+| 4 | td | 2 | shares r1 | 4/45/45 | **0/0/0** | 1,061,538 | 2,592 | 678 | 3.82 | 5.1 |
+| 4 | bu | 1 | shares r0 | 5/117/117 | **0/0/0** | 1,088,745 | 7,843 | 2,784 | 2.82 | 12.9 |
+| 8 | blind | 1 | reserve 0 | 6/93/93 | **0/0/0** | 2,175,864 | — | — | — | 33.1 |
+| 8 | td | 0 | top-down | 2/40/40 | 0/0/0 | 1,968,672 | — | — | — | 9.2 |
+| 8 | td | 1 | shares r0 | 8/109/109 | **0/0/0** | 2,180,195 | 6,784 | 1,304 | 5.20 | 69.6 |
+| 8 | bu | 1 | shares r0 | 11/109/109 | **0/0/0** | 2,174,752 | 16,947 | 5,590 | 3.03 | 45.0 |
+| 16 | blind | 1 | reserve 0 | 11/336/336 | 3/8/8 | (4,319,399) | — | — | — | 403.5 |
+| 16 | blind | 2 | reserve 1 | 15/203/203 | **0/0/0** | 4,482,219 | 30,015 | 3,252 | 9.23 | 213.5 |
+| 16 | td | 0 | top-down | 3/32/32 | 0/0/0 | 3,935,746 | — | — | — | 28.0 |
+| 16 | td | 1 | shares r0 | 19/187/187 | **0/0/0** | 4,541,780 | 11,768 | 1,379 | 8.53 | 275.8 |
+| 16 | bu | 1 | shares r0 | 15/384/384 | 4/8/8 | (4,245,861) | 43,308 | 12,500 | 3.46 | 388.3 |
+| 16 | bu | 2 | shares r1 | 11/336/336 | 3/8/8 | (4,319,621) | 41,241 | 12,689 | 3.25 | 404.4 |
+
+| size | arm | sessions | endpoint | complete-route WL |
+|---|---|---|---|---|
+| 2 | blind | 1 | clean | 591,230 |
+| 2 | td | 1 + 1 | clean | 601,617 |
+| 2 | bu | 1 + 1 | clean | 592,276 |
+| 4 | blind | 1 | clean | 1,088,063 |
+| 4 | td | 1 + 2 | clean | 1,061,538 |
+| 4 | bu | 1 + 1 | clean | 1,088,745 |
+| 8 | blind | 1 | clean | 2,175,864 |
+| 8 | td | 1 + 1 | clean | 2,180,195 |
+| 8 | bu | 1 + 1 | clean | 2,174,752 |
+| 16 | blind | 2 | clean | 4,482,219 |
+| 16 | td | 1 + 1 | clean | 4,541,780 |
+| 16 | bu | 1 + 2 | **dirty**, 3/8/8 | — |
 
 ## The blind policy's step (healers off, blind arm only)
 
@@ -257,7 +303,20 @@ pitch onto the track period, as `tpu.tcl` documents.)
    The policy's best is two rounds; the derived budget needed to beat
    two, and did not reach clean at all.
 
-7. **Healing makes every arm equal.**  HEALED_FINDING
+7. **With healers, the healers do the work, and the budget buys nothing.**
+   The blind round 1 heals clean with **no reservation at all** at NQ = 2,
+   4 and 8, so at those sizes there is nothing for a budget to buy and the
+   derived arms' 3–5× reservations are pure padding on a route the healers
+   would have closed anyway.  At NQ = 16 the E4 seat (`bundle 2`, 8 bits,
+   a LOW window with zero tracks) survives the healers in the blind round
+   1 and in both blind-derived rounds — a share cannot add tracks to a
+   window that has none — and two things clear it in one more session:
+   the blind `reserve 1` (9.2× reservation, 4,482,219) and the
+   top-down-derived shares (8.5×, 4,541,780, +1.3 % wire).  The session
+   count is the same either way, and the informed arm's one advantage is
+   a reservation 8 % tighter on a design that needed one whole layer.
+   Every clean healed route under a derived budget is within 1.3 % of the
+   blind one's wire; the two are the same route by another road.
 
 ## What the tables do not say
 
@@ -276,6 +335,13 @@ pitch onto the track period, as `tpu.tcl` documents.)
   took the informed round from 410 to 296 stranded at NQ = 2, not to 8).
   A floor read off a cell-local solve would be exact and would say "full
   use" on still more layers.
+- **That the informed loop is the E4 loop.**  The `bu` arm was meant to be
+  the diagnosed one — measure, then act — and it acts on the wrong quantity:
+  the E4 fault is a seat with zero tracks in its window, which the doomed-seat
+  census names and `set_max_bundle_bits 4 for pc_` fixes in one run; a share
+  derived from the top's demand cannot see it.  Diagnosability (E4) and the
+  budget's information content (E1) are separate axes, and this run kept
+  them separate.
 - **Anything judged by an independent audit** (build item 2 is still not
   built; every row is `check_design`'s, the same audit on every arm).
 - **What the control shows is the mechanism working where its premise
