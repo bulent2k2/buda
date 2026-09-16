@@ -1,0 +1,290 @@
+# Copyright 2026 Ben Bulent Basaran
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""`derive_cell_layer_shares` (convergence ladder item 4, rung 4).
+
+The complement of the top's measured demand, per cell and layer, as
+`set_cell_layer_share` lines — the budget handed DOWN derived from the
+top's own plan instead of guessed.  What is worth pinning:
+
+  * the share is the complement of the WORST instance (a template is solved
+    once and copied, so the cell gets what its most crowded occurrence
+    leaves), floored to a whole percent;
+  * a layer the top does not touch gets no line, and a complement whose
+    thinning keeps zero slots per period is skipped and said rather than
+    handed to a command that refuses it;
+  * `apply` declares through the command itself and `file` writes lines a
+    fresh session can `source` BEFORE `run_planner hier` — the E1 recipe —
+    and that session routes clean under them;
+  * the collision count is honest: a share is a budget, the top's tracks
+    are specific, and the number of the top's tracks inside the kept slots
+    is reported rather than assumed away;
+  * the derivation is the budget of every cell in scope: a scoped cell's
+    share on a layer it emits no line for is removed by `apply` AND written
+    as a `... 100` line by `file` (Codex P2 on #934, both halves — a session
+    reopening the same BDB restores the persisted share before it sources
+    the file), while a cell outside the scope keeps its shares.
+"""
+import contextlib
+import io
+import math
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parents[2] / "src"))
+import buda_cli  # noqa: E402
+
+from test_layer_demand import _DESIGN, _cmd, _quiet, _row  # noqa: E402
+
+
+def _session(*extra):
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    _quiet(s, *_DESIGN, *extra)
+    return s
+
+
+def test_the_share_is_the_complement_of_the_worst_instance():
+    s = _session("run_nuts")
+    lines, notes, _ = s._derive_cell_layer_shares()
+    assert any("owning a cell-local bundle" in n for n in notes), notes
+    assert [(l["cell"], l["layer_name"]) for l in lines] == [("top_cell", "M6")]
+    l = lines[0]
+    worst = max(_row(s._layer_demand(i, "M6"), i, "M6")["pct"]
+                for i in ("u1", "u2"))
+    assert l["pct"] == int(math.floor(100.0 - worst)), (l, worst)
+    assert l["worst_pct"] == worst and l["n_inst"] == 2
+    assert l["n_sig"] == 8 and l["kept"] == int(l["pct"] / 100.0 * 8 + 1e-9)
+    out = _cmd(s, "derive_cell_layer_shares")
+    assert f"set_cell_layer_share top_cell M6 {l['pct']}" in out, out
+    assert "abstract bus tracks" in out
+
+
+def test_apply_declares_and_a_sourced_file_routes_clean(tmp_path):
+    """The E1 recipe: session 1 routes top-down and derives; session 2
+    sources the lines before planning and routes under them."""
+    s = _session("run_nuts", "run_detailed_nuts")
+    path = tmp_path / "shares.buda"
+    out = _cmd(s, f"derive_cell_layer_shares apply file {path}")
+    assert "detailed bit tracks" in out and "applied 1 share(s)" in out, out
+    lines, _, _ = s._derive_cell_layer_shares()
+    pct = lines[0]["pct"]
+    assert s._cell_layer_shares[("top_cell", 6)] == pct / 100.0
+    text = path.read_text()
+    assert f"set_cell_layer_share top_cell M6 {pct}" in text, text
+    assert text.startswith("# derive_cell_layer_shares")
+    # applying twice is the same declaration again, not a second one
+    _cmd(s, "derive_cell_layer_shares apply")
+    assert s._cell_layer_shares == {("top_cell", 6): pct / 100.0}
+    # session 2: the lines govern the plan
+    s2 = buda_cli.BudaSession()
+    s2.no_viz = True
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        for c in _DESIGN[:-3] + [f"source {path}"] + _DESIGN[-3:]:
+            s2.do_command(c)
+    log = buf.getvalue()
+    assert f"[LayerShare] top_cell: layer M6 share {pct}%" in log, log
+    assert "carrying fractional shares" in log, log
+    _quiet(s2, "run_nuts", "run_detailed_nuts")
+    assert s2.nuts_result.num_overlaps == 0
+    assert s2.detailed_result.num_unplaced == 0
+    assert "Success" in _cmd(s2, "check_design")
+
+
+def test_a_complement_below_one_slot_is_skipped_and_said():
+    """The top leaving less than one slot per period is a band question, not
+    a share: `set_cell_layer_share` would refuse it, so it is not emitted."""
+    s = _session("run_nuts")
+    real = s._layer_demand()
+    for r in real:
+        if r["inst"] == "u1" and r["layer_name"] == "M6":
+            r["used"], r["pct"] = 45, 100.0 * 45 / r["supply"]
+    s._layer_demand = lambda *_a, **_k: real
+    lines, notes, _ = s._derive_cell_layer_shares()
+    assert lines == [], lines
+    assert any("minimum meaningful share" in n and "set_cell_layer_cap" in n
+               for n in notes), notes
+    assert "nothing to declare" in _cmd(s, "derive_cell_layer_shares")
+
+
+def test_scope_defaults_to_the_bottom_up_marks_and_cells_narrows():
+    s = _session("set_bottom_up top_cell", "run_nuts")
+    lines, notes, _ = s._derive_cell_layer_shares()
+    assert any("marked set_bottom_up" in n and "top_cell" in n for n in notes)
+    assert len(lines) == 1
+    lines, notes, scope = s._derive_cell_layer_shares(["leaf", "nosuch"])
+    assert lines == [] and any("'nosuch'" in n for n in notes), notes
+    assert "usage" in _cmd(s, "derive_cell_layer_shares bogus")
+
+
+def test_the_collision_count_is_the_tops_tracks_inside_the_kept_slots():
+    s = _session("run_nuts", "run_detailed_nuts")
+    l = s._derive_cell_layer_shares()[0][0]
+    pat = s.routing_grid.get_layer_grid(6).global_pattern()
+    tp = s._thinned_pattern(pat, l["pct"] / 100.0)
+    comps = {c.name: c for c in s.bdb.all_components()}
+    expect = 0
+    for inst in ("u1", "u2"):
+        c = comps[inst]
+        kept = [p for p, sl in tp.tracks_in_range(c.y1, c.y2)
+                if sl.type == "SIGNAL"]
+        used = _row(s._layer_demand(inst, "M6"), inst, "M6")["used_tracks"]
+        expect = max(expect, sum(1 for u in used
+                                 if any(abs(u - k) < 1e-6 for k in kept)))
+    assert l["collide"] == expect and 0 <= expect <= l["worst_used"], l
+
+
+def test_without_a_nuts_result_it_says_so():
+    s = _session()
+    assert s._derive_cell_layer_shares() is None
+    out = _cmd(s, "derive_cell_layer_shares")
+    assert "Error" in out and "run_nuts" in out, out
+
+
+def test_an_empty_derivation_still_rewrites_the_file(tmp_path):
+    """A later session sources the file, so a run that derives nothing must
+    not leave an earlier run's lines in it (Codex P2 on #934): the file is
+    rewritten header-only, and sourcing it declares nothing."""
+    s = _session("run_nuts")
+    path = tmp_path / "shares.buda"
+    path.write_text("set_cell_layer_share top_cell M6 50\n")   # stale
+    out = _cmd(s, f"derive_cell_layer_shares cells leaf file {path}")
+    assert "nothing to declare" in out and "header only" in out, out
+    text = path.read_text()
+    assert "set_cell_layer_share" not in text, text
+    assert text.startswith("# derive_cell_layer_shares"), text
+    s2 = _session()
+    _quiet(s2, f"source {path}")
+    assert not getattr(s2, "_cell_layer_shares", None)
+
+
+def test_a_quoted_spaced_path_is_one_path(tmp_path):
+    """`file "results run/shares.buda"` is one path under the repository's
+    quoted-path convention; the handler read the whitespace split and took
+    `"results` as the path (Codex P2 on #934)."""
+    s = _session("run_nuts")
+    d = tmp_path / "results run"
+    d.mkdir()
+    path = d / "shares.buda"
+    out = _cmd(s, f'derive_cell_layer_shares file "{path}"')
+    assert "written to" in out and "usage" not in out, out
+    assert "set_cell_layer_share top_cell M6" in path.read_text()
+
+
+def test_apply_removes_a_scoped_share_the_derivation_no_longer_emits():
+    """`apply` after the demand changed used to update only the emitted
+    lines, so a share held from an earlier declaration on a layer the top
+    no longer touches (or whose complement now keeps zero slots) kept
+    constraining the next plan (Codex P2 on #934).  A scoped cell's stale
+    share is removed through the command's own pct-100 path — session AND
+    BDB — while a cell outside the scope keeps its share."""
+    s = _session("run_nuts")
+    _quiet(s, "set_cell_layer_share leaf M6 50",       # in scope, no line
+           "set_cell_layer_share top_cell M5 50")      # out of scope
+    assert ("leaf", 6) in s._cell_layer_shares
+    assert s.bdb.cell_layer_shares("leaf") == [(6, 0.5)]   # persisted
+    out = _cmd(s, "derive_cell_layer_shares cells leaf apply")
+    assert "nothing to declare" in out, out
+    assert "leaf M6: share 50% held from an earlier declaration" in out, out
+    assert "removed 1 stale share(s) in scope" in out, out
+    assert ("leaf", 6) not in s._cell_layer_shares
+    assert s._cell_layer_shares == {("top_cell", 5): 0.5}
+    assert s.bdb.cell_layer_shares("leaf") == []
+    assert s.bdb.cell_layer_shares("top_cell") == [(5, 0.5)]
+    # the scope with lines: the emitted one is declared, a stale one on
+    # ANOTHER layer of the same cell goes, and re-applying is a no-op
+    _quiet(s, "set_cell_layer_share top_cell M4 50")
+    out = _cmd(s, "derive_cell_layer_shares cells top_cell apply")
+    assert "applied 1 share(s) to this session; removed 2 stale share(s)" \
+        in out, out
+    assert set(s._cell_layer_shares) == {("top_cell", 6)}
+    out = _cmd(s, "derive_cell_layer_shares cells top_cell apply")
+    assert "applied 1 share(s) to this session" in out and "stale" not in out
+
+
+def test_the_file_carries_the_removal_of_a_stale_scoped_share(tmp_path):
+    """The file half of the stale-share rule (Codex P2 on #934, round 4):
+    a later session that opens the SAME BDB restores the persisted shares
+    before it sources the file, so the new lines alone would leave a share
+    the top no longer supports in force.  The file writes a `... 100` line
+    for every scoped share the derivation did not emit, and sourcing it
+    into a session holding that share removes it — session and BDB."""
+    s = _session("run_nuts")
+    _quiet(s, "set_cell_layer_share leaf M6 50",       # in scope, no line
+           "set_cell_layer_share top_cell M5 50")      # out of scope
+    path = tmp_path / "shares.buda"
+    out = _cmd(s, f"derive_cell_layer_shares cells leaf file {path}")
+    assert "header only" in out and "1 removal line(s)" in out, out
+    text = path.read_text()
+    assert "set_cell_layer_share leaf M6 100" in text, text
+    assert "top_cell" not in text, text
+    # the writer did NOT touch this session (no apply)
+    assert s._cell_layer_shares[("leaf", 6)] == 0.5
+    # a session holding the stale share, as a reopened BDB would: sourcing
+    # the file removes it and leaves the out-of-scope one alone
+    s2 = _session("set_cell_layer_share leaf M6 50",
+                  "set_cell_layer_share top_cell M5 50")
+    log = _cmd(s2, f"source {path}")
+    assert "share 100% — explicit full use (share removed)" in log, log
+    assert s2._cell_layer_shares == {("top_cell", 5): 0.5}
+    assert s2.bdb.cell_layer_shares("leaf") == []
+    # with lines: the emitted line and the removal of the OTHER layer's
+    # stale share both land in the file
+    _quiet(s, "set_cell_layer_share top_cell M4 50")
+    _cmd(s, f"derive_cell_layer_shares cells top_cell file {path}")
+    text = path.read_text()
+    assert "set_cell_layer_share top_cell M6 " in text, text
+    assert "set_cell_layer_share top_cell M4 100" in text, text
+    assert "set_cell_layer_share top_cell M5 100" in text, text
+    assert "leaf" not in text, text
+
+
+def test_marks_on_instance_less_cells_keep_an_empty_scope():
+    """`set_bottom_up` accepts a defined cell with no instance; a mark like
+    that used to be filtered out and the scope fell through to the
+    bundle-owning cells, so `apply` derived — and removed — shares for
+    cells the marked scope never named (Codex P2 on #934).  The marks
+    decide the rung; an all-unplaced set is an empty scope, said."""
+    s = _session("add_cell orphan 10 10", "set_bottom_up orphan", "run_nuts",
+                 "set_cell_layer_share top_cell M5 50")   # not in scope
+    lines, notes, scope = s._derive_cell_layer_shares()
+    assert scope == [] and lines == [], (scope, lines)
+    assert any("marked set_bottom_up" in n and "0 cell(s)" in n
+               for n in notes), notes
+    assert any("marked cell 'orphan': no placed instance" in n
+               for n in notes), notes
+    out = _cmd(s, "derive_cell_layer_shares apply")
+    assert "nothing to declare" in out and "stale" not in out, out
+    assert s._cell_layer_shares == {("top_cell", 5): 0.5}   # untouched
+    # an explicit `cells` still overrides the marks
+    lines, _, scope = s._derive_cell_layer_shares(["top_cell"])
+    assert scope == ["top_cell"] and len(lines) == 1
+
+
+def test_an_empty_cells_argument_is_refused_not_widened():
+    """`cells ""` / `cells ,` name no cell; read as an omitted option the
+    scope silently widened to the default rungs, which `apply` then
+    replaced shares of (Codex P2 on #934).  The handler refuses it, and the
+    API keeps an explicit empty list as an empty scope."""
+    s = _session("run_nuts", "set_cell_layer_share top_cell M5 50")
+    for arg in ('cells ""', "cells ,"):
+        out = _cmd(s, f"derive_cell_layer_shares {arg} apply")
+        assert "Error: derive_cell_layer_shares: `cells` names no cell" \
+            in out, out
+        assert "===" not in out and "applied" not in out, out
+    assert s._cell_layer_shares == {("top_cell", 5): 0.5}   # untouched
+    lines, notes, scope = s._derive_cell_layer_shares([])
+    assert scope == [] and lines == []
+    assert any("0 cell(s) (named)" in n for n in notes), notes

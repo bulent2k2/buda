@@ -989,4 +989,68 @@ demand that was never computed is not a demand of zero).  A layer without a
 cell's LOW layers are its own keepout, so their supply there is 0.  An unknown
 layer name is an error; an instance filter matching nothing prints that.
 
+### `derive_cell_layer_shares [apply] [file <path>] [cells <a,b,...>]`
+
+```
+derive_cell_layer_shares                    # print the derivation + paste lines
+derive_cell_layer_shares apply              # ...and declare them in this session
+derive_cell_layer_shares file shares.buda   # ...and write them for a later session
+derive_cell_layer_shares cells sram_cell,tag_cell
+```
+
+Item 4 of the [convergence ladder](../internal/convergence_ladder.md) — rung
+4, the one that does not exist conventionally: the **complement of the top's
+measured demand**, per cell and per layer, as `set_cell_layer_share` lines.
+`set_cell_layer_share` took a number a human guessed; this reads the number
+off the top's own plan through [`report_layer_demand`](#layer-demand-reporting)'s
+rows.
+
+For every cell in scope and every patterned layer the top touches over one of
+its instances, the share is `100 − worst pct` over the cell's instances,
+floored to a whole percent — a template is solved once and copied everywhere,
+so the cell gets what its most crowded occurrence leaves.  A layer the top does
+not touch gets no line (full use is the default).  A complement whose thinning
+keeps **zero** slots per period is skipped and said: the top leaves the cell
+less than one slot there, which is a band question (`set_cell_layer_cap`), and
+`set_cell_layer_share` refuses it loudly anyway.
+
+**Scope**, in order: `cells` when given; else the cells marked
+`set_bottom_up` (the ones about to be solved once and copied — the E1 arm);
+else every cell owning a cell-local template bundle, since a share governs a
+cell's OWN interconnect and a cell with none has nothing to budget.  Each
+rung is taken when it *exists*, not when it survives the placed-instance
+filter: marks naming only instance-less cells (`set_bottom_up` accepts a
+defined cell with no instance) give an empty scope, each such mark said,
+never the next rung's cells — which matters once `apply` removes shares.
+The scope and its reason are printed.
+
+**A share is a budget, not a reservation**, and the table says how far the
+two are apart: the cell's pattern is thinned to its first
+`floor(s × n_signal)` SIGNAL slots per period while the top's demand sits on
+specific tracks, so `collide` is the most tracks, over the cell's instances,
+that the top holds *inside* the slots the thinned pattern would keep.  Zero
+means the budget is also a reservation there; nonzero is exactly what E1
+measures (measured on the two-instance test design: 6 of the top's 8 M6
+tracks sit in the kept slots — the top routed through the middle of the
+window and the thinning keeps the first slots).
+
+The lines must be declared **before `run_planner hier`** (`_apply_layer_policies`
+resolves them onto the wrappers there).  `apply` declares them in this session
+through `set_cell_layer_share` itself — its validation, BDB write-through and
+print — for a flow that re-plans, and it makes the derivation **the budget of
+every cell in scope**: a share a scoped cell still holds on a layer the
+derivation emitted no line for (the top no longer touches it, or the new
+complement keeps zero slots) is removed through the command's own pct-100
+path — session and BDB — and said, since leaving it would keep the next plan
+under a budget this run did not derive; a cell outside the scope keeps its
+shares.  `file` writes the lines (with a header naming the basis) — and the
+same removals as `... 100` lines, since a later session that opens the same
+BDB restores the persisted shares before it sources the file — for the E1
+recipe: session 1 routes top-down and derives, session 2
+`source`s the file after the cells exist and before bundling.  Reads the same
+basis as the demand query — detailed bit tracks once `run_detailed_nuts` has
+run, the abstract placement before — and needs a NUTS result, saying so
+otherwise.  From Tcl it is `buda::derive_cell_layer_shares apply`, or a driver
+computes its own policy from `buda::query demand`.
+
 ---

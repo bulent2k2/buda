@@ -1314,8 +1314,10 @@ class ReportsMixin:
                 g = self.routing_grid.get_layer_grid(lid)
                 tracks = [pos for pos, _slot in
                           g.signal_tracks_in(0.5 * (a_lo + a_hi), p_lo, p_hi)]
-                used = sum(1 for pos in tracks
-                           if any(lo - eps < pos < hi + eps for lo, hi in union))
+                used_tracks = [pos for pos in tracks
+                               if any(lo - eps < pos < hi + eps
+                                      for lo, hi in union)]
+                used = len(used_tracks)
                 supply = len(tracks)
                 rows.append({
                     "inst": c.name, "cell": c.cell, "depth": c.depth,
@@ -1323,6 +1325,9 @@ class ReportsMixin:
                     "bits": bits, "used": used, "supply": supply,
                     "pct": (100.0 * used / supply) if supply else 0.0,
                     "bundles": len(bundles),
+                    # WHICH tracks (positions), for the share derivation's
+                    # collision check; not part of the Tcl row.
+                    "used_tracks": used_tracks,
                 })
         return rows
 
@@ -1367,3 +1372,263 @@ class ReportsMixin:
                   f"{k} {v['pct']:.1f}% ({v['inst']})"
                   for k, v in sorted(worst.items(),
                                      key=lambda kv: kv[1]["layer"])))
+
+    # ── derive_cell_layer_shares (convergence ladder item 4) ──────────────
+
+    def _derive_cell_layer_shares(self, cells=None):
+        """Turn the demand rows into `set_cell_layer_share` lines: for every
+        cell in scope and every patterned layer, the COMPLEMENT of the
+        worst demand over the cell's instances, floored to a whole percent
+        (a template is solved once and copied everywhere, so the cell gets
+        what its most crowded occurrence leaves).  Rung 4 of the ladder —
+        the budget handed DOWN is derived from the top's own plan instead
+        of guessed.
+
+        Scope, in order: `cells` when given; else the cells marked
+        `set_bottom_up` (the ones about to be solved once and copied —
+        the E1 arm); else every cell owning a cell-local template bundle
+        (a share governs a cell's OWN interconnect, so a cell with none
+        has nothing to budget).  Each rung is taken when it EXISTS, not
+        when it survives the placed-instance filter: marks naming only
+        instance-less cells give an EMPTY scope (each one said), never
+        the next rung's cells.  A layer the top does not touch over any
+        instance gets no line (full use is the default); a complement
+        whose thinning keeps ZERO slots per period is SKIPPED and said
+        (the top leaves the cell less than one slot — a band question,
+        `set_cell_layer_cap`, not a share), since `set_cell_layer_share`
+        refuses it loudly.
+
+        Each line carries a COLLISION count: a share is a BUDGET (the
+        cell's pattern is thinned to its first floor(s x n_signal) SIGNAL
+        slots per period) and the top's demand sits on SPECIFIC tracks, so
+        the two need not be disjoint.  `collide` is the most tracks, over
+        the cell's instances, that the top holds INSIDE the slots the
+        thinned pattern would keep — zero means the budget is also a
+        reservation there, nonzero is exactly what E1 measures.
+
+        Returns (lines, notes, scope): `lines` are dicts (cell, layer,
+        layer_name, pct, kept, n_sig, worst_inst, worst_pct, n_inst,
+        collide); `notes` are printable strings; `scope` is the list of
+        cells the derivation judged — what `apply` replaces the shares OF,
+        so a scoped cell's share on a layer with no line is a stale one.
+        None when there is no demand to read (no NUTS result)."""
+        rows = self._layer_demand()
+        if rows is None:
+            return None
+        notes = []
+        by_cell = {}
+        for r in rows:
+            by_cell.setdefault(r["cell"], []).append(r)
+        if cells is not None:
+            # An explicit list decides the scope, an EMPTY one included
+            # (no cell — not the default rungs, Codex P2 on #934).
+            scope = list(cells)
+            unknown = [c for c in scope if c not in by_cell]
+            for c in unknown:
+                notes.append(f"cell '{c}': no placed instance — skipped")
+            scope = [c for c in scope if c in by_cell]
+            how = "named"
+        else:
+            marked = sorted(set(self.bdb.bottom_up_cells())) \
+                if self.bdb is not None else []
+            if marked:
+                # The MARKS decide the scope, not the marks that happen
+                # to have demand rows: a mark on a cell with no placed
+                # instance (set_bottom_up accepts one) used to empty this
+                # list and fall through to the bundle-owning cells, so
+                # `apply`/`file` derived — and REMOVED — shares for cells
+                # the documented scope never named (Codex P2 on #934).
+                for c in marked:
+                    if c not in by_cell:
+                        notes.append(f"marked cell '{c}': no placed "
+                                     f"instance — skipped")
+                scope = [c for c in marked if c in by_cell]
+                how = "marked set_bottom_up"
+            else:
+                templates = (getattr(self, "_hier_bundles_orig", None)
+                             or self.bundles)
+                owners = set()
+                for w in templates:
+                    ctx = w.input.original_bundle.cell_context
+                    if ctx:
+                        owners.add(self._bu_cell_of(ctx) or ctx)
+                scope = sorted(c for c in owners if c in by_cell)
+                how = "owning a cell-local bundle"
+        notes.append(f"scope: {len(scope)} cell(s) ({how})"
+                     + (": " + ", ".join(scope) if scope else ""))
+        lines = []
+        for cell in scope:
+            per_layer = {}
+            for r in by_cell[cell]:
+                per_layer.setdefault(r["layer"], []).append(r)
+            for lid in sorted(per_layer):
+                lrows = per_layer[lid]
+                lname = lrows[0]["layer_name"]
+                worst = max(lrows, key=lambda r: r["pct"])
+                if worst["used"] == 0:
+                    continue                # the top takes nothing here
+                pct = int(math.floor(100.0 - worst["pct"]))
+                pat = self.routing_grid.get_layer_grid(lid).global_pattern()
+                n_sig = sum(1 for sl in pat.slots if sl.type == "SIGNAL")
+                kept = int(pct / 100.0 * n_sig + 1e-9)
+                if pct <= 0 or kept == 0:
+                    notes.append(
+                        f"{cell} {lname}: the top leaves {100.0 - worst['pct']:.1f}% "
+                        f"at {worst['inst']} — floor({pct / 100.0:.2f} x {n_sig}) "
+                        f"= 0 slot(s)/period, below the minimum meaningful share "
+                        f"({math.ceil(100.0 / n_sig)}%); no share derived — a "
+                        f"band question (set_cell_layer_cap), not a share")
+                    continue
+                # Collision: the top's tracks that fall INSIDE the slots the
+                # thinned pattern keeps, at the worst instance over the cell.
+                tp = self._thinned_pattern(pat, pct / 100.0)
+                horiz = (self.layers.get_layer_dir(lid)
+                         == buda.LayerDir.HORIZONTAL)
+                comps = {c.name: c for c in self.bdb.all_components()} \
+                    if self.bdb is not None else {}
+                collide, collide_inst = 0, ""
+                for r in lrows:
+                    if not r["used_tracks"]:
+                        continue
+                    c = comps.get(r["inst"])
+                    if c is None:
+                        continue
+                    p_lo, p_hi = (c.y1, c.y2) if horiz else (c.x1, c.x2)
+                    kept_pos = [pos for pos, sl in tp.tracks_in_range(p_lo, p_hi)
+                                if sl.type == "SIGNAL"]
+                    n = sum(1 for u in r["used_tracks"]
+                            if any(abs(u - k) < 1e-6 for k in kept_pos))
+                    if n > collide:
+                        collide, collide_inst = n, r["inst"]
+                lines.append({
+                    "cell": cell, "layer": lid, "layer_name": lname,
+                    "pct": pct, "kept": kept, "n_sig": n_sig,
+                    "worst_inst": worst["inst"], "worst_pct": worst["pct"],
+                    "worst_used": worst["used"], "worst_supply": worst["supply"],
+                    "n_inst": len(lrows),
+                    "collide": collide, "collide_inst": collide_inst,
+                })
+        return lines, notes, scope
+
+    def _report_cell_layer_shares(self, cells=None, apply=False, path=""):
+        """`derive_cell_layer_shares`: print the derivation as a table plus
+        the `set_cell_layer_share` lines as flow-text paste lines; `apply`
+        declares them in this session through the command itself (so the
+        validation, the BDB write-through and the print are the command's),
+        `path` writes them to a file a later session can `source`.
+
+        `apply` makes the derivation THE budget of every cell in scope: a
+        share a scoped cell holds on a layer the derivation emitted no line
+        for — the top no longer touches it, or the new complement keeps
+        zero slots — is REMOVED (declared at 100%, the command's own
+        removal) and said, since leaving it would keep constraining the
+        next plan under a budget this run did not derive (Codex P2 on
+        #934).  A cell outside the scope keeps its shares."""
+        out = self._derive_cell_layer_shares(cells)
+        if out is None:
+            print("Error: derive_cell_layer_shares needs a NUTS result to read "
+                  "the demand off (run_nuts; run_detailed_nuts for exact "
+                  "tracks) — see report_layer_demand")
+            return
+        lines, notes, scope = out
+        det = getattr(self, "detailed_result", None)
+        basis = ("detailed bit tracks" if det is not None
+                 else "abstract bus tracks")
+        print(f"=== Cell layer shares derived from the top's demand ({basis}) "
+              f"===")
+        for n in notes:
+            print(f"  {n}")
+        text = [f"set_cell_layer_share {l['cell']} {l['layer_name']} {l['pct']}"
+                for l in lines]
+        # The derivation is the budget of every cell in scope, so a share a
+        # scoped cell still HOLDS on a layer with no line is a stale one —
+        # an earlier declaration the top's demand no longer supports.  Both
+        # doors remove it: `apply` through the command's own pct-100 path
+        # (session entry and BDB row together), and the FILE as a written
+        # `... 100` line, because a later session opening the SAME BDB
+        # restores the persisted share BEFORE it sources the file, so a
+        # file carrying only the new lines would leave it constraining the
+        # next plan (Codex P2 on #934, both halves).
+        names = {lid: n for n, lid in
+                 getattr(self, "_layer_name_map", {}).items()}
+        emitted = {(l["cell"], l["layer"]) for l in lines}
+        held = getattr(self, "_cell_layer_shares", None) or {}
+        stale = [(c, lid, names.get(lid, f"L{lid}"), held[(c, lid)])
+                 for (c, lid) in sorted(held)
+                 if c in scope and (c, lid) not in emitted]
+
+        def _write(path):
+            # ALWAYS rewrite the requested file, an empty derivation
+            # included: a later session sources it, and a stale file from
+            # an earlier run would hand that session constraints this run
+            # did not derive (Codex P2 on #934).
+            with open(path, "w") as f:
+                f.write("# derive_cell_layer_shares: the complement of the "
+                        f"top's demand ({basis}); source before "
+                        "run_planner hier\n")
+                if not text:
+                    f.write("# nothing to declare: the top takes no track "
+                            "over any instance in scope\n")
+                for t in text:
+                    f.write(t + "\n")
+                if stale:
+                    f.write("# removed: shares held when this was derived "
+                            "that the top's demand no longer supports (a "
+                            "session reopening the same BDB restores them "
+                            "before sourcing this file)\n")
+                for c, lid, lname, was in stale:
+                    f.write(f"set_cell_layer_share {c} {lname} 100"
+                            f"   # was {100.0 * was:g}%\n")
+            print(f"  written to {path}"
+                  + ("" if text else " (header only — no line to declare)")
+                  + (f"; {len(stale)} removal line(s)" if stale else ""))
+
+        def _apply():
+            from buda_cmds import bdb_cmds
+            for l in lines:
+                bdb_cmds.cmd_set_cell_layer_share(
+                    self, "set_cell_layer_share",
+                    [l["cell"], l["layer_name"], str(l["pct"])],
+                    f"set_cell_layer_share {l['cell']} {l['layer_name']} "
+                    f"{l['pct']}")
+            # The stale set above, removed through the command's own
+            # pct-100 path so the BDB row goes with the session entry.
+            for c, lid, lname, was in stale:
+                print(f"  {c} {lname}: share {100.0 * was:g}% held from an "
+                      f"earlier declaration, no line derived now — removed")
+                bdb_cmds.cmd_set_cell_layer_share(
+                    self, "set_cell_layer_share", [c, lname, "100"],
+                    f"set_cell_layer_share {c} {lname} 100")
+            print(f"  applied {len(lines)} share(s) to this session"
+                  + (f"; removed {len(stale)} stale share(s) in scope"
+                     if stale else ""))
+
+        if not lines:
+            print("  nothing to declare: the top takes no track over any "
+                  "instance in scope")
+            if path:
+                _write(path)
+            if apply:
+                _apply()
+            return
+        w_cell = max(len(l["cell"]) for l in lines)
+        w_inst = max([len(l["worst_inst"]) for l in lines] + [14])
+        print(f"  {'cell':<{w_cell}}  layer  share  kept   insts  "
+              f"{'worst instance':<{w_inst}}  worst   collide")
+        for l in lines:
+            print(f"  {l['cell']:<{w_cell}}  {l['layer_name']:<5}  "
+                  f"{l['pct']:>4}%  {l['kept']}/{l['n_sig']:<3}  "
+                  f"{l['n_inst']:>5}  {l['worst_inst']:<{w_inst}}  "
+                  f"{l['worst_pct']:>5.1f}%  {l['collide']}"
+                  + (f" ({l['collide_inst']})" if l['collide'] else ""))
+        n_coll = sum(1 for l in lines if l["collide"])
+        print(f"  {len(lines)} share(s) derived; {n_coll} with the top holding "
+              f"tracks inside the kept slots (a share is a budget, not a "
+              f"reservation — E1 measures what that costs)")
+        print("  --- flow-text lines (declare BEFORE run_planner hier) ---")
+        for t in text:
+            print(f"  {t}")
+        if path:
+            _write(path)
+        if apply:
+            _apply()
