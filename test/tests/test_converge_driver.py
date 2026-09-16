@@ -147,9 +147,11 @@ def test_a_zero_step_is_refused_before_any_session_starts(tmp_path):
                        (["-tag", "-heall"], "-tag needs a value"),
                        (["-out", "-otu"], "-out needs a value"),
                        (["-arms", "-out", "x"], "-arms needs a value"),
-                       # the server IGNORES an unreadable thread request
-                       (["-j", "foo"], "-j takes a positive integer or max"),
-                       (["-j", 0], "-j takes a positive integer or max")]:
+                       # the server IGNORES an unreadable thread request;
+                       # a readable out-of-range one is btcl's to clamp, so
+                       # `-j -3` passes and the LATER arm check is what fires
+                       (["-j", "foo"], "-j takes an integer or max"),
+                       (["-j", -3, "-arms", "nosuch"], "unknown arm 'nosuch'")]:
         if msg is None:
             continue
         r = _tclsh(_DRIVER, "soc", 2, *words, "-out", out, cwd=tmp_path)

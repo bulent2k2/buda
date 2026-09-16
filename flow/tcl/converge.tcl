@@ -129,10 +129,11 @@ if {![string is integer -strict $informed] || $informed < 0} {
 # IGNORES a request it cannot read (prints, keeps the default) — so an
 # unreadable count would run the whole experiment at a concurrency the
 # command line did not ask for (Codex P2 on #935).  btcl's semantics: `max`
-# or a positive integer (the engine clamps it to the machine, LOUD).
-if {$threads ne "" && $threads ne "max"
-    && (![string is integer -strict $threads] || $threads < 1)} {
-    error "converge.tcl: -j takes a positive integer or max, got '$threads'"
+# or an integer, READABLE here and CLAMPED by the engine to [1, max] with
+# its own warning — `-j 0` and `-j -3` are btcl's to clamp, not this
+# driver's to refuse (Codex P2 on #935, round 11).
+if {$threads ne "" && $threads ne "max" && ![string is integer -strict $threads]} {
+    error "converge.tcl: -j takes an integer or max, got '$threads'"
 }
 set arms [lsearch -all -inline -not -exact $arms ""]
 if {![llength $arms]} { error "converge.tcl: -arms names no arm (blind, td, bu)" }
