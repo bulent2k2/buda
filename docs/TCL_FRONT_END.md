@@ -134,6 +134,11 @@ foreach r [buda::query demand cell:sram_cell] {
 # ... the cell may be handed 100 - $worst($layer) on each layer
 ```
 
+That loop is what `buda::derive_cell_layer_shares apply` does for every cell
+in scope (item 4 of the ladder — with the floor, the zero-slot skip and a
+collision count the loop above does not have), so write your own only when the
+policy differs from the complement.
+
 `used` counts tracks, `bits` counts traffic (two foreign buses on the same
 tracks are 16 bits and ~8 tracks), `pct` is `100 * used / supply` at full
 precision (the printed table rounds to one decimal; the query does not, since

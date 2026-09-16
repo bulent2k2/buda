@@ -1314,8 +1314,10 @@ class ReportsMixin:
                 g = self.routing_grid.get_layer_grid(lid)
                 tracks = [pos for pos, _slot in
                           g.signal_tracks_in(0.5 * (a_lo + a_hi), p_lo, p_hi)]
-                used = sum(1 for pos in tracks
-                           if any(lo - eps < pos < hi + eps for lo, hi in union))
+                used_tracks = [pos for pos in tracks
+                               if any(lo - eps < pos < hi + eps
+                                      for lo, hi in union)]
+                used = len(used_tracks)
                 supply = len(tracks)
                 rows.append({
                     "inst": c.name, "cell": c.cell, "depth": c.depth,
@@ -1323,6 +1325,9 @@ class ReportsMixin:
                     "bits": bits, "used": used, "supply": supply,
                     "pct": (100.0 * used / supply) if supply else 0.0,
                     "bundles": len(bundles),
+                    # WHICH tracks (positions), for the share derivation's
+                    # collision check; not part of the Tcl row.
+                    "used_tracks": used_tracks,
                 })
         return rows
 
@@ -1367,3 +1372,184 @@ class ReportsMixin:
                   f"{k} {v['pct']:.1f}% ({v['inst']})"
                   for k, v in sorted(worst.items(),
                                      key=lambda kv: kv[1]["layer"])))
+
+    # ── derive_cell_layer_shares (convergence ladder item 4) ──────────────
+
+    def _derive_cell_layer_shares(self, cells=None):
+        """Turn the demand rows into `set_cell_layer_share` lines: for every
+        cell in scope and every patterned layer, the COMPLEMENT of the
+        worst demand over the cell's instances, floored to a whole percent
+        (a template is solved once and copied everywhere, so the cell gets
+        what its most crowded occurrence leaves).  Rung 4 of the ladder —
+        the budget handed DOWN is derived from the top's own plan instead
+        of guessed.
+
+        Scope, in order: `cells` when given; else the cells marked
+        `set_bottom_up` (the ones about to be solved once and copied —
+        the E1 arm); else every cell owning a cell-local template bundle
+        (a share governs a cell's OWN interconnect, so a cell with none
+        has nothing to budget).  A layer the top does not touch over any
+        instance gets no line (full use is the default); a complement
+        whose thinning keeps ZERO slots per period is SKIPPED and said
+        (the top leaves the cell less than one slot — a band question,
+        `set_cell_layer_cap`, not a share), since `set_cell_layer_share`
+        refuses it loudly.
+
+        Each line carries a COLLISION count: a share is a BUDGET (the
+        cell's pattern is thinned to its first floor(s x n_signal) SIGNAL
+        slots per period) and the top's demand sits on SPECIFIC tracks, so
+        the two need not be disjoint.  `collide` is the most tracks, over
+        the cell's instances, that the top holds INSIDE the slots the
+        thinned pattern would keep — zero means the budget is also a
+        reservation there, nonzero is exactly what E1 measures.
+
+        Returns (lines, notes): `lines` are dicts (cell, layer, layer_name,
+        pct, kept, n_sig, worst_inst, worst_pct, n_inst, collide); `notes`
+        are printable strings.  None when there is no demand to read
+        (no NUTS result)."""
+        rows = self._layer_demand()
+        if rows is None:
+            return None
+        notes = []
+        by_cell = {}
+        for r in rows:
+            by_cell.setdefault(r["cell"], []).append(r)
+        if cells:
+            scope = list(cells)
+            unknown = [c for c in scope if c not in by_cell]
+            for c in unknown:
+                notes.append(f"cell '{c}': no placed instance — skipped")
+            scope = [c for c in scope if c in by_cell]
+            how = "named"
+        else:
+            marked = sorted(set(self.bdb.bottom_up_cells())) \
+                if self.bdb is not None else []
+            marked = [c for c in marked if c in by_cell]
+            if marked:
+                scope, how = marked, "marked set_bottom_up"
+            else:
+                templates = (getattr(self, "_hier_bundles_orig", None)
+                             or self.bundles)
+                owners = set()
+                for w in templates:
+                    ctx = w.input.original_bundle.cell_context
+                    if ctx:
+                        owners.add(self._bu_cell_of(ctx) or ctx)
+                scope = sorted(c for c in owners if c in by_cell)
+                how = "owning a cell-local bundle"
+        notes.append(f"scope: {len(scope)} cell(s) ({how})"
+                     + (": " + ", ".join(scope) if scope else ""))
+        lines = []
+        for cell in scope:
+            per_layer = {}
+            for r in by_cell[cell]:
+                per_layer.setdefault(r["layer"], []).append(r)
+            for lid in sorted(per_layer):
+                lrows = per_layer[lid]
+                lname = lrows[0]["layer_name"]
+                worst = max(lrows, key=lambda r: r["pct"])
+                if worst["used"] == 0:
+                    continue                # the top takes nothing here
+                pct = int(math.floor(100.0 - worst["pct"]))
+                pat = self.routing_grid.get_layer_grid(lid).global_pattern()
+                n_sig = sum(1 for sl in pat.slots if sl.type == "SIGNAL")
+                kept = int(pct / 100.0 * n_sig + 1e-9)
+                if pct <= 0 or kept == 0:
+                    notes.append(
+                        f"{cell} {lname}: the top leaves {100.0 - worst['pct']:.1f}% "
+                        f"at {worst['inst']} — floor({pct / 100.0:.2f} x {n_sig}) "
+                        f"= 0 slot(s)/period, below the minimum meaningful share "
+                        f"({math.ceil(100.0 / n_sig)}%); no share derived — a "
+                        f"band question (set_cell_layer_cap), not a share")
+                    continue
+                # Collision: the top's tracks that fall INSIDE the slots the
+                # thinned pattern keeps, at the worst instance over the cell.
+                tp = self._thinned_pattern(pat, pct / 100.0)
+                horiz = (self.layers.get_layer_dir(lid)
+                         == buda.LayerDir.HORIZONTAL)
+                comps = {c.name: c for c in self.bdb.all_components()} \
+                    if self.bdb is not None else {}
+                collide, collide_inst = 0, ""
+                for r in lrows:
+                    if not r["used_tracks"]:
+                        continue
+                    c = comps.get(r["inst"])
+                    if c is None:
+                        continue
+                    p_lo, p_hi = (c.y1, c.y2) if horiz else (c.x1, c.x2)
+                    kept_pos = [pos for pos, sl in tp.tracks_in_range(p_lo, p_hi)
+                                if sl.type == "SIGNAL"]
+                    n = sum(1 for u in r["used_tracks"]
+                            if any(abs(u - k) < 1e-6 for k in kept_pos))
+                    if n > collide:
+                        collide, collide_inst = n, r["inst"]
+                lines.append({
+                    "cell": cell, "layer": lid, "layer_name": lname,
+                    "pct": pct, "kept": kept, "n_sig": n_sig,
+                    "worst_inst": worst["inst"], "worst_pct": worst["pct"],
+                    "worst_used": worst["used"], "worst_supply": worst["supply"],
+                    "n_inst": len(lrows),
+                    "collide": collide, "collide_inst": collide_inst,
+                })
+        return lines, notes
+
+    def _report_cell_layer_shares(self, cells=None, apply=False, path=""):
+        """`derive_cell_layer_shares`: print the derivation as a table plus
+        the `set_cell_layer_share` lines as flow-text paste lines; `apply`
+        declares them in this session through the command itself (so the
+        validation, the BDB write-through and the print are the command's),
+        `path` writes them to a file a later session can `source`."""
+        out = self._derive_cell_layer_shares(cells)
+        if out is None:
+            print("Error: derive_cell_layer_shares needs a NUTS result to read "
+                  "the demand off (run_nuts; run_detailed_nuts for exact "
+                  "tracks) — see report_layer_demand")
+            return
+        lines, notes = out
+        det = getattr(self, "detailed_result", None)
+        basis = ("detailed bit tracks" if det is not None
+                 else "abstract bus tracks")
+        print(f"=== Cell layer shares derived from the top's demand ({basis}) "
+              f"===")
+        for n in notes:
+            print(f"  {n}")
+        if not lines:
+            print("  nothing to declare: the top takes no track over any "
+                  "instance in scope")
+            return
+        w_cell = max(len(l["cell"]) for l in lines)
+        w_inst = max([len(l["worst_inst"]) for l in lines] + [14])
+        print(f"  {'cell':<{w_cell}}  layer  share  kept   insts  "
+              f"{'worst instance':<{w_inst}}  worst   collide")
+        for l in lines:
+            print(f"  {l['cell']:<{w_cell}}  {l['layer_name']:<5}  "
+                  f"{l['pct']:>4}%  {l['kept']}/{l['n_sig']:<3}  "
+                  f"{l['n_inst']:>5}  {l['worst_inst']:<{w_inst}}  "
+                  f"{l['worst_pct']:>5.1f}%  {l['collide']}"
+                  + (f" ({l['collide_inst']})" if l['collide'] else ""))
+        n_coll = sum(1 for l in lines if l["collide"])
+        print(f"  {len(lines)} share(s) derived; {n_coll} with the top holding "
+              f"tracks inside the kept slots (a share is a budget, not a "
+              f"reservation — E1 measures what that costs)")
+        text = [f"set_cell_layer_share {l['cell']} {l['layer_name']} {l['pct']}"
+                for l in lines]
+        print("  --- flow-text lines (declare BEFORE run_planner hier) ---")
+        for t in text:
+            print(f"  {t}")
+        if path:
+            with open(path, "w") as f:
+                f.write("# derive_cell_layer_shares: the complement of the "
+                        f"top's demand ({basis}); source before "
+                        "run_planner hier\n")
+                for t in text:
+                    f.write(t + "\n")
+            print(f"  written to {path}")
+        if apply:
+            from buda_cmds import bdb_cmds
+            for l in lines:
+                bdb_cmds.cmd_set_cell_layer_share(
+                    self, "set_cell_layer_share",
+                    [l["cell"], l["layer_name"], str(l["pct"])],
+                    f"set_cell_layer_share {l['cell']} {l['layer_name']} "
+                    f"{l['pct']}")
+            print(f"  applied {len(lines)} share(s) to this session")

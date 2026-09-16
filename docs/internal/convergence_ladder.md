@@ -187,7 +187,7 @@ channel — the `pc_0` seat.  "One round" is therefore a measurement, not a
 given; if BUDA needs a second round it is a diagnosed one (E4), and the
 write-up says so.
 
-**Needs.**  ~~The demand query~~ (built: `buda::query demand`, item 3); `derive_cell_layer_shares`.
+**Needs.**  ~~The demand query~~ (built: `buda::query demand`, item 3); ~~`derive_cell_layer_shares`~~ (built, item 4).  Both halves exist; what is left is the loop driver (item 5) and the run.
 
 ### E3 — Pin assignment at scale *(deferred to a partner evaluation)*
 
@@ -285,7 +285,17 @@ every "one round" measured rather than assumed.
    they exist, the abstract placement before (`bits` or `bits+1` per crossing
    bus, by phase — conservative).  -1 before `run_nuts`.
 4. **`derive_cell_layer_shares`** — the complement of that demand, per cell,
-   as `set_cell_layer_share` lines.  This is rung 4.
+   as `set_cell_layer_share` lines.  This is rung 4.  **Done** (2026-09-16):
+   [`derive_cell_layer_shares [apply] [file <path>] [cells ...]`](../script_reference/nuts.md#derive_cell_layer_shares-apply-file-path-cells-ab)
+   — `100 − worst pct` over the cell's instances, floored; scope = named
+   cells, else the `set_bottom_up` marks, else every cell owning a
+   cell-local bundle; a zero-slot complement is skipped and said.  It
+   REPORTS the budget-vs-reservation gap instead of assuming it away: a
+   share thins the cell's pattern to its first `floor(s × n_signal)`
+   slots while the top's demand sits on specific tracks, and `collide` is
+   the top's tracks inside the kept slots (6 of 8 on the two-instance
+   test design).  Whether that gap strands bits at scale is E1's
+   measurement, which is why the count is on every line.
 5. **`flow/tcl/converge.tcl`** — the loop driver: runs the conventional policy
    as a scripted round, counts, and runs the BUDA one-pass, on soc first
    (Q1) with tpu as the control, across the dial.

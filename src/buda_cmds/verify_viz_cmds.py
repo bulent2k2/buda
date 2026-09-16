@@ -181,6 +181,38 @@ def cmd_report_layer_demand(session, cmd, args, cmd_line):
                                  args[1] if len(args) > 1 else "")
 
 
+def cmd_derive_cell_layer_shares(session, cmd, args, cmd_line):
+    # Usage: derive_cell_layer_shares [apply] [file <path>] [cells <a,b,..>]
+    # Convergence ladder item 4 (rung 4): the COMPLEMENT of the top's
+    # measured demand per cell and layer, as `set_cell_layer_share` lines —
+    # the budget handed DOWN derived from the top's own plan rather than
+    # guessed.  Scope: `cells`, else the set_bottom_up-marked cells, else
+    # every cell owning a cell-local bundle.  Prints the derivation (worst
+    # instance, kept slots, a collision count for the top's tracks inside
+    # the kept slots) and the paste lines; `apply` declares them here,
+    # `file` writes them for a later session to `source` — either way
+    # they must be declared BEFORE `run_planner hier`.
+    apply, path, cells = False, "", None
+    toks = list(args)
+    i = 0
+    while i < len(toks):
+        t = toks[i].lower()
+        if t == "apply":
+            apply = True
+        elif t == "file" and i + 1 < len(toks):
+            path = toks[i + 1]; i += 1
+        elif t == "cells" and i + 1 < len(toks):
+            cells = [c for c in toks[i + 1].split(",") if c]; i += 1
+        else:
+            print("Error: usage: derive_cell_layer_shares [apply] "
+                  "[file <path>] [cells <a,b,...>]")
+            return
+        i += 1
+    if path:
+        path = resolve_script_path(session, path)
+    session._report_cell_layer_shares(cells, apply, path)
+
+
 def cmd_check_design(session, cmd, args, cmd_line):
     # Usage: check_design [topo|nuts|dnuts] [all]   (alias: check_connectivity)
     # Design audit at the given stage: connectivity opens, layer-direction
@@ -509,6 +541,7 @@ COMMANDS = {
     "report_wl": cmd_report_wirelength,
     "report_layer_demand": cmd_report_layer_demand,
     "report_demand": cmd_report_layer_demand,
+    "derive_cell_layer_shares": cmd_derive_cell_layer_shares,
     "check_design": cmd_check_design,
     "check_connectivity": cmd_check_design,   # legacy alias (pre-rename)
     "check_template_tracks": cmd_check_template_tracks,
