@@ -24,7 +24,8 @@ import os
 
 import buda_diag
 from buda_session.util import resolve_script_path
-from buda_script import leading_path_and_options
+from buda_script import (leading_path_and_options, split_quoted_args,
+                         unquote)
 
 from ._options import reject_unknown_options
 # NOTE: `buda_viz` is imported LAZILY inside the two visualize handlers below,
@@ -193,7 +194,10 @@ def cmd_derive_cell_layer_shares(session, cmd, args, cmd_line):
     # `file` writes them for a later session to `source` — either way
     # they must be declared BEFORE `run_planner hier`.
     apply, path, cells = False, "", None
-    toks = list(args)
+    # The engine's quote-aware tokenizer, so `file "results run/x.buda"`
+    # is one path — the repository's quoted-path convention (Codex P2 on
+    # #934); `args` is the plain whitespace split.
+    toks = [unquote(t) for t in split_quoted_args(cmd_line)]
     i = 0
     while i < len(toks):
         t = toks[i].lower()

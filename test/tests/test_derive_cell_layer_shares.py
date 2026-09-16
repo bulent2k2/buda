@@ -163,3 +163,16 @@ def test_an_empty_derivation_still_rewrites_the_file(tmp_path):
     s2 = _session()
     _quiet(s2, f"source {path}")
     assert not getattr(s2, "_cell_layer_shares", None)
+
+
+def test_a_quoted_spaced_path_is_one_path(tmp_path):
+    """`file "results run/shares.buda"` is one path under the repository's
+    quoted-path convention; the handler read the whitespace split and took
+    `"results` as the path (Codex P2 on #934)."""
+    s = _session("run_nuts")
+    d = tmp_path / "results run"
+    d.mkdir()
+    path = d / "shares.buda"
+    out = _cmd(s, f'derive_cell_layer_shares file "{path}"')
+    assert "written to" in out and "usage" not in out, out
+    assert "set_cell_layer_share top_cell M6" in path.read_text()
