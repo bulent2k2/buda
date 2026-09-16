@@ -1667,6 +1667,12 @@ class ReportsMixin:
                 f.write("# derive_cell_layer_shares: the complement of the "
                         f"top's demand ({basis}); source before "
                         "run_planner hier\n")
+                # The SCOPE, every cell of it: a driver re-deriving in a
+                # later round must pin the same scope, and a cell the top
+                # took nothing over this round has no line to read it off
+                # (Codex P2 on #935).
+                f.write("# scope: " + (",".join(scope) if scope else "(none)")
+                        + "\n")
                 if not text:
                     f.write("# nothing to declare: the top takes no track "
                             "over any instance in scope\n")

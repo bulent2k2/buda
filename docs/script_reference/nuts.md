@@ -998,6 +998,11 @@ derive_cell_layer_shares file shares.buda   # ...and write them for a later sess
 derive_cell_layer_shares cells sram_cell,tag_cell
 ```
 
+The written file carries a `# scope: <cells>` header naming EVERY cell the
+derivation covered — a cell the top took nothing over has no line, and a
+driver re-deriving next round (`flow/tcl/converge.tcl`) pins the same scope
+by reading the header, not the lines.
+
 Item 4 of the [convergence ladder](../internal/convergence_ladder.md) — rung
 4, the one that does not exist conventionally: the **complement of the top's
 measured demand**, per cell and per layer, as `set_cell_layer_share` lines.

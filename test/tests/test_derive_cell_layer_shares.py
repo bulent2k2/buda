@@ -199,6 +199,24 @@ def test_the_own_need_is_the_admission_demand_not_the_bit_count():
             assert r["own_seat"][2] == 8, r
 
 
+def test_the_file_names_its_whole_scope_not_just_the_cells_with_a_line(tmp_path):
+    """A driver re-deriving next round pins the SAME scope; a cell the top
+    took nothing over this round has no line, so the file's `# scope:`
+    header is where the scope lives (Codex P2 on #935)."""
+    s = _session("run_nuts")
+    path = tmp_path / "shares.buda"
+    _cmd(s, f"derive_cell_layer_shares cells top_cell,leaf file {path}")
+    lines, _, scope = s._derive_cell_layer_shares(["top_cell", "leaf"])
+    assert scope == ["top_cell", "leaf"]
+    with_line = {l["cell"] for l in lines}
+    assert "leaf" not in with_line, lines          # in scope, no line
+    hdr = [ln for ln in path.read_text().splitlines() if ln.startswith("# scope:")]
+    assert hdr == ["# scope: top_cell,leaf"], path.read_text()
+    # an empty scope says so rather than leaving the header out
+    _cmd(s, f"derive_cell_layer_shares cells nosuch file {path}")
+    assert "# scope: (none)" in path.read_text()
+
+
 def test_scope_defaults_to_the_bottom_up_marks_and_cells_narrows():
     s = _session("set_bottom_up top_cell", "run_nuts")
     lines, notes, _ = s._derive_cell_layer_shares()

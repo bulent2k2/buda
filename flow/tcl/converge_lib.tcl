@@ -254,6 +254,33 @@ proc converge::efficiency {rep policy} {
     return [list [expr {int(round($reserved))}] $used $pairs]
 }
 
+# The cells a derivation file was derived FOR, as the `-derive_cells` list
+# a later round pins its scope to.  Read off the file's `# scope:` header,
+# which names every cell in scope — a cell with no line this round (the
+# top took nothing over it) is still in scope next round, and reading the
+# scope off the emitted lines dropped it (Codex P2 on #935).  A file with
+# no header (an older derivation) falls back to the lines.
+proc converge::scope_of {shares_file} {
+    set f [open $shares_file]; set text [read $f]; close $f
+    if {[regexp -line {^# scope: (.*)$} $text -> s]} {
+        set s [string trim $s]
+        return [expr {$s eq "(none)" ? "" : $s}]
+    }
+    set cells [dict create]
+    foreach ln [split $text \n] {
+        if {[regexp {^set_cell_layer_share (\S+) } $ln -> c]} { dict set cells $c 1 }
+    }
+    return [join [dict keys $cells] ,]
+}
+
+# Whether the blind sweep runs ANOTHER round after this one: only while the
+# design is dirty AND the blind arm itself was asked for.  The bu arm needs
+# blind round 1 alone (its measurement); with `-arms bu` the reserved
+# rounds are neither wanted nor cheap (Codex P2 on #935).
+proc converge::blind_more {arms clean} {
+    return [expr {!$clean && "blind" in $arms}]
+}
+
 proc converge::_layer_cmp {a b} {
     regexp {(\d+)$} $a -> na; regexp {(\d+)$} $b -> nb
     return [expr {$na - $nb}]

@@ -55,8 +55,10 @@
 #   -maxreserve N  the blind policy's ceiling (default 4: a band must keep
 #                  an H and a V layer, and the six-layer stack has M2/M3
 #                  under M4..M7)
-#   -informed R    informed rounds per derived arm (default 2)
-#   -arms a,b,c    subset of blind,td,bu (default all)
+#   -informed R    informed rounds per derived arm (default 2; 0 = the
+#                  measurement alone — td's top-down round, bu's blind one)
+#   -arms a,b,c    subset of blind,td,bu (default all; `bu` without `blind`
+#                  runs blind round 1 only, as its measurement)
 #   -nofloor       derive the PURE complement (no own-need floor): the
 #                  derivation's own strawman defence
 #   -out DIR       where logs/reports/tables go (default e1_out beside the
@@ -146,21 +148,11 @@ proc clean {r} {
     return [expr {$ov == 0 && $un == 0 && $vi == 0}]
 }
 
-proc cells_of {shares_file} {
-    set cells [dict create]
-    set f [open $shares_file]
-    foreach ln [split [read $f] \n] {
-        if {[regexp {^set_cell_layer_share (\S+) } $ln -> c]} { dict set cells $c 1 }
-    }
-    close $f
-    return [join [dict keys $cells] ,]
-}
-
 # The informed rounds shared by td and bu: round r sources F_{r-1}, derives
 # F_r for the next, scope pinned to F_0's cells.  Returns the rounds' reports.
 proc informed_rounds {prefix size f0} {
     global informed nofloor
-    set cells [cells_of $f0]
+    set cells [converge::scope_of $f0]
     set rounds {}
     set prev $f0
     for {set r 1} {$r <= $informed} {incr r} {
@@ -223,7 +215,7 @@ foreach size $sizes {
             row $size blind $k "reserve $reserve" $rep [expr {$reserve > 0 ? $rep : ""}]
             lappend blind_rounds $rep
             incr solved [lindex [dict get $rep marks] 0]
-            if {[clean $rep]} { break }
+            if {![converge::blind_more $arms [clean $rep]]} { break }
             incr k
         }
         if {"blind" in $arms} {
@@ -250,7 +242,8 @@ foreach size $sizes {
             incr solved [lindex [dict get $rep marks] 0]
             incr r
         }
-        set last [lindex $rounds end]
+        # `-informed 0`: the endpoint is the top-down round itself
+        set last [expr {[llength $rounds] ? [lindex $rounds end] : $td0}]
         lappend summary [list $size td [expr {1 + [llength $rounds]}] $solved \
                              [expr {[clean $last] ? "clean" : "dirty"}] \
                              [join [dict get $last verdict] /]]
@@ -268,7 +261,8 @@ foreach size $sizes {
             incr solved [lindex [dict get $rep marks] 0]
             incr r
         }
-        set last [lindex $rounds end]
+        # `-informed 0`: the endpoint is the blind measurement itself
+        set last [expr {[llength $rounds] ? [lindex $rounds end] : $blind1}]
         lappend summary [list $size bu [expr {1 + [llength $rounds]}] $solved \
                              [expr {[clean $last] ? "clean" : "dirty"}] \
                              [join [dict get $last verdict] /]]

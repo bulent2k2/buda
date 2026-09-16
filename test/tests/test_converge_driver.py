@@ -138,6 +138,59 @@ def test_a_zero_step_is_refused_before_any_session_starts(tmp_path):
         assert not list(out.glob("*.log")) if out.exists() else True
 
 
+def test_zero_informed_rounds_summarize_the_measurement_itself(tmp_path):
+    """`-informed 0` is legal: td's endpoint is its top-down round, bu's the
+    blind measurement — the summary used to read an empty round list
+    (Codex P2 on #935).  With `bu` and not `blind`, the blind sweep is
+    round 1 alone and the summary carries no blind row."""
+    out = tmp_path / "e1"
+    r = _tclsh(_DRIVER, "soc", 2, "-arms", "td,bu", "-informed", 0,
+               "-out", out, cwd=tmp_path)
+    assert r.returncode == 0, r.stdout[-3000:] + r.stderr[-3000:]
+    table = (out / "e1_soc_healerless_step1.md").read_text()
+    summ = {ln.split("|")[2].strip(): [c.strip() for c in ln.split("|")[1:-1]]
+            for ln in table.splitlines()
+            if re.match(r"\| 2 \| (blind|td|bu) \|", ln)}
+    assert set(summ) == {"td", "bu"}, table
+    assert summ["td"][2] == "1" and summ["bu"][2] == "1", summ
+    assert all(v[4] in ("clean", "dirty") for v in summ.values())
+    # exactly the two sessions: blind r1 (bu's measurement) and td r0
+    assert sorted(p.name for p in out.glob("*.rep")) == \
+        ["soc2_blind_r1.rep", "soc2_td_r0.rep"], list(out.iterdir())
+
+
+def test_the_lib_reads_a_scope_and_decides_the_blind_sweep(tmp_path):
+    """`converge::scope_of` reads the derivation file's `# scope:` header —
+    a cell with no line is still in scope — and falls back to the lines on
+    a header-less file; `converge::blind_more` runs another blind round
+    only while dirty AND the blind arm is selected."""
+    hdr = tmp_path / "hdr.buda"
+    hdr.write_text("# derive_cell_layer_shares: ...\n# scope: a_cell,b_cell,c_cell\n"
+                   "set_cell_layer_share a_cell M6 75\n")
+    old = tmp_path / "old.buda"
+    old.write_text("set_cell_layer_share a_cell M6 75\n"
+                   "set_cell_layer_share a_cell M7 50\n"
+                   "set_cell_layer_share b_cell M6 60\n")
+    none = tmp_path / "none.buda"
+    none.write_text("# scope: (none)\n")
+    script = f"""
+        source {_ROOT / 'flow' / 'tcl' / 'converge_lib.tcl'}
+        puts [converge::scope_of {hdr}]
+        puts [converge::scope_of {old}]
+        puts "<[converge::scope_of {none}]>"
+        puts [list [converge::blind_more {{blind td bu}} 0] \
+                   [converge::blind_more {{blind td bu}} 1] \
+                   [converge::blind_more {{bu}} 0] \
+                   [converge::blind_more {{td bu}} 1]]
+    """
+    tcl = tmp_path / "lib.tcl"
+    tcl.write_text(script)
+    r = _tclsh(tcl, cwd=tmp_path)
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.splitlines() == ["a_cell,b_cell,c_cell", "a_cell,b_cell",
+                                     "<>", "1 0 0 0"], r.stdout
+
+
 def test_the_driver_runs_the_three_arms_and_writes_the_table(tmp_path):
     out = tmp_path / "e1"
     r = _tclsh(_DRIVER, "soc", 2, "-informed", 1, "-maxreserve", 2,
