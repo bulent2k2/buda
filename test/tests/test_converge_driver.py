@@ -128,12 +128,21 @@ def test_the_shares_govern_the_next_session(tmp_path):
 def test_a_zero_step_is_refused_before_any_session_starts(tmp_path):
     """The blind loop steps `reserve` by `-step` until it passes
     `-maxreserve`; a zero step would re-run the same dirty round forever
-    (Codex P2 on #935).  Refused up front, with the other two loop bounds."""
+    (Codex P2 on #935).  Refused up front, with the other two loop bounds,
+    an `-arms` naming no arm (it wrote an empty table and exited 0), and a
+    value-taking option with nothing after it."""
     out = tmp_path / "e1"
     for words, msg in [(["-step", 0], "-step takes a positive integer"),
                        (["-step", "x"], "-step takes a positive integer"),
                        (["-maxreserve", -1], "-maxreserve takes a non-negative"),
-                       (["-informed", -1], "-informed takes a non-negative")]:
+                       (["-informed", -1], "-informed takes a non-negative"),
+                       (["-arms", ""], "-arms needs a value"),
+                       (["-arms", ","], "-arms names no arm"),
+                       (["-arms", "td,"], None),           # a stray comma is fine
+                       (["-arms"], "-arms needs a value"),
+                       (["-step"], "-step needs a value")]:
+        if msg is None:
+            continue
         r = _tclsh(_DRIVER, "soc", 2, *words, "-out", out, cwd=tmp_path)
         assert r.returncode != 0 and msg in r.stderr, (words, r.stderr[-500:])
         assert not list(out.glob("*.log")) if out.exists() else True

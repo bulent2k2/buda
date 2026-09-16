@@ -87,6 +87,13 @@ while {$i < $argc} {
     set a [lindex $argv $i]
     if {[string is integer -strict $a]} { lappend sizes $a; incr i; continue }
     set v [lindex $argv [expr {$i + 1}]]
+    # Every option below `-nofloor` takes a value: a trailing option, or an
+    # empty word after it, must not read as "given" (an empty `-arms`
+    # passed validation and wrote an empty table — Codex P2 on #935).
+    set opts {-heal -nofloor -step -maxreserve -informed -arms -out -tag -j}
+    if {$a ni {-heal -nofloor} && ([string trim $v] eq "" || $v in $opts)} {
+        error "converge.tcl: $a needs a value"
+    }
     switch -- $a {
         -heal       { set heal 1; incr i }
         -nofloor    { set nofloor 1; incr i }
@@ -113,6 +120,8 @@ if {![string is integer -strict $maxreserve] || $maxreserve < 0} {
 if {![string is integer -strict $informed] || $informed < 0} {
     error "converge.tcl: -informed takes a non-negative integer, got '$informed'"
 }
+set arms [lsearch -all -inline -not -exact $arms ""]
+if {![llength $arms]} { error "converge.tcl: -arms names no arm (blind, td, bu)" }
 foreach a $arms { if {$a ni {blind td bu}} { error "converge.tcl: unknown arm '$a'" } }
 file mkdir $out
 set script [file join $repo flow tcl $vehicle.tcl]
