@@ -989,7 +989,7 @@ demand that was never computed is not a demand of zero).  A layer without a
 cell's LOW layers are its own keepout, so their supply there is 0.  An unknown
 layer name is an error; an instance filter matching nothing prints that.
 
-### `derive_cell_layer_shares [apply] [file <path>] [cells <a,b,...>]`
+### `derive_cell_layer_shares [apply] [file <path>] [cells <a,b,...>] [nofloor]`
 
 ```
 derive_cell_layer_shares                    # print the derivation + paste lines
@@ -1023,6 +1023,26 @@ filter: marks naming only instance-less cells (`set_bottom_up` accepts a
 defined cell with no instance) give an empty scope, each such mark said,
 never the next rung's cells — which matters once `apply` removes shares.
 The scope and its reason are printed.
+
+**The complement is floored by the cell's own need.**  A share thins the
+pattern *uniformly*, so a bus of the cell's own that needs N of the P tracks
+in its seat cannot live under a share keeping fewer than N/P of them.  For
+every line the derivation finds the worst OWN seat over the cell's instances
+— its subtree included, since the thinned pattern is installed over the
+instance's bbox for the DNUTS reference solve, so a nested cell's buses see
+the enclosing cell's thinning too — by the DNUTS admission arithmetic
+(member bits against the span-clear pool of the seat this plan gave the
+bus), and raises the share to the smallest slot count that hosts it, said
+on the line (`own` column, `F` when it floored).  Where that is every slot
+the layer gets **no line** (full use) and the note says what the top wanted
+there: a uniform share cannot hand the top a complement the block's own
+buses need too — that wants a positional reservation, which is not a share.
+E1 measured the unfloored derivation stranding **410 bits at NQ = 2** where
+a blind round strands 8, every one of them a core's 32-bit bus in a
+35-track seat under its cluster's 71 % M5 share.  The floor is a lower
+bound, read off the abstract seats: the seat a cell-local solve gives the
+same bus can be narrower, and E1's tables show what that costs.  `nofloor`
+derives the pure complement (the study control).
 
 **A share is a budget, not a reservation**, and the table says how far the
 two are apart: the cell's pattern is thinned to its first

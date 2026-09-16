@@ -1,0 +1,312 @@
+# E1 — Blind bottom-up vs derived budget
+
+*Experiment E1 of the [Convergence Ladder](convergence_ladder.md), run and
+written up 2026-09-16.  Driver: [`flow/tcl/converge.tcl`](../../flow/tcl/converge.tcl)
+(ladder item 5) over the vehicle hooks in
+[`converge_lib.tcl`](../../flow/tcl/converge_lib.tcl); construction guarded by
+`test/tests/test_converge_driver.py` (mid tier, NQ = 2).  No picture: the
+finding is about rounds and reservations, not about a route.*
+
+## The claim being tested
+
+Handing a block the **complement of the top's measured demand** converges in
+one informed round; handing it nothing converges in R blind rounds, with R
+growing with instance count.  The metric is rounds to a clean endpoint, the
+effort spent (template classes solved), the endpoint reached, and the
+**reservation efficiency** — tracks reserved over the blocks against tracks
+the top actually used there.
+
+## The result, in one paragraph
+
+**The claim is refuted for the primitive as built, and the reason is
+measured.**  The blind policy (`reserve_top_layers`, one layer per round)
+reaches a clean endpoint in **three rounds** at NQ = 2, 4 and 16 with
+healers off, and in **one round** at every size with the vehicle's own
+healing — reserving 5 to 8 tracks for every track the top used.  The
+derived budget (`derive_cell_layer_shares` → `set_cell_layer_share`) reaches
+a clean endpoint in **no round** with healers off, at any size, and does
+not improve on the blind round it was derived from; with healers on it
+heals to the same endpoint the blind round heals to, at the same cost.  A
+`set_cell_layer_share` is a **uniform** budget — the first `floor(s ×
+n_signal)` slots of every period, over the whole instance — and the top's
+demand is **positional**; the block's own buses fill their seats to 89–100
+% on the layers the top wants, so the floor the derivation must respect
+leaves those layers at full use, and what it can hand the top elsewhere the
+top does not need.  Rung 4 wants a positional reservation, which is E5's
+primitive, not a share.
+
+## Construction
+
+**Vehicle.**  `soc.tcl` at NQ = 2, 4, 8, 16 (4 / 8 / 16 / 32 clusters; 63 /
+127 / 255 / 511 leaf instances; 95 / 183 / 359 / 711 buses), the ladder's
+lead vehicle (Q1); `tpu.tcl` at N = 8, 16 as the control.  Every session is
+one run of the vehicle through five hooks the driver passes
+(`-reserve N`, `-shares FILE`, `-derive FILE`, `-noheal`, `-report FILE`),
+so an arm is a *sequence of ordinary vehicle runs* and the report each one
+leaves (both verdicts, marks, the reserve, the derived lines, one demand
+row per instance and layer) is what the tables are built from.
+
+**The three arms**, each a loop until clean or out of moves:
+
+| arm | round 1 | round k | what it is |
+|---|---|---|---|
+| **blind** | the block routes freely (`set_bottom_up *`, every eligible cell solved once and copied), is frozen, the top routes against it | the policy takes the block's highest layers away — `reserve_top_layers step·(k−1)` — and every instance is re-spun | rung 0, then rung 3: the industry's information flow |
+| **td** | plan the whole design **top-down** once; read the per-instance per-layer demand; write every cell the complement as a share | solve every template once under the shares, copy, route the top; re-derive from the result for the next round | rung 4 as the ladder wrote it |
+| **bu** | the blind round 1 **is** the measurement: it routed the top against the frozen blocks, so its demand rows are the top's demand on this geometry | the informed round: templates under the shares derived from round 1, then re-derive | the diagnosed loop (E4): rung 0, then rung 4 |
+
+`bu`'s round 1 and `blind`'s round 1 are the same session (one run, reported
+in the blind rows).  Two informed rounds per derived arm; a second round
+re-derives from the first with the scope pinned to the first file's cells.
+
+**The blind policy's parameter** is the step — layers given up per round —
+swept at 1 and 2, and its ceiling is 4 (a band must keep an H and a V layer;
+the stack is M2..M7).
+
+**What a share can and cannot say.**  `set_cell_layer_share C L p` thins
+`C`'s pattern on `L` to its first `floor(p/100 × n_signal)` SIGNAL slots per
+period, over the whole instance, for `C`'s own solve and every nested cell's
+(the thinned view is installed over the instance's bbox).  The derivation
+takes `100 − worst top demand` over the cell's instances, then **floors it
+by the cell's own need**: the worst own seat over its instances (subtree
+included) by the DNUTS admission arithmetic — a bus needing N of the P
+tracks in its seat cannot live under a share keeping fewer than N/P of
+them.  Where the block needs every slot, the layer gets no line (full use)
+and the note says what the top wanted there.  This floor was **added by
+this experiment**: the first derived round, without it, stranded **410 bits
+at NQ = 2** where the blind round strands 8 — every one a core's 32-bit bus
+in a 35-track seat under its cluster's 71 % M5 share.  `nofloor` keeps the
+pure complement as the study control.
+
+**Reservation efficiency** is read off the last round's demand rows: for
+every (instance, layer) pair carrying a reservation, *reserved* is the
+tracks the policy takes from the block (every track of a reserved layer;
+`1 − kept/n_signal` of the supply under a share) and *used* is every track
+the top placed over that instance on that layer, inside or outside the
+reserved slots.  reserved ÷ used > 1 is padding.
+
+**Judge.**  `check_design`, the same audit on every arm — the ladder's
+independent geometric audit (build item 2) does not exist yet, as E2's
+write-up also says.  A parenthesised wirelength excludes stranded bits and
+is not comparable to a complete route.
+
+## Results — healers off (the plain pipeline's verdict)
+
+`ovl/unpl/viol` = NUTS overlaps / DetailedNUTS unplaced bits / audit
+violations.  `classes` = template classes solved that round (every session
+marks the same 18 cells).  The first audit and the final verdict coincide
+here, since nothing heals.
+
+| size | arm | round | policy | final ovl/unpl/viol | detailed WL | reserved | used | reserved ÷ used | s |
+|---|---|---|---|---|---|---|---|---|---|
+| 2 | blind | 1 | reserve 0 | 1/8/8 | (584,581) | — | — | — | 1.8 |
+| 2 | blind | 2 | reserve 1 | 1/8/8 | (584,581) | 4,157 | 152 | 27.35 | 1.6 |
+| 2 | blind | 3 | reserve 2 | **0/0/0** | 527,039 | 10,612 | 1,340 | 7.92 | 1.5 |
+| 2 | td | 0 | top-down | 0/0/0 | 525,144 | — | — | — | 1.8 |
+| 2 | td | 1 | shares r0 | 2/296/296 | (539,487) | 1,140 | 381 | 2.99 | 1.8 |
+| 2 | td | 2 | shares r1 | 2/8/8 | (582,159) | 1,121 | 265 | 4.23 | 1.8 |
+| 2 | bu | 1 | shares r0 | 1/8/8 | (586,220) | 3,722 | 1,259 | 2.96 | 1.8 |
+| 2 | bu | 2 | shares r1 | 1/8/8 | (586,220) | 3,722 | 1,259 | 2.96 | 1.8 |
+| 4 | blind | 1 | reserve 0 | 5/117/117 | (980,908) | — | — | — | 3.5 |
+| 4 | blind | 2 | reserve 1 | 4/45/45 | (1,002,666) | 7,851 | 782 | 10.04 | 3.0 |
+| 4 | blind | 3 | reserve 2 | **0/0/0** | 945,980 | 20,087 | 3,947 | 5.09 | 2.9 |
+| 4 | td | 0 | top-down | 1/16/16 | (993,477) | — | — | — | 3.8 |
+| 4 | td | 1 | shares r0 | 4/101/101 | (914,410) | 3,142 | 313 | 10.04 | 3.7 |
+| 4 | td | 2 | shares r1 | 4/45/45 | (989,472) | 2,121 | 552 | 3.84 | 3.6 |
+| 4 | bu | 1 | shares r0 | 5/117/117 | (981,590) | 9,194 | 2,443 | 3.76 | 3.6 |
+| 4 | bu | 2 | shares r1 | 5/117/117 | (981,590) | 9,194 | 2,443 | 3.76 | 3.7 |
+| 8 | blind | 1 | reserve 0 | 6/93/93 | (2,012,407) | — | — | — | 8.7 |
+| 8 | blind | 2 | reserve 1 | 8/85/85 | (1,949,459) | 15,265 | 1,453 | 10.51 | 6.6 |
+| 8 | blind | 3 | reserve 2 | 1/8/8 | (1,847,877) | 39,067 | 8,077 | 4.84 | 6.4 |
+| 8 | blind | 4 | reserve 3 | 0/**1444**/1444 | (1,851,256) | 65,223 | 10,385 | 6.28 | 6.5 |
+| 8 | blind | 5 | reserve 4 | 16/520/520 | (1,842,234) | 83,210 | 10,385 | 8.01 | 6.2 |
+| 8 | td | 0 | top-down | 2/40/40 | (1,871,476) | — | — | — | 8.3 |
+| 8 | td | 1 | shares r0 | 8/88/88 | (1,892,125) | 6,849 | 1,414 | 4.84 | 9.0 |
+| 8 | td | 2 | shares r1 | 13/96/96 | (1,891,981) | 7,393 | 1,459 | 5.07 | 8.7 |
+| 8 | bu | 1 | shares r0 | 11/109/109 | (1,955,348) | 18,469 | 5,013 | 3.68 | 8.4 |
+| 8 | bu | 2 | shares r1 | 11/109/109 | (1,955,348) | 18,272 | 5,013 | 3.64 | 8.8 |
+| 16 | blind | 1 | reserve 0 | 11/336/336 | (4,274,800) | — | — | — | 23.7 |
+| 16 | blind | 2 | reserve 1 | 15/203/203 | (4,357,598) | 30,015 | 3,370 | 8.91 | 16.7 |
+| 16 | blind | 3 | reserve 2 | **0/0/0** | 3,757,248 | 76,965 | 16,808 | 4.58 | 16.0 |
+| 16 | td | 0 | top-down | 3/32/32 | (3,677,304) | — | — | — | 25.3 |
+| 16 | td | 1 | shares r0 | 19/187/187 | (4,357,918) | 13,266 | 1,822 | 7.28 | 23.9 |
+| 16 | td | 2 | shares r1 | 21/203/203 | (4,290,792) | 14,471 | 2,723 | 5.31 | 24.0 |
+| 16 | bu | 1 | shares r0 | 12/368/368 | (4,222,602) | 38,950 | 11,667 | 3.34 | 24.6 |
+| 16 | bu | 2 | shares r1 | 12/368/368 | (4,222,602) | 38,902 | 11,667 | 3.33 | 24.3 |
+
+| size | arm | rounds | classes solved | endpoint |
+|---|---|---|---|---|
+| 2 | blind | 3 | 54 | clean |
+| 2 | td | 1 + 2 | 36 | dirty, 2/8/8 |
+| 2 | bu | 1 + 2 | 54 | dirty, 1/8/8 |
+| 4 | blind | 3 | 54 | clean |
+| 4 | td | 1 + 2 | 36 | dirty, 4/45/45 |
+| 4 | bu | 1 + 2 | 54 | dirty, 5/117/117 |
+| 8 | blind | 5 | 90 | **dirty**, 16/520/520 (best round: 1/8/8 at reserve 2) |
+| 8 | td | 1 + 2 | 36 | dirty, 13/96/96 |
+| 8 | bu | 1 + 2 | 54 | dirty, 11/109/109 |
+| 16 | blind | 3 | 54 | clean |
+| 16 | td | 1 + 2 | 36 | dirty, 21/203/203 |
+| 16 | bu | 1 + 2 | 54 | dirty, 12/368/368 |
+
+## Results — healers on (`soc_lib`'s heal-if-dirty in every round)
+
+HEALED_TABLE
+
+## The blind policy's step (healers off, blind arm only)
+
+The step is the policy's own parameter, swept to its best before the
+comparison is read (the ladder's strawman defence).  Step 2 goes straight to
+`reserve 2`:
+
+| size | round | policy | final ovl/unpl/viol | detailed WL | reserved ÷ used |
+|---|---|---|---|---|---|
+| 2 | 1 | reserve 0 | 1/8/8 | (584,581) | — |
+| 2 | 2 | reserve 2 | **0/0/0** | 527,039 | 7.92 |
+| 4 | 1 | reserve 0 | 5/117/117 | (980,908) | — |
+| 4 | 2 | reserve 2 | **0/0/0** | 945,980 | 5.09 |
+| 8 | 1 | reserve 0 | 6/93/93 | (2,012,407) | — |
+| 8 | 2 | reserve 2 | 1/8/8 | (1,847,877) | 4.84 |
+| 8 | 3 | reserve 4 | 16/520/520 | (1,842,234) | 8.01 |
+| 16 | 1 | reserve 0 | 11/336/336 | (4,274,800) | — |
+| 16 | 2 | reserve 2 | **0/0/0** | 3,757,248 | 4.58 |
+
+Two rounds instead of three at NQ = 2, 4 and 16 — the same endpoint, the
+same reservation, one useless round (`reserve 1`) skipped — and the same
+failure at NQ = 8.  So the blind policy at its best is **two rounds and a
+5–8× reservation**, and that is the number the derived budget had to beat.
+
+## The control — `tpu.tcl` (healers off)
+
+The mesh, where the top's demand is uniform by construction (every row's
+buses cross every row the same way):
+
+| size | arm | round | policy | final ovl/unpl/viol | detailed WL | reserved | used | reserved ÷ used |
+|---|---|---|---|---|---|---|---|---|
+| 8 | blind | 1 | reserve 0 | 0/0/0 | 550,528 | — | — | — |
+| 8 | td | 0 | top-down | 0/0/0 | 197,376 | — | — | — |
+| 8 | td | 1 | shares r0 | 0/0/0 | 550,528 | 2,430 | 2,048 | 1.19 |
+| 8 | bu | 1 | shares r0 | 0/0/0 | 550,528 | 2,376 | 2,112 | 1.12 |
+| 16 | blind | 1 | reserve 0 | 0/0/0 | 2,174,208 | — | — | — |
+| 16 | td | 0 | top-down | 0/0/0 | 738,816 | — | — | — |
+| 16 | td | 1 | shares r0 | 0/0/0 | 2,174,208 | 9,660 | 8,192 | 1.18 |
+| 16 | bu | 1 | shares r0 | 0/0/0 | 2,174,208 | 9,552 | 8,320 | 1.15 |
+
+Every arm is clean in its first round (`tpu.tcl -bottomup` is clean to
+N = 32, as its page says), so there are no rounds to count; what the
+control measures is the *reservation*: the derived share reserves
+**1.12–1.19×** what the top uses, and the route under it is byte-identical
+in wirelength to the unconstrained one.  (The top-down row's wirelength is
+a different geometry, not a different route: `-bottomup` snaps the row
+pitch onto the track period, as `tpu.tcl` documents.)
+
+## What the tables say
+
+1. **The blind band policy converges; the derived share does not.**  With
+   healers off, `reserve_top_layers 2` — the top pair for the top level,
+   everything below capped at M5 — is clean in the third round at NQ = 2, 4
+   and 16.  Neither derived arm reaches a clean endpoint at any size in
+   either of its informed rounds, and at NQ = 4, 8 and 16 the informed
+   round strands **more** than the round it was derived from (td: 16 → 101,
+   40 → 88, 32 → 187; bu: 117 → 117, 93 → 109, 336 → 368).  The
+   hypothesis — one informed round against R blind ones — is refuted for
+   `set_cell_layer_share` as the rung-4 primitive.
+
+2. **The informed loop reaches a fixpoint at once, and it is the wrong
+   one.**  In the `bu` arm the second derivation reproduces the first
+   (identical shares, identical route, identical verdict at every size):
+   the derived budget is self-consistent after one round.  It is just not
+   clean.  In the `td` arm the second round moves (the top-down demand and
+   the frozen-block demand differ), and lands where the blind round 2
+   lands at NQ = 2 and 4 (2/8/8 and 4/45/45 — the same counts as
+   `reserve 1`).
+
+3. **Why: a share is uniform, the demand is positional, and the block
+   already fills its seats.**  The derivation's notes name it at every
+   size.  On M5 and M6 — the layers the top wants — the cluster's, the
+   core's, the l1's and the l2's own 32-bit buses need 32 of the 32–36
+   tracks in their seats (89–100 %), so the floor leaves those layers at
+   **full use** and the top gets nothing there; what the derivation can
+   still hand the top is M2/M4/M7 on the cluster and M5–M7 on the io block,
+   which is not where the stranding is.  The `collide` column said the
+   same thing the other way round on the two-instance test design (6 of
+   the top's 8 tracks inside the kept slots): the top's tracks sit at
+   specific positions, a share removes the *last* slots of every period,
+   and the two need not meet.  Without the floor (the `nofloor` control)
+   the shares that would have handed the top its complement strand the
+   block's own buses instead — 410 bits at NQ = 2 against the blind
+   round's 8 — which is worse, not better.
+
+4. **The blind policy pays for its convergence in reservation.**  At the
+   clean round it reserves **7.9× / 5.1× / 4.6×** the tracks the top used
+   (NQ = 2 / 4 / 16), and its intermediate round reserves 9–27×.  The
+   derived budgets reserve 3–7×: tighter, and useless.  Reservation
+   efficiency is only worth reading on a clean route, and the derived arms
+   never have one.
+
+5. **The blind policy is not monotone either, and at NQ = 8 it never
+   converges.**  `reserve 2` leaves the E4 fault (1/8/8 — one 8-bit seat),
+   `reserve 3` caps the blocks at M4 and strands **1,444** bits of their
+   own buses (24 seats with zero M2 tracks for 32-bit buses), `reserve 4`
+   strands 520.  The policy's only knob overshoots the fault it cannot
+   see, exactly the E4 shape: a loop that sees a count has to sweep, and
+   this one has nowhere left to sweep.
+
+6. **The step does not rescue it.**  Step 2 reaches the same clean
+   endpoint in two rounds where step 1 took three, at the same 5–8×
+   reservation, and fails at NQ = 8 the same way (reserve 4 strands 520).
+   The policy's best is two rounds; the derived budget needed to beat
+   two, and did not reach clean at all.
+
+7. **Healing makes every arm equal.**  HEALED_FINDING
+
+## What the tables do not say
+
+- **That rung 4 is wrong — only that a share is not rung 4.**  The ladder's
+  row says "derived `set_cell_layer_share` per cell + `hier.locked` copies
+  as track-level keepouts", and the share is the half that exists.  What
+  the top's demand asks the block for is *these tracks over this region*,
+  and the primitive that says that is a positional reservation — the
+  corridor E5 needs.  The derivation now reports, per cell and layer,
+  exactly where a share cannot express the complement (the "positional
+  reservation" notes), which is the specification for that primitive.
+- **That the floor is exact.**  It is read off the abstract seats, and the
+  seat a cell-local solve gives the same bus can be narrower (the cluster's
+  own 32-bit bus sat in an 86-track seat top-down and a 35-track seat in
+  its template; the subtree rule catches the cores' seats, which is what
+  took the informed round from 410 to 296 stranded at NQ = 2, not to 8).
+  A floor read off a cell-local solve would be exact and would say "full
+  use" on still more layers.
+- **Anything judged by an independent audit** (build item 2 is still not
+  built; every row is `check_design`'s, the same audit on every arm).
+- **What the control shows is the mechanism working where its premise
+  holds.**  On the mesh the top's demand over a row IS uniform, so a
+  uniform share expresses it: the derived budget reserves 1.12–1.19× what
+  the top uses against the SoC's 3–7×, and costs the block nothing.  The
+  SoC's demand is positional and the mesh's is not; the primitive fits one
+  and not the other.  The control has no rounds to compare because every
+  arm is clean in its first, so it says nothing about convergence.
+
+## What it contributes to the ladder
+
+E1 was the experiment that would show rung 4 converging in one informed
+round.  It shows the opposite for the primitive the rung was written
+against, and it shows *why* with the tool's own numbers: the block's own
+buses occupy their seats to within a track, so a per-layer fraction has no
+room to be both the block's budget and the top's reservation.  The blind
+band policy converges because it is coarse — a whole layer is a positional
+reservation of a kind — and pays 5–8× for it.  The informed loop's one
+virtue survives: it is self-consistent after one round (the `bu` fixpoint),
+which is what a positional derivation will need too.  The build order
+changes accordingly: the corridor primitive (E5's "positioned corridor",
+`add_grid_override` standing in) moves ahead of the fixed-pin work, and E1
+is re-run against it.
+
+## Provenance
+
+- `flow/tcl/converge.tcl soc 2 4 8 16 -out run -j 2` (healers off, step 1);
+  `… -heal -out runh -j 2` (healed); `… -step 2 -arms blind -out run2`
+  (the step sweep); `flow/tcl/converge.tcl tpu 8 16 -out runt` (the
+  control).  Each writes `e1_<vehicle>_<heal>_step<N>.md` and one
+  `.log`/`.rep` pair per session.
+- Engine at the merge of #934 plus this change (the own-need floor,
+  `nofloor`, the hooks and the driver).  `BUDA_THREADS_REQUEST=2`.

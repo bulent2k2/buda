@@ -21,6 +21,7 @@
 #   btcl flow/tcl/tpu.tcl 4 -PEW 80 -PPX 110 -PW 32 -PIPE 4
 #   btcl flow/tcl/tpu.tcl 8 -dry                # print the size, build nothing
 #   btcl flow/tcl/tpu.tcl 8 -emit flow/tpu      # write tpu.v/.def/.lef, stop
+#   btcl flow/tcl/tpu.tcl 8 -derive s.buda      # E1 hooks: converge_lib.tcl
 #
 # EVERY knob in `tpu_vehicle::configure` is settable as `-<NAME> <value>`
 # (N, PEW/PEH, PPX/PPY, ROWM/ROWGAP, EDGEW/EDGEH/EDGEGAP, X0/Y0, AW/PW/WW,
@@ -38,6 +39,7 @@
 set repo [file dirname [file dirname [file dirname [file normalize [info script]]]]]
 source [file join $repo tools buda.tcl]
 source [file join $repo flow tcl tpu_lib.tcl]
+source [file join $repo flow tcl converge_lib.tcl]
 
 # ── the command line ──────────────────────────────────────────────────────
 # A bare leading integer is N (the common case); everything else is
@@ -64,6 +66,9 @@ while {$argi < $argc} {
             incr argi 2
         }
         default {
+            # The E1 hooks — converge_lib.tcl, shared with soc.tcl.
+            set n [converge::opt $argv $argi]
+            if {$n} { incr argi $n; continue }
             if {[string index $opt 0] ne "-"} {
                 error "tpu.tcl: unexpected argument '$opt' (N comes first)"
             }
@@ -102,9 +107,11 @@ if {$bottomup} {
     # Mark BEFORE deriving busterms: `align_bottom_up` nudges instances onto
     # a shared track phase and must run while the floorplan is still the
     # only thing that has been derived from these coordinates.
-    buda::set_bottom_up row_cell
+    converge::mark row_cell
     buda::align_bottom_up
 }
+# The E1 budget, if the driver handed one down (see converge_lib.tcl).
+converge::policy
 
 tpu_vehicle::derive_interface
 tpu_vehicle::load_blocks
@@ -129,8 +136,11 @@ if {$bottomup} { buda::check_template_tracks }
 
 buda::run_detailed_nuts
 buda::check_design dnuts
+converge::first_audit
 
-tpu_vehicle::heal_if_dirty "tpu.tcl"
+set healed 0
+if {[converge::heal_wanted]} { set healed [tpu_vehicle::heal_if_dirty "tpu.tcl"] }
 buda::report_wirelength
+converge::finish $healed
 
 tpu_vehicle::verdict "tpu.tcl"

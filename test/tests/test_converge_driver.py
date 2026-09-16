@@ -1,0 +1,163 @@
+# Copyright 2026 Ben Bulent Basaran
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""E1's loop driver (`flow/tcl/converge.tcl`, convergence ladder item 5) and
+the vehicle hooks it drives (`flow/tcl/converge_lib.tcl`, through `soc.tcl`).
+
+What is worth pinning is the CONSTRUCTION, not the numbers — the tables in
+docs/internal/convergence_e1.md are the measurement, and an engine change
+that moved them is a result, not a regression:
+
+  * a vehicle session takes the hooks and leaves a report the driver can
+    read: both verdicts, marks, the reserve in force, the derived share
+    lines with their kept/nsig, and one demand row per instance and
+    patterned layer;
+  * `-shares` really governs the next session (the log says every share
+    was declared and the template solved under the thinned view);
+  * the driver runs the three arms as loops — blind rounds stepping
+    `reserve_top_layers`, the top-down-derived and the blind-derived
+    informed rounds — writes one table, and the blind arm's round 1 is the
+    blind-derived arm's measurement (one run, shared);
+  * the reservation efficiency is computed the way the write-up says.
+"""
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+_ROOT = Path(__file__).resolve().parents[2]
+_SOC = _ROOT / "flow" / "tcl" / "soc.tcl"
+_DRIVER = _ROOT / "flow" / "tcl" / "converge.tcl"
+
+pytestmark = [pytest.mark.mid,
+              pytest.mark.skipif(shutil.which("tclsh") is None,
+                                 reason="no tclsh on this host")]
+
+
+def _tclsh(*args, cwd):
+    return subprocess.run(["tclsh", *map(str, args)], capture_output=True,
+                          encoding="utf-8", errors="replace", cwd=cwd,
+                          timeout=900)
+
+
+def _report(path):
+    d = {"share": [], "demand": []}
+    for ln in path.read_text().splitlines():
+        toks = ln.split()
+        if not toks:
+            continue
+        # Tcl-list shaped: a word with a `/` is brace-quoted (`{io/p_0}`)
+        toks = [t.strip("{}") for t in toks]
+        if toks[0] in ("share", "demand"):
+            d[toks[0]].append(toks[1:])
+        else:
+            d[toks[0]] = toks[1:]
+    return d
+
+
+def test_a_vehicle_session_leaves_the_report_the_driver_reads(tmp_path):
+    rep = tmp_path / "td.rep"
+    shares = tmp_path / "td.buda"
+    r = _tclsh(_SOC, 2, "-noheal", "-derive", shares, "-report", rep,
+               cwd=tmp_path)
+    assert r.returncode == 0, r.stdout[-3000:] + r.stderr[-3000:]
+    d = _report(rep)
+    assert d["verdict_first"] == d["verdict"] == ["0", "0", "0"]
+    assert int(d["bundles"][0]) > 0 and d["marks"] == ["0"]
+    assert d["healed"] == ["0"] and d["reserve"] == ["0"]
+    assert int(d["wl_detailed"][0]) > 0
+    # the derived lines, with the kept/nsig pair a driver prices from
+    assert d["share"], d
+    for cell, layer, pct, kept, nsig, coll in d["share"]:
+        assert 0 < int(pct) <= 100 and 0 < int(kept) <= int(nsig)
+        assert f"set_cell_layer_share {cell} {layer} {pct}" in shares.read_text()
+    # one demand row per placed instance and patterned layer
+    assert d["demand"] and all(len(row) == 7 for row in d["demand"])
+    insts = {row[0] for row in d["demand"]}
+    assert "quad_0/cl_0" in insts and "l2" in insts
+
+
+def test_the_shares_govern_the_next_session(tmp_path):
+    shares = tmp_path / "td.buda"
+    r = _tclsh(_SOC, 2, "-noheal", "-derive", shares, cwd=tmp_path)
+    assert r.returncode == 0, r.stderr[-2000:]
+    declared = re.findall(r"^set_cell_layer_share (\S+) (\S+) (\d+)",
+                          shares.read_text(), re.M)
+    assert declared
+    rep = tmp_path / "bu.rep"
+    r = _tclsh(_SOC, 2, "-bottomup", "-noheal", "-shares", shares,
+               "-reserve", 1, "-report", rep, cwd=tmp_path)
+    log = r.stdout + r.stderr
+    for cell, layer, pct in declared:
+        assert f"[LayerShare] {cell}: layer {layer} share {pct}%" in log, log[-3000:]
+    assert "local solve under thinned view" in log
+    assert "[LayerCaps] reserving the top 1 layer(s)" in log, log[-3000:]
+    d = _report(rep)
+    assert d["reserve"] == ["1"] and int(d["marks"][0]) > 0
+
+
+def test_the_driver_runs_the_three_arms_and_writes_the_table(tmp_path):
+    out = tmp_path / "e1"
+    r = _tclsh(_DRIVER, "soc", 2, "-informed", 1, "-maxreserve", 2,
+               "-out", out, cwd=tmp_path)
+    assert r.returncode == 0, r.stdout[-3000:] + r.stderr[-3000:]
+    table = (out / "e1_soc_healerless_step1.md").read_text()
+    assert table.splitlines()[0].startswith("<!-- converge.tcl soc 2")
+    rows = [ln for ln in table.splitlines() if ln.startswith("| soc | 2 |")]
+    arms = [ln.split("|")[4].strip() for ln in rows]
+    assert "blind" in arms and "td" in arms and "bu" in arms
+    # the blind arm's round 1 is the bu arm's measurement: ONE session
+    assert (out / "soc2_blind_r1.rep").exists()
+    assert (out / "soc2_bu_shares_r0.buda").exists()
+    assert not (out / "soc2_bu_r0.rep").exists()
+    # every informed round sourced the previous file and derived the next
+    assert (out / "soc2_td_r0.rep").exists() and (out / "soc2_td_r1.rep").exists()
+    assert (out / "soc2_td_shares_r0.buda").exists()
+    # the summary names every arm with its rounds and endpoint
+    summ = [ln for ln in table.splitlines() if re.match(r"\| 2 \| (blind|td|bu) \|", ln)]
+    assert len(summ) == 3, table
+    for ln in summ:
+        cells = [c.strip() for c in ln.split("|")[1:-1]]
+        assert int(cells[2]) >= 1 and cells[4] in ("clean", "dirty")
+        assert re.fullmatch(r"\d+/\d+/\d+", cells[5]), ln
+
+
+def test_reservation_efficiency_is_reserved_over_used(tmp_path):
+    """The blind round with `reserve N` reserves EVERY track of the top N
+    layers over every instance; the informed round reserves the fraction
+    the thinning removes.  Both computed from the report the way the
+    write-up states, and checked here against a recount."""
+    rep = tmp_path / "bl.rep"
+    r = _tclsh(_SOC, 2, "-bottomup", "-noheal", "-reserve", 2,
+               "-report", rep, cwd=tmp_path)
+    d = _report(rep)
+    layers = sorted({row[2] for row in d["demand"]},
+                    key=lambda n: int(re.search(r"(\d+)$", n).group(1)))
+    top = set(layers[-2:])
+    reserved = sum(int(row[5]) for row in d["demand"] if row[2] in top)
+    used = sum(int(row[4]) for row in d["demand"] if row[2] in top)
+    script = f"""
+        source {_ROOT / 'flow' / 'tcl' / 'converge_lib.tcl'}
+        set rep [converge::read_report {rep}]
+        puts [converge::efficiency $rep $rep]
+    """
+    tcl = tmp_path / "eff.tcl"
+    tcl.write_text(script)
+    r = _tclsh(tcl, cwd=tmp_path)
+    assert r.returncode == 0, r.stderr
+    got = r.stdout.split()
+    assert int(got[0]) == reserved and int(got[1]) == used, (got, reserved, used)

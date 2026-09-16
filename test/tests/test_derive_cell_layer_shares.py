@@ -30,6 +30,10 @@ top's own plan instead of guessed.  What is worth pinning:
   * the collision count is honest: a share is a budget, the top's tracks
     are specific, and the number of the top's tracks inside the kept slots
     is reported rather than assumed away;
+  * the share is FLOORED by the cell's own worst seat (subtree included,
+    since the thinning covers the instance bbox) — E1 measured the pure
+    complement stranding a cluster's own 32-bit buses — and `nofloor` is
+    the study knob;
   * the derivation is the budget of every cell in scope: a scoped cell's
     share on a layer it emits no line for is removed by `apply` AND written
     as a `... 100` line by `file` (Codex P2 on #934, both halves — a session
@@ -105,18 +109,56 @@ def test_apply_declares_and_a_sourced_file_routes_clean(tmp_path):
 
 def test_a_complement_below_one_slot_is_skipped_and_said():
     """The top leaving less than one slot per period is a band question, not
-    a share: `set_cell_layer_share` would refuse it, so it is not emitted."""
+    a share: `set_cell_layer_share` would refuse it, so it is not emitted
+    (`nofloor`: the pure complement).  WITH the own-need floor the same
+    row yields the block's own minimum instead — the top is over-subscribed
+    and the block still gets what its own buses need, said."""
     s = _session("run_nuts")
     real = s._layer_demand()
     for r in real:
         if r["inst"] == "u1" and r["layer_name"] == "M6":
             r["used"], r["pct"] = 45, 100.0 * 45 / r["supply"]
     s._layer_demand = lambda *_a, **_k: real
-    lines, notes, _ = s._derive_cell_layer_shares()
+    lines, notes, _ = s._derive_cell_layer_shares(floor_own=False)
     assert lines == [], lines
     assert any("minimum meaningful share" in n and "set_cell_layer_cap" in n
                for n in notes), notes
-    assert "nothing to declare" in _cmd(s, "derive_cell_layer_shares")
+    assert "nothing to declare" in _cmd(s, "derive_cell_layer_shares nofloor")
+    lines, notes, _ = s._derive_cell_layer_shares()
+    assert len(lines) == 1 and lines[0]["floored"], lines
+    assert lines[0]["kept"] * 1.0 / lines[0]["n_sig"] >= lines[0]["own_pct"] / 100.0
+    assert any("share floored" in n and "own bundle" in n for n in notes), notes
+
+
+def test_the_share_is_floored_by_the_cells_own_seat():
+    """E1's first measurement: the pure complement of the top's demand
+    stranded a cluster's own 32-bit buses (35-track seats under a 71%
+    share).  The derivation floors the share by the worst OWN seat over
+    the cell's instances — including the subtree, since the thinned
+    pattern is installed over the instance's bbox — and drops the line
+    (full use, said) when the block needs every slot."""
+    s = _session("run_nuts")
+    rows = s._layer_demand()
+    own = [r for r in rows if r["cell"] == "top_cell" and r["layer_name"] == "M6"]
+    assert own and all(r["own_seat"] is not None for r in own), own
+    # the cell's own 8-bit bus in its seat: a real fraction of the window
+    assert all(0.0 < r["own_need"] <= 1.0 for r in own), own
+    lines, notes, _ = s._derive_cell_layer_shares()
+    l = [l for l in lines if l["layer_name"] == "M6"][0]
+    assert l["kept"] * 1.0 / l["n_sig"] >= l["own_need"] if "own_need" in l \
+        else l["kept"] * 1.0 / l["n_sig"] >= l["own_pct"] / 100.0
+    # force the own need past every slot: no line, and the note names why
+    for r in rows:
+        if r["cell"] == "top_cell" and r["layer_name"] == "M6":
+            r["own_need"] = 1.0
+    s._layer_demand = lambda *_a, **_k: rows
+    lines, notes, _ = s._derive_cell_layer_shares()
+    assert not [l for l in lines if l["layer_name"] == "M6"], lines
+    assert any("no share (full use)" in n and "positional reservation" in n
+               for n in notes), notes
+    # nofloor ignores it
+    lines, _, _ = s._derive_cell_layer_shares(floor_own=False)
+    assert [l for l in lines if l["layer_name"] == "M6"]
 
 
 def test_scope_defaults_to_the_bottom_up_marks_and_cells_narrows():
