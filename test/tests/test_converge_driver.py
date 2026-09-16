@@ -139,6 +139,29 @@ def test_a_zero_step_is_refused_before_any_session_starts(tmp_path):
         assert not list(out.glob("*.log")) if out.exists() else True
 
 
+def test_a_rejected_reservation_is_a_failed_round_not_a_row(tmp_path):
+    """`reserve_top_layers N` past the stack's ceiling (the six-layer SoC
+    hosts N <= 4: the cells must keep an H and a V layer) prints `Error:`
+    and the Tcl bridge RAISES on it, so the vehicle session dies before
+    its report and the driver stops there with the engine's reason — a
+    baseline route must never be recorded as `reserve 5` (Codex P2 on
+    #935, whose premise was that the session carried on)."""
+    rep = tmp_path / "r5.rep"
+    r = _tclsh(_SOC, 2, "-bottomup", "-noheal", "-reserve", 5, "-report", rep,
+               cwd=tmp_path)
+    assert r.returncode != 0 and not rep.exists()
+    assert "Error: reserve_top_layers" in r.stdout + r.stderr
+    out = tmp_path / "e1"
+    r = _tclsh(_DRIVER, "soc", 2, "-arms", "blind", "-step", 5,
+               "-maxreserve", 5, "-out", out, cwd=tmp_path)
+    assert r.returncode != 0, r.stdout[-2000:]
+    assert "session 'soc2_blind_r2' left no report" in r.stderr, r.stderr[-1500:]
+    assert "Error: reserve_top_layers" in r.stderr, r.stderr[-1500:]
+    assert (out / "soc2_blind_r1.rep").exists()
+    assert not (out / "soc2_blind_r2.rep").exists()
+    assert not list(out.glob("e1_*.md"))            # no table, no reserve-5 row
+
+
 def test_zero_informed_rounds_summarize_the_measurement_itself(tmp_path):
     """`-informed 0` is legal: td's endpoint is its top-down round, bu's the
     blind measurement — the summary used to read an empty round list

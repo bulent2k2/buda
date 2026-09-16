@@ -134,7 +134,17 @@ proc session {name size args} {
     catch {exec [info nameofexecutable] $script {*}$words > $log 2>@1}
     set secs [expr {([clock milliseconds] - $t0) / 1000.0}]
     if {![file exists $rep]} {
-        error "converge.tcl: session '$name' left no report — see $log"
+        # A session that died before its report is a FAILED round, never a
+        # row: a rejected policy (`reserve_top_layers N` past the stack's
+        # ceiling prints `Error:` and the bridge raises on it — Codex P2 on
+        # #935) stops the run here, with the engine's own reason.
+        set why ""
+        catch {
+            set lf [open $log]; set text [read $lf]; close $lf
+            regexp -line {^Error: .*$} $text why
+        }
+        error "converge.tcl: session '$name' left no report\
+               [expr {$why ne "" ? "($why)" : ""}] — see $log"
     }
     set r [converge::read_report $rep]
     dict set r name $name
