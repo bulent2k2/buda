@@ -1017,8 +1017,12 @@ less than one slot there, which is a band question (`set_cell_layer_cap`), and
 **Scope**, in order: `cells` when given; else the cells marked
 `set_bottom_up` (the ones about to be solved once and copied — the E1 arm);
 else every cell owning a cell-local template bundle, since a share governs a
-cell's OWN interconnect and a cell with none has nothing to budget.  The
-scope and its reason are printed.
+cell's OWN interconnect and a cell with none has nothing to budget.  Each
+rung is taken when it *exists*, not when it survives the placed-instance
+filter: marks naming only instance-less cells (`set_bottom_up` accepts a
+defined cell with no instance) give an empty scope, each such mark said,
+never the next rung's cells — which matters once `apply` removes shares.
+The scope and its reason are printed.
 
 **A share is a budget, not a reservation**, and the table says how far the
 two are apart: the cell's pattern is thinned to its first

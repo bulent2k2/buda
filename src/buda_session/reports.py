@@ -1388,7 +1388,10 @@ class ReportsMixin:
         `set_bottom_up` (the ones about to be solved once and copied —
         the E1 arm); else every cell owning a cell-local template bundle
         (a share governs a cell's OWN interconnect, so a cell with none
-        has nothing to budget).  A layer the top does not touch over any
+        has nothing to budget).  Each rung is taken when it EXISTS, not
+        when it survives the placed-instance filter: marks naming only
+        instance-less cells give an EMPTY scope (each one said), never
+        the next rung's cells.  A layer the top does not touch over any
         instance gets no line (full use is the default); a complement
         whose thinning keeps ZERO slots per period is SKIPPED and said
         (the top leaves the cell less than one slot — a band question,
@@ -1426,9 +1429,19 @@ class ReportsMixin:
         else:
             marked = sorted(set(self.bdb.bottom_up_cells())) \
                 if self.bdb is not None else []
-            marked = [c for c in marked if c in by_cell]
             if marked:
-                scope, how = marked, "marked set_bottom_up"
+                # The MARKS decide the scope, not the marks that happen
+                # to have demand rows: a mark on a cell with no placed
+                # instance (set_bottom_up accepts one) used to empty this
+                # list and fall through to the bundle-owning cells, so
+                # `apply`/`file` derived — and REMOVED — shares for cells
+                # the documented scope never named (Codex P2 on #934).
+                for c in marked:
+                    if c not in by_cell:
+                        notes.append(f"marked cell '{c}': no placed "
+                                     f"instance — skipped")
+                scope = [c for c in marked if c in by_cell]
+                how = "marked set_bottom_up"
             else:
                 templates = (getattr(self, "_hier_bundles_orig", None)
                              or self.bundles)

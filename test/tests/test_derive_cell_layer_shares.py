@@ -249,3 +249,25 @@ def test_the_file_carries_the_removal_of_a_stale_scoped_share(tmp_path):
     assert "set_cell_layer_share top_cell M4 100" in text, text
     assert "set_cell_layer_share top_cell M5 100" in text, text
     assert "leaf" not in text, text
+
+
+def test_marks_on_instance_less_cells_keep_an_empty_scope():
+    """`set_bottom_up` accepts a defined cell with no instance; a mark like
+    that used to be filtered out and the scope fell through to the
+    bundle-owning cells, so `apply` derived — and removed — shares for
+    cells the marked scope never named (Codex P2 on #934).  The marks
+    decide the rung; an all-unplaced set is an empty scope, said."""
+    s = _session("add_cell orphan 10 10", "set_bottom_up orphan", "run_nuts",
+                 "set_cell_layer_share top_cell M5 50")   # not in scope
+    lines, notes, scope = s._derive_cell_layer_shares()
+    assert scope == [] and lines == [], (scope, lines)
+    assert any("marked set_bottom_up" in n and "0 cell(s)" in n
+               for n in notes), notes
+    assert any("marked cell 'orphan': no placed instance" in n
+               for n in notes), notes
+    out = _cmd(s, "derive_cell_layer_shares apply")
+    assert "nothing to declare" in out and "stale" not in out, out
+    assert s._cell_layer_shares == {("top_cell", 5): 0.5}   # untouched
+    # an explicit `cells` still overrides the marks
+    lines, _, scope = s._derive_cell_layer_shares(["top_cell"])
+    assert scope == ["top_cell"] and len(lines) == 1
