@@ -30,9 +30,11 @@ top's own plan instead of guessed.  What is worth pinning:
   * the collision count is honest: a share is a budget, the top's tracks
     are specific, and the number of the top's tracks inside the kept slots
     is reported rather than assumed away;
-  * `apply` is the budget of every cell in scope: a scoped cell's share on
-    a layer the new derivation emits no line for is removed (Codex P2 on
-    #934), and a cell outside the scope keeps its shares.
+  * the derivation is the budget of every cell in scope: a scoped cell's
+    share on a layer it emits no line for is removed by `apply` AND written
+    as a `... 100` line by `file` (Codex P2 on #934, both halves — a session
+    reopening the same BDB restores the persisted share before it sources
+    the file), while a cell outside the scope keeps its shares.
 """
 import contextlib
 import io
@@ -210,3 +212,40 @@ def test_apply_removes_a_scoped_share_the_derivation_no_longer_emits():
     assert set(s._cell_layer_shares) == {("top_cell", 6)}
     out = _cmd(s, "derive_cell_layer_shares cells top_cell apply")
     assert "applied 1 share(s) to this session" in out and "stale" not in out
+
+
+def test_the_file_carries_the_removal_of_a_stale_scoped_share(tmp_path):
+    """The file half of the stale-share rule (Codex P2 on #934, round 4):
+    a later session that opens the SAME BDB restores the persisted shares
+    before it sources the file, so the new lines alone would leave a share
+    the top no longer supports in force.  The file writes a `... 100` line
+    for every scoped share the derivation did not emit, and sourcing it
+    into a session holding that share removes it — session and BDB."""
+    s = _session("run_nuts")
+    _quiet(s, "set_cell_layer_share leaf M6 50",       # in scope, no line
+           "set_cell_layer_share top_cell M5 50")      # out of scope
+    path = tmp_path / "shares.buda"
+    out = _cmd(s, f"derive_cell_layer_shares cells leaf file {path}")
+    assert "header only" in out and "1 removal line(s)" in out, out
+    text = path.read_text()
+    assert "set_cell_layer_share leaf M6 100" in text, text
+    assert "top_cell" not in text, text
+    # the writer did NOT touch this session (no apply)
+    assert s._cell_layer_shares[("leaf", 6)] == 0.5
+    # a session holding the stale share, as a reopened BDB would: sourcing
+    # the file removes it and leaves the out-of-scope one alone
+    s2 = _session("set_cell_layer_share leaf M6 50",
+                  "set_cell_layer_share top_cell M5 50")
+    log = _cmd(s2, f"source {path}")
+    assert "share 100% — explicit full use (share removed)" in log, log
+    assert s2._cell_layer_shares == {("top_cell", 5): 0.5}
+    assert s2.bdb.cell_layer_shares("leaf") == []
+    # with lines: the emitted line and the removal of the OTHER layer's
+    # stale share both land in the file
+    _quiet(s, "set_cell_layer_share top_cell M4 50")
+    _cmd(s, f"derive_cell_layer_shares cells top_cell file {path}")
+    text = path.read_text()
+    assert "set_cell_layer_share top_cell M6 " in text, text
+    assert "set_cell_layer_share top_cell M4 100" in text, text
+    assert "set_cell_layer_share top_cell M5 100" in text, text
+    assert "leaf" not in text, text

@@ -1525,6 +1525,22 @@ class ReportsMixin:
             print(f"  {n}")
         text = [f"set_cell_layer_share {l['cell']} {l['layer_name']} {l['pct']}"
                 for l in lines]
+        # The derivation is the budget of every cell in scope, so a share a
+        # scoped cell still HOLDS on a layer with no line is a stale one —
+        # an earlier declaration the top's demand no longer supports.  Both
+        # doors remove it: `apply` through the command's own pct-100 path
+        # (session entry and BDB row together), and the FILE as a written
+        # `... 100` line, because a later session opening the SAME BDB
+        # restores the persisted share BEFORE it sources the file, so a
+        # file carrying only the new lines would leave it constraining the
+        # next plan (Codex P2 on #934, both halves).
+        names = {lid: n for n, lid in
+                 getattr(self, "_layer_name_map", {}).items()}
+        emitted = {(l["cell"], l["layer"]) for l in lines}
+        held = getattr(self, "_cell_layer_shares", None) or {}
+        stale = [(c, lid, names.get(lid, f"L{lid}"), held[(c, lid)])
+                 for (c, lid) in sorted(held)
+                 if c in scope and (c, lid) not in emitted]
 
         def _write(path):
             # ALWAYS rewrite the requested file, an empty derivation
@@ -1540,8 +1556,17 @@ class ReportsMixin:
                             "over any instance in scope\n")
                 for t in text:
                     f.write(t + "\n")
+                if stale:
+                    f.write("# removed: shares held when this was derived "
+                            "that the top's demand no longer supports (a "
+                            "session reopening the same BDB restores them "
+                            "before sourcing this file)\n")
+                for c, lid, lname, was in stale:
+                    f.write(f"set_cell_layer_share {c} {lname} 100"
+                            f"   # was {100.0 * was:g}%\n")
             print(f"  written to {path}"
-                  + ("" if text else " (header only — no line to declare)"))
+                  + ("" if text else " (header only — no line to declare)")
+                  + (f"; {len(stale)} removal line(s)" if stale else ""))
 
         def _apply():
             from buda_cmds import bdb_cmds
@@ -1551,20 +1576,9 @@ class ReportsMixin:
                     [l["cell"], l["layer_name"], str(l["pct"])],
                     f"set_cell_layer_share {l['cell']} {l['layer_name']} "
                     f"{l['pct']}")
-            # The derivation is the budget of every cell in scope: a share
-            # a scoped cell still holds on a layer with no line is one an
-            # earlier declaration left behind, and the next plan would
-            # honour it (Codex P2 on #934).  pct 100 is the command's own
-            # removal, so the BDB row goes with the session entry.
-            names = {lid: n for n, lid in
-                     getattr(self, "_layer_name_map", {}).items()}
-            emitted = {(l["cell"], l["layer"]) for l in lines}
-            held = getattr(self, "_cell_layer_shares", None) or {}
-            stale = sorted((c, lid) for (c, lid) in held
-                           if c in scope and (c, lid) not in emitted)
-            for c, lid in stale:
-                was = held[(c, lid)]
-                lname = names.get(lid, f"L{lid}")
+            # The stale set above, removed through the command's own
+            # pct-100 path so the BDB row goes with the session entry.
+            for c, lid, lname, was in stale:
                 print(f"  {c} {lname}: share {100.0 * was:g}% held from an "
                       f"earlier declaration, no line derived now — removed")
                 bdb_cmds.cmd_set_cell_layer_share(

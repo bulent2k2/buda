@@ -1039,7 +1039,9 @@ derivation emitted no line for (the top no longer touches it, or the new
 complement keeps zero slots) is removed through the command's own pct-100
 path — session and BDB — and said, since leaving it would keep the next plan
 under a budget this run did not derive; a cell outside the scope keeps its
-shares.  `file` writes the lines (with a header naming the basis) for the E1
+shares.  `file` writes the lines (with a header naming the basis) — and the
+same removals as `... 100` lines, since a later session that opens the same
+BDB restores the persisted shares before it sources the file — for the E1
 recipe: session 1 routes top-down and derives, session 2
 `source`s the file after the cells exist and before bundling.  Reads the same
 basis as the demand query — detailed bit tracks once `run_detailed_nuts` has
