@@ -1513,9 +1513,31 @@ class ReportsMixin:
               f"===")
         for n in notes:
             print(f"  {n}")
+        text = [f"set_cell_layer_share {l['cell']} {l['layer_name']} {l['pct']}"
+                for l in lines]
+
+        def _write(path):
+            # ALWAYS rewrite the requested file, an empty derivation
+            # included: a later session sources it, and a stale file from
+            # an earlier run would hand that session constraints this run
+            # did not derive (Codex P2 on #934).
+            with open(path, "w") as f:
+                f.write("# derive_cell_layer_shares: the complement of the "
+                        f"top's demand ({basis}); source before "
+                        "run_planner hier\n")
+                if not text:
+                    f.write("# nothing to declare: the top takes no track "
+                            "over any instance in scope\n")
+                for t in text:
+                    f.write(t + "\n")
+            print(f"  written to {path}"
+                  + ("" if text else " (header only — no line to declare)"))
+
         if not lines:
             print("  nothing to declare: the top takes no track over any "
                   "instance in scope")
+            if path:
+                _write(path)
             return
         w_cell = max(len(l["cell"]) for l in lines)
         w_inst = max([len(l["worst_inst"]) for l in lines] + [14])
@@ -1531,19 +1553,11 @@ class ReportsMixin:
         print(f"  {len(lines)} share(s) derived; {n_coll} with the top holding "
               f"tracks inside the kept slots (a share is a budget, not a "
               f"reservation — E1 measures what that costs)")
-        text = [f"set_cell_layer_share {l['cell']} {l['layer_name']} {l['pct']}"
-                for l in lines]
         print("  --- flow-text lines (declare BEFORE run_planner hier) ---")
         for t in text:
             print(f"  {t}")
         if path:
-            with open(path, "w") as f:
-                f.write("# derive_cell_layer_shares: the complement of the "
-                        f"top's demand ({basis}); source before "
-                        "run_planner hier\n")
-                for t in text:
-                    f.write(t + "\n")
-            print(f"  written to {path}")
+            _write(path)
         if apply:
             from buda_cmds import bdb_cmds
             for l in lines:

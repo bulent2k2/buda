@@ -146,3 +146,20 @@ def test_without_a_nuts_result_it_says_so():
     assert s._derive_cell_layer_shares() is None
     out = _cmd(s, "derive_cell_layer_shares")
     assert "Error" in out and "run_nuts" in out, out
+
+
+def test_an_empty_derivation_still_rewrites_the_file(tmp_path):
+    """A later session sources the file, so a run that derives nothing must
+    not leave an earlier run's lines in it (Codex P2 on #934): the file is
+    rewritten header-only, and sourcing it declares nothing."""
+    s = _session("run_nuts")
+    path = tmp_path / "shares.buda"
+    path.write_text("set_cell_layer_share top_cell M6 50\n")   # stale
+    out = _cmd(s, f"derive_cell_layer_shares cells leaf file {path}")
+    assert "nothing to declare" in out and "header only" in out, out
+    text = path.read_text()
+    assert "set_cell_layer_share" not in text, text
+    assert text.startswith("# derive_cell_layer_shares"), text
+    s2 = _session()
+    _quiet(s2, f"source {path}")
+    assert not getattr(s2, "_cell_layer_shares", None)
