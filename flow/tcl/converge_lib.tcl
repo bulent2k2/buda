@@ -259,12 +259,17 @@ proc converge::efficiency {rep policy} {
 # which names every cell in scope — a cell with no line this round (the
 # top took nothing over it) is still in scope next round, and reading the
 # scope off the emitted lines dropped it (Codex P2 on #935).  A file with
-# no header (an older derivation) falls back to the lines.
+# no header (an older derivation) falls back to the lines.  An EXPLICITLY
+# empty scope comes back as the header's own `(none)`, distinct from the
+# empty string: the driver must not read it as "unspecified" and let the
+# next round derive under the vehicle's default scope, which would hand
+# shares to cells the first derivation never covered (Codex P2 on #935) —
+# `converge::scope_empty` is the test, and an empty scope means there is
+# nothing to hand down, so no informed round is worth a session.
 proc converge::scope_of {shares_file} {
     set f [open $shares_file]; set text [read $f]; close $f
     if {[regexp -line {^# scope: (.*)$} $text -> s]} {
-        set s [string trim $s]
-        return [expr {$s eq "(none)" ? "" : $s}]
+        return [string trim $s]
     }
     set cells [dict create]
     foreach ln [split $text \n] {
@@ -272,6 +277,8 @@ proc converge::scope_of {shares_file} {
     }
     return [join [dict keys $cells] ,]
 }
+
+proc converge::scope_empty {cells} { return [expr {$cells eq "(none)"}] }
 
 # Whether the blind sweep runs ANOTHER round after this one: only while the
 # design is dirty AND the blind arm itself was asked for.  The bu arm needs

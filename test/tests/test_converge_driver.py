@@ -162,8 +162,11 @@ def test_zero_informed_rounds_summarize_the_measurement_itself(tmp_path):
 def test_the_lib_reads_a_scope_and_decides_the_blind_sweep(tmp_path):
     """`converge::scope_of` reads the derivation file's `# scope:` header —
     a cell with no line is still in scope — and falls back to the lines on
-    a header-less file; `converge::blind_more` runs another blind round
-    only while dirty AND the blind arm is selected."""
+    a header-less file; an explicitly EMPTY scope is `(none)`, which
+    `converge::scope_empty` tells from an unspecified one (the driver runs
+    no informed round on it rather than re-deriving under the vehicle's
+    default scope — Codex P2 on #935); `converge::blind_more` runs another
+    blind round only while dirty AND the blind arm is selected."""
     hdr = tmp_path / "hdr.buda"
     hdr.write_text("# derive_cell_layer_shares: ...\n# scope: a_cell,b_cell,c_cell\n"
                    "set_cell_layer_share a_cell M6 75\n")
@@ -178,6 +181,9 @@ def test_the_lib_reads_a_scope_and_decides_the_blind_sweep(tmp_path):
         puts [converge::scope_of {hdr}]
         puts [converge::scope_of {old}]
         puts "<[converge::scope_of {none}]>"
+        puts [list [converge::scope_empty [converge::scope_of {none}]] \
+                   [converge::scope_empty [converge::scope_of {hdr}]] \
+                   [converge::scope_empty ""]]
         puts [list [converge::blind_more {{blind td bu}} 0] \
                    [converge::blind_more {{blind td bu}} 1] \
                    [converge::blind_more {{bu}} 0] \
@@ -188,7 +194,7 @@ def test_the_lib_reads_a_scope_and_decides_the_blind_sweep(tmp_path):
     r = _tclsh(tcl, cwd=tmp_path)
     assert r.returncode == 0, r.stderr
     assert r.stdout.splitlines() == ["a_cell,b_cell,c_cell", "a_cell,b_cell",
-                                     "<>", "1 0 0 0"], r.stdout
+                                     "<(none)>", "1 0 0", "1 0 0 0"], r.stdout
 
 
 def test_the_driver_runs_the_three_arms_and_writes_the_table(tmp_path):

@@ -155,6 +155,15 @@ proc informed_rounds {prefix size f0} {
     set cells [converge::scope_of $f0]
     set rounds {}
     set prev $f0
+    if {[converge::scope_empty $cells]} {
+        # Nothing was derived FOR: an informed round would source an empty
+        # budget and re-derive under the vehicle's default scope — a
+        # broader one than the measurement's.  Say so; the summary then
+        # reads the measurement itself, as with -informed 0.
+        puts "converge.tcl: ${prefix}: the derivation's scope is empty (no cell\
+              to hand a budget to) — no informed round run"
+        return $rounds
+    }
     for {set r 1} {$r <= $informed} {incr r} {
         set fr [file join [file dirname $f0] ${prefix}_shares_r$r.buda]
         set words [list -bottomup -shares $prev -derive $fr]
