@@ -280,6 +280,26 @@ def _demand(s, args=""):
         for r in rows)
 
 
+def _caps(s):
+    # The cell layer BANDS in force — `set_cell_layer_cap`, the by-depth
+    # bulk form and `reserve_top_layers` alike — as `{cell floor cap}` rows
+    # of layer NAMES (`-` for no floor).  What a driver needs to price a
+    # blind reservation honestly: `reserve_top_layers N` caps every cell
+    # BELOW the top level and leaves the top level unrestricted, so a
+    # reservation efficiency summed over every instance charged the
+    # uncapped cells' tracks as reserved (Codex P2 on #935).  Empty when no
+    # band is declared; a name the session cannot resolve prints as L<id>.
+    pol = getattr(s, "_cell_layer_policy", None) or {}
+    names = s._make_layer_names()
+    rows = []
+    for cell in sorted(pol):
+        floor, cap = pol[cell]
+        rows.append("{" + " ".join(tcl_word(str(v)) for v in (
+            cell, names.get(floor, f"L{floor}") if floor >= 0 else "-",
+            names.get(cap, f"L{cap}"))) + "}")
+    return " ".join(rows)
+
+
 # The values a flow script actually branches on.  Deliberately few: this is
 # a bridge, not a second API, and every name here is a promise to keep.
 # A count that has not been computed yet answers -1 rather than 0, because
@@ -293,6 +313,7 @@ _QUERIES = {
     "violations": _n_violations,
     "messages": _messages,
     "demand": _demand,
+    "caps": _caps,
 }
 # The queries that TAKE arguments.  Every other name is a scalar about the
 # whole session, and a word after it is a typo — `buda::query overlaps M6`

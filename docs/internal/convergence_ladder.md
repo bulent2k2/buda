@@ -193,7 +193,7 @@ write-up says so.
 (2026-09-16) — and the claim is **refuted for the primitive as built**, with
 the reason measured.  The blind policy (`reserve_top_layers`, its step swept
 to its best) is clean in **two rounds** at NQ = 2, 4 and 16 with healers
-off, reserving **5–8×** the tracks the top used, and never clean at NQ = 8
+off, reserving **4.5–8×** the tracks the top used, and never clean at NQ = 8
 (its only knob overshoots: `reserve 3` strands 1,444 bits of the blocks'
 own buses).  The derived share reaches a clean endpoint in **no round** at
 any size and does not improve on the round it was derived from, because a
@@ -205,7 +205,7 @@ first run without it stranded 410 bits at NQ = 2 against the blind round's
 8) and says, per cell and layer, where a share cannot express the
 complement.  On the mesh control, where the top's demand IS uniform, the
 derived share reserves 1.12–1.19× what the top uses at no cost to the
-route.  With the vehicle's own healing the healers do the work: the blind round 1 is clean with no reservation at all at NQ = 2, 4 and 8, and at NQ = 16 the top-down-derived round and the blind `reserve 1` round clear the E4 seat in the same session count (8.5× against 9.2× reservation, +1.3 % wire), while the blind-round-derived arm stays dirty on it.  What rung 4 wants is a positional reservation —
+route.  With the vehicle's own healing the healers do the work: the blind round 1 is clean with no reservation at all at NQ = 2, 4 and 8, and at NQ = 16 the top-down-derived round and the blind `reserve 1` round clear the E4 seat in the same session count (8.5× against 9.8× reservation, +1.3 % wire), while the blind-round-derived arm stays dirty on it.  What rung 4 wants is a positional reservation —
 E5's corridor — which moves ahead in the build order, and E1 is re-run
 against it.
 

@@ -21,7 +21,7 @@ the top actually used there.
 **The claim is refuted for the primitive as built, and the reason is
 measured.**  The blind policy (`reserve_top_layers`, its step swept to its
 best) reaches a clean endpoint in **two rounds** at NQ = 2, 4 and 16 with
-healers off — reserving 5 to 8 tracks for every track the top used — and
+healers off — reserving 4.5 to 8 tracks for every track the top used — and
 never at NQ = 8; with the vehicle's own healing it is clean in **one round
 with no reservation at all** at NQ = 2, 4 and 8 and in two at NQ = 16.  The
 derived budget (`derive_cell_layer_shares` → `set_cell_layer_share`) reaches
@@ -29,7 +29,7 @@ a clean endpoint in **no round** with healers off, at any size, and does
 not improve on the round it was derived from; with healers on, the
 top-down-derived arm heals clean in one informed round at NQ = 2, 8 and 16
 (two at 4) — the **same session count as the blind arm**, at 3–8.5× the
-top's used tracks in reservation where the blind arm needed none or 9.2× —
+top's used tracks in reservation where the blind arm needed none or 9.8× —
 and the blind-round-derived arm stays dirty at NQ = 16 on the seat the
 blind round left.  A
 `set_cell_layer_share` is a **uniform** budget — the first `floor(s ×
@@ -84,10 +84,17 @@ pure complement as the study control.
 
 **Reservation efficiency** is read off the last round's demand rows: for
 every (instance, layer) pair carrying a reservation, *reserved* is the
-tracks the policy takes from the block (every track of a reserved layer;
-`1 − kept/n_signal` of the supply under a share) and *used* is every track
-the top placed over that instance on that layer, inside or outside the
-reserved slots.  reserved ÷ used > 1 is padding.
+tracks the policy takes from the block (every track of a reserved layer
+over an instance of a **capped** cell — `reserve_top_layers` caps every cell
+below the top level and leaves the top level, the SoC's `quad_cell`,
+unrestricted, so its rows carry no reservation and do not count; the report
+records which cells were capped, `buda::query caps`; `1 − kept/n_signal` of
+the supply under a share) and *used* is every track the top placed over
+that instance on that layer, inside or outside the reserved slots.
+reserved ÷ used > 1 is padding.  (The first version of these tables summed
+the top N layers over EVERY instance, the uncapped `quad_cell` rows
+included — Codex P2 on #935; every blind ratio here moved by under 0.6 when
+recomputed from the same reports, and no finding changed.)
 
 **Judge.**  `check_design`, the same audit on every arm — the ladder's
 independent geometric audit (build item 2) does not exist yet, as E2's
@@ -104,34 +111,34 @@ here, since nothing heals.
 | size | arm | round | policy | final ovl/unpl/viol | detailed WL | reserved | used | reserved ÷ used | s |
 |---|---|---|---|---|---|---|---|---|---|
 | 2 | blind | 1 | reserve 0 | 1/8/8 | (584,581) | — | — | — | 1.8 |
-| 2 | blind | 2 | reserve 1 | 1/8/8 | (584,581) | 4,157 | 152 | 27.35 | 1.6 |
-| 2 | blind | 3 | reserve 2 | **0/0/0** | 527,039 | 10,612 | 1,340 | 7.92 | 1.5 |
+| 2 | blind | 2 | reserve 1 | 1/8/8 | (584,581) | 3,553 | 112 | 31.72 | 1.6 |
+| 2 | blind | 3 | reserve 2 | **0/0/0** | 527,039 | 9,458 | 1,160 | 8.15 | 1.5 |
 | 2 | td | 0 | top-down | 0/0/0 | 525,144 | — | — | — | 1.8 |
 | 2 | td | 1 | shares r0 | 2/296/296 | (539,487) | 1,140 | 381 | 2.99 | 1.8 |
 | 2 | td | 2 | shares r1 | 2/8/8 | (582,159) | 1,121 | 265 | 4.23 | 1.8 |
 | 2 | bu | 1 | shares r0 | 1/8/8 | (586,220) | 3,722 | 1,259 | 2.96 | 1.8 |
 | 2 | bu | 2 | shares r1 | 1/8/8 | (586,220) | 3,722 | 1,259 | 2.96 | 1.8 |
 | 4 | blind | 1 | reserve 0 | 5/117/117 | (980,908) | — | — | — | 3.5 |
-| 4 | blind | 2 | reserve 1 | 4/45/45 | (1,002,666) | 7,851 | 782 | 10.04 | 3.0 |
-| 4 | blind | 3 | reserve 2 | **0/0/0** | 945,980 | 20,087 | 3,947 | 5.09 | 2.9 |
+| 4 | blind | 2 | reserve 1 | 4/45/45 | (1,002,666) | 6,643 | 614 | 10.82 | 3.0 |
+| 4 | blind | 3 | reserve 2 | **0/0/0** | 945,980 | 17,779 | 3,467 | 5.13 | 2.9 |
 | 4 | td | 0 | top-down | 1/16/16 | (993,477) | — | — | — | 3.8 |
 | 4 | td | 1 | shares r0 | 4/101/101 | (914,410) | 3,142 | 313 | 10.04 | 3.7 |
 | 4 | td | 2 | shares r1 | 4/45/45 | (989,472) | 2,121 | 552 | 3.84 | 3.6 |
 | 4 | bu | 1 | shares r0 | 5/117/117 | (981,590) | 9,194 | 2,443 | 3.76 | 3.6 |
 | 4 | bu | 2 | shares r1 | 5/117/117 | (981,590) | 9,194 | 2,443 | 3.76 | 3.7 |
 | 8 | blind | 1 | reserve 0 | 6/93/93 | (2,012,407) | — | — | — | 8.7 |
-| 8 | blind | 2 | reserve 1 | 8/85/85 | (1,949,459) | 15,265 | 1,453 | 10.51 | 6.6 |
-| 8 | blind | 3 | reserve 2 | 1/8/8 | (1,847,877) | 39,067 | 8,077 | 4.84 | 6.4 |
-| 8 | blind | 4 | reserve 3 | 0/**1444**/1444 | (1,851,256) | 65,223 | 10,385 | 6.28 | 6.5 |
-| 8 | blind | 5 | reserve 4 | 16/520/520 | (1,842,234) | 83,210 | 10,385 | 8.01 | 6.2 |
+| 8 | blind | 2 | reserve 1 | 8/85/85 | (1,949,459) | 12,849 | 1,149 | 11.18 | 6.6 |
+| 8 | blind | 3 | reserve 2 | 1/8/8 | (1,847,877) | 34,453 | 7,149 | 4.82 | 6.4 |
+| 8 | blind | 4 | reserve 3 | 0/**1444**/1444 | (1,851,256) | 56,481 | 8,969 | 6.30 | 6.5 |
+| 8 | blind | 5 | reserve 4 | 16/520/520 | (1,842,234) | 70,314 | 8,969 | 7.84 | 6.2 |
 | 8 | td | 0 | top-down | 2/40/40 | (1,871,476) | — | — | — | 8.3 |
 | 8 | td | 1 | shares r0 | 8/88/88 | (1,892,125) | 6,849 | 1,414 | 4.84 | 9.0 |
 | 8 | td | 2 | shares r1 | 13/96/96 | (1,891,981) | 7,393 | 1,459 | 5.07 | 8.7 |
 | 8 | bu | 1 | shares r0 | 11/109/109 | (1,955,348) | 18,469 | 5,013 | 3.68 | 8.4 |
 | 8 | bu | 2 | shares r1 | 11/109/109 | (1,955,348) | 18,272 | 5,013 | 3.64 | 8.8 |
 | 16 | blind | 1 | reserve 0 | 11/336/336 | (4,274,800) | — | — | — | 23.7 |
-| 16 | blind | 2 | reserve 1 | 15/203/203 | (4,357,598) | 30,015 | 3,370 | 8.91 | 16.7 |
-| 16 | blind | 3 | reserve 2 | **0/0/0** | 3,757,248 | 76,965 | 16,808 | 4.58 | 16.0 |
+| 16 | blind | 2 | reserve 1 | 15/203/203 | (4,357,598) | 25,179 | 2,669 | 9.43 | 16.7 |
+| 16 | blind | 3 | reserve 2 | **0/0/0** | 3,757,248 | 67,733 | 15,072 | 4.49 | 16.0 |
 | 16 | td | 0 | top-down | 3/32/32 | (3,677,304) | — | — | — | 25.3 |
 | 16 | td | 1 | shares r0 | 19/187/187 | (4,357,918) | 13,266 | 1,822 | 7.28 | 23.9 |
 | 16 | td | 2 | shares r1 | 21/203/203 | (4,290,792) | 14,471 | 2,723 | 5.31 | 24.0 |
@@ -177,7 +184,7 @@ bits down to 8.
 | 8 | td | 1 | shares r0 | 8/109/109 | **0/0/0** | 2,180,195 | 6,784 | 1,304 | 5.20 | 69.6 |
 | 8 | bu | 1 | shares r0 | 11/109/109 | **0/0/0** | 2,174,752 | 16,947 | 5,590 | 3.03 | 45.0 |
 | 16 | blind | 1 | reserve 0 | 11/336/336 | 3/8/8 | (4,319,399) | — | — | — | 403.5 |
-| 16 | blind | 2 | reserve 1 | 15/203/203 | **0/0/0** | 4,482,219 | 30,015 | 3,252 | 9.23 | 213.5 |
+| 16 | blind | 2 | reserve 1 | 15/203/203 | **0/0/0** | 4,482,219 | 25,179 | 2,561 | 9.83 | 213.5 |
 | 16 | td | 0 | top-down | 3/32/32 | 0/0/0 | 3,935,746 | — | — | — | 28.0 |
 | 16 | td | 1 | shares r0 | 19/187/187 | **0/0/0** | 4,541,780 | 11,768 | 1,379 | 8.53 | 275.8 |
 | 16 | bu | 1 | shares r0 | 15/384/384 | 4/8/8 | (4,245,861) | 43,308 | 12,500 | 3.46 | 388.3 |
@@ -207,19 +214,19 @@ comparison is read (the ladder's strawman defence).  Step 2 goes straight to
 | size | round | policy | final ovl/unpl/viol | detailed WL | reserved ÷ used |
 |---|---|---|---|---|---|
 | 2 | 1 | reserve 0 | 1/8/8 | (584,581) | — |
-| 2 | 2 | reserve 2 | **0/0/0** | 527,039 | 7.92 |
+| 2 | 2 | reserve 2 | **0/0/0** | 527,039 | 8.15 |
 | 4 | 1 | reserve 0 | 5/117/117 | (980,908) | — |
-| 4 | 2 | reserve 2 | **0/0/0** | 945,980 | 5.09 |
+| 4 | 2 | reserve 2 | **0/0/0** | 945,980 | 5.13 |
 | 8 | 1 | reserve 0 | 6/93/93 | (2,012,407) | — |
-| 8 | 2 | reserve 2 | 1/8/8 | (1,847,877) | 4.84 |
-| 8 | 3 | reserve 4 | 16/520/520 | (1,842,234) | 8.01 |
+| 8 | 2 | reserve 2 | 1/8/8 | (1,847,877) | 4.82 |
+| 8 | 3 | reserve 4 | 16/520/520 | (1,842,234) | 7.84 |
 | 16 | 1 | reserve 0 | 11/336/336 | (4,274,800) | — |
-| 16 | 2 | reserve 2 | **0/0/0** | 3,757,248 | 4.58 |
+| 16 | 2 | reserve 2 | **0/0/0** | 3,757,248 | 4.49 |
 
 Two rounds instead of three at NQ = 2, 4 and 16 — the same endpoint, the
 same reservation, one useless round (`reserve 1`) skipped — and the same
 failure at NQ = 8.  So the blind policy at its best is **two rounds and a
-5–8× reservation**, and that is the number the derived budget had to beat.
+4.5–8× reservation**, and that is the number the derived budget had to beat.
 
 ## The control — `tpu.tcl` (healers off)
 
@@ -283,8 +290,8 @@ pitch onto the track period, as `tpu.tcl` documents.)
    round's 8 — which is worse, not better.
 
 4. **The blind policy pays for its convergence in reservation.**  At the
-   clean round it reserves **7.9× / 5.1× / 4.6×** the tracks the top used
-   (NQ = 2 / 4 / 16), and its intermediate round reserves 9–27×.  The
+   clean round it reserves **8.2× / 5.1× / 4.5×** the tracks the top used
+   (NQ = 2 / 4 / 16), and its intermediate round reserves 9–32×.  The
    derived budgets reserve 3–7×: tighter, and useless.  Reservation
    efficiency is only worth reading on a clean route, and the derived arms
    never have one.
@@ -298,7 +305,7 @@ pitch onto the track period, as `tpu.tcl` documents.)
    this one has nowhere left to sweep.
 
 6. **The step does not rescue it.**  Step 2 reaches the same clean
-   endpoint in two rounds where step 1 took three, at the same 5–8×
+   endpoint in two rounds where step 1 took three, at the same 4.5–8×
    reservation, and fails at NQ = 8 the same way (reserve 4 strands 520).
    The policy's best is two rounds; the derived budget needed to beat
    two, and did not reach clean at all.
@@ -311,10 +318,10 @@ pitch onto the track period, as `tpu.tcl` documents.)
    a LOW window with zero tracks) survives the healers in the blind round
    1 and in both blind-derived rounds — a share cannot add tracks to a
    window that has none — and two things clear it in one more session:
-   the blind `reserve 1` (9.2× reservation, 4,482,219) and the
+   the blind `reserve 1` (9.8× reservation, 4,482,219) and the
    top-down-derived shares (8.5×, 4,541,780, +1.3 % wire).  The session
    count is the same either way, and the informed arm's one advantage is
-   a reservation 8 % tighter on a design that needed one whole layer.
+   a reservation 13 % tighter on a design that needed one whole layer.
    Every clean healed route under a derived budget is within 1.3 % of the
    blind one's wire; the two are the same route by another road.
 
@@ -360,7 +367,7 @@ against, and it shows *why* with the tool's own numbers: the block's own
 buses occupy their seats to within a track, so a per-layer fraction has no
 room to be both the block's budget and the top's reservation.  The blind
 band policy converges because it is coarse — a whole layer is a positional
-reservation of a kind — and pays 5–8× for it.  The informed loop's one
+reservation of a kind — and pays 4.5–8× for it.  The informed loop's one
 virtue survives: it is self-consistent after one round (the `bu` fixpoint),
 which is what a positional derivation will need too.  The build order
 changes accordingly: the corridor primitive (E5's "positioned corridor",

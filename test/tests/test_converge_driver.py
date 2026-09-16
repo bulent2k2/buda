@@ -55,14 +55,14 @@ def _tclsh(*args, cwd):
 
 
 def _report(path):
-    d = {"share": [], "demand": []}
+    d = {"share": [], "cap": [], "demand": []}
     for ln in path.read_text().splitlines():
         toks = ln.split()
         if not toks:
             continue
         # Tcl-list shaped: a word with a `/` is brace-quoted (`{io/p_0}`)
         toks = [t.strip("{}") for t in toks]
-        if toks[0] in ("share", "demand"):
+        if toks[0] in ("share", "cap", "demand"):
             d[toks[0]].append(toks[1:])
         else:
             d[toks[0]] = toks[1:]
@@ -80,6 +80,7 @@ def test_a_vehicle_session_leaves_the_report_the_driver_reads(tmp_path):
     assert int(d["bundles"][0]) > 0 and d["marks"] == ["0"]
     assert d["healed"] == ["0"] and d["reserve"] == ["0"]
     assert int(d["wl_detailed"][0]) > 0
+    assert d["cap"] == []                          # top-down: no band declared
     # the derived lines, with the kept/nsig pair a driver prices from
     assert d["share"], d
     for cell, layer, pct, kept, nsig, coll in d["share"]:
@@ -225,9 +226,11 @@ def test_the_driver_runs_the_three_arms_and_writes_the_table(tmp_path):
 
 def test_reservation_efficiency_is_reserved_over_used(tmp_path):
     """The blind round with `reserve N` reserves EVERY track of the top N
-    layers over every instance; the informed round reserves the fraction
-    the thinning removes.  Both computed from the report the way the
-    write-up states, and checked here against a recount."""
+    layers over every instance of a CAPPED cell — `reserve_top_layers`
+    leaves the top level (the SoC's `quad_cell`) unrestricted, and its
+    rows must not count (Codex P2 on #935); the informed round reserves the
+    fraction the thinning removes.  Both computed from the report the way
+    the write-up states, and checked here against a recount."""
     rep = tmp_path / "bl.rep"
     r = _tclsh(_SOC, 2, "-bottomup", "-noheal", "-reserve", 2,
                "-report", rep, cwd=tmp_path)
@@ -235,8 +238,18 @@ def test_reservation_efficiency_is_reserved_over_used(tmp_path):
     layers = sorted({row[2] for row in d["demand"]},
                     key=lambda n: int(re.search(r"(\d+)$", n).group(1)))
     top = set(layers[-2:])
-    reserved = sum(int(row[5]) for row in d["demand"] if row[2] in top)
-    used = sum(int(row[4]) for row in d["demand"] if row[2] in top)
+    # the report says which cells the reservation capped, and at what
+    capped = {row[0]: row[2] for row in d["cap"]}
+    assert capped and "quad_cell" not in capped and "cluster_cell" in capped
+    assert set(capped.values()) == {layers[-3]}, capped
+    cells_seen = {row[1] for row in d["demand"]}
+    assert "quad_cell" in cells_seen               # so the exclusion bites
+    reserved = sum(int(row[5]) for row in d["demand"]
+                   if row[2] in top and row[1] in capped)
+    used = sum(int(row[4]) for row in d["demand"]
+               if row[2] in top and row[1] in capped)
+    over_all = sum(int(row[5]) for row in d["demand"] if row[2] in top)
+    assert over_all > reserved
     script = f"""
         source {_ROOT / 'flow' / 'tcl' / 'converge_lib.tcl'}
         set rep [converge::read_report {rep}]

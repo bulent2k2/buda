@@ -130,6 +130,40 @@ def test_a_count_that_was_never_computed_is_not_zero(tmp_path):
     assert "OVERLAPS=-1" in out, out
 
 
+def test_query_caps_names_the_cells_a_reservation_actually_capped(tmp_path):
+    """`reserve_top_layers N` caps every cell BELOW the top level and leaves
+    the top level unrestricted, so a driver pricing the reservation has to
+    know which cells carry a band: `buda::query caps` is the `{cell floor
+    cap}` list, empty before any band is declared (Codex P2 on #935)."""
+    out = _tcl(tmp_path, r"""
+        buda::open_bdb :memory:
+        buda::def_layer 2 M2 H 20
+        buda::def_layer 3 M3 V 20
+        buda::def_layer 4 M4 H TOP 20
+        buda::def_layer 5 M5 V TOP 20
+        buda::add_cell leaf 40 40
+        buda::add_cell mid 200 100
+        buda::add_inst_to_cell mid a leaf 10 10
+        buda::add_inst_to_cell mid b leaf 100 10
+        buda::add_inst u1 mid - 0 0
+        buda::add_inst u2 mid - 300 0
+        proc show {tag} {
+            set rows [buda::query caps]
+            puts "$tag=[llength $rows]"
+            foreach r $rows { lassign $r cell floor cap; puts "$tag $cell/$floor/$cap" }
+        }
+        show CAPS0
+        buda::reserve_top_layers 1
+        show CAPS1
+        buda::set_cell_layer_cap leaf M3 -min M2
+        show CAPS2
+        buda::stop""")
+    assert "CAPS0=0" in out, out
+    # only the leaf is capped: `mid` is the top level and stays unrestricted
+    assert "CAPS1=1" in out and "CAPS1 leaf/-/M4" in out, out
+    assert "CAPS2=1" in out and "CAPS2 leaf/M2/M3" in out, out
+
+
 def test_an_unknown_query_says_what_it_knows(tmp_path):
     out = _tcl(tmp_path, """
         if {[catch {buda::query nonesuch} e]} { puts "E=$e" }
