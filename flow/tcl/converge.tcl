@@ -99,6 +99,18 @@ while {$i < $argc} {
     }
 }
 if {![llength $sizes]} { error "converge.tcl: give at least one size" }
+# The blind loop advances by `step` until it passes `maxreserve`: a zero
+# step would re-run the same round forever on a dirty design (Codex P2 on
+# #935), so the three loop bounds are checked before any session starts.
+if {![string is integer -strict $step] || $step < 1} {
+    error "converge.tcl: -step takes a positive integer, got '$step'"
+}
+if {![string is integer -strict $maxreserve] || $maxreserve < 0} {
+    error "converge.tcl: -maxreserve takes a non-negative integer, got '$maxreserve'"
+}
+if {![string is integer -strict $informed] || $informed < 0} {
+    error "converge.tcl: -informed takes a non-negative integer, got '$informed'"
+}
 foreach a $arms { if {$a ni {blind td bu}} { error "converge.tcl: unknown arm '$a'" } }
 file mkdir $out
 set script [file join $repo flow tcl $vehicle.tcl]

@@ -1031,8 +1031,10 @@ every line the derivation finds the worst OWN seat over the cell's instances
 — its subtree included, since the thinned pattern is installed over the
 instance's bbox for the DNUTS reference solve, so a nested cell's buses see
 the enclosing cell's thinning too — by the DNUTS admission arithmetic
-(member bits against the span-clear pool of the seat this plan gave the
-bus), and raises the share to the smallest slot count that hosts it, said
+(what the engine ADMITS on — member bits, or a governed segment's NDR
+group demand, since a `width x2` bit pays two slots — against the span-clear
+pool of the seat this plan gave the bus, the doomed-seat census's own
+arithmetic), and raises the share to the smallest slot count that hosts it, said
 on the line (`own` column, `F` when it floored).  Where that is every slot
 the layer gets **no line** (full use) and the note says what the top wanted
 there: a uniform share cannot hand the top a complement the block's own

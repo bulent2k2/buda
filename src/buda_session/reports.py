@@ -1354,8 +1354,20 @@ class ReportsMixin:
                     sel = w.plan.selected_topology_index
                     if sel < 0 or sel >= len(w.input.candidates):
                         continue
-                    need = self._seg_member_bits(w, sel, ts.seg_idx)
-                    pool = self._seg_admission_pool(ts, g, need)
+                    # NEED is what the engine ADMITS on — for a governed
+                    # segment its NDR group demand (wide bits, guards,
+                    # shields, run ends), not its bit count — and the POOL
+                    # is selected against the full demand with the doom
+                    # test on the credited minimum: `_doomed_seats`'s own
+                    # split, so a governed seat is not read as needing
+                    # fewer slots than DNUTS will ask of it (Codex P2 on
+                    # #935).  Identity on every ungoverned segment.
+                    need = self._seg_admission_need(w, sel, ts.seg_idx,
+                                                    layer=ts.layer)
+                    pool = self._seg_admission_pool(
+                        ts, g, self._seg_admission_need(
+                            w, sel, ts.seg_idx, credited=False,
+                            layer=ts.layer))
                     frac = 1.0 if pool <= 0 else min(1.0, need / pool)
                     if frac > own_need:
                         own_need = frac

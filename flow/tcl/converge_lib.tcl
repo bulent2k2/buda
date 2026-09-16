@@ -152,11 +152,14 @@ proc converge::finish {healed} {
         lappend cmd {*}$converge::derive_opts
         set out [buda::derive_cell_layer_shares {*}$cmd]
         # The table rows: `cell  layer  share%  kept/nsig  insts  worst
-        # instance  worst%  collide (inst)` — the kept/nsig pair is what a
-        # driver needs to price the reservation, and the derivation is the
-        # one place that knows it.
+        # instance  worst%  own%[F]  collide (inst)` — the kept/nsig pair
+        # is what a driver needs to price the reservation, and the
+        # derivation is the one place that knows it.  The own% column sits
+        # BETWEEN worst% and collide and is matched explicitly: unanchored,
+        # the pattern captured its digits as the collision count (Codex P2
+        # on #935).
         foreach ln [split $out \n] {
-            if {[regexp {^\s*(\S+)\s+(\S+)\s+(\d+)%\s+(\d+)/(\d+)\s+\d+\s+\S+\s+[\d.]+%\s+(\d+)} \
+            if {[regexp {^\s*(\S+)\s+(\S+)\s+(\d+)%\s+(\d+)/(\d+)\s+\d+\s+\S+\s+[\d.]+%\s+\d+%F?\s+(\d+)(?:\s|$)} \
                         $ln -> cell layer pct kept nsig coll]} {
                 lappend derived [list $cell $layer $pct $kept $nsig $coll]
             }

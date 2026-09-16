@@ -85,6 +85,20 @@ def test_a_vehicle_session_leaves_the_report_the_driver_reads(tmp_path):
     for cell, layer, pct, kept, nsig, coll in d["share"]:
         assert 0 < int(pct) <= 100 and 0 < int(kept) <= int(nsig)
         assert f"set_cell_layer_share {cell} {layer} {pct}" in shares.read_text()
+    # ... and the collision count is the TABLE's, not the own% column that
+    # sits between worst% and collide (Codex P2 on #935: an unanchored
+    # match captured own%'s digits as `coll` in every report)
+    table = dict()
+    for ln in (r.stdout + r.stderr).splitlines():
+        m = re.match(r"^\s*(\S+)\s+(M\d)\s+\d+%\s+\d+/\d+\s+\d+\s+\S+\s+"
+                     r"[\d.]+%\s+(\d+)%F?\s+(\d+)", ln)
+        if m:
+            table[(m[1], m[2])] = (int(m[3]), int(m[4]))
+    assert table
+    for cell, layer, pct, kept, nsig, coll in d["share"]:
+        own_pct, collide = table[(cell, layer)]
+        assert int(coll) == collide, (cell, layer, coll, own_pct, collide)
+    assert any(o != c for o, c in table.values()), table
     # one demand row per placed instance and patterned layer
     assert d["demand"] and all(len(row) == 7 for row in d["demand"])
     insts = {row[0] for row in d["demand"]}
@@ -108,6 +122,20 @@ def test_the_shares_govern_the_next_session(tmp_path):
     assert "[LayerCaps] reserving the top 1 layer(s)" in log, log[-3000:]
     d = _report(rep)
     assert d["reserve"] == ["1"] and int(d["marks"][0]) > 0
+
+
+def test_a_zero_step_is_refused_before_any_session_starts(tmp_path):
+    """The blind loop steps `reserve` by `-step` until it passes
+    `-maxreserve`; a zero step would re-run the same dirty round forever
+    (Codex P2 on #935).  Refused up front, with the other two loop bounds."""
+    out = tmp_path / "e1"
+    for words, msg in [(["-step", 0], "-step takes a positive integer"),
+                       (["-step", "x"], "-step takes a positive integer"),
+                       (["-maxreserve", -1], "-maxreserve takes a non-negative"),
+                       (["-informed", -1], "-informed takes a non-negative")]:
+        r = _tclsh(_DRIVER, "soc", 2, *words, "-out", out, cwd=tmp_path)
+        assert r.returncode != 0 and msg in r.stderr, (words, r.stderr[-500:])
+        assert not list(out.glob("*.log")) if out.exists() else True
 
 
 def test_the_driver_runs_the_three_arms_and_writes_the_table(tmp_path):

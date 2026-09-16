@@ -161,6 +161,44 @@ def test_the_share_is_floored_by_the_cells_own_seat():
     assert [l for l in lines if l["layer_name"] == "M6"]
 
 
+def test_the_own_need_is_the_admission_demand_not_the_bit_count():
+    """A governed cell-local bus is admitted on its NDR GROUP DEMAND — a
+    `width x2` bit pays two slots — so the floor must read that, not the
+    bit count, or it derives a share the block's own routing cannot live
+    under (Codex P2 on #935).  Same design, the cell-local `loc` buses
+    under an x2 rule: the seat's need doubles while the bits do not, and
+    it is `_seg_admission_need`'s number — the doomed-seat census's own
+    arithmetic — that the row carries."""
+    i = _DESIGN.index("run_hier_bundler depth 1")
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    _quiet(s, *_DESIGN[:i], "def_ndr w2 width x2", "set_ndr loc w2",
+           *_DESIGN[i:], "run_nuts")
+    rows = s._layer_demand()
+    own = [r for r in rows if r["cell"] == "top_cell"
+           and r["layer_name"] == "M6" and r["own_seat"] is not None]
+    assert len(own) == 2, rows
+    wm = {w.input.original_bundle.id: w for w in s.bundles}
+    for r in own:
+        bid, si, need, pool = r["own_seat"]
+        w = wm[bid]
+        sel = w.plan.selected_topology_index
+        assert w.input.ndr.active()
+        assert s._seg_member_bits(w, sel, si) == 8
+        assert need == s._seg_admission_need(w, sel, si, layer=r["layer"]) == 16
+        ts = next(t for t in s.nuts_result.segments
+                  if t.bundle_id == bid and t.seg_idx == si)
+        assert pool == s._seg_admission_pool(
+            ts, s.routing_grid.get_layer_grid(r["layer"]),
+            s._seg_admission_need(w, sel, si, credited=False, layer=r["layer"]))
+        assert r["own_need"] == min(1.0, 16 / pool), r
+    # the ungoverned design reads the bit count: the identity, by construction
+    s0 = _session("run_nuts")
+    for r in s0._layer_demand():
+        if r["cell"] == "top_cell" and r["layer_name"] == "M6":
+            assert r["own_seat"][2] == 8, r
+
+
 def test_scope_defaults_to_the_bottom_up_marks_and_cells_narrows():
     s = _session("set_bottom_up top_cell", "run_nuts")
     lines, notes, _ = s._derive_cell_layer_shares()
