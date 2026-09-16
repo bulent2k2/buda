@@ -90,9 +90,14 @@ while {$i < $argc} {
     # Every option below `-nofloor` takes a value: a trailing option, or an
     # empty word after it, must not read as "given" (an empty `-arms`
     # passed validation and wrote an empty table — Codex P2 on #935).
-    set opts {-heal -nofloor -step -maxreserve -informed -arms -out -tag -j}
-    if {$a ni {-heal -nofloor} && ([string trim $v] eq "" || $v in $opts)} {
-        error "converge.tcl: $a needs a value"
+    # An option-LOOKING next word — anything dash-prefixed that is not a
+    # number — is a missing value too, whether or not it is an option this
+    # driver knows: `-tag -heall` used to take the typo as the tag and run
+    # the whole experiment (Codex P2 on #935).  A numeric `-1` still reaches
+    # its own check (`-maxreserve takes a non-negative integer`).
+    set optlike [expr {[string match -* $v] && ![string is integer -strict $v]}]
+    if {$a ni {-heal -nofloor} && ([string trim $v] eq "" || $optlike)} {
+        error "converge.tcl: $a needs a value (got '$v')"
     }
     switch -- $a {
         -heal       { set heal 1; incr i }

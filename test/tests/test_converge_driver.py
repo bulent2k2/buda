@@ -130,7 +130,9 @@ def test_a_zero_step_is_refused_before_any_session_starts(tmp_path):
     `-maxreserve`; a zero step would re-run the same dirty round forever
     (Codex P2 on #935).  Refused up front, with the other two loop bounds,
     an `-arms` naming no arm (it wrote an empty table and exited 0), and a
-    value-taking option with nothing after it."""
+    value-taking option with nothing after it — or an option-LOOKING word,
+    a typo included: `-tag -heall` used to run the experiment tagged
+    `-heall`."""
     out = tmp_path / "e1"
     for words, msg in [(["-step", 0], "-step takes a positive integer"),
                        (["-step", "x"], "-step takes a positive integer"),
@@ -140,7 +142,11 @@ def test_a_zero_step_is_refused_before_any_session_starts(tmp_path):
                        (["-arms", ","], "-arms names no arm"),
                        (["-arms", "td,"], None),           # a stray comma is fine
                        (["-arms"], "-arms needs a value"),
-                       (["-step"], "-step needs a value")]:
+                       (["-step"], "-step needs a value"),
+                       # an option-LOOKING value, known or a typo, is missing
+                       (["-tag", "-heall"], "-tag needs a value"),
+                       (["-out", "-otu"], "-out needs a value"),
+                       (["-arms", "-out", "x"], "-arms needs a value")]:
         if msg is None:
             continue
         r = _tclsh(_DRIVER, "soc", 2, *words, "-out", out, cwd=tmp_path)
