@@ -1403,10 +1403,12 @@ class ReportsMixin:
         thinned pattern would keep — zero means the budget is also a
         reservation there, nonzero is exactly what E1 measures.
 
-        Returns (lines, notes): `lines` are dicts (cell, layer, layer_name,
-        pct, kept, n_sig, worst_inst, worst_pct, n_inst, collide); `notes`
-        are printable strings.  None when there is no demand to read
-        (no NUTS result)."""
+        Returns (lines, notes, scope): `lines` are dicts (cell, layer,
+        layer_name, pct, kept, n_sig, worst_inst, worst_pct, n_inst,
+        collide); `notes` are printable strings; `scope` is the list of
+        cells the derivation judged — what `apply` replaces the shares OF,
+        so a scoped cell's share on a layer with no line is a stale one.
+        None when there is no demand to read (no NUTS result)."""
         rows = self._layer_demand()
         if rows is None:
             return None
@@ -1491,21 +1493,29 @@ class ReportsMixin:
                     "n_inst": len(lrows),
                     "collide": collide, "collide_inst": collide_inst,
                 })
-        return lines, notes
+        return lines, notes, scope
 
     def _report_cell_layer_shares(self, cells=None, apply=False, path=""):
         """`derive_cell_layer_shares`: print the derivation as a table plus
         the `set_cell_layer_share` lines as flow-text paste lines; `apply`
         declares them in this session through the command itself (so the
         validation, the BDB write-through and the print are the command's),
-        `path` writes them to a file a later session can `source`."""
+        `path` writes them to a file a later session can `source`.
+
+        `apply` makes the derivation THE budget of every cell in scope: a
+        share a scoped cell holds on a layer the derivation emitted no line
+        for — the top no longer touches it, or the new complement keeps
+        zero slots — is REMOVED (declared at 100%, the command's own
+        removal) and said, since leaving it would keep constraining the
+        next plan under a budget this run did not derive (Codex P2 on
+        #934).  A cell outside the scope keeps its shares."""
         out = self._derive_cell_layer_shares(cells)
         if out is None:
             print("Error: derive_cell_layer_shares needs a NUTS result to read "
                   "the demand off (run_nuts; run_detailed_nuts for exact "
                   "tracks) — see report_layer_demand")
             return
-        lines, notes = out
+        lines, notes, scope = out
         det = getattr(self, "detailed_result", None)
         basis = ("detailed bit tracks" if det is not None
                  else "abstract bus tracks")
@@ -1533,11 +1543,44 @@ class ReportsMixin:
             print(f"  written to {path}"
                   + ("" if text else " (header only — no line to declare)"))
 
+        def _apply():
+            from buda_cmds import bdb_cmds
+            for l in lines:
+                bdb_cmds.cmd_set_cell_layer_share(
+                    self, "set_cell_layer_share",
+                    [l["cell"], l["layer_name"], str(l["pct"])],
+                    f"set_cell_layer_share {l['cell']} {l['layer_name']} "
+                    f"{l['pct']}")
+            # The derivation is the budget of every cell in scope: a share
+            # a scoped cell still holds on a layer with no line is one an
+            # earlier declaration left behind, and the next plan would
+            # honour it (Codex P2 on #934).  pct 100 is the command's own
+            # removal, so the BDB row goes with the session entry.
+            names = {lid: n for n, lid in
+                     getattr(self, "_layer_name_map", {}).items()}
+            emitted = {(l["cell"], l["layer"]) for l in lines}
+            held = getattr(self, "_cell_layer_shares", None) or {}
+            stale = sorted((c, lid) for (c, lid) in held
+                           if c in scope and (c, lid) not in emitted)
+            for c, lid in stale:
+                was = held[(c, lid)]
+                lname = names.get(lid, f"L{lid}")
+                print(f"  {c} {lname}: share {100.0 * was:g}% held from an "
+                      f"earlier declaration, no line derived now — removed")
+                bdb_cmds.cmd_set_cell_layer_share(
+                    self, "set_cell_layer_share", [c, lname, "100"],
+                    f"set_cell_layer_share {c} {lname} 100")
+            print(f"  applied {len(lines)} share(s) to this session"
+                  + (f"; removed {len(stale)} stale share(s) in scope"
+                     if stale else ""))
+
         if not lines:
             print("  nothing to declare: the top takes no track over any "
                   "instance in scope")
             if path:
                 _write(path)
+            if apply:
+                _apply()
             return
         w_cell = max(len(l["cell"]) for l in lines)
         w_inst = max([len(l["worst_inst"]) for l in lines] + [14])
@@ -1559,11 +1602,4 @@ class ReportsMixin:
         if path:
             _write(path)
         if apply:
-            from buda_cmds import bdb_cmds
-            for l in lines:
-                bdb_cmds.cmd_set_cell_layer_share(
-                    self, "set_cell_layer_share",
-                    [l["cell"], l["layer_name"], str(l["pct"])],
-                    f"set_cell_layer_share {l['cell']} {l['layer_name']} "
-                    f"{l['pct']}")
-            print(f"  applied {len(lines)} share(s) to this session")
+            _apply()

@@ -1033,8 +1033,14 @@ window and the thinning keeps the first slots).
 The lines must be declared **before `run_planner hier`** (`_apply_layer_policies`
 resolves them onto the wrappers there).  `apply` declares them in this session
 through `set_cell_layer_share` itself — its validation, BDB write-through and
-print — for a flow that re-plans; `file` writes them (with a header naming
-the basis) for the E1 recipe: session 1 routes top-down and derives, session 2
+print — for a flow that re-plans, and it makes the derivation **the budget of
+every cell in scope**: a share a scoped cell still holds on a layer the
+derivation emitted no line for (the top no longer touches it, or the new
+complement keeps zero slots) is removed through the command's own pct-100
+path — session and BDB — and said, since leaving it would keep the next plan
+under a budget this run did not derive; a cell outside the scope keeps its
+shares.  `file` writes the lines (with a header naming the basis) for the E1
+recipe: session 1 routes top-down and derives, session 2
 `source`s the file after the cells exist and before bundling.  Reads the same
 basis as the demand query — detailed bit tracks once `run_detailed_nuts` has
 run, the abstract placement before — and needs a NUTS result, saying so

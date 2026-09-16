@@ -29,7 +29,10 @@ top's own plan instead of guessed.  What is worth pinning:
     and that session routes clean under them;
   * the collision count is honest: a share is a budget, the top's tracks
     are specific, and the number of the top's tracks inside the kept slots
-    is reported rather than assumed away.
+    is reported rather than assumed away;
+  * `apply` is the budget of every cell in scope: a scoped cell's share on
+    a layer the new derivation emits no line for is removed (Codex P2 on
+    #934), and a cell outside the scope keeps its shares.
 """
 import contextlib
 import io
@@ -52,7 +55,7 @@ def _session(*extra):
 
 def test_the_share_is_the_complement_of_the_worst_instance():
     s = _session("run_nuts")
-    lines, notes = s._derive_cell_layer_shares()
+    lines, notes, _ = s._derive_cell_layer_shares()
     assert any("owning a cell-local bundle" in n for n in notes), notes
     assert [(l["cell"], l["layer_name"]) for l in lines] == [("top_cell", "M6")]
     l = lines[0]
@@ -73,7 +76,7 @@ def test_apply_declares_and_a_sourced_file_routes_clean(tmp_path):
     path = tmp_path / "shares.buda"
     out = _cmd(s, f"derive_cell_layer_shares apply file {path}")
     assert "detailed bit tracks" in out and "applied 1 share(s)" in out, out
-    lines, _ = s._derive_cell_layer_shares()
+    lines, _, _ = s._derive_cell_layer_shares()
     pct = lines[0]["pct"]
     assert s._cell_layer_shares[("top_cell", 6)] == pct / 100.0
     text = path.read_text()
@@ -107,7 +110,7 @@ def test_a_complement_below_one_slot_is_skipped_and_said():
         if r["inst"] == "u1" and r["layer_name"] == "M6":
             r["used"], r["pct"] = 45, 100.0 * 45 / r["supply"]
     s._layer_demand = lambda *_a, **_k: real
-    lines, notes = s._derive_cell_layer_shares()
+    lines, notes, _ = s._derive_cell_layer_shares()
     assert lines == [], lines
     assert any("minimum meaningful share" in n and "set_cell_layer_cap" in n
                for n in notes), notes
@@ -116,10 +119,10 @@ def test_a_complement_below_one_slot_is_skipped_and_said():
 
 def test_scope_defaults_to_the_bottom_up_marks_and_cells_narrows():
     s = _session("set_bottom_up top_cell", "run_nuts")
-    lines, notes = s._derive_cell_layer_shares()
+    lines, notes, _ = s._derive_cell_layer_shares()
     assert any("marked set_bottom_up" in n and "top_cell" in n for n in notes)
     assert len(lines) == 1
-    lines, notes = s._derive_cell_layer_shares(["leaf", "nosuch"])
+    lines, notes, scope = s._derive_cell_layer_shares(["leaf", "nosuch"])
     assert lines == [] and any("'nosuch'" in n for n in notes), notes
     assert "usage" in _cmd(s, "derive_cell_layer_shares bogus")
 
@@ -176,3 +179,34 @@ def test_a_quoted_spaced_path_is_one_path(tmp_path):
     out = _cmd(s, f'derive_cell_layer_shares file "{path}"')
     assert "written to" in out and "usage" not in out, out
     assert "set_cell_layer_share top_cell M6" in path.read_text()
+
+
+def test_apply_removes_a_scoped_share_the_derivation_no_longer_emits():
+    """`apply` after the demand changed used to update only the emitted
+    lines, so a share held from an earlier declaration on a layer the top
+    no longer touches (or whose complement now keeps zero slots) kept
+    constraining the next plan (Codex P2 on #934).  A scoped cell's stale
+    share is removed through the command's own pct-100 path — session AND
+    BDB — while a cell outside the scope keeps its share."""
+    s = _session("run_nuts")
+    _quiet(s, "set_cell_layer_share leaf M6 50",       # in scope, no line
+           "set_cell_layer_share top_cell M5 50")      # out of scope
+    assert ("leaf", 6) in s._cell_layer_shares
+    assert s.bdb.cell_layer_shares("leaf") == [(6, 0.5)]   # persisted
+    out = _cmd(s, "derive_cell_layer_shares cells leaf apply")
+    assert "nothing to declare" in out, out
+    assert "leaf M6: share 50% held from an earlier declaration" in out, out
+    assert "removed 1 stale share(s) in scope" in out, out
+    assert ("leaf", 6) not in s._cell_layer_shares
+    assert s._cell_layer_shares == {("top_cell", 5): 0.5}
+    assert s.bdb.cell_layer_shares("leaf") == []
+    assert s.bdb.cell_layer_shares("top_cell") == [(5, 0.5)]
+    # the scope with lines: the emitted one is declared, a stale one on
+    # ANOTHER layer of the same cell goes, and re-applying is a no-op
+    _quiet(s, "set_cell_layer_share top_cell M4 50")
+    out = _cmd(s, "derive_cell_layer_shares cells top_cell apply")
+    assert "applied 1 share(s) to this session; removed 2 stale share(s)" \
+        in out, out
+    assert set(s._cell_layer_shares) == {("top_cell", 6)}
+    out = _cmd(s, "derive_cell_layer_shares cells top_cell apply")
+    assert "applied 1 share(s) to this session" in out and "stale" not in out
