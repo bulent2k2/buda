@@ -193,7 +193,7 @@ def cmd_derive_cell_layer_shares(session, cmd, args, cmd_line):
     # the kept slots) and the paste lines; `apply` declares them here,
     # `file` writes them for a later session to `source` — either way
     # they must be declared BEFORE `run_planner hier`.
-    apply, path, cells = False, "", None
+    apply, path, cells, floor_own = False, "", None, True
     # The engine's quote-aware tokenizer, so `file "results run/x.buda"`
     # is one path — the repository's quoted-path convention (Codex P2 on
     # #934); `args` is the plain whitespace split.
@@ -203,6 +203,10 @@ def cmd_derive_cell_layer_shares(session, cmd, args, cmd_line):
         t = toks[i].lower()
         if t == "apply":
             apply = True
+        elif t == "nofloor":
+            # The PURE complement, without the own-need floor: the
+            # derivation's own strawman defence (E1's control arm).
+            floor_own = False
         elif t == "file" and i + 1 < len(toks):
             path = toks[i + 1]; i += 1
         elif t == "cells" and i + 1 < len(toks):
@@ -218,12 +222,12 @@ def cmd_derive_cell_layer_shares(session, cmd, args, cmd_line):
                 return
         else:
             print("Error: usage: derive_cell_layer_shares [apply] "
-                  "[file <path>] [cells <a,b,...>]")
+                  "[file <path>] [cells <a,b,...>] [nofloor]")
             return
         i += 1
     if path:
         path = resolve_script_path(session, path)
-    session._report_cell_layer_shares(cells, apply, path)
+    session._report_cell_layer_shares(cells, apply, path, floor_own)
 
 
 def cmd_check_design(session, cmd, args, cmd_line):

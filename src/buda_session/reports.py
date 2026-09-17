@@ -1281,6 +1281,30 @@ class ReportsMixin:
                      min(ts.span_lo, ts.span_hi), max(ts.span_lo, ts.span_hi),
                      tp - ts.width / 2.0, tp + ts.width / 2.0,
                      sb.get(ts.seg_idx, nb)))
+        # The instance's OWN need, per layer: the worst SEAT among the bus
+        # segments solved in ITS frame or inside its SUBTREE — the same
+        # ownership the demand reads, and the one the share is enforced
+        # over: a share's thinned pattern is installed over the instance's
+        # BBOX for the DNUTS reference solve, so a nested cell's own buses
+        # see the enclosing cell's thinning too (E1's first measurement:
+        # a cluster's 71% M5 share stranded the CORES' 32-bit buses inside
+        # it, whose seats hold 35 tracks — 91%).  The need is the DNUTS
+        # admission arithmetic — member bits against the span-clear pool
+        # of the seat this plan gave the bus (`_seg_admission_pool`).  A
+        # share thins the pattern UNIFORMLY, and a bus needing N of the P
+        # tracks in its window cannot live under a share keeping fewer than
+        # N/P of them, so this is the floor a derived share must respect.
+        # Read off the ABSTRACT placement, which carries the seat windows;
+        # the seat a cell-local solve gives the same bus can be narrower,
+        # so the floor is a lower bound, said in the derivation's notes.
+        wrappers_by_id = {w.input.original_bundle.id: w for w in self.bundles}
+        own_segs = []
+        for ts in self.nuts_result.segments:
+            if not ts.placed or ts.track_position != ts.track_position:
+                continue
+            f = frame.get(ts.bundle_id)
+            if f:
+                own_segs.append((f, ts))
         eps = 1e-6
         rows = []
         for c in sorted(comps, key=lambda c: (c.depth, c.name)):
@@ -1319,6 +1343,35 @@ class ReportsMixin:
                                       for lo, hi in union)]
                 used = len(used_tracks)
                 supply = len(tracks)
+                own_need, own_seat = 0.0, None
+                for f, ts in own_segs:
+                    if ts.layer != lid or not (f == c.name
+                                               or f.startswith(own_pre)):
+                        continue
+                    w = wrappers_by_id.get(ts.bundle_id)
+                    if w is None:
+                        continue
+                    sel = w.plan.selected_topology_index
+                    if sel < 0 or sel >= len(w.input.candidates):
+                        continue
+                    # NEED is what the engine ADMITS on — for a governed
+                    # segment its NDR group demand (wide bits, guards,
+                    # shields, run ends), not its bit count — and the POOL
+                    # is selected against the full demand with the doom
+                    # test on the credited minimum: `_doomed_seats`'s own
+                    # split, so a governed seat is not read as needing
+                    # fewer slots than DNUTS will ask of it (Codex P2 on
+                    # #935).  Identity on every ungoverned segment.
+                    need = self._seg_admission_need(w, sel, ts.seg_idx,
+                                                    layer=ts.layer)
+                    pool = self._seg_admission_pool(
+                        ts, g, self._seg_admission_need(
+                            w, sel, ts.seg_idx, credited=False,
+                            layer=ts.layer))
+                    frac = 1.0 if pool <= 0 else min(1.0, need / pool)
+                    if frac > own_need:
+                        own_need = frac
+                        own_seat = (ts.bundle_id, ts.seg_idx, need, pool)
                 rows.append({
                     "inst": c.name, "cell": c.cell, "depth": c.depth,
                     "layer": lid, "layer_name": lname(lid),
@@ -1328,6 +1381,10 @@ class ReportsMixin:
                     # WHICH tracks (positions), for the share derivation's
                     # collision check; not part of the Tcl row.
                     "used_tracks": used_tracks,
+                    # The instance's own worst seat on this layer: the
+                    # fraction of its window the bus needs (1.0 = all of
+                    # it), and which (bundle, seg, need, pool) it is.
+                    "own_need": own_need, "own_seat": own_seat,
                 })
         return rows
 
@@ -1375,7 +1432,7 @@ class ReportsMixin:
 
     # ── derive_cell_layer_shares (convergence ladder item 4) ──────────────
 
-    def _derive_cell_layer_shares(self, cells=None):
+    def _derive_cell_layer_shares(self, cells=None, floor_own=True):
         """Turn the demand rows into `set_cell_layer_share` lines: for every
         cell in scope and every patterned layer, the COMPLEMENT of the
         worst demand over the cell's instances, floored to a whole percent
@@ -1397,6 +1454,21 @@ class ReportsMixin:
         (the top leaves the cell less than one slot — a band question,
         `set_cell_layer_cap`, not a share), since `set_cell_layer_share`
         refuses it loudly.
+
+        The complement is FLOORED by the cell's own need (`floor_own`,
+        the default): a share thins the pattern uniformly, so a bus of the
+        cell's own that needs N of the P tracks in its seat cannot live
+        under a share keeping fewer than N/P of them — the share is raised
+        to the smallest slot count that hosts the worst own seat over the
+        cell's instances, said on the line; where that is EVERY slot the
+        layer gets no line at all (full use) and the note says what the
+        top wanted there, since a uniform share cannot hand the top a
+        complement the block's own buses need too — that wants a
+        POSITIONAL reservation, which is not a share.  E1 measured the
+        unfloored derivation stranding 410 bits at NQ=2 where a blind
+        round strands 8, every one of them a cluster's own 32-bit bus in a
+        35-track window under a 71% share.  `floor_own=False` is the
+        study knob (`nofloor`).
 
         Each line carries a COLLISION count: a share is a BUDGET (the
         cell's pattern is thinned to its first floor(s x n_signal) SIGNAL
@@ -1471,6 +1543,54 @@ class ReportsMixin:
                 pat = self.routing_grid.get_layer_grid(lid).global_pattern()
                 n_sig = sum(1 for sl in pat.slots if sl.type == "SIGNAL")
                 kept = int(pct / 100.0 * n_sig + 1e-9)
+                # The own-need floor: the smallest slot count per period
+                # that hosts the cell's worst own seat on this layer.
+                own = max(lrows, key=lambda r: r["own_need"])
+                own_pct = 100.0 * own["own_need"]
+                floored = False
+                if floor_own and own["own_seat"] is not None:
+                    kept_min = int(math.ceil(own["own_need"] * n_sig - 1e-9))
+                    bid, si, need, pool = own["own_seat"]
+                    if kept_min >= n_sig:
+                        notes.append(
+                            f"{cell} {lname}: the top leaves "
+                            f"{100.0 - worst['pct']:.1f}% at {worst['inst']} "
+                            f"but {cell}'s own bundle {bid} seg {si} needs "
+                            f"{need} of the {pool} tracks in its seat "
+                            f"({own_pct:.0f}%, at {own['inst']}) — no share "
+                            f"(full use): a uniform share cannot host both; "
+                            f"this wants a positional reservation")
+                        continue
+                    if kept_min > kept:
+                        pct_floor = int(math.ceil(100.0 * kept_min / n_sig))
+                        # The share is declared in WHOLE percent and the
+                        # command keeps floor(pct/100 x n_sig) slots, so
+                        # the line must report the count the DECLARED
+                        # percent keeps (on a 128-slot pattern 50 slots
+                        # round up to 40%, which keeps 51) — and a floor
+                        # that rounds to 100% is full use, not a share:
+                        # `set_cell_layer_share ... 100` REMOVES the share
+                        # (Codex P2 on #935; 127 of 128 slots is the case).
+                        if pct_floor >= 100:
+                            notes.append(
+                                f"{cell} {lname}: the top leaves "
+                                f"{100.0 - worst['pct']:.1f}% at {worst['inst']} "
+                                f"but {cell}'s own bundle {bid} seg {si} needs "
+                                f"{need} of the {pool} tracks in its seat "
+                                f"({own_pct:.0f}%, at {own['inst']}), "
+                                f"{kept_min} of {n_sig} slots — every whole "
+                                f"percent under 100 keeps fewer; no share "
+                                f"(full use): a uniform share cannot host "
+                                f"both; this wants a positional reservation")
+                            continue
+                        kept_floor = int(pct_floor / 100.0 * n_sig + 1e-9)
+                        notes.append(
+                            f"{cell} {lname}: share floored {pct}% -> "
+                            f"{pct_floor}% ({kept_floor}/{n_sig} slots): "
+                            f"{cell}'s own bundle {bid} seg {si} needs "
+                            f"{need} of the {pool} tracks in its seat "
+                            f"({own_pct:.0f}%, at {own['inst']})")
+                        pct, kept, floored = pct_floor, kept_floor, True
                 if pct <= 0 or kept == 0:
                     notes.append(
                         f"{cell} {lname}: the top leaves {100.0 - worst['pct']:.1f}% "
@@ -1507,10 +1627,12 @@ class ReportsMixin:
                     "worst_used": worst["used"], "worst_supply": worst["supply"],
                     "n_inst": len(lrows),
                     "collide": collide, "collide_inst": collide_inst,
+                    "own_pct": own_pct, "floored": floored,
                 })
         return lines, notes, scope
 
-    def _report_cell_layer_shares(self, cells=None, apply=False, path=""):
+    def _report_cell_layer_shares(self, cells=None, apply=False, path="",
+                                  floor_own=True):
         """`derive_cell_layer_shares`: print the derivation as a table plus
         the `set_cell_layer_share` lines as flow-text paste lines; `apply`
         declares them in this session through the command itself (so the
@@ -1524,7 +1646,7 @@ class ReportsMixin:
         removal) and said, since leaving it would keep constraining the
         next plan under a budget this run did not derive (Codex P2 on
         #934).  A cell outside the scope keeps its shares."""
-        out = self._derive_cell_layer_shares(cells)
+        out = self._derive_cell_layer_shares(cells, floor_own)
         if out is None:
             print("Error: derive_cell_layer_shares needs a NUTS result to read "
                   "the demand off (run_nuts; run_detailed_nuts for exact "
@@ -1566,6 +1688,12 @@ class ReportsMixin:
                 f.write("# derive_cell_layer_shares: the complement of the "
                         f"top's demand ({basis}); source before "
                         "run_planner hier\n")
+                # The SCOPE, every cell of it: a driver re-deriving in a
+                # later round must pin the same scope, and a cell the top
+                # took nothing over this round has no line to read it off
+                # (Codex P2 on #935).
+                f.write("# scope: " + (",".join(scope) if scope else "(none)")
+                        + "\n")
                 if not text:
                     f.write("# nothing to declare: the top takes no track "
                             "over any instance in scope\n")
@@ -1614,12 +1742,13 @@ class ReportsMixin:
         w_cell = max(len(l["cell"]) for l in lines)
         w_inst = max([len(l["worst_inst"]) for l in lines] + [14])
         print(f"  {'cell':<{w_cell}}  layer  share  kept   insts  "
-              f"{'worst instance':<{w_inst}}  worst   collide")
+              f"{'worst instance':<{w_inst}}  worst    own   collide")
         for l in lines:
             print(f"  {l['cell']:<{w_cell}}  {l['layer_name']:<5}  "
                   f"{l['pct']:>4}%  {l['kept']}/{l['n_sig']:<3}  "
                   f"{l['n_inst']:>5}  {l['worst_inst']:<{w_inst}}  "
-                  f"{l['worst_pct']:>5.1f}%  {l['collide']}"
+                  f"{l['worst_pct']:>5.1f}%  {l['own_pct']:>4.0f}%"
+                  f"{'F' if l['floored'] else ' '}  {l['collide']}"
                   + (f" ({l['collide_inst']})" if l['collide'] else ""))
         n_coll = sum(1 for l in lines if l["collide"])
         print(f"  {len(lines)} share(s) derived; {n_coll} with the top holding "

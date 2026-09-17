@@ -111,7 +111,17 @@ buda::query demand ?inst? ?layer?
                          ;#   per instance and layer, the signal tracks over
                          ;#   the instance the REST of the design has placed,
                          ;#   against the tracks it has; -1 before run_nuts
+buda::query caps         ;# {cell floor cap} rows (layer names, `-` = no
+                         ;#   floor) — the cell layer bands in force, from
+                         ;#   set_cell_layer_cap, set_layer_caps_by_depth or
+                         ;#   reserve_top_layers; empty when none declared
 ```
+
+`caps` exists for one honest number: `reserve_top_layers N` caps every cell
+BELOW the top level and leaves the top level unrestricted, so a driver
+pricing a blind reservation (E1's `reserved ÷ used`) has to know WHICH
+cells were capped — summing the top N layers over every instance charges
+the uncapped top-level cells' tracks as reserved.
 
 A count that has not been computed answers **-1**, not 0: "no NUTS result"
 and "no overlaps" are opposite conclusions, and a flow that branches on the

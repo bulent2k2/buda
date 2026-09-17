@@ -30,6 +30,10 @@ top's own plan instead of guessed.  What is worth pinning:
   * the collision count is honest: a share is a budget, the top's tracks
     are specific, and the number of the top's tracks inside the kept slots
     is reported rather than assumed away;
+  * the share is FLOORED by the cell's own worst seat (subtree included,
+    since the thinning covers the instance bbox) — E1 measured the pure
+    complement stranding a cluster's own 32-bit buses — and `nofloor` is
+    the study knob;
   * the derivation is the budget of every cell in scope: a scoped cell's
     share on a layer it emits no line for is removed by `apply` AND written
     as a `... 100` line by `file` (Codex P2 on #934, both halves — a session
@@ -105,18 +109,153 @@ def test_apply_declares_and_a_sourced_file_routes_clean(tmp_path):
 
 def test_a_complement_below_one_slot_is_skipped_and_said():
     """The top leaving less than one slot per period is a band question, not
-    a share: `set_cell_layer_share` would refuse it, so it is not emitted."""
+    a share: `set_cell_layer_share` would refuse it, so it is not emitted
+    (`nofloor`: the pure complement).  WITH the own-need floor the same
+    row yields the block's own minimum instead — the top is over-subscribed
+    and the block still gets what its own buses need, said."""
     s = _session("run_nuts")
     real = s._layer_demand()
     for r in real:
         if r["inst"] == "u1" and r["layer_name"] == "M6":
             r["used"], r["pct"] = 45, 100.0 * 45 / r["supply"]
     s._layer_demand = lambda *_a, **_k: real
-    lines, notes, _ = s._derive_cell_layer_shares()
+    lines, notes, _ = s._derive_cell_layer_shares(floor_own=False)
     assert lines == [], lines
     assert any("minimum meaningful share" in n and "set_cell_layer_cap" in n
                for n in notes), notes
-    assert "nothing to declare" in _cmd(s, "derive_cell_layer_shares")
+    assert "nothing to declare" in _cmd(s, "derive_cell_layer_shares nofloor")
+    lines, notes, _ = s._derive_cell_layer_shares()
+    assert len(lines) == 1 and lines[0]["floored"], lines
+    assert lines[0]["kept"] * 1.0 / lines[0]["n_sig"] >= lines[0]["own_pct"] / 100.0
+    assert any("share floored" in n and "own bundle" in n for n in notes), notes
+
+
+def test_the_share_is_floored_by_the_cells_own_seat():
+    """E1's first measurement: the pure complement of the top's demand
+    stranded a cluster's own 32-bit buses (35-track seats under a 71%
+    share).  The derivation floors the share by the worst OWN seat over
+    the cell's instances — including the subtree, since the thinned
+    pattern is installed over the instance's bbox — and drops the line
+    (full use, said) when the block needs every slot."""
+    s = _session("run_nuts")
+    rows = s._layer_demand()
+    own = [r for r in rows if r["cell"] == "top_cell" and r["layer_name"] == "M6"]
+    assert own and all(r["own_seat"] is not None for r in own), own
+    # the cell's own 8-bit bus in its seat: a real fraction of the window
+    assert all(0.0 < r["own_need"] <= 1.0 for r in own), own
+    lines, notes, _ = s._derive_cell_layer_shares()
+    l = [l for l in lines if l["layer_name"] == "M6"][0]
+    assert l["kept"] * 1.0 / l["n_sig"] >= l["own_need"] if "own_need" in l \
+        else l["kept"] * 1.0 / l["n_sig"] >= l["own_pct"] / 100.0
+    # force the own need past every slot: no line, and the note names why
+    for r in rows:
+        if r["cell"] == "top_cell" and r["layer_name"] == "M6":
+            r["own_need"] = 1.0
+    s._layer_demand = lambda *_a, **_k: rows
+    lines, notes, _ = s._derive_cell_layer_shares()
+    assert not [l for l in lines if l["layer_name"] == "M6"], lines
+    assert any("no share (full use)" in n and "positional reservation" in n
+               for n in notes), notes
+    # nofloor ignores it
+    lines, _, _ = s._derive_cell_layer_shares(floor_own=False)
+    assert [l for l in lines if l["layer_name"] == "M6"]
+
+
+def test_the_own_need_is_the_admission_demand_not_the_bit_count():
+    """A governed cell-local bus is admitted on its NDR GROUP DEMAND — a
+    `width x2` bit pays two slots — so the floor must read that, not the
+    bit count, or it derives a share the block's own routing cannot live
+    under (Codex P2 on #935).  Same design, the cell-local `loc` buses
+    under an x2 rule: the seat's need doubles while the bits do not, and
+    it is `_seg_admission_need`'s number — the doomed-seat census's own
+    arithmetic — that the row carries."""
+    i = _DESIGN.index("run_hier_bundler depth 1")
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    _quiet(s, *_DESIGN[:i], "def_ndr w2 width x2", "set_ndr loc w2",
+           *_DESIGN[i:], "run_nuts")
+    rows = s._layer_demand()
+    own = [r for r in rows if r["cell"] == "top_cell"
+           and r["layer_name"] == "M6" and r["own_seat"] is not None]
+    assert len(own) == 2, rows
+    wm = {w.input.original_bundle.id: w for w in s.bundles}
+    for r in own:
+        bid, si, need, pool = r["own_seat"]
+        w = wm[bid]
+        sel = w.plan.selected_topology_index
+        assert w.input.ndr.active()
+        assert s._seg_member_bits(w, sel, si) == 8
+        assert need == s._seg_admission_need(w, sel, si, layer=r["layer"]) == 16
+        ts = next(t for t in s.nuts_result.segments
+                  if t.bundle_id == bid and t.seg_idx == si)
+        assert pool == s._seg_admission_pool(
+            ts, s.routing_grid.get_layer_grid(r["layer"]),
+            s._seg_admission_need(w, sel, si, credited=False, layer=r["layer"]))
+        assert r["own_need"] == min(1.0, 16 / pool), r
+    # the ungoverned design reads the bit count: the identity, by construction
+    s0 = _session("run_nuts")
+    for r in s0._layer_demand():
+        if r["cell"] == "top_cell" and r["layer_name"] == "M6":
+            assert r["own_seat"][2] == 8, r
+
+
+def test_the_file_names_its_whole_scope_not_just_the_cells_with_a_line(tmp_path):
+    """A driver re-deriving next round pins the SAME scope; a cell the top
+    took nothing over this round has no line, so the file's `# scope:`
+    header is where the scope lives (Codex P2 on #935)."""
+    s = _session("run_nuts")
+    path = tmp_path / "shares.buda"
+    _cmd(s, f"derive_cell_layer_shares cells top_cell,leaf file {path}")
+    lines, _, scope = s._derive_cell_layer_shares(["top_cell", "leaf"])
+    assert scope == ["top_cell", "leaf"]
+    with_line = {l["cell"] for l in lines}
+    assert "leaf" not in with_line, lines          # in scope, no line
+    hdr = [ln for ln in path.read_text().splitlines() if ln.startswith("# scope:")]
+    assert hdr == ["# scope: top_cell,leaf"], path.read_text()
+    # an empty scope says so rather than leaving the header out
+    _cmd(s, f"derive_cell_layer_shares cells nosuch file {path}")
+    assert "# scope: (none)" in path.read_text()
+
+
+def test_a_floor_that_rounds_to_100_percent_is_full_use_not_a_share():
+    """The share is declared in WHOLE percent and `set_cell_layer_share
+    ... 100` REMOVES a share, so on a pattern with more than 100 SIGNAL
+    slots an own need of 127/128 rounded to a 100% line that would have
+    run the next session UNRESTRICTED while reporting a 127/128
+    reservation (Codex P2 on #935).  Such a floor is full use, said.  And
+    a floor that does round to a share reports the slot count the
+    DECLARED percent keeps: 50 of 128 rounds up to 40%, which keeps 51."""
+    s = _session("run_nuts")
+    _quiet(s, "def_layer 9 M9 H TOP 20",
+           "def_track_pattern 9 0 VDD 2 1 (_ 1 1)x128 GND 2 1")
+    base = [dict(r) for r in s._layer_demand()
+            if r["cell"] == "top_cell" and r["layer_name"] == "M6"]
+    assert len(base) == 2
+
+    def rows(worst_pct, need, pool):
+        out = []
+        for r in base:
+            r = dict(r, layer=9, layer_name="M9", pct=worst_pct, used=10,
+                     supply=128, used_tracks=[], own_need=need / pool,
+                     own_seat=(4, 0, need, pool))
+            out.append(r)
+        return out
+
+    s._layer_demand = lambda *_a, **_k: rows(10.0, 127, 128)
+    lines, notes, _ = s._derive_cell_layer_shares(["top_cell"])
+    assert not [l for l in lines if l["layer"] == 9], lines
+    assert any("127 of 128 slots" in n and "no share (full use)" in n
+               for n in notes), notes
+    # the complement alone would have been 90%: the floor is what said no
+    lines, _, _ = s._derive_cell_layer_shares(["top_cell"], floor_own=False)
+    assert [l["pct"] for l in lines if l["layer"] == 9] == [90]
+    # a floor that IS a share reports what the declared percent keeps
+    s._layer_demand = lambda *_a, **_k: rows(80.0, 50, 128)
+    lines, notes, _ = s._derive_cell_layer_shares(["top_cell"])
+    l = [l for l in lines if l["layer"] == 9][0]
+    assert (l["pct"], l["kept"], l["n_sig"], l["floored"]) == (40, 51, 128, True), l
+    assert l["kept"] == int(l["pct"] / 100.0 * 128 + 1e-9)   # the command's count
+    assert any("share floored 20% -> 40% (51/128 slots)" in n for n in notes), notes
 
 
 def test_scope_defaults_to_the_bottom_up_marks_and_cells_narrows():

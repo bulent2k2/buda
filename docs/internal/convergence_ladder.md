@@ -187,7 +187,27 @@ channel — the `pc_0` seat.  "One round" is therefore a measurement, not a
 given; if BUDA needs a second round it is a diagnosed one (E4), and the
 write-up says so.
 
-**Needs.**  ~~The demand query~~ (built: `buda::query demand`, item 3); ~~`derive_cell_layer_shares`~~ (built, item 4).  Both halves exist; what is left is the loop driver (item 5) and the run.
+**Needs.**  ~~The demand query~~ (built: `buda::query demand`, item 3); ~~`derive_cell_layer_shares`~~ (built, item 4); ~~the loop driver~~ (built: `flow/tcl/converge.tcl`, item 5).
+
+**Status.**  **Run and written up: [convergence_e1.md](convergence_e1.md)**
+(2026-09-16) — and the claim is **refuted for the primitive as built**, with
+the reason measured.  The blind policy (`reserve_top_layers`, its step swept
+to its best) is clean in **two rounds** at NQ = 2, 4 and 16 with healers
+off, reserving **4.5–8×** the tracks the top used, and never clean at NQ = 8
+(its only knob overshoots: `reserve 3` strands 1,444 bits of the blocks'
+own buses).  The derived share reaches a clean endpoint in **no round** at
+any size and does not improve on the round it was derived from, because a
+`set_cell_layer_share` is UNIFORM — the last slots of every period, over
+the whole instance — while the top's demand is POSITIONAL, and the block's
+own 32-bit buses already fill their seats to 89–100 % on the layers the top
+wants.  The derivation now floors the share by the cell's own need (the
+first run without it stranded 410 bits at NQ = 2 against the blind round's
+8) and says, per cell and layer, where a share cannot express the
+complement.  On the mesh control, where the top's demand IS uniform, the
+derived share reserves 1.12–1.19× what the top uses at no cost to the
+route.  With the vehicle's own healing the healers do the work: the blind round 1 is clean with no reservation at all at NQ = 2, 4 and 8, and at NQ = 16 the top-down-derived round and the blind `reserve 1` round clear the E4 seat in the same session count (8.5× against 9.8× reservation, +1.3 % wire), while the blind-round-derived arm stays dirty on it.  What rung 4 wants is a positional reservation —
+E5's corridor — which moves ahead in the build order, and E1 is re-run
+against it.
 
 ### E3 — Pin assignment at scale *(deferred to a partner evaluation)*
 
@@ -298,8 +318,17 @@ every "one round" measured rather than assumed.
    measurement, which is why the count is on every line.
 5. **`flow/tcl/converge.tcl`** — the loop driver: runs the conventional policy
    as a scripted round, counts, and runs the BUDA one-pass, on soc first
-   (Q1) with tpu as the control, across the dial.
-6. E1 → E5.
+   (Q1) with tpu as the control, across the dial.  **Done** (2026-09-16):
+   three arms as loops (blind `reserve_top_layers` rounds; the top-down
+   derived budget; the blind-round-derived budget — the diagnosed loop),
+   every round an ordinary vehicle session through five shared hooks in
+   `converge_lib.tcl` (`-reserve`/`-shares`/`-derive`/`-noheal`/`-report`),
+   reservation efficiency read off the demand rows.
+6. ~~E1~~ **run** ([convergence_e1.md](convergence_e1.md): the share
+   primitive refuted, the reason measured) → **the positional reservation**
+   E5 needs (a corridor over an instance on a layer, handed down from the
+   top's placed tracks; `add_grid_override` stands in) → E1 re-run against
+   it → E5.
 7. **Fixed-pin primitive** — a busterm restricted to a face, then to a window
    on a face — as the interoperability piece for the partner evaluation (E3),
    last, since nothing in-house depends on it.

@@ -23,6 +23,10 @@
 #   btcl flow/tcl/soc.tcl 32 -LAYOUT compact # the utilization-chosen floorplan
 #   btcl flow/tcl/soc.tcl 2 -caps            # reserve the top pair for the top
 #   btcl flow/tcl/soc.tcl 2 -census          # instances per leaf cell type
+#   btcl flow/tcl/soc.tcl 4 -reserve 1 -noheal -report r.rep   # an E1 blind round
+#   btcl flow/tcl/soc.tcl 4 -derive s.buda   # top-down, write the derived shares
+#   btcl flow/tcl/soc.tcl 4 -bottomup -shares s.buda  # ...and route under them
+#   (the E1 hooks: converge_lib.tcl; the loop: converge.tcl)
 #
 # Every knob in `soc_vehicle::configure` is settable as `-<NAME> <value>`
 # (NQ, NC, NBANK, NBANK2, NIO, DW/AW/IW/CW, BITPITCH, PAD, M, GAP, LAYOUT), so a
@@ -46,6 +50,7 @@
 set repo [file dirname [file dirname [file dirname [file normalize [info script]]]]]
 source [file join $repo tools buda.tcl]
 source [file join $repo flow tcl soc_lib.tcl]
+source [file join $repo flow tcl converge_lib.tcl]
 
 # ── the command line ──────────────────────────────────────────────────────
 # A bare leading integer is NQ (the common case); everything else is
@@ -78,6 +83,11 @@ while {$argi < $argc} {
         -dry      { set dry 1; incr argi }
         -census   { set census 1; incr argi }
         default {
+            # The E1 hooks (-reserve/-shares/-derive/-derive_cells/-noheal/
+            # -report) — converge_lib.tcl, shared with tpu.tcl so the loop
+            # driver runs either vehicle the same way.
+            set n [converge::opt $argv $argi]
+            if {$n} { incr argi $n; continue }
             if {[string index $opt 0] ne "-"} {
                 error "soc.tcl: unexpected argument '$opt' (NQ comes first)"
             }
@@ -356,7 +366,7 @@ if {$bottomup} {
     # thing derived from these coordinates.  `*` marks every eligible cell,
     # which on a DIVERSE design is the interesting case — a cell with one
     # instance is solved once and frozen as a keepout rather than copied.
-    buda::set_bottom_up *
+    converge::mark *
     buda::align_bottom_up
 }
 
@@ -374,6 +384,10 @@ if {$bottomup} {
 # per-level behaviour collapses to the `-caps` case.
 if {$caps} { buda::reserve_top_layers 2 }
 if {$bydepth ne ""} { buda::set_layer_caps_by_depth {*}$bydepth }
+# The E1 budget, if the driver handed one down: `-reserve N` (the blind
+# policy's step) or `-shares FILE` (the derived complement), declared
+# where the bands above are — after the marks, before bundling.
+converge::policy
 
 soc_vehicle::derive_interface
 soc_vehicle::load_blocks
@@ -398,8 +412,11 @@ if {$bottomup} { buda::check_template_tracks on_mismatch independent }
 
 buda::run_detailed_nuts
 buda::check_design dnuts
+converge::first_audit
 
-soc_vehicle::heal_if_dirty "soc.tcl"
+set healed 0
+if {[converge::heal_wanted]} { set healed [soc_vehicle::heal_if_dirty "soc.tcl"] }
 buda::report_wirelength
+converge::finish $healed
 
 soc_vehicle::verdict "soc.tcl"
