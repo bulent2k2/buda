@@ -1779,6 +1779,7 @@ class ReportsMixin:
         comps = {c.name: c for c in self.bdb.all_components()} \
             if self.bdb is not None else {}
         lines = []
+        frames, ocache = {}, {}
         for cell in scope:
             per_layer = {}
             for r in by_cell[cell]:
@@ -1788,24 +1789,45 @@ class ReportsMixin:
                 lname = lrows[0]["layer_name"]
                 horiz = (self.layers.get_layer_dir(lid)
                          == buda.LayerDir.HORIZONTAL)
+                # Every occurrence sharing the template frame folds in
+                # through its orientation (S/FN/FS flip the axis); a
+                # 90-degree one belongs to the clone class, whose frame an
+                # upright-stated position cannot reach (BUDA-1921).
+                if cell not in frames:
+                    frames[cell] = self._reserve_frames(
+                        cell, None, list(comps.values()), ocache)
+                fr, n_rot = frames[cell]
                 union, used_counts, skipped = [], [], 0
+
+                def to_ref(u, c, o):
+                    ext = (c.y2 - c.y1) if horiz else (c.x2 - c.x1)
+                    origin = c.y1 if horiz else c.x1
+                    return round(self._reserve_ref_pos(u - origin, o, ext,
+                                                       horiz), 3)
+
+                def to_abs(q, c, o):
+                    ext = (c.y2 - c.y1) if horiz else (c.x2 - c.x1)
+                    origin = c.y1 if horiz else c.x1
+                    return origin + self._reserve_ref_pos(q, o, ext, horiz)
+
                 for r in lrows:
                     c = comps.get(r["inst"])
                     if c is None:
                         continue
-                    if (getattr(c, "orient", "N") or "N") != "N":
+                    o = fr.get(r["inst"])
+                    if o is None:
                         skipped += 1
                         continue
-                    origin = c.y1 if horiz else c.x1
                     used_counts.append(len(r["used_tracks"]))
                     for u in r["used_tracks"]:
-                        loc = round(u - origin, 3)
+                        loc = to_ref(u, c, o)
                         if not any(abs(loc - q) < 1e-6 for q in union):
                             union.append(loc)
                 if skipped:
-                    notes.append(f"{cell} {lname}: {skipped} rotated/mirrored "
-                                 f"instance(s) not folded in (the derivation "
-                                 f"reads N-oriented instances)")
+                    notes.append(f"{cell} {lname}: {skipped} 90-degree-"
+                                 f"rotated instance(s) not folded in (an "
+                                 f"upright-frame position has no image on "
+                                 f"the same layer there — BUDA-1921)")
                 if not union:
                     continue                # the top takes nothing here
                 union.sort()
@@ -1816,20 +1838,22 @@ class ReportsMixin:
                 seat_hit = 0
                 if own["own_window"] is not None:
                     oc = comps.get(own["inst"])
-                    if oc is not None:
-                        oo = oc.y1 if horiz else oc.x1
+                    oo = fr.get(own["inst"])
+                    if oc is not None and oo is not None:
                         lo, hi = own["own_window"]
                         seat_hit = sum(1 for q in union
-                                       if lo - 1e-6 <= oo + q <= hi + 1e-6)
+                                       if lo - 1e-6 <= to_abs(q, oc, oo)
+                                       <= hi + 1e-6)
                 own_hit = 0
                 for r in lrows:
                     c = comps.get(r["inst"])
-                    if c is None or (getattr(c, "orient", "N") or "N") != "N":
+                    o = fr.get(r["inst"])
+                    if c is None or o is None:
                         continue
-                    origin = c.y1 if horiz else c.x1
+                    absres = [to_abs(q, c, o) for q in union]
                     own_hit = max(own_hit, sum(
-                        1 for o in r.get("own_tracks", [])
-                        if any(abs(o - (origin + q)) < 1e-6 for q in union)))
+                        1 for t_ in r.get("own_tracks", [])
+                        if any(abs(t_ - a) < 1e-6 for a in absres)))
                 lines.append({
                     "cell": cell, "layer": lid, "layer_name": lname,
                     "positions": union, "n_inst": len(used_counts),

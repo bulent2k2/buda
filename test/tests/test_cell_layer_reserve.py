@@ -320,3 +320,92 @@ def test_a_nested_template_keeps_an_ancestors_corridor_free():
     # ... and its metal is audited as the corridor's, under top_cell's row
     rows2 = s2._layer_reserve_audit()
     assert any(r["own_hit"] for r in rows2), rows2
+
+
+def _flipped(marks, *policy, xform="flip_comp u2 y"):
+    """The nested design with the second top instance transformed AFTER
+    placement (hierarchical flip/rotate keep the tokens 'N' and rewrite the
+    children, so orientation is what detection finds, never the token)."""
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    i = _NEST.index("derive_busterms 2")
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        for c in [*_NEST[:i], xform, *_NEST[i:], *marks, *policy, *_NEST_TAIL]:
+            s.do_command(c)
+    return s, buf.getvalue()
+
+
+def test_a_mirrored_occurrence_folds_the_corridor_through_its_orientation():
+    """Codex P1 on #936: a nested occurrence under a MIRRORED ancestor (u2
+    flipped, so u2 and u2/c are FN/FS relative to their references) was
+    skipped by the inheritance, and the derivation and audit read the
+    token 'N' a hierarchical flip leaves behind.  Every direction-
+    preserving occurrence now folds through its orientation's involution
+    on the axis — the corridor over u2 is the mirror image of the one over
+    u1, and in the templates' own frames the two coincide."""
+    s0, _ = _flipped(["set_bottom_up *"])
+    comps = {c.name: c for c in s0.bdb.all_components()}
+    fr, n_rot = s0._reserve_frames("top_cell")
+    assert n_rot == 0 and fr["u1"] == "N" and fr["u2"] in ("FN", "FS", "S"), fr
+    lid = s0._layer_name_map["M6"]
+    before = _inner_tracks(s0, lid)
+    assert set(before) == {"u1/c", "u2/c"}
+    # the derivation folds u2's demand into the SAME cell-frame positions
+    # (the design is symmetric, so the union is one instance's worth)
+    _quiet(s0, "run_nuts", "run_detailed_nuts")
+    pos = sorted(t - comps["u1"].y1 for t in before["u1/c"])
+    line = "set_cell_layer_reserve top_cell M6 " + ",".join(f"{p:g}" for p in pos)
+    s, out = _flipped(["set_bottom_up *"], line)
+    # inner's leaves are y-symmetric, so detection reads BOTH occurrences as
+    # N in inner's frame while u2 itself is mirrored: the corridor over u2/c
+    # lands at the mirror image, and the template (solved once) keeps both
+    # images free — the expected union, computed here independently
+    expect = set()
+    for inst, o in s._reserve_frames("top_cell")[0].items():
+        c = comps[inst + "/c"]
+        for a in s._reserve_abs_positions("top_cell", inst, o, comps[inst], lid):
+            if c.y1 - 1e-6 <= a <= c.y2 + 1e-6:
+                expect.add(round(a - c.y1, 6))
+    got, src = s._inherited_reserves("inner")
+    assert set(got[lid]) == expect and src[lid] == {"top_cell": len(expect)}
+    assert len(expect) == 16, expect            # 8 + their 8 mirror images
+    assert (f"local solve with 16 reserved track(s) kept free on M6x16 "
+            f"(16 from top_cell)") in out, out
+    assert s.detailed_result.num_unplaced == 0
+    after = _inner_tracks(s, lid)
+    for inst, o in s._reserve_frames("top_cell")[0].items():
+        absres = set(s._reserve_abs_positions("top_cell", inst, o,
+                                              comps[inst], lid))
+        assert len(absres) == 8
+        assert not (after.get(inst + "/c", set()) & absres), (inst, o, after, absres)
+    rows = s._layer_reserve_audit()
+    assert [(r["inst"], r["own_hit"]) for r in rows] == [("u1", 0), ("u2", 0)], rows
+    # and the mirrored instance's corridor is NOT where the upright one's
+    # absolute positions would put it
+    u1_abs = set(s._reserve_abs_positions("top_cell", "u1", "N", comps["u1"], lid))
+    u2_abs = set(s._reserve_abs_positions("top_cell", "u2", fr["u2"], comps["u2"], lid))
+    assert {a - comps["u1"].y1 for a in u1_abs} != {a - comps["u2"].y1 for a in u2_abs}
+
+
+def test_a_rotated_class_is_not_governed_and_says_so():
+    """Codex P1 on #936: a 90-degree-rotated instance class plans through
+    its rotation-class CLONE template (`top_cell90`), whose context name
+    found no reservation and so got no keepouts and no notice.  A rotated
+    frame swaps the axes, so an upright-stated track has no image on the
+    same layer there: the class is NOT governed by the cell's own
+    reservation and BUDA-1921 says so at its solve; the derivation counts
+    the rotated occurrence out and says why."""
+    s, out = _flipped(["set_bottom_up *"], _LINE.replace("top_cell M6 ", "top_cell M6 ")
+                      .replace("83,86,89,92,100,103,106,109", "205,208,211,219"),
+                      xform="rotate_comp u2 90")
+    assert "top_cell90" in out, out[-3000:]
+    assert "BUDA-1921: WARNING" in out and "top_cell90 (cell 'top_cell')" in out, out
+    assert "[LayerReserve] cell 'top_cell': local solve with 4 reserved" in out
+    # the upright instance's audit row stands alone: the rotated one is
+    # not governed, so it has no row
+    rows = s._layer_reserve_audit()
+    assert [r["inst"] for r in rows] == ["u1"], rows
+    _quiet(s, "run_nuts", "run_detailed_nuts")
+    _lines, notes, _scope = s._derive_cell_layer_reserves(cells=["top_cell"])
+    assert any("1 90-degree-rotated instance(s) not folded in" in n for n in notes), notes

@@ -213,6 +213,14 @@ MESSAGES = {
                   "set_bottom_up it is NOT enforced — the cell's own metal "
                   "may land on the reserved tracks (check_design's "
                   "[LayerReserve] audit reports it)."),
+    "BUDA-1921": (WARNING, "A reserved cell's 90-degree-rotated instance "
+                  "class is not governed by the cell's own reservation: "
+                  "the positions are stated in the upright template frame "
+                  "and a rotation swaps the axes, so a reserved track has "
+                  "no image on the same layer there (the class plans "
+                  "through its own clone template; corridors inherited "
+                  "from ancestors still apply, and the derivation folds no "
+                  "rotated instance in)."),
     "BUDA-1919": (WARNING, "A cell's multi-rect footprint no longer unions to "
                            "the extent of an instance of that cell, so the "
                            "routing frame and the placement would be two "

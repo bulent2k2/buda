@@ -2312,59 +2312,160 @@ class HierMixin:
                             int(oy) + int(ch)))
         return out
 
-    def _inherited_reserves(self, cell):
-        """The reservations `cell` INHERITS: every ancestor instance's
-        reserved tracks projected into the cell's own frame, over EVERY
-        placed N-oriented instance of the cell, unioned — a template is
-        solved once, so it keeps free every ancestor corridor at every one
-        of its occurrences (the derivation's own union rule).  An ancestor
-        corridor is a fact about the ancestor INSTANCE (the top's wires
-        cross it), so it is inherited whether or not the ancestor is
-        itself solved as a template.  Measured need, not theory: on the
-        SoC vehicle the top's M5 tracks over a cluster sit right where the
-        nested core's 32-bit bus seats, and a core template solved without
-        them seated the bus there and lost all 32 bits at DNUTS — the
-        derivation had SAID so (`seat_hit`), and the local solve had no way
-        to act on it.  Returns ({lid: (pos, ...)}, {lid: {ancestor_cell:
-        n}}) — the projected positions and where each came from."""
+    # A reservation's POSITIONS are stated in the cell's TEMPLATE frame —
+    # the reference instance's lower-left at the origin, the frame the
+    # cell-local solve plans in and the copies are transformed FROM.  Every
+    # other occurrence of the cell is some orientation of that reference
+    # (detected geometrically, since hierarchical rotate/flip keep the
+    # tokens 'N'), so a track over an INSTANCE and the same track in the
+    # reference frame differ by the orientation's involution on the axis:
+    # the y of an H layer flips under S/FN, the x of a V layer under S/FS
+    # (`orient_rect.ORIENT_MAPS`, the rule `_translate_injections_to_cell`
+    # already applies).  A 90-degree orientation swaps the axes, so an
+    # upright-frame corridor on layer L has NO image on L there — the
+    # rotated class plans through its own clone template and is not
+    # governed by the cell's own reservation (BUDA-1921, said at its solve);
+    # an ancestor's corridor still reaches it, projected in the GLOBAL
+    # frame and folded through the class reference like any other.
+
+    def _reserve_ref_inst(self, cell):
+        """The reference instance a cell's reservation frame is anchored
+        on: its cell-local template's first instance when one exists
+        (pre-expansion view first, since the expanded list carries one
+        wrapper per instance), else the first placed instance by name —
+        the detection default, so the two agree wherever both exist."""
+        for lst in (getattr(self, "_hier_bundles_orig", None) or [],
+                    self.bundles):
+            for w in lst:
+                b = w.input.original_bundle
+                if b.cell_context == cell and b.instances:
+                    return b.instances[0]
+        return None
+
+    def _reserve_frames(self, cell, ref_inst=None, comps=None, cache=None):
+        """{instance name: orient} over the placed occurrences of `cell`
+        that share the template frame anchored on `ref_inst` (default: the
+        cell's canonical reference) — the direction-preserving ones,
+        N/S/FN/FS relative to that reference — plus the count of rotated
+        ones (the 90-degree class, another template's frame)."""
+        if self.bdb is None:
+            return {}, 0
+        if comps is None:
+            comps = list(self.bdb.all_components())
+        if ref_inst is None:
+            ref_inst = self._reserve_ref_inst(cell)
+        orients = self._detect_instance_orients(cell, comps,
+                                                ref_name=ref_inst,
+                                                cache=cache)
+        frames, rotated = {}, 0
+        for inst, o in orients.items():
+            if o is None:
+                continue
+            if o in _DIR_PRESERVING:
+                frames[inst] = o
+            else:
+                rotated += 1
+        return frames, rotated
+
+    @staticmethod
+    def _reserve_ref_pos(local, orient, extent, horiz):
+        """Instance-frame axis position <-> template-frame position (an
+        involution): the H-layer axis (y) flips under S/FN, the V-layer
+        axis (x) under S/FS."""
+        _s, rx, ry = _ORIENT_MAPS[orient]
+        return extent - local if (ry if horiz else rx) else local
+
+    def _reserve_abs_positions(self, cell, inst, orient, comp, lid):
+        """A cell's own reserved tracks on `lid` in ABSOLUTE coordinates
+        over occurrence `inst` (orient relative to the cell's reference)."""
+        pos = self._cell_reserves_of(cell).get(lid, ())
+        horiz = self.layers.get_layer_dir(lid) == buda.LayerDir.HORIZONTAL
+        ext = (comp.y2 - comp.y1) if horiz else (comp.x2 - comp.x1)
+        origin = comp.y1 if horiz else comp.x1
+        return [origin + self._reserve_ref_pos(p, orient, ext, horiz)
+                for p in pos]
+
+    def _inherited_reserves(self, cell, ref_inst=None):
+        """The reservations a template INHERITS: every ancestor instance's
+        reserved tracks projected into the template's own frame, over
+        EVERY occurrence sharing that frame (the direction-preserving ones
+        relative to `ref_inst` — a 90-degree occurrence belongs to the
+        clone template, whose own call folds its class), unioned — a
+        template is solved once, so it keeps free every ancestor corridor
+        at every one of its occurrences (the derivation's own union rule).
+        An ancestor corridor is a fact about the ancestor INSTANCE (the
+        top's wires cross it), so it is inherited whether or not the
+        ancestor is itself solved as a template; the ancestor's own
+        orientation relative to ITS reference places the corridor in the
+        global frame first, and a 90-degree-rotated ancestor occurrence
+        contributes nothing (its own reservation has no image there).
+        Measured need, not theory: on the SoC vehicle the top's M5 tracks
+        over a cluster sit right where the nested core's 32-bit bus seats,
+        and a core template solved without them seated the bus there and
+        lost all 32 bits at DNUTS — the derivation had SAID so
+        (`seat_hit`), and the local solve had no way to act on it.
+        Returns ({lid: (pos, ...)}, {lid: {ancestor_cell: n}}) — the
+        projected positions and where each came from."""
         out, src = {}, {}
         res_all = getattr(self, "_cell_layer_reserves", None) or {}
-        if not res_all or self.bdb is None:
+        if not any(res_all.values()) or self.bdb is None:
             return out, src
         comps = list(self.bdb.all_components())
         by_id = {c.id: c for c in comps}
+        by_name = {c.name: c for c in comps}
+        cache = {}
+        frames, _rot = self._reserve_frames(cell, ref_inst, comps, cache)
+        anc_frames = {}          # ancestor cell -> its frames
         eps = 1e-6
-        for c in comps:
-            if c.cell != cell or not is_placed(c) \
-                    or (getattr(c, "orient", "N") or "N") != "N":
-                continue
+        for inst, oc in sorted(frames.items()):
+            c = by_name[inst]
             cw, ch = c.x2 - c.x1, c.y2 - c.y1
             a = by_id.get(c.parent_id)
             while a is not None:
-                for lid, pos in self._cell_reserves_of(a.cell).items():
-                    horiz = (self.layers.get_layer_dir(lid)
-                             == buda.LayerDir.HORIZONTAL)
-                    ext = ch if horiz else cw
-                    off = (a.y1 - c.y1) if horiz else (a.x1 - c.x1)
-                    got = out.setdefault(lid, [])
-                    for p in pos:
-                        q = p + off
-                        if q < -eps or q > ext + eps:
-                            continue      # the corridor misses this instance
-                        if not any(abs(q - r) < eps for r in got):
-                            got.append(q)
-                            src.setdefault(lid, {})[a.cell] = \
-                                src.get(lid, {}).get(a.cell, 0) + 1
+                res = self._cell_reserves_of(a.cell)
+                if res:
+                    if a.cell not in anc_frames:
+                        anc_frames[a.cell] = self._reserve_frames(
+                            a.cell, None, comps, cache)[0]
+                    oa = anc_frames[a.cell].get(a.name)
+                    if oa is None:
+                        a = by_id.get(a.parent_id)
+                        continue      # a rotated ancestor: no image here
+                    for lid, pos in res.items():
+                        horiz = (self.layers.get_layer_dir(lid)
+                                 == buda.LayerDir.HORIZONTAL)
+                        ext_a = (a.y2 - a.y1) if horiz else (a.x2 - a.x1)
+                        ext_c = ch if horiz else cw
+                        oa_org = a.y1 if horiz else a.x1
+                        oc_org = c.y1 if horiz else c.x1
+                        got = out.setdefault(lid, [])
+                        for p in pos:
+                            g = oa_org + self._reserve_ref_pos(p, oa, ext_a,
+                                                               horiz)
+                            local = g - oc_org
+                            if local < -eps or local > ext_c + eps:
+                                continue   # the corridor misses this one
+                            q = self._reserve_ref_pos(local, oc, ext_c, horiz)
+                            if not any(abs(q - r) < eps for r in got):
+                                got.append(q)
+                                src.setdefault(lid, {})[a.cell] = \
+                                    src.get(lid, {}).get(a.cell, 0) + 1
                 a = by_id.get(a.parent_id)
         return {lid: tuple(sorted(v)) for lid, v in out.items() if v}, src
 
-    def _effective_reserves(self, cell):
-        """Own ∪ inherited reservations of `cell`, per layer — the set the
-        cell-local solve and the reference DNUTS view both keep free (ONE
-        function, so the two views cannot disagree).  Returns ({lid:
-        positions}, {lid: {ancestor_cell: n_inherited}})."""
-        own = self._cell_reserves_of(cell)
-        inh, src = self._inherited_reserves(cell)
+    def _effective_reserves(self, cell_ctx, ref_inst=None):
+        """Own ∪ inherited reservations of a template context, per layer —
+        the set the cell-local solve and the reference DNUTS view both keep
+        free (ONE function, so the two views cannot disagree).  A rotation-
+        class CLONE context (`cell90`) resolves to its base cell for the
+        inherited corridors and takes NONE of the base cell's own: an
+        upright-frame track has no image on the same layer in a rotated
+        frame.  Returns ({lid: positions}, {lid: {ancestor_cell: n}},
+        clone_skipped) — the third a bool a caller reports (BUDA-1921)."""
+        cell = self._bu_cell_of(cell_ctx)
+        is_clone = cell != cell_ctx
+        own = {} if is_clone else self._cell_reserves_of(cell)
+        inh, src = self._inherited_reserves(cell, ref_inst)
         eps = 1e-6
         eff = {}
         for lid in set(own) | set(inh):
@@ -2374,7 +2475,8 @@ class HierMixin:
                     pos.append(q)
             if pos:
                 eff[lid] = tuple(sorted(pos))
-        return eff, src
+        skipped = is_clone and any(self._cell_reserves_of(cell).values())
+        return eff, src, skipped
 
     def _reserve_note(self, eff, src):
         names = self._make_layer_names()
@@ -2395,7 +2497,11 @@ class HierMixin:
         reserved, the floorplan untouched (byte-identical)."""
         if self.routing_grid is None or self.bdb is None:
             return 0
-        eff, src = self._effective_reserves(cell)
+        eff, src, clone_skipped = self._effective_reserves(cell, ref_inst)
+        if clone_skipped:
+            import buda_diag as _diag
+            print(_diag.format("BUDA-1921", f"{cell} (cell "
+                               f"'{self._bu_cell_of(cell)}')"))
         if not eff:
             return 0
         comps = {c.name: c for c in self.bdb.all_components()}
@@ -2436,7 +2542,8 @@ class HierMixin:
             b = w.input.original_bundle
             if b.id not in ref_ids or not b.instances:
                 continue
-            res, _src = self._effective_reserves(b.cell_context)
+            res, _src, _clone = self._effective_reserves(b.cell_context,
+                                                         b.instances[0])
             if not res:
                 continue
             comp = comps.get(b.instances[0])
@@ -2494,13 +2601,13 @@ class HierMixin:
         if not any(pos for pos in res.values()) or self.bdb is None:
             return []
         bu = set(self.bdb.bottom_up_cells())
-        owning = {w.input.original_bundle.cell_context
+        owning = {self._bu_cell_of(w.input.original_bundle.cell_context)
                   for w in (wrappers if wrappers is not None else self.bundles)}
         out = []
         for cell in sorted({c.cell for c in self.bdb.all_components()}):
             if cell in bu or cell not in owning:
                 continue
-            eff, src = self._effective_reserves(cell)
+            eff, src, _clone = self._effective_reserves(cell)
             if not eff:
                 continue
             anc = sorted({a for per in src.values() for a in per})
@@ -2530,6 +2637,7 @@ class HierMixin:
             if self.bdb is not None else {}
         eps = 1e-6
         out = []
+        frames, cache = {}, {}
         for r in rows:
             pos = res.get((r["cell"], r["layer"]))
             if not pos:
@@ -2537,10 +2645,14 @@ class HierMixin:
             c = comps.get(r["inst"])
             if c is None:
                 continue
-            horiz = (self.layers.get_layer_dir(r["layer"])
-                     == buda.LayerDir.HORIZONTAL)
-            origin = c.y1 if horiz else c.x1
-            absres = [origin + p for p in pos]
+            if r["cell"] not in frames:
+                frames[r["cell"]] = self._reserve_frames(
+                    r["cell"], None, list(comps.values()), cache)[0]
+            orient = frames[r["cell"]].get(r["inst"])
+            if orient is None:
+                continue          # a rotated occurrence: not governed
+            absres = self._reserve_abs_positions(r["cell"], r["inst"],
+                                                 orient, c, r["layer"])
 
             def hits(tracks):
                 return sum(1 for u in tracks

@@ -1719,10 +1719,21 @@ by the child's local solve and reference DNUTS view exactly like its own.
 That was measured before it was built: on the SoC vehicle the top's M5
 tracks over a cluster sit where the nested core's 32-bit bus seats, and a
 core solved without them seated the bus there and lost all 32 bits at
-DNUTS while the cluster's audit row read VIOLATED.  A reserved cell — own or
-inherited — planned top-down is **not** enforced and says so at
-`run_planner hier` (BUDA-1920, an inherited-only cell named with its
-source).
+DNUTS while the cluster's audit row read VIOLATED.  Positions are stated in
+the template's **reference frame** (the reference instance's, detected
+geometrically, since a hierarchical flip or rotate keeps the tokens `N`):
+a mirrored occurrence (S/FN/FS) folds through its orientation's involution
+on the axis — the y of an H layer flips under S/FN, the x of a V layer
+under S/FS — in the inheritance, the derivation and the audit alike, so the
+corridor over a mirrored instance is the mirror image of the upright one's.
+A 90°-rotated class is **not** governed by the cell's own reservation: a
+rotation swaps the axes, so an upright-frame track has no image on the
+same layer there; the class plans through its rotation-class clone
+template, which says so at its solve (BUDA-1921), still inherits its
+ancestors' corridors, and is counted out of the derivation with a note.  A
+reserved cell — own or inherited — planned top-down is **not** enforced and
+says so at `run_planner hier` (BUDA-1920, an inherited-only cell named with
+its source).
 
 A re-declaration REPLACES the cell's list on that layer; `off` clears one
 (`* off` every reservation).  Validation is loud: an unknown cell or layer, a
