@@ -1311,17 +1311,6 @@ class ReportsMixin:
             f = frame.get(ts.bundle_id)
             if f:
                 own_segs.append((f, ts))
-        # The cell's OWN metal by (bundle, seg): exact bit tracks once DNUTS
-        # has run, the abstract footprint before — what a positional
-        # reservation's audit checks against the reserved tracks.
-        own_bits = {}
-        if det is not None:
-            for ns in det.net_segments:
-                tp = ns.track_position
-                if tp == tp:
-                    own_bits.setdefault((ns.bundle_id, ns.seg_idx), []).append(
-                        (min(ns.span_lo, ns.span_hi),
-                         max(ns.span_lo, ns.span_hi), tp))
         eps = 1e-6
         rows = []
         for c in sorted(comps, key=lambda c: (c.depth, c.name)):
@@ -1333,25 +1322,36 @@ class ReportsMixin:
                     a_lo, a_hi, p_lo, p_hi = c.x1, c.x2, c.y1, c.y2
                 else:
                     a_lo, a_hi, p_lo, p_hi = c.y1, c.y2, c.x1, c.x2
-                ivals, bits, bundles = [], 0, set()
+                # The metal over this instance, split by OWNERSHIP and
+                # read with ONE footprint rule: a wire covers the tracks
+                # under its WIDTH, and an NDR-governed run covers its
+                # guard slots too (the 0-bit rows above).  The own half
+                # used to record each own bit's CENTRE track alone, so a
+                # widened own wire or its guard run sat on a reserved
+                # track with `own_hit` reading zero (Codex P2 on #936).
+                ivals, own_ivals, bits, bundles = [], [], 0, set()
                 for bid, _si, s_lo, s_hi, m_lo, m_hi, nb in metal.get(lid, []):
-                    f = frame.get(bid)
-                    if f is not None and (f == c.name or f.startswith(own_pre)):
-                        continue          # the instance's own routing
                     if s_hi <= a_lo + eps or s_lo >= a_hi - eps:
                         continue          # does not reach over the instance
                     if m_hi <= p_lo + eps or m_lo >= p_hi - eps:
                         continue          # beside it, not over it
+                    f = frame.get(bid)
+                    if f is not None and (f == c.name or f.startswith(own_pre)):
+                        own_ivals.append((max(m_lo, p_lo), min(m_hi, p_hi)))
+                        continue          # the instance's own routing
                     ivals.append((max(m_lo, p_lo), min(m_hi, p_hi)))
                     bits += nb
                     bundles.add(bid)
-                ivals.sort()
-                union = []
-                for lo, hi in ivals:
-                    if union and lo <= union[-1][1] + eps:
-                        union[-1][1] = max(union[-1][1], hi)
-                    else:
-                        union.append([lo, hi])
+
+                def _union(iv):
+                    out = []
+                    for lo, hi in sorted(iv):
+                        if out and lo <= out[-1][1] + eps:
+                            out[-1][1] = max(out[-1][1], hi)
+                        else:
+                            out.append([lo, hi])
+                    return out
+                union, own_union = _union(ivals), _union(own_ivals)
                 g = self.routing_grid.get_layer_grid(lid)
                 tracks = [pos for pos, _slot in
                           g.signal_tracks_in(0.5 * (a_lo + a_hi), p_lo, p_hi)]
@@ -1360,31 +1360,17 @@ class ReportsMixin:
                                       for lo, hi in union)]
                 used = len(used_tracks)
                 supply = len(tracks)
+                # The cell's OWN metal's tracks over the instance — what a
+                # positional reservation's audit checks against the
+                # reserved tracks — by the same rule as `used_tracks`.
+                own_tracks = {round(pos, 6) for pos in tracks
+                              if any(lo - eps < pos < hi + eps
+                                     for lo, hi in own_union)}
                 own_need, own_seat, own_window = 0.0, None, None
-                own_tracks = set()
                 for f, ts in own_segs:
                     if ts.layer != lid or not (f == c.name
                                                or f.startswith(own_pre)):
                         continue
-                    # The own metal's tracks OVER this instance (along
-                    # overlap required): the bits' own tracks after DNUTS,
-                    # the abstract bus footprint's tracks before.
-                    s_lo = min(ts.span_lo, ts.span_hi)
-                    s_hi = max(ts.span_lo, ts.span_hi)
-                    if not (s_hi <= a_lo + eps or s_lo >= a_hi - eps):
-                        own_b = own_bits.get((ts.bundle_id, ts.seg_idx))
-                        if own_b is not None:
-                            for b_lo, b_hi, bp in own_b:
-                                if (not (b_hi <= a_lo + eps
-                                         or b_lo >= a_hi - eps)
-                                        and p_lo - eps <= bp <= p_hi + eps):
-                                    own_tracks.add(round(bp, 6))
-                        elif det is None:
-                            tp = ts.track_position
-                            for pos in tracks:
-                                if tp - ts.width / 2.0 - eps < pos \
-                                        < tp + ts.width / 2.0 + eps:
-                                    own_tracks.add(round(pos, 6))
                     w = wrappers_by_id.get(ts.bundle_id)
                     if w is None:
                         continue

@@ -2260,17 +2260,7 @@ class HierMixin:
         restored = {}
         raw = self.bdb.meta_get(self._RESERVE_META, "") if self.bdb else ""
         if raw:
-            try:
-                payload = json.loads(raw)
-            except ValueError:
-                payload = {}
-                print("[LayerReserve] WARNING: persisted reservations are "
-                      "unreadable — ignored (re-declare)")
-            for c, per in payload.items():
-                for lid_s, pos in per.items():
-                    key = (c, int(lid_s))
-                    if key not in res and pos:
-                        restored[key] = tuple(sorted(float(x) for x in pos))
+            restored = self._decode_layer_reserves(raw, res)
         self._cell_layer_reserves_restored = set(restored)
         if restored or prev:
             res.update(restored)
@@ -2281,8 +2271,70 @@ class HierMixin:
                   f"reservation(s): "
                   + ", ".join(f"{c}:{names.get(l, f'L{l}')}x{len(p)}"
                               for (c, l), p in sorted(restored.items())))
-        self._revalidate_layer_reserves()
+        dropped = self._revalidate_layer_reserves()
+        # A reservation typed BEFORE this BDB was open has no home until
+        # now (the declaration persists into the BDB open at the time, and
+        # there was none): write the validated map so a later session
+        # opening this BDB restores what this one enforces, and so a typed
+        # entry that outranked a restored one under the typed-wins
+        # contract is what the file holds (Codex P2 on #936).  Only when
+        # a typed entry exists — a session holding restored entries alone
+        # rewrites nothing.
+        if not dropped and any(k not in restored for k in res):
+            self._persist_layer_reserves()
         return len(restored)
+
+    @staticmethod
+    def _decode_layer_reserves(raw, typed):
+        """The persisted meta row -> {(cell, lid): (pos, ...)}, VALIDATED
+        (Codex P2 on #936): the declaration refuses a non-finite position,
+        but a hand-edited, corrupted or older file can carry anything
+        JSON spells — `"bad"` raised in `float()` and a `NaN` (which
+        Python's decoder accepts) passed every bounds comparison to fail
+        in `math.floor` at the keepout install.  A malformed entry is
+        skipped LOUD, naming it; the rest restore.  Keys already `typed`
+        are skipped silently (typed wins)."""
+        def bad(what):
+            print(f"[LayerReserve] WARNING: persisted reservation {what} "
+                  f"— ignored (re-declare)")
+        try:
+            payload = json.loads(raw)
+        except ValueError:
+            bad("row is unreadable")
+            return {}
+        if not isinstance(payload, dict):
+            bad("row is not a {cell: {layer: [pos]}} object")
+            return {}
+        out = {}
+        for c, per in payload.items():
+            if not isinstance(per, dict):
+                bad(f"for cell '{c}' is not a {{layer: [pos]}} object")
+                continue
+            for lid_s, pos in per.items():
+                try:
+                    lid = int(lid_s)
+                except (TypeError, ValueError):
+                    bad(f"for cell '{c}' names layer '{lid_s}', not an id")
+                    continue
+                if not isinstance(pos, list):
+                    bad(f"for cell '{c}' layer {lid} is not a list")
+                    continue
+                vals = []
+                ok = True
+                for x in pos:
+                    if isinstance(x, bool) or not isinstance(x, (int, float)) \
+                            or not math.isfinite(x) or x < 0.0:
+                        bad(f"for cell '{c}' layer {lid} holds position "
+                            f"{x!r}, not a finite non-negative number")
+                        ok = False
+                        break
+                    vals.append(float(x))
+                if not ok:
+                    continue
+                key = (c, lid)
+                if key not in typed and vals:
+                    out[key] = tuple(sorted(set(vals)))
+        return out
 
     def _reserve_cell_extent(self, cell, horiz):
         """The cell's extent along a reservation's axis (height for an H

@@ -1745,7 +1745,15 @@ held entry is, a restored one included — a cell another session resized
 since), an out-of-cell position dropped with a WARNING and an emptied entry
 removed, and an entry naming a cell the opened BDB does not know — a typo,
 or another design's name — removed the same way rather than persisted where
-no template could enforce it.  Persisted in the open BDB (meta `layer_reserves`), restored by
+no template could enforce it.  The open then WRITES the validated map when
+the session holds a typed entry, so a reservation declared before the open
+reaches the file (and a typed entry that outranked a restored one is what
+the file holds); a malformed persisted row — a non-numeric or non-finite
+position, a layer that is not an id — is skipped and named rather than
+failing six stages later.  Its audit half reads the cell's own metal with
+the SAME footprint rule as the foreign demand: a wire covers the tracks
+under its width and an NDR-governed run its guard slots too, so a widened
+own wire on a reserved track is an `own_hit`.  Persisted in the open BDB (meta `layer_reserves`), restored by
 `open_bdb` with the share contract (typed entries win).  Derived from a routed top plan by
 [`derive_cell_layer_reserves`](script_reference/nuts.md#derive_cell_layer_reserves-apply-file-path-cells-ab);
 read back from Tcl with `buda::query reserves`.

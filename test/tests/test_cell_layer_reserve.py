@@ -207,6 +207,92 @@ def test_a_cell_the_opened_bdb_does_not_know_is_dropped(tmp_path):
     assert s2._cell_layer_reserves[("top_cell", 6)] == (7.0,)
 
 
+def test_a_reservation_typed_before_the_open_is_persisted_at_the_open(tmp_path):
+    """Typed with no BDB open, a reservation had no home: the declaration
+    persists into the BDB open at the time, and there was none, so the
+    session enforced what the next one never saw (Codex P2 on #936).  The
+    open writes the validated map — and under typed-wins, what the file
+    then holds is the typed value, not the older row it outranked."""
+    bdb = tmp_path / "r.bdb"
+    s0 = _session()
+    _quiet(s0, "set_cell_layer_reserve top_cell M6 1", f"save_bdb {bdb}")
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    _quiet(s, f"source {_TRACKS}", "set_cell_layer_reserve top_cell M6 3,7.5",
+           "set_cell_layer_reserve top_cell M5 40")
+    out = _cmd(s, f"open_bdb {bdb}")
+    assert "restored" not in out, out          # the typed M6 outranks the row
+    assert s._cell_layer_reserves[("top_cell", 6)] == (3.0, 7.5)
+    s2 = buda_cli.BudaSession()
+    s2.no_viz = True
+    out = _cmd(s2, f"open_bdb {bdb}")
+    assert "restored 2 persisted reservation(s)" in out, out
+    assert s2._cell_layer_reserves[("top_cell", 6)] == (3.0, 7.5)
+    assert s2._cell_layer_reserves[("top_cell", 5)] == (40.0,)
+
+
+def test_a_malformed_persisted_row_is_skipped_loud(tmp_path):
+    """The declaration refuses a non-finite position, but the file can
+    carry anything JSON spells — `"bad"` raised in float(), and a NaN
+    (Python's decoder accepts it) passed every comparison to fail in
+    math.floor at the keepout install (Codex P2 on #936).  Each malformed
+    entry is skipped and named; the well-formed ones restore."""
+    import json
+    bdb = tmp_path / "r.bdb"
+    s = _session()
+    s.bdb.meta_set("layer_reserves", json.dumps({
+        "top_cell": {"6": [3, "bad"], "5": [float("nan")], "x": [1],
+                     "7": "notalist", "3": [1.5, 2]},
+        "leaf": 7,
+    }))
+    _cmd(s, f"save_bdb {bdb}")
+    s2 = buda_cli.BudaSession()
+    s2.no_viz = True
+    _quiet(s2, f"source {_TRACKS}")
+    out = _cmd(s2, f"open_bdb {bdb}")
+    assert "layer 6 holds position 'bad', not a finite" in out, out
+    assert "layer 5 holds position nan, not a finite" in out, out
+    assert "names layer 'x', not an id" in out, out
+    assert "layer 7 is not a list" in out, out
+    assert "for cell 'leaf' is not a {layer: [pos]} object" in out, out
+    assert "restored 1 persisted reservation(s): top_cell:M3x2" in out, out
+    assert s2._cell_layer_reserves == {("top_cell", 3): (1.5, 2.0)}
+    # a row that is not an object at all
+    s2.bdb.meta_set("layer_reserves", "[1, 2]")
+    _cmd(s2, f"save_bdb {bdb}")
+    s3 = buda_cli.BudaSession()
+    s3.no_viz = True
+    out = _cmd(s3, f"open_bdb {bdb}")
+    assert "row is not a {cell: {layer: [pos]}} object" in out, out
+    assert not getattr(s3, "_cell_layer_reserves", None)
+
+
+def test_own_metal_is_read_with_the_full_ndr_footprint():
+    """`own_tracks` recorded each own bit's CENTRE track, while the foreign
+    demand counted a wire's WIDTH and an NDR run's guard slots — so a
+    widened own wire, or its guard run, sat on a reserved track with
+    `own_hit` reading zero (Codex P2 on #936).  Both halves read one
+    footprint rule now: a x2-wide 8-bit bus covers 16 tracks, a
+    guard-spaced one 17 (8 bits, 7 gaps, the two run ends), the plain bus
+    8 — and the foreign `used` count is untouched by any of it."""
+    i = _DESIGN.index("run_hier_bundler depth 1")
+    got = {}
+    for rule in (None, "def_ndr wide width x2", "def_ndr wide spacing x2"):
+        s = buda_cli.BudaSession()
+        s.no_viz = True
+        pre = [rule, "set_ndr loc wide"] if rule else []
+        _quiet(s, *_DESIGN[:i], *pre, *_DESIGN[i:], "run_nuts",
+               "run_detailed_nuts")
+        assert s.detailed_result.num_unplaced == 0
+        rows = {r["inst"]: r for r in s._layer_demand()
+                if r["layer_name"] == "M6"}
+        got[rule] = (len(rows["u1"]["own_tracks"]), rows["u1"]["used"],
+                     len(rows["u2"]["own_tracks"]), rows["u2"]["used"])
+    assert got[None] == (8, 8, 8, 8), got
+    assert got["def_ndr wide width x2"] == (16, 8, 16, 8), got
+    assert got["def_ndr wide spacing x2"] == (17, 8, 17, 8), got
+
+
 def test_a_derived_line_reproduces_the_track_exactly(tmp_path):
     """`:g` keeps six significant digits, so a large cell-local coordinate
     came back MOVED when the file was sourced — `1234567.5` as
