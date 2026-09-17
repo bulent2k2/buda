@@ -194,6 +194,26 @@ def quote_arg(tok):
     return tok
 
 
+def reads_back(tok):
+    """Whether `quote_arg(tok)` comes back as exactly `tok` through the
+    reader a quote-aware command uses — comment strip, tokenizer, `unquote`.
+
+    MEASURED on the reader rather than restated as a rule, because the rule
+    has two halves that live in two places: `quote_arg` above returns a
+    token carrying whitespace AND both quote characters unchanged (the
+    grammar cannot spell it), and a handler's `unquote` strips one more
+    matched pair off what the tokenizer already unwrapped.  A writer that
+    emits a line for a later session to `source` asks THIS before writing it
+    (`derive_top_plan`, Codex P2 on #939): a line that does not read back is
+    an error at the reader — `pin_plan` parses the selector as two tokens
+    and reports a malformed line — so the writer omits the entry and says
+    so rather than handing down a line that cannot replay."""
+    line = "x " + quote_arg(tok)
+    toks = [unquote(t)
+            for t in split_quoted_args(strip_inline_comment(line))]
+    return toks == [tok]
+
+
 def split_quoted_args(cmd_line, skip=1):
     """The argument tokens of a command line, with QUOTED runs kept whole.
 

@@ -480,7 +480,11 @@ own frame under the derived budget — the half of the loop the hand-down
 exists to keep stable, not to pin); an unknown bundle, an unknown layer
 name, a seat list whose length is not the candidate's segment count (only
 the selection is pinned then) are each reported.  `unpin_topology` frees
-the selection, the forced layers and the seats together; `dump_pins` shows
+the selection, the forced layers and the seats together — a HELD entry
+too, superseded before it ever applies: `unpin_topology <bundle>` the
+entries resolving to that bundle, and `unpin_topology *` EVERY held entry
+without resolving any (typed before bundling there is no pool to resolve
+against, and the instruction was "no pins"); `dump_pins` shows
 the pin with `seats[k of n] (pin_plan)`.  Session state, not persisted: a
 resumed session re-sources the plan.  From Tcl, `buda::query plan_pins`
 returns `{entries applied seated of}`.

@@ -887,3 +887,71 @@ def test_the_flat_planner_applies_a_cell_local_entry_at_once():
     assert loc.input.topology_pinned and loc.plan.selected_topology_index == 0
     assert all(not e.get("stage") == "post" or e.get("applied")
                for e in s._plan_pins)
+
+
+# ── Codex round 10 on #939 ───────────────────────────────────────────────
+
+def test_unpin_all_before_bundling_supersedes_every_held_entry():
+    """Codex P2 on #939: `unpin_topology *` typed BEFORE bundling (a plan
+    sourced, then the user says "no pins") found no bundles to resolve the
+    held entries against, so they stayed pending and the first planner
+    run applied them over exactly that instruction.  The wildcard
+    supersedes every held entry without resolving it."""
+    a, _ = _run(tail=("run_nuts",))
+    uid, layers, seats, ttype = _top(a)
+    j = _DESIGN.index("run_hier_bundler depth 1")
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    with contextlib.redirect_stdout(io.StringIO()):
+        for c in [*_DESIGN[:j], "set_bottom_up top_cell", _LINE,
+                  f"pin_plan net:x_0 {ttype} uid {uid} layers M6 "
+                  f"seats 120:154"]:
+            s.do_command(c)
+    assert not s.bundles and s._plan_pins and \
+        not s._plan_pins[0].get("applied")
+    assert "Unpinned all bundles" in _cmd(s, "unpin_topology *")
+    assert s._plan_pins[0].get("skipped") and \
+        s._plan_pins[0].get("why") == "unpinned"
+    with contextlib.redirect_stdout(io.StringIO()):
+        for c in _DESIGN[j:-1]:
+            s.do_command(c)
+    log = _cmd(s, "run_planner hier 3")
+    assert "[PlanPin]" not in log and "Pinned bundle" not in log, log
+    w = [w for w in s.bundles if not w.input.original_bundle.instances][0]
+    assert not w.input.topology_pinned
+    assert list(w.input.pinned_seg_layers) == []
+    assert list(w.plan.seg_slide_lo) == []
+    assert "[PlanPin] seated" not in _cmd(s, "run_nuts")
+
+
+def test_a_net_the_grammar_cannot_quote_is_not_handed_down(tmp_path):
+    """Codex P2 on #939: a net name carrying whitespace AND both quote
+    characters has no spelling in the script grammar (`quote_arg` returns
+    it unchanged), so the plan line was written as one `pin_plan` cannot
+    read back.  The derivation asks the READER and omits the entry with
+    a note."""
+    from buda_script import reads_back
+    assert reads_back("net:foo bar") and reads_back('net:foo"bar baz')
+    assert not reads_back('net:a"b\'c d')
+    a, _ = _run(tail=("run_nuts",))
+    w = [w for w in a.bundles if not w.input.original_bundle.instances][0]
+    b = w.input.original_bundle
+    names = list(b.net_names)
+    names[0] = 'x "0\' bit'
+    b.net_names = names
+    lines, notes, _ = a._derive_top_plan()
+    assert all(l["net"] != names[0] for l in lines), lines
+    assert any("grammar cannot quote" in n and repr(names[0]) in n
+               for n in notes), notes
+    plan = tmp_path / "plan.buda"
+    out = _cmd(a, f"derive_top_plan file {plan}")
+    assert "grammar cannot quote" in out, out
+    text = plan.read_text()
+    assert names[0] not in text, text
+    # every line written reads back whole through the reader
+    from buda_script import split_quoted_args, strip_inline_comment, unquote
+    for line in text.splitlines():
+        if line.startswith("pin_plan "):
+            toks = [unquote(t)
+                    for t in split_quoted_args(strip_inline_comment(line))]
+            assert toks[0].startswith("net:") and toks[2] == "uid", toks

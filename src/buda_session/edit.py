@@ -1400,18 +1400,30 @@ class EditMixin:
         the held plan applied afterwards and silently overwrote the
         user's selection (both Codex P2s on #939) — except one naming
         `keep_uid`, the candidate the superseding pin itself lands on.
-        Returns the number of bundles whose plan state changed."""
+        The wildcard (`bids` None) supersedes every held entry WITHOUT
+        resolving it — before bundling there is nothing to resolve
+        against, and the instruction was "no pins".  Returns the number of
+        bundles (held entries counted one each) whose plan state changed."""
         applied = set(self._plan_pin_bids) if bids is None else \
             {b for b in bids if b in self._plan_pin_bids}
         # Held entries resolving to the bundle(s): superseded before they
         # ever apply.  Resolution needs the bundles to exist (a selector is
-        # a net name), which a typed pin guarantees.
+        # a net name), which a typed pin guarantees — and which the WILDCARD
+        # does not: `unpin_topology *` before bundling has no pool to
+        # resolve against, so with `bids` None EVERY held entry is
+        # superseded without asking (the user said "no pins", and an entry
+        # left pending would apply at the first planner run over exactly
+        # that instruction — Codex P2 on #939).
         held = set()
-        for e in self._plan_pins:
+        for i, e in enumerate(self._plan_pins):
             if e.get("applied") or e.get("skipped"):
                 continue
+            if bids is None:
+                e.update(skipped=True, why=why)
+                held.add(("held", i))
+                continue
             w2, b2, _ = self._plan_pin_bundle(e["sel"])
-            if w2 is None or (bids is not None and b2 not in bids):
+            if w2 is None or b2 not in bids:
                 continue
             if keep_uid is not None and e.get("uid") == keep_uid:
                 continue            # the pin is the plan's own candidate

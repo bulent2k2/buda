@@ -2157,6 +2157,7 @@ class ReportsMixin:
         uid, layers, seats, frame); None before a NUTS result."""
         if self.nuts_result is None or not self.bundles:
             return None
+        from buda_script import reads_back   # the reader's own verdict
         notes = []
         inside, scope = self._top_plan_scope_insts(cells, notes)
         seats = {(t.bundle_id, t.seg_idx): t
@@ -2178,6 +2179,7 @@ class ReportsMixin:
         dl_orig = getattr(self, "_dogleg_originals", None) or {}
         lines = []
         n_locked = n_inside = n_unplanned = n_dogleg = n_user = 0
+        n_unspell, unspell = 0, []
         for w in self.bundles:
             b = w.input.original_bundle
             if getattr(w.hier, "locked", False):
@@ -2208,6 +2210,18 @@ class ReportsMixin:
                 # omitted and said rather than handed down as a pin that
                 # silently re-plans (Codex P2 on #939).
                 n_user += 1
+                continue
+            if not (reads_back("net:" + nets[0]) and reads_back(t.type)):
+                # The script grammar cannot spell this line: a selector
+                # carrying whitespace AND both quote characters has no
+                # escape (`quote_arg` returns it unchanged, and `pin_plan`
+                # then reads it as two tokens and refuses the line), so the
+                # entry is omitted and said rather than written as a line
+                # the next session cannot replay (Codex P2 on #939).  Asked
+                # of the READER, so whatever it cannot read back is what is
+                # omitted.
+                n_unspell += 1
+                unspell.append(nets[0])
                 continue
             nseg = len(t.segments)
             sl = list(w.plan.seg_layers)
@@ -2241,6 +2255,13 @@ class ReportsMixin:
             notes.append(f"{n_user} bundle(s) on a hand-built USER candidate "
                          f"not handed down (regeneration cannot produce it; "
                          f"a sidecar or dump_user_ops replays it)")
+        if n_unspell:
+            shown = ", ".join(repr(n) for n in unspell[:3])
+            more = f", +{n_unspell - 3} more" if n_unspell > 3 else ""
+            notes.append(f"{n_unspell} bundle(s) whose net name the script "
+                         f"grammar cannot quote not handed down ({shown}"
+                         f"{more}: whitespace plus both quote characters "
+                         f"has no escape, so no pin_plan line reads back)")
         if n_dogleg:
             notes.append(f"{n_dogleg} dogleg-adopted bundle(s) handed down "
                          f"as the pre-split candidate with its layers, the "

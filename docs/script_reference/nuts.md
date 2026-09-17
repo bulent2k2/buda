@@ -1163,7 +1163,12 @@ the split trunk's reproduces — that one is `-`, since the next session's
 NUTS re-derives the dogleg from the same cycle; the note names how many.
 A bundle on a hand-built **USER** candidate is omitted and said: no fresh
 pool holds it (regeneration cannot produce it; a sidecar or
-`dump_user_ops` replays it), so a line naming it could never apply.
+`dump_user_ops` replays it), so a line naming it could never apply.  So is
+a bundle whose first net the script grammar cannot quote — a name carrying
+whitespace AND both quote characters has no escape, so no `pin_plan` line
+reads back as one selector; the derivation asks the READER
+(`buda_script.reads_back`: comment strip, tokenizer, unquote) rather than
+restating its rule, and the note names the nets.
 Needs a NUTS result.  The file carries a `# scope:` header and
 `# bundles: N`.  The loop driver runs it under
 `converge.tcl -handdown`, whose table then carries the `plan` (pins applied,
