@@ -587,6 +587,18 @@ void DetailedNUTSEngine::place_by_layer(
             // miss a real overlap and leave a bit short unrepaired.
             const double bs_lo = std::min(bs.span_lo, bs.span_hi);
             const double bs_hi = std::max(bs.span_lo, bs.span_hi);
+            // Reserve corridors this segment crosses on its layer (ladder
+            // item 6b): the reserved tracks of every governed instance
+            // under its span that its bundle does not route inside, inside
+            // the seat window.  The Path A pick below takes them FIRST
+            // (after span-clearness — a survivable bit still outranks a
+            // steered one), nearest the anchor among them; empty = the
+            // historical pick, bit for bit.
+            std::set<long long> corridor_keys;
+            for (double t : corridor_tracks_in(grid.reserve_corridors(),
+                                               bs_lo, bs_hi, bs.interval_lo,
+                                               bs.interval_hi, bs.frame_inst))
+                corridor_keys.insert(track_key(t));
             for (const auto& asgn : layer_assigns) {
                 if (asgn.bundle_id == bs.bundle_id) {
                     const double dil = asgn.track_positions.empty() ? 0.0
@@ -970,9 +982,18 @@ void DetailedNUTSEngine::place_by_layer(
                                span_clear_keys.count(
                                    track_key(signal_tracks[k].first)) > 0;
                     };
+                    auto on_corridor = [&](int k) {
+                        return !corridor_keys.empty() &&
+                               corridor_keys.count(
+                                   track_key(signal_tracks[k].first)) > 0;
+                    };
                     std::sort(avail.begin(), avail.end(), [&](int a, int b) {
                         const bool ca = is_clear(a), cb = is_clear(b);
                         if (ca != cb) return ca;
+                        // A reserved track the top was told to use, before
+                        // a merely nearer one (6b).
+                        const bool ra = on_corridor(a), rb = on_corridor(b);
+                        if (ra != rb) return ra;
                         // eff_anchor == abstract_pos unless pair-align biased
                         // it into a same-bundle interval overlap (lever A).
                         return std::abs(signal_tracks[a].first - eff_anchor) <
@@ -1565,11 +1586,15 @@ std::vector<BusSegment> make_bus_segments(
     // Positional reservation on an instance solved in THIS run (see
     // BusSegment::blocked_tracks): the wrapper's per-layer list.
     std::map<int, const std::map<int, std::vector<double>>*> bid_to_blocked;
+    // Frame instance per bundle (BusSegment::frame_inst).
+    std::map<int, std::string> bid_to_frame;
     for (const auto& w : bundles) {
         const int bid = w.input.original_bundle.id;
         if (w.input.ndr.active()) bid_to_ndr[bid] = &w.input.ndr;
         if (!w.hier.blocked_tracks.empty())
             bid_to_blocked[bid] = &w.hier.blocked_tracks;
+        if (!w.input.original_bundle.instances.empty())
+            bid_to_frame[bid] = w.input.original_bundle.instances[0];
         bid_to_nbits[bid] =
             (int)w.input.original_bundle.get_net_names().size();
         const int sel = w.plan.selected_topology_index;
@@ -1611,6 +1636,10 @@ std::vector<BusSegment> make_bus_segments(
                 bs.bit_list = it->second;
         }
         bs.abstract_pos = ts.track_position;
+        {
+            auto fr = bid_to_frame.find(ts.bundle_id);
+            if (fr != bid_to_frame.end()) bs.frame_inst = fr->second;
+        }
         // NDR: carry the bundle's resolved rule so stage 9 places the
         // k-slot/guard/shield run the upstream stages priced (default
         // spec = inactive = byte-identical).  R1: an ABSOLUTE rule is

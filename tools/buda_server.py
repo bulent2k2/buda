@@ -323,7 +323,9 @@ def _reserves(s):
 def _reserve_audit(s):
     # `check_design`'s LAYER_RESERVE rows as data — one per (instance,
     # layer) the positional reservation GOVERNS: `{inst cell layer reserved
-    # top_used own_hit}`.  Which occurrences count is the point: a 90-degree
+    # top_used own_hit top_total}` — top_used / top_total is the corridor's
+    # hit rate (6b; the field is LAST so a `lassign` of the six older ones
+    # still reads).  Which occurrences count is the point: a 90-degree
     # rotated occurrence of a reserved cell is NOT governed (BUDA-1921) and
     # has no row, while every demand row carries the cell name — so a driver
     # pricing a reservation off the demand rows alone charged the rotated
@@ -337,7 +339,7 @@ def _reserve_audit(s):
         "{" + " ".join([tcl_word(r["inst"]), tcl_word(r["cell"]),
                         tcl_word(names.get(r["layer"], f"L{r['layer']}")),
                         str(r["reserved"]), str(r["top_used"]),
-                        str(r["own_hit"])]) + "}"
+                        str(r["own_hit"]), str(r["top_total"])]) + "}"
         for r in rows)
 
 

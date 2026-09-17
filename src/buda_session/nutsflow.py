@@ -2331,6 +2331,9 @@ class NutsFlowMixin:
         # instance solved in the global run must keep free onto its wrapper
         # (BundleHierMeta::blocked_tracks), and the handoff copies them.
         bu_plan = self._bottom_up_dnuts_plan()
+        # The reserve corridors (6b) live on the session grid, which every
+        # DNUTS engine below — the reference-view clone included — reads.
+        self._sync_reserve_corridors()
         bus_segs = buda.make_bus_segments(self.bundles, self.nuts_result,
                                           self.fp, bit_order, self.layers)
         self._resolve_shared_cell_ndr(bus_segs)

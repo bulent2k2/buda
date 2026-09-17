@@ -126,6 +126,13 @@ struct BusSegment {
     // make_bus_segments, so every DNUTS path (the C++ trial sweep included)
     // reads one list.  Empty = unrestricted (byte-identical).
     std::vector<double> blocked_tracks;
+
+    // The bundle's frame instance (its component path; "" = the top): what
+    // decides which reserve corridors (ReserveCorridor, routing_grid.h) may
+    // steer this segment's bits — a corridor over an instance the bundle
+    // routes inside is not for it.  Copied from the bundle's first instance
+    // by make_bus_segments, the ownership rule the demand report reads.
+    std::string frame_inst;
 };
 
 // Member-bit count of a BusSegment under the tapered fan-in model: the

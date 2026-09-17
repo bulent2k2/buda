@@ -269,7 +269,9 @@ def test_release_stamps_the_reservation_as_blocked_tracks():
                  "check_template_tracks on_mismatch independent",
                  "run_detailed_nuts"]):
         _run_cmd(s, c)
-    w = _locked_wrapper(s)
+    ref = s._template_track_verdict["proc_cell"]["ref"]
+    w = next(w for w in s.bundles if w.hier.locked
+             and w.input.original_bundle.instances[0] != ref)
     assert not w.hier.blocked_tracks            # a copy carries none
     bid = w.input.original_bundle.id
     inst = w.input.original_bundle.instances[0]
@@ -314,21 +316,26 @@ def test_a_released_reference_leaves_its_siblings_stamped():
     wr = {w.input.original_bundle.instances[0]: w for w in s.bundles
           if w.hier.locked}
     assert set(wr) == {"proc_i1", "proc_i2"}
-    assert all(not w.hier.blocked_tracks for w in wr.values())
     ref = s._template_track_verdict["proc_cell"]["ref"]
     other = next(i for i in wr if i != ref)
     comps = {c.name: c for c in db.all_components()}
+    # the reference carries its reservation as blocked tracks (6b: no
+    # keepout on a grid clone any more), the copy carries none
+    assert wr[ref].hier.blocked_tracks == {6: [comps[ref].y1 + 21.5,
+                                               comps[ref].y1 + 25.5]}
+    assert not wr[other].hier.blocked_tracks
     # the state after a RELEASE COMMIT of the reference: with one bundle
-    # per instance here the sibling becomes the new reference (solved on
-    # the keepout-carrying grid clone, so no stamp) and the released
-    # instance solves in the global run with its reserved tracks stamped
+    # per instance here the sibling becomes the new reference (stamped as
+    # one) and the released instance solves in the global run with its
+    # reserved tracks stamped
     wr[ref].hier.locked = False
     s._rr_invalidate_bottom_up_caches()
     with contextlib.redirect_stdout(io.StringIO()):
         plan = s._bottom_up_dnuts_plan()
     assert plan is not None
     assert wr[other].input.original_bundle.id in plan[0]      # the new ref
-    assert not wr[other].hier.blocked_tracks
+    assert wr[other].hier.blocked_tracks == {6: [comps[other].y1 + 21.5,
+                                                 comps[other].y1 + 25.5]}
     y1 = comps[ref].y1
     assert wr[ref].hier.blocked_tracks == {6: [y1 + 21.5, y1 + 25.5]}
     # a wrapper rebuilt unstamped is re-stamped by the next plan call —

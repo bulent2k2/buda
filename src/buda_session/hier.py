@@ -2801,68 +2801,32 @@ class HierMixin:
                   + self._reserve_note(eff, src))
         return n
 
-    def _bu_reserve_dnuts_keepouts(self, ref_ids):
-        """The reference DNUTS view (the twin of _bu_share_dnuts_overrides):
-        for every bottom-up REFERENCE instance whose cell holds
-        reservations, the reserved tracks as grid keepout specs
-        [(lid, x1, y1, x2, y2)] in ABSOLUTE coordinates over the reference
-        bbox.  Installed on the grid CLONE the reference solve runs on, so
-        the reference bits (and the copies) cannot land on them, while the
-        parent keeps the full grid."""
-        out = []
-        if self.bdb is None or self.routing_grid is None:
-            return out
-        if not (getattr(self, "_cell_layer_reserves", None) or {}):
-            return out
-        comps = {c.name: c for c in self.bdb.all_components()}
-        seen = set()
-        for w in self.bundles:
-            b = w.input.original_bundle
-            if b.id not in ref_ids or not b.instances:
-                continue
-            res, _src, _clone = self._effective_reserves(b.cell_context,
-                                                         b.instances[0])
-            if not res:
-                continue
-            comp = comps.get(b.instances[0])
-            if comp is None or not is_placed(comp):
-                continue
-            cw = int(round(comp.x2 - comp.x1))
-            ch = int(round(comp.y2 - comp.y1))
-            for lid, pos in sorted(res.items()):
-                key = (b.instances[0], lid)
-                if key in seen or not self.routing_grid.has_layer(lid):
-                    continue
-                seen.add(key)
-                for x1, y1, x2, y2 in self._reserve_rects(
-                        lid, pos, int(round(comp.x1)), int(round(comp.y1)),
-                        cw, ch):
-                    out.append((lid, x1, y1, x2, y2))
-        return out
-
     def _bu_reference_grid(self, ref_ids, tag="DNUTS reference solve"):
         """The grid the bottom-up reference DNUTS solve runs on: the
-        session grid itself when nothing thins or reserves, else a CLONE
-        carrying every shared cell's thinned override and every reserved
-        cell's track keepouts — ONE function for the sequential merge path
-        and the ripup sweep, whose views must agree or a sweep's opens
-        metric diverges from the trial it replays (Codex P2 on #664).
-        Returns (grid, is_clone)."""
+        session grid itself when nothing thins, else a CLONE carrying
+        every shared cell's thinned override — ONE function for the
+        sequential merge path and the ripup sweep, whose views must agree
+        or a sweep's opens metric diverges from the trial it replays
+        (Codex P2 on #664).  Returns (grid, is_clone).
+
+        A positional RESERVATION is not on this clone any more.  It was
+        (every reference instance's reserved tracks as keepouts), and one
+        clone serves every template's reference solve at once, so a
+        cluster's reference solve saw its cores' reserved tracks as
+        keepouts and could never take the corridor the cores had left
+        for it — the top-side half (6b) cannot work through a keepout.
+        The reference carries its reservation as its bundles' blocked
+        tracks instead (_stamp_reserve_blocked_tracks), which bind only
+        the reserving instance's own bits, so the enclosing template's
+        bus crossing it is free to be steered onto them."""
         share_ovr = self._bu_share_dnuts_overrides(ref_ids)
-        res_ko = self._bu_reserve_dnuts_keepouts(ref_ids)
-        if not share_ovr and not res_ko:
+        if not share_ovr:
             return self.routing_grid, False
         grid = self.routing_grid.clone()
         for lid, x1, y1, x2, y2, pat in share_ovr:
             grid.add_override(lid, x1, y1, x2, y2, pat)
-        for lid, x1, y1, x2, y2 in res_ko:
-            grid.add_keepout(lid, x1, y1, x2, y2)
-        if share_ovr:
-            print(f"[LayerShare] {tag} under {len(share_ovr)} thinned "
-                  f"override(s)")
-        if res_ko:
-            print(f"[LayerReserve] {tag} with {len(res_ko)} reserved "
-                  f"track(s) kept free")
+        print(f"[LayerShare] {tag} under {len(share_ovr)} thinned "
+              f"override(s)")
         return grid, True
 
     def _reserved_cells_not_enforced(self, wrappers=None):
@@ -2903,8 +2867,9 @@ class HierMixin:
         demand rows' track positions) and how many carry the cell's OWN
         metal (a violation of the reservation — impossible on a template
         by construction, the documented gap on a top-down cell).  Rows:
-        {inst, cell, layer, layer_name, reserved, top_used, own_hit}.
-        None before a NUTS result; [] when nothing is reserved."""
+        {inst, cell, layer, layer_name, reserved, top_used, own_hit,
+        top_total}.  None before a NUTS result; [] when nothing is
+        reserved."""
         res = getattr(self, "_cell_layer_reserves", None) or {}
         if not res:
             return []
@@ -2939,7 +2904,11 @@ class HierMixin:
                         "layer": r["layer"], "layer_name": r["layer_name"],
                         "reserved": len(absres),
                         "top_used": hits(r["used_tracks"]),
-                        "own_hit": hits(r.get("own_tracks", []))})
+                        "own_hit": hits(r.get("own_tracks", [])),
+                        # every track the top takes over the instance —
+                        # top_used / top_total is the corridor's HIT RATE,
+                        # the number E5 read off the demand rows by hand
+                        "top_total": len(r["used_tracks"])})
         return out
 
     def _audit_share_budgets(self, wrappers):
@@ -3658,6 +3627,11 @@ class HierMixin:
                       or {}).get(cell, ([], []))
             if gx or gy:
                 nuts.set_extra_grid_points(gx, gy)
+            # A nested reserved child's corridors, in this frame (6b): the
+            # cell's own buses are the top over its children.
+            for lid, alo, ahi, tr, own in self._cell_local_corridors(
+                    wrappers[0].input.original_bundle.instances[0]):
+                nuts.add_reserve_corridor(lid, alo, ahi, tr, own)
             with buda.ostream_redirect():
                 local = nuts.run(wrappers)
             # Per-instance orientations relative to the template's reference
@@ -4041,13 +4015,114 @@ class HierMixin:
 
     def _inject_bottom_up_fixed(self, nuts_engine):
         """Register the bottom-up fixed copies with a NUTS engine (no-op when
-        there are none).  Must be called on EVERY engine that solves
-        self.bundles — run_nuts, post_nuts re-run, run_nuts_on_layer, and the
-        ripup/negotiate internal re-runs — or the fixed instances would be
-        re-solved as free bundles."""
+        there are none) and arm it with the reserve corridors.  Must be
+        called on EVERY engine that solves self.bundles — run_nuts,
+        post_nuts re-run, run_nuts_on_layer, and the ripup/negotiate
+        internal re-runs — or the fixed instances would be re-solved as
+        free bundles (and the seats not steered)."""
         fixed = self._bottom_up_fixed_segments()
         if fixed:
             nuts_engine.add_fixed_segments(fixed)
+        self._arm_reserve_corridors(nuts_engine)
+
+    # ── reserve corridors: the top-side half of the reservation (6b) ──────
+
+    def _reserve_corridors(self):
+        """The positional reservations seen from the TOP's side: per
+        governed (instance, layer), the reserved tracks in ABSOLUTE
+        coordinates over the instance's along-extent, as
+        [(layer_id, along_lo, along_hi, [tracks], owner path)].  Only a
+        cell's OWN reservation is a corridor over its instances — an
+        inherited one is the ancestor's own corridor over the ancestor's
+        extent, which already covers the child — and only occurrences in
+        the template's frame contribute (a 90-degree-rotated class is not
+        governed, BUDA-1921), the same rows the LAYER_RESERVE audit
+        reads.  Empty with no reservation, no BDB or no grid."""
+        res = getattr(self, "_cell_layer_reserves", None) or {}
+        if not any(pos for pos in res.values()) or self.bdb is None \
+                or self.routing_grid is None:
+            return []
+        comps = list(self.bdb.all_components())
+        by_name = {c.name: c for c in comps}
+        cells = sorted({cell for (cell, _lid), pos in res.items() if pos})
+        out, cache = [], {}
+        for cell in cells:
+            frames, _rot = self._reserve_frames(cell, None, comps, cache)
+            lids = sorted(lid for (cl, lid), pos in res.items()
+                          if cl == cell and pos
+                          and self.routing_grid.has_layer(lid))
+            for inst in sorted(frames):
+                c = by_name.get(inst)
+                if c is None or not is_placed(c):
+                    continue
+                for lid in lids:
+                    horiz = (self.layers.get_layer_dir(lid)
+                             == buda.LayerDir.HORIZONTAL)
+                    a_lo, a_hi = (c.x1, c.x2) if horiz else (c.y1, c.y2)
+                    tracks = sorted(self._reserve_abs_of(
+                        res[(cell, lid)], frames[inst], c, lid))
+                    out.append((lid, float(a_lo), float(a_hi), tracks, inst))
+        return out
+
+    def _sync_reserve_corridors(self):
+        """Install the reserve corridors on the session grid — every NUTS
+        and DetailedNUTS engine reads them there, the trial sweeps and the
+        reference-view clone included — when steering is on; clear them
+        when it is off or nothing is reserved.  Memoized on the corridor
+        set and the grid object (a grid rebuilt by a later declaration
+        starts with none), so a call at every solve entry is free.
+        Returns the corridor count installed."""
+        grid = self.routing_grid
+        if grid is None:
+            return 0
+        cors = (self._reserve_corridors()
+                if getattr(self, "_reserve_steer", True) else [])
+        key = (id(grid), tuple((lid, alo, ahi, tuple(tr), own)
+                               for lid, alo, ahi, tr, own in cors))
+        if key == getattr(self, "_reserve_corridor_memo", None):
+            return len(cors)
+        grid.clear_reserve_corridors()
+        for lid, alo, ahi, tr, own in cors:
+            grid.add_reserve_corridor(lid, alo, ahi, list(tr), own)
+        self._reserve_corridor_memo = key
+        if cors:
+            insts = sorted({own for _l, _a, _b, _t, own in cors})
+            print(f"[LayerReserve] {len(cors)} corridor(s) over "
+                  f"{len(insts)} instance(s) steer the crossing buses onto "
+                  f"the reserved tracks (set_reserve_steer off to measure "
+                  f"without)")
+        return len(cors)
+
+    def _arm_reserve_corridors(self, nuts_engine):
+        """Arm a NUTS engine solving self.bundles with the session grid's
+        corridors (syncing them first)."""
+        if self._sync_reserve_corridors():
+            nuts_engine.set_reserve_corridors(self.routing_grid)
+
+    def _cell_local_corridors(self, ref_inst):
+        """The corridors a cell-local solve reads, in the TEMPLATE's frame
+        (the reference instance's lower-left at the origin): every
+        corridor owned by an instance strictly inside `ref_inst` — a
+        nested reserved child, whose tracks the cell's own buses are the
+        top for — translated by the reference's origin.  The reference's
+        own corridor is not among them (for the cell it is a keepout,
+        installed by _install_cell_reserve_keepouts)."""
+        if self.bdb is None or not getattr(self, "_reserve_steer", True):
+            return []
+        comps = {c.name: c for c in self.bdb.all_components()}
+        r = comps.get(ref_inst)
+        if r is None or not is_placed(r):
+            return []
+        pre = ref_inst + "/"
+        out = []
+        for lid, alo, ahi, tr, own in self._reserve_corridors():
+            if not own.startswith(pre):
+                continue
+            horiz = (self.layers.get_layer_dir(lid)
+                     == buda.LayerDir.HORIZONTAL)
+            a0, p0 = (r.x1, r.y1) if horiz else (r.y1, r.x1)
+            out.append((lid, alo - a0, ahi - a0, [t - p0 for t in tr], own))
+        return out
 
     def _bottom_up_instance_groups(self):
         """(cell, template id, [locked instance wrappers]) triples for every
@@ -4888,12 +4963,17 @@ class HierMixin:
 
     def _stamp_reserve_blocked_tracks(self, plan):
         """Stamp `BundleHierMeta.blocked_tracks` from the DNUTS plan: every
-        instance wrapper of a `set_bottom_up` cell whose bits are solved in
-        the GLOBAL run — not a reference (solved on the grid clone that
-        carries the reservation as keepouts) and not a copy of one —
-        carries its cell's reserved tracks (own ∪ inherited, in the
-        template's reference frame) folded into its own frame; a reference
-        or copied wrapper carries none.  Derived from the PLAN and the
+        instance wrapper of a `set_bottom_up` cell whose bits are SOLVED
+        in this run — the template's reference, and every instance solved
+        in the global run beside it — carries its cell's reserved tracks
+        (own ∪ inherited, in the template's reference frame) folded into
+        its own frame; a wrapper whose bits are COPIED from the reference
+        carries none (the copy carries the reference's avoidance).  The
+        reference used to keep its reservation as keepouts on a grid clone
+        instead; a blocked track binds one instance's own bits where a
+        keepout bound everybody's, which is what lets the enclosing
+        template's bus be steered onto a nested child's reserved tracks
+        (6b).  Derived from the PLAN and the
         expansion map on every call rather than kept as state on the
         wrappers, because the state did not survive the healers: a
         released reference (E5's NQ = 16 top-down round — the class pass
@@ -4939,7 +5019,7 @@ class HierMixin:
             for iw in iws:
                 bid = iw.input.original_bundle.id
                 inst = iw.input.original_bundle.instances[0]
-                if bid in ref_ids or bid in skip_ids:
+                if bid in skip_ids:
                     iw.hier.blocked_tracks = {}
                     continue
                 key = (cell, ref, inst)
@@ -4953,7 +5033,7 @@ class HierMixin:
         if stamped and stamped != memo:
             names = sorted(stamped)
             print(f"[LayerReserve] {len(names)} instance(s) solved in the "
-                  f"global DNUTS run keep their reserved tracks as blocked "
+                  f"DNUTS run keep their reserved tracks as blocked "
                   f"tracks: {', '.join(names[:6])}"
                   + (f", +{len(names) - 6} more" if len(names) > 6 else ""))
         self._reserve_stamp_memo = stamped

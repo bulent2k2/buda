@@ -1706,30 +1706,38 @@ reserved track becomes a keepout zone on the cell-local floorplan — one thin
 rect per track (the layer's narrowest SIGNAL slot, rounded outward to the
 integer grid keepouts live on), the full cell extent along: a corridor
 crossing the cell — so the local planner's band capacity and the local NUTS
-seats leave it free, and the same tracks are keepouts on the grid **clone**
-the reference DNUTS solve runs on, so the reference bits (and every copy)
-cannot land there.  The parent keeps the full grid: a reservation is room
-*for* the top, never a keepout against it, and `check_design`'s
+seats leave it free, and at DNUTS the reference instance's bundles carry
+the same tracks as their **blocked tracks** (below), so the reference bits
+(and every copy) cannot land there.  The parent keeps the full grid: a
+reservation is room *for* the top, never a keepout against it — which is
+why the reference no longer carries it as a keepout on a grid clone: one
+clone served every template's reference solve at once, so a cluster's
+reference solve saw its cores' reserved tracks as keepouts and could never
+take the corridor the cores had left for it (found by the top-side half,
+below).  `check_design`'s
 `LAYER_RESERVE` line reports what it bought (the top's tracks on reserved
-ones, per instance) and whether the cell's own metal honours it — the metal
+ones, per instance, and the corridor's **hit rate** — of every track the top
+takes over the governed instances, the share that is a reserved one) and
+whether the cell's own metal honours it — the metal
 of every template solved *inside* the cell included, because a nested cell
 **inherits** the corridor: an ancestor's reservation is projected through
 the child's offset into the child's own frame (unioned over the child's
 occurrences in the ancestor, since a template is solved once) and kept free
 by the child's local solve and reference DNUTS view exactly like its own.
-An instance whose bits are solved in the **global** DNUTS run rather than
-copied — one misaligned with its reference under `check_template_tracks
-on_mismatch independent`, or one whose orientation the copy cannot serve —
-sees none of those keepouts (they live on the reference's grid clone; the
-global grid is the top's, and a reservation is never a keepout against the
-top), so it carries the reserved tracks, folded into its own frame, as its
-bundles' **blocked tracks** (`BundleHierMeta.blocked_tracks` →
+Every instance whose bits are **solved** in the DNUTS run — the template's
+reference, and one solved in the global run rather than copied (misaligned
+with its reference under `check_template_tracks on_mismatch independent`,
+or one whose orientation the copy cannot serve, or one the healer released)
+— carries the reserved tracks, folded into its own frame, as its bundles'
+**blocked tracks** (`BundleHierMeta.blocked_tracks` →
 `BusSegment.blocked_tracks`): DetailedNUTS drops them from every seat pool
 before the admission count, so the bits take the next tracks or strand
-honestly.  The stamp is DERIVED from the DNUTS plan on every call (a
-reference or a copy carries none, everything else of a marked cell carries
-its list), never kept as wrapper state — E5 measured all three doors
-before they were closed: the SoC's misaligned clusters under a mirrored
+honestly; a copy carries none (the copy carries the reference's avoidance).
+A blocked track binds one instance's OWN bits where a keepout bound
+everybody's, which is what lets an enclosing template's bus be steered onto
+a nested child's reserved tracks.  The stamp is DERIVED from the DNUTS plan
+on every call, never kept as wrapper state — E5 measured all three doors on
+the global-run side before they were closed: the SoC's misaligned clusters under a mirrored
 quad read one own track on their reservation, the healer's release pass
 withdrew cores from the copy and they read two, and at NQ = 16 a released
 reference left seven rebuilt siblings with no list at all.
@@ -1803,6 +1811,51 @@ lines persist and restore exactly like typed positions — which they are,
 once declared.  Derived from a routed top plan by
 [`derive_cell_layer_reserves`](script_reference/nuts.md#derive_cell_layer_reserves-apply-file-path-cells-ab);
 read back from Tcl with `buda::query reserves`.
+
+
+### `set_reserve_steer`
+
+```
+set_reserve_steer on|off        # default on
+set_reserve_steer               # print the state
+```
+
+The **top-side half** of a positional reservation ([convergence ladder](internal/convergence_ladder.md)
+item 6b).  `set_cell_layer_reserve` alone makes the block's own solve leave
+the named tracks free; [E5](internal/convergence_e5.md) measured what that
+bought on its own — the top landed on the reserved tracks **6–11 %** of the
+time, because nothing steered it there, so the reservation worked by
+*displacing* the block's buses rather than as a corridor the top used, and
+the informed loop (derive from the top, reserve, re-route) had no fixpoint.
+With steering on, every governed instance's reserved tracks are also a
+**reserve corridor** on the routing grid (absolute tracks over the
+instance's along-extent, owned by the instance's path), and a bus crossing
+the instance from *outside* it — the top over a block, or an enclosing
+cell's own bus over a nested reserved child, whose corridor the cell-local
+solve reads translated into its own frame — is **seated on them by abstract
+NUTS** (the corridor's centre replaces the pull as the segment's
+preference; an alignment sibling or a junction landing still wins, since
+those are correctness and a corridor is a preference) and **lands its bits
+on them first in DetailedNUTS** (after span-clear tracks — a survivable bit
+still outranks a steered one — and before merely nearer ones).  A bundle
+framed *inside* the reserving instance is never steered onto its own
+reservation (`BusSegment.frame_inst`, path-prefix containment).  Every
+engine reads the same corridors — the session's NUTS and DetailedNUTS
+engines, the healers' trial engines, the C++ parallel sweep and screen —
+so a trial's verdict cannot diverge from its replay's.
+
+`off` is the study knob: the first half alone, E5's reading (the
+environment variable `BUDA_RESERVE_STEER=0` is the same knob for a whole
+run).  It takes effect at the next solve — the corridors are synced onto
+the grid at every NUTS / DetailedNUTS entry, memoized on the corridor set.
+A design that reserves nothing installs no corridor whatever the setting:
+byte-identical.  `check_design`'s `LAYER_RESERVE` line prints the hit rate
+(`the top uses a..b of them per instance (P% of its N track(s) over them)`)
+and `buda::query reserve_audit` rows carry the top's total over the
+instance as a seventh, last field.  Measured on the two-instance vehicle
+with eight tracks reserved off the top's natural seat: 0 of the top's 16
+tracks over the instances land on them with steering off, 16 of 16 with it
+on, at the same clean endpoint.
 
 ### `add_inst`
 

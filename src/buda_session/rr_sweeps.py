@@ -82,8 +82,10 @@ class RRSweepsMixin:
                                   list(self.planner.get_y_grid()))
         # The baseline already carries any bottom-up fixed copies (run()
         # appends them), so this is the WHOLE frozen context — do not
-        # also _inject_bottom_up_fixed here.
+        # also _inject_bottom_up_fixed here.  The corridors (6b) are armed
+        # separately: a screen seats the target the way a trial would.
         eng.add_fixed_segments_except(self.nuts_result, bid)
+        self._arm_reserve_corridors(eng)
         with contextlib.redirect_stdout(io.StringIO()), \
                 buda.ostream_redirect():
             rows = eng.screen_candidates(self.bundles, bid, list(tidxs),
@@ -123,7 +125,9 @@ class RRSweepsMixin:
                 self._nuts_pitch, self.nuts_result,
                 list(self.planner.get_x_grid()),
                 list(self.planner.get_y_grid()),
-                n_threads=self._rr_sweep_threads())
+                n_threads=self._rr_sweep_threads(),
+                grid=(self.routing_grid if self._sync_reserve_corridors()
+                      else None))
         n = sum(max(len(t), 1) for _w, t in reqs) or 1
         dt = time.perf_counter() - t0
         for _ in range(n):
@@ -216,6 +220,11 @@ class RRSweepsMixin:
                              bit_order=self._detailed_bit_order,
                              abort_unplaced=(-1 if full else
                                              self._rr_m_primary(metric())))
+        elif self._sync_reserve_corridors():
+            # Stage a needs no DNUTS grid, but the sweep's NUTS engines read
+            # the reserve corridors (6b) off it — the sequential trial's
+            # engine seats on them, so the sweep must too.
+            dn_kwargs.update(grid=self.routing_grid)
         return base_disc, net_counts, dn_kwargs
 
     def _rr_sweep_eval(self, flat, stage, base_disc, net_counts, dn_kwargs,

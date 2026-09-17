@@ -233,3 +233,75 @@ def test_interval_too_narrow_violation():
     assert len(result.segments) == 1
     assert result.segments[0].placed        # best-effort placement
     assert result.num_violations >= 1
+
+
+# ---------------------------------------------------------------------------
+# Scenario: a reserve corridor seats the bus on the reserved tracks (6b)
+# ---------------------------------------------------------------------------
+
+def test_reserve_corridor_seats_the_bus_on_it():
+    """The top-side half of `set_cell_layer_reserve` (convergence ladder
+    item 6b): a corridor on the segment's layer, crossed by its span,
+    becomes the seat's pull — an INTERVAL covering the reserved tracks —
+    so the abstract seat lands on them; a bundle framed inside the
+    reserving instance keeps its own seat, and an engine with no corridor
+    places exactly as before."""
+    fp = make_floorplan(("src", 0, 100, 100, 200), ("dst", 300, 100, 400, 200))
+    seg = [{'x1': 0, 'y1': 150, 'x2': 300, 'y2': 150, 'layer': 3}]
+    ls = buda.LayerStack()
+
+    def seat(corridors=(), frame=None, via_stack=False):
+        w = make_bundle(1, ["net_a"], width=10.0, segments=seg)
+        if frame is not None:
+            w.input.original_bundle.instances = [frame]
+        engine = buda.NUTSEngine(fp, ls)
+        engine.set_track_pitch(1.0)
+        if via_stack:
+            stack = buda.RoutingGridStack()
+            stack.define_layer(3, buda.TrackPattern(origin=0.0, slots=[
+                buda.TrackSlot(type="SIGNAL", label="s", width=1.0,
+                               space_after=1.0)]), True)
+            for lo, hi, tr, own in corridors:
+                stack.add_reserve_corridor(3, lo, hi, tr, own)
+            engine.set_reserve_corridors(stack)
+        else:
+            for lo, hi, tr, own in corridors:
+                engine.add_reserve_corridor(3, lo, hi, tr, own)
+        assert engine.has_reserve_corridors() == bool(corridors)
+        r = engine.run([w])
+        assert len(r.segments) == 1 and r.segments[0].placed
+        assert r.num_violations == 0
+        return r.segments[0]
+
+    base = seat()
+    assert base.interval_lo <= 100.0 and base.interval_hi >= 200.0
+    # a single reserved track: the bus is centred on it
+    ts = seat([(50.0, 250.0, [180.0], "blk")])
+    assert ts.track_position == pytest.approx(180.0)
+    # several reserved tracks: centred on their spread (a bus at least as
+    # wide covers them all from there; a narrower one sits in their middle)
+    ts = seat([(50.0, 250.0, [176.0, 182.0], "blk")])
+    assert ts.track_position == pytest.approx(179.0)
+    ts = seat([(50.0, 250.0, [110.0, 190.0], "blk")])
+    assert ts.track_position == pytest.approx(150.0)
+    # clamped so the footprint stays inside the seat window
+    ts = seat([(50.0, 250.0, [199.0], "blk")])
+    assert ts.track_position == pytest.approx(195.0)
+    # the same corridors through a grid stack (the session's door)
+    ts = seat([(50.0, 250.0, [180.0], "blk")], via_stack=True)
+    assert ts.track_position == pytest.approx(180.0)
+    # framed inside the owner: not steered
+    for frame in ("blk", "blk/core"):
+        ts = seat([(50.0, 250.0, [180.0], "blk")], frame=frame)
+        assert ts.track_position == pytest.approx(base.track_position), frame
+    ts = seat([(50.0, 250.0, [180.0], "blk")], frame="blk2")
+    assert ts.track_position == pytest.approx(180.0)
+    # a corridor the span does not cross, or on another layer: nothing
+    ts = seat([(400.0, 500.0, [180.0], "blk")])
+    assert ts.track_position == pytest.approx(base.track_position)
+    w = make_bundle(1, ["net_a"], width=10.0, segments=seg)
+    engine = buda.NUTSEngine(fp, ls)
+    engine.set_track_pitch(1.0)
+    engine.add_reserve_corridor(5, 50.0, 250.0, [180.0], "blk")
+    ts = engine.run([w]).segments[0]
+    assert ts.track_position == pytest.approx(base.track_position)

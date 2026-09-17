@@ -153,7 +153,8 @@ std::vector<std::optional<std::vector<std::array<int, 3>>>> parallel_screen(
     const NUTSResult&                 baseline,     // frozen occupancy
     const std::vector<int>&           extra_x,
     const std::vector<int>&           extra_y,
-    int                               n_threads);
+    int                               n_threads,
+    const RoutingGridStack*           grid = nullptr);  // reserve corridors
 
 std::vector<SweepOutcome> parallel_sweep(
     const std::vector<BundleWrapper>& bundles,      // committed baseline

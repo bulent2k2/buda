@@ -1664,6 +1664,37 @@ def cmd_set_cell_layer_share(session, cmd, args, cmd_line):
           f"<= declared)")
 
 
+def cmd_set_reserve_steer(session, cmd, args, cmd_line):
+    # Usage: set_reserve_steer [on|off]
+    # The TOP-SIDE half of a positional reservation (convergence ladder
+    # item 6b): with it ON (the default), every governed instance's
+    # reserved tracks are installed on the routing grid as reserve
+    # corridors, and a bus crossing the instance from OUTSIDE it — the
+    # top, or an enclosing cell's own bus over a nested child — is seated
+    # on them by abstract NUTS and lands its bits on them first in
+    # DetailedNUTS.  E5 measured the first half alone: the block's solve
+    # left the tracks free and the top used them 6-11 % of the time, so
+    # the reservation displaced the block's buses without being a corridor
+    # the top took, and the informed loop had no fixpoint.  OFF gives that
+    # reading (the study knob; env BUDA_RESERVE_STEER=0 is the same).  A
+    # design with no reservation is byte-identical either way.
+    if not args:
+        state = "on" if getattr(session, "_reserve_steer", True) else "off"
+        print(f"reserve_steer is {state}")
+        return
+    val = args[0].lower()
+    if val not in ("on", "off"):
+        print(f"Error: set_reserve_steer expects on|off, got {args[0]!r}")
+        return
+    session._reserve_steer = (val == "on")
+    # Takes effect at the next solve: the corridors are synced on the grid
+    # at every NUTS / DNUTS entry (a memo keyed on the corridor set, so an
+    # unchanged setting costs nothing there).
+    n = session._sync_reserve_corridors()
+    print(f"[LayerReserve] steering {val}"
+          + (f" — {n} corridor(s) installed" if n else ""))
+
+
 def cmd_set_cell_layer_reserve(session, cmd, args, cmd_line):
     # set_cell_layer_reserve <cell>|* <layer> <pos>[,<pos>...]|off
     # The POSITIONAL reservation (convergence ladder item 6, E5's corridor):
@@ -2092,6 +2123,7 @@ COMMANDS = {
     "set_cell_layer_cap": cmd_set_cell_layer_cap,
     "set_cell_layer_share": cmd_set_cell_layer_share,
     "set_cell_layer_reserve": cmd_set_cell_layer_reserve,
+    "set_reserve_steer": cmd_set_reserve_steer,
     "set_layer_caps_by_depth": cmd_set_layer_caps_by_depth,
     "reserve_top_layers": cmd_reserve_top_layers,
     "align_bottom_up": cmd_align_bottom_up,

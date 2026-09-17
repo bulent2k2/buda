@@ -335,6 +335,12 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
         self._record_origin = None   # last `# origin:` written to the record
         self.script_path = None      # set when a .buda script is sourced
         self.routing_grid = None     # RoutingGridStack (stage 8)
+        # Reserve corridors (ladder item 6b): steer the top's seats and bits
+        # onto a governed instance's reserved tracks.  On by default — it is
+        # the second half of set_cell_layer_reserve and moves nothing on a
+        # design with no reservation; `set_reserve_steer off` / the study
+        # env BUDA_RESERVE_STEER=0 give the E5 (first-half-only) reading.
+        self._reserve_steer = os.environ.get("BUDA_RESERVE_STEER", "1") != "0"
         # Unit-plausibility guard (Phase 1d): 'on' (hard error) | 'warn' | 'off'
         self._unit_check = "on"
         # The (layer, unit_pitch) tuple last judged — report once per stage

@@ -194,6 +194,10 @@ SweepOutcome eval_move(const std::vector<BundleWrapper>& baseline,
     nuts.set_skip_tighten(full_trials ? false : (!stage_b && skip_tighten_a));
     if (!fixed_segs.empty()) nuts.add_fixed_segments(fixed_segs);
     nuts.set_extra_grid_points(extra_x, extra_y);
+    // Reserve corridors (6b): the sequential trial's engine reads the
+    // session grid's; the sweep must seat the same way or its verdict
+    // diverges from the replay's.
+    if (dn.grid) nuts.set_reserve_corridors(*dn.grid);
     NUTSResult nr = nuts.run(b);
     out.viols = nr.num_violations;
     out.wl    = placed_wl(nr);
@@ -236,7 +240,8 @@ std::vector<std::optional<std::vector<std::array<int, 3>>>> parallel_screen(
     const NUTSResult&                 baseline,
     const std::vector<int>&           extra_x,
     const std::vector<int>&           extra_y,
-    int                               n_threads) {
+    int                               n_threads,
+    const RoutingGridStack*           grid) {
     std::vector<std::optional<std::vector<std::array<int, 3>>>>
         out(jobs.size());
     if (jobs.empty()) return out;
@@ -262,6 +267,7 @@ std::vector<std::optional<std::vector<std::array<int, 3>>>> parallel_screen(
                 eng.set_skip_doglegs(true);
                 eng.set_layer_threads(1);   // job fan-out owns the cores
                 eng.set_extra_grid_points(extra_x, extra_y);
+                if (grid) eng.set_reserve_corridors(*grid);
                 eng.add_fixed_segments_except(baseline, j.bundle_id);
                 CongestionPlanner pl = planner;
                 pl.set_plan_threads(1);

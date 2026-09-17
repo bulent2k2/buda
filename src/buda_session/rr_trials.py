@@ -82,6 +82,7 @@ class RRTrialsMixin:
             eng.set_extra_grid_points(
                 list(self.planner.get_x_grid()),
                 list(self.planner.get_y_grid()))
+            self._arm_reserve_corridors(eng)
             with contextlib.redirect_stdout(io.StringIO()), \
                     buda.ostream_redirect():
                 warm = eng.rerun_bundle_warm(snap['nuts'], self.bundles,
@@ -122,6 +123,7 @@ class RRTrialsMixin:
         if self.planner is not None:
             eng.set_extra_grid_points(list(self.planner.get_x_grid()),
                                       list(self.planner.get_y_grid()))
+        self._arm_reserve_corridors(eng)
         with contextlib.redirect_stdout(io.StringIO()), \
                 buda.ostream_redirect():
             warm = eng.rerun_bundle_warm(snap['nuts'], self.bundles, bid)
