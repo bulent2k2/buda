@@ -444,3 +444,29 @@ def test_a_rotated_class_is_not_governed_and_says_so():
     _quiet(s, "run_nuts", "run_detailed_nuts")
     _lines, notes, _scope = s._derive_cell_layer_reserves(cells=["top_cell"])
     assert any("1 90-degree-rotated instance(s) not folded in" in n for n in notes), notes
+
+
+def test_the_derivation_keeps_the_computed_track_unrounded():
+    """A three-decimal rounding in the derivation moved a track before the
+    exact formatter ever saw it (`10.0004` -> `10.0`, outside the audit's
+    1e-6 match; Codex P2 on #936): the computed float is kept, and only
+    the line's formatter serializes it."""
+    s = _session("run_nuts", "run_detailed_nuts")
+    comps = {c.name: c for c in s.bdb.all_components()}
+    u1, u2 = comps["u1"], comps["u2"]
+    rows = []
+    for inst, c in (("u1", u1), ("u2", u2)):
+        rows.append({"inst": inst, "cell": "top_cell", "layer": 6,
+                     "layer_name": "M6", "used_tracks": [c.y1 + 10.0004],
+                     "own_tracks": [], "own_need": 0.0, "own_seat": None,
+                     "own_window": None, "bits": 8, "used": 1, "supply": 40,
+                     "pct": 2.5})
+    s._layer_demand = lambda *a, **k: rows
+    lines, _notes, _scope = s._derive_cell_layer_reserves(cells=["top_cell"])
+    assert len(lines) == 1 and len(lines[0]["positions"]) == 1, lines
+    got = lines[0]["positions"][0]
+    assert abs(got - 10.0004) < 1e-9 and got != 10.0, got   # unrounded
+    out = _cmd(s, "derive_cell_layer_reserves")
+    import re
+    m = re.search(r"^\s*set_cell_layer_reserve top_cell M6 (\S+)$", out, re.M)
+    assert m and float(m[1]) == got, (out, got)      # the line round-trips it

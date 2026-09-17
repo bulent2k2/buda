@@ -55,14 +55,14 @@ def _tclsh(*args, cwd):
 
 
 def _report(path):
-    d = {"share": [], "tracks": [], "cap": [], "demand": []}
+    d = {"share": [], "tracks": [], "cap": [], "governed": [], "demand": []}
     for ln in path.read_text().splitlines():
         toks = ln.split()
         if not toks:
             continue
         # Tcl-list shaped: a word with a `/` is brace-quoted (`{io/p_0}`)
         toks = [t.strip("{}") for t in toks]
-        if toks[0] in ("share", "tracks", "cap", "demand"):
+        if toks[0] in ("share", "tracks", "cap", "governed", "demand"):
             d[toks[0]].append(toks[1:])
         else:
             d[toks[0]] = toks[1:]
@@ -357,6 +357,48 @@ def test_the_reserve_primitive_hands_down_named_tracks(tmp_path):
     assert "BUDA-1920" not in log
     d2 = _report(rep2)
     assert int(d2["marks"][0]) > 0 and d2["tracks"] == []
+    # the routed report says WHICH instances the reservation governs, one
+    # row per (instance, layer) with the count reserved over that instance
+    gov = {(g[0], g[1], g[2]): int(g[3]) for g in d2["governed"]}
+    assert gov, d2
+    for cell, layer, n in d["tracks"]:
+        rows = {k: v for k, v in gov.items() if k[1] == cell and k[2] == layer}
+        assert rows and all(v == int(n) for v in rows.values()), (cell, layer, rows)
+    # the top-down report (nothing reserved in force) carries none
+    assert d["governed"] == []
+
+
+def test_efficiency_charges_only_the_governed_occurrences(tmp_path):
+    """A rotated occurrence of a reserved cell is not governed (BUDA-1921)
+    yet its demand rows carry the cell name, so pricing off the policy's
+    per-cell `tracks` count charged it as reserved (Codex P2 on #936).
+    The routed report's `governed` rows decide: u2 (rotated, no row) adds
+    nothing; without `governed` rows at all an older report falls back to
+    the per-cell count."""
+    pol = tmp_path / "pol.rep"
+    pol.write_text("verdict 0 0 0\ntracks top_cell M6 8\n")
+    rep = tmp_path / "rep.rep"
+    rep.write_text("verdict 0 0 0\ngoverned u1 top_cell M6 8\n"
+                   "demand u1 top_cell M6 16 4 40 10\n"
+                   "demand u2 top_cell M6 16 6 40 15\n"
+                   "demand u1 top_cell M5 8 2 30 7\n")
+    old = tmp_path / "old.rep"
+    old.write_text("verdict 0 0 0\n"
+                   "demand u1 top_cell M6 16 4 40 10\n"
+                   "demand u2 top_cell M6 16 6 40 15\n")
+    script = f"""
+        source {_ROOT / 'flow' / 'tcl' / 'converge_lib.tcl'}
+        set pol [converge::read_report {pol}]
+        puts [converge::efficiency [converge::read_report {rep}] $pol]
+        puts [converge::efficiency [converge::read_report {old}] $pol]
+    """
+    tcl = tmp_path / "eff.tcl"
+    tcl.write_text(script)
+    r = _tclsh(tcl, cwd=tmp_path)
+    assert r.returncode == 0, r.stderr
+    lines = r.stdout.split("\n")
+    assert lines[0] == "8 4 1", lines        # u1 only: 8 reserved over 4 used
+    assert lines[1] == "16 10 2", lines      # the fallback charges both
     # ... and through the DRIVER: the option reaches every session it
     # spawns (a `session` proc reading `primitive` without declaring it
     # global crashed the first blind round), the table is the `_reserve`

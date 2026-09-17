@@ -1102,8 +1102,12 @@ cell must leave free on *every* instance every track the top wants on *any*
 of them: the union is the price of solve-once-copy, and the `used/inst` column
 says how much of it each instance really needs (a reservation's efficiency is
 its named-track count against the top's use, which E1's driver prices with
-`-primitive reserve`).  Only instances in the cell's own frame (orientation
-`N`) are folded in; a rotated or mirrored one is counted and said.
+`-primitive reserve`).  Positions are stated in the template's reference
+frame: every occurrence sharing it — mirrored ones (S/FN/FS, detected
+geometrically) included — folds in through its orientation's involution on
+the axis, while a 90°-rotated one belongs to the rotation-class clone
+template, whose frame an upright-stated position cannot reach: it is counted
+out and said (BUDA-1921).
 
 Every line reports two things it does not act on: `seat_hit`, how many of the
 reserved tracks fall inside the cell's own worst seat (the window the abstract

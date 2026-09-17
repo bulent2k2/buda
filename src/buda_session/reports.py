@@ -1800,10 +1800,13 @@ class ReportsMixin:
                 union, used_counts, skipped = [], [], 0
 
                 def to_ref(u, c, o):
+                    # The computed float, unrounded: the line's formatter
+                    # round-trips it, and a three-decimal rounding here
+                    # MOVED a track (`10.0004` -> `10.0`, outside the
+                    # audit's 1e-6 match; Codex P2 on #936).
                     ext = (c.y2 - c.y1) if horiz else (c.x2 - c.x1)
                     origin = c.y1 if horiz else c.x1
-                    return round(self._reserve_ref_pos(u - origin, o, ext,
-                                                       horiz), 3)
+                    return self._reserve_ref_pos(u - origin, o, ext, horiz)
 
                 def to_abs(q, c, o):
                     ext = (c.y2 - c.y1) if horiz else (c.x2 - c.x1)

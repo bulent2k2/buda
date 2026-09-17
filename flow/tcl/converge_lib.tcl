@@ -66,6 +66,11 @@
 #   tracks CELL LAYER N           one per derived line (-primitive reserve):
 #                                 N cell-local tracks named — its own key,
 #                                 since `reserve` above is the scalar
+#   governed INST CELL LAYER N    one per (instance, layer) a positional
+#                                 reservation GOVERNS in this session (the
+#                                 `buda::query reserve_audit` rows): N
+#                                 tracks reserved over that instance — a
+#                                 90-degree-rotated occurrence has no row
 #   cap CELL FLOOR CAP            one per cell layer band in force (layer
 #                                 names, `-` for no floor) — which cells
 #                                 the -reserve actually capped
@@ -215,6 +220,13 @@ proc converge::finish {healed} {
         foreach d $derived { puts $f "share $d" }
     }
     foreach c [buda::query caps] { puts $f "cap $c" }
+    set gov [buda::query reserve_audit]
+    if {$gov ne "-1"} {
+        foreach g $gov {
+            lassign $g inst cell layer n _used _own
+            puts $f "governed [list $inst $cell $layer $n]"
+        }
+    }
     set rows [buda::query demand]
     if {$rows ne "-1"} {
         foreach r $rows { puts $f "demand $r" }
@@ -228,7 +240,7 @@ proc converge::finish {healed} {
 proc converge::read_report {path} {
     if {![file exists $path]} { error "converge: no report at $path" }
     set f [open $path]; set text [read $f]; close $f
-    set d [dict create shares {} reserves {} caps {} demand {}]
+    set d [dict create shares {} reserves {} caps {} governed {} demand {}]
     foreach ln [split $text \n] {
         if {[string trim $ln] eq ""} { continue }
         set key [lindex $ln 0]
@@ -237,6 +249,7 @@ proc converge::read_report {path} {
             share  { dict lappend d shares $rest }
             tracks { dict lappend d reserves $rest }
             cap    { dict lappend d caps $rest }
+            governed { dict lappend d governed $rest }
             demand { dict lappend d demand $rest }
             default { dict set d $key $rest }
         }
@@ -258,9 +271,14 @@ proc converge::read_report {path} {
 #           as reserved (Codex P2 on #935);
 #   derived (`share` lines): per cell and layer, the fraction the thinning
 #           removes — `1 - kept/nsig` — of the instance's supply;
-#   positional (`tracks` lines): per cell and layer, the COUNT of named
-#           tracks — every instance of the cell reserves exactly those,
-#           whatever its supply (a reservation is tracks, not a fraction).
+#   positional (`governed` rows of the ROUTED report, per instance and
+#           layer): the COUNT of tracks the reservation reserves over THAT
+#           instance — the audit's own rows, so an occurrence the
+#           reservation does not govern (a 90-degree-rotated one, BUDA-1921)
+#           contributes nothing, where charging the policy's `tracks` count
+#           to every demand row of the cell counted it as reserved (Codex
+#           P2 on #936).  A report without `governed` rows (an older run)
+#           falls back to the policy's per-(cell, layer) `tracks` count.
 #
 # `rep` is the round whose DEMAND is read; `policy` the report whose
 # `share` lines (derived the round before) and `cap` rows were in force —
@@ -287,6 +305,12 @@ proc converge::efficiency {rep policy} {
         lassign $r cell layer n
         dict set n_by_cell_layer [list $cell $layer] $n
     }
+    set n_by_inst_layer [dict create]
+    foreach g [dict get $rep governed] {
+        lassign $g inst cell layer n
+        dict set n_by_inst_layer [list $inst $cell $layer] $n
+    }
+    set have_governed [expr {[dict size $n_by_inst_layer] > 0}]
     set reserved 0.0; set used 0; set pairs 0
     foreach r [dict get $rep demand] {
         lassign $r inst cell layer bits u supply pct
@@ -299,7 +323,11 @@ proc converge::efficiency {rep policy} {
             set frac [dict get $frac_by_cell_layer [list $cell $layer]]
         }
         set n_named 0
-        if {[dict exists $n_by_cell_layer [list $cell $layer]]} {
+        if {$have_governed} {
+            if {[dict exists $n_by_inst_layer [list $inst $cell $layer]]} {
+                set n_named [dict get $n_by_inst_layer [list $inst $cell $layer]]
+            }
+        } elseif {[dict exists $n_by_cell_layer [list $cell $layer]]} {
             set n_named [dict get $n_by_cell_layer [list $cell $layer]]
         }
         if {$frac <= 0.0 && $n_named <= 0} { continue }
