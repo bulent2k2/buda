@@ -1744,9 +1744,12 @@ bounded by its sign alone and REVALIDATED the moment one is opened (every
 held entry is, a restored one included — a cell another session resized
 since) and again at every event that makes an entry checkable or stale — a
 layer declared AFTER the open (the check needs the layer's axis), a
-`resize_cell`, and `run_planner hier` right before it decides what to
-enforce — an out-of-cell position dropped with a WARNING and an emptied entry
-removed, and an entry naming a cell the opened BDB does not know — a typo,
+`resize_cell`, and `run_planner hier` right before the template solves
+install the keepouts, where the stack is complete and an entry on a layer id
+it does not declare is removed too — an out-of-cell position dropped with a
+WARNING and an emptied entry removed (a cell with no cell-table row is
+bounded by its reference occurrence's bbox, the frame the positions are
+stated in), and an entry naming a cell the opened BDB does not know — a typo,
 or another design's name — removed the same way rather than persisted where
 no template could enforce it.  A typed `off` (or `* off`) BEFORE the open is a
 TOMBSTONE the restore honours — the persisted entry it names is held off and

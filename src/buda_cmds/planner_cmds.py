@@ -215,6 +215,11 @@ def cmd_run_planner(session, cmd, args, cmd_line):
         # context resolves to the base cell via _bu_cell_of) and BEFORE the
         # bottom-up cell-local solves plan under the masks.
         session._apply_layer_policies()
+        # Every held reservation checked against the cells and the now
+        # complete stack — the last moment before the template solves
+        # install the keepouts (a stale or undeclared-layer entry is
+        # removed loud here; Codex P2 on #936).
+        session._revalidate_layer_reserves(final=True)
         session._plan_bottom_up_templates(iterations)
         # Expand cell-level bundles → per-instance absolute-coord wrappers.
         # Each expanded wrapper gets a unique HBundle ID.
@@ -237,9 +242,6 @@ def cmd_run_planner(session, cmd, args, cmd_line):
         session._apply_layer_policies(expanded)
         # A positional reservation is enforced on TEMPLATES only; a reserved
         # cell planned top-down is said here, before the planner works.
-        # Every held entry is checked against the cells first — the last
-        # moment before the keepouts and the audit read it.
-        session._revalidate_layer_reserves()
         _not_enforced = session._reserved_cells_not_enforced(expanded)
         if _not_enforced:
             import buda_diag as _diag

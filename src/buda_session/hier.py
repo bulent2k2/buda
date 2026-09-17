@@ -2232,8 +2232,14 @@ class HierMixin:
         centres on the layer's perpendicular axis: y for an H layer, x for
         a V one)."""
         res = getattr(self, "_cell_layer_reserves", None) or {}
+        # Only DECLARED layers reach a consumer: an old or hand-edited id
+        # (`get_layer_dir` answers HORIZONTAL for an unknown id) would
+        # otherwise fold into the inheritance and the audit as a phantom
+        # (Codex P2 on #936); the planner's final revalidation removes it
+        # loud, and this is the guard for every consumer before that.
+        declared = set(self._layer_name_map.values())
         return {lid: pos for (c, lid), pos in res.items()
-                if c == cell and pos}
+                if c == cell and pos and lid in declared}
 
     def _persist_layer_reserves(self):
         """ONE meta row (`layer_reserves`, JSON {cell: {lid: [pos]}}) —
@@ -2362,7 +2368,19 @@ class HierMixin:
         for cr in self.bdb.all_cells():
             if cr.name == cell:
                 return cr.height if horiz else cr.width
-        return None
+        # A cell known only through its COMPONENTS (an `add_comp` row, a
+        # DEF instance with no cell row) has its extent on every placed
+        # occurrence; the reference instance's bbox IS the template frame
+        # the positions are stated in (Codex P2 on #936 — this used to
+        # leave such a cell unchecked).
+        comps = [c for c in self.bdb.all_components()
+                 if c.cell == cell and is_placed(c)]
+        if not comps:
+            return None
+        ref = self._reserve_ref_inst(cell)
+        c = next((c for c in comps if c.name == ref), None) \
+            or min(comps, key=lambda c: c.name)
+        return (c.y2 - c.y1) if horiz else (c.x2 - c.x1)
 
     def _reserve_in_extent(self, positions, extent):
         """Split `positions` into (kept, dropped) against a cell extent —
@@ -2376,7 +2394,7 @@ class HierMixin:
                 kept.append(p)
         return kept, dropped
 
-    def _revalidate_layer_reserves(self):
+    def _revalidate_layer_reserves(self, final=False):
         """Check every held reservation against the cell extents the
         newly opened BDB knows (Codex P2 on #936): a position typed BEFORE
         any BDB was open was bounded by its sign alone, and a restored one
@@ -2389,7 +2407,11 @@ class HierMixin:
         `run_planner hier` right before the enforcement decision (Codex
         P2 on #936: a flow opening its BDB before declaring its stack
         skipped every coordinate here and nothing re-ran) — with the rect
-        builder applying the same rule as the last guard."""
+        builder applying the same rule as the last guard.  `final` is the
+        planner's call, when the technology stack is complete: an entry on
+        a layer id the stack does not declare (an old or hand-edited row)
+        is removed LOUD there, since it can never be enforced and would
+        otherwise persist as a phantom every query reports."""
         res = getattr(self, "_cell_layer_reserves", None) or {}
         if not res or self.bdb is None:
             return 0
@@ -2416,6 +2438,14 @@ class HierMixin:
                         set()).discard((cell, lid))
                 continue
             if lid not in declared:
+                if final:
+                    n_dropped += len(pos)
+                    print(f"[LayerReserve] WARNING: cell '{cell}': layer id "
+                          f"{lid} is not declared in this stack — its "
+                          f"reservation ({len(pos)} track(s)) is removed")
+                    del res[(cell, lid)]
+                    getattr(self, "_cell_layer_reserves_restored",
+                            set()).discard((cell, lid))
                 continue
             horiz = (self.layers.get_layer_dir(lid)
                      == buda.LayerDir.HORIZONTAL)

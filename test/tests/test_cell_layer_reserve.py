@@ -374,6 +374,58 @@ def test_revalidation_re_runs_at_a_late_layer_declaration_a_resize_and_the_plann
     assert s3._cell_layer_reserves[("top_cell", 6)] == (50.0,)
 
 
+def test_a_component_only_cell_is_bounded_by_its_placed_bbox(tmp_path):
+    """A cell with no cell-table row (an `add_comp` row, a DEF instance
+    the LEF did not describe) used to leave every coordinate unchecked
+    (Codex P2 on #936): the extent comes from the reference occurrence's
+    bbox now — the frame the positions are stated in — at the
+    declaration and at the open alike."""
+    import json
+    bdb = tmp_path / "r.bdb"
+    s = _session()
+    _quiet(s, "add_comp lone lone_cell - 700 300 1000 420")
+    assert not any(c.name == "lone_cell" for c in s.bdb.all_cells())
+    assert "outside the cell's height (120)" in \
+        _cmd(s, "set_cell_layer_reserve lone_cell M6 150"), "declaration"
+    assert "outside the cell's width (300)" in \
+        _cmd(s, "set_cell_layer_reserve lone_cell M5 301"), "declaration"
+    assert "reserves 1 track(s)" in _cmd(s, "set_cell_layer_reserve lone_cell M6 100")
+    s.bdb.meta_set("layer_reserves", json.dumps({"lone_cell": {"6": [100, 150]}}))
+    _cmd(s, f"save_bdb {bdb}")
+    s2 = buda_cli.BudaSession()
+    s2.no_viz = True
+    _quiet(s2, f"source {_TRACKS}")
+    out = _cmd(s2, f"open_bdb {bdb}")
+    assert "dropped 1 reserved position(s) outside the cell's height (120): 150" in out, out
+    assert s2._cell_layer_reserves[("lone_cell", 6)] == (100.0,)
+
+
+def test_an_undeclared_layer_id_is_removed_when_the_stack_is_complete(tmp_path):
+    """A persisted row on a numeric layer id the stack never declares (an
+    old or hand-edited file) decoded fine and stayed forever — a phantom
+    every query reported, and one `get_layer_dir` reads as HORIZONTAL if
+    a consumer ever folded it in (Codex P2 on #936).  Every consumer now
+    reads declared layers only, and the planner's final revalidation
+    removes it LOUD once the stack is complete."""
+    import json
+    j = _DESIGN.index("run_planner hier 3")
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    _quiet(s, *_DESIGN[:j])
+    # the shape a restore hands back from an old file: a row on layer 9
+    s._cell_layer_reserves = {("top_cell", 6): (3.0,), ("top_cell", 9): (1.0,)}
+    s._cell_layer_reserves_restored = {("top_cell", 9)}
+    s._persist_layer_reserves()
+    assert set(json.loads(s.bdb.meta_get("layer_reserves", ""))["top_cell"]) == {"6", "9"}
+    assert 9 not in s._cell_reserves_of("top_cell")        # every consumer's guard
+    out = _cmd(s, "run_planner hier 3")
+    assert ("cell 'top_cell': layer id 9 is not declared in this stack — its "
+            "reservation (1 track(s)) is removed") in out, out
+    assert ("top_cell", 9) not in s._cell_layer_reserves
+    assert s._cell_layer_reserves[("top_cell", 6)] == (3.0,)
+    assert set(json.loads(s.bdb.meta_get("layer_reserves", ""))["top_cell"]) == {"6"}
+
+
 def test_a_derived_line_reproduces_the_track_exactly(tmp_path):
     """`:g` keeps six significant digits, so a large cell-local coordinate
     came back MOVED when the file was sourced — `1234567.5` as
