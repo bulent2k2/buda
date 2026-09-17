@@ -1445,9 +1445,18 @@ class ReportsMixin:
         for (cell, lname), rs in sorted(by.items()):
             used = [r["top_used"] for r in rs]
             own = [r["own_hit"] for r in rs]
+            # The corridor's HIT RATE: of every track the top takes over
+            # these instances, the share that is a reserved one.  Printed
+            # by the audit because E5 computed it by hand and got the
+            # denominator wrong (hits over the instance's SUPPLY read 6-11 %
+            # where hits over the top's own tracks read 0.65-0.97).
+            hit, tot = sum(used), sum(r["top_total"] for r in rs)
+            rate = (f"{100.0 * hit / tot:.0f}% of its {tot}" if tot
+                    else "none of its 0")
             print(f"  LAYER_RESERVE: {cell} {lname}: {rs[0]['reserved']} "
                   f"track(s) reserved over {len(rs)} instance(s); the top "
-                  f"uses {min(used)}..{max(used)} of them per instance; "
+                  f"uses {min(used)}..{max(used)} of them per instance "
+                  f"({rate} track(s) over them); "
                   f"own metal on reserved tracks"
                   + ("" if placed else
                      " (abstract seat footprint — an estimate, the bits "

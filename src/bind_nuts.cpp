@@ -212,6 +212,21 @@ void bind_nuts(py::module_& m) {
         .def("set_skip_tighten",      &NUTSEngine::set_skip_tighten)
         .def("set_skip_doglegs",      &NUTSEngine::set_skip_doglegs)
         .def("set_extra_grid_points", &NUTSEngine::set_extra_grid_points)
+        .def("set_reserve_corridors", &NUTSEngine::set_reserve_corridors,
+             py::arg("grid"),
+             "Copy the grid stack's reserve corridors (ladder item 6b) so "
+             "a crossing bus is seated on the reserved tracks")
+        .def("add_reserve_corridor",
+             [](NUTSEngine& e, int layer_id, double along_lo, double along_hi,
+                std::vector<double> tracks, std::string owner) {
+                 e.add_reserve_corridor(layer_id, ReserveCorridor{
+                     along_lo, along_hi, std::move(tracks), std::move(owner)});
+             },
+             py::arg("layer_id"), py::arg("along_lo"), py::arg("along_hi"),
+             py::arg("tracks"), py::arg("owner") = "",
+             "One reserve corridor in THIS engine's frame (the cell-local "
+             "solve installs its children's, translated)")
+        .def("has_reserve_corridors", &NUTSEngine::has_reserve_corridors)
         .def("add_fixed_segments",    &NUTSEngine::add_fixed_segments,
              py::arg("segs"))
         .def("add_fixed_segments_except",
@@ -368,6 +383,26 @@ void bind_nuts(py::module_& m) {
         .def("add_keepout",   &RoutingGridStack::add_keepout,
              py::arg("layer_id"), py::arg("x1"), py::arg("y1"), py::arg("x2"),
              py::arg("y2"), py::arg("net") = "")
+        // Reserve corridors (ladder item 6b): the top-side half of a
+        // positional reservation — installed by the session over every
+        // governed instance, read by NUTS (seat) and DetailedNUTS (bits).
+        .def("add_reserve_corridor", &RoutingGridStack::add_reserve_corridor,
+             py::arg("layer_id"), py::arg("along_lo"), py::arg("along_hi"),
+             py::arg("tracks"), py::arg("owner") = "")
+        .def("clear_reserve_corridors",
+             &RoutingGridStack::clear_reserve_corridors)
+        .def("has_reserve_corridors",
+             &RoutingGridStack::has_reserve_corridors)
+        .def("layer_ids", &RoutingGridStack::layer_ids)
+        .def("reserve_corridors",
+             [](const RoutingGridStack& s, int layer_id) {
+                 py::list out;
+                 for (const auto& c : s.reserve_corridors(layer_id))
+                     out.append(py::make_tuple(c.along_lo, c.along_hi,
+                                               c.tracks, c.owner));
+                 return out;
+             }, py::arg("layer_id"),
+             "[(along_lo, along_hi, [tracks], owner)] on one layer")
         .def("get_layer_grid", [](RoutingGridStack& s, int id) -> RoutingGrid& {
             return s.get_layer_grid(id);
         }, py::arg("layer_id"), py::return_value_policy::reference_internal)
@@ -424,7 +459,8 @@ void bind_nuts(py::module_& m) {
         .def_readwrite("ndr",             &BusSegment::ndr)
         .def_readwrite("track_lo_bound",  &BusSegment::track_lo_bound)
         .def_readwrite("track_hi_bound",  &BusSegment::track_hi_bound)
-        .def_readwrite("blocked_tracks",  &BusSegment::blocked_tracks);
+        .def_readwrite("blocked_tracks",  &BusSegment::blocked_tracks)
+        .def_readwrite("frame_inst",      &BusSegment::frame_inst);
 
     py::class_<NetSegment>(m, "NetSegment")
         .def(py::init<>())
@@ -568,7 +604,7 @@ void bind_nuts(py::module_& m) {
                                           int, int, int, int>>& copy_specs,
              const std::map<std::pair<int, int>, bool>& horiz_of,
              int n_threads, bool full_trials,
-             const RoutingGridStack* ref_grid) {
+             const RoutingGridStack* ref_grid, bool nuts_corridors) {
               std::vector<SweepMove> mv;
               mv.reserve(moves.size());
               for (const auto& [bid, tidx] : moves)
@@ -577,6 +613,7 @@ void bind_nuts(py::module_& m) {
               dn.enabled = stage_b;
               dn.grid = grid;
               dn.ref_grid = ref_grid;
+              dn.nuts_corridors = nuts_corridors;
               dn.bit_order = bit_order;
               dn.abort_unplaced = abort_unplaced;
               dn.ref_ids = ref_ids;
@@ -616,7 +653,7 @@ void bind_nuts(py::module_& m) {
               int, int, std::string, int, int, int, int, int, int>>{},
           py::arg("horiz_of") = std::map<std::pair<int, int>, bool>{},
           py::arg("n_threads") = 0, py::arg("full_trials") = false,
-          py::arg("ref_grid") = nullptr);
+          py::arg("ref_grid") = nullptr, py::arg("nuts_corridors") = true);
 
     // Batched PARALLEL fixed-context screening (the refine/ripup chunk
     // builds' sequential-screen cost at chip scale): one worker per
@@ -632,7 +669,8 @@ void bind_nuts(py::module_& m) {
              const LayerStack& layers, double track_pitch,
              const NUTSResult& baseline,
              const std::vector<int>& extra_x,
-             const std::vector<int>& extra_y, int n_threads) {
+             const std::vector<int>& extra_y, int n_threads,
+             const RoutingGridStack* grid) {
               std::vector<ScreenJob> js;
               js.reserve(jobs.size());
               for (const auto& [bid, tidxs, clear] : jobs)
@@ -643,7 +681,7 @@ void bind_nuts(py::module_& m) {
                   py::gil_scoped_release release;
                   res = parallel_screen(bundles, js, planner, fp, layers,
                                         track_pitch, baseline, extra_x,
-                                        extra_y, n_threads);
+                                        extra_y, n_threads, grid);
               }
               py::list out;
               for (const auto& r : res) {
@@ -658,7 +696,8 @@ void bind_nuts(py::module_& m) {
           py::arg("bundles"), py::arg("jobs"), py::arg("planner"),
           py::arg("floorplan"), py::arg("layers"), py::arg("track_pitch"),
           py::arg("baseline"), py::arg("extra_x"), py::arg("extra_y"),
-          py::arg("n_threads") = 0);
+          py::arg("n_threads") = 0,
+          py::arg("grid") = nullptr);
 
     // ── Verify ────────────────────────────────────────────────────────────
     py::enum_<ViolationKind>(m, "ViolationKind")

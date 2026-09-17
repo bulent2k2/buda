@@ -118,7 +118,7 @@ buda::query caps         ;# {cell floor cap} rows (layer names, `-` = no
 buda::query reserves     ;# {cell layer {pos ...}} rows — the positional
                          ;#   track reservations (set_cell_layer_reserve),
                          ;#   cell-local track centres; empty when none
-buda::query reserve_audit ;# {inst cell layer reserved top_used own_hit}
+buda::query reserve_audit ;# {inst cell layer reserved top_used own_hit top_total}
                          ;#   rows — per (instance, layer) a reservation
                          ;#   GOVERNS (check_design's LAYER_RESERVE rows as
                          ;#   data; a 90°-rotated occurrence has none);

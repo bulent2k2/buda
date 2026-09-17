@@ -1664,6 +1664,43 @@ def cmd_set_cell_layer_share(session, cmd, args, cmd_line):
           f"<= declared)")
 
 
+def cmd_set_reserve_steer(session, cmd, args, cmd_line):
+    # Usage: set_reserve_steer [on|off]
+    # The TOP-SIDE half of a positional reservation (convergence ladder
+    # item 6b), OFF by default: with it on, every governed instance's
+    # reserved tracks are installed on the routing grid as reserve
+    # corridors, and a bus crossing the instance from OUTSIDE it — the
+    # top, or an enclosing cell's own bus over a nested child — is seated
+    # on them by abstract NUTS (where a footprint-wide run of them can
+    # host it) and lands its bits on them first in DetailedNUTS (where the
+    # window's corridor tracks can seat every bit).  Built because E5 read
+    # the top as landing on the reservation 6-11 % of the time; that was a
+    # mis-measurement (the hit was divided by the instance's SUPPLY, not
+    # by the top's tracks) — read right, the unsteered top lands on a
+    # DERIVED reservation 0.65-0.97 of the time on the SoC (the union over
+    # a template's instances covers half the supply) and 0.00 on the mesh.
+    # Steering takes the mesh to 1.00 at no cost and the SoC to 0.70-1.00
+    # while making its informed rounds DIRTIER at NQ >= 4 (every crossing
+    # bus is pulled into the union corridor and the packing pays), so it is
+    # a lever, not a default; env BUDA_RESERVE_STEER=1 turns it on for a
+    # whole run.  A design with no reservation is byte-identical either way.
+    if not args:
+        state = "on" if getattr(session, "_reserve_steer", False) else "off"
+        print(f"reserve_steer is {state}")
+        return
+    val = args[0].lower()
+    if val not in ("on", "off"):
+        print(f"Error: set_reserve_steer expects on|off, got {args[0]!r}")
+        return
+    session._reserve_steer = (val == "on")
+    # Takes effect at the next solve: the corridors are synced on the grid
+    # at every NUTS / DNUTS entry (a memo keyed on the corridor set, so an
+    # unchanged setting costs nothing there).
+    n = session._sync_reserve_corridors()
+    print(f"[LayerReserve] steering {val}"
+          + (f" — {n} corridor(s) installed" if n else ""))
+
+
 def cmd_set_cell_layer_reserve(session, cmd, args, cmd_line):
     # set_cell_layer_reserve <cell>|* <layer> <pos>[,<pos>...]|off
     # The POSITIONAL reservation (convergence ladder item 6, E5's corridor):
@@ -2092,6 +2129,7 @@ COMMANDS = {
     "set_cell_layer_cap": cmd_set_cell_layer_cap,
     "set_cell_layer_share": cmd_set_cell_layer_share,
     "set_cell_layer_reserve": cmd_set_cell_layer_reserve,
+    "set_reserve_steer": cmd_set_reserve_steer,
     "set_layer_caps_by_depth": cmd_set_layer_caps_by_depth,
     "reserve_top_layers": cmd_reserve_top_layers,
     "align_bottom_up": cmd_align_bottom_up,

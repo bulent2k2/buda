@@ -589,3 +589,33 @@ std::optional<PreRoutedSegment> ndr_credit_rail(
 }
 
 } // namespace buda
+
+namespace buda {
+
+std::vector<double> corridor_tracks_in(
+    const std::vector<ReserveCorridor>& corridors,
+    double along_lo, double along_hi, double perp_lo, double perp_hi,
+    const std::string& frame)
+{
+    std::vector<double> out;
+    if (corridors.empty()) return out;
+    if (along_hi < along_lo) std::swap(along_lo, along_hi);
+    if (perp_hi < perp_lo)   std::swap(perp_lo, perp_hi);
+    constexpr double eps = 1e-6;
+    for (const auto& c : corridors) {
+        // Overlap, not touch: a corridor ending where the span begins is
+        // not crossed by it.
+        if (c.along_hi <= along_lo + eps || c.along_lo >= along_hi - eps)
+            continue;
+        if (corridor_owner_contains(c.owner, frame)) continue;
+        for (double t : c.tracks)
+            if (t >= perp_lo - eps && t <= perp_hi + eps) out.push_back(t);
+    }
+    std::sort(out.begin(), out.end());
+    out.erase(std::unique(out.begin(), out.end(),
+                          [](double a, double b) { return std::fabs(a - b) < eps; }),
+              out.end());
+    return out;
+}
+
+} // namespace buda

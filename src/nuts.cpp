@@ -1264,11 +1264,88 @@ static void set_pull_targets(
 // produced the baseline — and apply_interval_constraints' trunk-margin
 // shrink is NOT idempotent, so re-prepping would tighten every interval a
 // second time.
+// Reserve-corridor pull override (ladder item 6b): a segment whose span
+// crosses a corridor on its layer — one its bundle does not route inside —
+// has the corridor's tracks inside its seat window; its pull becomes the
+// centre of the run that hosts it.  Written into pull_map (and out of
+// pull_win_map) before set_pull_targets, so place_seg's default
+// preference, the repack's anchor and tighten_pulls all read one objective;
+// an alignment sibling or a junction anchor still wins in place_seg (a
+// same-net track share and a corner landing are correctness, a corridor is
+// a preference).  No corridor on the segment's layer or none crossed:
+// nothing written, byte-identical.
+//
+// GATED on the corridor being able to HOST the bus: the densest window of
+// the bus's own width over the corridor tracks inside the seat window must
+// hold the segment's member bits, and the seat goes to that window's
+// centre.  Measured before the gate (E5 re-run, NQ = 2 bottom-up round 1):
+// steering every crossing bus onto whatever corridor tracks its window held
+// dragged seats off their pull for two or three reserved tracks a 32-bit
+// bus could never sit on — clean went to 16 unplaced at +5 % detailed wire.
+// A bus the corridor cannot seat keeps its pull; a corridor is for whole
+// buses, not bits scattered across it.
+static void apply_reserve_corridors(
+    const std::vector<BundleWrapper>& bundles,
+    std::vector<TrackSegment>& segments,
+    const std::map<int, std::vector<ReserveCorridor>>& corridors,
+    std::map<std::pair<int,int>, double>& pull_map,
+    std::map<std::pair<int,int>, std::pair<double,double>>& pull_win_map,
+    int only_layer)
+{
+    if (corridors.empty()) return;
+    std::map<int, std::string> frame_of;
+    std::map<std::pair<int,int>, int> bits_of;
+    for (const auto& bw : bundles) {
+        const int bid = bw.input.original_bundle.id;
+        const auto& inst = bw.input.original_bundle.instances;
+        frame_of[bid] = inst.empty() ? "" : inst[0];
+        const int sel = bw.plan.selected_topology_index;
+        if (sel < 0 || sel >= (int)bw.input.candidates.size()) continue;
+        const Topology& topo = bw.input.candidates[sel];
+        const int nbits = (int)bw.input.original_bundle.get_net_names().size();
+        for (int si = 0; si < (int)topo.segments.size(); ++si)
+            bits_of[{bid, si}] = seg_bit_count(topo, si, nbits);
+    }
+    for (auto& ts : segments) {
+        if (only_layer >= 0 && ts.layer != only_layer) continue;
+        auto cit = corridors.find(ts.layer);
+        if (cit == corridors.end() || cit->second.empty()) continue;
+        const double half = ts.width / 2.0;
+        const double c_lo = ts.interval_lo + half, c_hi = ts.interval_hi - half;
+        if (c_lo > c_hi) continue;
+        const auto key = std::make_pair(ts.bundle_id, ts.seg_idx);
+        auto fit = frame_of.find(ts.bundle_id);
+        const std::string& frame = fit == frame_of.end() ? std::string() : fit->second;
+        auto T = corridor_tracks_in(cit->second, sp_lo(ts), sp_hi(ts),
+                                    ts.interval_lo, ts.interval_hi, frame);
+        if (T.empty()) continue;
+        auto bit = bits_of.find(key);
+        const int need = std::max(1, bit == bits_of.end() ? 1 : bit->second);
+        // Densest footprint-wide window over the (sorted) corridor tracks:
+        // the first window holding the most tracks.
+        int best_i = 0, best_n = 0;
+        for (int i = 0, j = 0; i < (int)T.size(); ++i) {
+            while (j + 1 < (int)T.size() && T[j + 1] - T[i] <= ts.width + 1e-9) ++j;
+            if (j - i + 1 > best_n) { best_n = j - i + 1; best_i = i; }
+        }
+        if (best_n < need) continue;
+        // The POINT form: a corridor names a place, so it keeps the point
+        // form the alignment and junction preferences use, not the pull's
+        // flat interval — and any interval the pull wrote is withdrawn, or
+        // the repack would still pack to it.
+        pull_map[key] = std::clamp(0.5 * (T[best_i] + T[best_i + best_n - 1]),
+                                   c_lo, c_hi);
+        pull_win_map.erase(key);
+    }
+}
+
 static NutsContext build_context(const std::vector<BundleWrapper>& bundles,
                                  const Floorplan& floorplan,
                                  std::vector<TrackSegment>& segments,
                                  int only_layer = -1,
-                                 bool prep = true)
+                                 bool prep = true,
+                                 const std::map<int, std::vector<ReserveCorridor>>*
+                                     corridors = nullptr)
 {
     NutsContext ctx;
     build_nuts_maps(bundles, floorplan, ctx.pull_map, ctx.slide_map,
@@ -1301,6 +1378,12 @@ static NutsContext build_context(const std::vector<BundleWrapper>& bundles,
                                           ctx.ts_ptr_map, floorplan,
                                           ctx.n_reach_pruned, ctx.n_reach_doomed,
                                           only_layer);
+        // After the interval passes (the window the corridor is read in is
+        // the final one) and before set_pull_targets (which clamps the pull
+        // this writes).
+        if (corridors)
+            apply_reserve_corridors(bundles, segments, *corridors,
+                                    ctx.pull_map, ctx.pull_win_map, only_layer);
         set_pull_targets(segments, ctx.pull_map, ctx.net_pull_map);
     }
     return ctx;
@@ -2790,6 +2873,18 @@ static int repack_overlap_clusters(const NUTSEngine& eng, double track_pitch,
     return moved;
 }
 
+void NUTSEngine::set_reserve_corridors(const RoutingGridStack& grid) {
+    corridors_.clear();
+    for (int lid : grid.layer_ids())
+        if (!grid.reserve_corridors(lid).empty())
+            corridors_[lid] = grid.reserve_corridors(lid);
+}
+
+void NUTSEngine::add_reserve_corridor(int layer_id, ReserveCorridor c) {
+    std::sort(c.tracks.begin(), c.tracks.end());
+    corridors_[layer_id].push_back(std::move(c));
+}
+
 void NUTSEngine::set_extra_grid_points(std::vector<int> xs, std::vector<int> ys) {
     std::sort(xs.begin(), xs.end());
     xs.erase(std::unique(xs.begin(), xs.end()), xs.end());
@@ -3224,7 +3319,8 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
         NUTSResult result;
         result.segments = extract_segments(bs, x_grid, y_grid);
         charge("extract", t0);
-        NutsContext ctx = build_context(bs, floorplan_, result.segments);
+        NutsContext ctx = build_context(bs, floorplan_, result.segments, -1, true,
+                                        &corridors_);
         std::map<int, std::vector<TrackSegment*>> by_layer;
         for (auto& ts : result.segments)
             by_layer[ts.layer].push_back(&ts);
@@ -3442,7 +3538,8 @@ NUTSResult NUTSEngine::rerun_layer(
             if (dc.east >= 0) ts.interval_hi += dc.east;
         }
     }
-    NutsContext ctx = build_context(bundles, floorplan_, result.segments, layer_id);
+    NutsContext ctx = build_context(bundles, floorplan_, result.segments, layer_id,
+                                    true, &corridors_);
     std::vector<TrackSegment*> layer_segs;
     for (auto& ts : result.segments)
         if (ts.layer == layer_id) layer_segs.push_back(&ts);

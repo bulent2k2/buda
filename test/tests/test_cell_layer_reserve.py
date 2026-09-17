@@ -35,6 +35,8 @@ is pinned here:
 import contextlib
 import io
 import re
+
+import pytest
 import shutil
 import sys
 from pathlib import Path
@@ -553,7 +555,8 @@ def test_solved_as_a_template_the_cell_leaves_the_reserved_tracks_free():
     out = _cmd(s, "check_design")
     assert "Success" in out
     assert ("LAYER_RESERVE: top_cell M6: 8 track(s) reserved over 2 "
-            "instance(s); the top uses 8..8 of them per instance; own metal "
+            "instance(s); the top uses 8..8 of them per instance (100% of "
+            "its 16 track(s) over them); own metal "
             "on reserved tracks: 0") in out, out
     # the cell-local solve and the reference DNUTS view both said so
     # (captured by _quiet; re-run the enforcement sites' prints directly)
@@ -562,10 +565,22 @@ def test_solved_as_a_template_the_cell_leaves_the_reserved_tracks_free():
     assert n == 8 and len(fp.get_keepout_zones()) == 8
     z = fp.get_keepout_zones()[0]
     assert set(z.layer_ids) == {6} and z.bbox.x1 == 0 and z.bbox.x2 == 600
-    ko = s._bu_reserve_dnuts_keepouts({w.input.original_bundle.id
-                                       for w in s.bundles
-                                       if w.input.original_bundle.cell_context})
-    assert ko and all(k[0] == 6 for k in ko)
+    # the reference DNUTS solve carries the reservation as the reference
+    # wrapper's blocked tracks (absolute over u1), the copy carries none
+    wr = {w.input.original_bundle.instances[0]: w for w in s.bundles
+          if w.input.original_bundle.cell_context == "top_cell"}
+    ref = s._template_track_verdict["top_cell"]["ref"]
+    other = next(i for i in wr if i != ref)
+    y1 = {c.name: c for c in s.bdb.all_components()}[ref].y1
+    assert wr[ref].hier.blocked_tracks == {6: [y1 + p for p in
+                                                (83, 86, 89, 92, 100, 103, 106, 109)]}
+    # u2 is misaligned with u1 on M5 (x offset 850 against a 32 pitch), so
+    # it solves in the global run and carries the list in its own frame
+    y2 = {c.name: c for c in s.bdb.all_components()}[other].y1
+    assert wr[other].hier.blocked_tracks == {6: [y2 + p for p in
+                                                  (83, 86, 89, 92, 100, 103, 106, 109)]}
+    assert s.routing_grid is s._bu_reference_grid(
+        {wr[ref].input.original_bundle.id})[0]     # no clone for a reservation
 
 
 def test_a_reservation_the_cell_does_not_need_costs_nothing():
@@ -935,11 +950,13 @@ def test_an_instance_solved_in_the_global_run_keeps_the_reservation():
     pos = [s0._reserve_ref_pos(t - u2.y1, fr["u2"], ext, True) for t in hit]
     line = "set_cell_layer_reserve top_cell M6 " + ",".join(f"{p:g}" for p in pos)
     s, out = run(line)
-    assert "keep their reserved tracks as blocked tracks: u2" in out, out[-3000:]
+    assert "keep their reserved tracks as blocked tracks: u1, u2" in out, out[-3000:]
     wr = {w.input.original_bundle.instances[0]: w for w in s.bundles
           if w.input.original_bundle.cell_context == "top_cell"
           and w.input.original_bundle.instances}
-    assert not wr["u1"].hier.blocked_tracks                      # the reference
+    # the reference carries the same list in ITS frame
+    u1 = comps["u1"]
+    assert wr["u1"].hier.blocked_tracks == {6: sorted(u1.y1 + p for p in pos)}
     assert wr["u2"].hier.blocked_tracks == {6: hit}, wr["u2"].hier.blocked_tracks
     after = _own_tracks(s, "top_cell", 6)
     assert not (after.get("u2", set()) & set(hit)), (after, hit)
@@ -956,11 +973,13 @@ def test_an_instance_solved_in_the_global_run_keeps_the_reservation():
     _quiet(s, "run_detailed_nuts")
     assert s.detailed_result.num_unplaced == 0
     assert len(_own_tracks(s, "top_cell", 6)["u2"]) == 8
-    # the same design aligned (u2 back on the phase) carries no blocked
-    # tracks anywhere: the copy honours the reference's keepouts
+    # the same design aligned (u2 back on the phase): only the reference
+    # carries the list, the copy honours it through the copy
     s2, out2 = _nested(["set_bottom_up *"], line)
-    assert "blocked tracks" not in out2
-    assert all(not w.hier.blocked_tracks for w in s2.bundles)
+    assert "blocked tracks: u1\n" in out2 or "blocked tracks: u1" in out2, out2[-2000:]
+    st = {w.input.original_bundle.instances[0]: bool(w.hier.blocked_tracks)
+          for w in s2.bundles if w.input.original_bundle.cell_context == "top_cell"}
+    assert st == {"u1": True, "u2": False}, st
 
 
 def test_the_abstract_stage_reports_own_metal_as_an_estimate():
@@ -983,3 +1002,262 @@ def test_the_abstract_stage_reports_own_metal_as_an_estimate():
     out = _cmd(s, "check_design")
     assert "own metal on reserved tracks: 0..0 per instance" in out, out
     assert "abstract seat footprint" not in out
+
+
+# ── the top-side half: the top is steered onto the reserved tracks (6b) ──
+
+# Eight tracks INSIDE the top bus's M6 seat window (absolute [110, 190]
+# over u1: cell-local [60, 140]) that the top does not use on its own —
+# its bits sit at cell-local 83..109 (`_LINE`, the derived reservation).
+# Four below and four above, so landing on them is a choice, not a drift;
+# no 34-wide window (the bus's footprint) holds the eight, so the abstract
+# seat is NOT steered and the bits are (the window holds them all).
+_STEER = "set_cell_layer_reserve top_cell M6 66,69,72,75,117,120,123,126"
+# A contiguous run of eight (spread 26 < 34): half over the top's natural
+# tracks (100..109 = the upper four of `_LINE`) and half beyond them.
+_STEER_RUN = "set_cell_layer_reserve top_cell M6 100,103,106,109,117,120,123,126"
+
+
+def _template_run(*policy):
+    """`_template_session` with the console captured: (session, output)."""
+    i = _DESIGN.index("run_hier_bundler depth 1")
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        for c in [*_DESIGN[:i], "set_bottom_up top_cell", *policy,
+                  *_DESIGN[i:], "run_nuts",
+                  "check_template_tracks on_mismatch independent",
+                  "run_detailed_nuts"]:
+            s.do_command(c)
+    return s, buf.getvalue()
+
+
+def _top_seat(s):
+    """The top bus's M6 abstract seat (the one cross-instance bundle)."""
+    top = [w.input.original_bundle.id for w in s.bundles
+           if not w.input.original_bundle.instances]
+    assert len(top) == 1, top
+    ts = [t for t in s.nuts_result.segments
+          if t.bundle_id == top[0] and t.layer == 6]
+    assert len(ts) == 1, ts
+    return ts[0]
+
+
+def test_the_top_is_steered_onto_the_reserved_tracks():
+    """E5's refutation of the half-built primitive: the block left the
+    reserved tracks free and the top landed on them 6-11 % of the time,
+    since nothing steered it there.  Now the reservation is also a
+    CORRIDOR: abstract NUTS seats the crossing bus on the reserved tracks
+    and DetailedNUTS lands its bits there first — on this vehicle every
+    one of the top's 16 tracks over the two instances is a reserved one,
+    where the first half alone put none of them there.  Off — the
+    default — the E5 reading comes back exactly."""
+    s, out = _template_run("set_reserve_steer on", _STEER)
+    assert ("[LayerReserve] 2 corridor(s) over 2 instance(s) steer the "
+            "crossing buses onto the reserved tracks") in out, out[-2000:]
+    assert s.routing_grid.has_reserve_corridors()
+    assert s.nuts_result.num_overlaps == 0
+    assert s.detailed_result.num_unplaced == 0
+    # the abstract seat stays at its pull (no footprint-wide window of the
+    # corridor holds the eight), the bits take the corridor
+    assert _top_seat(s).track_position == pytest.approx(150.0)
+    rows = s._layer_reserve_audit()
+    assert [(r["inst"], r["reserved"], r["top_used"], r["top_total"],
+             r["own_hit"]) for r in rows] == \
+        [("u1", 8, 8, 8, 0), ("u2", 8, 8, 8, 0)], rows
+    out = _cmd(s, "check_design")
+    assert "Success" in out
+    assert ("the top uses 8..8 of them per instance (100% of its 16 "
+            "track(s) over them); own metal on reserved tracks: 0..0") in out, out
+    # the Tcl row carries the total as its LAST field
+    sys.path.insert(0, str(Path(__file__).parents[2] / "tools"))
+    import buda_server
+    assert buda_server._reserve_audit(s) == \
+        "{{u1} {top_cell} {M6} 8 8 0 8} {{u2} {top_cell} {M6} 8 8 0 8}"
+
+    # the first half alone (steering off — the DEFAULT): the tracks are
+    # free and unused
+    s0, out0 = _template_run(_STEER)
+    assert "corridor(s)" not in out0
+    assert not s0.routing_grid.has_reserve_corridors()
+    assert s0.detailed_result.num_unplaced == 0
+    rows = s0._layer_reserve_audit()
+    assert all(r["top_used"] == 0 and r["own_hit"] == 0 for r in rows), rows
+    assert "(0% of its 16 track(s) over them)" in _cmd(s0, "check_design")
+    assert _top_seat(s0).track_position == pytest.approx(150.0)
+    # ... and switching it on re-solves onto the corridor at the next NUTS
+    assert "steering on — 2 corridor(s) installed" in \
+        _cmd(s0, "set_reserve_steer on")
+    assert "reserve_steer is on" in _cmd(s0, "set_reserve_steer")
+    assert "expects on|off" in _cmd(s0, "set_reserve_steer maybe")
+    _quiet(s0, "run_nuts", "run_detailed_nuts")
+    assert all(r["top_used"] == 8 for r in s0._layer_reserve_audit())
+    assert "steering off" in _cmd(s0, "set_reserve_steer off")
+    assert not s0.routing_grid.has_reserve_corridors()
+
+    # a contiguous run the footprint can host: the abstract SEAT moves onto
+    # it (its centre, 163) and every bit lands on it; off, the top's own
+    # tracks overlap the run's lower half by construction — 4 of 8
+    s2, _ = _template_run("set_reserve_steer on", _STEER_RUN)
+    assert s2.detailed_result.num_unplaced == 0
+    assert _top_seat(s2).track_position == pytest.approx(163.0)
+    assert [r["top_used"] for r in s2._layer_reserve_audit()] == [8, 8]
+    s3, _ = _template_run(_STEER_RUN)
+    assert _top_seat(s3).track_position == pytest.approx(150.0)
+    assert [r["top_used"] for r in s3._layer_reserve_audit()] == [4, 4]
+
+
+def test_the_env_knob_and_a_design_with_no_reservation():
+    """BUDA_RESERVE_STEER=1 is the same lever from the environment (a
+    whole run's worth); a design reserving nothing installs no corridor
+    whatever the setting (byte-identical, corpus-guarded)."""
+    import os
+    old = os.environ.get("BUDA_RESERVE_STEER")
+    os.environ["BUDA_RESERVE_STEER"] = "1"
+    try:
+        s = _template_session(_STEER)
+    finally:
+        if old is None:
+            del os.environ["BUDA_RESERVE_STEER"]
+        else:
+            os.environ["BUDA_RESERVE_STEER"] = old
+    assert s._reserve_steer and s.routing_grid.has_reserve_corridors()
+    assert all(r["top_used"] == 8 for r in s._layer_reserve_audit())
+    s, out = _template_run("set_reserve_steer on")
+    assert s._reserve_steer
+    assert "corridor" not in out
+    assert not s.routing_grid.has_reserve_corridors()
+    assert s._sync_reserve_corridors() == 0
+    assert s._reserve_corridors() == []
+    s, _ = _template_run()
+    assert not s._reserve_steer
+
+
+# ── a nested child's corridor steers the ENCLOSING cell's own bus ────────
+
+# The SoC's shape: a core inside a cluster, the cluster's own bus crossing
+# it.  `inner` (250 x 80) sits between a and b, so top_cell's loc bus
+# (a -> b, M6) crosses it; inner's own bus in1 (p -> q) lives on M6 too.
+_NEST_X = [
+    f"source {_TRACKS}", "open_bdb :memory:",
+    "add_cell leaf 80 80", "add_cell inner 250 80",
+    "add_inst_to_cell inner p leaf 10 0", "add_inst_to_cell inner q leaf 160 0",
+    "add_cell top_cell 700 200",
+    "add_inst_to_cell top_cell a leaf 20 20",
+    "add_inst_to_cell top_cell b leaf 600 20",
+    "add_inst_to_cell top_cell c inner 200 20",
+    "add_inst u1 top_cell - 50 50", "add_inst u2 top_cell - 1000 50",
+    "derive_busterms 2", "add_blocks_from_bdb 0", "add_blocks_from_bdb 1 skip",
+    "add_blocks_from_bdb 2 skip", "bdb_net_mode on",
+    "add_bus loc[8] u1/a.out u1/b.in", "add_bus loc2[8] u2/a.out u2/b.in",
+    "add_bus x[8] u1/b.out u2/a.in",
+    "add_bus in1[8] u1/c/p.out u1/c/q.in", "add_bus in2[8] u2/c/p.out u2/c/q.in",
+]
+
+
+def test_a_nested_childs_corridor_steers_the_enclosing_cells_bus():
+    """The cell-local solve of `top_cell` is the TOP over its child `c`:
+    with `inner` reserving tracks (in ITS frame), the corridor reaches
+    the cluster-level solve translated into top_cell's frame — the local
+    NUTS seats the loc bus on it and the reference DNUTS view (absolute)
+    lands the bits there — so every instance of the template routes its
+    bus over the child on the child's reserved tracks."""
+    def run(*policy):
+        s = buda_cli.BudaSession()
+        s.no_viz = True
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            for c in [*_NEST_X, "set_bottom_up *", *policy, *_NEST_TAIL]:
+                s.do_command(c)
+        return s, buf.getvalue()
+
+    s0, _ = run()
+    assert s0.detailed_result.num_unplaced == 0
+    rows0 = {(r["inst"], r["layer_name"]): r for r in s0._layer_demand()}
+    used_c = rows0[("u1/c", "M6")]["used_tracks"]
+    assert len(used_c) == 8, used_c          # loc's 8 bits cross c
+    comps = {c.name: c for c in s0.bdb.all_components()}
+    c1 = comps["u1/c"]
+    # reserve, in inner's frame, the tightest run of eight M6 tracks inside
+    # c's extent that the loc bus does NOT use today (a run the bus's
+    # footprint can host, so the cell-local SEAT is steered too)
+    g = s0.routing_grid.get_layer_grid(6)
+    free = [p for p, _ in g.signal_tracks_in(0.5 * (c1.x1 + c1.x2), c1.y1, c1.y2)
+            if all(abs(p - u) > 1e-6 for u in used_c)]
+    assert len(free) >= 8, free
+    pick = min((free[i:i + 8] for i in range(len(free) - 7)),
+               key=lambda w: w[-1] - w[0])
+    assert pick[-1] - pick[0] <= 34.0, pick
+    line = "set_cell_layer_reserve inner M6 " + ",".join(
+        f"{p - c1.y1:g}" for p in pick)
+    s, out = run("set_reserve_steer on", line)
+    assert "[LayerReserve] cell 'inner': local solve with 8 reserved" in out
+    assert s.detailed_result.num_unplaced == 0
+    aud = {r["inst"]: r for r in s._layer_reserve_audit()}
+    assert set(aud) == {"u1/c", "u2/c"}, aud
+    for inst, r in aud.items():
+        assert (r["reserved"], r["top_used"], r["own_hit"]) == (8, 8, 0), (inst, r)
+    # the cell-local engine saw the child's corridor in its own frame
+    cl = s._cell_local_corridors("u1")
+    assert [(lid, own) for lid, _a, _b, _t, own in cl] == [(6, "u1/c")]
+    assert cl[0][3] == pytest.approx([p - 50.0 for p in pick])   # u1.y1 = 50
+    assert (cl[0][1], cl[0][2]) == (200.0, 450.0)                # c's x extent
+
+    def loc_seat(sess):
+        bid = next(w.input.original_bundle.id for w in sess.bundles
+                   if w.input.original_bundle.instances == ["u1"])
+        return next(t.track_position for t in sess.nuts_result.segments
+                    if t.bundle_id == bid and t.layer == 6)
+    # the cluster's local solve seated its bus on the corridor's centre
+    assert loc_seat(s) == pytest.approx(0.5 * (min(pick) + max(pick)))
+    # off: the child's tracks are merely free — the bus keeps the seat it
+    # had with nothing reserved, and whether its bits fall on them is
+    # chance (the E5 reading), not steering
+    s1, _ = run(line)
+    assert loc_seat(s1) == pytest.approx(loc_seat(s0))
+    assert loc_seat(s1) != pytest.approx(loc_seat(s))
+
+
+def test_the_parallel_screen_and_sweep_seat_like_the_sequential_ones():
+    """The bits-only study mode (BUDA_RESERVE_STEER_NUTS=0) leaves every
+    abstract seat at its pull; the parallel screen and sweep used to take
+    the grid's corridors unconditionally while the sequential screen and
+    trial did not, so a sweep could rank and pick on placements the replay
+    never makes (Codex P2 on #938).  One predicate now gates both: in
+    either mode the parallel screen's scores equal the sequential one's,
+    and the sweep's outcomes the sequential trials'."""
+    import os
+    import buda
+    old = os.environ.get("BUDA_RESERVE_STEER_NUTS")
+    try:
+        for mode in ("0", "1"):
+            os.environ["BUDA_RESERVE_STEER_NUTS"] = mode
+            s, _ = _template_run("set_reserve_steer on", _STEER_RUN)
+            assert s.routing_grid.has_reserve_corridors()
+            assert s._reserve_steer_nuts() == (mode == "1")
+            w = next(w for w in s.bundles
+                     if not w.input.original_bundle.instances)
+            alts = [t for t in range(len(w.input.candidates))
+                    if t != w.plan.selected_topology_index]
+            assert alts
+            seq = s._rr_screen_scores(w, alts)
+            par = s._rr_screen_scores_many([(w, alts)])[0]
+            assert seq is not None and seq == par, (mode, seq, par)
+            # the sweep's NUTS engines get the grid (stage a needs it for
+            # the corridors alone) and the same NUTS-half verdict
+            bid = w.input.original_bundle.id
+            _b, _n, dn = s._rr_sweep_stage_setup([(0, bid, 0, alts[0])],
+                                                 'a', lambda: (0, 0))
+            assert dn.get("grid") is s.routing_grid
+            assert dn.get("nuts_corridors") == (mode == "1")
+            # the seat itself: steered onto the run only when the NUTS
+            # half is on (the bits are steered either way)
+            assert _top_seat(s).track_position == pytest.approx(
+                163.0 if mode == "1" else 150.0)
+            assert [r["top_used"] for r in s._layer_reserve_audit()] == [8, 8]
+    finally:
+        if old is None:
+            os.environ.pop("BUDA_RESERVE_STEER_NUTS", None)
+        else:
+            os.environ["BUDA_RESERVE_STEER_NUTS"] = old

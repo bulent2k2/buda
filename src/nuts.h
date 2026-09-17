@@ -324,6 +324,20 @@ public:
     // perpendicular intervals.  Must be called before run() / rerun_layer().
     void set_extra_grid_points(std::vector<int> xs, std::vector<int> ys);
 
+    // Reserve corridors (convergence ladder item 6b, see ReserveCorridor in
+    // routing_grid.h): a segment whose span crosses a governed instance's
+    // corridor on its layer, and whose bundle is not routed inside that
+    // instance, takes the corridor's tracks inside its seat window as its
+    // pull — the seat preference place_seg, the repack and tighten_pulls all
+    // read — so the abstract seat lands on the reserved tracks and hands
+    // DetailedNUTS an anchor there.  Copied per layer from a grid stack
+    // (the session's, which every trial engine reads too) or added one at a
+    // time in another frame (the cell-local solve, whose coordinates are the
+    // template's).  None installed = byte-identical.
+    void set_reserve_corridors(const RoutingGridStack& grid);
+    void add_reserve_corridor(int layer_id, ReserveCorridor c);
+    bool has_reserve_corridors() const { return !corridors_.empty(); }
+
     // Bottom-up template planning (stage b): register already-placed segments
     // (per-instance translated copies of a cell-local NUTS solve) as FIXED.
     // Their bundles are skipped by extraction (never re-solved), every solver
@@ -422,6 +436,7 @@ private:
     // re-solved; their bundles are excluded from extraction.
     std::vector<TrackSegment> fixed_segments_;
     std::set<int>             fixed_bundle_ids_;
+    std::map<int, std::vector<ReserveCorridor>> corridors_;   // per layer
     std::vector<KeepoutZone>  fixed_zones_;
 
     // Build a flat list of TrackSegments from all selected topologies.

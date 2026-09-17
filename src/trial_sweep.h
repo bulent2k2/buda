@@ -103,6 +103,14 @@ struct SweepOutcome {
 struct SweepDnutsCtx {
     bool enabled = false;
     const RoutingGridStack* grid = nullptr;
+    // Whether the sweep's NUTS engines take the grid's reserve corridors
+    // (6b).  The sequential trial arms its engine through the session's
+    // `_arm_reserve_corridors`, which the bits-only study mode
+    // (BUDA_RESERVE_STEER_NUTS=0) turns off while the grid still has to
+    // reach DetailedNUTS — so the two are separate switches here too, or
+    // a sweep would seat differently from the replay it certifies (Codex
+    // P2 on #938).
+    bool nuts_corridors = true;
     // Reference-solve grid for the bottom-up merge path (Codex P2 on #664):
     // with `set_cell_layer_share` declared, the session's sequential
     // _run_detailed_nuts solves the REFERENCE instances on a grid CLONE
@@ -153,7 +161,9 @@ std::vector<std::optional<std::vector<std::array<int, 3>>>> parallel_screen(
     const NUTSResult&                 baseline,     // frozen occupancy
     const std::vector<int>&           extra_x,
     const std::vector<int>&           extra_y,
-    int                               n_threads);
+    int                               n_threads,
+    const RoutingGridStack*           grid = nullptr);  // reserve corridors
+                                                        // (nullptr = none)
 
 std::vector<SweepOutcome> parallel_sweep(
     const std::vector<BundleWrapper>& bundles,      // committed baseline

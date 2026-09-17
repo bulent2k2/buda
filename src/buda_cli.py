@@ -335,6 +335,15 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
         self._record_origin = None   # last `# origin:` written to the record
         self.script_path = None      # set when a .buda script is sourced
         self.routing_grid = None     # RoutingGridStack (stage 8)
+        # Reserve corridors (ladder item 6b): steer the top's seats and bits
+        # onto a governed instance's reserved tracks.  OFF by default — an
+        # opt-in lever (`set_reserve_steer on`, or BUDA_RESERVE_STEER=1 for
+        # a whole run): measured on the E5 SoC it raises a hit rate that
+        # was already 0.65-0.97 by construction to 0.70-1.00 and makes the
+        # informed rounds dirtier at NQ >= 4; on the mesh control it takes
+        # the hit rate from 0.00 to 1.00 at no cost.  Moves nothing on a
+        # design with no reservation either way.
+        self._reserve_steer = os.environ.get("BUDA_RESERVE_STEER", "0") == "1"
         # Unit-plausibility guard (Phase 1d): 'on' (hard error) | 'warn' | 'off'
         self._unit_check = "on"
         # The (layer, unit_pitch) tuple last judged — report once per stage

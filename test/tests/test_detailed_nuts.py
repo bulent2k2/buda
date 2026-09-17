@@ -415,3 +415,104 @@ def test_blocked_tracks_are_dropped_from_every_pool():
     result = buda.DetailedNUTSEngine(stack).run([seg])
     assert [s.track_position for s in net_segs_for(result, 1)] == \
         pytest.approx([3.5, 5.5])
+
+
+def test_reserve_corridor_tracks_are_picked_first():
+    """The top-side half of a positional reservation (convergence ladder
+    item 6b): a reserve corridor on the grid — the tracks a governed
+    instance keeps free over its along-extent — is where a crossing
+    segment's bits land FIRST, nearest the anchor among them — when the
+    corridor can seat every one of them; a segment whose bundle routes
+    INSIDE the reserving instance is not steered onto its own reservation,
+    a corridor beside the span steers nothing, a blocked track is never
+    taken, and no corridor is the historical pick bit for bit."""
+    stack = make_stack_with_standard_pattern()
+    # the unit's four signal tracks are 3.5, 5.5, 10.5, 12.5; anchor low
+    seg = make_bus_segment(bit_width=2, interval_lo=0.0, interval_hi=14.0)
+    seg.abstract_pos = 5.0
+
+    def picks():
+        r = buda.DetailedNUTSEngine(stack).run([seg])
+        assert r.num_unplaced == 0
+        return [s.track_position for s in net_segs_for(r, 1)]
+
+    assert picks() == pytest.approx([3.5, 5.5])
+    assert not stack.has_reserve_corridors()
+    stack.add_reserve_corridor(4, 20.0, 60.0, [12.5, 10.5], "blk")
+    assert stack.has_reserve_corridors()
+    assert stack.reserve_corridors(4) == [(20.0, 60.0, [10.5, 12.5], "blk")]
+    assert stack.reserve_corridors(9) == []
+    assert picks() == pytest.approx([10.5, 12.5])
+    # the owner's own bundles (its frame, or one inside it) are not steered
+    for frame in ("blk", "blk/core", "blk/core/x"):
+        seg.frame_inst = frame
+        assert picks() == pytest.approx([3.5, 5.5]), frame
+    seg.frame_inst = "blk2"                 # a sibling, not a child
+    assert picks() == pytest.approx([10.5, 12.5])
+    seg.frame_inst = ""
+    # one corridor track for two bits: the corridor cannot seat the bus,
+    # so it is not steered at all (a bus half on the corridor is scattered,
+    # not steered — the historical pick)
+    stack.clear_reserve_corridors()
+    stack.add_reserve_corridor(4, 20.0, 60.0, [10.5], "blk")
+    assert picks() == pytest.approx([3.5, 5.5])
+    # a blocked track is never taken, and with it gone the corridor no
+    # longer seats the bus: the historical pick again
+    stack.clear_reserve_corridors()
+    stack.add_reserve_corridor(4, 20.0, 60.0, [10.5, 12.5], "blk")
+    seg.blocked_tracks = [10.5]
+    assert picks() == pytest.approx([3.5, 5.5])
+    seg.blocked_tracks = []
+    # three corridor tracks for two bits: the two nearest the anchor
+    stack.clear_reserve_corridors()
+    stack.add_reserve_corridor(4, 20.0, 60.0, [5.5, 10.5, 12.5], "blk")
+    assert picks() == pytest.approx([5.5, 10.5])
+    # a corridor beside the span (along 200..300 against 0..100) is not
+    # crossed; one merely touching it (100..200) neither
+    for lo, hi in ((200.0, 300.0), (100.0, 200.0)):
+        stack.clear_reserve_corridors()
+        stack.add_reserve_corridor(4, lo, hi, [10.5, 12.5], "blk")
+        assert picks() == pytest.approx([3.5, 5.5]), (lo, hi)
+    # a corridor track outside the seat window is not a track of the seat
+    stack.clear_reserve_corridors()
+    stack.add_reserve_corridor(4, 20.0, 60.0, [24.5, 26.5], "blk")
+    assert picks() == pytest.approx([3.5, 5.5])
+    # cleared = byte-identical
+    stack.clear_reserve_corridors()
+    assert picks() == pytest.approx([3.5, 5.5])
+
+
+def test_reserve_corridor_steers_an_ndr_governed_run():
+    """The NDR branch takes its own path to a seat (a run of k-slot bits,
+    guards and shields chosen nearest the anchor), so the corridor
+    preference has to be scored there too (Codex P2 on #938): a feasible
+    run lying ENTIRELY on corridor tracks outranks every run that does
+    not; a run only partly on the corridor is off it (one run is one
+    seat); no corridor is the historical pick."""
+    stack = make_stack_with_standard_pattern()
+    # one bit two slots wide: the contiguous pairs are 3.5/5.5 and 10.5/12.5
+    seg = make_bus_segment(bit_width=1, interval_lo=0.0, interval_hi=14.0)
+    spec = buda.NdrSpec()
+    spec.width_slots, spec.guard_slots = 2, 0
+    seg.ndr = spec
+    seg.abstract_pos = 4.5
+
+    def run():
+        r = buda.DetailedNUTSEngine(stack).run([seg])
+        assert r.num_unplaced == 0
+        ns = net_segs_for(r, 1)
+        assert len(ns) == 1
+        return ns[0].track_position
+
+    assert run() == pytest.approx(4.5)             # centred on 3.5/5.5
+    stack.add_reserve_corridor(4, 20.0, 60.0, [10.5, 12.5], "blk")
+    assert run() == pytest.approx(11.5)            # the run on the corridor
+    seg.frame_inst = "blk/core"                    # inside the owner: no
+    assert run() == pytest.approx(4.5)
+    seg.frame_inst = ""
+    stack.clear_reserve_corridors()
+    stack.add_reserve_corridor(4, 20.0, 60.0, [12.5], "blk")   # half a run
+    assert run() == pytest.approx(4.5)
+    stack.clear_reserve_corridors()
+    stack.add_reserve_corridor(4, 200.0, 300.0, [10.5, 12.5], "blk")
+    assert run() == pytest.approx(4.5)             # beside the span

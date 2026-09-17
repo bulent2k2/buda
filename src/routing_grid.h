@@ -139,6 +139,50 @@ struct GridKeepout {
     std::string net;              // "" = anonymous obstruction, not a rail
 };
 
+// A positional reservation seen from the TOP's side (convergence ladder item
+// 6b, the second half of `set_cell_layer_reserve`): the ABSOLUTE track
+// positions a governed instance (`owner`, its component path) keeps free on
+// this layer over its along-extent [along_lo, along_hi].  The first half made
+// the block's own solve leave the tracks free; this half, opt-in
+// (`set_reserve_steer on`), seats a crossing bus on them in abstract NUTS
+// and picks its bits there first in DetailedNUTS.  Built because E5 read the
+// unsteered top as landing on the reservation 6-11 % of the time — a
+// mis-measurement (hits over the instance's SUPPLY, not over the top's
+// tracks); read right the unsteered rate is 0.65-0.97 on the SoC (a derived
+// reservation is the union over a template's instances and covers half the
+// supply) and 0.00 on the mesh.  Steering takes the mesh to 1.00 at no cost
+// and the SoC to 0.70-1.00 while making its informed rounds dirtier, which
+// is why it is a lever.  A bundle routed INSIDE the owner (its frame
+// instance is the owner or lies in its subtree) is never steered onto its
+// own reservation — for it those tracks are room for somebody else.
+struct ReserveCorridor {
+    double              along_lo = 0.0, along_hi = 0.0;
+    std::vector<double> tracks;      // ascending, absolute
+    std::string         owner;       // component path of the reserving instance
+};
+
+// Is a bundle framed at `frame` (its frame instance's path; "" = the top)
+// routed inside `owner`?  Path-prefix containment with a '/' boundary, so
+// "u1" does not contain "u10".
+inline bool corridor_owner_contains(const std::string& owner,
+                                    const std::string& frame) {
+    if (owner.empty()) return false;
+    if (frame == owner) return true;
+    return frame.size() > owner.size() &&
+           frame.compare(0, owner.size(), owner) == 0 &&
+           frame[owner.size()] == '/';
+}
+
+// The corridor tracks a segment may be steered onto: every corridor whose
+// along-extent overlaps the segment's span, minus those the segment's bundle
+// routes inside, restricted to the perp window [perp_lo, perp_hi].  Sorted,
+// deduplicated (two instances of one cell reserving the same absolute
+// track over adjacent spans name it once).
+std::vector<double> corridor_tracks_in(
+    const std::vector<ReserveCorridor>& corridors,
+    double along_lo, double along_hi, double perp_lo, double perp_hi,
+    const std::string& frame);
+
 class RoutingGrid {
 public:
     // `net` is non-empty only for metal that BELONGS to a net — a DEF
@@ -242,6 +286,19 @@ public:
     // cull re-checks final junction-adjusted bit spans against them.
     const std::vector<GridKeepout>& keepouts() const { return keepouts_; }
 
+    // Reserve corridors on this layer (see ReserveCorridor): installed by the
+    // session from `set_cell_layer_reserve` over every governed instance,
+    // read by the seat/bit choices of NUTS and DetailedNUTS.  Empty = no
+    // steering (byte-identical).
+    void add_reserve_corridor(ReserveCorridor c) {
+        std::sort(c.tracks.begin(), c.tracks.end());
+        corridors_.push_back(std::move(c));
+    }
+    void clear_reserve_corridors() { corridors_.clear(); }
+    const std::vector<ReserveCorridor>& reserve_corridors() const {
+        return corridors_;
+    }
+
 private:
     // The single span-aware SIGNAL-track walker behind signal_tracks_in_span
     // and count_signal_tracks_in_span — one implementation, so the vector and
@@ -262,6 +319,7 @@ private:
     TrackPattern                 global_pattern_;
     std::vector<PatternOverride> overrides_;
     std::vector<GridKeepout>     keepouts_;
+    std::vector<ReserveCorridor> corridors_;
     bool                         is_horizontal_ = true;
 };
 
@@ -296,6 +354,37 @@ public:
         bool include_signal = false) const;
 
     bool has_layer(int layer_id) const;
+
+    // Every defined layer id, ascending.
+    std::vector<int> layer_ids() const {
+        std::vector<int> out;
+        out.reserve(layers_.size());
+        for (const auto& [id, _g] : layers_) out.push_back(id);
+        return out;
+    }
+
+    // Reserve corridors (ladder item 6b): install one over a governed
+    // instance's extent, clear them all, read a layer's list (empty for an
+    // undefined layer), ask whether any exist.
+    void add_reserve_corridor(int layer_id, double along_lo, double along_hi,
+                              std::vector<double> tracks, std::string owner) {
+        get_layer_grid(layer_id).add_reserve_corridor(
+            ReserveCorridor{along_lo, along_hi, std::move(tracks),
+                            std::move(owner)});
+    }
+    void clear_reserve_corridors() {
+        for (auto& [_id, g] : layers_) g.clear_reserve_corridors();
+    }
+    const std::vector<ReserveCorridor>& reserve_corridors(int layer_id) const {
+        static const std::vector<ReserveCorridor> none;
+        auto it = layers_.find(layer_id);
+        return it == layers_.end() ? none : it->second.reserve_corridors();
+    }
+    bool has_reserve_corridors() const {
+        for (const auto& [_id, g] : layers_)
+            if (!g.reserve_corridors().empty()) return true;
+        return false;
+    }
 
 private:
     std::map<int, RoutingGrid> layers_;
