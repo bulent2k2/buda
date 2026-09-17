@@ -209,7 +209,7 @@ def cmd_run_planner(session, cmd, args, cmd_line):
         # later, explicit instruction) and before the template solves — the
         # informed round routes the blocks under the same top the
         # reservation came from (ladder item 6c).
-        session._apply_plan_pins(final=True)
+        session._apply_plan_pins(final=True, hier=True)
         # Bottom-up cells (set_bottom_up): first give any 90°-rotated
         # instance class its own clone template (candidates generated from
         # the rotated reference's cell-local floorplan), then solve each

@@ -129,6 +129,13 @@ class ExplorerSidecarMixin:
                 del self._selections[stale_key]
         
         wrapper = self.wrappers[self.bidx]
+        # A pin onto a DIFFERENT candidate is the user's later word over a
+        # handed-down plan's entry: the session supersedes it FIRST, so the
+        # plan's forced layers are gone before the entry below snapshots
+        # `pinned_seg_layers` (Codex P2s on #939).
+        moving = wrapper.plan.selected_topology_index != self.idx
+        if moving and self._pin_sink is not None:
+            self._pin_sink(wrapper.input.original_bundle.id, False, self.idx)
         sel = {
             'bundle_id':       wrapper.input.original_bundle.id,
             'topo_type':       topo.type,
@@ -152,11 +159,7 @@ class ExplorerSidecarMixin:
             sel['user_topo'] = old_sel['user_topo']
         
         # Update live object
-        if wrapper.plan.selected_topology_index != self.idx:
-            # A pin onto a DIFFERENT candidate is the user's later word
-            # over a handed-down plan's entry (the session supersedes it).
-            if self._pin_sink is not None:
-                self._pin_sink(wrapper.input.original_bundle.id, False)
+        if moving:
             # Clear stale plan state staged for the OLD candidate (audit
             # P7-01, the explorer twin of select_topology's P5-03): NUTS's
             # only staleness guard is an array-LENGTH match, so surviving

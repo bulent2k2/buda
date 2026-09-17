@@ -802,3 +802,88 @@ def test_an_explorer_unpin_or_repin_supersedes_the_plans_entry(tmp_path):
         assert list(wc.plan.seg_seat_pin) == []
     finally:
         plt.close('all')
+
+
+# ── Codex round 9 on #939 ────────────────────────────────────────────────
+
+def test_a_supersede_drops_the_plans_forced_layers_too():
+    """Codex P2 on #939: superseding a plan-pinned bundle cleared its seats
+    and left the plan's forced layers, which the planner applies to any
+    candidate — directionally wrong on a same-segment-count alternative;
+    the explorer then snapshotted them into the replacing sidecar entry."""
+    a, _ = _run(tail=("run_nuts",))
+    uid, layers, seats, ttype = _top(a)
+    b, _ = _run(f"pin_plan net:x_0 {ttype} uid {uid} layers M6 seats 120:154",
+                tail=("run_nuts",))
+    wb = [w for w in b.bundles if not w.input.original_bundle.instances][0]
+    assert list(wb.input.pinned_seg_layers) == [6]
+    other = next(i for i, c in enumerate(wb.input.candidates)
+                 if buda.topo_uid(c) != uid)
+    out = _cmd(b, f"select_topology x_0 {other + 1}")
+    assert "superseded by this pin" in out
+    orig = [w for w in b._hier_bundles_orig
+            if w.input.original_bundle.id == wb.input.original_bundle.id][0]
+    for w in (wb, orig):
+        assert list(w.input.pinned_seg_layers) == []
+        assert list(w.plan.seg_slide_lo) == [] and list(w.plan.seg_seat_pin) == []
+
+
+def test_a_pin_typed_before_the_first_planner_run_supersedes_a_held_entry():
+    """Codex P2 on #939: a plan sourced before bundling is HELD, so a
+    `select_topology` typed after generation and before the first planner
+    run found no applied entry to supersede — and the held plan then
+    applied over the user's selection."""
+    a, _ = _run(tail=("run_nuts",))
+    uid, layers, seats, ttype = _top(a)
+    i = _DESIGN.index("run_planner hier 3")
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    j = _DESIGN.index("run_hier_bundler depth 1")
+    with contextlib.redirect_stdout(io.StringIO()):
+        for c in [*_DESIGN[:j], "set_bottom_up top_cell", _LINE,
+                  f"pin_plan net:x_0 {ttype} uid {uid} layers M6 seats 120:154",
+                  *_DESIGN[j:i]]:
+            s.do_command(c)
+    assert s._plan_pins and not s._plan_pins[0].get("applied")
+    w = [w for w in s.bundles if not w.input.original_bundle.instances][0]
+    other = next(i for i, c in enumerate(w.input.candidates)
+                 if buda.topo_uid(c) != uid)
+    out = _cmd(s, f"select_topology x_0 {other + 1}")
+    assert "superseded by this pin" in out, out
+    assert s._plan_pins[0].get("skipped")
+    log = _cmd(s, "run_planner hier 3")
+    assert "[PlanPin]" not in log
+    w = [w for w in s.bundles if not w.input.original_bundle.instances][0]
+    assert w.plan.selected_topology_index == other
+    assert list(w.input.pinned_seg_layers) == []
+
+
+def test_the_flat_planner_applies_a_cell_local_entry_at_once():
+    """Codex P2 on #939: a wrapper bundled from a hierarchical BDB carries
+    a `cell_context` under the FLAT planner too, and the deferral to the
+    post-expansion pass (the hier planner's) left such an entry held for
+    ever there.  The deferral is gated on the hier planner."""
+    a, _ = _run(tail=("run_nuts",))
+    w = [w for w in a.bundles if w.input.original_bundle.cell_context
+         and not getattr(w.hier, "locked", False)]
+    # build the vehicle WITHOUT the bottom-up mark so the cell-local
+    # bundle is planned globally, then hand its plan to the flat planner
+    i = _DESIGN.index("run_planner hier 3")
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    with contextlib.redirect_stdout(io.StringIO()):
+        for c in _DESIGN[:i]:
+            s.do_command(c)
+    loc = [w for w in s.bundles if w.input.original_bundle.cell_context][0]
+    t = loc.input.candidates[0]
+    nseg = len(t.segments)
+    line = (f"pin_plan net:{loc.input.original_bundle.get_net_names()[0]} "
+            f"{t.type} uid {buda.topo_uid(t)} layers "
+            f"{','.join(['-'] * nseg)}")
+    out = _cmd(s, line)
+    assert "[PlanPin] 1 of 1" in out or "held" in out, out
+    log = _cmd(s, "run_planner 1")               # the FLAT planner
+    assert "[PlanPin] 1 of 1 handed-down plan(s) applied" in log, log
+    assert loc.input.topology_pinned and loc.plan.selected_topology_index == 0
+    assert all(not e.get("stage") == "post" or e.get("applied")
+               for e in s._plan_pins)

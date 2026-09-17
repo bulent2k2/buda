@@ -1225,7 +1225,7 @@ class EditMixin:
                 w.plan.selected_topology_index = members[0]
                 return len(members)
             if tidx != w.plan.selected_topology_index:
-                self._plan_pin_superseded(w)
+                self._plan_pin_superseded(w, tidx)
             self._clear_stale_seg_overrides(w, tidx)
             w.input.pinned_group = []      # single pin clears any prior group pin
             w.plan.selected_topology_index = tidx
@@ -1292,7 +1292,7 @@ class EditMixin:
         print(f"Error: bundle {bid} not found")
         return False
 
-    def _explorer_pin_sink(self, bid, unpinned):
+    def _explorer_pin_sink(self, bid, unpinned, tidx=None):
         """The session's bookkeeping for a pin state change the EXPLORER
         made on a live wrapper (its `pin_sink`): an unpin reaches the
         pre-expansion original and forgets a handed-down plan's entry
@@ -1301,8 +1301,14 @@ class EditMixin:
         as a typed select_topology does (Codex P2 on #939)."""
         if unpinned:
             self._unpin_topology_internal(bid, quiet=True)
-        elif bid in self._plan_pin_bids:
-            self._plan_pins_forget([bid], why="superseded by an explorer pin")
+            return
+        w = self._rr_wrapper(bid)
+        keep = None
+        if w is not None and tidx is not None \
+                and 0 <= tidx < len(w.input.candidates):
+            keep = buda.topo_uid(w.input.candidates[tidx])
+        if self._plan_pins_forget([bid], why="superseded by an explorer pin",
+                                  keep_uid=keep):
             print(f"  (the handed-down plan's entry for bundle {bid} is "
                   f"superseded by this pin)")
 
@@ -1354,20 +1360,29 @@ class EditMixin:
 
     # ── pin_plan (convergence ladder item 6c) ─────────────────────────────
 
-    def _plan_pin_superseded(self, w):
+    def _plan_pin_superseded(self, w, tidx=None):
         """A typed `select_topology` moving a plan-pinned bundle to another
         candidate is the user's later word: the plan's entry is forgotten
-        (seats, flag, bookkeeping — `_plan_pins_forget`) and said, so the
-        next `run_planner`'s re-application does not put the plan back."""
+        (seats, flag, layers, bookkeeping — `_plan_pins_forget`) and said,
+        so the next `run_planner`'s re-application does not put the plan
+        back.  An entry still HELD (a plan sourced before bundling, the pin
+        typed before the first planner run) is superseded too — unless the
+        pin lands on the plan's OWN candidate (`tidx`, matched by uid): a
+        flow whose text pins what its plan hands down keeps the plan's
+        layers and seats (Codex P2 on #939).  `tidx` None = a family pin,
+        which supersedes whatever the entry names."""
         if getattr(self, "_plan_pin_replaying", False):
             return          # the plan's own re-application, not the user's word
         bid = w.input.original_bundle.id
-        if bid in self._plan_pin_bids:
-            self._plan_pins_forget([bid], why="superseded by select_topology")
+        keep = None
+        if tidx is not None and 0 <= tidx < len(w.input.candidates):
+            keep = buda.topo_uid(w.input.candidates[tidx])
+        if self._plan_pins_forget([bid], why="superseded by select_topology",
+                                  keep_uid=keep):
             print(f"  (the handed-down plan's entry for bundle {bid} is "
                   f"superseded by this pin)")
 
-    def _plan_pins_forget(self, bids=None, why="unpinned"):
+    def _plan_pins_forget(self, bids=None, why="unpinned", keep_uid=None):
         """An unpin's plan-side bookkeeping: for `bids` (None = every
         plan-pinned bundle) drop the seat windows a `pin_plan` set on every
         wrapper carrying the bundle (routed, pre-expansion original,
@@ -1376,9 +1391,33 @@ class EditMixin:
         counting them) nor re-applicable by a later `run_planner` (an unpin
         is the user's decision for the session).  The wildcard
         `unpin_topology *` has its own loop and reaches this too (Codex P2
-        on #939)."""
-        targets = set(self._plan_pin_bids) if bids is None else \
+        on #939).  The plan's FORCED LAYERS go with the seats on every
+        alias — the planner applies `pinned_seg_layers` to any candidate,
+        so on a same-segment-count alternative they were directionally
+        wrong layers behind a superseded pin — and an entry still HELD
+        (a plan sourced before bundling, the pin typed before the first
+        planner run) that resolves to the bundle is superseded too, else
+        the held plan applied afterwards and silently overwrote the
+        user's selection (both Codex P2s on #939) — except one naming
+        `keep_uid`, the candidate the superseding pin itself lands on.
+        Returns the number of bundles whose plan state changed."""
+        applied = set(self._plan_pin_bids) if bids is None else \
             {b for b in bids if b in self._plan_pin_bids}
+        # Held entries resolving to the bundle(s): superseded before they
+        # ever apply.  Resolution needs the bundles to exist (a selector is
+        # a net name), which a typed pin guarantees.
+        held = set()
+        for e in self._plan_pins:
+            if e.get("applied") or e.get("skipped"):
+                continue
+            w2, b2, _ = self._plan_pin_bundle(e["sel"])
+            if w2 is None or (bids is not None and b2 not in bids):
+                continue
+            if keep_uid is not None and e.get("uid") == keep_uid:
+                continue            # the pin is the plan's own candidate
+            e.update(skipped=True, why=why)
+            held.add(b2)
+        targets = applied | held
         if not targets:
             return 0
         orig = getattr(self, "_hier_bundles_orig", None) or []
@@ -1388,14 +1427,15 @@ class EditMixin:
             if id(w) in seen:
                 continue
             seen.add(id(w))
-            if w.input.original_bundle.id in targets:
+            if w.input.original_bundle.id in applied:
                 w.plan.seg_slide_lo = []
                 w.plan.seg_slide_hi = []
                 w.plan.seg_seat_pin = []
+                w.input.pinned_seg_layers = []
         for e in self._plan_pins:
-            if e.get("applied") and e.get("bid") in targets:
+            if e.get("applied") and e.get("bid") in applied:
                 e.update(applied=False, skipped=True, why=why)
-        self._plan_pin_bids -= targets
+        self._plan_pin_bids -= applied
         return len(targets)
 
     def _plan_pin_bundle(self, sel, bundles=None):
@@ -1435,7 +1475,8 @@ class EditMixin:
         return None, None, (f"'{val}' is ambiguous ({len(pre)} bundles "
                             f"match by prefix and none exactly)")
 
-    def _apply_plan_pins(self, final=False, post=False, bundles=None):
+    def _apply_plan_pins(self, final=False, post=False, bundles=None,
+                         hier=False):
         """Apply every held `pin_plan` entry that resolves now: the bundle by
         selector, the candidate by content uid first and by type spec
         second, the forced layers, the seat windows (`plan.seg_slide_lo/hi`
@@ -1508,11 +1549,16 @@ class EditMixin:
                       f"bundle (cell {ctx}) — solved in its own frame under "
                       f"the derived budget, not pinned; skipped")
                 continue
-            if ctx and not post:
+            if ctx and not post and (hier or expanded_now):
                 # An unmarked cell's cell-local bundle: one entry per
                 # INSTANCE, applied to the instance's own wrapper after
                 # expansion (see above).  Already expanded (a pin typed
-                # after the plan): apply to the wrapper found now.
+                # after the plan): apply to the wrapper found now.  The
+                # deferral is the HIER planner's (`hier`): under the flat
+                # run_planner a wrapper can carry a cell_context too (a
+                # hierarchical BDB design bundled through the flat
+                # pipeline) and no expansion ever comes, so there the
+                # entry applies like any other (Codex P2 on #939).
                 e["stage"] = "post"
                 if not expanded_now:
                     n_deferred += 1
