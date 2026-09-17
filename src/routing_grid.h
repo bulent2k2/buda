@@ -143,14 +143,18 @@ struct GridKeepout {
 // 6b, the second half of `set_cell_layer_reserve`): the ABSOLUTE track
 // positions a governed instance (`owner`, its component path) keeps free on
 // this layer over its along-extent [along_lo, along_hi].  The first half made
-// the block's own solve leave the tracks free; E5 measured that nothing then
-// steered the top onto them (it landed there 6-11 % of the time), so the
-// reservation worked by displacing the block's buses rather than as a
-// corridor the top uses, and the informed loop had no fixpoint.  With a
-// corridor installed, abstract NUTS seats a crossing bus on its tracks and
-// DetailedNUTS picks the bits there first.  A bundle routed INSIDE the owner
-// (its frame instance is the owner or lies in its subtree) is never steered
-// onto its own reservation — for it those tracks are room for somebody else.
+// the block's own solve leave the tracks free; this half, opt-in
+// (`set_reserve_steer on`), seats a crossing bus on them in abstract NUTS
+// and picks its bits there first in DetailedNUTS.  Built because E5 read the
+// unsteered top as landing on the reservation 6-11 % of the time — a
+// mis-measurement (hits over the instance's SUPPLY, not over the top's
+// tracks); read right the unsteered rate is 0.65-0.97 on the SoC (a derived
+// reservation is the union over a template's instances and covers half the
+// supply) and 0.00 on the mesh.  Steering takes the mesh to 1.00 at no cost
+// and the SoC to 0.70-1.00 while making its informed rounds dirtier, which
+// is why it is a lever.  A bundle routed INSIDE the owner (its frame
+// instance is the owner or lies in its subtree) is never steered onto its
+// own reservation — for it those tracks are room for somebody else.
 struct ReserveCorridor {
     double              along_lo = 0.0, along_hi = 0.0;
     std::vector<double> tracks;      // ascending, absolute

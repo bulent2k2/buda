@@ -4076,7 +4076,7 @@ class HierMixin:
         if grid is None:
             return 0
         cors = (self._reserve_corridors()
-                if getattr(self, "_reserve_steer", True) else [])
+                if getattr(self, "_reserve_steer", False) else [])
         key = (id(grid), tuple((lid, alo, ahi, tuple(tr), own)
                                for lid, alo, ahi, tr, own in cors))
         if key == getattr(self, "_reserve_corridor_memo", None):
@@ -4089,14 +4089,18 @@ class HierMixin:
             insts = sorted({own for _l, _a, _b, _t, own in cors})
             print(f"[LayerReserve] {len(cors)} corridor(s) over "
                   f"{len(insts)} instance(s) steer the crossing buses onto "
-                  f"the reserved tracks (set_reserve_steer off to measure "
-                  f"without)")
+                  f"the reserved tracks (set_reserve_steer off = the "
+                  f"default: the block leaves them free, nothing seats the "
+                  f"top there)")
         return len(cors)
 
     def _arm_reserve_corridors(self, nuts_engine):
         """Arm a NUTS engine solving self.bundles with the session grid's
-        corridors (syncing them first)."""
-        if self._sync_reserve_corridors():
+        corridors (syncing them first).  Study knob: BUDA_RESERVE_STEER_NUTS=0
+        leaves every abstract seat at its pull and steers the BITS only —
+        which of the two halves costs what, measured on the E5 SoC."""
+        n = self._sync_reserve_corridors()
+        if n and os.environ.get("BUDA_RESERVE_STEER_NUTS", "1") != "0":
             nuts_engine.set_reserve_corridors(self.routing_grid)
 
     def _cell_local_corridors(self, ref_inst):
@@ -4107,7 +4111,8 @@ class HierMixin:
         top for — translated by the reference's origin.  The reference's
         own corridor is not among them (for the cell it is a keepout,
         installed by _install_cell_reserve_keepouts)."""
-        if self.bdb is None or not getattr(self, "_reserve_steer", True):
+        if self.bdb is None or not getattr(self, "_reserve_steer", False) \
+                or os.environ.get("BUDA_RESERVE_STEER_NUTS", "1") == "0":
             return []
         comps = {c.name: c for c in self.bdb.all_components()}
         r = comps.get(ref_inst)

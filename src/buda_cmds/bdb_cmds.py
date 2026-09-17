@@ -1667,19 +1667,25 @@ def cmd_set_cell_layer_share(session, cmd, args, cmd_line):
 def cmd_set_reserve_steer(session, cmd, args, cmd_line):
     # Usage: set_reserve_steer [on|off]
     # The TOP-SIDE half of a positional reservation (convergence ladder
-    # item 6b): with it ON (the default), every governed instance's
+    # item 6b), OFF by default: with it on, every governed instance's
     # reserved tracks are installed on the routing grid as reserve
     # corridors, and a bus crossing the instance from OUTSIDE it — the
     # top, or an enclosing cell's own bus over a nested child — is seated
-    # on them by abstract NUTS and lands its bits on them first in
-    # DetailedNUTS.  E5 measured the first half alone: the block's solve
-    # left the tracks free and the top used them 6-11 % of the time, so
-    # the reservation displaced the block's buses without being a corridor
-    # the top took, and the informed loop had no fixpoint.  OFF gives that
-    # reading (the study knob; env BUDA_RESERVE_STEER=0 is the same).  A
-    # design with no reservation is byte-identical either way.
+    # on them by abstract NUTS (where a footprint-wide run of them can
+    # host it) and lands its bits on them first in DetailedNUTS (where the
+    # window's corridor tracks can seat every bit).  Built because E5 read
+    # the top as landing on the reservation 6-11 % of the time; that was a
+    # mis-measurement (the hit was divided by the instance's SUPPLY, not
+    # by the top's tracks) — read right, the unsteered top lands on a
+    # DERIVED reservation 0.65-0.97 of the time on the SoC (the union over
+    # a template's instances covers half the supply) and 0.00 on the mesh.
+    # Steering takes the mesh to 1.00 at no cost and the SoC to 0.70-1.00
+    # while making its informed rounds DIRTIER at NQ >= 4 (every crossing
+    # bus is pulled into the union corridor and the packing pays), so it is
+    # a lever, not a default; env BUDA_RESERVE_STEER=1 turns it on for a
+    # whole run.  A design with no reservation is byte-identical either way.
     if not args:
-        state = "on" if getattr(session, "_reserve_steer", True) else "off"
+        state = "on" if getattr(session, "_reserve_steer", False) else "off"
         print(f"reserve_steer is {state}")
         return
     val = args[0].lower()

@@ -1816,17 +1816,21 @@ read back from Tcl with `buda::query reserves`.
 ### `set_reserve_steer`
 
 ```
-set_reserve_steer on|off        # default on
+set_reserve_steer on|off        # default OFF
 set_reserve_steer               # print the state
 ```
 
 The **top-side half** of a positional reservation ([convergence ladder](internal/convergence_ladder.md)
-item 6b).  `set_cell_layer_reserve` alone makes the block's own solve leave
-the named tracks free; [E5](internal/convergence_e5.md) measured what that
-bought on its own — the top landed on the reserved tracks **6–11 %** of the
-time, because nothing steered it there, so the reservation worked by
-*displacing* the block's buses rather than as a corridor the top used, and
-the informed loop (derive from the top, reserve, re-route) had no fixpoint.
+item 6b), an opt-in lever.  `set_cell_layer_reserve` alone makes the
+block's own solve leave the named tracks free; this half seats the crossing
+buses on them.  It was built because [E5](internal/convergence_e5.md)'s
+write-up read the unsteered top as landing on the reservation **6–11 %** of
+the time — a mis-measurement (the hits were divided by the instance's
+*supply*, not by the top's own tracks), corrected in that document: read
+right, the unsteered top lands on a *derived* reservation 0.65–0.97 of the
+time on the SoC (the reservation is the union over a template's instances
+and covers half the supply) and 0.00 on the mesh, where the top's seats
+shift by a track phase between rounds.
 With steering on, every governed instance's reserved tracks are also a
 **reserve corridor** on the routing grid (absolute tracks over the
 instance's along-extent, owned by the instance's path), and a bus crossing
@@ -1844,10 +1848,34 @@ engine reads the same corridors — the session's NUTS and DetailedNUTS
 engines, the healers' trial engines, the C++ parallel sweep and screen —
 so a trial's verdict cannot diverge from its replay's.
 
-`off` is the study knob: the first half alone, E5's reading (the
-environment variable `BUDA_RESERVE_STEER=0` is the same knob for a whole
-run).  It takes effect at the next solve — the corridors are synced onto
-the grid at every NUTS / DetailedNUTS entry, memoized on the corridor set.
+Both halves are **gated on the corridor being able to host the bus**: NUTS
+moves a seat only when a footprint-wide run of corridor tracks inside its
+window holds the segment's bits, DetailedNUTS ranks corridor tracks first
+only when the window's corridor tracks can seat every bit — the ungated
+form was measured first on the E5 SoC and dragged 32-bit buses onto
+two-track corridors (clean → 16 unplaced, +5 % wire, NQ = 2).
+
+**Why it is off by default.**  Measured on E5's own rounds (`converge.tcl
+soc 2 4 8 16 -primitive reserve`, healers off): on the mesh control the
+steered top lands on the reservation **1.00** of the time against 0.00
+unsteered, at byte-identical wire and clean; on the SoC the hit rate goes
+from 0.65–0.97 to 0.70–1.00 and the informed rounds come back **dirtier at
+NQ ≥ 4** — E5's clean healerless NQ = 8 top-down round goes to 80 unplaced,
+the NQ = 16 top-down round from 170 to 390 at +11 % wire — because every
+crossing bus is pulled into the union corridor and the packing pays for
+tracks the top would have hit anyway.  Steering the bits alone
+(`BUDA_RESERVE_STEER_NUTS=0`, the seats left at their pull) is no better
+(NQ = 4 bottom-up round 1: 121 unplaced against 45).  What the informed loop
+lacks is not a track preference but *plan stability*: on the recorded
+NQ = 2 rounds 4 of the 13 top-level bundles keep their topology between the
+blind and the informed round and none keeps its seat, so the corridor a
+derivation names is the previous top's and the next top plans elsewhere.
+That is the next build item (the top's plan handed down with the
+reservation); this lever is for a design whose top plan does reproduce.
+
+`on` takes effect at the next solve — the corridors are synced onto the
+grid at every NUTS / DetailedNUTS entry, memoized on the corridor set; the
+environment variable `BUDA_RESERVE_STEER=1` turns it on for a whole run.
 A design that reserves nothing installs no corridor whatever the setting:
 byte-identical.  `check_design`'s `LAYER_RESERVE` line prints the hit rate
 (`the top uses a..b of them per instance (P% of its N track(s) over them)`)

@@ -1281,10 +1281,9 @@ static void set_pull_targets(
 // centre.  Measured before the gate (E5 re-run, NQ = 2 bottom-up round 1):
 // steering every crossing bus onto whatever corridor tracks its window held
 // dragged seats off their pull for two or three reserved tracks a 32-bit
-// bus could never sit on — clean went to 16 unplaced, detailed wire +8 %,
-// and the hit rate barely moved (0.09 → 0.11).  A bus the corridor cannot
-// seat keeps its pull; the fixpoint the corridor exists for needs whole
-// buses on it, not bits scattered across it.
+// bus could never sit on — clean went to 16 unplaced at +5 % detailed wire.
+// A bus the corridor cannot seat keeps its pull; a corridor is for whole
+// buses, not bits scattered across it.
 static void apply_reserve_corridors(
     const std::vector<BundleWrapper>& bundles,
     std::vector<TrackSegment>& segments,

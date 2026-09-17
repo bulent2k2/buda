@@ -986,9 +986,8 @@ void DetailedNUTSEngine::place_by_layer(
                     // merely nearer one (6b) — but only when the corridor
                     // can seat EVERY member bit from this pool: a bus half
                     // on the corridor is scattered, not steered (measured
-                    // on the E5 SoC: seats dragged, bits strewn, hit rate
-                    // unmoved).  Fewer corridor tracks than bits = the
-                    // historical order.
+                    // on the E5 SoC: seats dragged, bits strewn).  Fewer
+                    // corridor tracks than bits = the historical order.
                     auto on_corridor = [&](int k) {
                         return !corridor_keys.empty() &&
                                corridor_keys.count(

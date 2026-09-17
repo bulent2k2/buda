@@ -1051,9 +1051,9 @@ def test_the_top_is_steered_onto_the_reserved_tracks():
     CORRIDOR: abstract NUTS seats the crossing bus on the reserved tracks
     and DetailedNUTS lands its bits there first — on this vehicle every
     one of the top's 16 tracks over the two instances is a reserved one,
-    where the first half alone put none of them there.  Off (the study
-    knob), the E5 reading comes back exactly."""
-    s, out = _template_run(_STEER)
+    where the first half alone put none of them there.  Off — the
+    default — the E5 reading comes back exactly."""
+    s, out = _template_run("set_reserve_steer on", _STEER)
     assert ("[LayerReserve] 2 corridor(s) over 2 instance(s) steer the "
             "crossing buses onto the reserved tracks") in out, out[-2000:]
     assert s.routing_grid.has_reserve_corridors()
@@ -1076,8 +1076,9 @@ def test_the_top_is_steered_onto_the_reserved_tracks():
     assert buda_server._reserve_audit(s) == \
         "{{u1} {top_cell} {M6} 8 8 0 8} {{u2} {top_cell} {M6} 8 8 0 8}"
 
-    # the first half alone (steering off): the tracks are free and unused
-    s0, out0 = _template_run("set_reserve_steer off", _STEER)
+    # the first half alone (steering off — the DEFAULT): the tracks are
+    # free and unused
+    s0, out0 = _template_run(_STEER)
     assert "corridor(s)" not in out0
     assert not s0.routing_grid.has_reserve_corridors()
     assert s0.detailed_result.num_unplaced == 0
@@ -1098,22 +1099,22 @@ def test_the_top_is_steered_onto_the_reserved_tracks():
     # a contiguous run the footprint can host: the abstract SEAT moves onto
     # it (its centre, 163) and every bit lands on it; off, the top's own
     # tracks overlap the run's lower half by construction — 4 of 8
-    s2, _ = _template_run(_STEER_RUN)
+    s2, _ = _template_run("set_reserve_steer on", _STEER_RUN)
     assert s2.detailed_result.num_unplaced == 0
     assert _top_seat(s2).track_position == pytest.approx(163.0)
     assert [r["top_used"] for r in s2._layer_reserve_audit()] == [8, 8]
-    s3, _ = _template_run("set_reserve_steer off", _STEER_RUN)
+    s3, _ = _template_run(_STEER_RUN)
     assert _top_seat(s3).track_position == pytest.approx(150.0)
     assert [r["top_used"] for r in s3._layer_reserve_audit()] == [4, 4]
 
 
 def test_the_env_knob_and_a_design_with_no_reservation():
-    """BUDA_RESERVE_STEER=0 is the same study knob from the environment;
-    a design reserving nothing installs no corridor whatever the setting
-    (byte-identical, corpus-guarded)."""
+    """BUDA_RESERVE_STEER=1 is the same lever from the environment (a
+    whole run's worth); a design reserving nothing installs no corridor
+    whatever the setting (byte-identical, corpus-guarded)."""
     import os
     old = os.environ.get("BUDA_RESERVE_STEER")
-    os.environ["BUDA_RESERVE_STEER"] = "0"
+    os.environ["BUDA_RESERVE_STEER"] = "1"
     try:
         s = _template_session(_STEER)
     finally:
@@ -1121,14 +1122,16 @@ def test_the_env_knob_and_a_design_with_no_reservation():
             del os.environ["BUDA_RESERVE_STEER"]
         else:
             os.environ["BUDA_RESERVE_STEER"] = old
-    assert not s._reserve_steer and not s.routing_grid.has_reserve_corridors()
-    assert all(r["top_used"] == 0 for r in s._layer_reserve_audit())
-    s, out = _template_run()
+    assert s._reserve_steer and s.routing_grid.has_reserve_corridors()
+    assert all(r["top_used"] == 8 for r in s._layer_reserve_audit())
+    s, out = _template_run("set_reserve_steer on")
     assert s._reserve_steer
     assert "corridor" not in out
     assert not s.routing_grid.has_reserve_corridors()
     assert s._sync_reserve_corridors() == 0
     assert s._reserve_corridors() == []
+    s, _ = _template_run()
+    assert not s._reserve_steer
 
 
 # ── a nested child's corridor steers the ENCLOSING cell's own bus ────────
@@ -1188,7 +1191,7 @@ def test_a_nested_childs_corridor_steers_the_enclosing_cells_bus():
     assert pick[-1] - pick[0] <= 34.0, pick
     line = "set_cell_layer_reserve inner M6 " + ",".join(
         f"{p - c1.y1:g}" for p in pick)
-    s, out = run(line)
+    s, out = run("set_reserve_steer on", line)
     assert "[LayerReserve] cell 'inner': local solve with 8 reserved" in out
     assert s.detailed_result.num_unplaced == 0
     aud = {r["inst"]: r for r in s._layer_reserve_audit()}
@@ -1211,6 +1214,6 @@ def test_a_nested_childs_corridor_steers_the_enclosing_cells_bus():
     # off: the child's tracks are merely free — the bus keeps the seat it
     # had with nothing reserved, and whether its bits fall on them is
     # chance (the E5 reading), not steering
-    s1, _ = run("set_reserve_steer off", line)
+    s1, _ = run(line)
     assert loc_seat(s1) == pytest.approx(loc_seat(s0))
     assert loc_seat(s1) != pytest.approx(loc_seat(s))
