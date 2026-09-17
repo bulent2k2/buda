@@ -994,6 +994,11 @@ class RipupMixin:
         # (issue #475).
         snap['locked'] = {w.input.original_bundle.id: bool(w.hier.locked)
                           for w in self.bundles}
+        # hier.blocked_tracks rides the DNUTS plan recompute a class/release
+        # trial triggers (a released instance is re-stamped, a re-copied one
+        # cleared), so it is restored with the lock it follows.
+        snap['blocked'] = {w.input.original_bundle.id:
+                           dict(w.hier.blocked_tracks) for w in self.bundles}
         snap['bu_fixed'] = getattr(self, "_bu_fixed_cache", None)
         snap['bu_verdict'] = getattr(self, "_template_track_verdict", None)
         snap['bu_dnuts_plan'] = getattr(self, "_bu_dnuts_plan_cache", None)
@@ -1013,6 +1018,9 @@ class RipupMixin:
             lk = snap['locked'].get(w.input.original_bundle.id)
             if lk is not None:
                 w.hier.locked = lk
+            bt = snap['blocked'].get(w.input.original_bundle.id)
+            if bt is not None and bt != w.hier.blocked_tracks:
+                w.hier.blocked_tracks = bt
         for w in getattr(self, "_hier_bundles_orig", None) or []:
             tid = w.input.original_bundle.id
             cap = snap['tmpl'].get(tid)
@@ -1367,6 +1375,13 @@ class RipupMixin:
             # replan then assigns fresh direction-correct layers.
             w.hier.locked = False
             w.input.pinned_seg_layers = []
+            # A released instance solves in the global run, where the
+            # reservation's keepouts (on the reference's grid clone) never
+            # reach — E5's healed rounds read the released cores' own
+            # metal on their reserved tracks.  The invalidated plan's next
+            # compute stamps it with its reserved tracks as blocked tracks
+            # (_stamp_reserve_blocked_tracks: neither a reference nor a
+            # copy any more), exactly as a misaligned instance.
             self._rr_invalidate_bottom_up_caches()
             self._rr_rerun(stage, full=True, skip_replan=True)
             m = metric()

@@ -157,7 +157,12 @@ def test_a_zero_step_is_refused_before_any_session_starts(tmp_path):
                        # reserve derivation, which refuses it — after a
                        # routing session had been paid for (Codex P2 on #936)
                        (["-primitive", "reserve", "-nofloor"],
-                        "-nofloor is the share derivation's control")]:
+                        "-nofloor is the share derivation's control"),
+                       # the uniform sweep doubles from -f0 until past -fmax
+                       (["-f0", 0], "-f0 takes a positive integer"),
+                       (["-f0", "x"], "-f0 takes a positive integer"),
+                       (["-fmax", 2, "-f0", 4], "-fmax takes an integer >= -f0"),
+                       (["-arms", "uniform,nosuch"], "unknown arm 'nosuch'")]:
         if msg is None:
             continue
         r = _tclsh(_DRIVER, "soc", 2, *words, "-out", out, cwd=tmp_path)
@@ -361,6 +366,11 @@ def test_the_reserve_primitive_hands_down_named_tracks(tmp_path):
     # row per (instance, layer) with the count reserved over that instance
     gov = {(g[0], g[1], g[2]): int(g[3]) for g in d2["governed"]}
     assert gov, d2
+    # each row also carries how many of the reserved tracks the top's
+    # placed metal uses (the hit rate E5 reads) and the cell's own metal
+    # on them, which a honoured reservation reads as 0 everywhere
+    assert all(len(g) == 6 and 0 <= int(g[4]) <= int(g[3]) and g[5] == "0"
+               for g in d2["governed"]), d2["governed"][:5]
     for cell, layer, n in d["tracks"]:
         rows = {k: v for k, v in gov.items() if k[1] == cell and k[2] == layer}
         assert rows and all(v == int(n) for v in rows.values()), (cell, layer, rows)
@@ -413,3 +423,52 @@ def test_efficiency_charges_only_the_governed_occurrences(tmp_path):
     assert "set_cell_layer_reserve" in (out / "soc2_td_shares_r0.buda").read_text()
     d1 = _report(out / "soc2_td_r1.rep")
     assert re.fullmatch(r"\d+", d1["verdict"][1])
+
+
+def test_the_uniform_arm_sweeps_f_and_names_the_table_e5(tmp_path):
+    """E5's conventional arm: every marked cell reserves F evenly spaced
+    tracks per TOP layer by GUESS, F doubling from -f0 until the design
+    is clean or -fmax is passed; the vehicle hook is ONE engine line
+    (`set_cell_layer_reserve * TOP uniform F`), so the same audit that
+    reads the derived arm reads this one.  With `uniform` among the arms
+    the table is E5's, not E1's."""
+    out = tmp_path / "e5"
+    r = _tclsh(_DRIVER, "soc", 2, "-arms", "uniform", "-f0", 4, "-fmax", 32,
+               "-primitive", "reserve", "-out", out, cwd=tmp_path)
+    assert r.returncode == 0, r.stdout[-3000:] + r.stderr[-3000:]
+    assert not (out / "e1_soc_healerless_step1_reserve.md").exists()
+    table = (out / "e5_soc_healerless_step1_reserve.md").read_text()
+    rows = [ln for ln in table.splitlines() if ln.startswith("| soc | 2 |")]
+    assert rows and all(ln.split("|")[4].strip() == "uniform" for ln in rows)
+    policies = [ln.split("|")[6].strip() for ln in rows]
+    # the sweep's ceiling is PHYSICAL before it is -fmax: the SoC's io_cell
+    # has 14 M5 tracks, so `uniform 16` is refused by the engine and the
+    # driver records the end of the sweep instead of dying on it (NQ=2 is
+    # dirty at 4 and 8, so both rounds run)
+    assert policies == ["uniform 4", "uniform 8"], policies
+    assert not (out / "soc2_uniform_r3.rep").exists()
+    assert (out / "soc2_uniform_r3.log").exists()
+    assert "uniform sweep ends at F=16" in r.stdout, r.stdout[-2000:]
+    note = [ln for ln in table.splitlines() if ln.startswith("- size 2, uniform:")]
+    assert len(note) == 1 and "ended at F=16" in note[0] \
+        and "asks more tracks than the cell has" in note[0], table
+    # each round's report records the F in force and the governed rows —
+    # every marked cell on every TOP layer, F tracks over each instance
+    rep = _report(out / "soc2_uniform_r1.rep")
+    assert rep["uniform"] == ["4"] and rep["reserve"] == ["0"]
+    assert int(rep["marks"][0]) > 0
+    gov = {(g[0], g[1], g[2]): int(g[3]) for g in rep["governed"]}
+    assert gov and all(v == 4 for v in gov.values()), gov
+    layers = {k[2] for k in gov}
+    assert layers == {"M5", "M6", "M7"}, layers
+    log = (out / "soc2_uniform_r1.log").read_text()
+    assert "(uniform 4 — cell-local" in log
+    # a start already past the ceiling is refused up front, naming it
+    r = _tclsh(_DRIVER, "soc", 2, "-arms", "uniform", "-f0", 16,
+               "-primitive", "reserve", "-out", tmp_path / "e5b", cwd=tmp_path)
+    assert r.returncode != 0 and "lower -f0" in r.stderr, r.stderr[-1000:]
+    # the summary row names the arm with its rounds and endpoint
+    summ = [ln for ln in table.splitlines() if re.match(r"\| 2 \| uniform \|", ln)]
+    assert len(summ) == 1, table
+    cells = [c.strip() for c in summ[0].split("|")[1:-1]]
+    assert int(cells[2]) == len(rows) and cells[4] in ("clean", "dirty")

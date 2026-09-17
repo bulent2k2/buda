@@ -423,7 +423,8 @@ void bind_nuts(py::module_& m) {
         .def_readwrite("abstract_pos",    &BusSegment::abstract_pos)
         .def_readwrite("ndr",             &BusSegment::ndr)
         .def_readwrite("track_lo_bound",  &BusSegment::track_lo_bound)
-        .def_readwrite("track_hi_bound",  &BusSegment::track_hi_bound);
+        .def_readwrite("track_hi_bound",  &BusSegment::track_hi_bound)
+        .def_readwrite("blocked_tracks",  &BusSegment::blocked_tracks);
 
     py::class_<NetSegment>(m, "NetSegment")
         .def(py::init<>())

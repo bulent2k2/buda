@@ -379,3 +379,39 @@ def test_span_adjust_endpoint_retracts_despite_midspan_conn():
         # busterm hi end untouched; mid-span stub stays covered.
         assert ns.span_hi == pytest.approx(600.0)
         assert ns.span_lo <= stub_b_pos[ns.bit_index] <= ns.span_hi
+
+
+# ---------------------------------------------------------------------------
+# Blocked tracks (a positional reservation on a globally solved instance)
+# ---------------------------------------------------------------------------
+
+def test_blocked_tracks_are_dropped_from_every_pool():
+    """`BusSegment.blocked_tracks` — the reserved tracks an instance solved
+    in the global run must keep free (convergence ladder item 6, the
+    `on_mismatch independent` gap E5 measured): the listed positions leave
+    the seat pool BEFORE the admission count reads it, so the bits take the
+    next tracks, and a window that cannot spare them strands the bits
+    honestly rather than placing them on the reservation."""
+    stack = make_stack_with_standard_pattern()
+    # the unit's four signal tracks are 3.5, 5.5, 10.5, 12.5 (see above)
+    seg = make_bus_segment(bit_width=2, interval_lo=0.0, interval_hi=14.0)
+    seg.blocked_tracks = [3.5, 10.5]
+    result = buda.DetailedNUTSEngine(stack).run([seg])
+    assert result.num_unplaced == 0
+    positions = [s.track_position for s in net_segs_for(result, 1)]
+    assert positions == pytest.approx([5.5, 12.5])
+    # a position that is not a track blocks nothing (exact match, eps 1e-6)
+    seg.blocked_tracks = [3.4, 4.0]
+    result = buda.DetailedNUTSEngine(stack).run([seg])
+    assert [s.track_position for s in net_segs_for(result, 1)] == \
+        pytest.approx([3.5, 5.5])
+    # three of four blocked: two bits cannot be seated — unplaced, not
+    # placed on the reservation
+    seg.blocked_tracks = [3.5, 5.5, 10.5]
+    result = buda.DetailedNUTSEngine(stack).run([seg])
+    assert result.num_unplaced == 2 and not net_segs_for(result, 1)
+    # empty = byte-identical to the unrestricted solve
+    seg.blocked_tracks = []
+    result = buda.DetailedNUTSEngine(stack).run([seg])
+    assert [s.track_position for s in net_segs_for(result, 1)] == \
+        pytest.approx([3.5, 5.5])

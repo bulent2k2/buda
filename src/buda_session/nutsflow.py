@@ -2323,14 +2323,17 @@ class NutsFlowMixin:
         # `self.layers` supplies the per-layer pitch an R1 ABSOLUTE NDR rule
         # resolves against, so a governed segment's k-slot run is quantized
         # on the layer the planner priced it on.
-        bus_segs = buda.make_bus_segments(self.bundles, self.nuts_result,
-                                          self.fp, bit_order, self.layers)
-        self._resolve_shared_cell_ndr(bus_segs)
         # Bottom-up cells (stage c): solve the reference instance once, copy
         # its bits/vias to the aligned siblings, and solve everything else
         # around the copies (their tracks pre-reserved).  May raise under the
         # 'stop' mismatch policy.  None = no bottom-up routing, single run.
+        # Computed BEFORE the handoff: the plan stamps the reserved tracks an
+        # instance solved in the global run must keep free onto its wrapper
+        # (BundleHierMeta::blocked_tracks), and the handoff copies them.
         bu_plan = self._bottom_up_dnuts_plan()
+        bus_segs = buda.make_bus_segments(self.bundles, self.nuts_result,
+                                          self.fp, bit_order, self.layers)
+        self._resolve_shared_cell_ndr(bus_segs)
         if bu_plan is None:
             engine = buda.DetailedNUTSEngine(self.routing_grid)
             # Only OVERRIDE when the caller explicitly asked (the heal passes
