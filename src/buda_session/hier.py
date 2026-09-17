@@ -4790,9 +4790,14 @@ class HierMixin:
         a raising compute (stop-policy mismatch) is never cached."""
         cached = getattr(self, "_bu_dnuts_plan_cache", None)
         if cached is not None:
-            return cached[0]
-        result = self._bottom_up_dnuts_plan_compute()
-        self._bu_dnuts_plan_cache = (result,)
+            result = cached[0]
+        else:
+            result = self._bottom_up_dnuts_plan_compute()
+            self._bu_dnuts_plan_cache = (result,)
+        # The reserved-track stamps are re-derived on EVERY call (see
+        # _stamp_reserve_blocked_tracks): every DNUTS door — the session
+        # run, the healer trials, the C++ sweep — asks for the plan first.
+        self._stamp_reserve_blocked_tracks(result)
         return result
 
     def _bottom_up_dnuts_plan_compute(self):
@@ -4854,30 +4859,16 @@ class HierMixin:
             # ref→sibling transform).
             orients = self._detect_instance_orients(
                 self._bu_cell_of(cell), comps.values(), ref_name=v['ref'])
-            # The template's reservation (own ∪ inherited, in the reference
-            # frame) reaches the reference solve as grid keepouts and every
-            # COPY through the copy; an instance solved in the GLOBAL run —
-            # misaligned under `on_mismatch independent`, or one whose
-            # orientation the copy cannot serve — would see none of it, and
-            # the audit read its own metal on reserved tracks (measured on
-            # E5's SoC: the misaligned clusters under a mirrored quad).  So
-            # such an instance carries the reserved tracks, folded into its
-            # own frame, as its bundle's blocked tracks (make_bus_segments
-            # copies them onto every BusSegment, so the C++ trial sweep
-            # reads the same list); a reference or copied instance carries
-            # none — cleared here so a verdict that changes cannot leave a
-            # stale list behind.
+            # An instance solved in the GLOBAL run — misaligned under
+            # `on_mismatch independent`, or one whose orientation the copy
+            # cannot serve — sees none of the reservation's keepouts (they
+            # live on the reference's grid clone); _stamp_reserve_blocked_tracks,
+            # run on every plan call, hands it the reserved tracks as its
+            # bundles' blocked tracks from this plan's ref/skip sets.
             for inst, iw in by_inst.items():
-                iw.hier.blocked_tracks = {}
-                oi = orients.get(inst)
-                global_solve = inst != v['ref'] and (
-                    inst in v['misaligned']
-                    or oi is None or oi not in self._DIR_PRESERVING)
-                if global_solve:
-                    iw.hier.blocked_tracks = self._reserve_blocked_tracks(
-                        cell, v['ref'], inst, oi, comps)
                 if inst == v['ref'] or inst in v['misaligned']:
                     continue        # ref solves; misaligned solve globally
+                oi = orients.get(inst)
                 if oi is None or oi not in self._DIR_PRESERVING:
                     # Shouldn't happen for locked instances (guarded at
                     # expansion) — leave it in the global solve.
@@ -4893,15 +4884,70 @@ class HierMixin:
                 skip_ids.add(iw.input.original_bundle.id)
         if not ref_ids:
             return None
-        blocked = sorted({iw.input.original_bundle.instances[0]
-                          for _c, _t, iws in self._bottom_up_instance_groups()
-                          for iw in iws if iw.hier.blocked_tracks})
-        if blocked:
-            print(f"[LayerReserve] {len(blocked)} instance(s) solved in the "
-                  f"global DNUTS run keep their reserved tracks as blocked "
-                  f"tracks: {', '.join(blocked[:6])}"
-                  + (f", +{len(blocked) - 6} more" if len(blocked) > 6 else ""))
         return ref_ids, copy_specs, skip_ids
+
+    def _stamp_reserve_blocked_tracks(self, plan):
+        """Stamp `BundleHierMeta.blocked_tracks` from the DNUTS plan: every
+        instance wrapper of a `set_bottom_up` cell whose bits are solved in
+        the GLOBAL run — not a reference (solved on the grid clone that
+        carries the reservation as keepouts) and not a copy of one —
+        carries its cell's reserved tracks (own ∪ inherited, in the
+        template's reference frame) folded into its own frame; a reference
+        or copied wrapper carries none.  Derived from the PLAN and the
+        expansion map on every call rather than kept as state on the
+        wrappers, because the state did not survive the healers: a
+        released reference (E5's NQ = 16 top-down round — the class pass
+        re-pinned the cluster template and the release pass withdrew its
+        reference instance) left the siblings' group without a reference
+        for the plan compute to walk, and seven of them had been rebuilt
+        unstamped by then — the audit read their own metal on the
+        reservation.  Cheap: one orientation detection per template and
+        one effective-reservation lookup per (context, reference)."""
+        res = getattr(self, "_cell_layer_reserves", None) or {}
+        if not any(pos for pos in res.values()) or self.bdb is None:
+            return
+        exp_map = getattr(self, "_hier_expansion_map", None) or {}
+        if not exp_map:
+            return
+        ref_ids, _copies, skip_ids = plan if plan else (set(), [], set())
+        bu_cells = set(self.bdb.bottom_up_cells())
+        comps = {c.name: c for c in self.bdb.all_components()}
+        verdict = getattr(self, "_template_track_verdict", None) or {}
+        cache, eff_cache, stamped = {}, {}, set()
+        for _tid, iws in exp_map.items():
+            iws = [iw for iw in iws if iw.input.original_bundle.instances
+                   and self._bu_cell_of(iw.input.original_bundle.cell_context)
+                   in bu_cells]
+            if not iws:
+                continue
+            cell = iws[0].input.original_bundle.cell_context
+            v = verdict.get(cell)
+            ref = v['ref'] if v else min(
+                iw.input.original_bundle.instances[0] for iw in iws)
+            orients = self._detect_instance_orients(
+                self._bu_cell_of(cell), comps.values(), ref_name=ref,
+                cache=cache)
+            for iw in iws:
+                bid = iw.input.original_bundle.id
+                inst = iw.input.original_bundle.instances[0]
+                if bid in ref_ids or bid in skip_ids:
+                    iw.hier.blocked_tracks = {}
+                    continue
+                key = (cell, ref, inst)
+                if key not in eff_cache:
+                    eff_cache[key] = self._reserve_blocked_tracks(
+                        cell, ref, inst, orients.get(inst), comps)
+                iw.hier.blocked_tracks = eff_cache[key]
+                if eff_cache[key]:
+                    stamped.add(inst)
+        memo = getattr(self, "_reserve_stamp_memo", None)
+        if stamped and stamped != memo:
+            names = sorted(stamped)
+            print(f"[LayerReserve] {len(names)} instance(s) solved in the "
+                  f"global DNUTS run keep their reserved tracks as blocked "
+                  f"tracks: {', '.join(names[:6])}"
+                  + (f", +{len(names) - 6} more" if len(names) > 6 else ""))
+        self._reserve_stamp_memo = stamped
 
     def _expand_hier_bundles(self, bundles):
         """Expand cell-level BundleWrappers to per-instance absolute-coord wrappers.

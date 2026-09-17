@@ -286,3 +286,56 @@ def test_release_stamps_the_reservation_as_blocked_tracks():
     assert seen["blocked"] == {6: [comp.y1 + 21.5, comp.y1 + 25.5]}, seen
     # after the rejected trial: locked again, and no stamp
     assert w.hier.locked and not w.hier.blocked_tracks
+
+
+def test_a_released_reference_leaves_its_siblings_stamped():
+    """E5's NQ = 16 top-down round, healed: the class pass re-pinned the
+    cluster template and the release pass then withdrew its REFERENCE
+    instance from the copy, so the siblings' group had no reference for
+    the plan compute to walk and the stamps it had kept as wrapper state
+    were gone from seven rebuilt wrappers — own metal on the reservation.
+    The stamps are now derived from the plan on every call: with the
+    reference released, every sibling solves in the global run and
+    carries the reserved tracks, the released reference too."""
+    db = _two_inst_db()
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    s.bdb = db
+    for c in (["def_layer 6 M6 H TOP 50", "def_layer 7 M7 V TOP 50",
+               "def_layer 4 M4 H 50", "def_layer 5 M5 V 50"]
+              + _PATTERNS
+              + ["run_hier_bundler", "generate_hier_topologies",
+                 "set_bottom_up proc_cell",
+                 "set_cell_layer_reserve proc_cell M6 21.5,25.5",
+                 "run_planner hier", "run_nuts",
+                 "check_template_tracks on_mismatch independent",
+                 "run_detailed_nuts"]):
+        _run_cmd(s, c)
+    wr = {w.input.original_bundle.instances[0]: w for w in s.bundles
+          if w.hier.locked}
+    assert set(wr) == {"proc_i1", "proc_i2"}
+    assert all(not w.hier.blocked_tracks for w in wr.values())
+    ref = s._template_track_verdict["proc_cell"]["ref"]
+    other = next(i for i in wr if i != ref)
+    comps = {c.name: c for c in db.all_components()}
+    # the state after a RELEASE COMMIT of the reference: with one bundle
+    # per instance here the sibling becomes the new reference (solved on
+    # the keepout-carrying grid clone, so no stamp) and the released
+    # instance solves in the global run with its reserved tracks stamped
+    wr[ref].hier.locked = False
+    s._rr_invalidate_bottom_up_caches()
+    with contextlib.redirect_stdout(io.StringIO()):
+        plan = s._bottom_up_dnuts_plan()
+    assert plan is not None
+    assert wr[other].input.original_bundle.id in plan[0]      # the new ref
+    assert not wr[other].hier.blocked_tracks
+    y1 = comps[ref].y1
+    assert wr[ref].hier.blocked_tracks == {6: [y1 + 21.5, y1 + 25.5]}
+    # a wrapper rebuilt unstamped is re-stamped by the next plan call —
+    # the stamp is derived, not state (the NQ = 16 shape: the reference
+    # keeps its other bundles locked, so the siblings stay in the global
+    # run and must keep their lists however the wrappers were rebuilt)
+    wr[ref].hier.blocked_tracks = {}
+    with contextlib.redirect_stdout(io.StringIO()):
+        s._bottom_up_dnuts_plan()
+    assert wr[ref].hier.blocked_tracks == {6: [y1 + 21.5, y1 + 25.5]}

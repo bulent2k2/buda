@@ -1726,8 +1726,13 @@ top), so it carries the reserved tracks, folded into its own frame, as its
 bundles' **blocked tracks** (`BundleHierMeta.blocked_tracks` →
 `BusSegment.blocked_tracks`): DetailedNUTS drops them from every seat pool
 before the admission count, so the bits take the next tracks or strand
-honestly.  E5 measured the gap before it was closed — the SoC's misaligned
-clusters under a mirrored quad read one own track on their reservation.
+honestly.  The stamp is DERIVED from the DNUTS plan on every call (a
+reference or a copy carries none, everything else of a marked cell carries
+its list), never kept as wrapper state — E5 measured all three doors
+before they were closed: the SoC's misaligned clusters under a mirrored
+quad read one own track on their reservation, the healer's release pass
+withdrew cores from the copy and they read two, and at NQ = 16 a released
+reference left seven rebuilt siblings with no list at all.
 That was measured before it was built: on the SoC vehicle the top's M5
 tracks over a cluster sit where the nested core's 32-bit bus seats, and a
 core solved without them seated the bus there and lost all 32 bits at
