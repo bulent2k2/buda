@@ -235,6 +235,13 @@ def cmd_run_planner(session, cmd, args, cmd_line):
         # optimize_topologies plans them (a post-assignment application
         # would let a capped non-bottom-up instance plan unrestricted).
         session._apply_layer_policies(expanded)
+        # A positional reservation is enforced on TEMPLATES only; a reserved
+        # cell planned top-down is said here, before the planner works.
+        _not_enforced = session._reserved_cells_not_enforced(expanded)
+        if _not_enforced:
+            import buda_diag as _diag
+            print(_diag.format("BUDA-1920", ", ".join(_not_enforced)
+                               + " — mark them set_bottom_up to enforce"))
         # The masks are final NOW, which is the first moment a hier bundle's
         # reachable layer set is knowable — and the NDR no-op verdict is a
         # statement about exactly that set, so it is deferred out of bundling

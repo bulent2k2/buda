@@ -300,6 +300,25 @@ def _caps(s):
     return " ".join(rows)
 
 
+def _reserves(s):
+    # The positional track reservations in force (`set_cell_layer_reserve`)
+    # as `{cell layer {pos ...}}` rows — cell-local track centres, so a
+    # driver counts a reservation's tracks per instance of the cell (a
+    # reservation is a COUNT of named tracks, not a fraction of the
+    # supply — the number E1's efficiency prices it by).  Empty when none.
+    res = getattr(s, "_cell_layer_reserves", None) or {}
+    names = s._make_layer_names()
+    rows = []
+    for (cell, lid), pos in sorted(res.items()):
+        if not pos:
+            continue
+        rows.append("{" + " ".join([tcl_word(cell),
+                                    tcl_word(names.get(lid, f"L{lid}")),
+                                    "{" + " ".join(f"{p:g}" for p in pos)
+                                    + "}"]) + "}")
+    return " ".join(rows)
+
+
 # The values a flow script actually branches on.  Deliberately few: this is
 # a bridge, not a second API, and every name here is a promise to keep.
 # A count that has not been computed yet answers -1 rather than 0, because
@@ -314,6 +333,7 @@ _QUERIES = {
     "messages": _messages,
     "demand": _demand,
     "caps": _caps,
+    "reserves": _reserves,
 }
 # The queries that TAKE arguments.  Every other name is a scalar about the
 # whole session, and a word after it is a typo — `buda::query overlaps M6`

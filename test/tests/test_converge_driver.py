@@ -55,14 +55,14 @@ def _tclsh(*args, cwd):
 
 
 def _report(path):
-    d = {"share": [], "cap": [], "demand": []}
+    d = {"share": [], "tracks": [], "cap": [], "demand": []}
     for ln in path.read_text().splitlines():
         toks = ln.split()
         if not toks:
             continue
         # Tcl-list shaped: a word with a `/` is brace-quoted (`{io/p_0}`)
         toks = [t.strip("{}") for t in toks]
-        if toks[0] in ("share", "cap", "demand"):
+        if toks[0] in ("share", "tracks", "cap", "demand"):
             d[toks[0]].append(toks[1:])
         else:
             d[toks[0]] = toks[1:]
@@ -309,3 +309,60 @@ def test_reservation_efficiency_is_reserved_over_used(tmp_path):
     assert r.returncode == 0, r.stderr
     got = r.stdout.split()
     assert int(got[0]) == reserved and int(got[1]) == used, (got, reserved, used)
+
+
+def test_the_reserve_primitive_hands_down_named_tracks(tmp_path):
+    """`-primitive reserve` (ladder item 6): the top-down session derives
+    `set_cell_layer_reserve` lines — the top's placed tracks over each
+    cell's instances, in the cell's frame — and the report carries one
+    `tracks CELL LAYER N` row per line under its OWN key (`reserve N` is
+    the blind scalar; a row under the same key swallowed it).  The next
+    session, bottom-up under the file, keeps every reserved track free of
+    the cell's own metal — nested templates included, since a corridor
+    over a cluster is inherited by the core solved inside it — which the
+    `LAYER_RESERVE` audit reads as `own metal ... 0..0` on every row.
+    Whether the design then routes CLEAN is E5's measurement, not this
+    test's claim: at NQ=2 healerless it does not (the core's 32-bit bus
+    moves off the reserved M5 seat onto LOW layers that cannot host it)."""
+    rep = tmp_path / "td.rep"
+    lines = tmp_path / "td.buda"
+    r = _tclsh(_SOC, 2, "-noheal", "-derive", lines, "-primitive", "reserve",
+               "-report", rep, cwd=tmp_path)
+    assert r.returncode == 0, r.stdout[-3000:] + r.stderr[-3000:]
+    d = _report(rep)
+    assert d["reserve"] == ["0"] and d["share"] == [], d
+    assert d["tracks"], d
+    text = lines.read_text()
+    assert text.startswith("# derive_cell_layer_reserves:") and "# scope: " in text
+    for cell, layer, n in d["tracks"]:
+        m = re.search(rf"^set_cell_layer_reserve {cell} {layer} (\S+)$", text, re.M)
+        assert m and len(m[1].split(",")) == int(n), (cell, layer, n)
+    rep2 = tmp_path / "bu.rep"
+    r = _tclsh(_SOC, 2, "-bottomup", "-noheal", "-shares", lines,
+               "-primitive", "reserve", "-report", rep2, cwd=tmp_path)
+    log = r.stdout + r.stderr
+    for cell, layer, n in d["tracks"]:
+        assert f"[LayerReserve] {cell}: layer {layer} reserves {n} track(s)" in log, log[-3000:]
+    assert re.search(r"\[LayerReserve\] cell 'core_cell': local solve with \d+ "
+                     r"reserved track\(s\) kept free on .*from cluster_cell", log), log[-3000:]
+    audit = re.findall(r"LAYER_RESERVE: (\S+) (\S+): .* own metal on reserved "
+                       r"tracks: (\d+)\.\.(\d+) per instance(.*)$", log, re.M)
+    assert audit and all(lo == "0" and hi == "0" and "VIOLATED" not in rest
+                         for _c, _l, lo, hi, rest in audit), audit
+    assert "BUDA-1920" not in log
+    d2 = _report(rep2)
+    assert int(d2["marks"][0]) > 0 and d2["tracks"] == []
+    # ... and through the DRIVER: the option reaches every session it
+    # spawns (a `session` proc reading `primitive` without declaring it
+    # global crashed the first blind round), the table is the `_reserve`
+    # twin, and the informed round's report carries the `tracks` rows
+    out = tmp_path / "e1"
+    r = _tclsh(_DRIVER, "soc", 2, "-arms", "td", "-informed", 1,
+               "-primitive", "reserve", "-out", out, cwd=tmp_path)
+    assert r.returncode == 0, r.stdout[-3000:] + r.stderr[-3000:]
+    assert (out / "e1_soc_healerless_step1_reserve.md").exists(), list(out.iterdir())
+    d0 = _report(out / "soc2_td_r0.rep")
+    assert d0["tracks"] and d0["share"] == []
+    assert "set_cell_layer_reserve" in (out / "soc2_td_shares_r0.buda").read_text()
+    d1 = _report(out / "soc2_td_r1.rep")
+    assert re.fullmatch(r"\d+", d1["verdict"][1])

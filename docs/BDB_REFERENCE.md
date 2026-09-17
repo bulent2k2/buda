@@ -1680,6 +1680,59 @@ Design notes and the measured study: `docs/internal/hier_layer_caps.md`.
 
 ---
 
+### `set_cell_layer_reserve`
+
+```
+set_cell_layer_reserve <cell> <layer> <pos>[,<pos>...]
+set_cell_layer_reserve <cell> <layer> off
+set_cell_layer_reserve * off
+```
+
+**Positional track reservation** — the primitive [convergence-ladder item 6](internal/convergence_ladder.md)
+asked for after E1 refuted the share: per cell and layer, the **tracks** the
+cell's own interconnect leaves free for the top, named by their **cell-local**
+perpendicular coordinate (`y` on an H layer, `x` on a V one — the frame the
+cell-local solve plans in, the reference instance's lower-left at the
+origin).  `set_cell_layer_share` thins every period of the pattern uniformly;
+[E1](internal/convergence_e1.md) measured that as the wrong shape, because the
+top's demand is *positional* — eight specific tracks over an instance — and a
+block whose own 32-bit bus fills its seat to 89–100 % cannot give up a
+fraction of every period without stranding that bus, while it can easily
+leave eight named tracks and seat its bus elsewhere.  This names them.
+
+Enforced where the cell is solved as a **template** (`set_bottom_up`): every
+reserved track becomes a keepout zone on the cell-local floorplan — one thin
+rect per track (the layer's narrowest SIGNAL slot, rounded outward to the
+integer grid keepouts live on), the full cell extent along: a corridor
+crossing the cell — so the local planner's band capacity and the local NUTS
+seats leave it free, and the same tracks are keepouts on the grid **clone**
+the reference DNUTS solve runs on, so the reference bits (and every copy)
+cannot land there.  The parent keeps the full grid: a reservation is room
+*for* the top, never a keepout against it, and `check_design`'s
+`LAYER_RESERVE` line reports what it bought (the top's tracks on reserved
+ones, per instance) and whether the cell's own metal honours it — the metal
+of every template solved *inside* the cell included, because a nested cell
+**inherits** the corridor: an ancestor's reservation is projected through
+the child's offset into the child's own frame (unioned over the child's
+occurrences in the ancestor, since a template is solved once) and kept free
+by the child's local solve and reference DNUTS view exactly like its own.
+That was measured before it was built: on the SoC vehicle the top's M5
+tracks over a cluster sit where the nested core's 32-bit bus seats, and a
+core solved without them seated the bus there and lost all 32 bits at
+DNUTS while the cluster's audit row read VIOLATED.  A reserved cell — own or
+inherited — planned top-down is **not** enforced and says so at
+`run_planner hier` (BUDA-1920, an inherited-only cell named with its
+source).
+
+A re-declaration REPLACES the cell's list on that layer; `off` clears one
+(`* off` every reservation).  Validation is loud: an unknown cell or layer, a
+layer with no `def_track_pattern`, a position outside the cell's extent on
+that axis, a repeated position.  Persisted in the open BDB (meta
+`layer_reserves`), restored by `open_bdb` with the share contract (typed
+entries win).  Derived from a routed top plan by
+[`derive_cell_layer_reserves`](script_reference/nuts.md#derive_cell_layer_reserves-apply-file-path-cells-ab);
+read back from Tcl with `buda::query reserves`.
+
 ### `add_inst`
 
 ```

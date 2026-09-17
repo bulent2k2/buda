@@ -164,6 +164,43 @@ def test_query_caps_names_the_cells_a_reservation_actually_capped(tmp_path):
     assert "CAPS2=1" in out and "CAPS2 leaf/M2/M3" in out, out
 
 
+def test_query_reserves_is_the_positional_twin_of_caps(tmp_path):
+    """`buda::query reserves` hands a driver the positional reservations in
+    force as `{cell layer {pos ...}}` rows — cell-local track centres, so
+    the driver prices a reservation by its COUNT per instance (ladder item
+    6); empty before any is declared, `off` removes the row."""
+    out = _tcl(tmp_path, r"""
+        buda::open_bdb :memory:
+        buda::def_layer 2 M2 H 20
+        buda::def_layer 3 M3 V 20
+        buda::def_layer 4 M4 H TOP 20
+        buda::def_layer 5 M5 V TOP 20
+        buda::def_track_pattern 4 0 (_ 1 1)x4
+        buda::def_track_pattern 5 0 (_ 1 1)x4
+        buda::add_cell leaf 40 40
+        buda::add_cell mid 200 100
+        buda::add_inst_to_cell mid a leaf 10 10
+        buda::add_inst_to_cell mid b leaf 100 10
+        buda::add_inst u1 mid - 0 0
+        proc show {tag} {
+            set rows [buda::query reserves]
+            puts "$tag=[llength $rows]"
+            foreach r $rows { lassign $r cell layer pos; puts "$tag $cell/$layer/[llength $pos]/[lindex $pos end]" }
+        }
+        show R0
+        buda::set_cell_layer_reserve mid M4 3,7.5,20
+        buda::set_cell_layer_reserve mid M5 40
+        show R1
+        buda::set_cell_layer_reserve mid M5 off
+        show R2
+        if {[catch {buda::query reserves M4} e]} { puts "E=$e" }
+        buda::stop""")
+    assert "R0=0" in out, out
+    assert "R1=2" in out and "R1 mid/M4/3/20" in out and "R1 mid/M5/1/40" in out, out
+    assert "R2=1" in out and "R2 mid/M4/3/20" in out, out
+    assert "E=" in out                      # a scalar query takes no words
+
+
 def test_an_unknown_query_says_what_it_knows(tmp_path):
     out = _tcl(tmp_path, """
         if {[catch {buda::query nonesuch} e]} { puts "E=$e" }

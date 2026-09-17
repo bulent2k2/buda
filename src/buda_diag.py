@@ -205,6 +205,14 @@ MESSAGES = {
                            "while the instance turns.  Rotate the leaf "
                            "itself (its token IS composed) or re-declare "
                            "the placement."),
+    "BUDA-1920": (WARNING, "A cell holds a positional track reservation "
+                  "(set_cell_layer_reserve — its own, or one inherited from "
+                  "a reserved ancestor) but is planned top-down: a "
+                  "reservation binds the cell-local TEMPLATE solve and the "
+                  "reference DNUTS view, so on a cell that is not "
+                  "set_bottom_up it is NOT enforced — the cell's own metal "
+                  "may land on the reserved tracks (check_design's "
+                  "[LayerReserve] audit reports it)."),
     "BUDA-1919": (WARNING, "A cell's multi-rect footprint no longer unions to "
                            "the extent of an instance of that cell, so the "
                            "routing frame and the placement would be two "
