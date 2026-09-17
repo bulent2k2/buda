@@ -337,3 +337,69 @@ def test_the_natural_window_carries_the_partner_reach_prune(tmp_path):
     bits = lambda s: sorted((n.bundle_id, n.seg_idx, n.bit_index, n.layer, n.track_position)
                             for n in s.detailed_result.net_segments)
     assert bits(a) == bits(b) and a.detailed_result.num_unplaced == b.detailed_result.num_unplaced
+
+
+def test_the_natural_window_reads_the_partners_natural_window_too(tmp_path):
+    """Codex P1 on #939, second round: the prune's natural verdict used the
+    PARTNER's pinned width-wide window, which "cannot slide clear" of a zone
+    its natural window steps past — so a pinned stub cut the trunk's natural
+    window where the source round, judging the stub by its own window, had
+    not.  An M7 keepout covering the stub's pinned window (x 710..737) but
+    not its natural one (710..790), lying under the trunk's seat inside the
+    trunk's window: the source keeps [110, 190], and so must the replay
+    (it read [150, 190] before)."""
+    tracks = str(Path(__file__).parents[2] / "flow" / "tracks" / "tracks.buda")
+    lines = [f"source {tracks}", "corner_margin dx 10 dy 10",
+             "add_keepout 705 120 745 150 7",
+             "add_block drv 100 100 200 200", "add_block rcv 700 600 800 700",
+             "add_bus b[4] drv.tx rcv.rx", "run_bundler strict",
+             "generate_topologies", "select_topology 1 L_HV", "run_planner",
+             "run_nuts"]
+
+    def run(extra):
+        s = buda_cli.BudaSession()
+        s.no_viz = True
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            for c in extra + lines:
+                s.do_command(c)
+        return s, buf.getvalue()
+
+    a, log_a = run([])
+    assert "pruned" not in log_a                     # the stub slides clear
+    ta = {t.seg_idx: t for t in a.nuts_result.segments}
+    assert (ta[0].interval_lo, ta[0].interval_hi) == (110.0, 190.0)
+    assert (ta[1].interval_lo, ta[1].interval_hi) == (710.0, 790.0)
+    plan = tmp_path / "plan.buda"
+    _cmd(a, f"derive_top_plan file {plan}")
+    b, log_b = run([f"source {plan}"])
+    assert "[PlanPin] seated 2 of 2" in log_b, log_b[-2000:]
+    tb = {t.seg_idx: t for t in b.nuts_result.segments}
+    assert abs(tb[1].interval_hi - tb[1].interval_lo - tb[1].width) < 1e-9   # the pin
+    assert (tb[0].seat_nat_lo, tb[0].seat_nat_hi) == (110.0, 190.0)
+    assert (tb[1].seat_nat_lo, tb[1].seat_nat_hi) == (710.0, 790.0)
+
+
+def test_unpin_all_frees_the_plans_seats_and_bookkeeping(tmp_path):
+    """Codex P2 on #939: `unpin_topology *` has its own loop; it must drop
+    the seat windows a plan set (or the freed bundle stays seat-bound on
+    the next run_nuts), forget the bids, and stop counting the entries as
+    applied — and a later run_planner must not re-apply what the user
+    unpinned."""
+    a, _ = _run()
+    plan = tmp_path / "plan.buda"
+    _cmd(a, f"derive_top_plan file {plan}")
+    b, _ = _run(f"source {plan}")
+    sys.path.insert(0, str(Path(__file__).parents[2] / "tools"))
+    import buda_server
+    assert buda_server._QUERIES["plan_pins"](b) == "1 1 1 1"
+    assert "Unpinned all bundles" in _cmd(b, "unpin_topology *")
+    w = [w for w in b.bundles if not w.input.original_bundle.instances][0]
+    assert list(w.plan.seg_slide_lo) == [] and list(w.plan.seg_slide_hi) == []
+    assert not b._plan_pin_bids
+    assert buda_server._QUERIES["plan_pins"](b) == "1 0 0 0"
+    out = _cmd(b, "run_planner hier 3")
+    assert "Pinned bundle" not in out and "[PlanPin]" not in out
+    assert not w.input.topology_pinned
+    _cmd(b, "run_nuts")
+    assert "[PlanPin] seated" not in _cmd(b, "run_nuts")

@@ -1324,10 +1324,40 @@ class EditMixin:
                 found = True
         if not found:
             print(f"Error: bundle {bid} not found")
-        self._plan_pin_bids.discard(bid)
+        self._plan_pins_forget([bid])
         return found
 
     # ── pin_plan (convergence ladder item 6c) ─────────────────────────────
+
+    def _plan_pins_forget(self, bids=None):
+        """An unpin's plan-side bookkeeping: for `bids` (None = every
+        plan-pinned bundle) drop the seat windows a `pin_plan` set on every
+        wrapper carrying the bundle (routed, pre-expansion original,
+        expanded instance), forget the bid, and mark the entries UNPINNED —
+        neither applied (the seat audit and `buda::query plan_pins` stop
+        counting them) nor re-applicable by a later `run_planner` (an unpin
+        is the user's decision for the session).  The wildcard
+        `unpin_topology *` has its own loop and reaches this too (Codex P2
+        on #939)."""
+        targets = set(self._plan_pin_bids) if bids is None else \
+            {b for b in bids if b in self._plan_pin_bids}
+        if not targets:
+            return 0
+        orig = getattr(self, "_hier_bundles_orig", None) or []
+        exp = [w for ws in self._hier_expansion_map.values() for w in ws]
+        seen = set()
+        for w in list(self.bundles) + list(orig) + exp:
+            if id(w) in seen:
+                continue
+            seen.add(id(w))
+            if w.input.original_bundle.id in targets:
+                w.plan.seg_slide_lo = []
+                w.plan.seg_slide_hi = []
+        for e in self._plan_pins:
+            if e.get("applied") and e.get("bid") in targets:
+                e.update(applied=False, skipped=True, why="unpinned")
+        self._plan_pin_bids -= targets
+        return len(targets)
 
     def _plan_pin_bundle(self, sel, bundles=None):
         """Resolve a pin_plan selector to (wrapper, bid, error) among

@@ -591,3 +591,28 @@ def test_a_healer_move_off_a_handed_down_shape_drops_its_forced_layers(tmp_path)
                                        if "unbuildable" in l][:4]
     d = _report(out / "soc4_td_r1.rep")
     assert d["verdict"][2] == "0", d["verdict"]        # no audit violation
+
+
+def test_the_plan_is_derived_in_the_budgets_scope(tmp_path):
+    """Codex P2 on #939: a session combining `-derive_cells` with
+    `-derive_plan` derives the plan in the SAME scope as the budget — a
+    top-down round's default scope (every bundle-owning cell) would hand
+    down less than the top the scoped budget came from."""
+    rep = tmp_path / "td.rep"
+    shares = tmp_path / "td.buda"
+    plan = tmp_path / "plan.buda"
+    r = _tclsh(_SOC, 2, "-noheal", "-derive", shares, "-derive_cells",
+               "alu_cell,sram_cell", "-derive_plan", plan, "-report", rep,
+               cwd=tmp_path)
+    assert r.returncode == 0, r.stdout[-3000:] + r.stderr[-3000:]
+    assert "# scope: alu_cell,sram_cell" in shares.read_text()
+    assert "# scope: alu_cell,sram_cell" in plan.read_text()
+    n = int(re.search(r"^# bundles: (\d+)$", plan.read_text(), re.M)[1])
+    assert n > 0 and _report(rep)["plan_derived"] == [str(n)]
+    # the default scope on the same session hands down fewer bundles: the
+    # other cells' own bundles are the top's here
+    plan2 = tmp_path / "plan2.buda"
+    r = _tclsh(_SOC, 2, "-noheal", "-derive_plan", plan2, cwd=tmp_path)
+    assert r.returncode == 0, r.stderr[-2000:]
+    n2 = int(re.search(r"^# bundles: (\d+)$", plan2.read_text(), re.M)[1])
+    assert n2 < n, (n2, n)

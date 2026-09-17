@@ -658,12 +658,6 @@ static void prune_unreachable_partner_windows(
             if (zit == index.end()) continue;
             const ReachZones& rz = zit->second;
 
-            // The partner's own seat window, on ITS perpendicular axis.
-            const double q_lo = std::min(p.interval_lo, p.interval_hi);
-            const double q_hi = std::max(p.interval_lo, p.interval_hi);
-            const int last = rz.last_starting_at_or_below(q_lo);
-            if (last < 0 || rz.pmax[last] < q_hi) continue;   // nothing can cover
-
             // Its FAR end.  The junction with `ts` rides the near end (that end
             // IS ts's track position, which is what makes this segment's seat
             // decide the partner's span).  Usable ONLY when the other end is
@@ -677,20 +671,44 @@ static void prune_unreachable_partner_windows(
             const double far = f.lo_end ? std::max(p.span_lo, p.span_hi)
                                         : std::min(p.span_lo, p.span_hi);
 
-            for (int zi = 0; zi <= last; ++zi) {
-                if (rz.p2[zi] < q_hi) continue;      // partner can slide clear
-                const double k_a1 = rz.a1[zi], k_a2 = rz.a2[zi];
-                // The partner's span runs from ts's seat to `far`, and crosses
-                // the zone iff span_lo < k_a2 && span_hi > k_a1 (the cull's own
-                // strict test).  With one end free that is a half-line in ts's
-                // seat coordinate — so the legal side is a single bound.
-                if (far >= k_a2)      { lo = std::max(lo, k_a2); zlo = std::max(zlo, k_a2); }
-                else if (far <= k_a1) { hi = std::min(hi, k_a1); zhi = std::min(zhi, k_a1); }
-                // else: `far` is INSIDE the zone's along range and the partner
-                // cannot slide clear, so it crosses wherever ts goes.  Nothing
-                // to prune — no seat helps — and the exhausted-window path is
-                // the honest reporter for it.
-                else doomed = true;
+            // The bounds the zones put on ts's seat, given the partner's seat
+            // window [q_lo, q_hi] on ITS perpendicular axis.
+            auto zone_bounds = [&](double q_lo, double q_hi, double& b_lo,
+                                   double& b_hi, bool* doom) {
+                const int last = rz.last_starting_at_or_below(q_lo);
+                if (last < 0 || rz.pmax[last] < q_hi) return;  // nothing can cover
+                for (int zi = 0; zi <= last; ++zi) {
+                    if (rz.p2[zi] < q_hi) continue;      // partner can slide clear
+                    const double k_a1 = rz.a1[zi], k_a2 = rz.a2[zi];
+                    // The partner's span runs from ts's seat to `far`, and
+                    // crosses the zone iff span_lo < k_a2 && span_hi > k_a1
+                    // (the cull's own strict test).  With one end free that
+                    // is a half-line in ts's seat coordinate — so the legal
+                    // side is a single bound.
+                    if (far >= k_a2)      b_lo = std::max(b_lo, k_a2);
+                    else if (far <= k_a1) b_hi = std::min(b_hi, k_a1);
+                    // else: `far` is INSIDE the zone's along range and the
+                    // partner cannot slide clear, so it crosses wherever ts
+                    // goes.  Nothing to prune — no seat helps — and the
+                    // exhausted-window path is the honest reporter for it.
+                    else if (doom) *doom = true;
+                }
+            };
+            // The partner's own seat window, on ITS perpendicular axis.
+            zone_bounds(std::min(p.interval_lo, p.interval_hi),
+                        std::max(p.interval_lo, p.interval_hi), lo, hi, &doomed);
+            // The natural verdict reads the partner's NATURAL window too: a
+            // pinned partner's width-wide interval "cannot slide clear" of a
+            // zone its natural window steps past, and the source round judged
+            // it by the latter (Codex P1 on #939).
+            if (!std::isnan(ts.seat_nat_lo)) {
+                const double nq_lo = std::isnan(p.seat_nat_lo)
+                    ? std::min(p.interval_lo, p.interval_hi)
+                    : std::min(p.seat_nat_lo, p.seat_nat_hi);
+                const double nq_hi = std::isnan(p.seat_nat_lo)
+                    ? std::max(p.interval_lo, p.interval_hi)
+                    : std::max(p.seat_nat_lo, p.seat_nat_hi);
+                zone_bounds(nq_lo, nq_hi, zlo, zhi, nullptr);
             }
         }
         if (doomed) ++n_doomed;      // once per SEGMENT, not per (partner, zone)

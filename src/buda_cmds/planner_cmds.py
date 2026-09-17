@@ -568,6 +568,10 @@ def cmd_unpin_topology(session, cmd, args, cmd_line):
             w.input.topology_pinned = False
             w.input.pinned_seg_layers = []   # also drop forced edit-pinned layers
             w.input.pinned_group = []        # and any super-candidate group pin
+        # ... and a handed-down plan's seat windows with them (pin_plan):
+        # freed bundles must re-seat where NUTS puts them, and the plan's
+        # entries stop counting as applied (Codex P2 on #939).
+        session._plan_pins_forget()
         print(f"Unpinned all bundles ({n} pinned)")
         session._persist_topologies()
         return

@@ -281,7 +281,15 @@ proc converge::finish {healed} {
     # The plan of THIS round's top, for the next round to route under.
     set converge::planned 0
     if {$converge::derive_plan ne ""} {
-        set out [buda::derive_top_plan file $converge::derive_plan]
+        # The SAME scope as the budget's: the plan is the top the scoped
+        # budget was derived from, and a top-down round's default scope
+        # (every bundle-owning cell) would hand down less than that
+        # (Codex P2 on #939).
+        set cmd [list file $converge::derive_plan]
+        if {$converge::derive_cells ne ""} {
+            lappend cmd cells $converge::derive_cells
+        }
+        set out [buda::derive_top_plan {*}$cmd]
         regexp {(\d+) bundle\(s\) handed down} $out -> converge::planned
     }
     if {$converge::report eq ""} { return }
