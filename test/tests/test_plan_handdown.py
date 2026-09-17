@@ -491,6 +491,13 @@ def test_the_plan_line_quotes_the_selector_whole():
     assert line.startswith('pin_plan "net:foo bar" TRUNK_H@y100 '), line
     toks = split_quoted_args(line)
     assert toks[:2] == ["net:foo bar", "TRUNK_H@y100"], toks
+    # a name carrying whitespace AND a double quote takes the other
+    # delimiter (`quote_arg`, the tokenizer's inverse — Codex round 4)
+    line = buda_cli.BudaSession._top_plan_line(
+        {"net": 'foo"bar baz', "type": "I_H", "uid": "abc",
+         "layers": ["M6"], "seats": [None]})
+    assert line.startswith("pin_plan 'net:foo\"bar baz' I_H "), line
+    assert split_quoted_args(line)[:2] == ['net:foo"bar baz', "I_H"]
     # a plain name is unquoted, as before
     line = buda_cli.BudaSession._top_plan_line(
         {"net": "x_0", "type": "I_H", "uid": "abc", "layers": ["M6"],

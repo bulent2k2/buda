@@ -2212,15 +2212,17 @@ class ReportsMixin:
     def _top_plan_line(l):
         """One `pin_plan` line for a derived entry — the grammar
         `cmd_pin_plan` reads back."""
-        def _tok(s):
-            return f'"{s}"' if any(ch.isspace() for ch in s) else s
+        from buda_script import quote_arg   # the tokenizer's own inverse
 
         def _seat(s):
             return "-" if s is None else f"{fmt_pos(s[0])}:{fmt_pos(s[1])}"
 
-        # The selector is quoted WHOLE ("net:foo bar"): the tokenizer honours
-        # a quote only where a token begins (Codex P2 on #939).
-        return (f"pin_plan {_tok('net:' + l['net'])} {_tok(l['type'])} "
+        # The selector is quoted WHOLE ("net:foo bar") by the tokenizer's
+        # inverse, which honours its rule — a quote counts only where a token
+        # begins — and picks the delimiter the name does not contain, so
+        # `foo"bar baz` is spelled with apostrophes (Codex P2s on #939).
+        return (f"pin_plan {quote_arg('net:' + l['net'])} "
+                f"{quote_arg(l['type'])} "
                 f"uid {l['uid']} layers {','.join(l['layers'])} "
                 f"seats {','.join(_seat(s) for s in l['seats'])}")
 
