@@ -481,8 +481,8 @@ def test_the_top_plan_is_handed_down_and_the_fixpoint_measured(tmp_path):
     engine until `run_planner hier`) and writes its own, the report says
     how many pins applied and how many seats NUTS honoured, and the table
     carries the `plan` and `fixpoint` columns — the fixpoint being the
-    driver's own comparison of the budget a round derived against the one
-    it ran under.  At NQ=2 the handed-down top reproduces EXACTLY (every
+    driver's own comparison of the budget AND the plan a round derived
+    against the ones it ran under.  At NQ=2 the handed-down top reproduces EXACTLY (every
     pin, every seat, the plan file re-derived byte for byte), so a
     fixpoint verdict of `no` there is the nested templates' own buses
     moving, not the top's — which is what the write-up says."""
@@ -520,7 +520,7 @@ def test_the_top_plan_is_handed_down_and_the_fixpoint_measured(tmp_path):
     assert "| — | — |" in blind
     bu = [l for l in table.splitlines() if "| bu | 1 |" in l][0]
     assert f"| {n}/{n} pins, {m[1]}/{m[2]} seats |" in bu, bu
-    fix = re.search(r"\| (yes \(\d+\)|no \(\d+ of \d+\)) \|", bu)
+    fix = re.search(r"\| (yes \(\d+\)|no \([^)]+\)) \|", bu)
     assert fix, bu
     # the summary's fixpoint column agrees with the row
     summ = [l for l in table.splitlines() if l.startswith("| 2 | bu |")][0]

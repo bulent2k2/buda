@@ -1167,5 +1167,5 @@ pool holds it (regeneration cannot produce it; a sidecar or
 Needs a NUTS result.  The file carries a `# scope:` header and
 `# bundles: N`.  The loop driver runs it under
 `converge.tcl -handdown`, whose table then carries the `plan` (pins applied,
-seats honoured) and `fixpoint` (a round's derived budget equal to the one it
-ran under) columns.
+seats honoured) and `fixpoint` (a round's derived budget AND derived plan
+equal to the ones it ran under — all of the loop's state) columns.

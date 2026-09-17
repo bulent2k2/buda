@@ -85,9 +85,10 @@
 #                  writes its own, so the blocks are routed under the SAME
 #                  top the budget came from.  Two columns say what it
 #                  bought: `plan` (pins applied, seats honoured by NUTS) and
-#                  `fixpoint` (this round's derived budget equals the one
-#                  it ran under — the loop's own convergence test; an
-#                  informed round that reaches it stops the arm).  The td
+#                  `fixpoint` (this round's derived budget AND derived plan
+#                  equal the ones it ran under — the loop's own convergence
+#                  test, over all of the loop's state; an informed round
+#                  that reaches it stops the arm).  The td
 #                  arm's measurement round then runs on the ALIGNED
 #                  floorplan (`-align`), since a seat is geometry
 #   -out DIR       where logs/reports/tables go (default e1_out beside the
@@ -276,15 +277,28 @@ proc informed_rounds {prefix size f0} {
         set rep [session ${prefix}_r$r $size {*}$words]
         dict set rep policy $prev
         # The fixpoint test: the budget this round DERIVED against the one
-        # it RAN UNDER.  Equal means the next round would run the same
-        # session again — the loop has converged there, clean or not.
+        # it RAN UNDER — and, under -handdown, the PLAN it derived against
+        # the one it ran under, since both are the loop's state (a healer
+        # can move a topology, a layer or a seat while the budget
+        # re-derives the same; a pin that fell back to its type spec can
+        # leave a different plan — Codex P1 on #939).  Equal means the next
+        # round would run the same session again — the loop has converged
+        # there, clean or not.
         lassign [converge::policy_diff $prev $fr] same ndiff ntotal
-        dict set rep fixpoint [list $same $ndiff $ntotal]
+        set psame 1; set pdiff 0; set ptotal 0
+        if {$handdown} {
+            lassign [converge::policy_diff [plan_file $prefix [expr {$r - 1}] $f0] \
+                                           [plan_file $prefix $r $f0]] psame pdiff ptotal
+        }
+        dict set rep fixpoint [list [expr {$same && $psame}] $ndiff $ntotal \
+                                    $psame $pdiff $ptotal]
         lappend rounds $rep
         if {[clean $rep]} { break }
-        if {$same} {
-            puts "converge.tcl: ${prefix} round $r re-derives the budget it\
-                  ran under ($ntotal line(s)) — a fixpoint, dirty; the arm stops"
+        if {$same && $psame} {
+            set what "the budget it ran under ($ntotal line(s))"
+            if {$handdown} { append what " and the plan ($ptotal line(s))" }
+            puts "converge.tcl: ${prefix} round $r re-derives $what — a\
+                  fixpoint, dirty; the arm stops"
             break
         }
         set prev $fr
@@ -322,10 +336,19 @@ proc row {size arm round policy rep policy_rep} {
         lassign [dict get $rep plan_pins] pe pa ps po
         if {$pe > 0} { set plan "$pa/$pe pins, $ps/$po seats" }
     }
+    # `yes (n)` when budget and plan both reproduce; otherwise what moved:
+    # the budget's differing lines, the plan's, or both.
     set fix "—"
     if {[dict exists $rep fixpoint]} {
-        lassign [dict get $rep fixpoint] same ndiff ntotal
-        set fix [expr {$same ? "yes ($ntotal)" : "no ($ndiff of $ntotal)"}]
+        lassign [dict get $rep fixpoint] fixed ndiff ntotal psame pdiff ptotal
+        if {$fixed} {
+            set fix "yes ($ntotal)"
+        } else {
+            set parts {}
+            if {$ndiff > 0} { lappend parts "$ndiff of $ntotal" }
+            if {!$psame} { lappend parts "plan $pdiff of $ptotal" }
+            set fix "no ([join $parts {, }])"
+        }
     }
     lappend rows [list $vehicle $size [expr {$heal ? "on" : "off"}] $arm $round $policy \
                       $plan $fix \

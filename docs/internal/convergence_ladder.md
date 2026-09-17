@@ -310,9 +310,9 @@ plans elsewhere.  A track preference cannot supply that; a pin can, and
 the measurement round's globally planned selections, layers and seats
 come down with the reservation and the informed round routes the blocks
 under the SAME top.  Every pin applies and every seat is honoured, and the
-loop has a **fixpoint** — the budget a round derives reproduces the one it
-ran under within one to three informed rounds on the SoC and in the first
-on the mesh (where the reservation is then exactly the top's use, 1.00×)
+loop has a **fixpoint** — the budget AND the plan a round derives
+reproduce the ones it ran under within one to three informed rounds on the
+SoC and in the first on the mesh (where the reservation is then exactly the top's use, 1.00×)
 — where E5's free re-plan reproduced nothing.  Healers off, the fixpoint
 is exactly as clean as the top handed down (the measurement round's own
 overlaps ride along); handed a HEALED blind round, the bottom-up informed

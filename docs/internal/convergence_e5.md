@@ -586,9 +586,19 @@ zone bounds (the last two Codex P1s on #939).  The driver's `-handdown` makes th
 its plan and every informed round source the previous round's and write
 its own, and adds two columns: `plan` (pins applied, seats honoured) and
 `fixpoint` — whether the budget a round *derived* equals the one it *ran
-under*, line for line, which is the loop's own convergence test; an
-informed round that reaches it stops the arm (the next round would be the
-same session again).  A plan is geometry, so under `-handdown` the `td`
+under*, line for line, AND the plan it derived equals the one it ran
+under, since both are the loop's state (a healer can move a topology, a
+layer or a seat while the budget re-derives the same, and a pin that fell
+back to its type spec can leave a different plan — Codex P1 on #939; the
+cell then reads `no (plan k of n)`), which is the loop's own convergence
+test; an informed round that reaches it stops the arm (the next round
+would be the same session again).  The tables below were produced by the
+budget-only test and were re-read against the recorded plan files after
+the plan half landed: at every round the budget test called a fixpoint,
+the derived plan is byte-identical to the one it ran under (0 differing
+lines on every healerless and mesh round), and the healed rounds whose
+plans differ between rounds (NQ = 4/8/16 `td` round 1, NQ = 16 `bu`
+round 1) already read `no` on the budget — so no recorded verdict moves.  A plan is geometry, so under `-handdown` the `td`
 arm's top-down measurement round runs on the *aligned* floorplan the
 informed rounds route (`-align`: mark, `align_bottom_up`, unmark, nothing
 left marked) — on the SoC the alignment reverts every move it tries and

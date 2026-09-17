@@ -696,3 +696,36 @@ def test_a_hand_built_candidate_is_not_handed_down(tmp_path):
     out = _cmd(a, f"derive_top_plan file {plan}")
     assert "1 bundle(s) on a hand-built USER candidate not handed down" in out
     assert "net:x_0" not in plan.read_text()
+
+
+# ── Codex round 7 on #939 ────────────────────────────────────────────────
+
+def test_the_plans_own_replay_does_not_supersede_its_entry(tmp_path):
+    """Codex P2 on #939: a re-application that found the bundle moved (a
+    USER sidecar entry, a healer) went through the shared pin path, whose
+    supersede bookkeeping marked the plan's own entry skipped — so the
+    run after the next let the sidecar win.  The replay is not the user's
+    later word."""
+    a, _ = _run(tail=("run_nuts",))
+    uid, layers, seats, ttype = _top(a)
+    b, _ = _run(f"pin_plan net:x_0 {ttype} uid {uid} layers M6 seats 120:154",
+                tail=("run_nuts",))
+    bid = [w for w in b.bundles
+           if not w.input.original_bundle.instances][0].input.original_bundle.id
+    # Something else moves the bundle between runs (what a USER sidecar
+    # entry or a healer does): the pre-expansion original's selection.
+    orig = [w for w in b._hier_bundles_orig
+            if w.input.original_bundle.id == bid][0]
+    other = next(i for i, c in enumerate(orig.input.candidates)
+                 if buda.topo_uid(c) != uid)
+    orig.plan.selected_topology_index = other
+    for _ in range(3):        # every run puts the plan back, none supersedes it
+        log = _cmd(b, "run_planner hier")
+        assert "[PlanPin] 1 of 1 handed-down plan(s) applied" in log, log
+        assert "superseded" not in log
+        wb = [w for w in b.bundles if not w.input.original_bundle.instances][0]
+        assert buda.topo_uid(wb.input.candidates[wb.plan.selected_topology_index]) \
+            == uid
+        assert list(wb.input.pinned_seg_layers) == [6]
+        orig.plan.selected_topology_index = other
+    assert all(not e.get("skipped") for e in b._plan_pins)

@@ -1343,6 +1343,8 @@ class EditMixin:
         candidate is the user's later word: the plan's entry is forgotten
         (seats, flag, bookkeeping — `_plan_pins_forget`) and said, so the
         next `run_planner`'s re-application does not put the plan back."""
+        if getattr(self, "_plan_pin_replaying", False):
+            return          # the plan's own re-application, not the user's word
         bid = w.input.original_bundle.id
         if bid in self._plan_pin_bids:
             self._plan_pins_forget([bid], why="superseded by select_topology")
@@ -1525,9 +1527,19 @@ class EditMixin:
                 w.input.topology_pinned = True
                 print(f"Pinned bundle {bid} ({self._bundle_label(w)}) to "
                       f"topology {tidx + 1} (its own instance)")
-            elif not self._select_single_topology_internal(bid, tidx + 1):
-                e["skipped"], e["why"] = True, "pin refused"
-                continue
+            else:
+                # The shared pin path runs the supersede bookkeeping when
+                # the selection moves; a replay that finds the bundle moved
+                # (a USER sidecar entry, a healer) is putting the plan BACK,
+                # not the user's later word (Codex P2 on #939).
+                self._plan_pin_replaying = True
+                try:
+                    ok = self._select_single_topology_internal(bid, tidx + 1)
+                finally:
+                    self._plan_pin_replaying = False
+                if not ok:
+                    e["skipped"], e["why"] = True, "pin refused"
+                    continue
             nseg = len(w.input.candidates[tidx].segments)
             lids, bad = [], []
             for nm in e.get("layers") or []:
