@@ -1292,7 +1292,21 @@ class EditMixin:
         print(f"Error: bundle {bid} not found")
         return False
 
-    def _unpin_topology_internal(self, bid):
+    def _explorer_pin_sink(self, bid, unpinned):
+        """The session's bookkeeping for a pin state change the EXPLORER
+        made on a live wrapper (its `pin_sink`): an unpin reaches the
+        pre-expansion original and forgets a handed-down plan's entry
+        (`_unpin_topology_internal`, quiet — the explorer already said
+        UNPINNED); a pin onto a different candidate supersedes that entry
+        as a typed select_topology does (Codex P2 on #939)."""
+        if unpinned:
+            self._unpin_topology_internal(bid, quiet=True)
+        elif bid in self._plan_pin_bids:
+            self._plan_pins_forget([bid], why="superseded by an explorer pin")
+            print(f"  (the handed-down plan's entry for bundle {bid} is "
+                  f"superseded by this pin)")
+
+    def _unpin_topology_internal(self, bid, quiet=False):
         """Inverse of select_topology: clear a bundle's pin so the next planner
         run is free to re-choose. Leaves the current selected_topology_index in
         place (the shown candidate does not jump) but drops BOTH topology_pinned
@@ -1318,7 +1332,8 @@ class EditMixin:
                 # And the pre-expansion original, for the same reason the pin
                 # lands there (see _mirror_pin_to_original).
                 self._mirror_pin_to_original(bid, w, _clear)
-                print(f"Unpinned bundle {bid}")
+                if not quiet:
+                    print(f"Unpinned bundle {bid}")
                 found = True
                 break
         if not found:
@@ -1328,8 +1343,9 @@ class EditMixin:
                     _clear(w)
                 self._mirror_pin_to_original(bid, wrappers[0], _clear)
                 n = len(wrappers)
-                print(f"Unpinned bundle {bid} "
-                      f"({n} expanded instance{'s' if n > 1 else ''})")
+                if not quiet:
+                    print(f"Unpinned bundle {bid} "
+                          f"({n} expanded instance{'s' if n > 1 else ''})")
                 found = True
         if not found:
             print(f"Error: bundle {bid} not found")

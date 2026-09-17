@@ -729,3 +729,76 @@ def test_the_plans_own_replay_does_not_supersede_its_entry(tmp_path):
         assert list(wb.input.pinned_seg_layers) == [6]
         orig.plan.selected_topology_index = other
     assert all(not e.get("skipped") for e in b._plan_pins)
+
+
+# ── Codex round 8 on #939 ────────────────────────────────────────────────
+
+def test_an_explorer_unpin_or_repin_supersedes_the_plans_entry(tmp_path):
+    """Codex P2 on #939: the explorer's `x` / `s`-toggle unpin cleared the
+    live wrapper and nothing else, so the plan's entry stayed applied and
+    the next `run_planner hier` put the pin, layers and seats back; the
+    explorer now hands every pin state change to the session (`pin_sink`),
+    which forgets the entry on an unpin and supersedes it on a pin onto
+    another candidate, as the typed commands do."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import buda_viz
+    import matplotlib.pyplot as plt
+
+    class _Key:
+        def __init__(self, key):
+            self.key = key
+
+    def explorer(s):
+        return buda_viz.TopologyExplorer(
+            s.fp, s.bundles, sidecar_path=str(tmp_path / "flow.json"),
+            layer_stack=s.layers, fp_resolver=s._make_topo_fp_resolver(),
+            pin_sink=s._explorer_pin_sink)
+
+    def top(s):
+        return [w for w in s.bundles if not w.input.original_bundle.instances][0]
+
+    a, _ = _run(tail=("run_nuts",))
+    uid, layers, seats, ttype = _top(a)
+    line = f"pin_plan net:x_0 {ttype} uid {uid} layers M6 seats 120:154"
+    try:
+        # 1. unpin through the explorer: the entry is forgotten and the
+        #    next planner run leaves the bundle free
+        b, _ = _run(line, tail=("run_nuts",))
+        wb = top(b)
+        bid = wb.input.original_bundle.id
+        ex = explorer(b)
+        ex.show_bundle_index([i for i, w in enumerate(b.bundles)
+                              if w is wb][0])
+        assert ex.wrappers[ex.bidx] is wb
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            ex._on_key(_Key('s'))          # pins the displayed (plan's) candidate
+            ex._on_key(_Key('x'))          # and unpins it
+        assert "UNPINNED bundle" in out.getvalue()
+        assert bid not in b._plan_pin_bids
+        assert all(e.get("skipped") and e.get("why") == "unpinned"
+                   for e in b._plan_pins)
+        (tmp_path / "flow.json").unlink(missing_ok=True)
+        log = _cmd(b, "run_planner hier")
+        assert "[PlanPin]" not in log
+        assert not top(b).input.topology_pinned
+        assert list(top(b).input.pinned_seg_layers) == []
+        # 2. pin ANOTHER candidate through the explorer: superseded
+        c, _ = _run(line, tail=("run_nuts",))
+        wc = top(c)
+        ex = explorer(c)
+        ex.show_bundle_index([i for i, w in enumerate(c.bundles)
+                              if w is wc][0])
+        ex.idx = next(i for i, t in enumerate(wc.input.candidates)
+                      if buda.topo_uid(t) != uid)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            ex._on_key(_Key('s'))
+        assert "PINNED bundle" in out.getvalue()
+        assert "superseded by this pin" in out.getvalue()
+        assert any(e.get("why") == "superseded by an explorer pin"
+                   for e in c._plan_pins)
+        assert list(wc.plan.seg_seat_pin) == []
+    finally:
+        plt.close('all')

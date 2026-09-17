@@ -480,6 +480,7 @@ def cmd_visualize_topologies(session, cmd, args, cmd_line):
                          fp_resolver=session._make_topo_fp_resolver(),
                          groups_fn=session._loci_groups,
                          user_ops_sink=session._record_user_ops,
+                         pin_sink=session._explorer_pin_sink,
                          cost_fn=(session._candidate_costs if debug else None),
                          routing_grid=session.routing_grid).show()
 
@@ -563,6 +564,7 @@ def cmd_visualize(session, cmd, args, cmd_line):
                          cuts_provider=_cuts_provider,
                          groups_fn=session._loci_groups,
                          user_ops_sink=session._record_user_ops,
+                         pin_sink=session._explorer_pin_sink,
                          cost_fn=(session._candidate_costs if debug else None))
     viz.draw_blocks()
     if session.planner is not None:
