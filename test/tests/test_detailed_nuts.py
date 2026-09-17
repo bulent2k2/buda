@@ -480,3 +480,39 @@ def test_reserve_corridor_tracks_are_picked_first():
     # cleared = byte-identical
     stack.clear_reserve_corridors()
     assert picks() == pytest.approx([3.5, 5.5])
+
+
+def test_reserve_corridor_steers_an_ndr_governed_run():
+    """The NDR branch takes its own path to a seat (a run of k-slot bits,
+    guards and shields chosen nearest the anchor), so the corridor
+    preference has to be scored there too (Codex P2 on #938): a feasible
+    run lying ENTIRELY on corridor tracks outranks every run that does
+    not; a run only partly on the corridor is off it (one run is one
+    seat); no corridor is the historical pick."""
+    stack = make_stack_with_standard_pattern()
+    # one bit two slots wide: the contiguous pairs are 3.5/5.5 and 10.5/12.5
+    seg = make_bus_segment(bit_width=1, interval_lo=0.0, interval_hi=14.0)
+    spec = buda.NdrSpec()
+    spec.width_slots, spec.guard_slots = 2, 0
+    seg.ndr = spec
+    seg.abstract_pos = 4.5
+
+    def run():
+        r = buda.DetailedNUTSEngine(stack).run([seg])
+        assert r.num_unplaced == 0
+        ns = net_segs_for(r, 1)
+        assert len(ns) == 1
+        return ns[0].track_position
+
+    assert run() == pytest.approx(4.5)             # centred on 3.5/5.5
+    stack.add_reserve_corridor(4, 20.0, 60.0, [10.5, 12.5], "blk")
+    assert run() == pytest.approx(11.5)            # the run on the corridor
+    seg.frame_inst = "blk/core"                    # inside the owner: no
+    assert run() == pytest.approx(4.5)
+    seg.frame_inst = ""
+    stack.clear_reserve_corridors()
+    stack.add_reserve_corridor(4, 20.0, 60.0, [12.5], "blk")   # half a run
+    assert run() == pytest.approx(4.5)
+    stack.clear_reserve_corridors()
+    stack.add_reserve_corridor(4, 200.0, 300.0, [10.5, 12.5], "blk")
+    assert run() == pytest.approx(4.5)             # beside the span

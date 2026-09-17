@@ -730,7 +730,7 @@ void DetailedNUTSEngine::place_by_layer(
                 };
                 int    best_start = -1;
                 double best_dist  = std::numeric_limits<double>::max();
-                bool   best_clo = false, best_chi = false;
+                bool   best_clo = false, best_chi = false, best_corr = false;
                 const bool anchored = !std::isnan(bs.abstract_pos);
                 for (int j = 0; j < n_sig; ++j) {
                     const bool clo = credit_at(j, -1);
@@ -760,14 +760,27 @@ void DetailedNUTSEngine::place_by_layer(
                             ok = false;
                     }
                     if (!ok) continue;
+                    // Reserve corridor (6b), the NDR twin of Path A's
+                    // gate: a run lying ENTIRELY on corridor tracks hosts
+                    // the governed bus there and outranks every run that
+                    // does not, nearest the anchor among them; a run only
+                    // partly on the corridor counts as off it (the whole
+                    // run is one seat).  No corridor = the historical
+                    // pick (Codex P2 on #938).
+                    bool corr = !corridor_keys.empty();
+                    for (int k = j; corr && k < j + du_c; ++k)
+                        if (!corridor_keys.count(track_key(signal_tracks[k].first)))
+                            corr = false;
                     const double mid = 0.5 * (signal_tracks[j].first +
                                               signal_tracks[j + du_c - 1].first);
                     const double dist =
                         anchored ? std::abs(mid - bs.abstract_pos) : 0.0;
-                    if (dist < best_dist) {
+                    if (best_start < 0 || (corr && !best_corr) ||
+                        (corr == best_corr && dist < best_dist)) {
                         best_dist = dist; best_start = j;
-                        best_clo = clo;  best_chi = chi;
+                        best_clo = clo;  best_chi = chi; best_corr = corr;
                     }
+                    if (!anchored && !corridor_keys.empty()) continue;
                     if (!anchored) break;   // first feasible run
                 }
                 const std::string layout = ndr_run_layout_credited(
