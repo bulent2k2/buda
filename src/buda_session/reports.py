@@ -1431,6 +1431,14 @@ class ReportsMixin:
         rows = self._layer_reserve_audit()
         if not rows:
             return
+        # Before detailed NUTS the rows read the ABSTRACT bus placement — a
+        # seat's footprint, bits or bits+1 tracks by phase, conservative by
+        # design — so a bus seated flush against a reserved track reads as
+        # touching it while its bits, once placed, do not (measured on the
+        # E5 SoC: io_blk_cell's own bus, 6 of 48 at the abstract stage, 0
+        # at the detailed one).  An estimate is reported as one; VIOLATED
+        # is a verdict on placed bits.
+        placed = getattr(self, "detailed_result", None) is not None
         by = {}
         for r in rows:
             by.setdefault((r["cell"], r["layer_name"]), []).append(r)
@@ -1440,9 +1448,12 @@ class ReportsMixin:
             print(f"  LAYER_RESERVE: {cell} {lname}: {rs[0]['reserved']} "
                   f"track(s) reserved over {len(rs)} instance(s); the top "
                   f"uses {min(used)}..{max(used)} of them per instance; "
-                  f"own metal on reserved tracks: {min(own)}..{max(own)} "
-                  f"per instance"
-                  + ("" if max(own) == 0 else " — VIOLATED at "
+                  f"own metal on reserved tracks"
+                  + ("" if placed else
+                     " (abstract seat footprint — an estimate, the bits "
+                     "are read at the detailed stage)")
+                  + f": {min(own)}..{max(own)} per instance"
+                  + ("" if max(own) == 0 or not placed else " — VIOLATED at "
                      + ", ".join(r["inst"] for r in rs if r["own_hit"])))
 
     def _report_layer_demand(self, inst_filter="", layer_name=""):

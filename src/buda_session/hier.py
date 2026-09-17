@@ -4878,13 +4878,13 @@ class HierMixin:
                 skip_ids.add(iw.input.original_bundle.id)
         if not ref_ids:
             return None
-        blocked = [iw.input.original_bundle.instances[0]
-                   for _c, _t, iws in self._bottom_up_instance_groups()
-                   for iw in iws if iw.hier.blocked_tracks]
+        blocked = sorted({iw.input.original_bundle.instances[0]
+                          for _c, _t, iws in self._bottom_up_instance_groups()
+                          for iw in iws if iw.hier.blocked_tracks})
         if blocked:
             print(f"[LayerReserve] {len(blocked)} instance(s) solved in the "
                   f"global DNUTS run keep their reserved tracks as blocked "
-                  f"tracks: {', '.join(sorted(blocked)[:6])}"
+                  f"tracks: {', '.join(blocked[:6])}"
                   + (f", +{len(blocked) - 6} more" if len(blocked) > 6 else ""))
         return ref_ids, copy_specs, skip_ids
 

@@ -945,3 +945,25 @@ def test_an_instance_solved_in_the_global_run_keeps_the_reservation():
     s2, out2 = _nested(["set_bottom_up *"], line)
     assert "blocked tracks" not in out2
     assert all(not w.hier.blocked_tracks for w in s2.bundles)
+
+
+def test_the_abstract_stage_reports_own_metal_as_an_estimate():
+    """Before detailed NUTS the audit reads the ABSTRACT seat footprint —
+    conservative by design (bits or bits+1 tracks by phase), so a bus
+    seated flush against a reserved track reads as touching it while its
+    placed bits do not (E5's SoC: io_blk_cell 6 of 48 at the abstract
+    stage, 0 at the detailed one).  The abstract line says it is an
+    estimate and never says VIOLATED; the verdict is on placed bits."""
+    i = _DESIGN.index("run_hier_bundler depth 1")
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    _quiet(s, *_DESIGN[:i], "set_bottom_up top_cell", _LINE, *_DESIGN[i:],
+           "run_nuts")
+    out = _cmd(s, "check_design")
+    assert "own metal on reserved tracks (abstract seat footprint" in out, out
+    assert "VIOLATED" not in out
+    _quiet(s, "check_template_tracks on_mismatch independent",
+           "run_detailed_nuts")
+    out = _cmd(s, "check_design")
+    assert "own metal on reserved tracks: 0..0 per instance" in out, out
+    assert "abstract seat footprint" not in out
