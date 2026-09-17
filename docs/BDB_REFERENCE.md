@@ -1743,7 +1743,9 @@ extent is the open BDB's; a reservation typed BEFORE any BDB is open is
 bounded by its sign alone and REVALIDATED the moment one is opened (every
 held entry is, a restored one included — a cell another session resized
 since), an out-of-cell position dropped with a WARNING and an emptied entry
-removed.  Persisted in the open BDB (meta `layer_reserves`), restored by
+removed, and an entry naming a cell the opened BDB does not know — a typo,
+or another design's name — removed the same way rather than persisted where
+no template could enforce it.  Persisted in the open BDB (meta `layer_reserves`), restored by
 `open_bdb` with the share contract (typed entries win).  Derived from a routed top plan by
 [`derive_cell_layer_reserves`](script_reference/nuts.md#derive_cell_layer_reserves-apply-file-path-cells-ab);
 read back from Tcl with `buda::query reserves`.

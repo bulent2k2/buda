@@ -173,6 +173,40 @@ def test_a_position_typed_before_the_bdb_is_revalidated_at_open(tmp_path):
     assert "outside the cell's height (100) and are skipped: 1e+30" in buf.getvalue(), buf.getvalue()
 
 
+def test_a_cell_the_opened_bdb_does_not_know_is_dropped(tmp_path):
+    """The declaration refuses an unknown cell while a BDB is open, so an
+    entry naming one can only have been typed with no BDB (a typo, or a
+    name from another design) — and it used to survive the open silently,
+    persisted and answering `query reserves` with nothing able to enforce
+    it (Codex P2 on #936).  Dropped LOUD at the open; a restored row
+    naming a cell the file's design lacks goes the same way."""
+    bdb = tmp_path / "r.bdb"
+    _cmd(_session(), f"save_bdb {bdb}")
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    _quiet(s, f"source {_TRACKS}", "set_cell_layer_reserve top_cel M6 3",
+           "set_cell_layer_reserve top_cell M6 7")
+    out = _cmd(s, f"open_bdb {bdb}")
+    assert ("cell 'top_cel' is not in the opened BDB — its M6 reservation "
+            "(1 track(s)) is removed") in out, out
+    assert ("top_cel", 6) not in s._cell_layer_reserves
+    assert s._cell_layer_reserves[("top_cell", 6)] == (7.0,)
+    import json
+    assert set(json.loads(s.bdb.meta_get("layer_reserves", ""))) == {"top_cell"}
+    # a restored row for a cell the design lacks (a hand-edited file)
+    s.bdb.meta_set("layer_reserves", json.dumps({"ghost": {"6": [1.0]},
+                                                 "top_cell": {"6": [7.0]}}))
+    _cmd(s, f"save_bdb {bdb}")
+    s2 = buda_cli.BudaSession()
+    s2.no_viz = True
+    _quiet(s2, f"source {_TRACKS}")
+    out = _cmd(s2, f"open_bdb {bdb}")
+    assert "restored 2 persisted reservation(s)" in out, out
+    assert "cell 'ghost' is not in the opened BDB" in out, out
+    assert ("ghost", 6) not in s2._cell_layer_reserves
+    assert s2._cell_layer_reserves[("top_cell", 6)] == (7.0,)
+
+
 def test_a_derived_line_reproduces_the_track_exactly(tmp_path):
     """`:g` keeps six significant digits, so a large cell-local coordinate
     came back MOVED when the file was sourced — `1234567.5` as

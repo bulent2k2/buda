@@ -2321,15 +2321,33 @@ class HierMixin:
             return 0
         declared = set(self._layer_name_map.values())
         names = self._make_layer_names()
+        # An UNKNOWN cell is not the same as an unavailable extent (Codex
+        # P2 on #936): the declaration refuses a cell the open BDB does
+        # not know, so an entry naming one can only have been typed with
+        # no BDB open (or restored from a file another design wrote) —
+        # a typo that would otherwise persist and answer `query reserves`
+        # while no template could ever enforce it.  Dropped, loud.
+        known = ({cr.name for cr in self.bdb.all_cells()}
+                 | {c.cell for c in self.bdb.all_components()})
         n_dropped = 0
         for (cell, lid), pos in sorted(res.items()):
+            if cell not in known:
+                n_dropped += len(pos)
+                print(f"[LayerReserve] WARNING: cell '{cell}' is not in the "
+                      f"opened BDB — its {names.get(lid, f'L{lid}')} "
+                      f"reservation ({len(pos)} track(s)) is removed; "
+                      f"declare it once the cell exists")
+                del res[(cell, lid)]
+                getattr(self, "_cell_layer_reserves_restored",
+                        set()).discard((cell, lid))
+                continue
             if lid not in declared:
                 continue
             horiz = (self.layers.get_layer_dir(lid)
                      == buda.LayerDir.HORIZONTAL)
             extent = self._reserve_cell_extent(cell, horiz)
             if extent is None:
-                continue
+                continue      # a component-only cell with no cell row
             kept, dropped = self._reserve_in_extent(pos, extent)
             if not dropped:
                 continue
