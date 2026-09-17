@@ -85,9 +85,9 @@ struct TrackSegment : PlacedSegmentBase {
     // snap to the bounded side on real signal tracks.  Default = unbounded.
     double track_lo_bound = -std::numeric_limits<double>::infinity();
     double track_hi_bound =  std::numeric_limits<double>::infinity();
-    // A SEAT PIN's natural window.  A per-segment slide override exactly the
-    // segment's width (`plan.seg_slide_lo/hi` from a handed-down plan,
-    // `pin_plan`) fixes the abstract POSITION — every NUTS pass respects the
+    // A SEAT PIN's natural window.  A per-segment slide override FLAGGED as
+    // a seat (`plan.seg_slide_lo/hi` + `plan.seg_seat_pin`, both set by a
+    // handed-down plan, `pin_plan`) fixes the abstract POSITION — every NUTS pass respects the
     // interval, so the seat cannot move — but the same interval is also the
     // window DetailedNUTS admits bits from, and a width-wide window on a
     // rail-straddling seat holds one signal track fewer than the bits (the
@@ -285,6 +285,9 @@ struct NutsContext {
     // The candidates' OWN slide windows, override or not — what a seat
     // pin's natural window (TrackSegment::seat_nat) is cut from.
     std::map<std::pair<int,int>, std::pair<double,double>>   nat_slide_map;
+    // The (bundle, seg) keys whose slide override is a SEAT PIN
+    // (plan.seg_seat_pin): the only ones that get a natural window.
+    std::set<std::pair<int,int>>                             seat_pin_set;
     std::set<std::pair<int,int>>                             trunk_set;
     std::set<std::pair<int,int>>                             busterm_set;
     std::map<std::pair<int,int>, std::vector<SpanAdjConn>>   rev_conn_map;

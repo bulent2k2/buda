@@ -429,14 +429,18 @@ as a slide window NUTS must place inside — the width-wide window
 `[pos − w/2, pos + w/2]` around the previous session's track position, which
 reproduces it exactly (a POINT would be refused by the fit, which needs
 `hi − lo ≥ width`); `-` hands down no seat for that segment.  A window
-exactly the segment's width is a **seat pin** to NUTS: every pass respects
-the interval, so the seat cannot move — and the bit stage gets the
-segment's *natural* window (the candidate's own slide, trunk margin and
-boundary relax included: the window the previous session admitted its bits
-from, `TrackSegment.seat_nat`), not the pinned one, because a width-wide
-window on a rail-straddling seat holds one signal track fewer than the bits
-and stranded 32 of 85 bits at NQ = 8 (128 of 176 at NQ = 16) in the first
-6c measurement.
+`pin_plan` set is a **seat pin** to NUTS, flagged as one on the plan
+(`seg_seat_pin`, beside the window): every pass respects the interval, so
+the seat cannot move — and the bit stage gets the segment's *natural*
+window (the candidate's own slide, trunk margin and boundary relax
+included: the window the previous session admitted its bits from,
+`TrackSegment.seat_nat`), not the pinned one, because a width-wide window
+on a rail-straddling seat holds one signal track fewer than the bits and
+stranded 32 of 85 bits at NQ = 8 (128 of 176 at NQ = 16) in the first 6c
+measurement.  The flag is what makes it a seat, never the window's width:
+an `edit_set_slide` or explorer override of the same width is the user's
+window, and it bounds the bits exactly as that command documents (a
+bottom-up copy carries the natural window transformed with its seat).
 
 The entry is **held** until the candidate pool exists — a plan is sourced
 before bundling, like the budget it comes with — and applied at

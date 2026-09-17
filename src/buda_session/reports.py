@@ -2218,7 +2218,9 @@ class ReportsMixin:
         def _seat(s):
             return "-" if s is None else f"{fmt_pos(s[0])}:{fmt_pos(s[1])}"
 
-        return (f"pin_plan net:{_tok(l['net'])} {_tok(l['type'])} "
+        # The selector is quoted WHOLE ("net:foo bar"): the tokenizer honours
+        # a quote only where a token begins (Codex P2 on #939).
+        return (f"pin_plan {_tok('net:' + l['net'])} {_tok(l['type'])} "
                 f"uid {l['uid']} layers {','.join(l['layers'])} "
                 f"seats {','.join(_seat(s) for s in l['seats'])}")
 

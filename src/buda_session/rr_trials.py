@@ -72,6 +72,7 @@ class RRTrialsMixin:
                 w.plan.seg_net_pull = []
                 w.plan.seg_slide_lo = []
                 w.plan.seg_slide_hi = []
+                w.plan.seg_seat_pin = []
             if moved:
                 w.input.pinned_seg_layers = []
             asn = self.planner.replan_bundle(self.bundles, bid)
@@ -298,6 +299,7 @@ class RRTrialsMixin:
             w.plan.seg_net_pull = []
             w.plan.seg_slide_lo = []
             w.plan.seg_slide_hi = []
+            w.plan.seg_seat_pin = []
         if moved:
             # FORCED per-segment layers (`pinned_seg_layers`, from
             # `edit_commit pin` or a handed-down plan) apply to EVERY

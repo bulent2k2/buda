@@ -86,6 +86,7 @@ class NegotiateMixin:
             tw.plan.seg_net_pull = []
             tw.plan.seg_slide_lo = []
             tw.plan.seg_slide_hi = []
+            tw.plan.seg_seat_pin = []
         local_inj = self._translate_injections_to_cell(cell, cell_wrappers,
                                                        inj_recs)
         iters = (getattr(self, "_bu_local_iterations", None)

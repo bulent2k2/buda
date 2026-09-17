@@ -949,6 +949,7 @@ class ExplorerEditMixin:
             # load-bearing pin.
             w.plan.seg_slide_lo = slo
             w.plan.seg_slide_hi = shi
+            w.plan.seg_seat_pin = []      # a user's window, not a seat pin
             if applied:
                 self._edit_msg += f" (+{applied} slide window(s))"
             if dropped:

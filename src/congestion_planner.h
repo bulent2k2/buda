@@ -184,6 +184,17 @@ struct BundlePlan {
     // from its stub subset), and the jog is clamped to the trunk's stub extent.
     std::vector<double> seg_slide_lo;
     std::vector<double> seg_slide_hi;
+    // Per-segment SEAT-PIN flag (1 = the slide override above is a seat
+    // handed down by `pin_plan`, 0/absent = an ordinary override).  Only a
+    // flagged override hands DetailedNUTS the segment's NATURAL window
+    // (TrackSegment::seat_nat); an `edit_set_slide` / explorer override of
+    // the same width stays the bit stage's window too, as the command
+    // documents (Codex P1 on #939 — the flag replaces a width test, which
+    // read every width-wide override as a seat).  Indexed like seg_slide_*
+    // and honoured only where that override is present and the lengths
+    // match; every writer of seg_slide_* sets it (pin_plan to 1s, everyone
+    // else to empty).
+    std::vector<int> seg_seat_pin;
 };
 
 struct BundleHierMeta {

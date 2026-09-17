@@ -78,6 +78,7 @@ void apply_doglegs(std::vector<BundleWrapper>& b, const NUTSResult& nr) {
             hi != nr.dogleg_seg_slide_hi.end()) {
             w->plan.seg_slide_lo = lo->second;
             w->plan.seg_slide_hi = hi->second;
+            w->plan.seg_seat_pin.clear();   // a dogleg's windows, not seats
         }
     }
 }

@@ -266,6 +266,7 @@ static DoglegResult apply_dogleg(BundleWrapper& bw, int trunk_si,
     auto& shi = bw.plan.seg_slide_hi;
     slo.assign(topo.segments.size(), kNaN);
     shi.assign(topo.segments.size(), kNaN);
+    bw.plan.seg_seat_pin.clear();    // a dogleg's windows are not seat pins
     slo[trunk_si]    = orig_slide_lo;  shi[trunk_si]    = orig_slide_hi;  // left piece
     slo[piece_r_idx] = orig_slide_lo;  shi[piece_r_idx] = orig_slide_hi;  // right piece
     slo[jog_idx]     = x_lo;           shi[jog_idx]     = x_hi;           // jog footprint

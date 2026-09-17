@@ -3749,6 +3749,7 @@ class HierMixin:
             if tid in slo:
                 w.plan.seg_slide_lo = list(slo[tid])
                 w.plan.seg_slide_hi = list(shi[tid])
+                w.plan.seg_seat_pin = []          # a dogleg's, not a seat's
             # Per-instance adoption (transformed frames).
             n_inst = 0
             for iw in exp_map.get(tid, []):
@@ -4009,6 +4010,7 @@ class HierMixin:
             w.plan.seg_net_pull = []
             w.plan.seg_slide_lo = []
             w.plan.seg_slide_hi = []
+            w.plan.seg_seat_pin = []
             w.plan.seg_perp = []
         self._bu_dogleg_slot = {}
         self._bu_dogleg_originals = {}

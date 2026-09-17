@@ -972,6 +972,7 @@ class RipupMixin:
                          list(w.plan.seg_net_pull),
                          list(w.plan.seg_slide_lo),
                          list(w.plan.seg_slide_hi),
+                         list(w.plan.seg_seat_pin),
                          w.input.assigned_v_layer, w.input.assigned_h_layer,
                          list(w.input.pinned_seg_layers))
                         for w in templates}
@@ -1027,7 +1028,7 @@ class RipupMixin:
             if cap is None:
                 continue
             (sel, pinned, ncand, seg_layers, seg_perp,
-             seg_net_pull, seg_slide_lo, seg_slide_hi, av, ah,
+             seg_net_pull, seg_slide_lo, seg_slide_hi, seg_seat_pin, av, ah,
              pinned_layers) = cap
             cands = w.input.candidates
             while len(cands) > ncand:    # drop trial-appended dogleg splits
@@ -1040,6 +1041,7 @@ class RipupMixin:
             w.plan.seg_net_pull = seg_net_pull
             w.plan.seg_slide_lo = seg_slide_lo
             w.plan.seg_slide_hi = seg_slide_hi
+            w.plan.seg_seat_pin = seg_seat_pin
             w.input.assigned_v_layer = av
             w.input.assigned_h_layer = ah
             w.input.pinned_seg_layers = pinned_layers
@@ -1095,6 +1097,7 @@ class RipupMixin:
         tw.plan.seg_net_pull = []
         tw.plan.seg_slide_lo = []
         tw.plan.seg_slide_hi = []
+        tw.plan.seg_seat_pin = []
         iters = (getattr(self, "_bu_local_iterations", None)
                  or self._planner_iterations)
         with contextlib.redirect_stdout(io.StringIO()), \
@@ -1137,6 +1140,7 @@ class RipupMixin:
             iw.plan.seg_net_pull = []
             iw.plan.seg_slide_lo = []
             iw.plan.seg_slide_hi = []
+            iw.plan.seg_seat_pin = []
             iw.hier.locked = (tw.input.topology_pinned
                               and bool(tw.input.pinned_seg_layers))
 

@@ -440,6 +440,8 @@ def cmd_edit_commit(session, cmd, args, cmd_line):
             applied += 1
         w.plan.seg_slide_lo = slo
         w.plan.seg_slide_hi = shi
+        w.plan.seg_seat_pin = []      # a user's window, NOT a seat pin: it
+        #                               bounds the bits too (Codex P1 on #939)
         if applied:
             print(f"  Applied {applied} slide window(s) to the plan "
                   f"(run_nuts honors them).")

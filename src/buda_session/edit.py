@@ -79,6 +79,7 @@ class EditMixin:
             if slo and bid in slo:
                 w.plan.seg_slide_lo = list(slo[bid])
                 w.plan.seg_slide_hi = list(shi[bid])
+                w.plan.seg_seat_pin = []          # a dogleg's, not a seat's
 
     def _reset_doglegs(self):
         """Discard any adopted dogleg before re-planning: drop the appended split
@@ -108,6 +109,7 @@ class EditMixin:
             w.plan.seg_net_pull = []
             w.plan.seg_slide_lo = []
             w.plan.seg_slide_hi = []
+            w.plan.seg_seat_pin = []
             w.plan.seg_perp = []
         self._dogleg_originals = {}
         self._dogleg_slot = {}
@@ -877,6 +879,7 @@ class EditMixin:
         w.plan.seg_net_pull   = []
         w.plan.seg_slide_lo   = []
         w.plan.seg_slide_hi   = []
+        w.plan.seg_seat_pin = []
         bid = w.input.original_bundle.id
         self._dogleg_slot.pop(bid, None)
         self._dogleg_originals.pop(bid, None)
@@ -919,6 +922,7 @@ class EditMixin:
         w.plan.seg_net_pull = []
         w.plan.seg_slide_lo = []
         w.plan.seg_slide_hi = []
+        w.plan.seg_seat_pin = []
         w.plan.seg_perp = []
 
     @staticmethod
@@ -1213,6 +1217,7 @@ class EditMixin:
                     w.plan.seg_net_pull = []
                     w.plan.seg_slide_lo = []
                     w.plan.seg_slide_hi = []
+                    w.plan.seg_seat_pin = []
                     w.plan.seg_perp = []
                 w.input.pinned_group = list(members)
                 w.input.topology_pinned = False
@@ -1302,6 +1307,7 @@ class EditMixin:
                 # pin: a freed bundle re-seats where NUTS puts it.
                 w.plan.seg_slide_lo = []
                 w.plan.seg_slide_hi = []
+                w.plan.seg_seat_pin = []
         found = False
         for w in self.bundles:
             if w.input.original_bundle.id == bid:
@@ -1353,6 +1359,7 @@ class EditMixin:
             if w.input.original_bundle.id in targets:
                 w.plan.seg_slide_lo = []
                 w.plan.seg_slide_hi = []
+                w.plan.seg_seat_pin = []
         for e in self._plan_pins:
             if e.get("applied") and e.get("bid") in targets:
                 e.update(applied=False, skipped=True, why="unpinned")
@@ -1523,10 +1530,17 @@ class EditMixin:
             slo = [nan if s is None else s[0] for s in seats]
             shi = [nan if s is None else s[1] for s in seats]
 
-            def _set(x, lids=lids, slo=slo, shi=shi):
+            # The windows are FLAGGED as seats (plan.seg_seat_pin): that,
+            # not their width, is what hands the bit stage the natural
+            # window — an edit_set_slide override of the same width keeps
+            # its window at the bit stage too (Codex P1 on #939).
+            flags = [0 if s is None else 1 for s in seats]
+
+            def _set(x, lids=lids, slo=slo, shi=shi, flags=flags):
                 x.input.pinned_seg_layers = list(lids)
                 x.plan.seg_slide_lo = list(slo)
                 x.plan.seg_slide_hi = list(shi)
+                x.plan.seg_seat_pin = list(flags)
 
             _set(w)
             if e.get("stage") != "post":

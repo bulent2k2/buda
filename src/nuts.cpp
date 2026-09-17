@@ -71,7 +71,8 @@ static void build_nuts_maps(
     std::map<std::pair<int,int>, std::vector<double>>&            busterm_face_map,
     std::map<std::pair<int,int>, std::vector<PassthruCrossing>>&  passthru_map,
     std::map<std::pair<int,int>, std::pair<double,double>>&       pull_win_map,
-    std::map<std::pair<int,int>, std::pair<double,double>>*       nat_slide_map = nullptr)
+    std::map<std::pair<int,int>, std::pair<double,double>>*       nat_slide_map = nullptr,
+    std::set<std::pair<int,int>>*                                 seat_pin_set = nullptr)
 {
     std::set<std::pair<int,int>> jog_set;   // dogleg jogs: excluded from alignment
     // Pass 1 — nominal perpendicular position from the topology.
@@ -121,6 +122,10 @@ static void build_nuts_maps(
         const bool np_ok    = (bw.plan.seg_net_pull.size() == conn_segs.size());
         const bool slide_ok = (bw.plan.seg_slide_lo.size() == conn_segs.size() &&
                                bw.plan.seg_slide_hi.size() == conn_segs.size());
+        // The seat-pin flag rides the override it describes: honoured only
+        // where the override is present and the flag array matches too.
+        const bool seat_ok  = slide_ok &&
+                              bw.plan.seg_seat_pin.size() == conn_segs.size();
         // seg_perp is planner-managed and normally matches the topology; guard it
         // too so a stale dogleg seg_perp can never be applied to a different one.
         const bool perp_ok  = (bw.plan.seg_perp.size() == conn_segs.size());
@@ -131,9 +136,11 @@ static void build_nuts_maps(
 
             // A dogleg pins its sub-trunks' / jog's slide range (ConnTopology
             // would recompute a narrower range on the split topology); honor it.
-            if (slide_ok && !std::isnan(bw.plan.seg_slide_lo[si]))
+            if (slide_ok && !std::isnan(bw.plan.seg_slide_lo[si])) {
                 slide_map[key] = { bw.plan.seg_slide_lo[si], bw.plan.seg_slide_hi[si] };
-            else
+                if (seat_pin_set && seat_ok && bw.plan.seg_seat_pin[si])
+                    seat_pin_set->insert(key);
+            } else
                 slide_map[key] = { static_cast<double>(cs.perp_lo),
                                    static_cast<double>(cs.perp_hi) };
             // The candidate's OWN slide window, override or not: what a seat
@@ -416,7 +423,8 @@ static void apply_interval_constraints(
     const std::set<std::pair<int,int>>&                           trunk_set,
     const std::map<std::pair<int,int>, int>&                      net_pull_map,
     int only_layer = -1,
-    const std::map<std::pair<int,int>, std::pair<double,double>>* nat_slide_map = nullptr)
+    const std::map<std::pair<int,int>, std::pair<double,double>>* nat_slide_map = nullptr,
+    const std::set<std::pair<int,int>>* seat_pin_set = nullptr)
 {
     constexpr double kSentinel = 5e8;
     for (auto& ts : segments) {
@@ -425,7 +433,10 @@ static void apply_interval_constraints(
 
         // The window this segment would have WITHOUT a slide override — kept
         // for a seat pin (TrackSegment::seat_nat_lo/hi), since the pinned
-        // interval is exact for the seat and too tight for the bits.
+        // interval is exact for the seat and too tight for the bits.  A seat
+        // pin is what `pin_plan` FLAGGED (plan.seg_seat_pin), never inferred
+        // from the override's width: an `edit_set_slide` override the same
+        // width is the user's window for the bits too (Codex P1 on #939).
         double nat_lo = ts.interval_lo, nat_hi = ts.interval_hi;
         bool seat_pin = false;
         auto sit = slide_map.find(key);
@@ -433,8 +444,8 @@ static void apply_interval_constraints(
             auto [slo, shi] = sit->second;
             if (slo > -kSentinel) ts.interval_lo = std::max(ts.interval_lo, slo);
             if (shi <  kSentinel) ts.interval_hi = std::min(ts.interval_hi, shi);
-            seat_pin = (slo > -kSentinel && shi < kSentinel &&
-                        shi - slo <= ts.width + 1e-6);
+            seat_pin = (seat_pin_set && seat_pin_set->count(key) &&
+                        slo > -kSentinel && shi < kSentinel);
         }
         if (seat_pin && nat_slide_map) {
             // The window without the override: the candidate's own slide,
@@ -1428,7 +1439,8 @@ static NutsContext build_context(const std::vector<BundleWrapper>& bundles,
     build_nuts_maps(bundles, floorplan, ctx.pull_map, ctx.slide_map,
                     ctx.trunk_set, ctx.busterm_set, ctx.rev_conn_map,
                     ctx.net_pull_map, ctx.align_map, ctx.busterm_face_map,
-                    ctx.passthru_map, ctx.pull_win_map, &ctx.nat_slide_map);
+                    ctx.passthru_map, ctx.pull_win_map, &ctx.nat_slide_map,
+                    &ctx.seat_pin_set);
     for (auto& ts : segments) {
         auto bf = ctx.busterm_face_map.find({ts.bundle_id, ts.seg_idx});
         if (bf != ctx.busterm_face_map.end()) ts.busterm_faces = bf->second;
@@ -1443,7 +1455,7 @@ static NutsContext build_context(const std::vector<BundleWrapper>& bundles,
     if (prep) {
         apply_interval_constraints(segments, ctx.slide_map, ctx.trunk_set,
                                    ctx.net_pull_map, only_layer,
-                                   &ctx.nat_slide_map);
+                                   &ctx.nat_slide_map, &ctx.seat_pin_set);
         relax_boundary_intervals(segments, ctx.pull_map, ctx.net_pull_map,
                                  ctx.busterm_set, only_layer);
         // AFTER the relax, deliberately: relax widens an interval OUTWARD by a
@@ -1963,6 +1975,11 @@ TrackSegment transform_track_segment(const TrackSegment& ts,
     const double i_lo = perp(ts.interval_lo), i_hi = perp(ts.interval_hi);
     out.interval_lo = std::min(i_lo, i_hi);
     out.interval_hi = std::max(i_lo, i_hi);
+    // A seat pin's natural window goes with the seat (a reflection swaps
+    // its ends like the interval's; NaN rides through).
+    const double n_lo = perp(ts.seat_nat_lo), n_hi = perp(ts.seat_nat_hi);
+    out.seat_nat_lo = std::min(n_lo, n_hi);
+    out.seat_nat_hi = std::max(n_lo, n_hi);
     out.pull_target = perp(ts.pull_target);
     const double b_lo = perp(ts.track_lo_bound);
     const double b_hi = perp(ts.track_hi_bound);
@@ -1990,6 +2007,8 @@ TrackSegment offset_track_segment(const TrackSegment& ts, int dx, int dy,
     out.track_position += perp;                // NaN + perp stays NaN
     out.interval_lo += perp;
     out.interval_hi += perp;
+    out.seat_nat_lo += perp;                   // NaN + perp stays NaN
+    out.seat_nat_hi += perp;
     if (!std::isnan(out.pull_target))    out.pull_target    += perp;
     if (std::isfinite(out.track_lo_bound)) out.track_lo_bound += perp;
     if (std::isfinite(out.track_hi_bound)) out.track_hi_bound += perp;

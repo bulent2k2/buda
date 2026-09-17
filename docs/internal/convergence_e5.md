@@ -562,7 +562,9 @@ whose loci moved), the planner's layer per segment, forced, and each
 segment's abstract seat as the width-wide slide window
 `[pos − w/2, pos + w/2]` NUTS must place inside (a *point* would be
 refused by the fit, which needs `hi − lo ≥ width`; the width-wide window
-reproduces the position exactly, and to NUTS it is a *seat pin*: every
+reproduces the position exactly, and to NUTS it is a *seat pin*, flagged
+as one on the plan rather than read off its width, so a user's own
+`edit_set_slide` window of that width keeps bounding the bits: every
 pass respects the interval, so the seat cannot move — while the bit stage
 gets the segment's *natural* window, the candidate's own slide cut like
 the source's, trunk margin and boundary relax included, because the first

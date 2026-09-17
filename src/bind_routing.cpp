@@ -838,7 +838,8 @@ void bind_routing(py::module_& m) {
         .def_readwrite("seg_perp",                &BundlePlan::seg_perp)
         .def_readwrite("seg_net_pull",            &BundlePlan::seg_net_pull)
         .def_readwrite("seg_slide_lo",            &BundlePlan::seg_slide_lo)
-        .def_readwrite("seg_slide_hi",            &BundlePlan::seg_slide_hi);
+        .def_readwrite("seg_slide_hi",            &BundlePlan::seg_slide_hi)
+        .def_readwrite("seg_seat_pin",            &BundlePlan::seg_seat_pin);
 
     py::class_<BundleHierMeta>(m, "BundleHierMeta")
         .def(py::init<>())

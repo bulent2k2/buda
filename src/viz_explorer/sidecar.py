@@ -162,6 +162,7 @@ class ExplorerSidecarMixin:
             wrapper.plan.seg_net_pull = []
             wrapper.plan.seg_slide_lo = []
             wrapper.plan.seg_slide_hi = []
+            wrapper.plan.seg_seat_pin = []
             wrapper.plan.seg_perp = []
 
         wrapper.plan.selected_topology_index = self.idx
@@ -237,6 +238,7 @@ class ExplorerSidecarMixin:
             wrapper.plan.seg_net_pull = []
             wrapper.plan.seg_slide_lo = []
             wrapper.plan.seg_slide_hi = []
+            wrapper.plan.seg_seat_pin = []
 
         # Clear the LIVE group pin too (the sidecar entry — if any — was popped
         # by the old_sel block above): 'x' un-pins a group-pinned bundle.
@@ -247,6 +249,7 @@ class ExplorerSidecarMixin:
             w.plan.seg_net_pull = []
             w.plan.seg_slide_lo = []
             w.plan.seg_slide_hi = []
+            w.plan.seg_seat_pin = []
             w.plan.seg_perp = []
 
         self._draw()

@@ -199,6 +199,7 @@ class ExplorerNavMixin:
             w.plan.seg_net_pull = []
             w.plan.seg_slide_lo = []
             w.plan.seg_slide_hi = []
+            w.plan.seg_seat_pin = []
             w.plan.seg_perp = []
         w.input.pinned_group = list(members)
         w.input.topology_pinned = False

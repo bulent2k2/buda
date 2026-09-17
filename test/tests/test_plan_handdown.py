@@ -403,3 +403,96 @@ def test_unpin_all_frees_the_plans_seats_and_bookkeeping(tmp_path):
     assert not w.input.topology_pinned
     _cmd(b, "run_nuts")
     assert "[PlanPin] seated" not in _cmd(b, "run_nuts")
+
+
+# ── Codex round 3 on #939 ────────────────────────────────────────────────
+
+def test_a_users_own_window_is_not_a_seat_pin():
+    """Codex P1 on #939: a seat pin was inferred from the override's WIDTH,
+    so an `edit_set_slide` / explorer override exactly the segment's width
+    also handed the bits the natural window — outside the window the
+    command documents as a NUTS constraint.  A seat pin is what `pin_plan`
+    FLAGS (`plan.seg_seat_pin`); a user's window of the same width bounds
+    the bits too."""
+    a, _ = _run(tail=("run_nuts",))
+    uid, layers, seats, ttype = _top(a)
+    w = [w for w in a.bundles if not w.input.original_bundle.instances][0]
+    bid = w.input.original_bundle.id
+    # The user's own window, exactly a seat's width, through the edit
+    # session (what edit_commit writes: the window with NO seat flag).
+    _cmd(a, f"edit_topology {bid} {w.plan.selected_topology_index + 1}")
+    # (a seat's width, inside the segment's slide range [110, 190])
+    assert "applies at edit_commit" in _cmd(a, "edit_set_slide 0 120 154")
+    out = _cmd(a, "edit_commit pin")
+    assert "Applied 1 slide window(s)" in out, out
+    assert list(w.plan.seg_slide_lo) == [120.0] and \
+        list(w.plan.seg_seat_pin) == []
+    _cmd(a, "run_nuts")
+    (ta,) = [t for t in a.nuts_result.segments if t.bundle_id == bid]
+    assert (ta.interval_lo, ta.interval_hi) == (120.0, 154.0)
+    assert ta.seat_nat_lo != ta.seat_nat_lo             # NaN: not a seat pin
+    _cmd(a, "check_template_tracks on_mismatch independent")
+    _cmd(a, "run_detailed_nuts")
+    for _, _, _, pos in _bits(a):
+        assert 120.0 <= pos <= 154.0, pos                 # the bits stay inside
+    # The same window handed down by pin_plan IS a seat pin: flagged, and
+    # the bits get the natural window.
+    b, _ = _run(f"pin_plan net:x_0 {ttype} uid {uid} layers M6 seats 120:154",
+                tail=("run_nuts",))
+    wb = [w for w in b.bundles if not w.input.original_bundle.instances][0]
+    assert list(wb.plan.seg_seat_pin) == [1]
+    (tb,) = [t for t in b.nuts_result.segments if t.bundle_id == bid]
+    assert (tb.interval_lo, tb.interval_hi) == (120.0, 154.0)
+    assert tb.seat_nat_lo == tb.seat_nat_lo             # set
+    assert tb.seat_nat_hi - tb.seat_nat_lo > tb.width
+    # and unpinning forgets the flag with the window
+    _cmd(b, "unpin_topology x_0")
+    assert list(wb.plan.seg_seat_pin) == [] and list(wb.plan.seg_slide_lo) == []
+
+
+def test_a_copy_carries_the_natural_window_with_its_seat():
+    """Codex P2 on #939: `transform_track_segment` / `offset_track_segment`
+    moved the interval, bounds and position into the copy's frame and left
+    `seat_nat` in the source's, so a reflected or translated instance's
+    bits were admitted from the wrong place."""
+    ts = buda.TrackSegment()
+    ts.bundle_id, ts.seg_idx, ts.layer = 7, 0, 6
+    ts.horiz = True
+    ts.span_lo, ts.span_hi = 100.0, 300.0
+    ts.interval_lo, ts.interval_hi = 40.0, 74.0
+    ts.track_position, ts.width = 57.0, 34.0
+    ts.seat_nat_lo, ts.seat_nat_hi = 20.0, 120.0
+    # translate: N at (0,0) -> N at (1000, 500): every y moves by 500
+    n = buda.transform_track_segment(ts, "N", 400, 200, 0, 0, 1000, 500, 8)
+    assert (n.interval_lo, n.interval_hi) == (540.0, 574.0)
+    assert (n.seat_nat_lo, n.seat_nat_hi) == (520.0, 620.0)
+    o = buda.offset_track_segment(ts, 1000, 500, 8)
+    assert (o.seat_nat_lo, o.seat_nat_hi) == (520.0, 620.0)
+    # mirror the perpendicular axis (FN: y -> 200 - y) at the same origin:
+    # the ends swap and the window is re-ordered like the interval's
+    s = buda.transform_track_segment(ts, "FN", 400, 200, 0, 0, 0, 0, 8)
+    assert (s.interval_lo, s.interval_hi) == (126.0, 160.0)
+    assert (s.seat_nat_lo, s.seat_nat_hi) == (80.0, 180.0)
+    # no seat pin: NaN rides through both
+    ts.seat_nat_lo = ts.seat_nat_hi = float("nan")
+    n = buda.transform_track_segment(ts, "N", 400, 200, 0, 0, 1000, 500, 8)
+    o = buda.offset_track_segment(ts, 1000, 500, 8)
+    assert n.seat_nat_lo != n.seat_nat_lo and o.seat_nat_lo != o.seat_nat_lo
+
+
+def test_the_plan_line_quotes_the_selector_whole():
+    """Codex P2 on #939: a net name with whitespace was written
+    `net:"foo bar"`, which the tokenizer (a quote counts only where a token
+    BEGINS) splits in two, so the plan could not be replayed."""
+    from buda_script import split_quoted_args
+    line = buda_cli.BudaSession._top_plan_line(
+        {"net": "foo bar", "type": "TRUNK_H@y100", "uid": "abc",
+         "layers": ["M6"], "seats": [(50.0, 84.0)]})
+    assert line.startswith('pin_plan "net:foo bar" TRUNK_H@y100 '), line
+    toks = split_quoted_args(line)
+    assert toks[:2] == ["net:foo bar", "TRUNK_H@y100"], toks
+    # a plain name is unquoted, as before
+    line = buda_cli.BudaSession._top_plan_line(
+        {"net": "x_0", "type": "I_H", "uid": "abc", "layers": ["M6"],
+         "seats": [None]})
+    assert line == "pin_plan net:x_0 I_H uid abc layers M6 seats -", line

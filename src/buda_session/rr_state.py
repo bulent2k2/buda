@@ -66,6 +66,7 @@ class RRStateMixin:
                       list(w.plan.seg_layers), list(w.plan.seg_perp),
                       list(w.plan.seg_net_pull),
                       list(w.plan.seg_slide_lo), list(w.plan.seg_slide_hi),
+                      list(w.plan.seg_seat_pin),
                       w.input.assigned_v_layer, w.input.assigned_h_layer,
                       list(w.input.pinned_seg_layers))
                      for w in self.bundles},
@@ -109,7 +110,7 @@ class RRStateMixin:
             if cap is None:
                 continue
             (sel, pinned, ncand, seg_layers, seg_perp,
-             seg_net_pull, seg_slide_lo, seg_slide_hi, av, ah,
+             seg_net_pull, seg_slide_lo, seg_slide_hi, seg_seat_pin, av, ah,
              pinned_layers) = cap
             cands = w.input.candidates
             # RE-GROW a pool a rejected full-replan-fallback trial SHRANK:
@@ -149,6 +150,7 @@ class RRStateMixin:
             w.plan.seg_net_pull = seg_net_pull
             w.plan.seg_slide_lo = seg_slide_lo
             w.plan.seg_slide_hi = seg_slide_hi
+            w.plan.seg_seat_pin = seg_seat_pin
             w.input.assigned_v_layer = av
             w.input.assigned_h_layer = ah
             w.input.pinned_seg_layers = pinned_layers
