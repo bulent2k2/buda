@@ -4903,10 +4903,19 @@ class HierMixin:
         unstamped by then — the audit read their own metal on the
         reservation.  Cheap: one orientation detection per template and
         one effective-reservation lookup per (context, reference)."""
+        exp_map = getattr(self, "_hier_expansion_map", None) or {}
         res = getattr(self, "_cell_layer_reserves", None) or {}
         if not any(pos for pos in res.values()) or self.bdb is None:
+            # Nothing reserved any more (`set_cell_layer_reserve * off`
+            # after a stamped run): a stamp left behind would keep
+            # excluding tracks the reservation no longer names and could
+            # strand bits (Codex P2 on #937) — clear every one.
+            for iws in exp_map.values():
+                for iw in iws:
+                    if iw.hier.blocked_tracks:
+                        iw.hier.blocked_tracks = {}
+            self._reserve_stamp_memo = set()
             return
-        exp_map = getattr(self, "_hier_expansion_map", None) or {}
         if not exp_map:
             return
         ref_ids, _copies, skip_ids = plan if plan else (set(), [], set())

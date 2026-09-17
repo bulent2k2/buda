@@ -1819,7 +1819,13 @@ def _reserve_uniform(session, args, usage):
                   "set_bottom_up-marked cells and none is marked — mark "
                   "them first, or name a cell"); return
     else:
-        if not any(cr.name == args[0] for cr in session.bdb.all_cells()):
+        # A cell is known by its cell-table row OR by a placed component of
+        # it (an imported DEF instance whose LEF wrote no cell row): the
+        # positional form and _reserve_uniform_positions both fall back to
+        # the component's bbox as the frame (Codex P2 on #937).
+        known = ({cr.name for cr in session.bdb.all_cells()}
+                 | {c.cell for c in session.bdb.all_components()})
+        if args[0] not in known:
             print(f"Error: set_cell_layer_reserve: unknown cell '{args[0]}'")
             return
         cells = [args[0]]

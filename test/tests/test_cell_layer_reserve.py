@@ -391,6 +391,12 @@ def test_a_component_only_cell_is_bounded_by_its_placed_bbox(tmp_path):
     assert "outside the cell's width (300)" in \
         _cmd(s, "set_cell_layer_reserve lone_cell M5 301"), "declaration"
     assert "reserves 1 track(s)" in _cmd(s, "set_cell_layer_reserve lone_cell M6 100")
+    # the uniform form reaches the same component fallback (Codex P2 on
+    # #937: it validated the name against the cell table alone)
+    out = _cmd(s, "set_cell_layer_reserve lone_cell M6 uniform 2")
+    assert "reserves 2 track(s)" in out and "uniform 2" in out, out
+    assert all(0 <= p <= 120 for p in s._cell_layer_reserves[("lone_cell", 6)])
+    _cmd(s, "set_cell_layer_reserve lone_cell M6 100")
     s.bdb.meta_set("layer_reserves", json.dumps({"lone_cell": {"6": [100, 150]}}))
     _cmd(s, f"save_bdb {bdb}")
     s2 = buda_cli.BudaSession()
@@ -940,6 +946,16 @@ def test_an_instance_solved_in_the_global_run_keeps_the_reservation():
     assert len(after["u2"]) == 8 and s.detailed_result.num_unplaced == 0
     rows = s._layer_reserve_audit()
     assert [(r["inst"], r["own_hit"]) for r in rows] == [("u1", 0), ("u2", 0)], rows
+    # removing the reservation clears the stamp at the next plan call —
+    # a stale list would keep excluding tracks the reservation no longer
+    # names (Codex P2 on #937) — and the re-solve is free to use them
+    _quiet(s, "set_cell_layer_reserve * off")
+    with contextlib.redirect_stdout(io.StringIO()):
+        s._bottom_up_dnuts_plan()
+    assert all(not w.hier.blocked_tracks for w in s.bundles)
+    _quiet(s, "run_detailed_nuts")
+    assert s.detailed_result.num_unplaced == 0
+    assert len(_own_tracks(s, "top_cell", 6)["u2"]) == 8
     # the same design aligned (u2 back on the phase) carries no blocked
     # tracks anywhere: the copy honours the reference's keepouts
     s2, out2 = _nested(["set_bottom_up *"], line)
