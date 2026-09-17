@@ -271,22 +271,41 @@ reservation reaches a **clean endpoint with healers off at NQ = 2, 8 and
 16** (one, one and two informed rounds) where E1's share reached none and
 the blind band needed two rounds and never cleaned NQ = 8, reserving
 3.2–8.1× the top's used tracks (the union over a template's instances —
-exact, 1.00×, on the mesh control).  But the top lands on the reserved
-tracks only **6–11 %** of the time: nothing steers it there, so the
-reservation works by DISPLACING the block's own buses off the region the
-top wants, not as a corridor the top uses — which is also why every second
-informed round strands the cores' bus again (757 / 1,444 / 2,864) and the
-loop has no fixpoint.  With the vehicle's own healing the derived arm is clean at every
+exact, 1.00×, on the mesh control).  With the vehicle's own healing the derived arm is clean at every
 size in one informed round (in one of its two arms) and its NQ = 16 route
 is 11–14 % less wire than the blind band's — the first size at which the
 informed arm beats the blind one on the route itself — while the guess is
 healed clean at NQ = 2–8 at 10–30× the blind round's healing time and
-never at NQ = 16.  The primitive is half built: the top-side half — a
-preference for reserved tracks in the hier planner and NUTS over governed
-instances — is the next build item (6b).  Running it also closed an
-enforcement gap the audit found (an instance solved in the global DNUTS
-run under `on_mismatch independent` saw no reservation; it now carries the
-tracks as blocked tracks).
+never at NQ = 16.  Running it also closed an enforcement gap the audit
+found (an instance solved in the global DNUTS run under `on_mismatch
+independent` saw no reservation; it now carries the tracks as blocked
+tracks).
+
+The write-up first read the top as landing on the reserved tracks only
+**6–11 %** of the time and blamed the loop's missing fixpoint on that.
+**That number was a mis-measurement** — the scratch script divided the
+hits by the instance's *supply* rather than by the top's own tracks over
+it — and is corrected in the write-up: read right, the unsteered top lands
+on a derived reservation **0.65–0.97** of the time on the SoC (the
+reservation is the union over a template's instances and covers half the
+supply) and **0.00** on the mesh, where the top's seats shift by a track
+phase between rounds.  **Build item 6b, the top-side half, was built
+against the wrong number and measured** (2026-09-17, `set_reserve_steer`,
+off by default): a bus crossing a governed instance is seated on the
+reserved tracks by NUTS and lands its bits there first in DetailedNUTS,
+gated on the corridor being able to host it.  On the mesh it takes the hit
+rate from 0.00 to 1.00 at byte-identical wire; on the SoC it lifts
+0.65–0.97 to 0.70–1.00 and makes the informed rounds *dirtier* at NQ ≥ 4
+(E5's clean healerless NQ = 8 top-down round goes to 80 unplaced, the
+NQ = 16 top-down round from 170 to 390 at +11 % wire), because every
+crossing bus is pulled into the union corridor and the packing pays for
+tracks the top would have hit anyway — so it ships as a lever, not a
+default.  What the informed loop lacks is **plan stability**: on the
+recorded NQ = 2 rounds, 4 of the 13 top-level bundles keep their topology
+between the blind round and the informed one and none keeps its seat, so
+the corridor a derivation names is the previous top's and the next top
+plans elsewhere.  A track preference cannot supply that; the next build
+item is the top's plan handed down with the reservation (6c).
 
 ## The judge must not be BUDA
 
@@ -373,14 +392,28 @@ every "one round" measured rather than assumed.
    verdict → ~~E1 re-run against it → E5~~ **E5 run** (2026-09-17,
    [convergence_e5.md](convergence_e5.md); its `td`/`bu` rows ARE E1
    re-run against the positional primitive): clean healerless at three of
-   four sizes where the share cleaned none, exact on the mesh, and the top
-   uses the reserved tracks 6–11 % of the time.
-   **6b — the top-side half of the reservation**: the hier planner and
-   NUTS PREFER a governed instance's reserved tracks for the bundles
-   crossing it (a negative cost on reserved tracks, or a hard restriction
-   of the crossing bundles to them), so a reserved track is a track the
-   top uses and the informed loop has a fixpoint; E5 re-run against it.
-   Ahead of the fixed-pin work.
+   four sizes where the share cleaned none, exact on the mesh; the
+   unsteered top uses the reserved tracks 0.65–0.97 of the time on the SoC
+   and 0.00 on the mesh (the write-up's first reading, 6–11 %, was a
+   mis-measurement, corrected in place).
+   ~~**6b — the top-side half of the reservation**~~ **BUILT and measured**
+   (2026-09-17, `set_reserve_steer`, off by default): NUTS seats a
+   crossing bus on a governed instance's reserved tracks and DetailedNUTS
+   lands its bits there first, where the corridor can host the bus.  The
+   mesh: 0.00 → 1.00 at no cost.  The SoC: 0.65–0.97 → 0.70–1.00 with the
+   informed rounds dirtier at NQ ≥ 4 — the hit rate was never what the
+   loop lacked.  A lever, not a default; the planner's own term (a
+   negative cost on reserved bands) was not built, since a preference
+   cannot restore a plan the templates' new charges have moved.
+   **6c — the top's plan handed down with the reservation**: the informed
+   round re-plans the top from scratch after the templates moved (NQ = 2:
+   4 of 13 top-level topologies survive, no seat does), which is why the
+   loop has no fixpoint whatever the top prefers; hand the derivation
+   round's top selections, layers and seats down as pins (the machinery
+   `select_topology` / the sidecar already have), so the informed round
+   routes the blocks under the SAME top the reservation came from, and
+   measure whether a round is then a fixpoint.  Ahead of the fixed-pin
+   work.
 7. **Fixed-pin primitive** — a busterm restricted to a face, then to a window
    on a face — as the interoperability piece for the partner evaluation (E3),
    last, since nothing in-house depends on it.
