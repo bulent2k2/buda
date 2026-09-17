@@ -1150,8 +1150,19 @@ exactly the bundles the reserve derivation read as *demand* on those
 cells; a bundle framed inside a scoped instance is re-solved under the
 derived budget and is not handed down.  A seat is the width-wide window
 `[pos − w/2, pos + w/2]` (see `pin_plan` for why not a point); an unplaced
-segment hands down `-`.  Needs a NUTS result.  The file carries a
-`# scope:` header and `# bundles: N`.  The loop driver runs it under
+segment hands down `-`.  A bundle whose NUTS run **adopted a dogleg** is
+handed down as its **pre-split** candidate: the adopted split is an
+appended, geometry-mutated copy no fresh pool holds, and its layers and
+seats index two segments the shape does not have, so a line written from
+it could never replay (the type spec would land on the unsplit candidate
+and the segment-count guard drop every layer and seat).  The split keeps
+the original segment indices (the trunk is rewritten in place as the left
+piece, the right piece and the jog are appended), so the pre-split
+candidate's layers are the first `nseg` of the split's and every seat but
+the split trunk's reproduces — that one is `-`, since the next session's
+NUTS re-derives the dogleg from the same cycle; the note names how many.
+Needs a NUTS result.  The file carries a `# scope:` header and
+`# bundles: N`.  The loop driver runs it under
 `converge.tcl -handdown`, whose table then carries the `plan` (pins applied,
 seats honoured) and `fixpoint` (a round's derived budget equal to the one it
 ran under) columns.

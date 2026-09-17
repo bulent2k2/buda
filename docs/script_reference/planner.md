@@ -445,7 +445,11 @@ bottom-up copy carries the natural window transformed with its seat).
 The entry is **held** until the candidate pool exists — a plan is sourced
 before bundling, like the budget it comes with — and applied at
 `run_planner` / `run_planner hier` (`[PlanPin] N of M handed-down plan(s)
-applied`), or at once when typed after generation.  In a hier session an
+applied`), AFTER the selections sidecar's baseline load (the sourced plan
+is the later, explicit instruction: a sidecar entry for the same bundle
+would otherwise clear the plan's forced layers, or a USER entry replace
+the topology under the plan's seats), or at once when typed after
+generation.  In a hier session an
 entry for an **unmarked cell's cell-local bundle** — planned globally *per
 instance*, so the plan carries one entry per instance while before
 expansion only the template and its replicas exist — is held past the

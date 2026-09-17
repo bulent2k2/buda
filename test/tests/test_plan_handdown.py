@@ -49,12 +49,15 @@ from test_cell_layer_reserve import _LINE  # noqa: E402
 
 
 def _run(*pre, tail=("run_nuts", "check_template_tracks on_mismatch independent",
-                     "run_detailed_nuts")):
+                     "run_detailed_nuts"), script_path=None):
     """The two-instance vehicle solved bottom-up under the reservation, with
-    `pre` declared before bundling (where a sourced plan goes)."""
+    `pre` declared before bundling (where a sourced plan goes); `script_path`
+    names the flow a selections sidecar would sit beside."""
     i = _DESIGN.index("run_hier_bundler depth 1")
     s = buda_cli.BudaSession()
     s.no_viz = True
+    if script_path:
+        s.script_path = str(script_path)
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
         for c in [*_DESIGN[:i], "set_bottom_up top_cell", _LINE, *pre,
@@ -503,3 +506,97 @@ def test_the_plan_line_quotes_the_selector_whole():
         {"net": "x_0", "type": "I_H", "uid": "abc", "layers": ["M6"],
          "seats": [None]})
     assert line == "pin_plan net:x_0 I_H uid abc layers M6 seats -", line
+
+
+# ── Codex round 5 on #939 ────────────────────────────────────────────────
+
+def test_a_dogleg_adopted_bundle_hands_down_its_pre_split_candidate(tmp_path):
+    """Codex P1 on #939: NUTS's adopted dogleg is an appended, geometry-
+    mutated copy of the selected candidate, so a line written from it named
+    a uid no fresh pool holds and layers/seats indexing the split; the type
+    spec then landed on the unsplit candidate and the segment-count guard
+    dropped every layer and seat.  The pre-split candidate is handed down
+    instead — its layers, every seat but the split trunk's."""
+    import os
+    flow = Path(__file__).resolve().parents[2] / "flow" / "dogleg2.buda"
+    a = buda_cli.BudaSession()
+    a.no_viz = True
+    _cmd(a, f"source {flow}")
+    assert a._dogleg_slot, "the vehicle adopts a dogleg"
+    (bid,) = a._dogleg_slot
+    w = [w for w in a.bundles if w.input.original_bundle.id == bid][0]
+    orig = w.input.candidates[a._dogleg_originals[bid]]
+    split = w.input.candidates[a._dogleg_slot[bid]]
+    assert len(split.segments) == len(orig.segments) + 2
+    plan = tmp_path / "plan.buda"
+    out = _cmd(a, f"derive_top_plan file {plan}")
+    assert "1 dogleg-adopted bundle(s) handed down as the pre-split " \
+        "candidate" in out, out
+    lines = [l for l in plan.read_text().splitlines()
+             if l.startswith("pin_plan")]
+    assert len(lines) == 3
+    (dl,) = [l for l in lines if f"uid {buda.topo_uid(orig)}" in l]
+    assert f"uid {buda.topo_uid(split)}" not in plan.read_text()
+    toks = dl.split()
+    layers = toks[toks.index("layers") + 1].split(",")
+    seats = toks[toks.index("seats") + 1].split(",")
+    nseg = len(orig.segments)
+    assert len(layers) == nseg and len(seats) == nseg
+    assert seats.count("-") == 1 and all(":" in x for x in seats
+                                          if x != "-")
+    # Replay: a fresh session sources the plan after generation, and every
+    # line applies with its layers and seats (no segment-count fallback).
+    setup = [l.strip() for l in flow.read_text().splitlines()
+             if l.strip() and not l.startswith("#")]
+    setup = setup[:setup.index("generate_topologies") + 1]
+    b = buda_cli.BudaSession()
+    b.no_viz = True
+    log = "".join(_cmd(b, c) for c in
+                  [*setup, f"source {plan}", "run_planner 1"])
+    assert "layer/seat entries for a" not in log, log
+    assert "[PlanPin] 3 of 3 handed-down plan(s) applied" in log
+    wb = [w for w in b.bundles if w.input.original_bundle.id == bid][0]
+    assert buda.topo_uid(wb.input.candidates[wb.plan.selected_topology_index]) \
+        == buda.topo_uid(orig)
+    assert len(wb.input.pinned_seg_layers) == nseg
+    # NUTS re-derives the dogleg from the same cycle (the selection is the
+    # re-adopted split, its pre-split original the handed-down candidate)
+    # and every handed-down seat is honoured.
+    log = _cmd(b, "run_nuts")
+    assert bid in b._dogleg_slot
+    assert buda.topo_uid(wb.input.candidates[b._dogleg_originals[bid]]) \
+        == buda.topo_uid(orig)
+    n_seat = sum(1 for l in lines for x in
+                 l.split()[l.split().index("seats") + 1].split(",") if x != "-")
+    assert f"[PlanPin] seated {n_seat} of {n_seat}" in log, log
+
+
+def test_a_sidecar_entry_cannot_clear_the_plans_layers(tmp_path):
+    """Codex P2 on #939: the plan was applied BEFORE the sidecar baseline,
+    whose entry for the same bundle keeps a pinned topology but clears the
+    forced layers on its no-`seg_layers` path (and a USER entry would
+    replace the topology under the plan's seats).  The plan is the later,
+    explicit instruction and is applied after the baseline."""
+    import json
+    a, _ = _run(tail=("run_nuts",))
+    uid, layers, seats, ttype = _top(a)
+    w = [w for w in a.bundles if not w.input.original_bundle.instances][0]
+    bid = w.input.original_bundle.id
+    other = [c for c in w.input.candidates if buda.topo_uid(c) != uid][0]
+    flow = tmp_path / "flow.buda"
+    (tmp_path / "flow.json").write_text(json.dumps({"selections": [{
+        "bundle_hint": "x_0", "bundle_id": bid, "topo_type": other.type,
+        "topo_wl": other.estimated_wirelength,
+        "topo_uid": buda.topo_uid(other), "topo_index_hint": 0,
+        "note": "", "selected_at": "now"}]}))
+    (_, _, pos), = seats
+    lo, hi = pos - 17, pos + 17
+    b, log = _run(f"pin_plan net:x_0 {ttype} uid {uid} layers M6 seats {lo:g}:{hi:g}",
+                  tail=("run_nuts",), script_path=flow)
+    assert "Pinned bundle" in log                      # the sidecar loaded
+    wb = [w for w in b.bundles if not w.input.original_bundle.instances][0]
+    assert buda.topo_uid(wb.input.candidates[wb.plan.selected_topology_index]) \
+        == uid                                          # the plan's candidate
+    assert list(wb.input.pinned_seg_layers) == [6]     # its layers intact
+    assert list(wb.plan.seg_seat_pin) == [1]
+    assert "[PlanPin] seated 1 of 1" in log

@@ -2162,8 +2162,22 @@ class ReportsMixin:
         seats = {(t.bundle_id, t.seg_idx): t
                  for t in self.nuts_result.segments}
         names = self._make_layer_names()
+        # A dogleg NUTS adopted is an APPENDED, geometry-mutated copy of the
+        # selected candidate (edit.py `_adopt_doglegs`): its uid is in no
+        # fresh pool, and its layers/seats index the split (two segments
+        # more than the shape's), so a line written from it could not
+        # replay — the type spec would land on the unsplit candidate and
+        # the segment-count guard would drop every layer and seat (Codex
+        # P1 on #939).  Hand down the PRE-split candidate instead: the split
+        # keeps the original segment indices (the trunk is rewritten in
+        # place as the left piece, the right piece and the jog are
+        # appended), so the first `nseg` layers are the original's, and
+        # every seat but the split trunk's reproduces; the trunk's is
+        # withheld, since NUTS re-derives the dogleg from the same cycle.
+        dl_slot = getattr(self, "_dogleg_slot", None) or {}
+        dl_orig = getattr(self, "_dogleg_originals", None) or {}
         lines = []
-        n_locked = n_inside = n_unplanned = 0
+        n_locked = n_inside = n_unplanned = n_dogleg = 0
         for w in self.bundles:
             b = w.input.original_bundle
             if getattr(w.hier, "locked", False):
@@ -2180,6 +2194,13 @@ class ReportsMixin:
                 n_unplanned += 1
                 continue
             t = w.input.candidates[sel]
+            trunk_si = None            # the split trunk of an adopted dogleg
+            if (b.id in dl_slot and sel == dl_slot[b.id]
+                    and 0 <= dl_orig.get(b.id, -1) < len(w.input.candidates)
+                    and dl_orig[b.id] != sel):
+                split, t = t, w.input.candidates[dl_orig[b.id]]
+                trunk_si = self._dogleg_trunk_index(t, split)
+                n_dogleg += 1
             nseg = len(t.segments)
             sl = list(w.plan.seg_layers)
             layers = [(names.get(l, f"L{l}") if l >= 0 else "-")
@@ -2187,7 +2208,9 @@ class ReportsMixin:
             seat = []
             for si in range(nseg):
                 ts = seats.get((b.id, si))
-                if ts is None or not ts.placed \
+                if si == trunk_si:
+                    seat.append(None)          # the split trunk: re-derived
+                elif ts is None or not ts.placed \
                         or ts.track_position != ts.track_position:
                     seat.append(None)
                 else:
@@ -2206,7 +2229,41 @@ class ReportsMixin:
         if n_unplanned:
             notes.append(f"{n_unplanned} bundle(s) with no selected "
                          f"candidate skipped")
+        if n_dogleg:
+            notes.append(f"{n_dogleg} dogleg-adopted bundle(s) handed down "
+                         f"as the pre-split candidate with its layers, the "
+                         f"split trunk's seat withheld (NUTS re-derives the "
+                         f"dogleg)")
         return lines, notes, scope
+
+    @staticmethod
+    def _dogleg_trunk_index(orig, split):
+        """Which of `orig`'s segments the dogleg split in two: the one
+        whose orientation matches the appended right piece and whose
+        along-extent is the union of the left piece's (rewritten in place
+        at the same index) and the right piece's.  The split also re-ends
+        every stub on the pieces' tracks, so a geometry diff is no
+        discriminator; a stub's PERPENDICULAR coordinate — its seat — is
+        unchanged, which is why the other seats reproduce.  None when the
+        shape is not the trunk/piece/jog split `_adopt_doglegs` records."""
+        nseg = len(orig.segments)
+        if len(split.segments) != nseg + 2:
+            return None
+
+        def geom(seg):
+            horiz = seg.start.y == seg.end.y
+            a0, a1 = ((seg.start.x, seg.end.x) if horiz
+                      else (seg.start.y, seg.end.y))
+            return horiz, min(a0, a1), max(a0, a1)
+
+        rh, rlo, rhi = geom(split.segments[nseg])
+        for si in range(nseg):
+            oh, olo, ohi = geom(orig.segments[si])
+            lh, llo, lhi = geom(split.segments[si])
+            if oh == lh == rh and min(llo, rlo) == olo \
+                    and max(lhi, rhi) == ohi:
+                return si
+        return None
 
     @staticmethod
     def _top_plan_line(l):

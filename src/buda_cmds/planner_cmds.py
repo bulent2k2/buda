@@ -194,18 +194,22 @@ def cmd_run_planner(session, cmd, args, cmd_line):
             session._hier_bundles_orig = list(session.bundles)
         # Re-planning invalidates any adopted dogleg (and its pins).
         session._reset_doglegs()
-        # A handed-down top plan (pin_plan, held until now): selection,
-        # forced layers and seat windows onto the globally planned
-        # wrappers, BEFORE the sidecar's baseline load and the template
-        # solves — the informed round routes the blocks under the same top
-        # the reservation came from (ladder item 6c).
-        session._apply_plan_pins(final=True)
         # Apply user-pinned selections to template wrappers BEFORE expansion
         # so topology_pinned + pinned_seg_layers propagate to all instances.
         # persist=True: the pre-expansion rows must learn the pin here — the
         # planner persist below writes only the EXPANDED view, and this is
         # the one caller where nothing else refreshes the template rows.
         session._apply_selections(persist=True)
+        # A handed-down top plan (pin_plan, held until now): selection,
+        # forced layers and seat windows onto the globally planned
+        # wrappers, AFTER the sidecar's baseline load (a sidecar entry for
+        # the same bundle would otherwise clear the plan's forced layers on
+        # its no-`seg_layers` path, or a USER entry replace the topology
+        # under the plan's seats — Codex P2 on #939; the sourced plan is the
+        # later, explicit instruction) and before the template solves — the
+        # informed round routes the blocks under the same top the
+        # reservation came from (ladder item 6c).
+        session._apply_plan_pins(final=True)
         # Bottom-up cells (set_bottom_up): first give any 90°-rotated
         # instance class its own clone template (candidates generated from
         # the rotated reference's cell-local floorplan), then solve each
@@ -327,12 +331,13 @@ def cmd_run_planner(session, cmd, args, cmd_line):
         session._planner_pitch = session._nuts_pitch
         session._configure_capacity_mode(args)   # opt-in signal_tracks (Gap A part 2)
         session.planner.build_congestion_map()
-        # A handed-down plan (pin_plan, held until now) — see the hier
-        # branch; the flat planner honours it the same way.
-        session._apply_plan_pins(final=True)
         # Apply architect-pinned selections BEFORE optimizing so the
         # planner scores the correct topology and assigns layers for it.
         session._apply_selections()
+        # A handed-down plan (pin_plan, held until now) — see the hier
+        # branch; the flat planner honours it the same way, after the
+        # sidecar baseline for the same reason.
+        session._apply_plan_pins(final=True)
         # Tapered fan-in: derive per-segment bit membership on every fan-in
         # bundle's candidates so the planner charges each driver stub for its
         # own sub-bus only (Topology.seg_bits; no-op for non-fan-in bundles).
