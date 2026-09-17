@@ -257,8 +257,31 @@ how many bits → `set_feedthru` plus positioned reservations
 
 **Judge.**  Independent geometric audit.
 
-**Needs.**  A positioned corridor.  Most real of the five, most building.
-Last.
+**Needs.**  ~~A positioned corridor~~ (built: `set_cell_layer_reserve`, item
+6, with its `uniform F` form as the conventional arm).
+
+**Status.**  **Run and written up: [convergence_e5.md](convergence_e5.md)**
+(2026-09-17).  The guessed reservation (F evenly spaced tracks on every
+TOP layer of every marked cell, F swept over its whole legal range — 4, 8;
+16 exceeds the smallest cell's supply) is **worse than reserving nothing at
+every size**: 368–2,907 stranded bits at F = 4 against the blind round's
+8–336, because four tracks in every 35-track seat push the cores' 32-bit
+bus onto LOW layers that cannot host it.  The derived positional
+reservation reaches a **clean endpoint with healers off at NQ = 2, 8 and
+16** (one, one and two informed rounds) where E1's share reached none and
+the blind band needed two rounds and never cleaned NQ = 8, reserving
+3.2–8.1× the top's used tracks (the union over a template's instances —
+exact, 1.00×, on the mesh control).  But the top lands on the reserved
+tracks only **6–11 %** of the time: nothing steers it there, so the
+reservation works by DISPLACING the block's own buses off the region the
+top wants, not as a corridor the top uses — which is also why every second
+informed round strands the cores' bus again (757 / 1,444 / 2,864) and the
+loop has no fixpoint.  The primitive is half built: the top-side half — a
+preference for reserved tracks in the hier planner and NUTS over governed
+instances — is the next build item (6b).  Running it also closed an
+enforcement gap the audit found (an instance solved in the global DNUTS
+run under `on_mismatch independent` saw no reservation; it now carries the
+tracks as blocked tracks).
 
 ## The judge must not be BUDA
 
@@ -342,7 +365,17 @@ every "one round" measured rather than assumed.
    NQ=2 healerless every reservation is honoured and the design is DIRTY
    (360 unplaced: the cores' regf→alu bus, off its reserved M5 seat onto
    LOW layers that cannot host it) — the first measurement, not the
-   verdict → E1 re-run against it → E5.
+   verdict → ~~E1 re-run against it → E5~~ **E5 run** (2026-09-17,
+   [convergence_e5.md](convergence_e5.md); its `td`/`bu` rows ARE E1
+   re-run against the positional primitive): clean healerless at three of
+   four sizes where the share cleaned none, exact on the mesh, and the top
+   uses the reserved tracks 6–11 % of the time.
+   **6b — the top-side half of the reservation**: the hier planner and
+   NUTS PREFER a governed instance's reserved tracks for the bundles
+   crossing it (a negative cost on reserved tracks, or a hard restriction
+   of the crossing bundles to them), so a reserved track is a track the
+   top uses and the informed loop has a fixpoint; E5 re-run against it.
+   Ahead of the fixed-pin work.
 7. **Fixed-pin primitive** — a busterm restricted to a face, then to a window
    on a face — as the interoperability piece for the partner evaluation (E3),
    last, since nothing in-house depends on it.
