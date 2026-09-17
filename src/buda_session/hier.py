@@ -2257,11 +2257,21 @@ class HierMixin:
         prev = getattr(self, "_cell_layer_reserves_restored", None) or set()
         for k in [k for k in prev if k in res]:
             del res[k]
-        restored = {}
+        restored, held_off = {}, 0
         raw = self.bdb.meta_get(self._RESERVE_META, "") if self.bdb else ""
         if raw:
-            restored = self._decode_layer_reserves(raw, res)
+            restored, held_off = self._decode_layer_reserves(
+                raw, res, getattr(self, "_cell_layer_reserves_off", set()),
+                getattr(self, "_cell_layer_reserves_off_all", False))
         self._cell_layer_reserves_restored = set(restored)
+        if held_off:
+            # A typed `off` (or `* off`) BEFORE the open is a decision too
+            # (Codex P2 on #936): a generated policy's stale-entry removal
+            # sourced ahead of the open used to remove nothing from an
+            # empty map, and the open then restored the very entry it
+            # removed.  Held as a tombstone and applied here, said.
+            print(f"[LayerReserve] {held_off} persisted reservation(s) held "
+                  f"off by a typed `off` declared before the open")
         if restored or prev:
             res.update(restored)
             self._cell_layer_reserves = res
@@ -2280,12 +2290,13 @@ class HierMixin:
         # contract is what the file holds (Codex P2 on #936).  Only when
         # a typed entry exists — a session holding restored entries alone
         # rewrites nothing.
-        if not dropped and any(k not in restored for k in res):
+        if held_off or (not dropped
+                        and any(k not in restored for k in res)):
             self._persist_layer_reserves()
         return len(restored)
 
     @staticmethod
-    def _decode_layer_reserves(raw, typed):
+    def _decode_layer_reserves(raw, typed, off=frozenset(), off_all=False):
         """The persisted meta row -> {(cell, lid): (pos, ...)}, VALIDATED
         (Codex P2 on #936): the declaration refuses a non-finite position,
         but a hand-edited, corrupted or older file can carry anything
@@ -2293,7 +2304,9 @@ class HierMixin:
         Python's decoder accepts) passed every bounds comparison to fail
         in `math.floor` at the keepout install.  A malformed entry is
         skipped LOUD, naming it; the rest restore.  Keys already `typed`
-        are skipped silently (typed wins)."""
+        are skipped silently (typed wins); keys in `off` (or every key
+        under `off_all`) are the typed tombstones, counted in the second
+        return value.  Returns ({key: positions}, n_held_off)."""
         def bad(what):
             print(f"[LayerReserve] WARNING: persisted reservation {what} "
                   f"— ignored (re-declare)")
@@ -2301,11 +2314,11 @@ class HierMixin:
             payload = json.loads(raw)
         except ValueError:
             bad("row is unreadable")
-            return {}
+            return {}, 0
         if not isinstance(payload, dict):
             bad("row is not a {cell: {layer: [pos]}} object")
-            return {}
-        out = {}
+            return {}, 0
+        out, held_off = {}, 0
         for c, per in payload.items():
             if not isinstance(per, dict):
                 bad(f"for cell '{c}' is not a {{layer: [pos]}} object")
@@ -2332,9 +2345,13 @@ class HierMixin:
                 if not ok:
                     continue
                 key = (c, lid)
-                if key not in typed and vals:
-                    out[key] = tuple(sorted(set(vals)))
-        return out
+                if key in typed or not vals:
+                    continue
+                if off_all or key in off:
+                    held_off += 1
+                    continue
+                out[key] = tuple(sorted(set(vals)))
+        return out, held_off
 
     def _reserve_cell_extent(self, cell, horiz):
         """The cell's extent along a reservation's axis (height for an H
@@ -2366,8 +2383,13 @@ class HierMixin:
         was written by another session against a cell that may since
         have been resized.  A position outside the cell is DROPPED, loud;
         an entry left empty goes with it.  A layer not yet declared has
-        no axis to check on and is left for the rect builder, which
-        applies the same rule when it knows the extent."""
+        no axis to check on, so this runs AGAIN at every event that can
+        make an entry checkable or stale — a layer declaration
+        (`def_layer`, `import_lef_tech`), a `resize_cell`, and
+        `run_planner hier` right before the enforcement decision (Codex
+        P2 on #936: a flow opening its BDB before declaring its stack
+        skipped every coordinate here and nothing re-ran) — with the rect
+        builder applying the same rule as the last guard."""
         res = getattr(self, "_cell_layer_reserves", None) or {}
         if not res or self.bdb is None:
             return 0

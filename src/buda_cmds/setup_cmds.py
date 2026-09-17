@@ -680,6 +680,9 @@ def cmd_def_layer(session, cmd, args, cmd_line):
         session._layer_overheads[int(lid)] = ovh_val
     session._layer_name_map[name] = int(lid)
     session._layer_source[int(lid)] = "script"
+    # A reservation restored (or typed) before this layer existed had no
+    # axis to be checked on; now it has one (Codex P2 on #936).
+    session._revalidate_layer_reserves()
     # A pattern may already exist for this layer — the v29 restore installs
     # the grid at `open_bdb`, and a flow declares its stack AFTER that
     # (`flow/ariane133/ariane133_heal.buda`: open_bdb line 27, def_layer line
@@ -1098,6 +1101,7 @@ def cmd_import_lef_tech(session, cmd, args, cmd_line):
         why = _install_geometry(lid, l, l.dir == "HORIZONTAL")
         if why and why != "no PITCH/WIDTH":
             print(f"[LEF] layer {l.name}: {why}; pattern skipped")
+    session._revalidate_layer_reserves()   # the def_layer rule, once
 
     n_geom = 0
     for lid, l in sorted(geom_only):

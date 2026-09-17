@@ -787,6 +787,9 @@ def cmd_resize_cell(session, cmd, args, cmd_line):
     if session.bdb is None:
         print("Error: open_bdb first"); return
     session.bdb.resize_cell(args[0], float(args[1]), float(args[2]))
+    # A reservation names cell-local tracks; a smaller cell can leave one
+    # outside.  Same rule and voice as open_bdb (Codex P2 on #936).
+    session._revalidate_layer_reserves()
 
 
 def cmd_add_cell(session, cmd, args, cmd_line):
@@ -1689,6 +1692,10 @@ def cmd_set_cell_layer_reserve(session, cmd, args, cmd_line):
         n = len(res)
         res.clear()
         session._cell_layer_reserves_restored = set()
+        # A typed `* off` outlives the next open_bdb: the restore holds
+        # every persisted entry off (Codex P2 on #936).
+        session._cell_layer_reserves_off_all = True
+        session._cell_layer_reserves_off = set()
         session._persist_layer_reserves()
         print(f"[LayerReserve] cleared {n} reservation(s)")
         return
@@ -1704,6 +1711,12 @@ def cmd_set_cell_layer_reserve(session, cmd, args, cmd_line):
         had = res.pop((cell, lid), None)
         getattr(session, "_cell_layer_reserves_restored",
                 set()).discard((cell, lid))
+        # A tombstone: a later open_bdb holds this key's persisted entry
+        # off rather than restoring the entry a generated policy's `off`
+        # line removed (Codex P2 on #936).
+        if not hasattr(session, "_cell_layer_reserves_off"):
+            session._cell_layer_reserves_off = set()
+        session._cell_layer_reserves_off.add((cell, lid))
         session._persist_layer_reserves()
         print(f"[LayerReserve] {cell}: layer {args[1]} reservation "
               f"{'removed' if had else 'was not set'}")
@@ -1761,6 +1774,7 @@ def cmd_set_cell_layer_reserve(session, cmd, args, cmd_line):
         print(f"Error: usage: {usage}"); return
     res[(cell, lid)] = tuple(sorted(positions))
     getattr(session, "_cell_layer_reserves_restored", set()).discard((cell, lid))
+    getattr(session, "_cell_layer_reserves_off", set()).discard((cell, lid))
     session._persist_layer_reserves()
     print(f"[LayerReserve] {cell}: layer {args[1]} reserves {len(positions)} "
           f"track(s) at {'y' if horiz else 'x'} = "

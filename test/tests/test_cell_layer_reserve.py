@@ -147,8 +147,11 @@ def test_a_position_typed_before_the_bdb_is_revalidated_at_open(tmp_path):
     assert "the reservation is removed" in out, out
     assert ("top_cell", 5) not in s._cell_layer_reserves
     # a RESTORED entry against a since-resized cell: the row says 150 is
-    # inside; the cell is 100 tall now
-    _quiet(s, "set_cell_layer_reserve top_cell M6 50,150", "resize_cell top_cell 600 100")
+    # inside; the cell is 100 tall now (the row planted by hand — an
+    # in-session resize drops the position at once, Codex round 7)
+    import json
+    _quiet(s, "resize_cell top_cell 600 100")
+    s.bdb.meta_set("layer_reserves", json.dumps({"top_cell": {"6": [50, 150]}}))
     _cmd(s, f"save_bdb {bdb}")
     s2 = buda_cli.BudaSession()
     s2.no_viz = True
@@ -291,6 +294,84 @@ def test_own_metal_is_read_with_the_full_ndr_footprint():
     assert got[None] == (8, 8, 8, 8), got
     assert got["def_ndr wide width x2"] == (16, 8, 16, 8), got
     assert got["def_ndr wide spacing x2"] == (17, 8, 17, 8), got
+
+
+def test_a_pre_open_off_is_a_tombstone_the_restore_honours(tmp_path):
+    """A generated policy's `... off` line sourced BEFORE the open removed
+    an entry from an empty map and recorded nothing, so the open restored
+    the very entry it had removed (Codex P2 on #936).  A typed `off` is
+    now a tombstone the restore honours — said, and the file follows —
+    `* off` holds every persisted entry off, and a later positive
+    declaration of the same key wins over its own tombstone."""
+    import json
+    bdb = tmp_path / "r.bdb"
+    s0 = _session()
+    _quiet(s0, "set_cell_layer_reserve top_cell M6 3,7.5",
+           "set_cell_layer_reserve top_cell M5 40", f"save_bdb {bdb}")
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    _quiet(s, f"source {_TRACKS}", "set_cell_layer_reserve top_cell M5 off")
+    out = _cmd(s, f"open_bdb {bdb}")
+    assert "restored 1 persisted reservation(s): top_cell:M6x2" in out, out
+    assert "1 persisted reservation(s) held off by a typed `off`" in out, out
+    assert ("top_cell", 5) not in s._cell_layer_reserves
+    assert s._cell_layer_reserves[("top_cell", 6)] == (3.0, 7.5)
+    assert json.loads(s.bdb.meta_get("layer_reserves", "")) == \
+        {"top_cell": {"6": [3.0, 7.5]}}
+    # the same key re-declared after its off wins over the tombstone
+    s2 = buda_cli.BudaSession()
+    s2.no_viz = True
+    _quiet(s2, f"source {_TRACKS}", "set_cell_layer_reserve top_cell M6 off",
+           "set_cell_layer_reserve top_cell M6 9")
+    _cmd(s2, f"open_bdb {bdb}")
+    assert s2._cell_layer_reserves[("top_cell", 6)] == (9.0,)
+    # `* off` before the open holds everything off and empties the file
+    s3 = buda_cli.BudaSession()
+    s3.no_viz = True
+    _quiet(s3, f"source {_TRACKS}", "set_cell_layer_reserve * off")
+    out = _cmd(s3, f"open_bdb {bdb}")
+    assert "held off by a typed `off`" in out and "restored" not in out, out
+    assert not s3._cell_layer_reserves
+    assert not s3.bdb.meta_get("layer_reserves", "")
+
+
+def test_revalidation_re_runs_at_a_late_layer_declaration_a_resize_and_the_planner(tmp_path):
+    """`open_bdb` can only check a coordinate on a DECLARED layer, and a
+    flow that opens its BDB first (`flow/tcl/hdesign.tcl`) declares its
+    stack after — so the open skipped every coordinate and nothing ran
+    again (Codex P2 on #936).  The check re-runs at each event that makes
+    an entry checkable or stale: the layer's declaration, a `resize_cell`,
+    and `run_planner hier` right before the enforcement decision."""
+    import json
+    bdb = tmp_path / "r.bdb"
+    s0 = _session()
+    s0.bdb.meta_set("layer_reserves", json.dumps({"top_cell": {"6": [50, 150]}}))
+    _quiet(s0, "resize_cell top_cell 600 100", f"save_bdb {bdb}")
+    # (1) open FIRST: the layer is unknown, both positions are kept — the
+    #     declaration of M6 is what drops the stale one
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    out = _cmd(s, f"open_bdb {bdb}")
+    assert "restored 1 persisted reservation(s)" in out and "dropped" not in out, out
+    assert s._cell_layer_reserves[("top_cell", 6)] == (50.0, 150.0)
+    out = _cmd(s, f"source {_TRACKS}")
+    assert "dropped 1 reserved position(s) outside the cell's height (100): 150" in out, out
+    assert s._cell_layer_reserves[("top_cell", 6)] == (50.0,)
+    # (2) a resize in-session
+    s2 = _session()
+    _quiet(s2, "set_cell_layer_reserve top_cell M6 50,150")
+    out = _cmd(s2, "resize_cell top_cell 600 100")
+    assert "dropped 1 reserved position(s) outside the cell's height (100): 150" in out, out
+    assert s2._cell_layer_reserves[("top_cell", 6)] == (50.0,)
+    # (3) the planner checks before it decides what to enforce
+    i = _DESIGN.index("run_planner hier 3")
+    s3 = buda_cli.BudaSession()
+    s3.no_viz = True
+    _quiet(s3, *_DESIGN[:i])
+    s3._cell_layer_reserves = {("top_cell", 6): (50.0, 999.0)}
+    out = _cmd(s3, "run_planner hier 3")
+    assert "dropped 1 reserved position(s) outside the cell's height (200): 999" in out, out
+    assert s3._cell_layer_reserves[("top_cell", 6)] == (50.0,)
 
 
 def test_a_derived_line_reproduces_the_track_exactly(tmp_path):

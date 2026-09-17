@@ -1742,11 +1742,18 @@ position outside the cell's extent on that axis, a repeated position.  The
 extent is the open BDB's; a reservation typed BEFORE any BDB is open is
 bounded by its sign alone and REVALIDATED the moment one is opened (every
 held entry is, a restored one included — a cell another session resized
-since), an out-of-cell position dropped with a WARNING and an emptied entry
+since) and again at every event that makes an entry checkable or stale — a
+layer declared AFTER the open (the check needs the layer's axis), a
+`resize_cell`, and `run_planner hier` right before it decides what to
+enforce — an out-of-cell position dropped with a WARNING and an emptied entry
 removed, and an entry naming a cell the opened BDB does not know — a typo,
 or another design's name — removed the same way rather than persisted where
-no template could enforce it.  The open then WRITES the validated map when
-the session holds a typed entry, so a reservation declared before the open
+no template could enforce it.  A typed `off` (or `* off`) BEFORE the open is a
+TOMBSTONE the restore honours — the persisted entry it names is held off and
+said, so a generated policy's stale-entry removal sourced ahead of the open
+is not undone by it; a later positive declaration of the same key wins over
+its own tombstone.  The open then WRITES the validated map when
+the session holds a typed entry or applied a tombstone, so a reservation declared before the open
 reaches the file (and a typed entry that outranked a restored one is what
 the file holds); a malformed persisted row — a non-numeric or non-finite
 position, a layer that is not an id — is skipped and named rather than
