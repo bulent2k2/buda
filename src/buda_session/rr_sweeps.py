@@ -126,8 +126,11 @@ class RRSweepsMixin:
                 list(self.planner.get_x_grid()),
                 list(self.planner.get_y_grid()),
                 n_threads=self._rr_sweep_threads(),
-                grid=(self.routing_grid if self._sync_reserve_corridors()
-                      else None))
+                # The screen's grid is for the reserve corridors ALONE, so
+                # it goes only when the sequential screen would arm them.
+                grid=(self.routing_grid
+                      if self._sync_reserve_corridors()
+                      and self._reserve_steer_nuts() else None))
         n = sum(max(len(t), 1) for _w, t in reqs) or 1
         dt = time.perf_counter() - t0
         for _ in range(n):
@@ -225,6 +228,11 @@ class RRSweepsMixin:
             # the reserve corridors (6b) off it — the sequential trial's
             # engine seats on them, so the sweep must too.
             dn_kwargs.update(grid=self.routing_grid)
+        # ... unless the bits-only study mode leaves the seats alone, in
+        # which case the grid still reaches DetailedNUTS (stage b) and the
+        # NUTS engines take no corridor — as the sequential trial's do.
+        if dn_kwargs.get("grid") is not None:
+            dn_kwargs.update(nuts_corridors=self._reserve_steer_nuts())
         return base_disc, net_counts, dn_kwargs
 
     def _rr_sweep_eval(self, flat, stage, base_disc, net_counts, dn_kwargs,

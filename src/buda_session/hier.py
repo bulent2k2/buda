@@ -4094,13 +4094,21 @@ class HierMixin:
                   f"top there)")
         return len(cors)
 
+    @staticmethod
+    def _reserve_steer_nuts():
+        """Whether the abstract SEATS are steered as well as the bits: the
+        study knob BUDA_RESERVE_STEER_NUTS=0 leaves every seat at its pull
+        (which of the two halves costs what, measured on the E5 SoC).  ONE
+        predicate for the session's engines, the cell-local solve and the
+        parallel sweep/screen, so a sweep cannot seat differently from the
+        replay it certifies (Codex P2 on #938)."""
+        return os.environ.get("BUDA_RESERVE_STEER_NUTS", "1") != "0"
+
     def _arm_reserve_corridors(self, nuts_engine):
         """Arm a NUTS engine solving self.bundles with the session grid's
-        corridors (syncing them first).  Study knob: BUDA_RESERVE_STEER_NUTS=0
-        leaves every abstract seat at its pull and steers the BITS only —
-        which of the two halves costs what, measured on the E5 SoC."""
+        corridors (syncing them first); nothing when the NUTS half is off."""
         n = self._sync_reserve_corridors()
-        if n and os.environ.get("BUDA_RESERVE_STEER_NUTS", "1") != "0":
+        if n and self._reserve_steer_nuts():
             nuts_engine.set_reserve_corridors(self.routing_grid)
 
     def _cell_local_corridors(self, ref_inst):
@@ -4112,7 +4120,7 @@ class HierMixin:
         own corridor is not among them (for the cell it is a keepout,
         installed by _install_cell_reserve_keepouts)."""
         if self.bdb is None or not getattr(self, "_reserve_steer", False) \
-                or os.environ.get("BUDA_RESERVE_STEER_NUTS", "1") == "0":
+                or not self._reserve_steer_nuts():
             return []
         comps = {c.name: c for c in self.bdb.all_components()}
         r = comps.get(ref_inst)

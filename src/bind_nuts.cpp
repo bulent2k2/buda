@@ -604,7 +604,7 @@ void bind_nuts(py::module_& m) {
                                           int, int, int, int>>& copy_specs,
              const std::map<std::pair<int, int>, bool>& horiz_of,
              int n_threads, bool full_trials,
-             const RoutingGridStack* ref_grid) {
+             const RoutingGridStack* ref_grid, bool nuts_corridors) {
               std::vector<SweepMove> mv;
               mv.reserve(moves.size());
               for (const auto& [bid, tidx] : moves)
@@ -613,6 +613,7 @@ void bind_nuts(py::module_& m) {
               dn.enabled = stage_b;
               dn.grid = grid;
               dn.ref_grid = ref_grid;
+              dn.nuts_corridors = nuts_corridors;
               dn.bit_order = bit_order;
               dn.abort_unplaced = abort_unplaced;
               dn.ref_ids = ref_ids;
@@ -652,7 +653,7 @@ void bind_nuts(py::module_& m) {
               int, int, std::string, int, int, int, int, int, int>>{},
           py::arg("horiz_of") = std::map<std::pair<int, int>, bool>{},
           py::arg("n_threads") = 0, py::arg("full_trials") = false,
-          py::arg("ref_grid") = nullptr);
+          py::arg("ref_grid") = nullptr, py::arg("nuts_corridors") = true);
 
     // Batched PARALLEL fixed-context screening (the refine/ripup chunk
     // builds' sequential-screen cost at chip scale): one worker per

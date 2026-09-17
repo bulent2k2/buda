@@ -1217,3 +1217,47 @@ def test_a_nested_childs_corridor_steers_the_enclosing_cells_bus():
     s1, _ = run(line)
     assert loc_seat(s1) == pytest.approx(loc_seat(s0))
     assert loc_seat(s1) != pytest.approx(loc_seat(s))
+
+
+def test_the_parallel_screen_and_sweep_seat_like_the_sequential_ones():
+    """The bits-only study mode (BUDA_RESERVE_STEER_NUTS=0) leaves every
+    abstract seat at its pull; the parallel screen and sweep used to take
+    the grid's corridors unconditionally while the sequential screen and
+    trial did not, so a sweep could rank and pick on placements the replay
+    never makes (Codex P2 on #938).  One predicate now gates both: in
+    either mode the parallel screen's scores equal the sequential one's,
+    and the sweep's outcomes the sequential trials'."""
+    import os
+    import buda
+    old = os.environ.get("BUDA_RESERVE_STEER_NUTS")
+    try:
+        for mode in ("0", "1"):
+            os.environ["BUDA_RESERVE_STEER_NUTS"] = mode
+            s, _ = _template_run("set_reserve_steer on", _STEER_RUN)
+            assert s.routing_grid.has_reserve_corridors()
+            assert s._reserve_steer_nuts() == (mode == "1")
+            w = next(w for w in s.bundles
+                     if not w.input.original_bundle.instances)
+            alts = [t for t in range(len(w.input.candidates))
+                    if t != w.plan.selected_topology_index]
+            assert alts
+            seq = s._rr_screen_scores(w, alts)
+            par = s._rr_screen_scores_many([(w, alts)])[0]
+            assert seq is not None and seq == par, (mode, seq, par)
+            # the sweep's NUTS engines get the grid (stage a needs it for
+            # the corridors alone) and the same NUTS-half verdict
+            bid = w.input.original_bundle.id
+            _b, _n, dn = s._rr_sweep_stage_setup([(0, bid, 0, alts[0])],
+                                                 'a', lambda: (0, 0))
+            assert dn.get("grid") is s.routing_grid
+            assert dn.get("nuts_corridors") == (mode == "1")
+            # the seat itself: steered onto the run only when the NUTS
+            # half is on (the bits are steered either way)
+            assert _top_seat(s).track_position == pytest.approx(
+                163.0 if mode == "1" else 150.0)
+            assert [r["top_used"] for r in s._layer_reserve_audit()] == [8, 8]
+    finally:
+        if old is None:
+            os.environ.pop("BUDA_RESERVE_STEER_NUTS", None)
+        else:
+            os.environ["BUDA_RESERVE_STEER_NUTS"] = old

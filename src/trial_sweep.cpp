@@ -197,7 +197,7 @@ SweepOutcome eval_move(const std::vector<BundleWrapper>& baseline,
     // Reserve corridors (6b): the sequential trial's engine reads the
     // session grid's; the sweep must seat the same way or its verdict
     // diverges from the replay's.
-    if (dn.grid) nuts.set_reserve_corridors(*dn.grid);
+    if (dn.grid && dn.nuts_corridors) nuts.set_reserve_corridors(*dn.grid);
     NUTSResult nr = nuts.run(b);
     out.viols = nr.num_violations;
     out.wl    = placed_wl(nr);
