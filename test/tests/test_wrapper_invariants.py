@@ -89,7 +89,7 @@ SNAPSHOTTED = {
     # captured per wrapper by _rr_snapshot's 'wrap' tuple
     "plan.selected_topology_index", "input.topology_pinned",
     "plan.seg_layers", "plan.seg_perp", "plan.seg_net_pull",
-    "plan.seg_slide_lo", "plan.seg_slide_hi",
+    "plan.seg_slide_lo", "plan.seg_slide_hi", "plan.seg_seat_pin",
     "input.assigned_v_layer", "input.assigned_h_layer",
     "input.pinned_seg_layers",
     # candidate pools: count-trimmed + the dogleg slot deep-copied (dl_cand)

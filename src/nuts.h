@@ -85,6 +85,22 @@ struct TrackSegment : PlacedSegmentBase {
     // snap to the bounded side on real signal tracks.  Default = unbounded.
     double track_lo_bound = -std::numeric_limits<double>::infinity();
     double track_hi_bound =  std::numeric_limits<double>::infinity();
+    // A SEAT PIN's natural window.  A per-segment slide override FLAGGED as
+    // a seat (`plan.seg_slide_lo/hi` + `plan.seg_seat_pin`, both set by a
+    // handed-down plan, `pin_plan`) fixes the abstract POSITION — every NUTS pass respects the
+    // interval, so the seat cannot move — but the same interval is also the
+    // window DetailedNUTS admits bits from, and a width-wide window on a
+    // rail-straddling seat holds one signal track fewer than the bits (the
+    // abstract width is bits x the AVERAGE pitch): 32 of 85 stranded bits at
+    // NQ = 8 and 128 of 176 at NQ = 16 in the 6c measurement were the top's
+    // own M7 seats the source round had filled from its natural window.  So a
+    // seat pin keeps the interval it would have had WITHOUT the override
+    // here (the derived interval, trunk margin included — the source round's
+    // own bit window), and the stage-4 -> stage-9 handoff (make_bus_segments)
+    // hands THIS to DetailedNUTS while NUTS itself keeps the pinned interval.
+    // NaN = not a seat pin.
+    double seat_nat_lo = std::numeric_limits<double>::quiet_NaN();
+    double seat_nat_hi = std::numeric_limits<double>::quiet_NaN();
     // Along-axis coordinates of this segment's BUSTERM block-face taps (x for an
     // H segment, y for a V segment).  rev_conn_map carries only SEG connectivity,
     // so do_span_adjustments uses these as extend-only anchors to guarantee a
@@ -266,6 +282,12 @@ struct NutsContext {
     // DEGENERATE one — reproduces the point behavior exactly.
     std::map<std::pair<int,int>, std::pair<double,double>>   pull_win_map;
     std::map<std::pair<int,int>, std::pair<double,double>>   slide_map;
+    // The candidates' OWN slide windows, override or not — what a seat
+    // pin's natural window (TrackSegment::seat_nat) is cut from.
+    std::map<std::pair<int,int>, std::pair<double,double>>   nat_slide_map;
+    // The (bundle, seg) keys whose slide override is a SEAT PIN
+    // (plan.seg_seat_pin): the only ones that get a natural window.
+    std::set<std::pair<int,int>>                             seat_pin_set;
     std::set<std::pair<int,int>>                             trunk_set;
     std::set<std::pair<int,int>>                             busterm_set;
     std::map<std::pair<int,int>, std::vector<SpanAdjConn>>   rev_conn_map;

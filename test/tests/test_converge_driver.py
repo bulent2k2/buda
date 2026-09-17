@@ -472,3 +472,147 @@ def test_the_uniform_arm_sweeps_f_and_names_the_table_e5(tmp_path):
     assert len(summ) == 1, table
     cells = [c.strip() for c in summ[0].split("|")[1:-1]]
     assert int(cells[2]) == len(rows) and cells[4] in ("clean", "dirty")
+
+
+def test_the_top_plan_is_handed_down_and_the_fixpoint_measured(tmp_path):
+    """`-handdown` (ladder item 6c): the measurement round writes its top
+    plan (`derive_top_plan` — one `pin_plan` line per globally planned
+    bundle), the informed round sources it BEFORE bundling (held by the
+    engine until `run_planner hier`) and writes its own, the report says
+    how many pins applied and how many seats NUTS honoured, and the table
+    carries the `plan` and `fixpoint` columns — the fixpoint being the
+    driver's own comparison of the budget AND the plan a round derived
+    against the ones it ran under.  At NQ=2 the handed-down top reproduces EXACTLY (every
+    pin, every seat, the plan file re-derived byte for byte), so a
+    fixpoint verdict of `no` there is the nested templates' own buses
+    moving, not the top's — which is what the write-up says."""
+    out = tmp_path / "e6"
+    r = _tclsh(_DRIVER, "soc", 2, "-arms", "bu", "-informed", 1,
+               "-primitive", "reserve", "-handdown", "-out", out, cwd=tmp_path)
+    assert r.returncode == 0, r.stdout[-3000:] + r.stderr[-3000:]
+    plan0 = out / "soc2_bu_plan_r0.buda"
+    plan1 = out / "soc2_bu_plan_r1.buda"
+    assert plan0.exists() and plan1.exists()
+    lines0 = [l for l in plan0.read_text().splitlines() if l.startswith("pin_plan ")]
+    assert lines0 and re.search(r"^# bundles: (\d+)$", plan0.read_text(), re.M)[1] == str(len(lines0))
+    assert all(re.match(r"pin_plan net:\S+ \S+ uid [0-9a-f]+ layers \S+ seats \S+$", l)
+               for l in lines0), lines0[:3]
+    # the informed round applied every pin and NUTS honoured every seat ...
+    log = (out / "soc2_bu_r1.log").read_text()
+    n = len(lines0)
+    assert f"[PlanPin] {n} of {n} handed-down plan(s) applied" in log, log[-3000:]
+    m = re.search(r"\[PlanPin\] seated (\d+) of (\d+) handed-down seat\(s\)$", log, re.M)
+    assert m and m[1] == m[2] and int(m[2]) > 0, log[-3000:]
+    d = _report(out / "soc2_bu_r1.rep")
+    assert d["plan_pins"] == [str(n), str(n), m[1], m[2]], d["plan_pins"]
+    assert d["plan_derived"] == [str(n)]
+    # ... so the top it hands on is the one it was handed
+    strip = lambda p: [l for l in p.read_text().splitlines() if not l.startswith("#")]
+    assert strip(plan0) == strip(plan1)
+    # the measurement round sourced no plan
+    d0 = _report(out / "soc2_blind_r1.rep")
+    assert d0["plan_pins"] == ["0", "0", "-1", "-1"] and d0["plan_derived"] == [str(n)]
+    # the table: a `plan` cell for the informed round, `—` for the blind
+    # one, and a fixpoint verdict of the driver's own policy comparison
+    table = (out / "e1_soc_healerless_step1_reserve_handdown.md").read_text()
+    assert "| plan | fixpoint |" in table
+    blind = [l for l in table.splitlines() if "| blind | 1 |" in l][0]
+    assert "| — | — |" in blind
+    bu = [l for l in table.splitlines() if "| bu | 1 |" in l][0]
+    assert f"| {n}/{n} pins, {m[1]}/{m[2]} seats |" in bu, bu
+    fix = re.search(r"\| (yes \(\d+\)|no \([^)]+\)) \|", bu)
+    assert fix, bu
+    # the summary's fixpoint column agrees with the row
+    summ = [l for l in table.splitlines() if l.startswith("| 2 | bu |")][0]
+    assert summ.rstrip("| ").endswith(fix[1].split(" ")[0]), (summ, fix[1])
+
+
+def test_the_policy_comparison_is_a_set_of_normalized_lines(tmp_path):
+    """`converge::policy_diff`: comments and blank lines dropped, whitespace
+    normalized, order ignored — {same n_differ n_total}."""
+    a = tmp_path / "a.buda"
+    b = tmp_path / "b.buda"
+    a.write_text("# scope: x\nset_cell_layer_reserve c M5 1,2\n\n"
+                 "set_cell_layer_reserve d M6 3\n")
+    b.write_text("set_cell_layer_reserve d   M6 3\n# other\n"
+                 "set_cell_layer_reserve c M5 1,2\n")
+    lib = _ROOT / "flow" / "tcl" / "converge_lib.tcl"
+    script = tmp_path / "t.tcl"
+    script.write_text(
+        f"source {{{lib}}}\n"
+        f"puts [converge::policy_diff {{{a}}} {{{b}}}]\n"
+        f"set f [open {{{b}}} a]; puts $f \"set_cell_layer_reserve e M7 9\"; close $f\n"
+        f"puts [converge::policy_diff {{{a}}} {{{b}}}]\n"
+        f"puts [converge::policy_diff {{{a}}} {{{tmp_path / 'none'}}}]\n")
+    r = _tclsh(script, cwd=tmp_path)
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.split("\n")[:3] == ["1 0 2", "0 1 3", "0 2 2"], r.stdout
+
+
+def test_a_top_down_measurement_round_is_aligned_for_a_hand_down(tmp_path):
+    """A handed-down plan is GEOMETRY, so the `td` arm's measurement round
+    under `-handdown` runs on the aligned floorplan the informed rounds
+    route (`-align`: mark, `align_bottom_up`, unmark — nothing stays
+    marked, every bundle plans globally).  On the mesh the rows move by a
+    phase between the two floorplans, and the unaligned round's seats
+    pinned against moved block faces were 112 BUSTERM violations; aligned,
+    the informed round is a clean fixpoint in one round with the
+    reservation exactly the top's use (reserved ÷ used = 1.00)."""
+    out = tmp_path / "e6t"
+    r = _tclsh(_DRIVER, "tpu", 8, "-arms", "td", "-informed", 2,
+               "-primitive", "reserve", "-handdown", "-out", out, cwd=tmp_path)
+    assert r.returncode == 0, r.stdout[-3000:] + r.stderr[-3000:]
+    log0 = (out / "tpu8_td_r0.log").read_text()
+    assert "set_bottom_up * off: cleared 1 cell(s)" in log0
+    assert _report(out / "tpu8_td_r0.rep")["marks"] == ["0"]
+    table = (out / "e1_tpu_healerless_step1_reserve_handdown.md").read_text()
+    row = [l for l in table.splitlines() if "| td | 1 |" in l][0]
+    assert "| 96/96 pins, 96/96 seats | yes (2) | 0/0/0 | 0/0/0 |" in row, row
+    assert "| 1.00 |" in row
+    assert "| 8 | td | 2 | 1 | clean | 0/0/0 | yes |" in table
+
+
+def test_a_healer_move_off_a_handed_down_shape_drops_its_forced_layers(tmp_path):
+    """A `pin_plan` pin carries FORCED per-segment layers and seat windows
+    sized for the handed-down candidate; ripup may override a pin, and its
+    first healed hand-down round measured what carrying them onto the new
+    shape costs — `topo 2->1` on an 8-bit bus left its H segment's bits on
+    a V layer, 34 LAYER_DIR violations behind a 0/0 (opens, overlaps)
+    metric.  A trial that moves a bundle to a different shape now drops
+    them (rr_trials.py, trial_sweep.cpp, the screen), so a healed informed
+    round ends with no unbuildable segment."""
+    out = tmp_path / "e6h"
+    r = _tclsh(_DRIVER, "soc", 4, "-arms", "td", "-informed", 1, "-heal",
+               "-primitive", "reserve", "-handdown", "-out", out, cwd=tmp_path)
+    assert r.returncode == 0, r.stdout[-3000:] + r.stderr[-3000:]
+    log = (out / "soc4_td_r1.log").read_text()
+    assert "COMMIT bundle" in log or "CLASS COMMIT" in log, log[-2000:]
+    assert "unbuildable" not in log, [l for l in log.splitlines()
+                                       if "unbuildable" in l][:4]
+    d = _report(out / "soc4_td_r1.rep")
+    assert d["verdict"][2] == "0", d["verdict"]        # no audit violation
+
+
+def test_the_plan_is_derived_in_the_budgets_scope(tmp_path):
+    """Codex P2 on #939: a session combining `-derive_cells` with
+    `-derive_plan` derives the plan in the SAME scope as the budget — a
+    top-down round's default scope (every bundle-owning cell) would hand
+    down less than the top the scoped budget came from."""
+    rep = tmp_path / "td.rep"
+    shares = tmp_path / "td.buda"
+    plan = tmp_path / "plan.buda"
+    r = _tclsh(_SOC, 2, "-noheal", "-derive", shares, "-derive_cells",
+               "alu_cell,sram_cell", "-derive_plan", plan, "-report", rep,
+               cwd=tmp_path)
+    assert r.returncode == 0, r.stdout[-3000:] + r.stderr[-3000:]
+    assert "# scope: alu_cell,sram_cell" in shares.read_text()
+    assert "# scope: alu_cell,sram_cell" in plan.read_text()
+    n = int(re.search(r"^# bundles: (\d+)$", plan.read_text(), re.M)[1])
+    assert n > 0 and _report(rep)["plan_derived"] == [str(n)]
+    # the default scope on the same session hands down fewer bundles: the
+    # other cells' own bundles are the top's here
+    plan2 = tmp_path / "plan2.buda"
+    r = _tclsh(_SOC, 2, "-noheal", "-derive_plan", plan2, cwd=tmp_path)
+    assert r.returncode == 0, r.stderr[-2000:]
+    n2 = int(re.search(r"^# bundles: (\d+)$", plan2.read_text(), re.M)[1])
+    assert n2 < n, (n2, n)

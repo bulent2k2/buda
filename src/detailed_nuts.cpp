@@ -1644,8 +1644,16 @@ std::vector<BusSegment> make_bus_segments(
         bs.layer       = ts.layer;
         bs.span_lo     = ts.span_lo;
         bs.span_hi     = ts.span_hi;
-        bs.interval_lo = ts.interval_lo;
-        bs.interval_hi = ts.interval_hi;
+        // A seat pin (a width-wide slide override, `pin_plan`) fixes the
+        // abstract position; the bits get the segment's NATURAL window —
+        // the one the source round admitted from (TrackSegment::seat_nat).
+        if (!std::isnan(ts.seat_nat_lo)) {
+            bs.interval_lo = ts.seat_nat_lo;
+            bs.interval_hi = ts.seat_nat_hi;
+        } else {
+            bs.interval_lo = ts.interval_lo;
+            bs.interval_hi = ts.interval_hi;
+        }
         auto nb = bid_to_nbits.find(ts.bundle_id);
         bs.bit_width   = (nb != bid_to_nbits.end()) ? nb->second : 1;
         bs.bit_order   = bit_order;

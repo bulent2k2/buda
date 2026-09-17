@@ -80,8 +80,17 @@ class TopologyExplorer(ExplorerEditMixin, ExplorerAnalysisMixin, ExplorerSidecar
                  ui_state: ViewState = None, start_bidx=0, layer_visible=None,
                  on_focus_bundle=None, bundle_order_fn=None, fp_resolver=None,
                  user_ops_sink=None, groups_fn=None, cost_fn=None,
-                 routing_grid=None):
+                 routing_grid=None, pin_sink=None):
         self.fp          = fp
+        # _explorer_pin_sink — the session's bookkeeping for a pin state
+        # change made HERE: an unpin (`x`, the `s` toggle) reaches the
+        # pre-expansion original and forgets a handed-down plan's entry for
+        # the bundle (`pin_plan`), and a pin onto a DIFFERENT candidate
+        # supersedes that entry as a typed select_topology does — else the
+        # next run_planner's plan replay puts the plan back over the user's
+        # later word (Codex P2 on #939).  None (orphan explorer) = live
+        # wrapper only, as before.
+        self._pin_sink = pin_sink
         # Optional RoutingGridStack: powers the NDR surface (rule-derived
         # shield ghosts + the debug realizability tint).  None (orphan
         # explorer / no grid declared) -> those overlays are silently off.
@@ -426,6 +435,7 @@ class BudaVisualizer(VizHighlightMixin, VizPanelsMixin, VizAbstractDrawMixin, Vi
                  rerun_fn=None, routing_grid=None, layer_stack=None,
                  net_endpoints=None, ipc_session=None, ipc_verbose=False,
                  fp_resolver=None, cuts_provider=None, user_ops_sink=None,
+                 pin_sink=None,
                  groups_fn=None, cost_fn=None):
         self.fp           = floorplan
         self.bundles      = bundles
@@ -442,6 +452,7 @@ class BudaVisualizer(VizHighlightMixin, VizPanelsMixin, VizAbstractDrawMixin, Vi
         # _record_user_ops, so a GUI edit_commit stores BDB op-log
         # provenance (see TopologyExplorer.__init__).
         self._user_ops_sink = user_ops_sink
+        self._pin_sink = pin_sink            # handed on to the explorer
         # () -> (cuts, x_grid, y_grid) | None: fresh planner cut/band state for
         # the congestion heatmap, so an in-GUI re-run can redraw the overlay
         # against the RE-ROUTED design instead of leaving the stale original

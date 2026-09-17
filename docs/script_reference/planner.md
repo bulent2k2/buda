@@ -407,6 +407,104 @@ unpin_topology 2       # bundle 2 is no longer forced
 run_planner            # may now choose a different candidate for bundle 2
 ```
 
+### `pin_plan`
+
+```
+pin_plan <bundle> <type-spec> [uid <hash>] [layers <name,...>] [seats <lo:hi|-,...>]
+```
+
+ONE bundle's plan handed down from a previous session ([convergence
+ladder](../internal/convergence_ladder.md) item 6c) — the lines
+[`derive_top_plan`](nuts.md#derive_top_plan-file-path-cells-ab) writes.
+`<bundle>` is the [`select_topology`](#select_topology) selector, with a
+net-name hint matching the bundle whose **first net is exactly the hint**
+before the prefix rule (a plan names every bundle by its first net, and
+`pc_1` must not land on `pc_10`).  The candidate is found by content **uid**
+first — the exact candidate the previous session routed — and by the
+**type spec** second (the shape and nearest locus: the pin that survives a
+pool whose Hanan loci moved, reported as `by type spec rather than uid`).
+`layers` forces the planner's layer per segment (the `edit_commit pin`
+mechanism, `pinned_seg_layers`); `seats` gives each segment's abstract seat
+as a slide window NUTS must place inside — the width-wide window
+`[pos − w/2, pos + w/2]` around the previous session's track position, which
+reproduces it exactly (a POINT would be refused by the fit, which needs
+`hi − lo ≥ width`); `-` hands down no seat for that segment.  A window
+`pin_plan` set is a **seat pin** to NUTS, flagged as one on the plan
+(`seg_seat_pin`, beside the window): every pass respects the interval, so
+the seat cannot move — and the bit stage gets the segment's *natural*
+window (the candidate's own slide, trunk margin and boundary relax
+included: the window the previous session admitted its bits from,
+`TrackSegment.seat_nat`), not the pinned one, because a width-wide window
+on a rail-straddling seat holds one signal track fewer than the bits and
+stranded 32 of 85 bits at NQ = 8 (128 of 176 at NQ = 16) in the first 6c
+measurement.  The flag is what makes it a seat, never the window's width:
+an `edit_set_slide` or explorer override of the same width is the user's
+window, and it bounds the bits exactly as that command documents (a
+bottom-up copy carries the natural window transformed with its seat).
+
+The entry is **held** until the candidate pool exists — a plan is sourced
+before bundling, like the budget it comes with — and applied at
+`run_planner` / `run_planner hier` (`[PlanPin] N of M handed-down plan(s)
+applied`), AFTER the selections sidecar's baseline load (the sourced plan
+is the later, explicit instruction: a sidecar entry for the same bundle
+would otherwise clear the plan's forced layers, or a USER entry replace
+the topology under the plan's seats) and on EVERY planner run, since the
+baseline runs ahead of every one; a typed `select_topology` moving the
+bundle to another candidate is the user's later word and supersedes the
+entry (said, and never re-applied — its forced layers go with its seats
+on every alias, and an entry still HELD is superseded too, except by a
+pin onto the plan's own candidate, so a flow whose text pins what its
+plan hands down keeps the plan's layers and seats), as `unpin_topology`
+does — and so do
+the explorer's `x` / `s`-toggle unpin and a pin onto another candidate
+there, which the explorer hands to the session (`pin_sink`); the explorer
+now unpins a pin that has no sidecar entry too (a script `select_topology`,
+a `pin_plan`, a checkpoint pin), saying so, where it used to do nothing
+silently.  Typed after generation the entry applies at once.  A healer that moves the bundle to
+another shape drops the seats and their flags with the forced layers
+(negotiation and the ripup trials alike).  Under `run_planner hier` an
+entry for an **unmarked cell's cell-local bundle** — planned globally *per
+instance*, so the plan carries one entry per instance while before
+expansion only the template and its replicas exist — is held past the
+pre-expansion pass and pinned onto each instance's own wrapper right after
+expansion (`[PlanPin] K per-instance plan(s) applied after expansion`), on
+every expansion; a pin there before expansion would broadcast one
+instance's selection to every instance or land on a replica expansion
+drops.  After every `run_nuts`
+the session audits the seats: `[PlanPin] seated S of N handed-down seat(s)`,
+naming each seat the placement could not honour (a window the templates'
+copies took, or one outside the candidate's slide range — NUTS then places
+where it can and counts a violation) — never a silent re-seat.  A bottom-up
+**template's** bundle is skipped and said (a template is solved once in its
+own frame under the derived budget — the half of the loop the hand-down
+exists to keep stable, not to pin); an unknown bundle, an unknown layer
+name, a seat list whose length is not the candidate's segment count (only
+the selection is pinned then) are each reported.  `unpin_topology` frees
+the selection, the forced layers and the seats together — a HELD entry
+too, superseded before it ever applies: `unpin_topology <bundle>` the
+entries resolving to that bundle, and `unpin_topology *` EVERY held entry
+without resolving any (typed before bundling there is no pool to resolve
+against, and the instruction was "no pins"); `dump_pins` shows
+the pin with `seats[k of n] (pin_plan)`.  Session state, not persisted: a
+resumed session re-sources the plan.  From Tcl, `buda::query plan_pins`
+returns `{entries applied seated of}`.
+
+| Argument | Type | Description |
+|---|---|---|
+| `bundle` | int \| string | Bundle ID, net-name hint (exact first net first), or `id:<N>` / `net:<name>`. |
+| `type-spec` | string | The candidate's type as `dump_topologies` prints it (`TRUNK_H+MST@y1268`); the fallback when the uid is not in the pool. |
+| `uid <hash>` | string | The candidate's content uid (`topo_uid`), tried first. |
+| `layers <csv>` | names | One layer name per segment (`-` = the planner's choice). |
+| `seats <csv>` | `lo:hi` | One slide window per segment (`-` = none). |
+
+**Example:**
+```buda
+# the previous session's plan for the bus x, then the round that routes under it
+pin_plan net:x_0 I_H uid 63cc2a3bfb1afd90 layers M6 seats 133:167
+run_planner hier 5          # [PlanPin] 1 of 1 handed-down plan(s) applied (1 seat(s) pinned)
+run_nuts                    # [PlanPin] seated 1 of 1 handed-down seat(s)
+```
+
 ### `dump_pins`
 
 ```

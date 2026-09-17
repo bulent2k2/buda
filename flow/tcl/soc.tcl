@@ -368,6 +368,10 @@ if {$bottomup} {
     # instance is solved once and frozen as a keepout rather than copied.
     converge::mark *
     buda::align_bottom_up
+} elseif {[converge::align_wanted]} {
+    # The same nudges without the marks: a top-down round on the geometry
+    # a bottom-up round routes (converge_lib.tcl, `-align`).
+    converge::align_only *
 }
 
 # The band declarations this vehicle exists to exercise.

@@ -217,6 +217,39 @@ def cmd_derive_cell_layer_reserves(session, cmd, args, cmd_line):
     session._report_cell_layer_reserves(cells, apply, path)
 
 
+def cmd_derive_top_plan(session, cmd, args, cmd_line):
+    # Usage: derive_top_plan [file <path>] [cells <a,b,...>]
+    # The top's PLAN handed down (convergence ladder item 6c): every
+    # globally planned bundle's selected candidate (by uid and type spec),
+    # its layers and its abstract seats as `pin_plan` lines a later session
+    # sources BEFORE run_planner (hier) — so the informed round routes the
+    # blocks under the SAME top the reservation was derived from, which is
+    # what E5 measured the loop lacked (4 of 13 top-level topologies and
+    # no seat survived the re-plan).  Scope as the share/reserve
+    # derivations: a bundle framed inside a scoped cell's instance is not
+    # the top's (it is re-solved under the derived budget), nor is a
+    # bottom-up copy.  Needs a NUTS result.
+    path, cells = "", None
+    toks = [unquote(t) for t in split_quoted_args(cmd_line)]
+    i = 0
+    while i < len(toks):
+        t = toks[i].lower()
+        if t == "file" and i + 1 < len(toks):
+            path = toks[i + 1]; i += 1
+        elif t == "cells" and i + 1 < len(toks):
+            cells = [c for c in toks[i + 1].split(",") if c]; i += 1
+            if not cells:
+                print("Error: derive_top_plan: `cells` names no cell (an "
+                      "empty list is not \"every cell\")")
+                return
+        else:
+            print(f"Error: derive_top_plan: unknown token '{toks[i]}'\n  "
+                  f"usage: derive_top_plan [file <path>] [cells <a,b,...>]")
+            return
+        i += 1
+    session._report_top_plan(cells, path)
+
+
 def cmd_derive_cell_layer_shares(session, cmd, args, cmd_line):
     # Usage: derive_cell_layer_shares [apply] [file <path>] [cells <a,b,..>]
     # Convergence ladder item 4 (rung 4): the COMPLEMENT of the top's
@@ -447,6 +480,7 @@ def cmd_visualize_topologies(session, cmd, args, cmd_line):
                          fp_resolver=session._make_topo_fp_resolver(),
                          groups_fn=session._loci_groups,
                          user_ops_sink=session._record_user_ops,
+                         pin_sink=session._explorer_pin_sink,
                          cost_fn=(session._candidate_costs if debug else None),
                          routing_grid=session.routing_grid).show()
 
@@ -530,6 +564,7 @@ def cmd_visualize(session, cmd, args, cmd_line):
                          cuts_provider=_cuts_provider,
                          groups_fn=session._loci_groups,
                          user_ops_sink=session._record_user_ops,
+                         pin_sink=session._explorer_pin_sink,
                          cost_fn=(session._candidate_costs if debug else None))
     viz.draw_blocks()
     if session.planner is not None:
@@ -595,6 +630,7 @@ COMMANDS = {
     "report_demand": cmd_report_layer_demand,
     "derive_cell_layer_shares": cmd_derive_cell_layer_shares,
     "derive_cell_layer_reserves": cmd_derive_cell_layer_reserves,
+    "derive_top_plan": cmd_derive_top_plan,
     "check_design": cmd_check_design,
     "check_connectivity": cmd_check_design,   # legacy alias (pre-rename)
     "check_template_tracks": cmd_check_template_tracks,

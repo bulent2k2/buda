@@ -2104,3 +2104,282 @@ class ReportsMixin:
             _write(path)
         if apply:
             _apply()
+
+    # ── derive_top_plan (convergence ladder item 6c) ──────────────────────
+
+    def _top_plan_scope_insts(self, cells, notes):
+        """The placed instances of the cells in the derivation scope (the
+        share/reserve derivations' rule: named `cells`, else the
+        `set_bottom_up` marks, else every cell owning a cell-local bundle)
+        — the frames a handed-down plan must NOT come from, since those
+        cells are re-solved as templates under the budget the same round
+        derived for them.  Returns (paths, scope)."""
+        if self.bdb is None:
+            notes.append("scope: no BDB open — a flat design, every "
+                         "planned bundle is the top's")
+            return [], []
+        comps = [c for c in self.bdb.all_components() if is_placed(c)]
+        by_cell = {}
+        for c in comps:
+            by_cell.setdefault(c.cell, []).append(c)
+        scope = self._policy_scope(cells, by_cell, notes)
+        in_scope = set(scope)
+        return [c.name for c in comps if c.cell in in_scope], scope
+
+    def _derive_top_plan(self, cells=None):
+        """The top's PLAN — every globally planned bundle's selected
+        candidate, its per-segment layers and its abstract seats — as
+        `pin_plan` lines a later session sources before `run_planner hier`,
+        so the blocks are routed under the SAME top the reservation was
+        derived from (convergence ladder item 6c).
+
+        E5 measured why the informed loop had no fixpoint: the informed
+        round re-plans the top from scratch after the templates moved, so
+        on the recorded NQ = 2 rounds 4 of 13 top-level bundles kept their
+        topology and none kept its seat, and every derivation named a top
+        that the next round did not route.  A track PREFERENCE cannot fix
+        that (6b, measured); a pin can.
+
+        "The top" is every bundle in the routed list that is not a
+        bottom-up copy and whose frame instance is not inside a placed
+        instance of a scoped cell — the same bundles the reserve derivation
+        read as demand on those cells.  Per bundle: the selected candidate
+        by content uid (`topo_uid`) AND by its type spec (the pin that
+        survives a pool whose loci moved — the uid is tried first, the
+        spec is the fallback and is reported), the planner's layer per
+        segment by name, and the abstract seat per segment as the
+        width-wide window `[pos - w/2, pos + w/2]` (a POINT is refused by
+        NUTS's fit — `first_fit` needs `hi - lo >= width` — while the
+        width-wide window reproduces the position exactly); an unplaced
+        segment hands down no seat (`-`).
+
+        Returns (lines, notes, scope): `lines` are dicts (bid, net, type,
+        uid, layers, seats, frame); None before a NUTS result."""
+        if self.nuts_result is None or not self.bundles:
+            return None
+        from buda_script import reads_back   # the reader's own verdict
+        notes = []
+        inside, scope = self._top_plan_scope_insts(cells, notes)
+        seats = {(t.bundle_id, t.seg_idx): t
+                 for t in self.nuts_result.segments}
+        names = self._make_layer_names()
+        # A dogleg NUTS adopted is an APPENDED, geometry-mutated copy of the
+        # selected candidate (edit.py `_adopt_doglegs`): its uid is in no
+        # fresh pool, and its layers/seats index the split (two segments
+        # more than the shape's), so a line written from it could not
+        # replay — the type spec would land on the unsplit candidate and
+        # the segment-count guard would drop every layer and seat (Codex
+        # P1 on #939).  Hand down the PRE-split candidate instead: the split
+        # keeps the original segment indices (the trunk is rewritten in
+        # place as the left piece, the right piece and the jog are
+        # appended), so the first `nseg` layers are the original's, and
+        # every seat but the split trunk's reproduces; the trunk's is
+        # withheld, since NUTS re-derives the dogleg from the same cycle.
+        dl_slot = getattr(self, "_dogleg_slot", None) or {}
+        dl_orig = getattr(self, "_dogleg_originals", None) or {}
+        lines = []
+        n_locked = n_inside = n_unplanned = n_dogleg = n_user = 0
+        n_unspell, unspell = 0, []
+        for w in self.bundles:
+            b = w.input.original_bundle
+            if getattr(w.hier, "locked", False):
+                n_locked += 1
+                continue
+            frame = b.instances[0] if b.instances else ""
+            if frame and any(frame == p or frame.startswith(p + "/")
+                             for p in inside):
+                n_inside += 1
+                continue
+            sel = w.plan.selected_topology_index
+            nets = b.get_net_names()
+            if not (0 <= sel < len(w.input.candidates)) or not nets:
+                n_unplanned += 1
+                continue
+            t = w.input.candidates[sel]
+            trunk_si = None            # the split trunk of an adopted dogleg
+            if (b.id in dl_slot and sel == dl_slot[b.id]
+                    and 0 <= dl_orig.get(b.id, -1) < len(w.input.candidates)
+                    and dl_orig[b.id] != sel):
+                split, t = t, w.input.candidates[dl_orig[b.id]]
+                trunk_si = self._dogleg_trunk_index(t, split)
+                n_dogleg += 1
+            if t.type == "USER":
+                # A hand-built candidate is in no fresh pool — regeneration
+                # cannot produce it, and only a sidecar / `dump_user_ops`
+                # replay rebuilds it — so a line naming it could not apply;
+                # omitted and said rather than handed down as a pin that
+                # silently re-plans (Codex P2 on #939).
+                n_user += 1
+                continue
+            nseg = len(t.segments)
+            sl = list(w.plan.seg_layers)
+            layers = [(names.get(l, f"L{l}") if l >= 0 else "-")
+                      for l in (sl + [-1] * nseg)[:nseg]]
+            if not (reads_back("net:" + nets[0]) and reads_back(t.type)
+                    and self._csv_reads_back(layers)
+                    and not any(l >= 0 and names.get(l) == "-"
+                                for l in sl[:nseg])):
+                # The script grammar cannot spell this line: a selector
+                # carrying whitespace AND both quote characters has no
+                # escape (`quote_arg` returns it unchanged, and `pin_plan`
+                # then reads it as two tokens and refuses the line), a
+                # layer NAME carrying a comma splits into two on the CSV
+                # `layers` field (the segment-count guard then drops every
+                # layer and seat), and one named `-` reads as the
+                # UNASSIGNED placeholder — so the entry is omitted and said
+                # rather than written as a line the next session cannot
+                # replay (Codex P2s on #939).  Asked of the READER, so
+                # whatever it cannot read back is what is omitted.
+                n_unspell += 1
+                unspell.append(nets[0])
+                continue
+            seat = []
+            for si in range(nseg):
+                ts = seats.get((b.id, si))
+                if si == trunk_si:
+                    seat.append(None)          # the split trunk: re-derived
+                elif ts is None or not ts.placed \
+                        or ts.track_position != ts.track_position:
+                    seat.append(None)
+                else:
+                    seat.append((ts.track_position - ts.width / 2.0,
+                                 ts.track_position + ts.width / 2.0))
+            lines.append({"bid": b.id, "net": nets[0], "type": t.type,
+                          "uid": buda.topo_uid(t), "layers": layers,
+                          "seats": seat, "frame": frame})
+        if n_locked:
+            notes.append(f"{n_locked} bottom-up copy/copies not handed "
+                         f"down (a template is solved in its own frame)")
+        if n_inside:
+            notes.append(f"{n_inside} bundle(s) framed inside a scoped "
+                         f"cell's instance not handed down (re-solved "
+                         f"under the derived budget)")
+        if n_unplanned:
+            notes.append(f"{n_unplanned} bundle(s) with no selected "
+                         f"candidate skipped")
+        if n_user:
+            notes.append(f"{n_user} bundle(s) on a hand-built USER candidate "
+                         f"not handed down (regeneration cannot produce it; "
+                         f"a sidecar or dump_user_ops replays it)")
+        if n_unspell:
+            shown = ", ".join(repr(n) for n in unspell[:3])
+            more = f", +{n_unspell - 3} more" if n_unspell > 3 else ""
+            notes.append(f"{n_unspell} bundle(s) whose net name, type or "
+                         f"layer names the script grammar cannot spell not "
+                         f"handed down ({shown}{more}: whitespace plus both "
+                         f"quote characters has no escape, a comma in a "
+                         f"layer name splits the layers field, so no "
+                         f"pin_plan line reads back)")
+        if n_dogleg:
+            notes.append(f"{n_dogleg} dogleg-adopted bundle(s) handed down "
+                         f"as the pre-split candidate with its layers, the "
+                         f"split trunk's seat withheld (NUTS re-derives the "
+                         f"dogleg)")
+        return lines, notes, scope
+
+    @staticmethod
+    def _dogleg_trunk_index(orig, split):
+        """Which of `orig`'s segments the dogleg split in two: the one
+        whose orientation matches the appended right piece and whose
+        along-extent is the union of the left piece's (rewritten in place
+        at the same index) and the right piece's.  The split also re-ends
+        every stub on the pieces' tracks, so a geometry diff is no
+        discriminator; a stub's PERPENDICULAR coordinate — its seat — is
+        unchanged, which is why the other seats reproduce.  None when the
+        shape is not the trunk/piece/jog split `_adopt_doglegs` records."""
+        nseg = len(orig.segments)
+        if len(split.segments) != nseg + 2:
+            return None
+
+        def geom(seg):
+            horiz = seg.start.y == seg.end.y
+            a0, a1 = ((seg.start.x, seg.end.x) if horiz
+                      else (seg.start.y, seg.end.y))
+            return horiz, min(a0, a1), max(a0, a1)
+
+        rh, rlo, rhi = geom(split.segments[nseg])
+        for si in range(nseg):
+            oh, olo, ohi = geom(orig.segments[si])
+            lh, llo, lhi = geom(split.segments[si])
+            if oh == lh == rh and min(llo, rlo) == olo \
+                    and max(lhi, rhi) == ohi:
+                return si
+        return None
+
+    @staticmethod
+    def _csv_reads_back(items):
+        """Whether a comma-joined list reads back as the same list through
+        the reader: the joined token as ONE token (`reads_back`) and its
+        comma split as these items — a name carrying a comma fails the
+        second half, since the CSV grammar has no escape for it."""
+        from buda_script import reads_back
+        tok = ",".join(items)
+        return reads_back(tok) and tok.split(",") == list(items)
+
+    @staticmethod
+    def _top_plan_line(l):
+        """One `pin_plan` line for a derived entry — the grammar
+        `cmd_pin_plan` reads back."""
+        from buda_script import quote_arg   # the tokenizer's own inverse
+
+        def _seat(s):
+            return "-" if s is None else f"{fmt_pos(s[0])}:{fmt_pos(s[1])}"
+
+        # The selector is quoted WHOLE ("net:foo bar") by the tokenizer's
+        # inverse, which honours its rule — a quote counts only where a token
+        # begins — and picks the delimiter the name does not contain, so
+        # `foo"bar baz` is spelled with apostrophes (Codex P2s on #939).
+        return (f"pin_plan {quote_arg('net:' + l['net'])} "
+                f"{quote_arg(l['type'])} "
+                f"uid {l['uid']} layers {quote_arg(','.join(l['layers']))} "
+                f"seats {','.join(_seat(s) for s in l['seats'])}")
+
+    def _report_top_plan(self, cells=None, path=""):
+        """`derive_top_plan`: the plan as a table plus the `pin_plan` paste
+        lines; `path` writes them for a later session to `source` (they are
+        held until that session's `run_planner`)."""
+        out = self._derive_top_plan(cells)
+        if out is None:
+            print("Error: derive_top_plan needs a NUTS result to read the "
+                  "seats off (run_planner, then run_nuts)")
+            return
+        lines, notes, scope = out
+        print("=== The top's plan (selection, layers, seats per globally "
+              "planned bundle) ===")
+        for n in notes:
+            print(f"  {n}")
+        n_seg = sum(len(l["seats"]) for l in lines)
+        n_seated = sum(1 for l in lines for s in l["seats"] if s is not None)
+        if lines:
+            w_net = max(len(l["net"]) for l in lines)
+            w_type = max(len(l["type"]) for l in lines)
+            print(f"  {'bundle':>6}  {'net':<{w_net}}  {'type':<{w_type}}  "
+                  f"layers  seats")
+            for l in lines:
+                print(f"  {l['bid']:>6}  {l['net']:<{w_net}}  "
+                      f"{l['type']:<{w_type}}  "
+                      f"{' '.join(l['layers'])}  "
+                      f"{sum(1 for s in l['seats'] if s is not None)}"
+                      f"/{len(l['seats'])}")
+        print(f"  {len(lines)} bundle(s) handed down ({n_seg} segment(s), "
+              f"{n_seated} seated)")
+        text = [self._top_plan_line(l) for l in lines]
+        if lines:
+            print("  --- flow-text lines (source BEFORE run_planner; held "
+                  "until it runs) ---")
+            for t in text[:12]:
+                print(f"  {t}")
+            if len(text) > 12:
+                print(f"  ... {len(text) - 12} more line(s)")
+        if path:
+            with open(path, "w") as f:
+                f.write("# derive_top_plan: the globally planned bundles' "
+                        "selection, layers and abstract seats; source "
+                        "before run_planner (hier) — held until it runs\n")
+                f.write("# scope: " + (",".join(scope) if scope else "(none)")
+                        + "\n")
+                f.write(f"# bundles: {len(lines)}\n")
+                for t in text:
+                    f.write(t + "\n")
+            print(f"  written to {path}"
+                  + ("" if text else " (header only — nothing planned)"))

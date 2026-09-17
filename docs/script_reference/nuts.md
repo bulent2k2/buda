@@ -1121,3 +1121,60 @@ two doors: `apply` declares through `set_cell_layer_reserve` itself and REMOVES
 a scoped cell's reservation on a layer it emitted no line for, `file` writes
 the lines (with a `# scope:` header and `off` lines for the removals) for a
 session that sources them **before** `run_planner hier`.
+
+### `derive_top_plan [file <path>] [cells <a,b,...>]`
+
+```
+derive_top_plan                  # print the top's plan + the pin_plan lines
+derive_top_plan file plan.buda   # ...and write them for the next session
+derive_top_plan cells sram_cell  # scope: the cells the budget is derived FOR
+```
+
+The **top's plan handed down** ([convergence ladder](../internal/convergence_ladder.md)
+item 6c): every **globally planned** bundle's selected candidate (by content
+uid and by type spec), its planner layer per segment, and its abstract seat
+per segment, as one [`pin_plan`](planner.md#pin_plan) line each — for a
+later session to source before `run_planner hier`, beside the reservation
+the same session derives.  [E5](../internal/convergence_e5.md) measured why
+the informed loop had no fixpoint: the informed round re-planned the top
+from scratch after the templates moved, so on the recorded NQ = 2 rounds
+4 of the 13 top-level bundles kept their topology and none kept its seat,
+and every derivation named a top the next round did not route.  A track
+preference (`set_reserve_steer`, 6b) could not supply that; a pin can.
+
+"The top" is every routed bundle that is not a bottom-up copy and whose
+frame instance is not inside a placed instance of a scoped cell — the same
+scope rule as the share/reserve derivations (named `cells`, else the
+`set_bottom_up` marks, else every cell owning a cell-local bundle) — i.e.
+exactly the bundles the reserve derivation read as *demand* on those
+cells; a bundle framed inside a scoped instance is re-solved under the
+derived budget and is not handed down.  A seat is the width-wide window
+`[pos − w/2, pos + w/2]` (see `pin_plan` for why not a point); an unplaced
+segment hands down `-`.  A bundle whose NUTS run **adopted a dogleg** is
+handed down as its **pre-split** candidate: the adopted split is an
+appended, geometry-mutated copy no fresh pool holds, and its layers and
+seats index two segments the shape does not have, so a line written from
+it could never replay (the type spec would land on the unsplit candidate
+and the segment-count guard drop every layer and seat).  The split keeps
+the original segment indices (the trunk is rewritten in place as the left
+piece, the right piece and the jog are appended), so the pre-split
+candidate's layers are the first `nseg` of the split's and every seat but
+the split trunk's reproduces — that one is `-`, since the next session's
+NUTS re-derives the dogleg from the same cycle; the note names how many.
+A bundle on a hand-built **USER** candidate is omitted and said: no fresh
+pool holds it (regeneration cannot produce it; a sidecar or
+`dump_user_ops` replays it), so a line naming it could never apply.  So is
+a bundle whose line the script grammar cannot spell: a first net carrying
+whitespace AND both quote characters has no escape, so no `pin_plan` line
+reads back as one selector, and a LAYER NAME carrying a comma (`def_layer`
+accepts one) splits the comma-separated `layers` field into two layers for
+one segment, where the segment-count guard would drop every layer and seat
+— or named `-`, the unassigned placeholder.  The derivation asks the READER
+(`buda_script.reads_back`: comment strip, tokenizer, unquote; the CSV split
+for the layers field) rather than restating its rule, and the note names
+the nets.  A layer name with whitespace is fine: the field is quoted whole.
+Needs a NUTS result.  The file carries a `# scope:` header and
+`# bundles: N`.  The loop driver runs it under
+`converge.tcl -handdown`, whose table then carries the `plan` (pins applied,
+seats honoured) and `fixpoint` (a round's derived budget AND derived plan
+equal to the ones it ran under — all of the loop's state) columns.

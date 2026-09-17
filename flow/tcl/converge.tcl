@@ -22,6 +22,8 @@
 #   btcl flow/tcl/converge.tcl soc 2 -nofloor        # the pure complement
 #   btcl flow/tcl/converge.tcl soc 2 4 -primitive reserve -arms uniform,td,bu
 #                                                   # E5: the corridor
+#   btcl flow/tcl/converge.tcl soc 2 4 -primitive reserve -arms td,bu -handdown
+#                                                   # 6c: the top's plan kept
 #
 # Four ways a block gets its layer budget, each run as a LOOP on the same
 # vehicle at the same size, until the endpoint is clean or the arm runs out
@@ -75,6 +77,20 @@
 #                  round and the sweep stops when it would pass this)
 #   -nofloor       derive the PURE complement (no own-need floor): the
 #                  derivation's own strawman defence
+#   -handdown      hand the top's PLAN down with the budget (ladder item
+#                  6c): the measurement round writes its globally planned
+#                  bundles' selection, layers and seats (`derive_top_plan`),
+#                  every informed round sources the previous round's plan
+#                  (`pin_plan` lines, held until its run_planner hier) and
+#                  writes its own, so the blocks are routed under the SAME
+#                  top the budget came from.  Two columns say what it
+#                  bought: `plan` (pins applied, seats honoured by NUTS) and
+#                  `fixpoint` (this round's derived budget AND derived plan
+#                  equal the ones it ran under — the loop's own convergence
+#                  test, over all of the loop's state; an informed round
+#                  that reaches it stops the arm).  The td
+#                  arm's measurement round then runs on the ALIGNED
+#                  floorplan (`-align`), since a seat is geometry
 #   -out DIR       where logs/reports/tables go (default e1_out beside the
 #                  current directory)
 #   -tag T         a tag in the table file's name
@@ -89,14 +105,14 @@ if {$argc < 2} {
     puts stderr "usage: converge.tcl soc|tpu <size> ... \[-heal\] \[-step N\]\
                  \[-maxreserve N\] \[-informed R\] \[-arms a,b\] \[-nofloor\]\
                  \[-primitive share|reserve\] \[-f0 F\] \[-fmax F\]\
-                 \[-out DIR\] \[-tag T\] \[-j N\]"
+                 \[-handdown\] \[-out DIR\] \[-tag T\] \[-j N\]"
     exit 2
 }
 set vehicle [lindex $argv 0]
 if {$vehicle ni {soc tpu}} { error "converge.tcl: vehicle must be soc|tpu, got '$vehicle'" }
 set sizes {}
 set heal 0; set step 1; set maxreserve 4; set informed 2; set nofloor 0
-set primitive share; set f_start 4; set fmax 32
+set primitive share; set f_start 4; set fmax 32; set handdown 0
 set arms {blind td bu}; set out e1_out; set tag ""; set threads ""
 set i 1
 while {$i < $argc} {
@@ -112,12 +128,13 @@ while {$i < $argc} {
     # the whole experiment (Codex P2 on #935).  A numeric `-1` still reaches
     # its own check (`-maxreserve takes a non-negative integer`).
     set optlike [expr {[string match -* $v] && ![string is integer -strict $v]}]
-    if {$a ni {-heal -nofloor} && ([string trim $v] eq "" || $optlike)} {
+    if {$a ni {-heal -nofloor -handdown} && ([string trim $v] eq "" || $optlike)} {
         error "converge.tcl: $a needs a value (got '$v')"
     }
     switch -- $a {
         -heal       { set heal 1; incr i }
         -nofloor    { set nofloor 1; incr i }
+        -handdown   { set handdown 1; incr i }
         -step       { set step $v; incr i 2 }
         -primitive  { set primitive $v; incr i 2 }
         -f0         { set f_start $v; incr i 2 }
@@ -223,10 +240,17 @@ proc clean {r} {
     return [expr {$ov == 0 && $un == 0 && $vi == 0}]
 }
 
+# An informed round's fixpoint verdict for the summary: yes/no, `—` for a
+# measurement round (nothing to compare against).
+proc fixpoint_of {r} {
+    if {![dict exists $r fixpoint]} { return "—" }
+    return [expr {[lindex [dict get $r fixpoint] 0] ? "yes" : "no"}]
+}
+
 # The informed rounds shared by td and bu: round r sources F_{r-1}, derives
 # F_r for the next, scope pinned to F_0's cells.  Returns the rounds' reports.
 proc informed_rounds {prefix size f0} {
-    global informed nofloor
+    global informed nofloor handdown
     set cells [converge::scope_of $f0]
     set rounds {}
     set prev $f0
@@ -244,13 +268,47 @@ proc informed_rounds {prefix size f0} {
         set words [list -bottomup -shares $prev -derive $fr]
         if {$cells ne ""} { lappend words -derive_cells $cells }
         if {$nofloor} { lappend words -derive_opts nofloor }
+        if {$handdown} {
+            # The previous round's top plan comes down with its budget,
+            # and this round leaves its own for the next.
+            lappend words -plan [plan_file $prefix [expr {$r - 1}] $f0] \
+                          -derive_plan [plan_file $prefix $r $f0]
+        }
         set rep [session ${prefix}_r$r $size {*}$words]
         dict set rep policy $prev
+        # The fixpoint test: the budget this round DERIVED against the one
+        # it RAN UNDER — and, under -handdown, the PLAN it derived against
+        # the one it ran under, since both are the loop's state (a healer
+        # can move a topology, a layer or a seat while the budget
+        # re-derives the same; a pin that fell back to its type spec can
+        # leave a different plan — Codex P1 on #939).  Equal means the next
+        # round would run the same session again — the loop has converged
+        # there, clean or not.
+        lassign [converge::policy_diff $prev $fr] same ndiff ntotal
+        set psame 1; set pdiff 0; set ptotal 0
+        if {$handdown} {
+            lassign [converge::policy_diff [plan_file $prefix [expr {$r - 1}] $f0] \
+                                           [plan_file $prefix $r $f0]] psame pdiff ptotal
+        }
+        dict set rep fixpoint [list [expr {$same && $psame}] $ndiff $ntotal \
+                                    $psame $pdiff $ptotal]
         lappend rounds $rep
         if {[clean $rep]} { break }
+        if {$same && $psame} {
+            set what "the budget it ran under ($ntotal line(s))"
+            if {$handdown} { append what " and the plan ($ptotal line(s))" }
+            puts "converge.tcl: ${prefix} round $r re-derives $what — a\
+                  fixpoint, dirty; the arm stops"
+            break
+        }
         set prev $fr
     }
     return $rounds
+}
+
+# Where a round's top plan lives: beside the budget files, `<prefix>_plan_r<k>.buda`.
+proc plan_file {prefix k f0} {
+    return [file join [file dirname $f0] ${prefix}_plan_r$k.buda]
 }
 
 # ── the table ─────────────────────────────────────────────────────────────
@@ -271,7 +329,29 @@ proc row {size arm round policy rep policy_rep} {
     }
     set wl [lindex [dict get $rep wl_detailed] 0]
     set wl_s [expr {($u > 0) ? "($wl)" : $wl}]
+    # The handed-down plan's fate: pins applied of the lines sourced, seats
+    # NUTS honoured of the seats handed down; `—` where none came down.
+    set plan "—"
+    if {[dict exists $rep plan_pins]} {
+        lassign [dict get $rep plan_pins] pe pa ps po
+        if {$pe > 0} { set plan "$pa/$pe pins, $ps/$po seats" }
+    }
+    # `yes (n)` when budget and plan both reproduce; otherwise what moved:
+    # the budget's differing lines, the plan's, or both.
+    set fix "—"
+    if {[dict exists $rep fixpoint]} {
+        lassign [dict get $rep fixpoint] fixed ndiff ntotal psame pdiff ptotal
+        if {$fixed} {
+            set fix "yes ($ntotal)"
+        } else {
+            set parts {}
+            if {$ndiff > 0} { lappend parts "$ndiff of $ntotal" }
+            if {!$psame} { lappend parts "plan $pdiff of $ptotal" }
+            set fix "no ([join $parts {, }])"
+        }
+    }
     lappend rows [list $vehicle $size [expr {$heal ? "on" : "off"}] $arm $round $policy \
+                      $plan $fix \
                       "$fo/$fu/$fv" "$o/$u/$v" $wl_s [lindex [dict get $rep marks] 0] \
                       $reserved $used $eff [format %.1f [dict get $rep secs]]]
 }
@@ -297,6 +377,9 @@ foreach size $sizes {
             if {$k == 1 && "bu" in $arms} {
                 lappend words -derive [file join $out ${p}_bu_shares_r0.buda]
                 if {$nofloor} { lappend words -derive_opts nofloor }
+                if {$handdown} {
+                    lappend words -derive_plan [file join $out ${p}_bu_plan_r0.buda]
+                }
             }
             set rep [session ${p}_blind_r$k $size {*}$words]
             if {$k == 1} { set blind1 $rep }
@@ -312,7 +395,7 @@ foreach size $sizes {
             set last [lindex $blind_rounds end]
             lappend summary [list $size blind [llength $blind_rounds] $solved \
                                  [expr {[clean $last] ? "clean" : "dirty"}] \
-                                 [join [dict get $last verdict] /]]
+                                 [join [dict get $last verdict] /] "—"]
         }
     }
     # ── uniform ── (E5's conventional arm: F per TOP layer, doubling)
@@ -352,7 +435,7 @@ foreach size $sizes {
         set last [lindex $urounds end]
         lappend summary [list $size uniform [llength $urounds] $solved \
                              [expr {[clean $last] ? "clean" : "dirty"}] \
-                             [join [dict get $last verdict] /]]
+                             [join [dict get $last verdict] /] "—"]
         if {$ceiling ne ""} {
             lappend notes "size $size, uniform: the sweep ended at F=$F, past\
                            the smallest cell's supply ($ceiling)"
@@ -363,6 +446,13 @@ foreach size $sizes {
         set f0 [file join $out ${p}_td_shares_r0.buda]
         set words [list -derive $f0]
         if {$nofloor} { lappend words -derive_opts nofloor }
+        if {$handdown} {
+            # The plan handed down is geometry, so the top-down round is
+            # measured on the ALIGNED floorplan the informed rounds route
+            # (converge_lib.tcl `-align`; on the SoC the alignment moves
+            # nothing, on the mesh it moves every row by a phase).
+            lappend words -derive_plan [file join $out ${p}_td_plan_r0.buda] -align
+        }
         set td0 [session ${p}_td_r0 $size {*}$words]
         row $size td 0 "top-down" $td0 ""
         set rounds [informed_rounds ${p}_td $size $f0]
@@ -379,7 +469,7 @@ foreach size $sizes {
         set last [expr {[llength $rounds] ? [lindex $rounds end] : $td0}]
         lappend summary [list $size td [expr {1 + [llength $rounds]}] $solved \
                              [expr {[clean $last] ? "clean" : "dirty"}] \
-                             [join [dict get $last verdict] /]]
+                             [join [dict get $last verdict] /] [fixpoint_of $last]]
     }
     # ── bu ──
     if {"bu" in $arms} {
@@ -398,16 +488,16 @@ foreach size $sizes {
         set last [expr {[llength $rounds] ? [lindex $rounds end] : $blind1}]
         lappend summary [list $size bu [expr {1 + [llength $rounds]}] $solved \
                              [expr {[clean $last] ? "clean" : "dirty"}] \
-                             [join [dict get $last verdict] /]]
+                             [join [dict get $last verdict] /] [fixpoint_of $last]]
     }
 }
 
 # ── print ─────────────────────────────────────────────────────────────────
-set hdr "| vehicle | size | heal | arm | round | policy | first ovl/unpl/viol | final ovl/unpl/viol | detailed WL | classes | reserved | used | reserved÷used | s |"
-set sep "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"
+set hdr "| vehicle | size | heal | arm | round | policy | plan | fixpoint | first ovl/unpl/viol | final ovl/unpl/viol | detailed WL | classes | reserved | used | reserved÷used | s |"
+set sep "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"
 set lines [list $hdr $sep]
 foreach r $rows { lappend lines "| [join $r { | }] |" }
-lappend lines "" "| size | arm | rounds | classes solved | endpoint | final ovl/unpl/viol |" "|---|---|---|---|---|---|"
+lappend lines "" "| size | arm | rounds | classes solved | endpoint | final ovl/unpl/viol | fixpoint |" "|---|---|---|---|---|---|---|"
 foreach s $summary { lappend lines "| [join $s { | }] |" }
 if {[llength $notes]} {
     lappend lines ""
@@ -417,7 +507,7 @@ set text [join $lines \n]
 puts $text
 # The table is E5's when the conventional corridor arm ran, E1's otherwise.
 set exp [expr {"uniform" in $arms ? "e5" : "e1"}]
-set name ${exp}_${vehicle}[expr {$heal ? "_healed" : "_healerless"}]_step$step[expr {$nofloor ? "_nofloor" : ""}][expr {$primitive eq "reserve" ? "_reserve" : ""}]
+set name ${exp}_${vehicle}[expr {$heal ? "_healed" : "_healerless"}]_step$step[expr {$nofloor ? "_nofloor" : ""}][expr {$primitive eq "reserve" ? "_reserve" : ""}][expr {$handdown ? "_handdown" : ""}]
 if {$tag ne ""} { append name _$tag }
 set f [open [file join $out $name.md] w]
 puts $f "<!-- converge.tcl $argv -->"

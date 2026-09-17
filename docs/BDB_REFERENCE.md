@@ -1885,6 +1885,25 @@ with eight tracks reserved off the top's natural seat: 0 of the top's 16
 tracks over the instances land on them with steering off, 16 of 16 with it
 on, at the same clean endpoint.
 
+### The top's plan handed down (6c)
+
+`set_cell_layer_reserve` and `set_reserve_steer` are the block's half and
+the track half of the loop; what [E5](internal/convergence_e5.md) measured
+the informed loop still lacked was **plan stability** — the informed round
+re-planned the top from scratch after the templates moved, so the
+reservation a derivation named was the previous top's and the next top
+planned elsewhere.  [`derive_top_plan`](script_reference/nuts.md#derive_top_plan-file-path-cells-ab)
+writes every globally planned bundle's selection, layers and abstract
+seats as [`pin_plan`](script_reference/planner.md#pin_plan) lines, and a
+session sourcing them before `run_planner hier` routes the blocks under
+the SAME top the reservation came from; `converge.tcl -handdown` drives
+the loop that way and measures, per round, whether the derived budget
+reproduces the one it ran under (its `fixpoint` column).  Measured: the
+loop reaches a fixpoint at every size on both vehicles where the free
+re-plan never did — and reproduces the handed-down top's own defects with
+it, so the fixpoint is exactly as clean as the top it was handed
+(the [E5 write-up](internal/convergence_e5.md), "The plan handed down").
+
 ### `add_inst`
 
 ```

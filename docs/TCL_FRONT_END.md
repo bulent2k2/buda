@@ -123,6 +123,12 @@ buda::query reserve_audit ;# {inst cell layer reserved top_used own_hit top_tota
                          ;#   GOVERNS (check_design's LAYER_RESERVE rows as
                          ;#   data; a 90°-rotated occurrence has none);
                          ;#   -1 before run_nuts, empty when none reserved
+buda::query plan_pins    ;# {entries applied seated of} — a handed-down
+                         ;#   top plan's fate (pin_plan, ladder item 6c):
+                         ;#   lines sourced, pins applied at the planner,
+                         ;#   seats NUTS honoured of the seats handed down
+                         ;#   (0 0 -1 -1 with no plan; seated -1 before
+                         ;#   run_nuts)
 ```
 
 `caps` exists for one honest number: `reserve_top_layers N` caps every cell

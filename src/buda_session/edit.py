@@ -27,6 +27,8 @@ import os
 
 import buda
 
+from .util import fmt_pos
+
 
 class EditMixin:
 
@@ -77,6 +79,7 @@ class EditMixin:
             if slo and bid in slo:
                 w.plan.seg_slide_lo = list(slo[bid])
                 w.plan.seg_slide_hi = list(shi[bid])
+                w.plan.seg_seat_pin = []          # a dogleg's, not a seat's
 
     def _reset_doglegs(self):
         """Discard any adopted dogleg before re-planning: drop the appended split
@@ -106,6 +109,7 @@ class EditMixin:
             w.plan.seg_net_pull = []
             w.plan.seg_slide_lo = []
             w.plan.seg_slide_hi = []
+            w.plan.seg_seat_pin = []
             w.plan.seg_perp = []
         self._dogleg_originals = {}
         self._dogleg_slot = {}
@@ -875,6 +879,7 @@ class EditMixin:
         w.plan.seg_net_pull   = []
         w.plan.seg_slide_lo   = []
         w.plan.seg_slide_hi   = []
+        w.plan.seg_seat_pin = []
         bid = w.input.original_bundle.id
         self._dogleg_slot.pop(bid, None)
         self._dogleg_originals.pop(bid, None)
@@ -917,6 +922,7 @@ class EditMixin:
         w.plan.seg_net_pull = []
         w.plan.seg_slide_lo = []
         w.plan.seg_slide_hi = []
+        w.plan.seg_seat_pin = []
         w.plan.seg_perp = []
 
     @staticmethod
@@ -1211,11 +1217,15 @@ class EditMixin:
                     w.plan.seg_net_pull = []
                     w.plan.seg_slide_lo = []
                     w.plan.seg_slide_hi = []
+                    w.plan.seg_seat_pin = []
                     w.plan.seg_perp = []
+                    self._plan_pin_superseded(w)
                 w.input.pinned_group = list(members)
                 w.input.topology_pinned = False
                 w.plan.selected_topology_index = members[0]
                 return len(members)
+            if tidx != w.plan.selected_topology_index:
+                self._plan_pin_superseded(w, tidx)
             self._clear_stale_seg_overrides(w, tidx)
             w.input.pinned_group = []      # single pin clears any prior group pin
             w.plan.selected_topology_index = tidx
@@ -1282,7 +1292,27 @@ class EditMixin:
         print(f"Error: bundle {bid} not found")
         return False
 
-    def _unpin_topology_internal(self, bid):
+    def _explorer_pin_sink(self, bid, unpinned, tidx=None):
+        """The session's bookkeeping for a pin state change the EXPLORER
+        made on a live wrapper (its `pin_sink`): an unpin reaches the
+        pre-expansion original and forgets a handed-down plan's entry
+        (`_unpin_topology_internal`, quiet — the explorer already said
+        UNPINNED); a pin onto a different candidate supersedes that entry
+        as a typed select_topology does (Codex P2 on #939)."""
+        if unpinned:
+            self._unpin_topology_internal(bid, quiet=True)
+            return
+        w = self._rr_wrapper(bid)
+        keep = None
+        if w is not None and tidx is not None \
+                and 0 <= tidx < len(w.input.candidates):
+            keep = buda.topo_uid(w.input.candidates[tidx])
+        if self._plan_pins_forget([bid], why="superseded by an explorer pin",
+                                  keep_uid=keep):
+            print(f"  (the handed-down plan's entry for bundle {bid} is "
+                  f"superseded by this pin)")
+
+    def _unpin_topology_internal(self, bid, quiet=False):
         """Inverse of select_topology: clear a bundle's pin so the next planner
         run is free to re-choose. Leaves the current selected_topology_index in
         place (the shown candidate does not jump) but drops BOTH topology_pinned
@@ -1295,6 +1325,12 @@ class EditMixin:
         def _clear(w):
             w.unpin()                          # pin + forced layers, atomically
             w.input.pinned_group = []          # also clear a group pin
+            if bid in self._plan_pin_bids:
+                # A handed-down plan's seat windows (pin_plan) go with the
+                # pin: a freed bundle re-seats where NUTS puts it.
+                w.plan.seg_slide_lo = []
+                w.plan.seg_slide_hi = []
+                w.plan.seg_seat_pin = []
         found = False
         for w in self.bundles:
             if w.input.original_bundle.id == bid:
@@ -1302,7 +1338,8 @@ class EditMixin:
                 # And the pre-expansion original, for the same reason the pin
                 # lands there (see _mirror_pin_to_original).
                 self._mirror_pin_to_original(bid, w, _clear)
-                print(f"Unpinned bundle {bid}")
+                if not quiet:
+                    print(f"Unpinned bundle {bid}")
                 found = True
                 break
         if not found:
@@ -1312,9 +1349,385 @@ class EditMixin:
                     _clear(w)
                 self._mirror_pin_to_original(bid, wrappers[0], _clear)
                 n = len(wrappers)
-                print(f"Unpinned bundle {bid} "
-                      f"({n} expanded instance{'s' if n > 1 else ''})")
+                if not quiet:
+                    print(f"Unpinned bundle {bid} "
+                          f"({n} expanded instance{'s' if n > 1 else ''})")
                 found = True
         if not found:
             print(f"Error: bundle {bid} not found")
+        self._plan_pins_forget([bid])
         return found
+
+    # ── pin_plan (convergence ladder item 6c) ─────────────────────────────
+
+    def _plan_pin_superseded(self, w, tidx=None):
+        """A typed `select_topology` moving a plan-pinned bundle to another
+        candidate is the user's later word: the plan's entry is forgotten
+        (seats, flag, layers, bookkeeping — `_plan_pins_forget`) and said,
+        so the next `run_planner`'s re-application does not put the plan
+        back.  An entry still HELD (a plan sourced before bundling, the pin
+        typed before the first planner run) is superseded too — unless the
+        pin lands on the plan's OWN candidate (`tidx`, matched by uid): a
+        flow whose text pins what its plan hands down keeps the plan's
+        layers and seats (Codex P2 on #939).  `tidx` None = a family pin,
+        which supersedes whatever the entry names."""
+        if getattr(self, "_plan_pin_replaying", False):
+            return          # the plan's own re-application, not the user's word
+        bid = w.input.original_bundle.id
+        keep = None
+        if tidx is not None and 0 <= tidx < len(w.input.candidates):
+            keep = buda.topo_uid(w.input.candidates[tidx])
+        if self._plan_pins_forget([bid], why="superseded by select_topology",
+                                  keep_uid=keep):
+            print(f"  (the handed-down plan's entry for bundle {bid} is "
+                  f"superseded by this pin)")
+
+    def _plan_pins_forget(self, bids=None, why="unpinned", keep_uid=None):
+        """An unpin's plan-side bookkeeping: for `bids` (None = every
+        plan-pinned bundle) drop the seat windows a `pin_plan` set on every
+        wrapper carrying the bundle (routed, pre-expansion original,
+        expanded instance), forget the bid, and mark the entries UNPINNED —
+        neither applied (the seat audit and `buda::query plan_pins` stop
+        counting them) nor re-applicable by a later `run_planner` (an unpin
+        is the user's decision for the session).  The wildcard
+        `unpin_topology *` has its own loop and reaches this too (Codex P2
+        on #939).  The plan's FORCED LAYERS go with the seats on every
+        alias — the planner applies `pinned_seg_layers` to any candidate,
+        so on a same-segment-count alternative they were directionally
+        wrong layers behind a superseded pin — and an entry still HELD
+        (a plan sourced before bundling, the pin typed before the first
+        planner run) that resolves to the bundle is superseded too, else
+        the held plan applied afterwards and silently overwrote the
+        user's selection (both Codex P2s on #939) — except one naming
+        `keep_uid`, the candidate the superseding pin itself lands on.
+        The wildcard (`bids` None) supersedes every held entry WITHOUT
+        resolving it — before bundling there is nothing to resolve
+        against, and the instruction was "no pins".  Returns the number of
+        bundles (held entries counted one each) whose plan state changed."""
+        applied = set(self._plan_pin_bids) if bids is None else \
+            {b for b in bids if b in self._plan_pin_bids}
+        # Held entries resolving to the bundle(s): superseded before they
+        # ever apply.  Resolution needs the bundles to exist (a selector is
+        # a net name), which a typed pin guarantees — and which the WILDCARD
+        # does not: `unpin_topology *` before bundling has no pool to
+        # resolve against, so with `bids` None EVERY held entry is
+        # superseded without asking (the user said "no pins", and an entry
+        # left pending would apply at the first planner run over exactly
+        # that instruction — Codex P2 on #939).
+        held = set()
+        for i, e in enumerate(self._plan_pins):
+            if e.get("applied") or e.get("skipped"):
+                continue
+            if bids is None:
+                e.update(skipped=True, why=why)
+                held.add(("held", i))
+                continue
+            w2, b2, _ = self._plan_pin_bundle(e["sel"])
+            if w2 is None or b2 not in bids:
+                continue
+            if keep_uid is not None and e.get("uid") == keep_uid:
+                continue            # the pin is the plan's own candidate
+            e.update(skipped=True, why=why)
+            held.add(b2)
+        targets = applied | held
+        if not targets:
+            return 0
+        orig = getattr(self, "_hier_bundles_orig", None) or []
+        exp = [w for ws in self._hier_expansion_map.values() for w in ws]
+        seen = set()
+        for w in list(self.bundles) + list(orig) + exp:
+            if id(w) in seen:
+                continue
+            seen.add(id(w))
+            if w.input.original_bundle.id in applied:
+                w.plan.seg_slide_lo = []
+                w.plan.seg_slide_hi = []
+                w.plan.seg_seat_pin = []
+                w.input.pinned_seg_layers = []
+        for e in self._plan_pins:
+            if e.get("applied") and e.get("bid") in applied:
+                e.update(applied=False, skipped=True, why=why)
+        self._plan_pin_bids -= applied
+        return len(targets)
+
+    def _plan_pin_bundle(self, sel, bundles=None):
+        """Resolve a pin_plan selector to (wrapper, bid, error) among
+        `bundles` (the session's list by default).  A hint matches the
+        bundle whose FIRST net is exactly the hint before the prefix rule —
+        a handed-down plan names every bundle by its first net, and `pc_1`
+        must not land on `pc_10` (the sidecar's rule)."""
+        pool = self.bundles if bundles is None else bundles
+        kind, val = self._split_bundle_selector(sel)
+        if kind is None:
+            return None, None, val
+        if kind == "id":
+            w = next((x for x in pool
+                      if x.input.original_bundle.id == val), None)
+            if w is None and bundles is None:
+                ws = self._hier_expansion_map.get(val, [])
+                w = ws[0] if ws else None
+            return (w, val, None) if w is not None \
+                else (None, None, f"bundle {val} not found")
+        nets0 = []
+        for w in pool:
+            try:
+                names = w.input.original_bundle.get_net_names()
+            except Exception:
+                names = None
+            if names:
+                nets0.append((w, names[0]))
+        exact = [w for w, n0 in nets0 if n0 == val]
+        if len(exact) == 1:
+            return exact[0], exact[0].input.original_bundle.id, None
+        pre = [w for w, n0 in nets0 if n0.startswith(val)]
+        if len(pre) == 1:
+            return pre[0], pre[0].input.original_bundle.id, None
+        if not pre:
+            return None, None, f"no bundle whose first net is '{val}'"
+        return None, None, (f"'{val}' is ambiguous ({len(pre)} bundles "
+                            f"match by prefix and none exactly)")
+
+    def _apply_plan_pins(self, final=False, post=False, bundles=None,
+                         hier=False):
+        """Apply every held `pin_plan` entry that resolves now: the bundle by
+        selector, the candidate by content uid first and by type spec
+        second, the forced layers, the seat windows (`plan.seg_slide_lo/hi`
+        — NUTS's own per-segment hatch).  An entry whose bundle has no
+        candidates yet is HELD (a plan is sourced before bundling, the
+        pool exists at `run_planner`); with `final` (the planner's call)
+        such an entry is an error.  A bundle that is a bottom-up
+        template's is skipped and said: a template is solved once in its
+        own frame under the derived budget, which is the half of the loop
+        the hand-down exists to keep stable, not to pin.
+
+        Two passes in a hier session.  The PRE-expansion pass (the
+        default) pins the bundles that exist as themselves before and
+        after expansion — top-level and cross-level ones, whose wrapper
+        expansion appends as is.  A cell-local bundle of an UNMARKED cell
+        is planned globally PER INSTANCE: the plan carries one entry per
+        instance, while before expansion only the template and its
+        replicas exist — a pin there would broadcast one instance's
+        selection to every instance, or land on a replica expansion drops
+        (Codex P1 on #939) — so such an entry is held for the
+        POST-expansion pass (`post=True`, `bundles` = the expanded list,
+        called by `run_planner hier` right after expansion and before the
+        planner works), which pins each instance's own wrapper; the pass
+        re-applies on every expansion, since expansion builds fresh
+        wrappers.  Typed after expansion, such an entry applies at once.
+        Returns the number applied this call."""
+        expanded_now = bool(getattr(self, "_hier_expansion_map", None))
+        if post:
+            pending = [e for e in self._plan_pins
+                       if e.get("stage") == "post" and not e.get("skipped")]
+        elif final:
+            # The planner's call RE-APPLIES every live entry, applied
+            # before or not: `_apply_selections` runs again ahead of every
+            # planner run and a sidecar entry for the same bundle would
+            # clear the plan's forced layers or replace its topology under
+            # the plan's seats (Codex P2 on #939).  An entry a later
+            # `unpin_topology` / `select_topology` superseded is skipped
+            # (`_plan_pins_forget`), so the user's later word stands.
+            pending = [e for e in self._plan_pins
+                       if not e.get("skipped") and e.get("stage") != "post"]
+        else:
+            pending = [e for e in self._plan_pins
+                       if not e.get("applied") and not e.get("skipped")
+                       and e.get("stage") != "post"]
+        if not pending:
+            return 0
+        marked = set(self.bdb.bottom_up_cells()) if self.bdb is not None \
+            else set()
+        name_to_id = dict(self._layer_name_map)
+        n_applied = 0
+        n_deferred = 0
+        for e in pending:
+            w, bid, err = self._plan_pin_bundle(e["sel"], bundles)
+            if w is None:
+                if final:
+                    e["skipped"], e["why"] = True, err
+                    print(f"Error: pin_plan {e['sel']}: {err}")
+                continue
+            if not w.input.candidates:
+                if final:
+                    e["skipped"], e["why"] = True, "no candidates"
+                    print(f"Error: pin_plan {e['sel']}: bundle {bid} has no "
+                          f"candidates — generate topologies first")
+                continue
+            ctx = w.input.original_bundle.cell_context
+            if getattr(w.hier, "locked", False) or \
+                    (ctx and (self._bu_cell_of(ctx) or ctx) in marked):
+                e["skipped"], e["why"] = True, "bottom-up template"
+                print(f"pin_plan: {e['sel']} is a bottom-up template's "
+                      f"bundle (cell {ctx}) — solved in its own frame under "
+                      f"the derived budget, not pinned; skipped")
+                continue
+            if ctx and not post and (hier or expanded_now):
+                # An unmarked cell's cell-local bundle: one entry per
+                # INSTANCE, applied to the instance's own wrapper after
+                # expansion (see above).  Already expanded (a pin typed
+                # after the plan): apply to the wrapper found now.  The
+                # deferral is the HIER planner's (`hier`): under the flat
+                # run_planner a wrapper can carry a cell_context too (a
+                # hierarchical BDB design bundled through the flat
+                # pipeline) and no expansion ever comes, so there the
+                # entry applies like any other (Codex P2 on #939).
+                e["stage"] = "post"
+                if not expanded_now:
+                    n_deferred += 1
+                    continue
+            tidx, how = None, "uid"
+            if e.get("uid"):
+                for i, c in enumerate(w.input.candidates):
+                    if buda.topo_uid(c) == e["uid"]:
+                        tidx = i
+                        break
+            if tidx is None:
+                tidx, err = self._resolve_topo_spec(w, e["spec"])
+                if tidx is None:
+                    e["skipped"], e["why"] = True, err
+                    print(f"Error: pin_plan {e['sel']}: {err}")
+                    continue
+                how = ("type spec (uid not in this pool — the loci moved)"
+                       if e.get("uid") else "type spec")
+            if e.get("stage") == "post":
+                # The instance's own wrapper, pinned directly: it is not in
+                # the pre-expansion list nor a key of the expansion map (it
+                # is a MEMBER of one), so the shared pin path cannot find
+                # it — and no mirror onto a template is wanted, since a
+                # template pin is what would broadcast it.
+                self._clear_stale_seg_overrides(w, tidx)
+                w.input.pinned_group = []
+                w.plan.selected_topology_index = tidx
+                w.input.topology_pinned = True
+                print(f"Pinned bundle {bid} ({self._bundle_label(w)}) to "
+                      f"topology {tidx + 1} (its own instance)")
+            else:
+                # The shared pin path runs the supersede bookkeeping when
+                # the selection moves; a replay that finds the bundle moved
+                # (a USER sidecar entry, a healer) is putting the plan BACK,
+                # not the user's later word (Codex P2 on #939).
+                self._plan_pin_replaying = True
+                try:
+                    ok = self._select_single_topology_internal(bid, tidx + 1)
+                finally:
+                    self._plan_pin_replaying = False
+                if not ok:
+                    e["skipped"], e["why"] = True, "pin refused"
+                    continue
+            nseg = len(w.input.candidates[tidx].segments)
+            lids, bad = [], []
+            for nm in e.get("layers") or []:
+                if nm == "-":
+                    lids.append(-1)
+                elif nm in name_to_id:
+                    lids.append(name_to_id[nm])
+                else:
+                    bad.append(nm)
+                    lids.append(-1)
+            if bad:
+                print(f"Warning: pin_plan {e['sel']}: unknown layer(s) "
+                      f"{', '.join(bad)} — those segments take the "
+                      f"planner's choice")
+            seats = list(e.get("seats") or [])
+            if (lids and len(lids) != nseg) or (seats and len(seats) != nseg):
+                print(f"Warning: pin_plan {e['sel']}: {len(lids) or len(seats)} "
+                      f"layer/seat entries for a {nseg}-segment candidate — "
+                      f"they index another shape; only the selection is "
+                      f"pinned")
+                lids, seats = [], []
+                e["layers"], e["seats"] = [], []
+            nan = float("nan")
+            slo = [nan if s is None else s[0] for s in seats]
+            shi = [nan if s is None else s[1] for s in seats]
+
+            # The windows are FLAGGED as seats (plan.seg_seat_pin): that,
+            # not their width, is what hands the bit stage the natural
+            # window — an edit_set_slide override of the same width keeps
+            # its window at the bit stage too (Codex P1 on #939).
+            flags = [0 if s is None else 1 for s in seats]
+
+            def _set(x, lids=lids, slo=slo, shi=shi, flags=flags):
+                x.input.pinned_seg_layers = list(lids)
+                x.plan.seg_slide_lo = list(slo)
+                x.plan.seg_slide_hi = list(shi)
+                x.plan.seg_seat_pin = list(flags)
+
+            _set(w)
+            if e.get("stage") != "post":
+                self._mirror_pin_to_original(bid, w, _set)
+                for iw in self._hier_expansion_map.get(bid, []):
+                    if iw is not w:
+                        _set(iw)
+            self._plan_pin_bids.add(bid)
+            e.update(applied=True, bid=bid, how=how, nseg=nseg,
+                     nseat=sum(1 for s in seats if s is not None))
+            n_applied += 1
+        if post:
+            if n_applied or final:
+                print(f"[PlanPin] {n_applied} per-instance plan(s) applied "
+                      f"after expansion (each to its own instance's wrapper)")
+            return n_applied
+        if final or n_applied:
+            done = [e for e in self._plan_pins if e.get("applied")]
+            skipped = [e for e in self._plan_pins if e.get("skipped")]
+            held = [e for e in self._plan_pins
+                    if not e.get("applied") and not e.get("skipped")
+                    and e.get("stage") != "post"]
+            by_spec = sum(1 for e in done if e["how"] != "uid")
+            print(f"[PlanPin] {len(done)} of {len(self._plan_pins)} "
+                  f"handed-down plan(s) applied ({sum(e['nseat'] for e in done)}"
+                  f" seat(s) pinned"
+                  + (f", {by_spec} by type spec rather than uid" if by_spec
+                     else "")
+                  + (f", {len(skipped)} skipped" if skipped else "")
+                  + (f", {n_deferred} per-instance, applied after expansion"
+                     if n_deferred else "")
+                  + (f", {len(held)} held" if held else "") + ")")
+        return n_applied
+
+    def _plan_pins_seated(self):
+        """After run_nuts: of the handed-down seats, how many the placement
+        honoured — (seated, total, misses) with misses as (net, seg,
+        wanted, got_or_None); None before a NUTS result."""
+        if self.nuts_result is None:
+            return None
+        placed = {(t.bundle_id, t.seg_idx): t
+                  for t in self.nuts_result.segments}
+        seated, total, misses = 0, 0, []
+        for e in self._plan_pins:
+            if not e.get("applied"):
+                continue
+            for si, s in enumerate(e.get("seats") or []):
+                if s is None:
+                    continue
+                total += 1
+                want = 0.5 * (s[0] + s[1])
+                ts = placed.get((e["bid"], si))
+                got = (ts.track_position if ts is not None and ts.placed
+                       and ts.track_position == ts.track_position else None)
+                if got is not None and abs(got - want) < 1e-6:
+                    seated += 1
+                else:
+                    misses.append((e["sel"], si, want, got))
+        return seated, total, misses
+
+    def _report_plan_pins_seated(self):
+        """The seat audit line after every run_nuts of a session holding a
+        handed-down plan: a seat NUTS could not honour is the measurement
+        (the templates' copies took it, or the window moved), never a
+        silent re-seat."""
+        if not any(e.get("applied") for e in self._plan_pins):
+            return
+        r = self._plan_pins_seated()
+        if r is None:
+            return
+        seated, total, misses = r
+        if total == 0:
+            return                      # selections pinned, no seat to audit
+        print(f"[PlanPin] seated {seated} of {total} handed-down seat(s)"
+              + ("" if not misses else f"; {len(misses)} not honoured:"))
+        for sel, si, want, got in misses[:8]:
+            print(f"  {sel} seg {si}: wanted {fmt_pos(want)}, "
+                  + ("unplaced" if got is None else f"placed {fmt_pos(got)}"))
+        if len(misses) > 8:
+            print(f"  ... {len(misses) - 8} more")

@@ -129,6 +129,13 @@ class ExplorerSidecarMixin:
                 del self._selections[stale_key]
         
         wrapper = self.wrappers[self.bidx]
+        # A pin onto a DIFFERENT candidate is the user's later word over a
+        # handed-down plan's entry: the session supersedes it FIRST, so the
+        # plan's forced layers are gone before the entry below snapshots
+        # `pinned_seg_layers` (Codex P2s on #939).
+        moving = wrapper.plan.selected_topology_index != self.idx
+        if moving and self._pin_sink is not None:
+            self._pin_sink(wrapper.input.original_bundle.id, False, self.idx)
         sel = {
             'bundle_id':       wrapper.input.original_bundle.id,
             'topo_type':       topo.type,
@@ -152,7 +159,7 @@ class ExplorerSidecarMixin:
             sel['user_topo'] = old_sel['user_topo']
         
         # Update live object
-        if wrapper.plan.selected_topology_index != self.idx:
+        if moving:
             # Clear stale plan state staged for the OLD candidate (audit
             # P7-01, the explorer twin of select_topology's P5-03): NUTS's
             # only staleness guard is an array-LENGTH match, so surviving
@@ -162,6 +169,7 @@ class ExplorerSidecarMixin:
             wrapper.plan.seg_net_pull = []
             wrapper.plan.seg_slide_lo = []
             wrapper.plan.seg_slide_hi = []
+            wrapper.plan.seg_seat_pin = []
             wrapper.plan.seg_perp = []
 
         wrapper.plan.selected_topology_index = self.idx
@@ -197,6 +205,9 @@ class ExplorerSidecarMixin:
         wrapper = self.wrappers[self.bidx]
         cands = wrapper.input.candidates
         rep = cands[members[0]]
+        if self._pin_sink is not None and \
+                members != [wrapper.plan.selected_topology_index]:
+            self._pin_sink(wrapper.input.original_bundle.id, False)
         self._selections[hint] = {
             'bundle_id':       wrapper.input.original_bundle.id,
             'topo_type':       rep.type,
@@ -213,8 +224,16 @@ class ExplorerSidecarMixin:
     def _deselect_current(self):
         hint    = self._bundle_hint()
         old_sel = self._find_selection()
-        if old_sel is not None or getattr(
-                self.wrappers[self.bidx].input, 'pinned_group', []):
+        wrapper = self.wrappers[self.bidx]
+        # A pin with no sidecar entry — a script select_topology, a
+        # handed-down `pin_plan`, a checkpoint pin — is a pin all the same:
+        # `x` / the `s` toggle unpin the live wrapper too, and say so
+        # (silently doing nothing on a pinned bundle is the shape the
+        # LOUD rule exists to forbid; Codex P2 on #939).
+        unpinned = (old_sel is not None
+                    or bool(getattr(wrapper.input, 'pinned_group', []))
+                    or bool(getattr(wrapper.input, 'topology_pinned', False)))
+        if unpinned:
             # LOUD, before the bookkeeping: `s` TOGGLES — a second press on
             # a pinned candidate unpins it, and the silent form of that is
             # how a session's local-bundle pin vanished with only a save
@@ -227,9 +246,9 @@ class ExplorerSidecarMixin:
                               if v is old_sel), hint)
             self._selections.pop(stale_key, None)
             self._save_sidecar()
-            
+        if old_sel is not None or getattr(wrapper.input, 'topology_pinned',
+                                          False):
             # Update live object
-            wrapper = self.wrappers[self.bidx]
             wrapper.unpin()            # pin + forced layers, atomically
             # Unpinned, the next run_planner may select a DIFFERENT candidate
             # — and it never clears slide/net-pull overrides, so stale ones
@@ -237,6 +256,7 @@ class ExplorerSidecarMixin:
             wrapper.plan.seg_net_pull = []
             wrapper.plan.seg_slide_lo = []
             wrapper.plan.seg_slide_hi = []
+            wrapper.plan.seg_seat_pin = []
 
         # Clear the LIVE group pin too (the sidecar entry — if any — was popped
         # by the old_sel block above): 'x' un-pins a group-pinned bundle.
@@ -247,7 +267,13 @@ class ExplorerSidecarMixin:
             w.plan.seg_net_pull = []
             w.plan.seg_slide_lo = []
             w.plan.seg_slide_hi = []
+            w.plan.seg_seat_pin = []
             w.plan.seg_perp = []
+        if unpinned and self._pin_sink is not None:
+            # The session's side of the unpin: the pre-expansion original
+            # and a handed-down plan's entry for the bundle (else the next
+            # run_planner re-applies the pin just removed).
+            self._pin_sink(w.input.original_bundle.id, True)
 
         self._draw()
 

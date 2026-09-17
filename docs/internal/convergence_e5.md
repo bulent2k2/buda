@@ -54,8 +54,10 @@ each round re-derives from a top that moved.  The top-side half of the
 primitive — a reservation the top's NUTS and DetailedNUTS *prefer* — was
 built (`set_reserve_steer`) and measured below: exact on the mesh (0.00 →
 1.00 at no cost), a small lift on the SoC (0.70–1.00) at the price of
-dirtier informed rounds, so it ships off by default and the next build
-item is the top's plan handed down with the reservation.  With the vehicle's own healing
+dirtier informed rounds, so it ships off by default; the top's plan handed down with the
+reservation (6c, below) then gives the loop its fixpoint at every size
+and, from a healed blind round, a clean informed round without healers at
+NQ ≤ 8.  With the vehicle's own healing
 the derived arm is clean at every size in one informed round (in one of
 its two arms) and its NQ = 16 route is 11–14 % less wire than the blind
 band's, while the guess is healed clean at NQ = 2–8 at 10–30× the blind
@@ -440,9 +442,10 @@ track is a track the top uses.  It is, at 0.63–1.00 on the SoC (and not at
 all on the mesh, 0.00, where the seats shift a phase); the write-up first
 read 6–11 % off a wrong denominator and sent the build order after a
 top-side preference (item 6b, built and measured below) that the loop did
-not need.  What the loop needs is the top's plan kept between rounds —
-item 6c, ahead of the fixed-pin work; E1's re-run against the positional
-primitive is this table's `td`/`bu` rows.
+not need.  What the loop needed was the top's plan kept between rounds —
+item 6c, built and measured below: the loop has a fixpoint and, handed a
+healed blind round, is clean healerless in one round at NQ ≤ 8; E1's
+re-run against the positional primitive is this table's `td`/`bu` rows.
 
 ## The top-side half, built and measured (6b)
 
@@ -535,11 +538,223 @@ plan reproduces (the mesh); and the informed loop's missing fixpoint is a
 property of the *plan*, which the templates' changed charges move between
 rounds (finding 4), not of the tracks.  So the lever ships off by default
 (a design reserving nothing is byte-identical either way; the corpus is
-unchanged on all 55 comparable flows), and the next build item is 6c: hand
-the derivation round's top selections, layers and seats down with the
-reservation — the pin machinery exists — so the informed round routes the
-blocks under the SAME top the reservation came from, and measure whether a
-round is then a fixpoint.
+unchanged on all 55 comparable flows), and the next build item was 6c:
+hand the derivation round's top selections, layers and seats down with
+the reservation, so the informed round routes the blocks under the SAME
+top the reservation came from, and measure whether a round is then a
+fixpoint — built and measured in the next section.
+
+## The plan handed down, built and measured (6c)
+
+**What was built** (`derive_top_plan` → `pin_plan`; `converge.tcl
+-handdown`).  The 6b measurement above ended on the loop's missing
+fixpoint being a property of the *plan*: the informed round re-planned the
+top from scratch after the templates moved, so on the recorded NQ = 2
+rounds 4 of the 13 top-level bundles kept their topology and none kept its
+seat, and every derivation named a top the next round did not route.
+`derive_top_plan` writes, for every *globally planned* bundle — every
+routed bundle that is not a bottom-up copy and whose frame is not inside a
+scoped cell's placed instance, i.e. exactly the bundles the reserve
+derivation read as demand on those cells — one `pin_plan` line: the
+selected candidate by content uid and by type spec (the uid first, the
+exact candidate; the spec second, shape and nearest locus, for a pool
+whose loci moved), the planner's layer per segment, forced, and each
+segment's abstract seat as the width-wide slide window
+`[pos − w/2, pos + w/2]` NUTS must place inside (a *point* would be
+refused by the fit, which needs `hi − lo ≥ width`; the width-wide window
+reproduces the position exactly, and to NUTS it is a *seat pin*, flagged
+as one on the plan rather than read off its width, so a user's own
+`edit_set_slide` window of that width keeps bounding the bits: every
+pass respects the interval, so the seat cannot move — while the bit stage
+gets the segment's *natural* window, the candidate's own slide cut like
+the source's, trunk margin and boundary relax included, because the first
+measurement handed the bits the width-wide window too and a
+rail-straddling M7 seat holds one signal track fewer than its 32 bits:
+32 of 85 stranded bits at NQ = 8 and 128 of 176 at NQ = 16 were the top's
+own seats the blind round had filled from its natural window).  A session
+sourcing the lines before
+bundling holds them until its `run_planner hier`, applies them there, and
+after every `run_nuts` audits the seats (`[PlanPin] seated S of N`, each
+unhonoured seat named — never a silent re-seat); a bottom-up template's
+bundle is skipped and said, since the template is what the budget
+re-solves, and an unmarked cell's cell-local bundle — planned globally per
+instance — has its entries pinned onto each instance's own wrapper right
+after expansion (before it, only the template and its replicas exist).
+The natural window is cut exactly as the source's: the candidate's own
+slide, the trunk margin, the boundary relax and the partner-reach prune's
+zone bounds (the last two Codex P1s on #939).  The driver's `-handdown` makes the measurement round write
+its plan and every informed round source the previous round's and write
+its own, and adds two columns: `plan` (pins applied, seats honoured) and
+`fixpoint` — whether the budget a round *derived* equals the one it *ran
+under*, line for line, AND the plan it derived equals the one it ran
+under, since both are the loop's state (a healer can move a topology, a
+layer or a seat while the budget re-derives the same, and a pin that fell
+back to its type spec can leave a different plan — Codex P1 on #939; the
+cell then reads `no (plan k of n)`), which is the loop's own convergence
+test; an informed round that reaches it stops the arm (the next round
+would be the same session again).  The tables below were produced by the
+budget-only test and were re-read against the recorded plan files after
+the plan half landed: at every round the budget test called a fixpoint,
+the derived plan is byte-identical to the one it ran under (0 differing
+lines on every healerless and mesh round), and the healed rounds whose
+plans differ between rounds (NQ = 4/8/16 `td` round 1, NQ = 16 `bu`
+round 1) already read `no` on the budget — so no recorded verdict moves.  A plan is geometry, so under `-handdown` the `td`
+arm's top-down measurement round runs on the *aligned* floorplan the
+informed rounds route (`-align`: mark, `align_bottom_up`, unmark, nothing
+left marked) — on the SoC the alignment reverts every move it tries and
+the two floorplans already agree, on the mesh the rows move by a phase and
+the unaligned round's seats pinned against moved block faces were 112
+BUSTERM violations.
+
+**Healers off.**  Every column as in the tables above, plus the two new
+ones; `plan` reads `pins applied / lines sourced, seats honoured / seats
+handed down`.  E5's free re-plan rows (the healers-off table above) are
+quoted beside each round's verdict for the comparison.
+
+| size | arm | round | plan | fixpoint | ovl/unpl/viol | E5 free re-plan | detailed WL | reserved ÷ used | s |
+|---|---|---|---|---|---|---|---|---|---|
+| 2 | td | 0 | — | — | 0/0/0 | 0/0/0 | 525,144 | — | 2.1 |
+| 2 | td | 1 | 13/13, 24/24 | **yes** (9) | 0/360/360 | 0/360/360 | (534,340) | 1.86 | 2.5 |
+| 2 | bu | 1 | 13/13, 36/36 | no (10 of 35) | **0/0/0** | **0/0/0** | 593,478 | 3.15 | 2.9 |
+| 4 | td | 0 | — | — | 1/16/16 | 1/16/16 | (993,477) | — | 4.1 |
+| 4 | td | 1 | 21/21, 44/44 | no (8 of 19) | 3/32/32 | 1/24/24 | (972,335) | 4.14 | 5.7 |
+| 4 | td | 2 | 21/21, 44/44 | **yes** (15) | 3/32/32 | 0/37/37 | (972,655) | 3.58 | 5.3 |
+| 4 | bu | 1 | 21/21, 57/57 | no (35 of 60) | 2/45/45 | 0/45/45 | (974,636) | 4.65 | 5.9 |
+| 4 | bu | 2 | 21/21, 57/57 | no (5 of 43) | 2/45/45 | 0/757/757 | (974,636) | 4.55 | 5.7 |
+| 4 | bu | 3 | 21/21, 57/57 | **yes** (38) | 2/45/45 | — | (974,636) | 4.55 | 5.8 |
+| 8 | td | 0 | — | — | 2/40/40 | 2/40/40 | (1,871,476) | — | 7.5 |
+| 8 | td | 1 | 37/37, 68/68 | no (8 of 22) | 7/32/32 | **0/0/0** | (1,888,906) | 4.67 | 10.7 |
+| 8 | td | 2 | 37/37, 68/68 | no (1 of 18) | 2/32/32 | — | (1,908,950) | 4.32 | 11.4 |
+| 8 | td | 3 | 37/37, 68/68 | **yes** (17) | 2/32/32 | — | (1,908,950) | 4.32 | 11.4 |
+| 8 | bu | 1 | 37/37, 105/105 | no (33 of 62) | 3/53/53 | 0/18/18 | (2,005,699) | 5.85 | 12.6 |
+| 8 | bu | 2 | 37/37, 105/105 | no (4 of 46) | 3/53/53 | 0/1444/1444 | (2,005,699) | 6.01 | 12.6 |
+| 8 | bu | 3 | 37/37, 105/105 | **yes** (42) | 3/53/53 | — | (2,005,699) | 6.01 | 12.8 |
+| 16 | td | 0 | — | — | 3/32/32 | 3/32/32 | (3,677,304) | — | 20.3 |
+| 16 | td | 1 | 69/69, 119/119 | no (14 of 22) | 6/40/40 | 7/170/170 | (3,745,514) | 7.22 | 32.4 |
+| 16 | td | 2 | 69/69, 119/119 | **yes** (15) | 6/40/40 | 0/2864/2864 | (3,745,514) | 5.96 | 31.0 |
+| 16 | bu | 1 | 69/69, 201/201 | no (31 of 66) | 0/40/40 | 1/8/8 | (4,351,216) | 6.91 | 33.1 |
+| 16 | bu | 2 | 69/69, 201/201 | no (1 of 53) | 0/40/40 | **0/0/0** | (4,351,216) | 6.68 | 33.2 |
+| 16 | bu | 3 | 69/69, 201/201 | **yes** (52) | 0/40/40 | — | (4,351,216) | 6.68 | 33.4 |
+
+The mesh control (`tpu.tcl`, healers off, the `td` round 0 on the aligned
+floorplan — which is why its wire is the bottom-up rounds' 550,528 rather
+than the compact top-down 197,376 of the control table above):
+
+| N | arm | round | plan | fixpoint | ovl/unpl/viol | detailed WL | reserved ÷ used |
+|---|---|---|---|---|---|---|---|
+| 8 | td | 0 (aligned) | — | — | 0/0/0 | 550,528 | — |
+| 8 | td | 1 | 96/96, 96/96 | **yes** (2) | **0/0/0** | 550,528 | **1.00** |
+| 8 | bu | 1 | 96/96, 96/96 | **yes** (2) | **0/0/0** | 550,528 | **1.00** |
+| 16 | td | 1 | 320/320, 320/320 | **yes** (2) | **0/0/0** | 2,174,208 | **1.00** |
+| 16 | bu | 1 | 320/320, 320/320 | **yes** (2) | **0/0/0** | 2,174,208 | **1.00** |
+
+**Healers on** (`soc_lib`'s heal-if-dirty in every round, as in the healed
+table above; the `first` column is the informed round's *healerless*
+verdict under the healed previous round's plan — the number the ladder's
+"one informed round" is about; E5's healed rows quoted for comparison as
+`first → final`):
+
+| size | arm | round | plan | fixpoint | first | final | E5 healed (first → final) | detailed WL | reserved ÷ used | s |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 2 | td | 1 | 13/13, 24/24 | yes (9) | 0/360/360 | 0/128/128 | 0/360 → 0/128 | (530,308) | 1.86 | 18.0 |
+| 2 | bu | 1 | 13/13, 36/36 | no (4 of 36) | **0/0/0** | **0/0/0** | 0/0 → 0/0 | 594,632 | 3.21 | 2.9 |
+| 4 | td | 1 | 21/21, 43/44 | no (20 of 26) | 2/16/16 | **0/0/0** | 1/24 → 0/0 | 983,364 | 4.32 | 8.9 |
+| 4 | bu | 1 | 21/21, 59/59 | no (4 of 45) | **0/0/0** | **0/0/0** | 0/45 → 6/0/0, then 0/37 → 3/0/0 (never clean) | 1,096,053 | 4.44 | 6.2 |
+| 8 | td | 1 | 37/37, 64/67 | no (16 of 25) | 7/16/16 | **0/0/0** | 1/16 → 0/0 | 1,986,136 | 4.78 | 18.3 |
+| 8 | bu | 1 | 37/37, 107/107 | no (2 of 48) | **0/0/0** | **0/0/0** | 0/8 → 0/0 | 2,193,266 | 5.99 | 13.4 |
+| 16 | td | 1 | 69/69, 83/119 | no (25 of 28) | 35/464/464 | 5/0/0 | 32/464 → 0/0 | 4,355,492 | 5.59 | 141.7 |
+| 16 | td | 2 | 69/69, 135/135 | no (6 of 19) | **0/0/0** | **0/0/0** | — | 4,301,684 | 6.54 | 34.3 |
+| 16 | bu | 1 | 69/69, 198/201 | no (45 of 74) | 0/8/8 | **0/0/0** | 0/0 → 0/0 | 4,318,745 | 7.41 | 71.3 |
+
+**What the tables say.**
+
+1. **The handed-down top reproduces exactly, and the loop has a
+   fixpoint.**  Every pin applies and, healers off, every seat is honoured
+   at every size on both vehicles (the `plan` column never falls short),
+   the plan file a round derives is the plan it was handed, byte for byte,
+   and the budget a round derives reproduces the budget it ran under
+   within one to three informed rounds on the SoC (`td` at NQ = 2 in one,
+   at NQ = 4/16 in two, at NQ = 8 in three; `bu` at NQ = 4/8/16 in three)
+   and in the first on the mesh — where E5's free re-plan never
+   reproduced anything (its second informed rounds went to 376, 757,
+   1,444 and 2,864 unplaced).  On the mesh the fixpoint is clean and the
+   reservation is exactly the top's use (1.00×) for both arms.  The
+   rounds it takes on the SoC are the nested templates' own buses
+   settling, not the top's: a cluster's bus is demand on the core inside
+   it (the inherited corridor), it is re-solved under that corridor each
+   round, and the derivation lines that still move between round 1 and
+   round 2 (5 of 43, 4 of 46, 1 of 53) are those.
+
+2. **Healers off, the fixpoint is exactly as clean as the top handed down
+   — no cleaner.**  The stranded bits at every dirty SoC fixpoint are the
+   pinned top's *own*, at seats the measurement round itself could not
+   fill (replayed from `BUDA_RECORD` traces at NQ = 8 and compared segment
+   by segment): NQ = 8 `td`'s 32 are `ml_0`, whose round-0 M4 seat
+   overlaps `nl_11`'s (one of the two overlaps round 0 itself reported,
+   carried into every round with the plan); NQ = 8 `bu`'s 53 are the
+   blind round's own three overlaps between top buses (`pn_0`×`nl_0`,
+   `pc_0`×`nl_0`, `pc_2`×`pc_3` on M6 — 32 + 8 + 8 bits) and its M3
+   keepout culls of `nl_4` (5 bits); NQ = 16 `bu`'s 40 are the same M3
+   culls of the `nl_*` buses.  No template bit strands in any of them.
+   The five extra "overlaps" NQ = 8 `td` reports beside the carried one
+   are abstract-footprint touches of one unit between a pinned top seat
+   and the cluster template's bus packed against the reserved tracks'
+   keepout (the top's abstract footprint is a slot wider than the union of
+   its bit tracks), and lose no bit.
+
+3. **Pinning the top forbids the re-plan that sometimes rescues it.**
+   Where the free re-plan came out clean the hand-down does not (NQ = 8
+   `td` round 1: 0/0/0 free against 7/32 pinned; NQ = 16 `bu` round 2:
+   0/0/0 free against 0/40 pinned), and at NQ = 2 the free `bu` round
+   routes 10 % less wire (536,005 against 593,478: the pinned round keeps
+   the blind round's route, the free one finds a shorter top).  The two
+   are one trade: the free re-plan can repair the measurement round's
+   defects and cannot reproduce its top; the hand-down reproduces the top
+   and cannot repair it.  So the loop's *convergence* and its
+   *cleanliness* are two different things, measured apart.
+
+4. **Hand a healed top down and the informed round is clean without
+   healers.**  The `bu` arm's blind round healed clean and its plan handed
+   down: the informed round's *healerless* verdict is **0/0/0 at NQ = 2,
+   4 and 8** in ONE round — where E5's free re-plan under the same
+   reservation read 0/45 and then 0/757 at NQ = 4 (never clean, healed or
+   not) and 0/8 at NQ = 8 — and 0/8/8 at NQ = 16, healed to 0/0/0.  This
+   is the ladder's claim measured: a hierarchical design whose top is
+   *kept* between rounds routes its blocks under the reservation derived
+   from that top in one informed round, clean, at three of four sizes and
+   8 bits short at the fourth.  The `td` arm is the weaker source: a
+   top-down round's healed plan is routed at round 1 with 2–35 overlaps
+   and 16–464 unplaced (the templates, now solved under the reservation,
+   and the pinned top contend where the top-down round had planned them
+   together), healed clean at NQ = 4/8 in that round and at NQ = 16 in the
+   next, whose healerless verdict is then 0/0/0 too; at NQ = 2 it is E5's
+   known dirty fixpoint (the union reservation covers the core's own
+   32-bit seat, 360 stranded, 128 after healing) and stays it.  The
+   healers move seats when they run (NQ = 16 `td` round 1: 83 of 119
+   honoured at the end; `bu`: 198 of 201), which is why the healed arms
+   read `fixpoint: no` — they stop at clean, before the budget settles.
+   Building this measured one more healer fault: a ripup move that
+   re-pins a `pin_plan`-ed bundle to a different shape carried the forced
+   per-segment layers onto it, an unbuildable LAYER_DIR route behind a
+   clean (opens, overlaps) metric — 34/44/66 audit violations on the first
+   healed rounds; a trial that moves a bundle to another shape now drops
+   its forced layers and seat windows (the sequential trial, the C++ sweep
+   and the screen alike).  Neither that nor the seat pin's natural window
+   moves a flow that hands nothing down: the QoR corpus is byte-identical
+   on all 56 comparable flows (`--vs` main's merge commit, abstract and
+   detailed WL +0; `ariane133_heal` needs fetched inputs this container
+   lacks).
+
+**What this settles.**  The loop converges once the top is handed down —
+a fixpoint at every size, exact on the mesh — and it converges to
+whatever the top handed down was: clean from a healed blind round at
+NQ ≤ 8 without a healer in the informed round, dirty from a dirty one.
+The rung-4 primitive and its loop are therefore both in hand; what the
+SoC's `td` arm at NQ = 2 still shows is the reservation's own limit (a
+union that covers the block's seat), which no top plan fixes, and the
+next question is whether the derivation should yield there — leave the
+block its seat and hand the top the loss — which is a derivation policy,
+not a new primitive.
 
 ## Provenance
 
@@ -564,6 +779,17 @@ round is then a fixpoint.
   traces of `soc.tcl 2 -bottomup -noheal` and the same `-shares` the
   driver derived, comparing each top-level bundle's selected topology,
   layers and seat between the two.
+- The 6c measurement: `converge.tcl soc 2 4 8 -primitive reserve -arms
+  td,bu -informed 4 -handdown` and `… soc 16 … -informed 4 -handdown`
+  (healers off), `… soc 2 4 8 -heal … -informed 3 -handdown` and `… soc 16
+  -heal … -informed 3 -handdown` (healed), `converge.tcl tpu 8 16
+  -primitive reserve -arms td,bu -informed 3 -handdown` (the control; its
+  `td` round 0 aligned by the driver).  Each run leaves
+  `<p>_<arm>_plan_r<k>.buda` beside the budget files, and the `plan` /
+  `fixpoint` columns are the driver's (`buda::query plan_pins`,
+  `converge::policy_diff`).  The stranded-bit attributions are from
+  `BUDA_RECORD` traces of the NQ = 8 rounds replayed in Python and
+  compared segment by segment against the blind round's own.
 - Engine at the merge of #936 plus this change (the `uniform` form, the
   driver's `uniform` arm, the blocked-track enforcement on globally solved
   instances, the extended report); the correction and the 6b rows at the

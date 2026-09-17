@@ -181,6 +181,7 @@ class VizViewMixin:
             fp_resolver=self._fp_resolver,            # hier per-bundle frames
             groups_fn=self._groups_fn,                # super-candidate families
             user_ops_sink=self._user_ops_sink,        # BDB op-log provenance
+            pin_sink=getattr(self, '_pin_sink', None),  # plan-pin bookkeeping
             cost_fn=getattr(self, '_cost_fn', None),  # debug cost view (visualize … debug)
             routing_grid=self.routing_grid)           # NDR ghosts + debug tint
         self._topo_explorer.fig.show()

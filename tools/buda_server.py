@@ -343,6 +343,20 @@ def _reserve_audit(s):
         for r in rows)
 
 
+def _plan_pins(s):
+    # A handed-down top plan's fate (6c): `{entries applied seated of}` —
+    # `pin_plan` lines sourced, the ones applied at run_planner, and after
+    # run_nuts the seats the placement honoured out of the seats handed
+    # down (-1 -1 before run_nuts).  `0 0 -1 -1` when no plan was sourced.
+    pins = getattr(s, "_plan_pins", None) or []
+    applied = sum(1 for e in pins if e.get("applied"))
+    seated, of = -1, -1
+    r = s._plan_pins_seated() if pins else None
+    if r is not None:
+        seated, of = r[0], r[1]
+    return f"{len(pins)} {applied} {seated} {of}"
+
+
 # The values a flow script actually branches on.  Deliberately few: this is
 # a bridge, not a second API, and every name here is a promise to keep.
 # A count that has not been computed yet answers -1 rather than 0, because
@@ -359,6 +373,7 @@ _QUERIES = {
     "caps": _caps,
     "reserves": _reserves,
     "reserve_audit": _reserve_audit,
+    "plan_pins": _plan_pins,
 }
 # The queries that TAKE arguments.  Every other name is a scalar about the
 # whole session, and a word after it is a typo — `buda::query overlaps M6`

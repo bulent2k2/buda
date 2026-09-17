@@ -304,8 +304,24 @@ default.  What the informed loop lacks is **plan stability**: on the
 recorded NQ = 2 rounds, 4 of the 13 top-level bundles keep their topology
 between the blind round and the informed one and none keeps its seat, so
 the corridor a derivation names is the previous top's and the next top
-plans elsewhere.  A track preference cannot supply that; the next build
-item is the top's plan handed down with the reservation (6c).
+plans elsewhere.  A track preference cannot supply that; a pin can, and
+**build item 6c, the top's plan handed down, is BUILT and measured**
+(2026-09-17, `derive_top_plan` → `pin_plan`, `converge.tcl -handdown`):
+the measurement round's globally planned selections, layers and seats
+come down with the reservation and the informed round routes the blocks
+under the SAME top.  Every pin applies and every seat is honoured, and the
+loop has a **fixpoint** — the budget AND the plan a round derives
+reproduce the ones it ran under within one to three informed rounds on the
+SoC and in the first on the mesh (where the reservation is then exactly the top's use, 1.00×)
+— where E5's free re-plan reproduced nothing.  Healers off, the fixpoint
+is exactly as clean as the top handed down (the measurement round's own
+overlaps ride along); handed a HEALED blind round, the bottom-up informed
+round is clean **without healers** in one round at NQ = 2, 4 and 8 (E5
+never cleaned NQ = 4, healed or not) and 8 bits short at NQ = 16, healed
+clean there.  The top-down source is weaker (2–35 overlaps at round 1,
+healed clean at NQ ≥ 4) and at NQ = 2 stays at E5's dirty fixpoint — the
+union reservation covering the core's own 32-bit seat — which is the
+reservation's limit, not the plan's.
 
 ## The judge must not be BUDA
 
@@ -405,15 +421,25 @@ every "one round" measured rather than assumed.
    loop lacked.  A lever, not a default; the planner's own term (a
    negative cost on reserved bands) was not built, since a preference
    cannot restore a plan the templates' new charges have moved.
-   **6c — the top's plan handed down with the reservation**: the informed
-   round re-plans the top from scratch after the templates moved (NQ = 2:
-   4 of 13 top-level topologies survive, no seat does), which is why the
-   loop has no fixpoint whatever the top prefers; hand the derivation
-   round's top selections, layers and seats down as pins (the machinery
-   `select_topology` / the sidecar already have), so the informed round
-   routes the blocks under the SAME top the reservation came from, and
-   measure whether a round is then a fixpoint.  Ahead of the fixed-pin
-   work.
+   ~~**6c — the top's plan handed down with the reservation**~~ **BUILT
+   and measured** (2026-09-17, `derive_top_plan` → `pin_plan`,
+   `converge.tcl -handdown`; [convergence_e5.md](convergence_e5.md), "The
+   plan handed down"): the derivation round's globally planned
+   selections (by candidate uid and type spec), forced layers and seats
+   (width-wide slide windows — a seat pin to NUTS, with the bit stage
+   keeping the segment's natural window) come down with the reservation.
+   Every pin applies, every seat is honoured, and the loop has a fixpoint
+   at every size on both vehicles (exact and 1.00× on the mesh) where the
+   free re-plan never did; healers off the fixpoint is as clean as the
+   top handed down, and from a healed blind round the informed round is
+   clean healerless in one round at NQ ≤ 8 (8 bits short at NQ = 16).
+   Found on the way and fixed: a healer move off a pinned shape carried
+   its forced layers (LAYER_DIR behind a clean metric), and a top-down
+   measurement round must be ALIGNED (a seat is geometry; the mesh's rows
+   move by a phase).  What remains is the reservation's own limit (the
+   `td` arm at NQ = 2: a union covering the core's own seat, E5's dirty
+   fixpoint) — a derivation-policy question (yield the block its seat),
+   not a new primitive.
 7. **Fixed-pin primitive** — a busterm restricted to a face, then to a window
    on a face — as the interoperability piece for the partner evaluation (E3),
    last, since nothing in-house depends on it.

@@ -55,7 +55,16 @@
 #                   TOP layer over every marked cell, a guess with no plan
 #                   behind it, named through the same primitive the
 #                   derived corridor uses so one audit reads both
+#   -align          a top-down session on the ALIGNED floorplan: mark,
+#                   align_bottom_up, unmark (a hand-down's measurement
+#                   round must share the informed round's geometry)
 #   -noheal         skip the vehicle's heal_if_dirty (the healerless table)
+#   -plan FILE      `source FILE` (the previous round's `pin_plan` lines,
+#                   derive_top_plan's output) — the top's plan handed down
+#                   with the budget (ladder item 6c); held by the engine
+#                   until this session's run_planner hier
+#   -derive_plan FILE  derive_top_plan file FILE at the end: this round's
+#                   top plan for the next round to route under
 #   -report FILE    write the machine-readable report the driver reads
 #
 # The report is one fact per line, Tcl-list shaped:
@@ -67,6 +76,11 @@
 #   healed 0|1
 #   wl_detailed N                 -1 when the run did not report one
 #   reserve N                     the -reserve in force
+#   plan_pins E A S O             the handed-down plan's fate: E pin_plan
+#                                 lines sourced, A applied at the planner,
+#                                 S of O handed-down seats honoured by NUTS
+#                                 (0 0 -1 -1 with no -plan)
+#   plan_derived N                bundles in this round's -derive_plan file
 #   uniform F                     the -uniform in force (0 = none)
 #   share CELL LAYER PCT KEPT NSIG COLLIDE   one per derived line (-derive
 #                                 share)
@@ -101,6 +115,10 @@ namespace eval converge {
     variable derive_opts ""
     variable primitive share
     variable uniform 0
+    variable plan ""
+    variable derive_plan ""
+    variable align 0
+    variable planned 0
     variable noheal 0
     variable report ""
     variable marks 0
@@ -140,11 +158,34 @@ proc converge::opt {argv argi} {
             set converge::uniform $val
             return 2
         }
+        -plan    { if {!$have_val} { error "$opt needs a file" }
+                   set converge::plan [file normalize $val]; return 2 }
+        -derive_plan { if {!$have_val} { error "$opt needs a file" }
+                   set converge::derive_plan [file normalize $val]; return 2 }
         -report  { if {!$have_val} { error "$opt needs a file" }
                    set converge::report [file normalize $val]; return 2 }
         -noheal  { set converge::noheal 1; return 1 }
+        -align   { set converge::align 1; return 1 }
     }
     return 0
+}
+
+# A TOP-DOWN session on the bottom-up floorplan (`-align`): mark, align,
+# unmark — the instances nudged onto the shared track phase exactly as a
+# `-bottomup` session nudges them (and, on the mesh, the row pitch snapped
+# at construction: the vehicle reads `converge::align_wanted` there too),
+# then nothing marked, so every bundle plans globally.  What a hand-down
+# needs: a plan is geometry, and the seats a top-down measurement round
+# hands to an aligned informed round must be seats on the SAME floorplan —
+# the mesh's rows move by a phase between the two, and a seat pinned
+# against a moved block face is a BUSTERM violation (measured: 7 of 96
+# seats, 112 violations, before this).  The SoC's alignment reverts every
+# move it tries, so there the two floorplans already agree.
+proc converge::align_wanted {} { return $converge::align }
+proc converge::align_only {args} {
+    buda::set_bottom_up {*}$args
+    buda::align_bottom_up
+    buda::set_bottom_up * off
 }
 
 # `buda::set_bottom_up ...` with the mark count kept for the report: the
@@ -175,6 +216,17 @@ proc converge::policy {} {
     # `-bottomup` session (the engine refuses it with none marked).
     if {$converge::uniform > 0} {
         buda::set_cell_layer_reserve * TOP uniform $converge::uniform
+    }
+    # The top's plan handed down with the budget (ladder item 6c): the
+    # previous round's `pin_plan` lines, HELD by the engine until this
+    # session's `run_planner hier` (the pool does not exist yet), where
+    # they pin the globally planned bundles' selection, layers and seats —
+    # so the blocks are routed under the SAME top the budget came from.
+    if {$converge::plan ne ""} {
+        if {![file exists $converge::plan]} {
+            error "converge: -plan file not found: $converge::plan"
+        }
+        buda::source $converge::plan
     }
 }
 
@@ -226,6 +278,20 @@ proc converge::finish {healed} {
             }
         }
     }
+    # The plan of THIS round's top, for the next round to route under.
+    set converge::planned 0
+    if {$converge::derive_plan ne ""} {
+        # The SAME scope as the budget's: the plan is the top the scoped
+        # budget was derived from, and a top-down round's default scope
+        # (every bundle-owning cell) would hand down less than that
+        # (Codex P2 on #939).
+        set cmd [list file $converge::derive_plan]
+        if {$converge::derive_cells ne ""} {
+            lappend cmd cells $converge::derive_cells
+        }
+        set out [buda::derive_top_plan {*}$cmd]
+        regexp {(\d+) bundle\(s\) handed down} $out -> converge::planned
+    }
     if {$converge::report eq ""} { return }
     set f [open $converge::report w]
     puts $f "verdict_first $converge::first"
@@ -241,6 +307,11 @@ proc converge::finish {healed} {
     puts $f "wl_detailed $wl"
     puts $f "reserve $converge::reserve"
     puts $f "uniform $converge::uniform"
+    # `plan_pins`: {entries applied seated of} — the handed-down plan's
+    # fate in this session (0 0 -1 -1 with none); `plan_derived`: the
+    # bundles this round's plan file carries (0 when none was asked for).
+    puts $f "plan_pins [buda::query plan_pins]"
+    puts $f "plan_derived $converge::planned"
     if {$converge::primitive eq "reserve"} {
         foreach d $derived { puts $f "tracks $d" }
     } else {
@@ -402,4 +473,32 @@ proc converge::blind_more {arms clean} {
 proc converge::_layer_cmp {a b} {
     regexp {(\d+)$} $a -> na; regexp {(\d+)$} $b -> nb
     return [expr {$na - $nb}]
+}
+
+# Two policy files (derived reservation or share lines) as the SAME budget:
+# the set of their declaration lines (comments and blank lines dropped,
+# every line's whitespace normalized) compared as sets.  Returns
+# {same n_differ n_total}: the fixpoint test of an informed round — a
+# round whose derivation reproduces the policy it ran under would derive
+# it again next round, so the loop has converged (or is stuck) there.
+proc converge::policy_diff {f1 f2} {
+    set sets {}
+    foreach f [list $f1 $f2] {
+        set d [dict create]
+        if {[file exists $f]} {
+            set h [open $f]; set text [read $h]; close $h
+            foreach ln [split $text \n] {
+                set ln [string trim $ln]
+                if {$ln eq "" || [string index $ln 0] eq "#"} { continue }
+                dict set d [join [regexp -all -inline {\S+} $ln] " "] 1
+            }
+        }
+        lappend sets $d
+    }
+    lassign $sets a b
+    set differ 0
+    foreach k [dict keys $a] { if {![dict exists $b $k]} { incr differ } }
+    foreach k [dict keys $b] { if {![dict exists $a $k]} { incr differ } }
+    set total [llength [lsort -unique [concat [dict keys $a] [dict keys $b]]]]
+    return [list [expr {$differ == 0}] $differ $total]
 }
