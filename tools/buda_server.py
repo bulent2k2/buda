@@ -200,6 +200,7 @@ import buda_diag                                            # noqa: E402
 from buda_cmds import COMMANDS                              # noqa: E402
 from buda_script import split_quoted_args, unquote          # noqa: E402
 from tcl_quote import tcl_word                              # noqa: E402
+from buda_session.util import fmt_pos                        # noqa: E402
 
 
 def _n_bundles(s):
@@ -314,7 +315,7 @@ def _reserves(s):
             continue
         rows.append("{" + " ".join([tcl_word(cell),
                                     tcl_word(names.get(lid, f"L{lid}")),
-                                    "{" + " ".join(f"{p:g}" for p in pos)
+                                    "{" + " ".join(fmt_pos(p) for p in pos)
                                     + "}"]) + "}")
     return " ".join(rows)
 

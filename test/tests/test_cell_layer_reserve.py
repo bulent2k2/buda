@@ -98,6 +98,41 @@ def test_the_declaration_validates_and_replaces():
     _quiet(s2, "open_bdb :memory:", "def_layer 8 M8 H TOP 20",
            "add_cell top_cell 600 200", "add_inst u1 top_cell - 0 0")
     assert "no track pattern" in _cmd(s2, "set_cell_layer_reserve top_cell M8 1")
+    # a non-finite position parses as a float and passes every comparison
+    # (Codex P2 on #936): refused at the declaration, not at the solve
+    s3 = _session()
+    for tok in ("nan", "inf", "-inf", "3,nan"):
+        assert "not a finite number" in _cmd(s3, f"set_cell_layer_reserve top_cell M6 {tok}"), tok
+    assert ("top_cell", 6) not in s3._cell_layer_reserves
+
+
+def test_a_derived_line_reproduces_the_track_exactly(tmp_path):
+    """`:g` keeps six significant digits, so a large cell-local coordinate
+    came back MOVED when the file was sourced — `1234567.5` as
+    `1.23457e+06`, a neighbouring track kept free while the top's own stays
+    open (Codex P1 on #936).  Every writer goes through one round-trip
+    formatter: the derivation's lines, the declaration's echo, the Tcl
+    query."""
+    from buda_session.util import fmt_pos
+    assert fmt_pos(3) == "3" and fmt_pos(3.0) == "3" and fmt_pos(7.5) == "7.5"
+    for v in (1234567.5, 600000.5, 0.1, 1e-7, 123456789.25):
+        assert float(fmt_pos(v)) == v, (v, fmt_pos(v))
+    s = _session("run_nuts", "run_detailed_nuts")
+    line = {"cell": "top_cell", "layer": 6, "layer_name": "M6",
+            "positions": [600000.5, 1234567.5], "n_inst": 1, "n_skipped": 0,
+            "used_lo": 2, "used_hi": 2, "seat_hit": 0, "seat": None,
+            "seat_inst": "u1", "own_hit": 0}
+    s._derive_cell_layer_reserves = lambda cells=None: ([line], [], ["top_cell"])
+    out = _cmd(s, f"derive_cell_layer_reserves file {tmp_path / 'r.buda'}")
+    text = (tmp_path / "r.buda").read_text()
+    assert "set_cell_layer_reserve top_cell M6 600000.5,1234567.5" in text, text
+    assert "set_cell_layer_reserve top_cell M6 600000.5,1234567.5" in out
+    # ... and the declaration echoes what it stored, exactly
+    s2 = _session()
+    _quiet(s2, "add_cell wide 2000000 2000000", "add_inst w wide - 0 0")
+    echo = _cmd(s2, "set_cell_layer_reserve wide M6 600000.5,1234567.5")
+    assert "y = 600000.5, 1234567.5" in echo, echo
+    assert s2._cell_layer_reserves[("wide", 6)] == (600000.5, 1234567.5)
 
 
 def test_the_reservation_persists_and_typed_entries_win(tmp_path):

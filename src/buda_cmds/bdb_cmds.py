@@ -21,10 +21,12 @@ in this module's COMMANDS dict; the buda_cmds package assembles the
 full registry that buda_cli.do_command dispatches through.
 """
 import buda
+import math
 import os
 import sys
 
 import buda_diag
+from buda_session.util import fmt_pos
 from ._options import (parse_rect_list, reject_unknown_options,
                        require_number, validate_rect_list)
 from buda_session.util import (apply_pattern_layer_facts,
@@ -1730,6 +1732,12 @@ def cmd_set_cell_layer_reserve(session, cmd, args, cmd_line):
         except ValueError:
             print(f"Error: set_cell_layer_reserve: position '{tok}' is not "
                   f"a number"); return
+        if not math.isfinite(v):
+            # `nan` passes every comparison below (both false) and inf
+            # the bounds check when the cell extent is unknown; either
+            # reaches _reserve_rects as math.floor(nan) six stages later.
+            print(f"Error: set_cell_layer_reserve: position '{tok}' is not "
+                  f"a finite number"); return
         if v < 0.0 or (extent is not None and v > extent + 1e-9):
             print(f"Error: set_cell_layer_reserve: position {tok} lies "
                   f"outside the cell's {'height' if horiz else 'width'} "
@@ -1747,7 +1755,7 @@ def cmd_set_cell_layer_reserve(session, cmd, args, cmd_line):
     session._persist_layer_reserves()
     print(f"[LayerReserve] {cell}: layer {args[1]} reserves {len(positions)} "
           f"track(s) at {'y' if horiz else 'x'} = "
-          + ", ".join(f"{v:g}" for v in sorted(positions))
+          + ", ".join(fmt_pos(v) for v in sorted(positions))
           + " (cell-local; kept free by the cell's own routing where the "
             "cell is solved as a template)")
 

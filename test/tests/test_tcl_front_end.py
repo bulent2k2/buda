@@ -191,6 +191,7 @@ def test_query_reserves_is_the_positional_twin_of_caps(tmp_path):
         buda::set_cell_layer_reserve mid M4 3,7.5,20
         buda::set_cell_layer_reserve mid M5 40
         show R1
+        puts "EXACT=[lindex [lindex [buda::query reserves] 0] 2]"
         buda::set_cell_layer_reserve mid M5 off
         show R2
         if {[catch {buda::query reserves M4} e]} { puts "E=$e" }
@@ -198,6 +199,7 @@ def test_query_reserves_is_the_positional_twin_of_caps(tmp_path):
     assert "R0=0" in out, out
     assert "R1=2" in out and "R1 mid/M4/3/20" in out and "R1 mid/M5/1/40" in out, out
     assert "R2=1" in out and "R2 mid/M4/3/20" in out, out
+    assert "EXACT=3 7.5 20" in out                # round-trip text, not :g
     assert "E=" in out                      # a scalar query takes no words
 
 

@@ -30,7 +30,7 @@ import buda_diag
 from comp_placement import is_placed
 from .util import (UNIT_PITCH_UM_MAX, UNIT_PITCH_UM_MIN, UNIT_TRACKS_MAX,
                    UNIT_TRACKS_MIN, seg_crosses_rect, seg_spans_block,
-                   unit_consistency_signals, unit_plausibility_faults)
+                   unit_consistency_signals, unit_plausibility_faults, fmt_pos)
 
 
 def _fmt_pull_opt(cs):
@@ -1890,7 +1890,7 @@ class ReportsMixin:
             print(f"  {n}")
 
         def _fmt(l):
-            return ",".join(f"{q:g}" for q in l["positions"])
+            return ",".join(fmt_pos(q) for q in l["positions"])
         text = [f"set_cell_layer_reserve {l['cell']} {l['layer_name']} "
                 f"{_fmt(l)}" for l in lines]
         names = {lid: n for n, lid in

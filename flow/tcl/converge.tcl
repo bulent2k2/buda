@@ -120,6 +120,14 @@ if {![llength $sizes]} { error "converge.tcl: give at least one size" }
 if {$primitive ni {share reserve}} {
     error "converge.tcl: -primitive takes share|reserve, got '$primitive'"
 }
+# `-nofloor` is the SHARE derivation's control (the pure complement, no
+# own-need floor); the reserve derivation has no floor to drop and refuses
+# the token — which used to surface only after the first informed round's
+# routing session had been paid for (Codex P2 on #936).
+if {$nofloor && $primitive eq "reserve"} {
+    error "converge.tcl: -nofloor is the share derivation's control and\
+ does not apply to -primitive reserve"
+}
 # The blind loop advances by `step` until it passes `maxreserve`: a zero
 # step would re-run the same round forever on a dirty design (Codex P2 on
 # #935), so the three loop bounds are checked before any session starts.

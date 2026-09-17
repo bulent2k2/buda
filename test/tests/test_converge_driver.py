@@ -152,7 +152,12 @@ def test_a_zero_step_is_refused_before_any_session_starts(tmp_path):
                        # `-j -3` passes and the LATER arm check is what fires
                        (["-j", "foo"], "-j takes an integer or max"),
                        (["-j", "0x4"], "-j takes an integer or max"),   # Tcl-only spelling
-                       (["-j", -3, "-arms", "nosuch"], "unknown arm 'nosuch'")]:
+                       (["-j", -3, "-arms", "nosuch"], "unknown arm 'nosuch'"),
+                       # the share derivation's control forwarded to the
+                       # reserve derivation, which refuses it — after a
+                       # routing session had been paid for (Codex P2 on #936)
+                       (["-primitive", "reserve", "-nofloor"],
+                        "-nofloor is the share derivation's control")]:
         if msg is None:
             continue
         r = _tclsh(_DRIVER, "soc", 2, *words, "-out", out, cwd=tmp_path)
