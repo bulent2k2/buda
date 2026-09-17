@@ -366,6 +366,11 @@ def test_the_reserve_primitive_hands_down_named_tracks(tmp_path):
     # row per (instance, layer) with the count reserved over that instance
     gov = {(g[0], g[1], g[2]): int(g[3]) for g in d2["governed"]}
     assert gov, d2
+    # each row also carries how many of the reserved tracks the top's
+    # placed metal uses (the hit rate E5 reads) and the cell's own metal
+    # on them, which a honoured reservation reads as 0 everywhere
+    assert all(len(g) == 6 and 0 <= int(g[4]) <= int(g[3]) and g[5] == "0"
+               for g in d2["governed"]), d2["governed"][:5]
     for cell, layer, n in d["tracks"]:
         rows = {k: v for k, v in gov.items() if k[1] == cell and k[2] == layer}
         assert rows and all(v == int(n) for v in rows.values()), (cell, layer, rows)

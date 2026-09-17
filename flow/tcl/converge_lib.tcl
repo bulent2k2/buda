@@ -73,10 +73,15 @@
 #   tracks CELL LAYER N           one per derived line (-primitive reserve):
 #                                 N cell-local tracks named — its own key,
 #                                 since `reserve` above is the scalar
-#   governed INST CELL LAYER N    one per (instance, layer) a positional
+#   governed INST CELL LAYER N USED OWN
+#                                 one per (instance, layer) a positional
 #                                 reservation GOVERNS in this session (the
 #                                 `buda::query reserve_audit` rows): N
-#                                 tracks reserved over that instance — a
+#                                 tracks reserved over that instance, USED
+#                                 of them carrying the top's placed metal
+#                                 (the reservation's hit rate against the
+#                                 instance's `demand` row), OWN the cell's
+#                                 own metal (0 where honoured) — a
 #                                 90-degree-rotated occurrence has no row
 #   cap CELL FLOOR CAP            one per cell layer band in force (layer
 #                                 names, `-` for no floor) — which cells
@@ -245,8 +250,8 @@ proc converge::finish {healed} {
     set gov [buda::query reserve_audit]
     if {$gov ne "-1"} {
         foreach g $gov {
-            lassign $g inst cell layer n _used _own
-            puts $f "governed [list $inst $cell $layer $n]"
+            lassign $g inst cell layer n used own
+            puts $f "governed [list $inst $cell $layer $n $used $own]"
         }
     }
     set rows [buda::query demand]
