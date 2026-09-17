@@ -421,11 +421,11 @@ def test_reserve_corridor_tracks_are_picked_first():
     """The top-side half of a positional reservation (convergence ladder
     item 6b): a reserve corridor on the grid — the tracks a governed
     instance keeps free over its along-extent — is where a crossing
-    segment's bits land FIRST, nearest the anchor among them; a segment
-    whose bundle routes INSIDE the reserving instance is not steered onto
-    its own reservation, a corridor beside the span steers nothing, a
-    blocked track is never taken, and no corridor is the historical pick
-    bit for bit."""
+    segment's bits land FIRST, nearest the anchor among them — when the
+    corridor can seat every one of them; a segment whose bundle routes
+    INSIDE the reserving instance is not steered onto its own reservation,
+    a corridor beside the span steers nothing, a blocked track is never
+    taken, and no corridor is the historical pick bit for bit."""
     stack = make_stack_with_standard_pattern()
     # the unit's four signal tracks are 3.5, 5.5, 10.5, 12.5; anchor low
     seg = make_bus_segment(bit_width=2, interval_lo=0.0, interval_hi=14.0)
@@ -450,17 +450,23 @@ def test_reserve_corridor_tracks_are_picked_first():
     seg.frame_inst = "blk2"                 # a sibling, not a child
     assert picks() == pytest.approx([10.5, 12.5])
     seg.frame_inst = ""
-    # one corridor track: it, plus the nearest to the anchor of the rest
+    # one corridor track for two bits: the corridor cannot seat the bus,
+    # so it is not steered at all (a bus half on the corridor is scattered,
+    # not steered — the historical pick)
     stack.clear_reserve_corridors()
     stack.add_reserve_corridor(4, 20.0, 60.0, [10.5], "blk")
-    assert picks() == pytest.approx([5.5, 10.5])
-    # a blocked track outranks the corridor (a reservation this instance
-    # must honour is not a preference)
+    assert picks() == pytest.approx([3.5, 5.5])
+    # a blocked track is never taken, and with it gone the corridor no
+    # longer seats the bus: the historical pick again
     stack.clear_reserve_corridors()
     stack.add_reserve_corridor(4, 20.0, 60.0, [10.5, 12.5], "blk")
     seg.blocked_tracks = [10.5]
-    assert picks() == pytest.approx([5.5, 12.5])
+    assert picks() == pytest.approx([3.5, 5.5])
     seg.blocked_tracks = []
+    # three corridor tracks for two bits: the two nearest the anchor
+    stack.clear_reserve_corridors()
+    stack.add_reserve_corridor(4, 20.0, 60.0, [5.5, 10.5, 12.5], "blk")
+    assert picks() == pytest.approx([5.5, 10.5])
     # a corridor beside the span (along 200..300 against 0..100) is not
     # crossed; one merely touching it (100..200) neither
     for lo, hi in ((200.0, 300.0), (100.0, 200.0)):

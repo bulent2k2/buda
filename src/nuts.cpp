@@ -1267,13 +1267,24 @@ static void set_pull_targets(
 // Reserve-corridor pull override (ladder item 6b): a segment whose span
 // crosses a corridor on its layer — one its bundle does not route inside —
 // has the corridor's tracks inside its seat window; its pull becomes the
-// centre of their spread.  Written into pull_map (and out of pull_win_map)
-// before set_pull_targets, so place_seg's default
+// centre of the run that hosts it.  Written into pull_map (and out of
+// pull_win_map) before set_pull_targets, so place_seg's default
 // preference, the repack's anchor and tighten_pulls all read one objective;
 // an alignment sibling or a junction anchor still wins in place_seg (a
 // same-net track share and a corner landing are correctness, a corridor is
 // a preference).  No corridor on the segment's layer or none crossed:
 // nothing written, byte-identical.
+//
+// GATED on the corridor being able to HOST the bus: the densest window of
+// the bus's own width over the corridor tracks inside the seat window must
+// hold the segment's member bits, and the seat goes to that window's
+// centre.  Measured before the gate (E5 re-run, NQ = 2 bottom-up round 1):
+// steering every crossing bus onto whatever corridor tracks its window held
+// dragged seats off their pull for two or three reserved tracks a 32-bit
+// bus could never sit on — clean went to 16 unplaced, detailed wire +8 %,
+// and the hit rate barely moved (0.09 → 0.11).  A bus the corridor cannot
+// seat keeps its pull; the fixpoint the corridor exists for needs whole
+// buses on it, not bits scattered across it.
 static void apply_reserve_corridors(
     const std::vector<BundleWrapper>& bundles,
     std::vector<TrackSegment>& segments,
@@ -1284,9 +1295,17 @@ static void apply_reserve_corridors(
 {
     if (corridors.empty()) return;
     std::map<int, std::string> frame_of;
+    std::map<std::pair<int,int>, int> bits_of;
     for (const auto& bw : bundles) {
+        const int bid = bw.input.original_bundle.id;
         const auto& inst = bw.input.original_bundle.instances;
-        frame_of[bw.input.original_bundle.id] = inst.empty() ? "" : inst[0];
+        frame_of[bid] = inst.empty() ? "" : inst[0];
+        const int sel = bw.plan.selected_topology_index;
+        if (sel < 0 || sel >= (int)bw.input.candidates.size()) continue;
+        const Topology& topo = bw.input.candidates[sel];
+        const int nbits = (int)bw.input.original_bundle.get_net_names().size();
+        for (int si = 0; si < (int)topo.segments.size(); ++si)
+            bits_of[{bid, si}] = seg_bit_count(topo, si, nbits);
     }
     for (auto& ts : segments) {
         if (only_layer >= 0 && ts.layer != only_layer) continue;
@@ -1295,19 +1314,28 @@ static void apply_reserve_corridors(
         const double half = ts.width / 2.0;
         const double c_lo = ts.interval_lo + half, c_hi = ts.interval_hi - half;
         if (c_lo > c_hi) continue;
+        const auto key = std::make_pair(ts.bundle_id, ts.seg_idx);
         auto fit = frame_of.find(ts.bundle_id);
         const std::string& frame = fit == frame_of.end() ? std::string() : fit->second;
         auto T = corridor_tracks_in(cit->second, sp_lo(ts), sp_hi(ts),
                                     ts.interval_lo, ts.interval_hi, frame);
         if (T.empty()) continue;
-        // The POINT form: the centre of the corridor's spread (a footprint
-        // at least as wide as the spread covers every reserved track from
-        // there; a narrower one sits in their middle).  A corridor names a
-        // place, so it keeps the point form the alignment and junction
-        // preferences use, not the pull's flat interval — and any interval
-        // the pull wrote is withdrawn, or the repack would still pack to it.
-        const auto key = std::make_pair(ts.bundle_id, ts.seg_idx);
-        pull_map[key] = std::clamp(0.5 * (T.front() + T.back()), c_lo, c_hi);
+        auto bit = bits_of.find(key);
+        const int need = std::max(1, bit == bits_of.end() ? 1 : bit->second);
+        // Densest footprint-wide window over the (sorted) corridor tracks:
+        // the first window holding the most tracks.
+        int best_i = 0, best_n = 0;
+        for (int i = 0, j = 0; i < (int)T.size(); ++i) {
+            while (j + 1 < (int)T.size() && T[j + 1] - T[i] <= ts.width + 1e-9) ++j;
+            if (j - i + 1 > best_n) { best_n = j - i + 1; best_i = i; }
+        }
+        if (best_n < need) continue;
+        // The POINT form: a corridor names a place, so it keeps the point
+        // form the alignment and junction preferences use, not the pull's
+        // flat interval — and any interval the pull wrote is withdrawn, or
+        // the repack would still pack to it.
+        pull_map[key] = std::clamp(0.5 * (T[best_i] + T[best_i + best_n - 1]),
+                                   c_lo, c_hi);
         pull_win_map.erase(key);
     }
 }

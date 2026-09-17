@@ -242,8 +242,8 @@ def test_interval_too_narrow_violation():
 def test_reserve_corridor_seats_the_bus_on_it():
     """The top-side half of `set_cell_layer_reserve` (convergence ladder
     item 6b): a corridor on the segment's layer, crossed by its span,
-    becomes the seat's pull — an INTERVAL covering the reserved tracks —
-    so the abstract seat lands on them; a bundle framed inside the
+    becomes the seat's pull when a footprint-wide window of it can host
+    the bus's bits, so the abstract seat lands on them; a bundle framed inside the
     reserving instance keeps its own seat, and an engine with no corridor
     places exactly as before."""
     fp = make_floorplan(("src", 0, 100, 100, 200), ("dst", 300, 100, 400, 200))
@@ -278,12 +278,25 @@ def test_reserve_corridor_seats_the_bus_on_it():
     # a single reserved track: the bus is centred on it
     ts = seat([(50.0, 250.0, [180.0], "blk")])
     assert ts.track_position == pytest.approx(180.0)
-    # several reserved tracks: centred on their spread (a bus at least as
-    # wide covers them all from there; a narrower one sits in their middle)
+    # several reserved tracks inside one footprint: centred on them; two
+    # farther apart than the bus is wide: the first footprint-wide window
+    # that seats the (one-bit) bus, so the lower track
     ts = seat([(50.0, 250.0, [176.0, 182.0], "blk")])
     assert ts.track_position == pytest.approx(179.0)
     ts = seat([(50.0, 250.0, [110.0, 190.0], "blk")])
-    assert ts.track_position == pytest.approx(150.0)
+    assert ts.track_position == pytest.approx(110.0)
+    # a bus the corridor cannot seat keeps its pull: two bits, one track
+    w2 = make_bundle(1, ["n0", "n1"], width=10.0, segments=seg)
+    engine = buda.NUTSEngine(fp, ls)
+    engine.set_track_pitch(1.0)
+    engine.add_reserve_corridor(3, 50.0, 250.0, [180.0], "blk")
+    ts = engine.run([w2]).segments[0]
+    assert ts.track_position == pytest.approx(base.track_position)
+    engine = buda.NUTSEngine(fp, ls)
+    engine.set_track_pitch(1.0)
+    engine.add_reserve_corridor(3, 50.0, 250.0, [178.0, 182.0], "blk")
+    ts = engine.run([w2]).segments[0]
+    assert ts.track_position == pytest.approx(180.0)
     # clamped so the footprint stays inside the seat window
     ts = seat([(50.0, 250.0, [199.0], "blk")])
     assert ts.track_position == pytest.approx(195.0)

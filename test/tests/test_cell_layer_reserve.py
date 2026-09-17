@@ -1009,8 +1009,13 @@ def test_the_abstract_stage_reports_own_metal_as_an_estimate():
 # Eight tracks INSIDE the top bus's M6 seat window (absolute [110, 190]
 # over u1: cell-local [60, 140]) that the top does not use on its own —
 # its bits sit at cell-local 83..109 (`_LINE`, the derived reservation).
-# Four below and four above, so landing on them is a choice, not a drift.
+# Four below and four above, so landing on them is a choice, not a drift;
+# no 34-wide window (the bus's footprint) holds the eight, so the abstract
+# seat is NOT steered and the bits are (the window holds them all).
 _STEER = "set_cell_layer_reserve top_cell M6 66,69,72,75,117,120,123,126"
+# A contiguous run of eight (spread 26 < 34): half over the top's natural
+# tracks (100..109 = the upper four of `_LINE`) and half beyond them.
+_STEER_RUN = "set_cell_layer_reserve top_cell M6 100,103,106,109,117,120,123,126"
 
 
 def _template_run(*policy):
@@ -1054,11 +1059,9 @@ def test_the_top_is_steered_onto_the_reserved_tracks():
     assert s.routing_grid.has_reserve_corridors()
     assert s.nuts_result.num_overlaps == 0
     assert s.detailed_result.num_unplaced == 0
-    # the abstract seat: the bus (34 wide) inside the corridor's spread,
-    # absolute [116, 176] over both instances
-    ts = _top_seat(s)
-    assert 116.0 - 1e-6 <= ts.track_position - 17.0 and \
-        ts.track_position + 17.0 <= 176.0 + 1e-6, ts.track_position
+    # the abstract seat stays at its pull (no footprint-wide window of the
+    # corridor holds the eight), the bits take the corridor
+    assert _top_seat(s).track_position == pytest.approx(150.0)
     rows = s._layer_reserve_audit()
     assert [(r["inst"], r["reserved"], r["top_used"], r["top_total"],
              r["own_hit"]) for r in rows] == \
@@ -1091,6 +1094,17 @@ def test_the_top_is_steered_onto_the_reserved_tracks():
     assert all(r["top_used"] == 8 for r in s0._layer_reserve_audit())
     assert "steering off" in _cmd(s0, "set_reserve_steer off")
     assert not s0.routing_grid.has_reserve_corridors()
+
+    # a contiguous run the footprint can host: the abstract SEAT moves onto
+    # it (its centre, 163) and every bit lands on it; off, the top's own
+    # tracks overlap the run's lower half by construction — 4 of 8
+    s2, _ = _template_run(_STEER_RUN)
+    assert s2.detailed_result.num_unplaced == 0
+    assert _top_seat(s2).track_position == pytest.approx(163.0)
+    assert [r["top_used"] for r in s2._layer_reserve_audit()] == [8, 8]
+    s3, _ = _template_run("set_reserve_steer off", _STEER_RUN)
+    assert _top_seat(s3).track_position == pytest.approx(150.0)
+    assert [r["top_used"] for r in s3._layer_reserve_audit()] == [4, 4]
 
 
 def test_the_env_knob_and_a_design_with_no_reservation():
@@ -1162,13 +1176,16 @@ def test_a_nested_childs_corridor_steers_the_enclosing_cells_bus():
     assert len(used_c) == 8, used_c          # loc's 8 bits cross c
     comps = {c.name: c for c in s0.bdb.all_components()}
     c1 = comps["u1/c"]
-    # reserve, in inner's frame, the eight highest M6 tracks inside c's
-    # extent that the loc bus does NOT use today
+    # reserve, in inner's frame, the tightest run of eight M6 tracks inside
+    # c's extent that the loc bus does NOT use today (a run the bus's
+    # footprint can host, so the cell-local SEAT is steered too)
     g = s0.routing_grid.get_layer_grid(6)
     free = [p for p, _ in g.signal_tracks_in(0.5 * (c1.x1 + c1.x2), c1.y1, c1.y2)
             if all(abs(p - u) > 1e-6 for u in used_c)]
     assert len(free) >= 8, free
-    pick = free[-8:]
+    pick = min((free[i:i + 8] for i in range(len(free) - 7)),
+               key=lambda w: w[-1] - w[0])
+    assert pick[-1] - pick[0] <= 34.0, pick
     line = "set_cell_layer_reserve inner M6 " + ",".join(
         f"{p - c1.y1:g}" for p in pick)
     s, out = run(line)

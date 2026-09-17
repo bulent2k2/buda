@@ -982,18 +982,29 @@ void DetailedNUTSEngine::place_by_layer(
                                span_clear_keys.count(
                                    track_key(signal_tracks[k].first)) > 0;
                     };
+                    // A reserved track the top was told to use outranks a
+                    // merely nearer one (6b) — but only when the corridor
+                    // can seat EVERY member bit from this pool: a bus half
+                    // on the corridor is scattered, not steered (measured
+                    // on the E5 SoC: seats dragged, bits strewn, hit rate
+                    // unmoved).  Fewer corridor tracks than bits = the
+                    // historical order.
                     auto on_corridor = [&](int k) {
                         return !corridor_keys.empty() &&
                                corridor_keys.count(
                                    track_key(signal_tracks[k].first)) > 0;
                     };
+                    int n_corr = 0;
+                    if (!corridor_keys.empty())
+                        for (int k : avail) if (on_corridor(k)) ++n_corr;
+                    const bool steer = n_corr >= bw;
                     std::sort(avail.begin(), avail.end(), [&](int a, int b) {
                         const bool ca = is_clear(a), cb = is_clear(b);
                         if (ca != cb) return ca;
-                        // A reserved track the top was told to use, before
-                        // a merely nearer one (6b).
-                        const bool ra = on_corridor(a), rb = on_corridor(b);
-                        if (ra != rb) return ra;
+                        if (steer) {
+                            const bool ra = on_corridor(a), rb = on_corridor(b);
+                            if (ra != rb) return ra;
+                        }
                         // eff_anchor == abstract_pos unless pair-align biased
                         // it into a same-bundle interval overlap (lever A).
                         return std::abs(signal_tracks[a].first - eff_anchor) <
