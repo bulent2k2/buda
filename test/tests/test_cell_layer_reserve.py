@@ -106,6 +106,73 @@ def test_the_declaration_validates_and_replaces():
     assert ("top_cell", 6) not in s3._cell_layer_reserves
 
 
+def test_a_rail_only_pattern_is_refused():
+    """A pattern with slots and no SIGNAL slot names no track (Codex P2 on
+    #936): refused at the declaration, as the share command already does,
+    instead of reserving a corridor of a made-up width."""
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    _quiet(s, "open_bdb :memory:", "def_layer 8 M8 H TOP 20",
+           "def_track_pattern 8 0 VDD 2 1 GND 2 1",
+           "add_cell top_cell 600 200", "add_inst u1 top_cell - 0 0")
+    out = _cmd(s, "set_cell_layer_reserve top_cell M8 1")
+    assert "no SIGNAL slots" in out, out
+    assert ("top_cell", 8) not in s._cell_layer_reserves
+
+
+def test_a_position_typed_before_the_bdb_is_revalidated_at_open(tmp_path):
+    """With no BDB open the cell's extent is unknown, so the declaration
+    can only check the sign (Codex P2 on #936).  The moment a BDB is
+    opened every held entry is checked against the cell it names: an
+    out-of-cell position is dropped LOUD, the rest kept — and a restored
+    entry written against a cell another session has since resized gets
+    the same treatment."""
+    bdb = tmp_path / "r.bdb"
+    _cmd(_session(), f"save_bdb {bdb}")
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    _quiet(s, f"source {_TRACKS}")
+    assert s.bdb is None
+    out = _cmd(s, "set_cell_layer_reserve top_cell M6 3,1e12,999")
+    assert "reserves 3 track(s)" in out, out
+    out = _cmd(s, f"open_bdb {bdb}")
+    assert ("dropped 2 reserved position(s) outside the cell's height (200): "
+            "999, 1000000000000") in out, out
+    assert s._cell_layer_reserves[("top_cell", 6)] == (3.0,)
+    # an entry left with nothing is removed, and the persisted form follows
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    _quiet(s, f"source {_TRACKS}", "set_cell_layer_reserve top_cell M5 1e9")
+    out = _cmd(s, f"open_bdb {bdb}")
+    assert "the reservation is removed" in out, out
+    assert ("top_cell", 5) not in s._cell_layer_reserves
+    # a RESTORED entry against a since-resized cell: the row says 150 is
+    # inside; the cell is 100 tall now
+    _quiet(s, "set_cell_layer_reserve top_cell M6 50,150", "resize_cell top_cell 600 100")
+    _cmd(s, f"save_bdb {bdb}")
+    s2 = buda_cli.BudaSession()
+    s2.no_viz = True
+    _quiet(s2, f"source {_TRACKS}")
+    out = _cmd(s2, f"open_bdb {bdb}")
+    assert "restored 1 persisted reservation(s)" in out, out
+    assert "dropped 1 reserved position(s) outside the cell's height (100): 150" in out, out
+    assert s2._cell_layer_reserves[("top_cell", 6)] == (50.0,)
+    # the rect builder applies the same rule (the layer declared AFTER the
+    # open is the one shape open_bdb cannot check), and a position that
+    # would overflow a keepout call is skipped rather than raised
+    s3 = buda_cli.BudaSession()
+    s3.no_viz = True
+    with contextlib.redirect_stdout(io.StringIO()):
+        s3.do_command(f"open_bdb {bdb}")
+    _quiet(s3, f"source {_TRACKS}")
+    s3._cell_layer_reserves[("top_cell", 6)] = (50.0, 1e30)
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rects = s3._reserve_rects(6, (50.0, 1e30), 0, 0, 600, 100)
+    assert len(rects) == 1, rects
+    assert "outside the cell's height (100) and are skipped: 1e+30" in buf.getvalue(), buf.getvalue()
+
+
 def test_a_derived_line_reproduces_the_track_exactly(tmp_path):
     """`:g` keeps six significant digits, so a large cell-local coordinate
     came back MOVED when the file was sourced — `1234567.5` as

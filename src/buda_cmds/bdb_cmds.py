@@ -1715,13 +1715,22 @@ def cmd_set_cell_layer_reserve(session, cmd, args, cmd_line):
         print(f"Error: set_cell_layer_reserve: layer {args[1]} has no track "
               f"pattern — declare def_track_pattern first (a reservation "
               f"names tracks)"); return
+    pat = session.routing_grid.get_layer_grid(lid).global_pattern()
+    if not any(sl.type == "SIGNAL" for sl in pat.slots):
+        # A rail-only pattern has slots and no track anything routes on;
+        # the keepout width is the narrowest SIGNAL slot, which then falls
+        # back to a made-up 1.0 (Codex P2 on #936 — the share command
+        # already asks this).
+        print(f"Error: set_cell_layer_reserve: layer {args[1]}'s track "
+              f"pattern has no SIGNAL slots — nothing to reserve"); return
     horiz = session.layers.get_layer_dir(lid) == buda.LayerDir.HORIZONTAL
-    extent = None
-    if session.bdb is not None:
-        for cr in session.bdb.all_cells():
-            if cr.name == cell:
-                extent = cr.height if horiz else cr.width
-                break
+    # The cell's extent bounds a position.  With no BDB open it is not
+    # known yet; the declaration is accepted on the sign alone and the
+    # entry is REVALIDATED against the cell the moment a BDB is opened
+    # (`_revalidate_layer_reserves`, Codex P2 on #936), and again where a
+    # rect is built from it — so an out-of-cell position never reaches a
+    # keepout call, whichever order the flow declares things in.
+    extent = session._reserve_cell_extent(cell, horiz)
     positions = []
     for tok in ",".join(args[2:]).split(","):
         tok = tok.strip()

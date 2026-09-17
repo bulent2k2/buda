@@ -1737,10 +1737,14 @@ its source).
 
 A re-declaration REPLACES the cell's list on that layer; `off` clears one
 (`* off` every reservation).  Validation is loud: an unknown cell or layer, a
-layer with no `def_track_pattern`, a position outside the cell's extent on
-that axis, a repeated position.  Persisted in the open BDB (meta
-`layer_reserves`), restored by `open_bdb` with the share contract (typed
-entries win).  Derived from a routed top plan by
+layer with no `def_track_pattern` or whose pattern has no SIGNAL slot, a
+position outside the cell's extent on that axis, a repeated position.  The
+extent is the open BDB's; a reservation typed BEFORE any BDB is open is
+bounded by its sign alone and REVALIDATED the moment one is opened (every
+held entry is, a restored one included — a cell another session resized
+since), an out-of-cell position dropped with a WARNING and an emptied entry
+removed.  Persisted in the open BDB (meta `layer_reserves`), restored by
+`open_bdb` with the share contract (typed entries win).  Derived from a routed top plan by
 [`derive_cell_layer_reserves`](script_reference/nuts.md#derive_cell_layer_reserves-apply-file-path-cells-ab);
 read back from Tcl with `buda::query reserves`.
 

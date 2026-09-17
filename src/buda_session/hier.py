@@ -41,6 +41,7 @@ from bus_names import parse_bus_bit
 # module builds, because generation validates in its frame and load_pipeline
 # validates in self.fp, so two answers is a resume failure (comp_placement.py).
 from comp_placement import is_placed
+from .util import fmt_pos
 
 # ── Orientation helpers (module-level: shared pure functions) ────────────────
 # Output-normalized orientation maps over a w×h box: (swap, reflect-x,
@@ -2280,7 +2281,74 @@ class HierMixin:
                   f"reservation(s): "
                   + ", ".join(f"{c}:{names.get(l, f'L{l}')}x{len(p)}"
                               for (c, l), p in sorted(restored.items())))
+        self._revalidate_layer_reserves()
         return len(restored)
+
+    def _reserve_cell_extent(self, cell, horiz):
+        """The cell's extent along a reservation's axis (height for an H
+        layer, width for a V one), or None when no open BDB knows the
+        cell."""
+        if self.bdb is None:
+            return None
+        for cr in self.bdb.all_cells():
+            if cr.name == cell:
+                return cr.height if horiz else cr.width
+        return None
+
+    def _reserve_in_extent(self, positions, extent):
+        """Split `positions` into (kept, dropped) against a cell extent —
+        ONE rule for the declaration, the open_bdb revalidation and the
+        rect builder."""
+        kept, dropped = [], []
+        for p in positions:
+            if p < 0.0 or (extent is not None and p > extent + 1e-9):
+                dropped.append(p)
+            else:
+                kept.append(p)
+        return kept, dropped
+
+    def _revalidate_layer_reserves(self):
+        """Check every held reservation against the cell extents the
+        newly opened BDB knows (Codex P2 on #936): a position typed BEFORE
+        any BDB was open was bounded by its sign alone, and a restored one
+        was written by another session against a cell that may since
+        have been resized.  A position outside the cell is DROPPED, loud;
+        an entry left empty goes with it.  A layer not yet declared has
+        no axis to check on and is left for the rect builder, which
+        applies the same rule when it knows the extent."""
+        res = getattr(self, "_cell_layer_reserves", None) or {}
+        if not res or self.bdb is None:
+            return 0
+        declared = set(self._layer_name_map.values())
+        names = self._make_layer_names()
+        n_dropped = 0
+        for (cell, lid), pos in sorted(res.items()):
+            if lid not in declared:
+                continue
+            horiz = (self.layers.get_layer_dir(lid)
+                     == buda.LayerDir.HORIZONTAL)
+            extent = self._reserve_cell_extent(cell, horiz)
+            if extent is None:
+                continue
+            kept, dropped = self._reserve_in_extent(pos, extent)
+            if not dropped:
+                continue
+            n_dropped += len(dropped)
+            print(f"[LayerReserve] WARNING: cell '{cell}' layer "
+                  f"{names.get(lid, f'L{lid}')}: dropped {len(dropped)} "
+                  f"reserved position(s) outside the cell's "
+                  f"{'height' if horiz else 'width'} ({extent:g}): "
+                  + ", ".join(fmt_pos(v) for v in dropped)
+                  + (" — the reservation is removed" if not kept else ""))
+            if kept:
+                res[(cell, lid)] = tuple(sorted(kept))
+            else:
+                del res[(cell, lid)]
+                getattr(self, "_cell_layer_reserves_restored",
+                        set()).discard((cell, lid))
+        if n_dropped:
+            self._persist_layer_reserves()
+        return n_dropped
 
     def _reserve_slot_width(self, lid):
         """The keepout's perpendicular width for one reserved track: the
@@ -2298,6 +2366,23 @@ class HierMixin:
         crossing the cell, which is what a feedthrough reservation is."""
         horiz = (self.layers.get_layer_dir(lid) == buda.LayerDir.HORIZONTAL)
         w = self._reserve_slot_width(lid)
+        extent = ch if horiz else cw
+        positions, dropped = self._reserve_in_extent(positions, extent)
+        if dropped:
+            # Reachable only when open_bdb could not check (the layer was
+            # declared after the open); said once per shape rather than
+            # per frame.
+            warned = self.__dict__.setdefault("_reserve_rects_warned", set())
+            key = (lid, extent, tuple(dropped))
+            if key not in warned:
+                warned.add(key)
+                names = self._make_layer_names()
+                print(f"[LayerReserve] WARNING: {len(dropped)} reserved "
+                      f"position(s) on {names.get(lid, f'L{lid}')} lie "
+                      f"outside the cell's "
+                      f"{'height' if horiz else 'width'} ({extent:g}) and "
+                      f"are skipped: "
+                      + ", ".join(fmt_pos(v) for v in dropped))
         out = []
         for p in positions:
             lo = int(math.floor(p - w / 2.0 + 1e-9))
