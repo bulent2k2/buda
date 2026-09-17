@@ -722,7 +722,11 @@ verdict under the healed previous round's plan — the number the ladder's
    clean (opens, overlaps) metric — 34/44/66 audit violations on the first
    healed rounds; a trial that moves a bundle to another shape now drops
    its forced layers and seat windows (the sequential trial, the C++ sweep
-   and the screen alike).
+   and the screen alike).  Neither that nor the seat pin's natural window
+   moves a flow that hands nothing down: the QoR corpus is byte-identical
+   on all 56 comparable flows (`--vs` main's merge commit, abstract and
+   detailed WL +0; `ariane133_heal` needs fetched inputs this container
+   lacks).
 
 **What this settles.**  The loop converges once the top is handed down —
 a fixpoint at every size, exact on the mesh — and it converges to
