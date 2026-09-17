@@ -44,7 +44,11 @@ the top wants, and it is exactly that displacement which strands the cores'
 bits; every second informed round, 757 / 1,444 / 2,864).  The informed loop
 therefore has **no fixpoint** — each round re-derives from a top that moved
 — and the ladder's rung 4 needs the top-side half of the primitive: a
-reservation the top's planner *prefers*.
+reservation the top's planner *prefers*.  With the vehicle's own healing
+the derived arm is clean at every size in one informed round (in one of
+its two arms) and its NQ = 16 route is 11–14 % less wire than the blind
+band's, while the guess is healed clean at NQ = 2–8 at 10–30× the blind
+round's healing time and never at NQ = 16.
 
 ## Construction
 
@@ -194,7 +198,71 @@ asks more tracks than the cell has (14 signal tracks over its extent)`.
 
 ## Results — healers on (`soc_lib`'s heal-if-dirty in every round)
 
-HEALED_PLACEHOLDER
+The first audit is the healerless verdict of the same session; the final
+verdict is after `heal_if_dirty` (negotiate + ripup, and a second round with
+`refine_selection` when the first leaves a residue).  The `uniform` and
+`td` rows are from the re-run under the derived-stamp fix, the `blind` and
+`bu` rows from the run before it (no release commit in any of them, and the
+re-run reproduced every shared row to the wirelength).  Hit rates are read
+off each round's own report (healed state).
+
+| size | arm | round | policy | first ovl/unpl/viol | final ovl/unpl/viol | detailed WL | reserved | used | reserved ÷ used | hit rate | s |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 2 | blind | 1 | reserve 0 | 1/8/8 | **0/0/0** | 591,230 | — | — | — | — | 1.9 |
+| 2 | uniform | 1 | uniform 4 | 2/368/368 | **0/0/0** | 558,227 | 1,044 | 2,236 | 0.47 | 0.00 | 28.9 |
+| 2 | td | 0 | top-down | 0/0/0 | 0/0/0 | 525,144 | — | — | — | — | 1.4 |
+| 2 | td | 1 | lines r0 | 0/360/360 | 0/128/128 | (528,399) | 1,324 | 664 | 1.99 | 0.12 | 19.1 |
+| 2 | td | 2 | lines r1 | 0/16/16 | **0/0/0** | 612,548 | 1,188 | 687 | 1.73 | 0.04 | 4.3 |
+| 2 | bu | 1 | lines r0 | 0/0/0 | **0/0/0** | 536,025 | 7,434 | 2,269 | 3.28 | 0.08 | 2.2 |
+| 4 | blind | 1 | reserve 0 | 5/117/117 | **0/0/0** | 1,088,063 | — | — | — | — | 9.8 |
+| 4 | uniform | 1 | uniform 4 | 2/741/741 | **0/0/0** | 1,023,648 | 1,932 | 4,946 | 0.39 | 0.00 | 139.1 |
+| 4 | td | 0 | top-down | 1/16/16 | 0/0/0 | 1,007,765 | — | — | — | — | 3.1 |
+| 4 | td | 1 | lines r0 | 1/24/24 | **0/0/0** | 995,239 | 7,776 | 2,039 | 3.81 | 0.07 | 7.1 |
+| 4 | bu | 1 | lines r0 | 0/45/45 | 6/0/0 | 1,020,715 | 24,098 | 5,504 | 4.38 | 0.10 | 76.8 |
+| 4 | bu | 2 | lines r1 | 0/37/37 | 3/0/0 | 1,013,284 | 27,537 | 5,480 | 5.03 | 0.14 | 68.0 |
+| 8 | blind | 1 | reserve 0 | 6/93/93 | **0/0/0** | 2,175,864 | — | — | — | — | 24.8 |
+| 8 | uniform | 1 | uniform 4 | 1/1454/1454 | **0/0/0** | 2,095,343 | 3,708 | 9,155 | 0.41 | 0.00 | 650.5 |
+| 8 | td | 0 | top-down | 2/40/40 | 0/0/0 | 1,968,672 | — | — | — | — | 5.9 |
+| 8 | td | 1 | lines r0 | 1/16/16 | **0/0/0** | 1,978,425 | 14,496 | 3,411 | 4.25 | 0.06 | 14.4 |
+| 8 | bu | 1 | lines r0 | 0/8/8 | **0/0/0** | 1,948,503 | 60,129 | 9,502 | 6.33 | 0.08 | 17.2 |
+| 16 | blind | 1 | reserve 0 | 11/336/336 | 3/8/8 | (4,319,399) | — | — | — | — | 308.9 |
+| 16 | uniform | 1 | uniform 4 | 1/2907/2907 | 0/736/736 | (4,376,283) | 7,260 | 17,603 | 0.41 | 0.00 | 1395.1 |
+| 16 | uniform | 2 | uniform 8 | 60/1102/1102 | 48/1032/1032 | (4,196,967) | 14,520 | 21,203 | 0.68 | 0.01 | 144.3 |
+| 16 | td | 0 | top-down | 3/32/32 | 0/0/0 | 3,935,746 | — | — | — | — | 15.9 |
+| 16 | td | 1 | lines r0 | 32/464/464 | **0/0/0** | 3,997,844 | 49,864 | 6,697 | 7.45 | 0.07 | 134.3 |
+| 16 | bu | 1 | lines r0 | 0/0/0 | **0/0/0** | 3,867,848 | 164,415 | 17,949 | 9.16 | 0.06 | 45.1 |
+
+| size | arm | sessions | endpoint | complete-route WL | E1 healed for comparison |
+|---|---|---|---|---|---|
+| 2 | uniform | 1 | clean | 558,227 | blind 1 session, 591,230 |
+| 2 | td | 1 + 2 | clean | 612,548 | share 1 + 1, 601,617 |
+| 2 | bu | 1 + 1 | clean | 536,025 | share 1 + 1, 592,276 |
+| 4 | uniform | 1 | clean | 1,023,648 | blind 1, 1,088,063 |
+| 4 | td | 1 + 1 | clean | 995,239 | share 1 + 2, 1,061,538 |
+| 4 | bu | 1 + 2 | **dirty**, 3/0/0 (overlaps only) | — | share 1 + 1, 1,088,745 |
+| 8 | uniform | 1 | clean | 2,095,343 | blind 1, 2,175,864 |
+| 8 | td | 1 + 1 | clean | 1,978,425 | share 1 + 1, 2,180,195 |
+| 8 | bu | 1 + 1 | clean | 1,948,503 | share 1 + 1, 2,174,752 |
+| 16 | uniform | 2 | **dirty**, 48/1032/1032 | — | blind 2, 4,482,219 |
+| 16 | td | 1 + 1 | clean | 3,997,844 | share 1 + 1, 4,541,780 |
+| 16 | bu | 1 + 1 | clean (no healing needed) | 3,867,848 | share dirty 3/8/8 |
+
+The healers change the reading in two ways.  The guessed reservation is
+rescued by them at NQ = 2, 4 and 8 — one session, but 29 / 139 / 650 s of
+healing against the blind round's 2 / 10 / 25 s, since every core's
+displaced bus has to be re-seated by rip-up — and at NQ = 16 it is beyond
+them: 23 minutes take 2,907 stranded bits to 736, F = 8 stops at 1,032, and
+the sweep has no F left.  The derived positional reservation, which
+healers off was clean at three sizes in one to two rounds, is clean with
+healers at **every size in one informed round** in one of its two arms
+(td at 4, 8, 16; bu at 2, 8, 16 — at NQ = 16 the blind-derived round is
+clean **before** any healer runs, 0/0/0 at the first audit), and its
+clean NQ = 16 routes are **10.8–13.7 % less wire** than the blind band's
+(3,997,844 td / 3,867,848 bu against 4,482,219) and 12–15 % less than the
+share's 4,541,780 — the first size at which the informed arm beats the
+blind one on the route itself rather than only on rounds, because a
+positional reservation costs the block no layer.  The hit rate does not
+move with healing (uniform 0.00–0.01, derived 0.04–0.14).
 
 ## The control — `tpu.tcl` (healers off)
 
@@ -280,6 +348,19 @@ where a guess is free.
    (the mesh control) the union collapses to the demand and the
    reservation is exact at 1.00×.
 
+6. **With healers the positional arm wins on the route, not only on
+   rounds.**  E1's healed table read "the healers do the work, and the
+   budget buys nothing": every clean healed route under a derived share
+   was within 1.3 % of the blind one's wire.  Here the blind-derived lines
+   at NQ = 16 are clean **before** the healers run (0/0/0 at the first
+   audit, 45 s) at 13.7 % less wire than the blind band's healed route,
+   and the top-down-derived lines heal clean in one informed round at
+   10.8 % less — a band takes a whole layer from every block, a
+   positional line takes tracks, and the wire shows it.  The guess is the
+   mirror: healers rescue it at NQ = 2–8 at 10–30× the blind round's
+   healing time, since every core's displaced bus is re-seated by rip-up
+   one at a time, and at NQ = 16 (2,907 stranded) they do not finish.
+
 ## What the tables do not say
 
 - **That a positional reservation is the wrong primitive.**  It is the
@@ -328,7 +409,10 @@ primitive is this table's `td`/`bu` rows.
 ## Provenance
 
 - `flow/tcl/converge.tcl soc 2 4 8 16 -primitive reserve -arms
-  uniform,td,bu -out run` (healers off); `… -heal -out runh` (healed);
+  uniform,td,bu -out run` (healers off); `… -heal -out runh` (healed; its
+  `uniform` and `td` rows re-run as `… -heal -arms uniform,td -out runh2`
+  after the derived-stamp fix, the `bu` rows kept — no release commit ran
+  in them);
   `flow/tcl/converge.tcl tpu 8 16 -primitive reserve -arms uniform,td,bu
   -out runt` (the control).  Each writes
   `e5_<vehicle>_<heal>_step1_reserve.md` and one `.log`/`.rep` pair per

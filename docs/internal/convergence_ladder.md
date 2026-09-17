@@ -276,7 +276,12 @@ tracks only **6–11 %** of the time: nothing steers it there, so the
 reservation works by DISPLACING the block's own buses off the region the
 top wants, not as a corridor the top uses — which is also why every second
 informed round strands the cores' bus again (757 / 1,444 / 2,864) and the
-loop has no fixpoint.  The primitive is half built: the top-side half — a
+loop has no fixpoint.  With the vehicle's own healing the derived arm is clean at every
+size in one informed round (in one of its two arms) and its NQ = 16 route
+is 11–14 % less wire than the blind band's — the first size at which the
+informed arm beats the blind one on the route itself — while the guess is
+healed clean at NQ = 2–8 at 10–30× the blind round's healing time and
+never at NQ = 16.  The primitive is half built: the top-side half — a
 preference for reserved tracks in the hier planner and NUTS over governed
 instances — is the next build item (6b).  Running it also closed an
 enforcement gap the audit found (an instance solved in the global DNUTS
