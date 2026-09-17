@@ -441,7 +441,15 @@ and stranded 32 of 85 bits at NQ = 8 (128 of 176 at NQ = 16) in the first
 The entry is **held** until the candidate pool exists — a plan is sourced
 before bundling, like the budget it comes with — and applied at
 `run_planner` / `run_planner hier` (`[PlanPin] N of M handed-down plan(s)
-applied`), or at once when typed after generation.  After every `run_nuts`
+applied`), or at once when typed after generation.  In a hier session an
+entry for an **unmarked cell's cell-local bundle** — planned globally *per
+instance*, so the plan carries one entry per instance while before
+expansion only the template and its replicas exist — is held past the
+pre-expansion pass and pinned onto each instance's own wrapper right after
+expansion (`[PlanPin] K per-instance plan(s) applied after expansion`), on
+every expansion; a pin there before expansion would broadcast one
+instance's selection to every instance or land on a replica expansion
+drops.  After every `run_nuts`
 the session audits the seats: `[PlanPin] seated S of N handed-down seat(s)`,
 naming each seat the placement could not honour (a window the templates'
 copies took, or one outside the candidate's slide range — NUTS then places

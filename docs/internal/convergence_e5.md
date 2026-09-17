@@ -575,7 +575,12 @@ bundling holds them until its `run_planner hier`, applies them there, and
 after every `run_nuts` audits the seats (`[PlanPin] seated S of N`, each
 unhonoured seat named — never a silent re-seat); a bottom-up template's
 bundle is skipped and said, since the template is what the budget
-re-solves.  The driver's `-handdown` makes the measurement round write
+re-solves, and an unmarked cell's cell-local bundle — planned globally per
+instance — has its entries pinned onto each instance's own wrapper right
+after expansion (before it, only the template and its replicas exist).
+The natural window is cut exactly as the source's: the candidate's own
+slide, the trunk margin, the boundary relax and the partner-reach prune's
+zone bounds (the last two Codex P1s on #939).  The driver's `-handdown` makes the measurement round write
 its plan and every informed round source the previous round's and write
 its own, and adds two columns: `plan` (pins applied, seats honoured) and
 `fixpoint` — whether the budget a round *derived* equals the one it *ran

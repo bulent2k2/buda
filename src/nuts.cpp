@@ -634,6 +634,7 @@ static void prune_unreachable_partner_windows(
     // Every bound is computed from the PRE-prune intervals and applied after,
     // so the result cannot depend on the order segments are visited in.
     std::map<std::pair<int,int>, std::pair<double,double>> bounds;
+    std::map<std::pair<int,int>, std::pair<double,double>> nat_bounds;   // seat pins' natural windows
 
     for (const auto& ts : segments) {
         if (only_layer >= 0 && ts.layer != only_layer) continue;
@@ -642,6 +643,11 @@ static void prune_unreachable_partner_windows(
         if (it == rev_conn_map.end()) continue;
 
         double lo = ts.interval_lo, hi = ts.interval_hi;
+        // The zone bounds alone, for a seat pin's NATURAL window (which the
+        // pinned interval above no longer represents): the same hard
+        // reachability the source round's window received (Codex P1 on #939).
+        double zlo = -std::numeric_limits<double>::infinity();
+        double zhi =  std::numeric_limits<double>::infinity();
         bool doomed = false;
         for (const auto& f : it->second) {
             auto pit = ts_ptr_map.find({f.src_bid, f.src_si});
@@ -678,8 +684,8 @@ static void prune_unreachable_partner_windows(
                 // the zone iff span_lo < k_a2 && span_hi > k_a1 (the cull's own
                 // strict test).  With one end free that is a half-line in ts's
                 // seat coordinate — so the legal side is a single bound.
-                if (far >= k_a2)      lo = std::max(lo, k_a2);
-                else if (far <= k_a1) hi = std::min(hi, k_a1);
+                if (far >= k_a2)      { lo = std::max(lo, k_a2); zlo = std::max(zlo, k_a2); }
+                else if (far <= k_a1) { hi = std::min(hi, k_a1); zhi = std::min(zhi, k_a1); }
                 // else: `far` is INSIDE the zone's along range and the partner
                 // cannot slide clear, so it crosses wherever ts goes.  Nothing
                 // to prune — no seat helps — and the exhausted-window path is
@@ -688,6 +694,17 @@ static void prune_unreachable_partner_windows(
             }
         }
         if (doomed) ++n_doomed;      // once per SEGMENT, not per (partner, zone)
+        if (!std::isnan(ts.seat_nat_lo)) {
+            // A seat pin's natural window takes the zone bounds under the
+            // same emptiness rule; the pinned interval below is judged on
+            // its own (a bound that cuts a width-wide window empties it,
+            // which is the doomed case, reported as such).
+            const double nlo = std::max(ts.seat_nat_lo, zlo);
+            const double nhi = std::min(ts.seat_nat_hi, zhi);
+            if ((nlo != ts.seat_nat_lo || nhi != ts.seat_nat_hi) &&
+                nhi - nlo >= ts.width)
+                nat_bounds[key] = { nlo, nhi };
+        }
         if (lo == ts.interval_lo && hi == ts.interval_hi) continue;
         // An EMPTY pruned window means every seat dooms a partner.  Leave the
         // interval alone rather than inventing one: NUTS then exhausts the
@@ -699,6 +716,11 @@ static void prune_unreachable_partner_windows(
     }
 
     for (auto& ts : segments) {
+        auto nit = nat_bounds.find({ts.bundle_id, ts.seg_idx});
+        if (nit != nat_bounds.end()) {
+            ts.seat_nat_lo = nit->second.first;
+            ts.seat_nat_hi = nit->second.second;
+        }
         auto bit = bounds.find({ts.bundle_id, ts.seg_idx});
         if (bit == bounds.end()) continue;
         ts.interval_lo = bit->second.first;

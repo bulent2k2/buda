@@ -200,3 +200,140 @@ def test_a_pin_typed_after_the_plan_applies_at_once():
     assert w.input.topology_pinned and list(w.plan.seg_slide_lo) == [50.0]
     _cmd(a, "run_nuts")
     assert _top(a)[2] == [(0, 6, 67.0)]
+
+
+# An UNMARKED second cell beside the reserved one: its cell-local bundles
+# are planned globally PER INSTANCE (expanded wrappers), so the plan carries
+# one entry per instance and each must reach its own wrapper.
+_SIDE = [
+    "add_cell side 600 200",
+    "add_inst_to_cell side p leaf 20 60",
+    "add_inst_to_cell side q leaf 300 60",
+    "add_inst s1 side - 50 400",
+    "add_inst s2 side - 900 400",
+]
+_SIDE_BUSES = ["add_bus sl[8] s1/p.out s1/q.in", "add_bus sl2[8] s2/p.out s2/q.in"]
+
+
+def _run_side(*pre, tail=("run_nuts",)):
+    i_cell = _DESIGN.index("add_inst u1 top_cell - 50 50")
+    i_bus = _DESIGN.index("run_hier_bundler depth 1")
+    design = (_DESIGN[:i_cell] + _SIDE + _DESIGN[i_cell:i_bus]
+              + _SIDE_BUSES + _DESIGN[i_bus:])
+    i = design.index("run_hier_bundler depth 1")
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        for c in [*design[:i], "set_bottom_up top_cell", _LINE, *pre,
+                  *design[i:], *tail]:
+            s.do_command(c)
+    return s, buf.getvalue()
+
+
+def _seats_by_net(s):
+    out = {}
+    for w in s.bundles:
+        b = w.input.original_bundle
+        nets = b.get_net_names()
+        if not nets:
+            continue
+        out[nets[0]] = sorted(
+            (t.seg_idx, t.layer, t.track_position)
+            for t in s.nuts_result.segments if t.bundle_id == b.id)
+    return out
+
+
+def test_per_instance_plans_reach_their_own_wrappers_after_expansion(tmp_path):
+    """Codex P1 on #939: an unmarked cell's cell-local bundles are planned
+    per instance, so the plan carries one entry per instance — and before
+    expansion only the template and its replicas exist, so a pin there
+    would broadcast one instance's selection to every instance or land on
+    a replica expansion drops.  Such entries are held for the
+    post-expansion pass and pinned onto each instance's own wrapper."""
+    a, _ = _run_side()
+    plan = tmp_path / "plan.buda"
+    out = _cmd(a, f"derive_top_plan file {plan}")
+    assert "3 bundle(s) handed down" in out, out
+    lines = [l for l in plan.read_text().splitlines() if l.startswith("pin_plan ")]
+    assert sorted(l.split()[1] for l in lines) == ["net:sl2_0", "net:sl_0", "net:x_0"]
+    b, log = _run_side(f"source {plan}")
+    assert ("[PlanPin] 1 of 3 handed-down plan(s) applied (1 seat(s) pinned, "
+            "2 per-instance, applied after expansion)") in log, log[-3000:]
+    assert "[PlanPin] 2 per-instance plan(s) applied after expansion" in log
+    assert "(its own instance)" in log
+    assert "[PlanPin] seated 3 of 3 handed-down seat(s)" in log, log[-3000:]
+    sys.path.insert(0, str(Path(__file__).parents[2] / "tools"))
+    import buda_server
+    assert buda_server._QUERIES["plan_pins"](b) == "3 3 3 3"
+    sa, sb = _seats_by_net(a), _seats_by_net(b)
+    for net in ("x_0", "sl_0", "sl2_0"):
+        assert sa[net] == sb[net], (net, sa[net], sb[net])
+    # per instance, really: doctor s2's seat alone (a pitch up, inside its
+    # window) and only s2's bus moves
+    doctored = []
+    for l in plan.read_text().splitlines():
+        if l.startswith("pin_plan net:sl2_0 "):
+            head, seats = l.rsplit(" seats ", 1)
+            lo, hi = (float(v) for v in seats.split(":"))
+            l = f"{head} seats {lo + 4.25:g}:{hi + 4.25:g}"
+        doctored.append(l)
+    plan2 = tmp_path / "plan2.buda"
+    plan2.write_text("\n".join(doctored) + "\n")
+    c, log = _run_side(f"source {plan2}")
+    assert "[PlanPin] seated 3 of 3" in log, log[-3000:]
+    sc = _seats_by_net(c)
+    assert sc["sl_0"] == sa["sl_0"] and sc["x_0"] == sa["x_0"]
+    assert sc["sl2_0"] != sa["sl2_0"]
+    assert sc["sl2_0"][0][2] == sa["sl2_0"][0][2] + 4.25
+
+
+def _flow_lines(path, upto):
+    lines = []
+    for l in path.read_text().splitlines():
+        l = l.strip()
+        if not l or l.startswith("#"):
+            continue
+        lines.append(l)
+        if l.split()[0] == upto:
+            break
+    return lines
+
+
+def test_the_natural_window_carries_the_partner_reach_prune(tmp_path):
+    """Codex P1 on #939: `seat_nat` was cut before
+    `prune_unreachable_partner_windows`, so a seat pin's bit window could
+    admit tracks the source round's final window had excluded.  On the
+    vehicle where the prune fires, every handed-down seat's natural window
+    now equals the source's own final window, and the seats and bits
+    reproduce."""
+    flow = Path(__file__).parents[2] / "flow" / "keepout_blocks_partner_reach.buda"
+    lines = _flow_lines(flow, "run_detailed_nuts")
+    root = flow.parent
+    lines = [("source " + str(root / l.split()[1]) if l.startswith("source ") else l)
+             for l in lines]
+
+    def run(extra):
+        s = buda_cli.BudaSession()
+        s.no_viz = True
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            for c in extra + lines:
+                s.do_command(c)
+        return s, buf.getvalue()
+
+    a, log_a = run([])
+    assert "seat window(s) pruned" in log_a, log_a[-2000:]   # the prune fires
+    plan = tmp_path / "plan.buda"
+    _cmd(a, f"derive_top_plan file {plan}")
+    b, log_b = run([f"source {plan}"])
+    assert "[PlanPin] seated" in log_b and "not honoured" not in log_b, log_b[-2000:]
+    ta = {(t.bundle_id, t.seg_idx): t for t in a.nuts_result.segments}
+    tb = {(t.bundle_id, t.seg_idx): t for t in b.nuts_result.segments}
+    assert ta.keys() == tb.keys()
+    for k, t in tb.items():
+        assert t.track_position == ta[k].track_position, k
+        assert (t.seat_nat_lo, t.seat_nat_hi) == (ta[k].interval_lo, ta[k].interval_hi), k
+    bits = lambda s: sorted((n.bundle_id, n.seg_idx, n.bit_index, n.layer, n.track_position)
+                            for n in s.detailed_result.net_segments)
+    assert bits(a) == bits(b) and a.detailed_result.num_unplaced == b.detailed_result.num_unplaced

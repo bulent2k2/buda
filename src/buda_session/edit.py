@@ -1329,24 +1329,26 @@ class EditMixin:
 
     # ── pin_plan (convergence ladder item 6c) ─────────────────────────────
 
-    def _plan_pin_bundle(self, sel):
-        """Resolve a pin_plan selector to (wrapper, bid, error).  A hint
-        matches the bundle whose FIRST net is exactly the hint before the
-        prefix rule — a handed-down plan names every bundle by its first
-        net, and `pc_1` must not land on `pc_10` (the sidecar's rule)."""
+    def _plan_pin_bundle(self, sel, bundles=None):
+        """Resolve a pin_plan selector to (wrapper, bid, error) among
+        `bundles` (the session's list by default).  A hint matches the
+        bundle whose FIRST net is exactly the hint before the prefix rule —
+        a handed-down plan names every bundle by its first net, and `pc_1`
+        must not land on `pc_10` (the sidecar's rule)."""
+        pool = self.bundles if bundles is None else bundles
         kind, val = self._split_bundle_selector(sel)
         if kind is None:
             return None, None, val
         if kind == "id":
-            w = next((x for x in self.bundles
+            w = next((x for x in pool
                       if x.input.original_bundle.id == val), None)
-            if w is None:
+            if w is None and bundles is None:
                 ws = self._hier_expansion_map.get(val, [])
                 w = ws[0] if ws else None
             return (w, val, None) if w is not None \
                 else (None, None, f"bundle {val} not found")
         nets0 = []
-        for w in self.bundles:
+        for w in pool:
             try:
                 names = w.input.original_bundle.get_net_names()
             except Exception:
@@ -1364,7 +1366,7 @@ class EditMixin:
         return None, None, (f"'{val}' is ambiguous ({len(pre)} bundles "
                             f"match by prefix and none exactly)")
 
-    def _apply_plan_pins(self, final=False):
+    def _apply_plan_pins(self, final=False, post=False, bundles=None):
         """Apply every held `pin_plan` entry that resolves now: the bundle by
         selector, the candidate by content uid first and by type spec
         second, the forced layers, the seat windows (`plan.seg_slide_lo/hi`
@@ -1374,18 +1376,40 @@ class EditMixin:
         such an entry is an error.  A bundle that is a bottom-up
         template's is skipped and said: a template is solved once in its
         own frame under the derived budget, which is the half of the loop
-        the hand-down exists to keep stable, not to pin.  Returns the
-        number applied this call."""
-        pending = [e for e in self._plan_pins
-                   if not e.get("applied") and not e.get("skipped")]
+        the hand-down exists to keep stable, not to pin.
+
+        Two passes in a hier session.  The PRE-expansion pass (the
+        default) pins the bundles that exist as themselves before and
+        after expansion — top-level and cross-level ones, whose wrapper
+        expansion appends as is.  A cell-local bundle of an UNMARKED cell
+        is planned globally PER INSTANCE: the plan carries one entry per
+        instance, while before expansion only the template and its
+        replicas exist — a pin there would broadcast one instance's
+        selection to every instance, or land on a replica expansion drops
+        (Codex P1 on #939) — so such an entry is held for the
+        POST-expansion pass (`post=True`, `bundles` = the expanded list,
+        called by `run_planner hier` right after expansion and before the
+        planner works), which pins each instance's own wrapper; the pass
+        re-applies on every expansion, since expansion builds fresh
+        wrappers.  Typed after expansion, such an entry applies at once.
+        Returns the number applied this call."""
+        expanded_now = bool(getattr(self, "_hier_expansion_map", None))
+        if post:
+            pending = [e for e in self._plan_pins
+                       if e.get("stage") == "post" and not e.get("skipped")]
+        else:
+            pending = [e for e in self._plan_pins
+                       if not e.get("applied") and not e.get("skipped")
+                       and e.get("stage") != "post"]
         if not pending:
             return 0
         marked = set(self.bdb.bottom_up_cells()) if self.bdb is not None \
             else set()
         name_to_id = dict(self._layer_name_map)
         n_applied = 0
+        n_deferred = 0
         for e in pending:
-            w, bid, err = self._plan_pin_bundle(e["sel"])
+            w, bid, err = self._plan_pin_bundle(e["sel"], bundles)
             if w is None:
                 if final:
                     e["skipped"], e["why"] = True, err
@@ -1405,6 +1429,15 @@ class EditMixin:
                       f"bundle (cell {ctx}) — solved in its own frame under "
                       f"the derived budget, not pinned; skipped")
                 continue
+            if ctx and not post:
+                # An unmarked cell's cell-local bundle: one entry per
+                # INSTANCE, applied to the instance's own wrapper after
+                # expansion (see above).  Already expanded (a pin typed
+                # after the plan): apply to the wrapper found now.
+                e["stage"] = "post"
+                if not expanded_now:
+                    n_deferred += 1
+                    continue
             tidx, how = None, "uid"
             if e.get("uid"):
                 for i, c in enumerate(w.input.candidates):
@@ -1419,7 +1452,19 @@ class EditMixin:
                     continue
                 how = ("type spec (uid not in this pool — the loci moved)"
                        if e.get("uid") else "type spec")
-            if not self._select_single_topology_internal(bid, tidx + 1):
+            if e.get("stage") == "post":
+                # The instance's own wrapper, pinned directly: it is not in
+                # the pre-expansion list nor a key of the expansion map (it
+                # is a MEMBER of one), so the shared pin path cannot find
+                # it — and no mirror onto a template is wanted, since a
+                # template pin is what would broadcast it.
+                self._clear_stale_seg_overrides(w, tidx)
+                w.input.pinned_group = []
+                w.plan.selected_topology_index = tidx
+                w.input.topology_pinned = True
+                print(f"Pinned bundle {bid} ({self._bundle_label(w)}) to "
+                      f"topology {tidx + 1} (its own instance)")
+            elif not self._select_single_topology_internal(bid, tidx + 1):
                 e["skipped"], e["why"] = True, "pin refused"
                 continue
             nseg = len(w.input.candidates[tidx].segments)
@@ -1454,19 +1499,26 @@ class EditMixin:
                 x.plan.seg_slide_hi = list(shi)
 
             _set(w)
-            self._mirror_pin_to_original(bid, w, _set)
-            for iw in self._hier_expansion_map.get(bid, []):
-                if iw is not w:
-                    _set(iw)
+            if e.get("stage") != "post":
+                self._mirror_pin_to_original(bid, w, _set)
+                for iw in self._hier_expansion_map.get(bid, []):
+                    if iw is not w:
+                        _set(iw)
             self._plan_pin_bids.add(bid)
             e.update(applied=True, bid=bid, how=how, nseg=nseg,
                      nseat=sum(1 for s in seats if s is not None))
             n_applied += 1
+        if post:
+            if n_applied or final:
+                print(f"[PlanPin] {n_applied} per-instance plan(s) applied "
+                      f"after expansion (each to its own instance's wrapper)")
+            return n_applied
         if final or n_applied:
             done = [e for e in self._plan_pins if e.get("applied")]
             skipped = [e for e in self._plan_pins if e.get("skipped")]
             held = [e for e in self._plan_pins
-                    if not e.get("applied") and not e.get("skipped")]
+                    if not e.get("applied") and not e.get("skipped")
+                    and e.get("stage") != "post"]
             by_spec = sum(1 for e in done if e["how"] != "uid")
             print(f"[PlanPin] {len(done)} of {len(self._plan_pins)} "
                   f"handed-down plan(s) applied ({sum(e['nseat'] for e in done)}"
@@ -1474,6 +1526,8 @@ class EditMixin:
                   + (f", {by_spec} by type spec rather than uid" if by_spec
                      else "")
                   + (f", {len(skipped)} skipped" if skipped else "")
+                  + (f", {n_deferred} per-instance, applied after expansion"
+                     if n_deferred else "")
                   + (f", {len(held)} held" if held else "") + ")")
         return n_applied
 

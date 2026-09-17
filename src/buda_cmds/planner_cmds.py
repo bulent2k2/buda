@@ -246,6 +246,11 @@ def cmd_run_planner(session, cmd, args, cmd_line):
         # optimize_topologies plans them (a post-assignment application
         # would let a capped non-bottom-up instance plan unrestricted).
         session._apply_layer_policies(expanded)
+        # A handed-down plan's PER-INSTANCE entries (an unmarked cell's
+        # cell-local bundles, planned globally per instance): onto each
+        # instance's own fresh wrapper, before the planner works (the
+        # pre-expansion pass held them — see _apply_plan_pins).
+        session._apply_plan_pins(final=True, post=True, bundles=expanded)
         # A positional reservation is enforced on TEMPLATES only; a reserved
         # cell planned top-down is said here, before the planner works.
         _not_enforced = session._reserved_cells_not_enforced(expanded)
