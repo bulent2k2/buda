@@ -1,7 +1,11 @@
 # E5 — Feedthrough reservation: guessed against derived
 
 *Experiment E5 of the [Convergence Ladder](convergence_ladder.md), run and
-written up 2026-09-17.  Driver: [`flow/tcl/converge.tcl`](../../flow/tcl/converge.tcl)
+written up 2026-09-17; **corrected the same day** — the hit rate this
+write-up first reported (6–11 %) was a mis-measurement, and the top-side
+half of the primitive it asked for (build item 6b) was built against that
+number and measured; both are in "[The top-side half, built and measured](#the-top-side-half-built-and-measured-6b)"
+below, and every hit-rate figure in the tables is the corrected one.  Driver: [`flow/tcl/converge.tcl`](../../flow/tcl/converge.tcl)
 (`-primitive reserve -arms uniform,td,bu`) over the vehicle hooks in
 [`converge_lib.tcl`](../../flow/tcl/converge_lib.tcl); construction guarded by
 `test/tests/test_converge_driver.py` (mid tier, NQ = 2) and
@@ -34,17 +38,24 @@ round, NQ = 8 in one, NQ = 16 in two — where E1's share reached none, and
 where the blind band policy needed two rounds and never converged at
 NQ = 8.  It reserves **3.2–8.1×** the tracks the top used, the same order
 as the blind policy's 4.5–8×, because a template is solved once and the
-reservation is the *union* over its instances.  But the second half is
-refuted by a number nobody had asked for: the top lands on the reserved
-tracks **6–11 % of the time**.  Nothing in the flow steers the top onto the
-tracks the block left free, so the reservation does not work as a corridor
-the top uses; it works by *displacing* the block's own buses off the region
-the top wants, and it is exactly that displacement which strands the cores'
-32-bit bus wherever the derived tracks cover its seat (NQ = 2 top-down, 360
-bits; every second informed round, 757 / 1,444 / 2,864).  The informed loop
-therefore has **no fixpoint** — each round re-derives from a top that moved
-— and the ladder's rung 4 needs the top-side half of the primitive: a
-reservation the top's planner *prefers*.  With the vehicle's own healing
+reservation is the *union* over its instances.  The top lands on the
+reserved tracks **0.63–1.00 of the time** (corrected; the first reading,
+6–11 %, divided the hits by the instance's supply) — a derived reservation
+covers about half the supply over a governed instance, so an unsteered top
+lands on it most of the time.  What the reservation buys is that the
+block's own buses have *left* the region the top wants, and it is exactly
+that displacement which strands the cores' 32-bit bus wherever the derived
+tracks cover its seat (NQ = 2 top-down, 360 bits; every second informed
+round, 757 / 1,444 / 2,864).  The informed loop has **no fixpoint**, and
+the reason is not the hit rate: the informed round re-plans the top from
+scratch after the templates moved, and on the recorded NQ = 2 rounds 4 of
+the 13 top-level bundles keep their topology and none keeps its seat, so
+each round re-derives from a top that moved.  The top-side half of the
+primitive — a reservation the top's NUTS and DetailedNUTS *prefer* — was
+built (`set_reserve_steer`) and measured below: exact on the mesh (0.00 →
+1.00 at no cost), a small lift on the SoC (0.70–1.00) at the price of
+dirtier informed rounds, so it ships off by default and the next build
+item is the top's plan handed down with the reservation.  With the vehicle's own healing
 the derived arm is clean at every size in one informed round (in one of
 its two arms) and its NQ = 16 route is 11–14 % less wire than the blind
 band's, while the guess is healed clean at NQ = 2–8 at 10–30× the blind
@@ -143,7 +154,12 @@ bits and is not comparable to a complete route.
 violations.  `classes` = template classes solved that round (every session
 marks the same 18 cells).  `reserved ÷ used` is read off the round's own
 governed rows.  The blind round 1 is the `bu` arm's measurement and is
-shown once.
+shown once.  `hit rate` = of the top's tracks over the governed instances,
+the share that is a reserved one (corrected: `top_used ÷ used` off the
+governed and demand rows, re-read from a byte-identical re-run of every
+`td`/`bu` round on the 6b build with steering off; the `uniform` rounds'
+healerless reports predate the field — their healed rounds read
+0.02–0.03).
 
 | size | arm | round | policy | final ovl/unpl/viol | detailed WL | reserved | used | reserved ÷ used | hit rate | s |
 |---|---|---|---|---|---|---|---|---|---|---|
@@ -151,32 +167,32 @@ shown once.
 | 2 | uniform | 1 | uniform 4 | 2/368/368 | (557,357) | 1,044 | 2,245 | 0.47 | — | 1.8 |
 | 2 | uniform | 2 | uniform 8 | 6/136/136 | (560,705) | 2,088 | 2,221 | 0.94 | — | 1.8 |
 | 2 | td | 0 | top-down | 0/0/0 | 525,144 | — | — | — | — | 1.4 |
-| 2 | td | 1 | lines r0 | 0/360/360 | (538,483) | 1,324 | 805 | 1.64 | — | 1.9 |
-| 2 | td | 2 | lines r1 | 1/376/376 | (566,769) | 2,144 | 1,019 | 2.10 | — | 2.0 |
-| 2 | bu | 1 | lines r0 | **0/0/0** | 536,005 | 7,234 | 2,269 | 3.19 | 0.09 | 2.3 |
+| 2 | td | 1 | lines r0 | 0/360/360 | (538,483) | 1,324 | 805 | 1.64 | 0.68 | 1.9 |
+| 2 | td | 2 | lines r1 | 1/376/376 | (566,769) | 2,144 | 1,019 | 2.10 | 0.84 | 2.0 |
+| 2 | bu | 1 | lines r0 | **0/0/0** | 536,005 | 7,234 | 2,269 | 3.19 | 0.65 | 2.3 |
 | 4 | blind | 1 | reserve 0 | 5/117/117 | (980,908) | — | — | — | — | 2.5 |
 | 4 | uniform | 1 | uniform 4 | 2/741/741 | (1,064,732) | 1,932 | 5,012 | 0.39 | — | 3.4 |
 | 4 | uniform | 2 | uniform 8 | 14/269/269 | (1,039,315) | 3,864 | 5,247 | 0.74 | — | 3.4 |
 | 4 | td | 0 | top-down | 1/16/16 | (993,477) | — | — | — | — | 2.8 |
-| 4 | td | 1 | lines r0 | 1/24/24 | (982,122) | 7,352 | 1,959 | 3.75 | — | 4.0 |
-| 4 | td | 2 | lines r1 | 0/37/37 | (957,112) | 7,888 | 1,809 | 4.36 | — | 4.0 |
-| 4 | bu | 1 | lines r0 | 0/45/45 | (942,054) | 22,475 | 4,738 | 4.74 | 0.10 | 4.5 |
-| 4 | bu | 2 | lines r1 | 0/757/757 | (962,888) | 21,668 | 4,793 | 4.52 | — | 4.5 |
+| 4 | td | 1 | lines r0 | 1/24/24 | (982,122) | 7,352 | 1,959 | 3.75 | 0.67 | 4.0 |
+| 4 | td | 2 | lines r1 | 0/37/37 | (957,112) | 7,888 | 1,809 | 4.36 | 0.69 | 4.0 |
+| 4 | bu | 1 | lines r0 | 0/45/45 | (942,054) | 22,475 | 4,738 | 4.74 | 0.82 | 4.5 |
+| 4 | bu | 2 | lines r1 | 0/757/757 | (962,888) | 21,668 | 4,793 | 4.52 | 0.97 | 4.5 |
 | 8 | blind | 1 | reserve 0 | 6/93/93 | (2,012,407) | — | — | — | — | 5.4 |
 | 8 | uniform | 1 | uniform 4 | 1/1454/1454 | (2,118,394) | 3,708 | 8,967 | 0.41 | — | 7.3 |
 | 8 | uniform | 2 | uniform 8 | 30/560/560 | (2,025,227) | 7,416 | 9,061 | 0.82 | — | 7.1 |
 | 8 | td | 0 | top-down | 2/40/40 | (1,871,476) | — | — | — | — | 5.3 |
-| 8 | td | 1 | lines r0 | **0/0/0** | 1,982,521 | 14,528 | 3,411 | 4.26 | 0.06 | 8.2 |
-| 8 | bu | 1 | lines r0 | 0/18/18 | (2,147,336) | 53,501 | 9,430 | 5.67 | — | 9.7 |
-| 8 | bu | 2 | lines r1 | 0/1444/1444 | (1,937,231) | 66,230 | 9,580 | 6.91 | — | 10.4 |
+| 8 | td | 1 | lines r0 | **0/0/0** | 1,982,521 | 14,528 | 3,411 | 4.26 | 0.78 | 8.2 |
+| 8 | bu | 1 | lines r0 | 0/18/18 | (2,147,336) | 53,501 | 9,430 | 5.67 | 0.81 | 9.7 |
+| 8 | bu | 2 | lines r1 | 0/1444/1444 | (1,937,231) | 66,230 | 9,580 | 6.91 | 0.86 | 10.4 |
 | 16 | blind | 1 | reserve 0 | 11/336/336 | (4,274,800) | — | — | — | — | 12.2 |
 | 16 | uniform | 1 | uniform 4 | 1/2907/2907 | (4,373,880) | 7,260 | 16,676 | 0.44 | — | 16.9 |
 | 16 | uniform | 2 | uniform 8 | 60/1102/1102 | (4,160,682) | 14,520 | 17,587 | 0.83 | — | 16.5 |
 | 16 | td | 0 | top-down | 3/32/32 | (3,677,304) | — | — | — | — | 14.2 |
-| 16 | td | 1 | lines r0 | 7/170/170 | (4,323,498) | 45,448 | 8,259 | 5.50 | — | 20.9 |
-| 16 | td | 2 | lines r1 | 0/2864/2864 | (3,857,628) | 63,400 | 7,032 | 9.02 | — | 20.4 |
-| 16 | bu | 1 | lines r0 | 1/8/8 | (3,839,107) | 145,191 | 17,826 | 8.14 | — | 23.0 |
-| 16 | bu | 2 | lines r1 | **0/0/0** | 3,905,996 | 111,767 | 18,136 | 6.16 | 0.11 | 21.7 |
+| 16 | td | 1 | lines r0 | 7/170/170 | (4,323,498) | 45,448 | 8,259 | 5.50 | 0.63 | 20.9 |
+| 16 | td | 2 | lines r1 | 0/2864/2864 | (3,857,628) | 63,400 | 7,032 | 9.02 | 0.83 | 20.4 |
+| 16 | bu | 1 | lines r0 | 1/8/8 | (3,839,107) | 145,191 | 17,826 | 8.14 | 0.67 | 23.0 |
+| 16 | bu | 2 | lines r1 | **0/0/0** | 3,905,996 | 111,767 | 18,136 | 6.16 | 1.00 | 21.7 |
 
 The uniform sweep ended at F = 16 at every size: `io_cell M5: uniform 16
 asks more tracks than the cell has (14 signal tracks over its extent)`.
@@ -209,28 +225,28 @@ off each round's own report (healed state).
 | size | arm | round | policy | first ovl/unpl/viol | final ovl/unpl/viol | detailed WL | reserved | used | reserved ÷ used | hit rate | s |
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | 2 | blind | 1 | reserve 0 | 1/8/8 | **0/0/0** | 591,230 | — | — | — | — | 1.9 |
-| 2 | uniform | 1 | uniform 4 | 2/368/368 | **0/0/0** | 558,227 | 1,044 | 2,236 | 0.47 | 0.00 | 28.9 |
+| 2 | uniform | 1 | uniform 4 | 2/368/368 | **0/0/0** | 558,227 | 1,044 | 2,236 | 0.47 | 0.03 | 28.9 |
 | 2 | td | 0 | top-down | 0/0/0 | 0/0/0 | 525,144 | — | — | — | — | 1.4 |
-| 2 | td | 1 | lines r0 | 0/360/360 | 0/128/128 | (528,399) | 1,324 | 664 | 1.99 | 0.12 | 19.1 |
-| 2 | td | 2 | lines r1 | 0/16/16 | **0/0/0** | 612,548 | 1,188 | 687 | 1.73 | 0.04 | 4.3 |
-| 2 | bu | 1 | lines r0 | 0/0/0 | **0/0/0** | 536,025 | 7,434 | 2,269 | 3.28 | 0.08 | 2.2 |
+| 2 | td | 1 | lines r0 | 0/360/360 | 0/128/128 | (528,399) | 1,324 | 664 | 1.99 | 0.92 | 19.1 |
+| 2 | td | 2 | lines r1 | 0/16/16 | **0/0/0** | 612,548 | 1,188 | 687 | 1.73 | 0.39 | 4.3 |
+| 2 | bu | 1 | lines r0 | 0/0/0 | **0/0/0** | 536,025 | 7,434 | 2,269 | 3.28 | 0.65 | 2.2 |
 | 4 | blind | 1 | reserve 0 | 5/117/117 | **0/0/0** | 1,088,063 | — | — | — | — | 9.8 |
-| 4 | uniform | 1 | uniform 4 | 2/741/741 | **0/0/0** | 1,023,648 | 1,932 | 4,946 | 0.39 | 0.00 | 139.1 |
+| 4 | uniform | 1 | uniform 4 | 2/741/741 | **0/0/0** | 1,023,648 | 1,932 | 4,946 | 0.39 | 0.03 | 139.1 |
 | 4 | td | 0 | top-down | 1/16/16 | 0/0/0 | 1,007,765 | — | — | — | — | 3.1 |
-| 4 | td | 1 | lines r0 | 1/24/24 | **0/0/0** | 995,239 | 7,776 | 2,039 | 3.81 | 0.07 | 7.1 |
-| 4 | bu | 1 | lines r0 | 0/45/45 | 6/0/0 | 1,020,715 | 24,098 | 5,504 | 4.38 | 0.10 | 76.8 |
-| 4 | bu | 2 | lines r1 | 0/37/37 | 3/0/0 | 1,013,284 | 27,537 | 5,480 | 5.03 | 0.14 | 68.0 |
+| 4 | td | 1 | lines r0 | 1/24/24 | **0/0/0** | 995,239 | 7,776 | 2,039 | 3.81 | 0.67 | 7.1 |
+| 4 | bu | 1 | lines r0 | 0/45/45 | 6/0/0 | 1,020,715 | 24,098 | 5,504 | 4.38 | 0.67 | 76.8 |
+| 4 | bu | 2 | lines r1 | 0/37/37 | 3/0/0 | 1,013,284 | 27,537 | 5,480 | 5.03 | 0.91 | 68.0 |
 | 8 | blind | 1 | reserve 0 | 6/93/93 | **0/0/0** | 2,175,864 | — | — | — | — | 24.8 |
-| 8 | uniform | 1 | uniform 4 | 1/1454/1454 | **0/0/0** | 2,095,343 | 3,708 | 9,155 | 0.41 | 0.00 | 650.5 |
+| 8 | uniform | 1 | uniform 4 | 1/1454/1454 | **0/0/0** | 2,095,343 | 3,708 | 9,155 | 0.41 | 0.02 | 650.5 |
 | 8 | td | 0 | top-down | 2/40/40 | 0/0/0 | 1,968,672 | — | — | — | — | 5.9 |
-| 8 | td | 1 | lines r0 | 1/16/16 | **0/0/0** | 1,978,425 | 14,496 | 3,411 | 4.25 | 0.06 | 14.4 |
-| 8 | bu | 1 | lines r0 | 0/8/8 | **0/0/0** | 1,948,503 | 60,129 | 9,502 | 6.33 | 0.08 | 17.2 |
+| 8 | td | 1 | lines r0 | 1/16/16 | **0/0/0** | 1,978,425 | 14,496 | 3,411 | 4.25 | 0.78 | 14.4 |
+| 8 | bu | 1 | lines r0 | 0/8/8 | **0/0/0** | 1,948,503 | 60,129 | 9,502 | 6.33 | 0.71 | 17.2 |
 | 16 | blind | 1 | reserve 0 | 11/336/336 | 3/8/8 | (4,319,399) | — | — | — | — | 308.9 |
-| 16 | uniform | 1 | uniform 4 | 1/2907/2907 | 0/736/736 | (4,376,283) | 7,260 | 17,603 | 0.41 | 0.00 | 1395.1 |
-| 16 | uniform | 2 | uniform 8 | 60/1102/1102 | 48/1032/1032 | (4,196,967) | 14,520 | 21,203 | 0.68 | 0.01 | 144.3 |
+| 16 | uniform | 1 | uniform 4 | 1/2907/2907 | 0/736/736 | (4,376,283) | 7,260 | 17,603 | 0.41 | 0.02 | 1395.1 |
+| 16 | uniform | 2 | uniform 8 | 60/1102/1102 | 48/1032/1032 | (4,196,967) | 14,520 | 21,203 | 0.68 | 0.03 | 144.3 |
 | 16 | td | 0 | top-down | 3/32/32 | 0/0/0 | 3,935,746 | — | — | — | — | 15.9 |
-| 16 | td | 1 | lines r0 | 32/464/464 | **0/0/0** | 3,997,844 | 49,864 | 6,697 | 7.45 | 0.07 | 134.3 |
-| 16 | bu | 1 | lines r0 | 0/0/0 | **0/0/0** | 3,867,848 | 164,415 | 17,949 | 9.16 | 0.06 | 45.1 |
+| 16 | td | 1 | lines r0 | 32/464/464 | **0/0/0** | 3,997,844 | 49,864 | 6,697 | 7.45 | 0.86 | 134.3 |
+| 16 | bu | 1 | lines r0 | 0/0/0 | **0/0/0** | 3,867,848 | 164,415 | 17,949 | 9.16 | 0.70 | 45.1 |
 
 | size | arm | sessions | endpoint | complete-route WL | E1 healed for comparison |
 |---|---|---|---|---|---|
@@ -261,25 +277,25 @@ clean NQ = 16 routes are **10.8–13.7 % less wire** than the blind band's
 (3,997,844 td / 3,867,848 bu against 4,482,219) and 12–15 % less than the
 share's 4,541,780 — the first size at which the informed arm beats the
 blind one on the route itself rather than only on rounds, because a
-positional reservation costs the block no layer.  The hit rate does not
-move with healing (uniform 0.00–0.01, derived 0.04–0.14).
+positional reservation costs the block no layer.  The hit rate is the same
+order with healing (uniform 0.02–0.03, derived 0.39–0.92).
 
 ## The control — `tpu.tcl` (healers off)
 
 The mesh, where the top's demand is uniform by construction:
 
-| size | arm | round | policy | final ovl/unpl/viol | detailed WL | reserved | used | reserved ÷ used |
-|---|---|---|---|---|---|---|---|---|
-| 8 | blind | 1 | reserve 0 | 0/0/0 | 550,528 | — | — | — |
-| 8 | uniform | 1 | uniform 4 | 0/0/0 | 550,528 | 96 | 2,112 | 0.05 |
-| 8 | td | 0 | top-down | 0/0/0 | 197,376 | — | — | — |
-| 8 | td | 1 | lines r0 | 0/0/0 | 550,528 | 2,344 | 2,048 | 1.14 |
-| 8 | bu | 1 | lines r0 | 0/0/0 | 550,528 | 2,112 | 2,112 | 1.00 |
-| 16 | blind | 1 | reserve 0 | 0/0/0 | 2,174,208 | — | — | — |
-| 16 | uniform | 1 | uniform 4 | 0/0/0 | 2,174,208 | 192 | 8,320 | 0.02 |
-| 16 | td | 0 | top-down | 0/0/0 | 738,816 | — | — | — |
-| 16 | td | 1 | lines r0 | 0/0/0 | 2,174,208 | 8,784 | 8,192 | 1.07 |
-| 16 | bu | 1 | lines r0 | 0/0/0 | 2,174,208 | 8,320 | 8,320 | 1.00 |
+| size | arm | round | policy | final ovl/unpl/viol | detailed WL | reserved | used | reserved ÷ used | hit rate |
+|---|---|---|---|---|---|---|---|---|---|
+| 8 | blind | 1 | reserve 0 | 0/0/0 | 550,528 | — | — | — | — |
+| 8 | uniform | 1 | uniform 4 | 0/0/0 | 550,528 | 96 | 2,112 | 0.05 | 0.00 |
+| 8 | td | 0 | top-down | 0/0/0 | 197,376 | — | — | — | — |
+| 8 | td | 1 | lines r0 | 0/0/0 | 550,528 | 2,344 | 2,048 | 1.14 | 0.00 |
+| 8 | bu | 1 | lines r0 | 0/0/0 | 550,528 | 2,112 | 2,112 | 1.00 | 0.00 |
+| 16 | blind | 1 | reserve 0 | 0/0/0 | 2,174,208 | — | — | — | — |
+| 16 | uniform | 1 | uniform 4 | 0/0/0 | 2,174,208 | 192 | 8,320 | 0.02 | 0.00 |
+| 16 | td | 0 | top-down | 0/0/0 | 738,816 | — | — | — | — |
+| 16 | td | 1 | lines r0 | 0/0/0 | 2,174,208 | 8,784 | 8,192 | 1.07 | 0.00 |
+| 16 | bu | 1 | lines r0 | 0/0/0 | 2,174,208 | 8,320 | 8,320 | 1.00 | 0.00 |
 
 Every arm is clean in its first round, as in E1, so the control has no
 rounds to count; what it measures is the reservation, and here the
@@ -289,7 +305,11 @@ rows IS each row's demand), against the share's 1.12–1.19×, and the route
 under them is byte-identical in wirelength.  The uniform guess reserves
 2–5 % of the demand and changes nothing either — on a design that needed
 no reservation, a guess that misses costs nothing, which is the one case
-where a guess is free.
+where a guess is free.  And the hit rate is **0.00** for every arm: the
+reservation is exactly the top's previous tracks, and the unsteered top
+lands on none of them — its seats shift by one track phase when the PEs'
+buses move off the reserved tracks, the first place the corridor's other
+half shows (steered, below, it is 1.00).
 
 ## What the tables say
 
@@ -316,28 +336,43 @@ where a guess is free.
    because both are unions: a band takes a whole layer, a positional line
    takes every track any instance's top ever used.
 
-3. **The top does not use the reservation.**  Hit rate 0.09 / 0.10 / 0.06
-   / 0.11 on the four re-read rounds: nine of ten tracks the top places
-   over a governed instance are NOT the tracks the block reserved for it.
-   The audit's per-cell ranges say the same — `cluster_cell M5: 118
-   reserved, the top uses 0..40 of them per instance`.  The primitive is
-   one-sided: the block keeps tracks free, and the top's planner and NUTS
-   have no reason to prefer them, so after the block moves its buses the
-   top re-plans against the new occupancy and seats elsewhere.  What the
-   reservation buys is that the block's own buses have LEFT the region the
-   top wants — which is why a clean round is clean — not that the top is
-   routed through named tracks.
+3. **The top uses the reservation without being told to — and that was
+   mis-read the first time.**  This finding first said "hit rate 0.09 /
+   0.10 / 0.06 / 0.11: nine of ten tracks the top places over a governed
+   instance are NOT the tracks the block reserved".  The scratch script
+   behind it divided the hits by the DEMAND row's sixth field, the
+   instance's *supply*, instead of its fifth, the top's own tracks — so it
+   measured what fraction of the instance's tracks the top hit through the
+   reservation, not what fraction of the top's tracks were reserved ones.
+   Read right, the unsteered rate is **0.63–1.00** healerless (the tables
+   above) and 0.39–0.92 healed: a derived reservation is the union over a
+   template's instances of every top track, it covers about half the
+   supply over a governed instance (`cluster_cell M5: 88 of 161 tracks`),
+   and a top that seats near where it seated before lands on it most of
+   the time.  The audit prints the rate itself now (`the top uses a..b of
+   them per instance (P% of its N track(s) over them)`) so it is never
+   computed by hand again.  What the reservation buys is still what the
+   sentence after the wrong number said: the block's own buses have LEFT
+   the region the top wants, which is why a clean round is clean.
 
-4. **So the informed loop has no fixpoint.**  Each derivation reads the
-   top of the round before, the top moved, and the union moves with it:
-   the second informed round strands 757 (NQ = 4), 1,444 (NQ = 8) and 2,864
-   (NQ = 16, td) bits — every one a core's 32-bit bus under lines that now
-   cover its seat — and at NQ = 16 the same second round goes clean (bu),
-   which is the same mechanism with the other sign.  E1's share loop was
-   self-consistent after one round and wrong; the positional loop is right
-   at three sizes and not self-consistent at any.  The derivation reports
-   `seat_hit` for exactly these lines and does not act on it; E1's floor
-   was the share's answer to the same collision.
+4. **The informed loop has no fixpoint, and the cause is the plan, not
+   the hit rate.**  Each derivation reads the top of the round before, the
+   top moved, and the union moves with it: the second informed round
+   strands 757 (NQ = 4), 1,444 (NQ = 8) and 2,864 (NQ = 16, td) bits —
+   every one a core's 32-bit bus under lines that now cover its seat — and
+   at NQ = 16 the same second round goes clean (bu), which is the same
+   mechanism with the other sign.  WHY the top moves is measured on the
+   recorded NQ = 2 bottom-up rounds (blind round 1 against informed round
+   2): of the 13 top-level bundles, **4 keep their topology, 3 their
+   layers, 4 their seat windows and 0 their seats** — the templates are
+   solved under the reservation, their charges change, and the top's
+   planner chooses differently against them.  A hit rate of 0.65–1.00 on a
+   union that covers half the supply is compatible with that: the top
+   lands on *reserved* tracks, not on *its own previous* tracks.  E1's
+   share loop was self-consistent after one round and wrong; the
+   positional loop is right at three sizes and not self-consistent at any.
+   The derivation reports `seat_hit` for exactly these lines and does not
+   act on it; E1's floor was the share's answer to the same collision.
 
 5. **The union is the price of solve-once-copy, and it is most of the
    reservation.**  At NQ = 16 the blind-derived lines reserve 8.1× what
@@ -365,12 +400,13 @@ where a guess is free.
 
 - **That a positional reservation is the wrong primitive.**  It is the
   right shape — it converges where the uniform share could not, and it
-  is exact on the control — and it is half a primitive: the top-side half,
-  a reservation the top's planner *prefers* over a governed instance (a
-  negative cost on reserved tracks, or a hard restriction of the crossing
-  bundles to them), is what turns a 6–11 % hit rate into a corridor and
-  gives the informed loop a fixpoint.  That is the build item this
-  experiment writes.
+  is exact on the control.  This bullet first said it was half a
+  primitive whose other half, a reservation the top *prefers*, "turns a
+  6–11 % hit rate into a corridor and gives the informed loop a
+  fixpoint".  That half was built and measured (below): it turns the
+  mesh's 0.00 into 1.00 and the SoC's 0.65–0.97 into 0.70–1.00, and gives
+  the loop no fixpoint, because the loop's instability is in the top's
+  PLAN, not in which tracks its bits take.
 - **That the derivation should floor by the block's own seat.**  E1's
   floor did that for the share and left the top nothing on the layers it
   wanted; here the collision is reported (`seat_hit`) and the local solve
@@ -400,11 +436,110 @@ against a derived one.  It does that — the guess is not just wasteful but
 harmful on a block whose seats are full, and the derived reservation is
 exact on a mesh and converges on the SoC where the share could not — and
 it measures the thing the ladder's rung 4 had assumed: that a reserved
-track is a track the top uses.  It is not, at 6–11 %, until the top is
-told.  The build order gains the top-side primitive (a preference for
-reserved tracks in the hier planner and NUTS over governed instances) as
-item 6b, ahead of the fixed-pin work; E1's re-run against the positional
+track is a track the top uses.  It is, at 0.63–1.00 on the SoC (and not at
+all on the mesh, 0.00, where the seats shift a phase); the write-up first
+read 6–11 % off a wrong denominator and sent the build order after a
+top-side preference (item 6b, built and measured below) that the loop did
+not need.  What the loop needs is the top's plan kept between rounds —
+item 6c, ahead of the fixed-pin work; E1's re-run against the positional
 primitive is this table's `td`/`bu` rows.
+
+## The top-side half, built and measured (6b)
+
+**What was built** (`set_reserve_steer on|off`, off by default; the
+engine's `ReserveCorridor`).  Every governed instance's reserved tracks are
+installed on the routing grid as a *reserve corridor* (absolute tracks
+over the instance's along-extent, owned by the instance's path), and a bus
+crossing the instance from outside it — the top over a block, or an
+enclosing cell's own bus over a nested reserved child, whose corridor the
+cell-local solve reads translated into its frame — is **seated on them by
+abstract NUTS** (the centre of the densest footprint-wide run of corridor
+tracks replaces the pull as the segment's preference, before
+`set_pull_targets`, so the placer, the repack and the tightening pass read
+one objective; an alignment sibling or a junction landing still wins) and
+**lands its bits on them first in DetailedNUTS** (after span-clear tracks,
+before merely nearer ones).  Both halves are gated on the corridor being
+able to *host* the bus: the ungated form was measured first and dragged
+32-bit buses onto two-track corridors (NQ = 2 bottom-up round 1: clean →
+16 unplaced, +5 % wire).  A bundle framed inside the reserving instance is
+never steered onto its own reservation.  Building it also found and fixed
+a limit in the first half: the reference DNUTS solve carried every
+reference instance's reservation as keepouts on ONE grid clone, so a
+cluster's reference solve saw its cores' reserved tracks as keepouts and
+could never take the corridor the cores left for it; the reference now
+carries its reservation as its bundles' blocked tracks, which bind one
+instance's own bits where a keepout bound everybody's — byte-identical on
+every E5 round (the unsteered re-run below reproduces the tables above to
+the wirelength).
+
+**The mesh control, steered** (`tpu.tcl 8 16 -primitive reserve`, healers
+off): every arm clean at byte-identical wire (550,528 / 2,174,208), and the
+hit rate **1.00** on every derived round (td 2,048 / 2,048 and 8,192 /
+8,192; bu 2,112 / 2,112 and 8,320 / 8,320) against 0.00 unsteered; the
+uniform guess stays at 0.00–0.01, since its four tracks per layer per cell
+cannot host a PE's bus and the gate leaves the bus alone.  This is the
+mechanism working as designed: where the top's plan reproduces, its bits go
+exactly where the block left room.
+
+**The SoC, steered** (healers off; same rows as the corrected table above,
+so the two are read side by side):
+
+| size | arm | round | policy | ovl/unpl/viol | detailed WL | reserved | used | reserved ÷ used | hit rate | unsteered: ovl/unpl/viol, WL, hit (— = the unsteered loop stopped at a clean round before this one, or a `uniform` round, whose field is on healed reports only) |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 2 | uniform | 1 | uniform 4 | 2/368/368 | 557,357 | 1,044 | 2,245 | 0.47 | 0.03 | — |
+| 2 | uniform | 2 | uniform 8 | 6/140/140 | 570,273 | 2,088 | 2,259 | 0.92 | 0.09 | — |
+| 2 | td | 1 | lines r0 | 0/360/360 | 552,425 | 1,324 | 852 | 1.55 | 0.70 | 0/360/360, 538,483, 0.68 |
+| 2 | td | 2 | lines r1 | 0/362/362 | 552,428 | 2,172 | 884 | 2.46 | 1.00 | 1/376/376, 566,769, 0.84 |
+| 2 | bu | 1 | lines r0 | 0/16/16 | 562,963 | 7,234 | 2,409 | 3.00 | 0.80 | **0/0/0**, 536,005, 0.65 |
+| 2 | bu | 2 | lines r1 | 0/362/362 | 575,746 | 8,137 | 2,501 | 3.25 | 0.99 | — |
+| 4 | uniform | 1 | uniform 4 | 2/761/761 | 1,039,971 | 1,932 | 4,959 | 0.39 | 0.04 | — |
+| 4 | uniform | 2 | uniform 8 | 14/344/344 | 1,043,506 | 3,864 | 5,905 | 0.65 | 0.08 | — |
+| 4 | td | 1 | lines r0 | 1/110/110 | 893,843 | 7,352 | 1,662 | 4.42 | 0.90 | 1/24/24, 982,122, 0.67 |
+| 4 | td | 2 | lines r1 | 0/170/170 | 1,145,032 | 5,536 | 2,225 | 2.49 | 0.76 | 0/37/37, 957,112, 0.69 |
+| 4 | bu | 1 | lines r0 | 1/96/96 | 1,025,869 | 22,475 | 5,451 | 4.12 | 0.85 | 0/45/45, 942,054, 0.82 |
+| 4 | bu | 2 | lines r1 | 2/904/904 | 1,040,215 | 19,765 | 5,506 | 3.59 | 0.94 | 0/757/757, 962,888, 0.97 |
+| 8 | uniform | 1 | uniform 4 | 1/1481/1481 | 2,163,104 | 3,708 | 9,479 | 0.39 | 0.03 | — |
+| 8 | uniform | 2 | uniform 8 | 30/652/652 | 2,115,064 | 7,416 | 10,093 | 0.73 | 0.07 | — |
+| 8 | td | 1 | lines r0 | 1/80/80 | 1,996,654 | 14,528 | 3,306 | 4.39 | 0.86 | **0/0/0**, 1,982,521, 0.78 |
+| 8 | td | 2 | lines r1 | 2/40/40 | 1,993,544 | 14,376 | 3,460 | 4.15 | 0.98 | — |
+| 8 | bu | 1 | lines r0 | 2/184/184 | 2,458,805 | 53,501 | 11,175 | 4.79 | 0.83 | 0/18/18, 2,147,336, 0.81 |
+| 8 | bu | 2 | lines r1 | 0/1444/1444 | 2,031,625 | 65,206 | 9,171 | 7.11 | 0.96 | 0/1444/1444, 1,937,231, 0.86 |
+| 16 | uniform | 1 | uniform 4 | 1/3020/3020 | 4,466,401 | 7,260 | 17,910 | 0.41 | 0.03 | — |
+| 16 | uniform | 2 | uniform 8 | 60/1334/1334 | 4,412,624 | 14,520 | 21,320 | 0.68 | 0.06 | — |
+| 16 | td | 1 | lines r0 | 33/390/390 | 4,800,233 | 45,448 | 9,558 | 4.75 | 0.77 | 7/170/170, 4,323,498, 0.63 |
+| 16 | td | 2 | lines r1 | 33/1086/1086 | 4,008,970 | 56,776 | 7,463 | 7.61 | 0.92 | 0/2864/2864, 3,857,628, 0.83 |
+| 16 | bu | 1 | lines r0 | 1/8/8 | 4,006,837 | 145,191 | 18,190 | 7.98 | 0.86 | 1/8/8, 3,839,107, 0.67 |
+| 16 | bu | 2 | lines r1 | **0/0/0** | 4,090,467 | 106,809 | 18,644 | 5.73 | 0.98 | **0/0/0**, 3,905,996, 1.00 |
+
+The hit rate moves from 0.63–1.00 to 0.70–1.00 — the same order, since
+the union corridor was already where most of the top's tracks fell — and
+the rounds are **not better and mostly worse**: NQ = 2 bottom-up round 1
+(clean unsteered) 16 unplaced; NQ = 4 bottom-up 45 → 96 and top-down 24 →
+110; NQ = 8 top-down round 1, E5's clean healerless round, 80 unplaced at
++0.7 % wire, bottom-up 18 → 184 at +14 %; NQ = 16 top-down 170 → 390 at
++11 %, bottom-up round 2 clean either way at +4.7 % wire.  What costs is
+concentration: every crossing bus is pulled into the corridor's tracks —
+half the supply over a cluster, and a corridor derived from *another*
+instance's crossing as often as from this bus's own — and the packing pays
+for a preference that changes which reserved tracks the bits take more
+than whether they take reserved tracks.  The *bits-only* variant
+(`BUDA_RESERVE_STEER_NUTS=0`: seats left at their pull, bits steered inside
+the window) was measured at NQ = 2, 4, 8 and is no better (NQ = 2 bottom-up
+clean at +2.7 % wire; NQ = 4 bottom-up 121 against 45, top-down 32 against
+24; NQ = 8 top-down clean, bottom-up 234 against 18).
+
+**What this settles.**  A reserved track *is* a track the top uses — at
+0.63–1.00 without being told and 0.70–1.00 when told — so the rung-4
+premise stands; the primitive's other half exists and is exact where the
+plan reproduces (the mesh); and the informed loop's missing fixpoint is a
+property of the *plan*, which the templates' changed charges move between
+rounds (finding 4), not of the tracks.  So the lever ships off by default
+(a design reserving nothing is byte-identical either way; the corpus is
+unchanged on all 55 comparable flows), and the next build item is 6c: hand
+the derivation round's top selections, layers and seats down with the
+reservation — the pin machinery exists — so the informed round routes the
+blocks under the SAME top the reservation came from, and measure whether a
+round is then a fixpoint.
 
 ## Provenance
 
@@ -416,10 +551,22 @@ primitive is this table's `td`/`bu` rows.
   `flow/tcl/converge.tcl tpu 8 16 -primitive reserve -arms uniform,td,bu
   -out runt` (the control).  Each writes
   `e5_<vehicle>_<heal>_step1_reserve.md` and one `.log`/`.rep` pair per
-  session; the hit rates are from `soc.tcl <N> -bottomup -noheal -shares
-  run/<arm>_shares_r<k>.buda -primitive reserve -report …` re-runs of the
-  four clean-or-best rounds under the extended report.
+  session.  The CORRECTED healerless hit rates are from
+  `BUDA_RESERVE_STEER=0 converge.tcl soc 2 4 8 16 -primitive reserve -arms
+  td,bu` on the 6b build (byte-identical rounds; the original healerless
+  reports predate the governed rows' hit field), the healed ones re-read
+  off the original healed reports with the right denominator.
+- The 6b measurement: `converge.tcl soc 2 4 8 16 -primitive reserve -arms
+  uniform,td,bu` with `BUDA_RESERVE_STEER=1` (the SoC, healers off; NQ = 16
+  `td`/`bu` rerun alone after the sweep was stopped), the same for `tpu 8
+  16`, and `BUDA_RESERVE_STEER_NUTS=0 … soc 2 4 8 -arms td,bu` for the
+  bits-only variant; the plan-stability probe replays `BUDA_RECORD`
+  traces of `soc.tcl 2 -bottomup -noheal` and the same `-shares` the
+  driver derived, comparing each top-level bundle's selected topology,
+  layers and seat between the two.
 - Engine at the merge of #936 plus this change (the `uniform` form, the
   driver's `uniform` arm, the blocked-track enforcement on globally solved
-  instances, the extended report).  `BUDA_THREADS_REQUEST` at the launcher
+  instances, the extended report); the correction and the 6b rows at the
+  merge of #937 plus the 6b change (`set_reserve_steer`, the reference's
+  reservation as blocked tracks, the audit's printed hit rate).  `BUDA_THREADS_REQUEST` at the launcher
   default (half the machine's logical CPUs).
