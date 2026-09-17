@@ -600,3 +600,99 @@ def test_a_sidecar_entry_cannot_clear_the_plans_layers(tmp_path):
     assert list(wb.input.pinned_seg_layers) == [6]     # its layers intact
     assert list(wb.plan.seg_seat_pin) == [1]
     assert "[PlanPin] seated 1 of 1" in log
+
+
+# ── Codex round 6 on #939 ────────────────────────────────────────────────
+
+def test_negotiation_moving_a_plan_pinned_bundle_drops_its_seats():
+    """Codex P1 on #939: negotiate's free-bundle path unpins and re-plans
+    an affected bundle but left the plan's seat windows and seat-pin flags
+    on the wrapper; on a same-segment-count alternative NUTS accepted them
+    and seated the new shape in the old candidate's windows."""
+    import time
+    a, _ = _run(tail=("run_nuts",))
+    uid, layers, seats, ttype = _top(a)
+    w = [w for w in a.bundles if not w.input.original_bundle.instances][0]
+    bid = w.input.original_bundle.id
+    # Hand down a DIFFERENT candidate than the planner's own choice, with
+    # a seat: the unpinned re-plan will leave it for the planner's.
+    sel = w.plan.selected_topology_index
+    other = next(i for i, c in enumerate(w.input.candidates) if i != sel)
+    oc = w.input.candidates[other]
+    seats = ",".join(["120:154"] + ["-"] * (len(oc.segments) - 1))
+    b, log = _run(f"pin_plan net:x_0 {oc.type} uid {buda.topo_uid(oc)} "
+                  f"seats {seats}", tail=("run_nuts",))
+    wb = [w for w in b.bundles if not w.input.original_bundle.instances][0]
+    assert wb.plan.selected_topology_index == other
+    assert list(wb.plan.seg_seat_pin)[0] == 1
+    # One negotiation iteration on that bundle alone (the body the command
+    # runs per affected bundle): the re-plan moves it back ...
+    with contextlib.redirect_stdout(io.StringIO()):
+        b._negotiate_iteration_body([bid], "a", (), (), time.perf_counter())
+    assert wb.plan.selected_topology_index != other
+    # ... and the plan's per-segment state went with the old shape.
+    assert list(wb.plan.seg_slide_lo) == [] and list(wb.plan.seg_slide_hi) == []
+    assert list(wb.plan.seg_seat_pin) == []
+    (tb,) = [t for t in b.nuts_result.segments if t.bundle_id == bid]
+    assert tb.seat_nat_lo != tb.seat_nat_lo               # no seat pin now
+
+
+def test_the_plan_is_reapplied_on_every_planner_run(tmp_path):
+    """Codex P2 on #939: the sidecar baseline runs ahead of EVERY planner
+    run, so applying the plan after it on the first run alone left the
+    second run's baseline free to clear the plan's layers.  The planner's
+    call re-applies every live entry; a later `select_topology` on the
+    bundle supersedes its entry instead."""
+    import json
+    a, _ = _run(tail=("run_nuts",))
+    uid, layers, seats, ttype = _top(a)
+    w = [w for w in a.bundles if not w.input.original_bundle.instances][0]
+    bid = w.input.original_bundle.id
+    other = [c for c in w.input.candidates if buda.topo_uid(c) != uid][0]
+    flow = tmp_path / "flow.buda"
+    (tmp_path / "flow.json").write_text(json.dumps({"selections": [{
+        "bundle_hint": "x_0", "bundle_id": bid, "topo_type": other.type,
+        "topo_wl": other.estimated_wirelength,
+        "topo_uid": buda.topo_uid(other), "topo_index_hint": 0,
+        "note": "", "selected_at": "now"}]}))
+    b, _ = _run(f"pin_plan net:x_0 {ttype} uid {uid} layers M6 seats 120:154",
+                tail=("run_nuts",), script_path=flow)
+    def top(s):    # expansion builds fresh wrappers: re-fetch after a plan
+        return [w for w in s.bundles if not w.input.original_bundle.instances][0]
+    log = _cmd(b, "run_planner hier") + _cmd(b, "run_nuts")
+    wb = top(b)
+    assert "[PlanPin] 1 of 1 handed-down plan(s) applied" in log
+    assert buda.topo_uid(wb.input.candidates[wb.plan.selected_topology_index]) \
+        == uid
+    assert list(wb.input.pinned_seg_layers) == [6]
+    assert list(wb.plan.seg_seat_pin) == [1]
+    assert "[PlanPin] seated 1 of 1" in log
+    # A typed select_topology moving the bundle is the user's later word:
+    # the entry is superseded, and the next run does not put the plan back.
+    oidx = [i for i, c in enumerate(wb.input.candidates)
+            if buda.topo_uid(c) == buda.topo_uid(other)][0]
+    out = _cmd(b, f"select_topology x_0 {oidx + 1}")
+    assert "superseded by this pin" in out, out
+    assert list(wb.plan.seg_slide_lo) == [] and list(wb.plan.seg_seat_pin) == []
+    log = _cmd(b, "run_planner hier")
+    assert "[PlanPin]" not in log
+    assert top(b).plan.selected_topology_index == oidx
+    assert any(e.get("why") == "superseded by select_topology"
+               for e in b._plan_pins)
+
+
+def test_a_hand_built_candidate_is_not_handed_down(tmp_path):
+    """Codex P2 on #939: a USER candidate is in no fresh pool, so a line
+    naming it could never apply and the top would silently re-plan; the
+    derivation omits it and says so."""
+    a, _ = _run(tail=("run_nuts",))
+    w = [w for w in a.bundles if not w.input.original_bundle.instances][0]
+    bid = w.input.original_bundle.id
+    _cmd(a, f"edit_topology {bid} {w.plan.selected_topology_index + 1}")
+    _cmd(a, "edit_set_slide 0 120 154")
+    assert "type USER" in _cmd(a, "edit_commit pin")
+    _cmd(a, "run_nuts")
+    plan = tmp_path / "plan.buda"
+    out = _cmd(a, f"derive_top_plan file {plan}")
+    assert "1 bundle(s) on a hand-built USER candidate not handed down" in out
+    assert "net:x_0" not in plan.read_text()

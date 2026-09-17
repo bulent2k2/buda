@@ -1219,10 +1219,13 @@ class EditMixin:
                     w.plan.seg_slide_hi = []
                     w.plan.seg_seat_pin = []
                     w.plan.seg_perp = []
+                    self._plan_pin_superseded(w)
                 w.input.pinned_group = list(members)
                 w.input.topology_pinned = False
                 w.plan.selected_topology_index = members[0]
                 return len(members)
+            if tidx != w.plan.selected_topology_index:
+                self._plan_pin_superseded(w)
             self._clear_stale_seg_overrides(w, tidx)
             w.input.pinned_group = []      # single pin clears any prior group pin
             w.plan.selected_topology_index = tidx
@@ -1335,7 +1338,18 @@ class EditMixin:
 
     # ── pin_plan (convergence ladder item 6c) ─────────────────────────────
 
-    def _plan_pins_forget(self, bids=None):
+    def _plan_pin_superseded(self, w):
+        """A typed `select_topology` moving a plan-pinned bundle to another
+        candidate is the user's later word: the plan's entry is forgotten
+        (seats, flag, bookkeeping — `_plan_pins_forget`) and said, so the
+        next `run_planner`'s re-application does not put the plan back."""
+        bid = w.input.original_bundle.id
+        if bid in self._plan_pin_bids:
+            self._plan_pins_forget([bid], why="superseded by select_topology")
+            print(f"  (the handed-down plan's entry for bundle {bid} is "
+                  f"superseded by this pin)")
+
+    def _plan_pins_forget(self, bids=None, why="unpinned"):
         """An unpin's plan-side bookkeeping: for `bids` (None = every
         plan-pinned bundle) drop the seat windows a `pin_plan` set on every
         wrapper carrying the bundle (routed, pre-expansion original,
@@ -1362,7 +1376,7 @@ class EditMixin:
                 w.plan.seg_seat_pin = []
         for e in self._plan_pins:
             if e.get("applied") and e.get("bid") in targets:
-                e.update(applied=False, skipped=True, why="unpinned")
+                e.update(applied=False, skipped=True, why=why)
         self._plan_pin_bids -= targets
         return len(targets)
 
@@ -1434,6 +1448,16 @@ class EditMixin:
         if post:
             pending = [e for e in self._plan_pins
                        if e.get("stage") == "post" and not e.get("skipped")]
+        elif final:
+            # The planner's call RE-APPLIES every live entry, applied
+            # before or not: `_apply_selections` runs again ahead of every
+            # planner run and a sidecar entry for the same bundle would
+            # clear the plan's forced layers or replace its topology under
+            # the plan's seats (Codex P2 on #939).  An entry a later
+            # `unpin_topology` / `select_topology` superseded is skipped
+            # (`_plan_pins_forget`), so the user's later word stands.
+            pending = [e for e in self._plan_pins
+                       if not e.get("skipped") and e.get("stage") != "post"]
         else:
             pending = [e for e in self._plan_pins
                        if not e.get("applied") and not e.get("skipped")

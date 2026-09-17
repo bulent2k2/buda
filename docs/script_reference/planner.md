@@ -448,8 +448,13 @@ before bundling, like the budget it comes with — and applied at
 applied`), AFTER the selections sidecar's baseline load (the sourced plan
 is the later, explicit instruction: a sidecar entry for the same bundle
 would otherwise clear the plan's forced layers, or a USER entry replace
-the topology under the plan's seats), or at once when typed after
-generation.  In a hier session an
+the topology under the plan's seats) and on EVERY planner run, since the
+baseline runs ahead of every one; a typed `select_topology` moving the
+bundle to another candidate is the user's later word and supersedes the
+entry (said, and never re-applied), as `unpin_topology` does.  Typed after
+generation the entry applies at once.  A healer that moves the bundle to
+another shape drops the seats and their flags with the forced layers
+(negotiation and the ripup trials alike).  In a hier session an
 entry for an **unmarked cell's cell-local bundle** — planned globally *per
 instance*, so the plan carries one entry per instance while before
 expansion only the template and its replicas exist — is held past the

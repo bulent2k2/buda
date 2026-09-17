@@ -2177,7 +2177,7 @@ class ReportsMixin:
         dl_slot = getattr(self, "_dogleg_slot", None) or {}
         dl_orig = getattr(self, "_dogleg_originals", None) or {}
         lines = []
-        n_locked = n_inside = n_unplanned = n_dogleg = 0
+        n_locked = n_inside = n_unplanned = n_dogleg = n_user = 0
         for w in self.bundles:
             b = w.input.original_bundle
             if getattr(w.hier, "locked", False):
@@ -2201,6 +2201,14 @@ class ReportsMixin:
                 split, t = t, w.input.candidates[dl_orig[b.id]]
                 trunk_si = self._dogleg_trunk_index(t, split)
                 n_dogleg += 1
+            if t.type == "USER":
+                # A hand-built candidate is in no fresh pool — regeneration
+                # cannot produce it, and only a sidecar / `dump_user_ops`
+                # replay rebuilds it — so a line naming it could not apply;
+                # omitted and said rather than handed down as a pin that
+                # silently re-plans (Codex P2 on #939).
+                n_user += 1
+                continue
             nseg = len(t.segments)
             sl = list(w.plan.seg_layers)
             layers = [(names.get(l, f"L{l}") if l >= 0 else "-")
@@ -2229,6 +2237,10 @@ class ReportsMixin:
         if n_unplanned:
             notes.append(f"{n_unplanned} bundle(s) with no selected "
                          f"candidate skipped")
+        if n_user:
+            notes.append(f"{n_user} bundle(s) on a hand-built USER candidate "
+                         f"not handed down (regeneration cannot produce it; "
+                         f"a sidecar or dump_user_ops replays it)")
         if n_dogleg:
             notes.append(f"{n_dogleg} dogleg-adopted bundle(s) handed down "
                          f"as the pre-split candidate with its layers, the "

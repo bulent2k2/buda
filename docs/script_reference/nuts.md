@@ -1161,6 +1161,9 @@ piece, the right piece and the jog are appended), so the pre-split
 candidate's layers are the first `nseg` of the split's and every seat but
 the split trunk's reproduces — that one is `-`, since the next session's
 NUTS re-derives the dogleg from the same cycle; the note names how many.
+A bundle on a hand-built **USER** candidate is omitted and said: no fresh
+pool holds it (regeneration cannot produce it; a sidecar or
+`dump_user_ops` replays it), so a line naming it could never apply.
 Needs a NUTS result.  The file carries a `# scope:` header and
 `# bundles: N`.  The loop driver runs it under
 `converge.tcl -handdown`, whose table then carries the `plan` (pins applied,

@@ -171,6 +171,14 @@ class NegotiateMixin:
                 w2 = self._rr_wrapper(asn.bundle_id)
                 if w2 is None:
                     continue
+                # A bundle MOVED to another shape must not keep the
+                # per-segment overrides sized for the old one — a dogleg's
+                # windows, or a handed-down plan's seats and their seat-pin
+                # flags (`pin_plan`): NUTS's only staleness guard is an
+                # array-length match, and every Z/U shape has three
+                # segments (Codex P1 on #939; the ripup trials clear the
+                # same way).  The snapshot restores them on rejection.
+                self._clear_stale_seg_overrides(w2, asn.topo_index)
                 w2.plan.selected_topology_index = asn.topo_index
                 w2.input.assigned_v_layer = asn.v_layer_id
                 w2.input.assigned_h_layer = asn.h_layer_id
