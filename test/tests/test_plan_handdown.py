@@ -941,11 +941,11 @@ def test_a_net_the_grammar_cannot_quote_is_not_handed_down(tmp_path):
     b.net_names = names
     lines, notes, _ = a._derive_top_plan()
     assert all(l["net"] != names[0] for l in lines), lines
-    assert any("grammar cannot quote" in n and repr(names[0]) in n
+    assert any("grammar cannot spell" in n and repr(names[0]) in n
                for n in notes), notes
     plan = tmp_path / "plan.buda"
     out = _cmd(a, f"derive_top_plan file {plan}")
-    assert "grammar cannot quote" in out, out
+    assert "grammar cannot spell" in out, out
     text = plan.read_text()
     assert names[0] not in text, text
     # every line written reads back whole through the reader
@@ -955,3 +955,36 @@ def test_a_net_the_grammar_cannot_quote_is_not_handed_down(tmp_path):
             toks = [unquote(t)
                     for t in split_quoted_args(strip_inline_comment(line))]
             assert toks[0].startswith("net:") and toks[2] == "uid", toks
+
+
+def test_a_layer_name_the_csv_grammar_cannot_spell_is_not_handed_down(
+        tmp_path):
+    """Codex P2 on #939 (round 11): `def_layer` accepts a name carrying a
+    comma (`M,6`), and the `layers` field is comma-separated, so the line
+    read back as two layers for one segment and the segment-count guard
+    dropped every layer and seat — the plan did not replay.  The
+    derivation asks the reader about the CSV too (`_csv_reads_back`) and
+    omits the entry; a layer named `-` (the unassigned placeholder) the
+    same way."""
+    a, _ = _run(tail=("run_nuts",))
+    w = [w for w in a.bundles if not w.input.original_bundle.instances][0]
+    lid = [l for l in w.plan.seg_layers if l >= 0][0]
+    orig = a._make_layer_names
+    lines, notes, _ = a._derive_top_plan()
+    assert any(l["net"] == "x_0" for l in lines)
+    for bad in ("M,6", "-"):
+        a._make_layer_names = lambda bad=bad: {**orig(), lid: bad}
+        lines, notes, _ = a._derive_top_plan()
+        assert all(l["net"] != "x_0" for l in lines), (bad, lines)
+        assert any("cannot spell" in n and "'x_0'" in n for n in notes), \
+            (bad, notes)
+    # a layer name with WHITESPACE is spellable: the field is quoted whole
+    a._make_layer_names = lambda: {**orig(), lid: "M 6"}
+    lines, notes, _ = a._derive_top_plan()
+    l = [l for l in lines if l["net"] == "x_0"][0]
+    line = buda_cli.BudaSession._top_plan_line(l)
+    from buda_script import split_quoted_args, unquote
+    toks = [unquote(t) for t in split_quoted_args(line)]
+    i = toks.index("layers")
+    assert toks[i + 1].split(",") == l["layers"], toks
+    assert "M 6" in l["layers"]

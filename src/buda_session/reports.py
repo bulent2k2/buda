@@ -2211,22 +2211,28 @@ class ReportsMixin:
                 # silently re-plans (Codex P2 on #939).
                 n_user += 1
                 continue
-            if not (reads_back("net:" + nets[0]) and reads_back(t.type)):
-                # The script grammar cannot spell this line: a selector
-                # carrying whitespace AND both quote characters has no
-                # escape (`quote_arg` returns it unchanged, and `pin_plan`
-                # then reads it as two tokens and refuses the line), so the
-                # entry is omitted and said rather than written as a line
-                # the next session cannot replay (Codex P2 on #939).  Asked
-                # of the READER, so whatever it cannot read back is what is
-                # omitted.
-                n_unspell += 1
-                unspell.append(nets[0])
-                continue
             nseg = len(t.segments)
             sl = list(w.plan.seg_layers)
             layers = [(names.get(l, f"L{l}") if l >= 0 else "-")
                       for l in (sl + [-1] * nseg)[:nseg]]
+            if not (reads_back("net:" + nets[0]) and reads_back(t.type)
+                    and self._csv_reads_back(layers)
+                    and not any(l >= 0 and names.get(l) == "-"
+                                for l in sl[:nseg])):
+                # The script grammar cannot spell this line: a selector
+                # carrying whitespace AND both quote characters has no
+                # escape (`quote_arg` returns it unchanged, and `pin_plan`
+                # then reads it as two tokens and refuses the line), a
+                # layer NAME carrying a comma splits into two on the CSV
+                # `layers` field (the segment-count guard then drops every
+                # layer and seat), and one named `-` reads as the
+                # UNASSIGNED placeholder — so the entry is omitted and said
+                # rather than written as a line the next session cannot
+                # replay (Codex P2s on #939).  Asked of the READER, so
+                # whatever it cannot read back is what is omitted.
+                n_unspell += 1
+                unspell.append(nets[0])
+                continue
             seat = []
             for si in range(nseg):
                 ts = seats.get((b.id, si))
@@ -2258,10 +2264,12 @@ class ReportsMixin:
         if n_unspell:
             shown = ", ".join(repr(n) for n in unspell[:3])
             more = f", +{n_unspell - 3} more" if n_unspell > 3 else ""
-            notes.append(f"{n_unspell} bundle(s) whose net name the script "
-                         f"grammar cannot quote not handed down ({shown}"
-                         f"{more}: whitespace plus both quote characters "
-                         f"has no escape, so no pin_plan line reads back)")
+            notes.append(f"{n_unspell} bundle(s) whose net name, type or "
+                         f"layer names the script grammar cannot spell not "
+                         f"handed down ({shown}{more}: whitespace plus both "
+                         f"quote characters has no escape, a comma in a "
+                         f"layer name splits the layers field, so no "
+                         f"pin_plan line reads back)")
         if n_dogleg:
             notes.append(f"{n_dogleg} dogleg-adopted bundle(s) handed down "
                          f"as the pre-split candidate with its layers, the "
@@ -2299,6 +2307,16 @@ class ReportsMixin:
         return None
 
     @staticmethod
+    def _csv_reads_back(items):
+        """Whether a comma-joined list reads back as the same list through
+        the reader: the joined token as ONE token (`reads_back`) and its
+        comma split as these items — a name carrying a comma fails the
+        second half, since the CSV grammar has no escape for it."""
+        from buda_script import reads_back
+        tok = ",".join(items)
+        return reads_back(tok) and tok.split(",") == list(items)
+
+    @staticmethod
     def _top_plan_line(l):
         """One `pin_plan` line for a derived entry — the grammar
         `cmd_pin_plan` reads back."""
@@ -2313,7 +2331,7 @@ class ReportsMixin:
         # `foo"bar baz` is spelled with apostrophes (Codex P2s on #939).
         return (f"pin_plan {quote_arg('net:' + l['net'])} "
                 f"{quote_arg(l['type'])} "
-                f"uid {l['uid']} layers {','.join(l['layers'])} "
+                f"uid {l['uid']} layers {quote_arg(','.join(l['layers']))} "
                 f"seats {','.join(_seat(s) for s in l['seats'])}")
 
     def _report_top_plan(self, cells=None, path=""):
