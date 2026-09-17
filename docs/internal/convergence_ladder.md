@@ -325,10 +325,24 @@ every "one round" measured rather than assumed.
    `converge_lib.tcl` (`-reserve`/`-shares`/`-derive`/`-noheal`/`-report`),
    reservation efficiency read off the demand rows.
 6. ~~E1~~ **run** ([convergence_e1.md](convergence_e1.md): the share
-   primitive refuted, the reason measured) → **the positional reservation**
-   E5 needs (a corridor over an instance on a layer, handed down from the
-   top's placed tracks; `add_grid_override` stands in) → E1 re-run against
-   it → E5.
+   primitive refuted, the reason measured) → ~~the positional reservation~~
+   **built** (2026-09-17): [`set_cell_layer_reserve`](../BDB_REFERENCE.md#set_cell_layer_reserve)
+   — per cell and layer the cell-local tracks the cell's own routing leaves
+   free, enforced as keepouts on the cell-local template solve and the
+   reference DNUTS view (the parent keeps the full grid) — with
+   [`derive_cell_layer_reserves`](../script_reference/nuts.md#derive_cell_layer_reserves-apply-file-path-cells-ab)
+   handing the top's placed tracks down as those lines, `buda::query
+   reserves`, the `LAYER_RESERVE` audit, and `converge.tcl -primitive
+   reserve` driving E1 with it; a nested template INHERITS an ancestor's
+   corridor (projected into its own frame, unioned over its occurrences),
+   which the SoC forced: the top's M5 tracks over a cluster sit where the
+   nested core's 32-bit bus seats, and a core solved without them lost all
+   32 bits at DNUTS.  On the two-instance design the block's bus moves off
+   the eight reserved tracks and the top uses all eight; on the SoC at
+   NQ=2 healerless every reservation is honoured and the design is DIRTY
+   (360 unplaced: the cores' regf→alu bus, off its reserved M5 seat onto
+   LOW layers that cannot host it) — the first measurement, not the
+   verdict → E1 re-run against it → E5.
 7. **Fixed-pin primitive** — a busterm restricted to a face, then to a window
    on a face — as the interoperability piece for the partner evaluation (E3),
    last, since nothing in-house depends on it.

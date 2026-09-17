@@ -52,6 +52,8 @@
 #   -heal          run the vehicle's heal_if_dirty in every round (default:
 #                  healerless — the plain pipeline's verdict)
 #   -step N        the blind policy's layers per round (default 1)
+#   -primitive P   the derived arms' budget: share (default) | reserve —
+#                  the positional `set_cell_layer_reserve` (ladder item 6)
 #   -maxreserve N  the blind policy's ceiling (default 4: a band must keep
 #                  an H and a V layer, and the six-layer stack has M2/M3
 #                  under M4..M7)
@@ -74,13 +76,14 @@ source [file join $repo flow tcl converge_lib.tcl]
 if {$argc < 2} {
     puts stderr "usage: converge.tcl soc|tpu <size> ... \[-heal\] \[-step N\]\
                  \[-maxreserve N\] \[-informed R\] \[-arms a,b\] \[-nofloor\]\
-                 \[-out DIR\] \[-tag T\] \[-j N\]"
+                 \[-primitive share|reserve\] \[-out DIR\] \[-tag T\] \[-j N\]"
     exit 2
 }
 set vehicle [lindex $argv 0]
 if {$vehicle ni {soc tpu}} { error "converge.tcl: vehicle must be soc|tpu, got '$vehicle'" }
 set sizes {}
 set heal 0; set step 1; set maxreserve 4; set informed 2; set nofloor 0
+set primitive share
 set arms {blind td bu}; set out e1_out; set tag ""; set threads ""
 set i 1
 while {$i < $argc} {
@@ -103,6 +106,7 @@ while {$i < $argc} {
         -heal       { set heal 1; incr i }
         -nofloor    { set nofloor 1; incr i }
         -step       { set step $v; incr i 2 }
+        -primitive  { set primitive $v; incr i 2 }
         -maxreserve { set maxreserve $v; incr i 2 }
         -informed   { set informed $v; incr i 2 }
         -arms       { set arms [split $v ,]; incr i 2 }
@@ -113,6 +117,17 @@ while {$i < $argc} {
     }
 }
 if {![llength $sizes]} { error "converge.tcl: give at least one size" }
+if {$primitive ni {share reserve}} {
+    error "converge.tcl: -primitive takes share|reserve, got '$primitive'"
+}
+# `-nofloor` is the SHARE derivation's control (the pure complement, no
+# own-need floor); the reserve derivation has no floor to drop and refuses
+# the token — which used to surface only after the first informed round's
+# routing session had been paid for (Codex P2 on #936).
+if {$nofloor && $primitive eq "reserve"} {
+    error "converge.tcl: -nofloor is the share derivation's control and\
+ does not apply to -primitive reserve"
+}
 # The blind loop advances by `step` until it passes `maxreserve`: a zero
 # step would re-run the same round forever on a dirty design (Codex P2 on
 # #935), so the three loop bounds are checked before any session starts.
@@ -151,11 +166,11 @@ if {$threads ne ""} { set ::env(BUDA_THREADS_REQUEST) $threads }
 # the report is the result.  No report = the session crashed: stop, and
 # name the log.
 proc session {name size args} {
-    global script out heal
+    global script out heal primitive
     set log [file join $out $name.log]
     set rep [file join $out $name.rep]
     file delete -force $rep
-    set words [list $size {*}$args -report $rep]
+    set words [list $size {*}$args -report $rep -primitive $primitive]
     if {!$heal} { lappend words -noheal }
     set t0 [clock milliseconds]
     catch {exec [info nameofexecutable] $script {*}$words > $log 2>@1}
@@ -329,7 +344,7 @@ lappend lines "" "| size | arm | rounds | classes solved | endpoint | final ovl/
 foreach s $summary { lappend lines "| [join $s { | }] |" }
 set text [join $lines \n]
 puts $text
-set name e1_${vehicle}[expr {$heal ? "_healed" : "_healerless"}]_step$step[expr {$nofloor ? "_nofloor" : ""}]
+set name e1_${vehicle}[expr {$heal ? "_healed" : "_healerless"}]_step$step[expr {$nofloor ? "_nofloor" : ""}][expr {$primitive eq "reserve" ? "_reserve" : ""}]
 if {$tag ne ""} { append name _$tag }
 set f [open [file join $out $name.md] w]
 puts $f "<!-- converge.tcl $argv -->"

@@ -569,3 +569,18 @@ def passthru_blocks(topo, segs, fp):
                     and seg_spans_block(cs, name, ubbox, fp):
                 out.add(name)
     return sorted(out)
+
+
+def fmt_pos(v):
+    """A track POSITION as text that parses back to the SAME float: an
+    integral value prints as an integer, anything else as Python's
+    shortest round-trip repr.  `:g` keeps six significant digits and
+    silently moved a reservation on a large cell-local coordinate
+    (`1234567.5` -> `1.23457e+06`, 2.5 units — a neighbouring track kept
+    free while the top's own stays open; Codex P1 on #936), so every writer
+    of a reservation line, the declaration echo and the Tcl query alike
+    goes through this one rule."""
+    v = float(v)
+    if v == int(v) and abs(v) < 1e15:
+        return str(int(v))
+    return repr(v)

@@ -182,6 +182,41 @@ def cmd_report_layer_demand(session, cmd, args, cmd_line):
                                  args[1] if len(args) > 1 else "")
 
 
+def cmd_derive_cell_layer_reserves(session, cmd, args, cmd_line):
+    # Usage: derive_cell_layer_reserves [apply] [file <path>] [cells <a,b,..>]
+    # The POSITIONAL twin of derive_cell_layer_shares (convergence ladder
+    # item 6): per cell and layer, the UNION over the cell's instances of
+    # the tracks the top placed over them, mapped into the cell's frame, as
+    # `set_cell_layer_reserve` lines — the top's demand handed down as the
+    # tracks it wants rather than as a fraction of every period.  Same
+    # scope rule and the same two doors (`apply` declares here, `file`
+    # writes lines a later session sources BEFORE `run_planner hier`).
+    apply, path, cells = False, "", None
+    toks = [unquote(t) for t in split_quoted_args(cmd_line)]
+    i = 0
+    while i < len(toks):
+        t = toks[i].lower()
+        if t == "apply":
+            apply = True
+        elif t == "file" and i + 1 < len(toks):
+            path = toks[i + 1]; i += 1
+        elif t == "cells" and i + 1 < len(toks):
+            cells = [c for c in toks[i + 1].split(",") if c]; i += 1
+            if not cells:
+                print("Error: derive_cell_layer_reserves: `cells` names no "
+                      "cell (an empty list is not \"every cell\")")
+                return
+        elif i == 0:
+            pass                                  # the command word
+        else:
+            print(f"Error: derive_cell_layer_reserves: unknown token "
+                  f"'{toks[i]}'\n  usage: derive_cell_layer_reserves [apply] "
+                  f"[file <path>] [cells <a,b,...>]")
+            return
+        i += 1
+    session._report_cell_layer_reserves(cells, apply, path)
+
+
 def cmd_derive_cell_layer_shares(session, cmd, args, cmd_line):
     # Usage: derive_cell_layer_shares [apply] [file <path>] [cells <a,b,..>]
     # Convergence ladder item 4 (rung 4): the COMPLEMENT of the top's
@@ -559,6 +594,7 @@ COMMANDS = {
     "report_layer_demand": cmd_report_layer_demand,
     "report_demand": cmd_report_layer_demand,
     "derive_cell_layer_shares": cmd_derive_cell_layer_shares,
+    "derive_cell_layer_reserves": cmd_derive_cell_layer_reserves,
     "check_design": cmd_check_design,
     "check_connectivity": cmd_check_design,   # legacy alias (pre-rename)
     "check_template_tracks": cmd_check_template_tracks,

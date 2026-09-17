@@ -41,6 +41,7 @@ from bus_names import parse_bus_bit
 # module builds, because generation validates in its frame and load_pipeline
 # validates in self.fp, so two answers is a resume failure (comp_placement.py).
 from comp_placement import is_placed
+from .util import fmt_pos
 
 # ── Orientation helpers (module-level: shared pure functions) ────────────────
 # Output-normalized orientation maps over a w×h box: (swap, reflect-x,
@@ -1967,7 +1968,9 @@ class HierMixin:
                   f"share(s): "
                   + ", ".join(f"{c}:L{lid}={s:g}"
                               for (c, lid), s in sorted(restored_s.items())))
-        return len(restored) + len(restored_s)
+        # Positional reservations (meta `layer_reserves`): same contract.
+        n_res = self._restore_layer_reserves()
+        return len(restored) + len(restored_s) + n_res
 
     def _cell_levels(self):
         """Intrinsic bottom-anchored LEVEL of every cell type in the open BDB.
@@ -2200,6 +2203,672 @@ class HierMixin:
                 out.append((lid, int(round(comp.x1)), int(round(comp.y1)),
                             int(round(comp.x2)), int(round(comp.y2)),
                             self._thinned_pattern(pat, s)))
+        return out
+
+    # ── positional track reservations (convergence ladder item 6) ─────────
+    #
+    # E1 measured the fractional share as the rung-4 primitive and refuted
+    # it: a share is UNIFORM (the first floor(s x n_signal) slots of every
+    # period, over the whole instance) while the top's demand is POSITIONAL
+    # (specific tracks over specific instances), and a block whose own
+    # 32-bit bus fills its seat to 89-100% cannot give up a fraction of
+    # EVERY period without stranding that bus — while it could easily leave
+    # the eight tracks the top wants if they were named.  A reservation
+    # names them: per cell and layer, the CELL-LOCAL perpendicular track
+    # centres the cell's OWN routing leaves free (the frame the cell-local
+    # solve plans in — the reference instance's, lower-left at the origin).
+    # Enforced where the cell is solved as a TEMPLATE (`set_bottom_up`):
+    # as keepout zones on the cell-local floorplan (the local planner's
+    # capacity and the local NUTS seats both read them) and as keepouts on
+    # the reference DNUTS grid clone (the reference bits, and so the
+    # copies, cannot land there) — the parent keeps the full grid, so the
+    # reservation is a constraint on the cell and FREE room for the top,
+    # never a keepout against it.  A reserved cell planned top-down is not
+    # enforced and says so (BUDA-1920).
+    _RESERVE_META = "layer_reserves"
+
+    def _cell_reserves_of(self, cell):
+        """{lid: (pos, ...)} — one cell's reservations (cell-local track
+        centres on the layer's perpendicular axis: y for an H layer, x for
+        a V one)."""
+        res = getattr(self, "_cell_layer_reserves", None) or {}
+        # Only DECLARED layers reach a consumer: an old or hand-edited id
+        # (`get_layer_dir` answers HORIZONTAL for an unknown id) would
+        # otherwise fold into the inheritance and the audit as a phantom
+        # (Codex P2 on #936); the planner's final revalidation removes it
+        # loud, and this is the guard for every consumer before that.
+        declared = set(self._layer_name_map.values())
+        return {lid: pos for (c, lid), pos in res.items()
+                if c == cell and pos and lid in declared}
+
+    def _persist_layer_reserves(self):
+        """ONE meta row (`layer_reserves`, JSON {cell: {lid: [pos]}}) —
+        a reservation is a list, which no existing table holds, and a
+        single key restores without enumerating cells x layers."""
+        if self.bdb is None:
+            return
+        res = getattr(self, "_cell_layer_reserves", None) or {}
+        payload = {}
+        for (c, lid), pos in sorted(res.items()):
+            if pos:
+                payload.setdefault(c, {})[str(lid)] = [float(x) for x in pos]
+        self.bdb.meta_set(self._RESERVE_META,
+                          json.dumps(payload, sort_keys=True) if payload
+                          else "")
+
+    def _restore_layer_reserves(self):
+        """The share contract: typed entries win, a previous BDB's restored
+        entries drop first.  Returns the number restored."""
+        res = getattr(self, "_cell_layer_reserves", None) or {}
+        prev = getattr(self, "_cell_layer_reserves_restored", None) or set()
+        for k in [k for k in prev if k in res]:
+            del res[k]
+        restored, held_off = {}, 0
+        raw = self.bdb.meta_get(self._RESERVE_META, "") if self.bdb else ""
+        if raw:
+            restored, held_off = self._decode_layer_reserves(
+                raw, res, getattr(self, "_cell_layer_reserves_off", set()),
+                getattr(self, "_cell_layer_reserves_off_all", False))
+        self._cell_layer_reserves_restored = set(restored)
+        if held_off:
+            # A typed `off` (or `* off`) BEFORE the open is a decision too
+            # (Codex P2 on #936): a generated policy's stale-entry removal
+            # sourced ahead of the open used to remove nothing from an
+            # empty map, and the open then restored the very entry it
+            # removed.  Held as a tombstone and applied here, said.
+            print(f"[LayerReserve] {held_off} persisted reservation(s) held "
+                  f"off by a typed `off` declared before the open")
+        if restored or prev:
+            res.update(restored)
+            self._cell_layer_reserves = res
+        if restored:
+            names = self._make_layer_names()
+            print(f"[LayerReserve] restored {len(restored)} persisted "
+                  f"reservation(s): "
+                  + ", ".join(f"{c}:{names.get(l, f'L{l}')}x{len(p)}"
+                              for (c, l), p in sorted(restored.items())))
+        dropped = self._revalidate_layer_reserves()
+        # A reservation typed BEFORE this BDB was open has no home until
+        # now (the declaration persists into the BDB open at the time, and
+        # there was none): write the validated map so a later session
+        # opening this BDB restores what this one enforces, and so a typed
+        # entry that outranked a restored one under the typed-wins
+        # contract is what the file holds (Codex P2 on #936).  Only when
+        # a typed entry exists — a session holding restored entries alone
+        # rewrites nothing.
+        if held_off or (not dropped
+                        and any(k not in restored for k in res)):
+            self._persist_layer_reserves()
+        return len(restored)
+
+    @staticmethod
+    def _decode_layer_reserves(raw, typed, off=frozenset(), off_all=False):
+        """The persisted meta row -> {(cell, lid): (pos, ...)}, VALIDATED
+        (Codex P2 on #936): the declaration refuses a non-finite position,
+        but a hand-edited, corrupted or older file can carry anything
+        JSON spells — `"bad"` raised in `float()` and a `NaN` (which
+        Python's decoder accepts) passed every bounds comparison to fail
+        in `math.floor` at the keepout install.  A malformed entry is
+        skipped LOUD, naming it; the rest restore.  Keys already `typed`
+        are skipped silently (typed wins); keys in `off` (or every key
+        under `off_all`) are the typed tombstones, counted in the second
+        return value.  Returns ({key: positions}, n_held_off)."""
+        def bad(what):
+            print(f"[LayerReserve] WARNING: persisted reservation {what} "
+                  f"— ignored (re-declare)")
+        try:
+            payload = json.loads(raw)
+        except ValueError:
+            bad("row is unreadable")
+            return {}, 0
+        if not isinstance(payload, dict):
+            bad("row is not a {cell: {layer: [pos]}} object")
+            return {}, 0
+        out, held_off = {}, 0
+        for c, per in payload.items():
+            if not isinstance(per, dict):
+                bad(f"for cell '{c}' is not a {{layer: [pos]}} object")
+                continue
+            for lid_s, pos in per.items():
+                try:
+                    lid = int(lid_s)
+                except (TypeError, ValueError):
+                    bad(f"for cell '{c}' names layer '{lid_s}', not an id")
+                    continue
+                if not isinstance(pos, list):
+                    bad(f"for cell '{c}' layer {lid} is not a list")
+                    continue
+                vals = []
+                ok = True
+                for x in pos:
+                    if isinstance(x, bool) or not isinstance(x, (int, float)) \
+                            or not math.isfinite(x) or x < 0.0:
+                        bad(f"for cell '{c}' layer {lid} holds position "
+                            f"{x!r}, not a finite non-negative number")
+                        ok = False
+                        break
+                    vals.append(float(x))
+                if not ok:
+                    continue
+                key = (c, lid)
+                if key in typed or not vals:
+                    continue
+                if off_all or key in off:
+                    held_off += 1
+                    continue
+                out[key] = tuple(sorted(set(vals)))
+        return out, held_off
+
+    def _reserve_cell_extent(self, cell, horiz):
+        """The cell's extent along a reservation's axis (height for an H
+        layer, width for a V one), or None when no open BDB knows the
+        cell."""
+        if self.bdb is None:
+            return None
+        for cr in self.bdb.all_cells():
+            if cr.name == cell:
+                return cr.height if horiz else cr.width
+        # A cell known only through its COMPONENTS (an `add_comp` row, a
+        # DEF instance with no cell row) has its extent on every placed
+        # occurrence; the reference instance's bbox IS the template frame
+        # the positions are stated in (Codex P2 on #936 — this used to
+        # leave such a cell unchecked).
+        comps = [c for c in self.bdb.all_components()
+                 if c.cell == cell and is_placed(c)]
+        if not comps:
+            return None
+        ref = self._reserve_ref_inst(cell)
+        c = next((c for c in comps if c.name == ref), None) \
+            or min(comps, key=lambda c: c.name)
+        return (c.y2 - c.y1) if horiz else (c.x2 - c.x1)
+
+    def _reserve_in_extent(self, positions, extent):
+        """Split `positions` into (kept, dropped) against a cell extent —
+        ONE rule for the declaration, the open_bdb revalidation and the
+        rect builder."""
+        kept, dropped = [], []
+        for p in positions:
+            if p < 0.0 or (extent is not None and p > extent + 1e-9):
+                dropped.append(p)
+            else:
+                kept.append(p)
+        return kept, dropped
+
+    def _revalidate_layer_reserves(self, final=False):
+        """Check every held reservation against the cell extents the
+        newly opened BDB knows (Codex P2 on #936): a position typed BEFORE
+        any BDB was open was bounded by its sign alone, and a restored one
+        was written by another session against a cell that may since
+        have been resized.  A position outside the cell is DROPPED, loud;
+        an entry left empty goes with it.  A layer not yet declared has
+        no axis to check on, so this runs AGAIN at every event that can
+        make an entry checkable or stale — a layer declaration
+        (`def_layer`, `import_lef_tech`), a `resize_cell`, and
+        `run_planner hier` right before the enforcement decision (Codex
+        P2 on #936: a flow opening its BDB before declaring its stack
+        skipped every coordinate here and nothing re-ran) — with the rect
+        builder applying the same rule as the last guard.  `final` is the
+        planner's call, when the technology stack is complete: an entry on
+        a layer id the stack does not declare (an old or hand-edited row)
+        is removed LOUD there, since it can never be enforced and would
+        otherwise persist as a phantom every query reports."""
+        res = getattr(self, "_cell_layer_reserves", None) or {}
+        if not res or self.bdb is None:
+            return 0
+        declared = set(self._layer_name_map.values())
+        names = self._make_layer_names()
+        # An UNKNOWN cell is not the same as an unavailable extent (Codex
+        # P2 on #936): the declaration refuses a cell the open BDB does
+        # not know, so an entry naming one can only have been typed with
+        # no BDB open (or restored from a file another design wrote) —
+        # a typo that would otherwise persist and answer `query reserves`
+        # while no template could ever enforce it.  Dropped, loud.
+        known = ({cr.name for cr in self.bdb.all_cells()}
+                 | {c.cell for c in self.bdb.all_components()})
+        n_dropped = 0
+        for (cell, lid), pos in sorted(res.items()):
+            if cell not in known:
+                n_dropped += len(pos)
+                print(f"[LayerReserve] WARNING: cell '{cell}' is not in the "
+                      f"opened BDB — its {names.get(lid, f'L{lid}')} "
+                      f"reservation ({len(pos)} track(s)) is removed; "
+                      f"declare it once the cell exists")
+                del res[(cell, lid)]
+                getattr(self, "_cell_layer_reserves_restored",
+                        set()).discard((cell, lid))
+                continue
+            if lid not in declared:
+                if final:
+                    n_dropped += len(pos)
+                    print(f"[LayerReserve] WARNING: cell '{cell}': layer id "
+                          f"{lid} is not declared in this stack — its "
+                          f"reservation ({len(pos)} track(s)) is removed")
+                    del res[(cell, lid)]
+                    getattr(self, "_cell_layer_reserves_restored",
+                            set()).discard((cell, lid))
+                continue
+            horiz = (self.layers.get_layer_dir(lid)
+                     == buda.LayerDir.HORIZONTAL)
+            extent = self._reserve_cell_extent(cell, horiz)
+            if extent is None:
+                continue      # a component-only cell with no cell row
+            kept, dropped = self._reserve_in_extent(pos, extent)
+            if not dropped:
+                continue
+            n_dropped += len(dropped)
+            print(f"[LayerReserve] WARNING: cell '{cell}' layer "
+                  f"{names.get(lid, f'L{lid}')}: dropped {len(dropped)} "
+                  f"reserved position(s) outside the cell's "
+                  f"{'height' if horiz else 'width'} ({extent:g}): "
+                  + ", ".join(fmt_pos(v) for v in dropped)
+                  + (" — the reservation is removed" if not kept else ""))
+            if kept:
+                res[(cell, lid)] = tuple(sorted(kept))
+            else:
+                del res[(cell, lid)]
+                getattr(self, "_cell_layer_reserves_restored",
+                        set()).discard((cell, lid))
+        if n_dropped:
+            self._persist_layer_reserves()
+        return n_dropped
+
+    def _reserve_slot_width(self, lid):
+        """The keepout's perpendicular width for one reserved track: the
+        layer's narrowest SIGNAL slot (one track, no more)."""
+        pat = self.routing_grid.get_layer_grid(lid).global_pattern()
+        ws = [s.width for s in pat.slots if s.type == "SIGNAL"]
+        return min(ws) if ws else 1.0
+
+    def _reserve_rects(self, lid, positions, ox, oy, cw, ch):
+        """Integer keepout rects for the reserved track centres of layer
+        `lid` in a frame whose cell box sits at (ox, oy) with extent
+        cw x ch: one thin rect per track (the slot width, rounded OUTWARD
+        to the integer grid keepouts live on — at most half a unit past
+        the slot either side), the full cell extent along — a corridor
+        crossing the cell, which is what a feedthrough reservation is."""
+        horiz = (self.layers.get_layer_dir(lid) == buda.LayerDir.HORIZONTAL)
+        w = self._reserve_slot_width(lid)
+        extent = ch if horiz else cw
+        positions, dropped = self._reserve_in_extent(positions, extent)
+        if dropped:
+            # Reachable only when open_bdb could not check (the layer was
+            # declared after the open); said once per shape rather than
+            # per frame.
+            warned = self.__dict__.setdefault("_reserve_rects_warned", set())
+            key = (lid, extent, tuple(dropped))
+            if key not in warned:
+                warned.add(key)
+                names = self._make_layer_names()
+                print(f"[LayerReserve] WARNING: {len(dropped)} reserved "
+                      f"position(s) on {names.get(lid, f'L{lid}')} lie "
+                      f"outside the cell's "
+                      f"{'height' if horiz else 'width'} ({extent:g}) and "
+                      f"are skipped: "
+                      + ", ".join(fmt_pos(v) for v in dropped))
+        out = []
+        for p in positions:
+            lo = int(math.floor(p - w / 2.0 + 1e-9))
+            hi = int(math.ceil(p + w / 2.0 - 1e-9))
+            if hi <= lo:
+                hi = lo + 1
+            if horiz:
+                out.append((int(ox), int(oy) + lo, int(ox) + int(cw),
+                            int(oy) + hi))
+            else:
+                out.append((int(ox) + lo, int(oy), int(ox) + hi,
+                            int(oy) + int(ch)))
+        return out
+
+    # A reservation's POSITIONS are stated in the cell's TEMPLATE frame —
+    # the reference instance's lower-left at the origin, the frame the
+    # cell-local solve plans in and the copies are transformed FROM.  Every
+    # other occurrence of the cell is some orientation of that reference
+    # (detected geometrically, since hierarchical rotate/flip keep the
+    # tokens 'N'), so a track over an INSTANCE and the same track in the
+    # reference frame differ by the orientation's involution on the axis:
+    # the y of an H layer flips under S/FN, the x of a V layer under S/FS
+    # (`orient_rect.ORIENT_MAPS`, the rule `_translate_injections_to_cell`
+    # already applies).  A 90-degree orientation swaps the axes, so an
+    # upright-frame corridor on layer L has NO image on L there — the
+    # rotated class plans through its own clone template and is not
+    # governed by the cell's own reservation (BUDA-1921, said at its solve);
+    # an ancestor's corridor still reaches it, projected in the GLOBAL
+    # frame and folded through the class reference like any other.
+
+    def _reserve_ref_inst(self, cell):
+        """The reference instance a cell's reservation frame is anchored
+        on: its cell-local template's first instance when one exists
+        (pre-expansion view first, since the expanded list carries one
+        wrapper per instance), else the first placed instance by name —
+        the detection default, so the two agree wherever both exist."""
+        for lst in (getattr(self, "_hier_bundles_orig", None) or [],
+                    self.bundles):
+            for w in lst:
+                b = w.input.original_bundle
+                if b.cell_context == cell and b.instances:
+                    return b.instances[0]
+        return None
+
+    def _reserve_frames(self, cell, ref_inst=None, comps=None, cache=None):
+        """{instance name: orient} over the placed occurrences of `cell`
+        that share the template frame anchored on `ref_inst` (default: the
+        cell's canonical reference) — the direction-preserving ones,
+        N/S/FN/FS relative to that reference — plus the count of rotated
+        ones (the 90-degree class, another template's frame)."""
+        if self.bdb is None:
+            return {}, 0
+        if comps is None:
+            comps = list(self.bdb.all_components())
+        if ref_inst is None:
+            ref_inst = self._reserve_ref_inst(cell)
+        orients = self._detect_instance_orients(cell, comps,
+                                                ref_name=ref_inst,
+                                                cache=cache)
+        frames, rotated = {}, 0
+        for inst, o in orients.items():
+            if o is None:
+                continue
+            if o in _DIR_PRESERVING:
+                frames[inst] = o
+            else:
+                rotated += 1
+        return frames, rotated
+
+    @staticmethod
+    def _reserve_ref_pos(local, orient, extent, horiz):
+        """Instance-frame axis position <-> template-frame position (an
+        involution): the H-layer axis (y) flips under S/FN, the V-layer
+        axis (x) under S/FS."""
+        _s, rx, ry = _ORIENT_MAPS[orient]
+        return extent - local if (ry if horiz else rx) else local
+
+    def _reserve_abs_positions(self, cell, inst, orient, comp, lid):
+        """A cell's own reserved tracks on `lid` in ABSOLUTE coordinates
+        over occurrence `inst` (orient relative to the cell's reference)."""
+        pos = self._cell_reserves_of(cell).get(lid, ())
+        horiz = self.layers.get_layer_dir(lid) == buda.LayerDir.HORIZONTAL
+        ext = (comp.y2 - comp.y1) if horiz else (comp.x2 - comp.x1)
+        origin = comp.y1 if horiz else comp.x1
+        return [origin + self._reserve_ref_pos(p, orient, ext, horiz)
+                for p in pos]
+
+    def _inherited_reserves(self, cell, ref_inst=None):
+        """The reservations a template INHERITS: every ancestor instance's
+        reserved tracks projected into the template's own frame, over
+        EVERY occurrence sharing that frame (the direction-preserving ones
+        relative to `ref_inst` — a 90-degree occurrence belongs to the
+        clone template, whose own call folds its class), unioned — a
+        template is solved once, so it keeps free every ancestor corridor
+        at every one of its occurrences (the derivation's own union rule).
+        An ancestor corridor is a fact about the ancestor INSTANCE (the
+        top's wires cross it), so it is inherited whether or not the
+        ancestor is itself solved as a template; the ancestor's own
+        orientation relative to ITS reference places the corridor in the
+        global frame first, and a 90-degree-rotated ancestor occurrence
+        contributes nothing (its own reservation has no image there).
+        Measured need, not theory: on the SoC vehicle the top's M5 tracks
+        over a cluster sit right where the nested core's 32-bit bus seats,
+        and a core template solved without them seated the bus there and
+        lost all 32 bits at DNUTS — the derivation had SAID so
+        (`seat_hit`), and the local solve had no way to act on it.
+        Returns ({lid: (pos, ...)}, {lid: {ancestor_cell: n}}) — the
+        projected positions and where each came from."""
+        out, src = {}, {}
+        res_all = getattr(self, "_cell_layer_reserves", None) or {}
+        if not any(res_all.values()) or self.bdb is None:
+            return out, src
+        comps = list(self.bdb.all_components())
+        by_id = {c.id: c for c in comps}
+        by_name = {c.name: c for c in comps}
+        cache = {}
+        frames, _rot = self._reserve_frames(cell, ref_inst, comps, cache)
+        anc_frames = {}          # ancestor cell -> its frames
+        eps = 1e-6
+        for inst, oc in sorted(frames.items()):
+            c = by_name[inst]
+            cw, ch = c.x2 - c.x1, c.y2 - c.y1
+            a = by_id.get(c.parent_id)
+            while a is not None:
+                res = self._cell_reserves_of(a.cell)
+                if res:
+                    if a.cell not in anc_frames:
+                        anc_frames[a.cell] = self._reserve_frames(
+                            a.cell, None, comps, cache)[0]
+                    oa = anc_frames[a.cell].get(a.name)
+                    if oa is None:
+                        a = by_id.get(a.parent_id)
+                        continue      # a rotated ancestor: no image here
+                    for lid, pos in res.items():
+                        horiz = (self.layers.get_layer_dir(lid)
+                                 == buda.LayerDir.HORIZONTAL)
+                        ext_a = (a.y2 - a.y1) if horiz else (a.x2 - a.x1)
+                        ext_c = ch if horiz else cw
+                        oa_org = a.y1 if horiz else a.x1
+                        oc_org = c.y1 if horiz else c.x1
+                        got = out.setdefault(lid, [])
+                        for p in pos:
+                            g = oa_org + self._reserve_ref_pos(p, oa, ext_a,
+                                                               horiz)
+                            local = g - oc_org
+                            if local < -eps or local > ext_c + eps:
+                                continue   # the corridor misses this one
+                            q = self._reserve_ref_pos(local, oc, ext_c, horiz)
+                            if not any(abs(q - r) < eps for r in got):
+                                got.append(q)
+                                src.setdefault(lid, {})[a.cell] = \
+                                    src.get(lid, {}).get(a.cell, 0) + 1
+                a = by_id.get(a.parent_id)
+        return {lid: tuple(sorted(v)) for lid, v in out.items() if v}, src
+
+    def _effective_reserves(self, cell_ctx, ref_inst=None):
+        """Own ∪ inherited reservations of a template context, per layer —
+        the set the cell-local solve and the reference DNUTS view both keep
+        free (ONE function, so the two views cannot disagree).  A rotation-
+        class CLONE context (`cell90`) resolves to its base cell for the
+        inherited corridors and takes NONE of the base cell's own: an
+        upright-frame track has no image on the same layer in a rotated
+        frame.  Returns ({lid: positions}, {lid: {ancestor_cell: n}},
+        clone_skipped) — the third a bool a caller reports (BUDA-1921)."""
+        cell = self._bu_cell_of(cell_ctx)
+        is_clone = cell != cell_ctx
+        own = {} if is_clone else self._cell_reserves_of(cell)
+        inh, src = self._inherited_reserves(cell, ref_inst)
+        eps = 1e-6
+        eff = {}
+        for lid in set(own) | set(inh):
+            pos = list(own.get(lid, ()))
+            for q in inh.get(lid, ()):
+                if not any(abs(q - r) < eps for r in pos):
+                    pos.append(q)
+            if pos:
+                eff[lid] = tuple(sorted(pos))
+        skipped = is_clone and any(self._cell_reserves_of(cell).values())
+        return eff, src, skipped
+
+    def _reserve_note(self, eff, src):
+        names = self._make_layer_names()
+        parts = []
+        for l, p in sorted(eff.items()):
+            s = f"{names.get(l, f'L{l}')}x{len(p)}"
+            if src.get(l):
+                s += " (" + ", ".join(f"{n} from {a}" for a, n in
+                                      sorted(src[l].items())) + ")"
+            parts.append(s)
+        return ", ".join(parts)
+
+    def _install_cell_reserve_keepouts(self, fp, cell, ref_inst):
+        """The cell-local solve's view: every reserved track of `cell` —
+        its own and the ones it inherits from reserved ancestors — as a
+        keepout zone on the cell-local floorplan (whose lower-left is the
+        reference instance's).  Returns the zone count; 0 = nothing
+        reserved, the floorplan untouched (byte-identical)."""
+        if self.routing_grid is None or self.bdb is None:
+            return 0
+        eff, src, clone_skipped = self._effective_reserves(cell, ref_inst)
+        if clone_skipped:
+            import buda_diag as _diag
+            print(_diag.format("BUDA-1921", f"{cell} (cell "
+                               f"'{self._bu_cell_of(cell)}')"))
+        if not eff:
+            return 0
+        comps = {c.name: c for c in self.bdb.all_components()}
+        c = comps.get(ref_inst)
+        if c is None or not is_placed(c):
+            return 0
+        cw = int(round(c.x2 - c.x1))
+        ch = int(round(c.y2 - c.y1))
+        n = 0
+        for lid, pos in sorted(eff.items()):
+            if not self.routing_grid.has_layer(lid):
+                continue
+            for x1, y1, x2, y2 in self._reserve_rects(lid, pos, 0, 0, cw, ch):
+                fp.add_keepout_zone(x1, y1, x2, y2, [lid])
+                n += 1
+        if n:
+            print(f"[LayerReserve] cell '{cell}': local solve with {n} "
+                  f"reserved track(s) kept free on "
+                  + self._reserve_note(eff, src))
+        return n
+
+    def _bu_reserve_dnuts_keepouts(self, ref_ids):
+        """The reference DNUTS view (the twin of _bu_share_dnuts_overrides):
+        for every bottom-up REFERENCE instance whose cell holds
+        reservations, the reserved tracks as grid keepout specs
+        [(lid, x1, y1, x2, y2)] in ABSOLUTE coordinates over the reference
+        bbox.  Installed on the grid CLONE the reference solve runs on, so
+        the reference bits (and the copies) cannot land on them, while the
+        parent keeps the full grid."""
+        out = []
+        if self.bdb is None or self.routing_grid is None:
+            return out
+        if not (getattr(self, "_cell_layer_reserves", None) or {}):
+            return out
+        comps = {c.name: c for c in self.bdb.all_components()}
+        seen = set()
+        for w in self.bundles:
+            b = w.input.original_bundle
+            if b.id not in ref_ids or not b.instances:
+                continue
+            res, _src, _clone = self._effective_reserves(b.cell_context,
+                                                         b.instances[0])
+            if not res:
+                continue
+            comp = comps.get(b.instances[0])
+            if comp is None or not is_placed(comp):
+                continue
+            cw = int(round(comp.x2 - comp.x1))
+            ch = int(round(comp.y2 - comp.y1))
+            for lid, pos in sorted(res.items()):
+                key = (b.instances[0], lid)
+                if key in seen or not self.routing_grid.has_layer(lid):
+                    continue
+                seen.add(key)
+                for x1, y1, x2, y2 in self._reserve_rects(
+                        lid, pos, int(round(comp.x1)), int(round(comp.y1)),
+                        cw, ch):
+                    out.append((lid, x1, y1, x2, y2))
+        return out
+
+    def _bu_reference_grid(self, ref_ids, tag="DNUTS reference solve"):
+        """The grid the bottom-up reference DNUTS solve runs on: the
+        session grid itself when nothing thins or reserves, else a CLONE
+        carrying every shared cell's thinned override and every reserved
+        cell's track keepouts — ONE function for the sequential merge path
+        and the ripup sweep, whose views must agree or a sweep's opens
+        metric diverges from the trial it replays (Codex P2 on #664).
+        Returns (grid, is_clone)."""
+        share_ovr = self._bu_share_dnuts_overrides(ref_ids)
+        res_ko = self._bu_reserve_dnuts_keepouts(ref_ids)
+        if not share_ovr and not res_ko:
+            return self.routing_grid, False
+        grid = self.routing_grid.clone()
+        for lid, x1, y1, x2, y2, pat in share_ovr:
+            grid.add_override(lid, x1, y1, x2, y2, pat)
+        for lid, x1, y1, x2, y2 in res_ko:
+            grid.add_keepout(lid, x1, y1, x2, y2)
+        if share_ovr:
+            print(f"[LayerShare] {tag} under {len(share_ovr)} thinned "
+                  f"override(s)")
+        if res_ko:
+            print(f"[LayerReserve] {tag} with {len(res_ko)} reserved "
+                  f"track(s) kept free")
+        return grid, True
+
+    def _reserved_cells_not_enforced(self, wrappers=None):
+        """Cells holding a reservation — their own, or one INHERITED from a
+        reserved ancestor — that the hier planner will NOT enforce: a
+        reservation binds the cell-local TEMPLATE solve and the reference
+        DNUTS view, so such a cell planned top-down (not `set_bottom_up`)
+        routes its own metal with the reservation unread.  Only cells that
+        OWN a cell-local bundle count (a leaf with nothing to route has
+        nothing to enforce).  Returns the sorted names, an inherited-only
+        one annotated with its source (empty = every such cell is a
+        template, or nothing is reserved)."""
+        res = getattr(self, "_cell_layer_reserves", None) or {}
+        if not any(pos for pos in res.values()) or self.bdb is None:
+            return []
+        bu = set(self.bdb.bottom_up_cells())
+        owning = {self._bu_cell_of(w.input.original_bundle.cell_context)
+                  for w in (wrappers if wrappers is not None else self.bundles)}
+        out = []
+        for cell in sorted({c.cell for c in self.bdb.all_components()}):
+            if cell in bu or cell not in owning:
+                continue
+            eff, src, _clone = self._effective_reserves(cell)
+            if not eff:
+                continue
+            anc = sorted({a for per in src.values() for a in per})
+            own = any(pos for pos in self._cell_reserves_of(cell).values())
+            if own:
+                out.append(cell)
+            else:
+                out.append(f"{cell} (inherited from {', '.join(anc)})")
+        return out
+
+    def _layer_reserve_audit(self):
+        """Per (instance, layer) with a reservation on the instance's cell:
+        the reserved tracks in ABSOLUTE coordinates, how many the TOP's
+        placed metal uses (the reservation's efficiency, read off the
+        demand rows' track positions) and how many carry the cell's OWN
+        metal (a violation of the reservation — impossible on a template
+        by construction, the documented gap on a top-down cell).  Rows:
+        {inst, cell, layer, layer_name, reserved, top_used, own_hit}.
+        None before a NUTS result; [] when nothing is reserved."""
+        res = getattr(self, "_cell_layer_reserves", None) or {}
+        if not res:
+            return []
+        rows = self._layer_demand()
+        if rows is None:
+            return None
+        comps = {c.name: c for c in self.bdb.all_components()} \
+            if self.bdb is not None else {}
+        eps = 1e-6
+        out = []
+        frames, cache = {}, {}
+        for r in rows:
+            pos = res.get((r["cell"], r["layer"]))
+            if not pos:
+                continue
+            c = comps.get(r["inst"])
+            if c is None:
+                continue
+            if r["cell"] not in frames:
+                frames[r["cell"]] = self._reserve_frames(
+                    r["cell"], None, list(comps.values()), cache)[0]
+            orient = frames[r["cell"]].get(r["inst"])
+            if orient is None:
+                continue          # a rotated occurrence: not governed
+            absres = self._reserve_abs_positions(r["cell"], r["inst"],
+                                                 orient, c, r["layer"])
+
+            def hits(tracks):
+                return sum(1 for u in tracks
+                           if any(abs(u - a) < eps for a in absres))
+            out.append({"inst": r["inst"], "cell": r["cell"],
+                        "layer": r["layer"], "layer_name": r["layer_name"],
+                        "reserved": len(absres),
+                        "top_used": hits(r["used_tracks"]),
+                        "own_hit": hits(r.get("own_tracks", []))})
         return out
 
     def _audit_share_budgets(self, wrappers):
@@ -2719,6 +3388,11 @@ class HierMixin:
         if thinned:
             print(f"[LayerShare] cell '{cell}': local solve under thinned "
                   f"view on layer(s) {sorted(thinned)}")
+        # Positional reservations: the reserved tracks as keepout zones on
+        # the cell-local floorplan, so the local planner's band capacity
+        # and the local NUTS seats both leave them free.
+        self._install_cell_reserve_keepouts(
+            fp, cell, wrappers[0].input.original_bundle.instances[0])
         planner = buda.CongestionPlanner(fp, layers_view)
         for pname, pval in self._planner_params.items():
             planner.set_planner_param(pname, pval)
@@ -2899,6 +3573,11 @@ class HierMixin:
             # local planner charged (same derived LayerStack; locals keep
             # it alive through the run).
             layers_view, _thin = self._cell_share_views(cell)
+            with contextlib.redirect_stdout(io.StringIO()):
+                # Same reserved-track keepouts the local planner charged
+                # (said there; silent here).
+                self._install_cell_reserve_keepouts(
+                    fp, cell, wrappers[0].input.original_bundle.instances[0])
             nuts = buda.NUTSEngine(fp, layers_view)
             nuts.set_track_pitch(self._nuts_pitch)
             # The local planner's candidate-extended Hanan grid (mirrors

@@ -115,6 +115,14 @@ buda::query caps         ;# {cell floor cap} rows (layer names, `-` = no
                          ;#   floor) — the cell layer bands in force, from
                          ;#   set_cell_layer_cap, set_layer_caps_by_depth or
                          ;#   reserve_top_layers; empty when none declared
+buda::query reserves     ;# {cell layer {pos ...}} rows — the positional
+                         ;#   track reservations (set_cell_layer_reserve),
+                         ;#   cell-local track centres; empty when none
+buda::query reserve_audit ;# {inst cell layer reserved top_used own_hit}
+                         ;#   rows — per (instance, layer) a reservation
+                         ;#   GOVERNS (check_design's LAYER_RESERVE rows as
+                         ;#   data; a 90°-rotated occurrence has none);
+                         ;#   -1 before run_nuts, empty when none reserved
 ```
 
 `caps` exists for one honest number: `reserve_top_layers N` caps every cell

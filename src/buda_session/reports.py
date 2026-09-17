@@ -30,7 +30,7 @@ import buda_diag
 from comp_placement import is_placed
 from .util import (UNIT_PITCH_UM_MAX, UNIT_PITCH_UM_MIN, UNIT_TRACKS_MAX,
                    UNIT_TRACKS_MIN, seg_crosses_rect, seg_spans_block,
-                   unit_consistency_signals, unit_plausibility_faults)
+                   unit_consistency_signals, unit_plausibility_faults, fmt_pos)
 
 
 def _fmt_pull_opt(cs):
@@ -1040,6 +1040,12 @@ class ReportsMixin:
                       f"collective lease (LAYER_SHARE) — a non-STRICT "
                       f"commit spent past the budget; see the run_planner "
                       f"hier audit.")
+            # Positional reservations (LAYER_RESERVE): per cell and layer,
+            # what the reservation bought (the top's tracks on reserved
+            # ones) and whether the cell's own metal honours it.  Silent
+            # when nothing is reserved.
+            if stage in ("nuts", "dnuts"):
+                self._print_layer_reserve_advisory()
 
         # Supply-doomed seat census (#536 option 1, report-only): placed
         # segments whose layer's real signal-track supply cannot host their
@@ -1316,25 +1322,36 @@ class ReportsMixin:
                     a_lo, a_hi, p_lo, p_hi = c.x1, c.x2, c.y1, c.y2
                 else:
                     a_lo, a_hi, p_lo, p_hi = c.y1, c.y2, c.x1, c.x2
-                ivals, bits, bundles = [], 0, set()
+                # The metal over this instance, split by OWNERSHIP and
+                # read with ONE footprint rule: a wire covers the tracks
+                # under its WIDTH, and an NDR-governed run covers its
+                # guard slots too (the 0-bit rows above).  The own half
+                # used to record each own bit's CENTRE track alone, so a
+                # widened own wire or its guard run sat on a reserved
+                # track with `own_hit` reading zero (Codex P2 on #936).
+                ivals, own_ivals, bits, bundles = [], [], 0, set()
                 for bid, _si, s_lo, s_hi, m_lo, m_hi, nb in metal.get(lid, []):
-                    f = frame.get(bid)
-                    if f is not None and (f == c.name or f.startswith(own_pre)):
-                        continue          # the instance's own routing
                     if s_hi <= a_lo + eps or s_lo >= a_hi - eps:
                         continue          # does not reach over the instance
                     if m_hi <= p_lo + eps or m_lo >= p_hi - eps:
                         continue          # beside it, not over it
+                    f = frame.get(bid)
+                    if f is not None and (f == c.name or f.startswith(own_pre)):
+                        own_ivals.append((max(m_lo, p_lo), min(m_hi, p_hi)))
+                        continue          # the instance's own routing
                     ivals.append((max(m_lo, p_lo), min(m_hi, p_hi)))
                     bits += nb
                     bundles.add(bid)
-                ivals.sort()
-                union = []
-                for lo, hi in ivals:
-                    if union and lo <= union[-1][1] + eps:
-                        union[-1][1] = max(union[-1][1], hi)
-                    else:
-                        union.append([lo, hi])
+
+                def _union(iv):
+                    out = []
+                    for lo, hi in sorted(iv):
+                        if out and lo <= out[-1][1] + eps:
+                            out[-1][1] = max(out[-1][1], hi)
+                        else:
+                            out.append([lo, hi])
+                    return out
+                union, own_union = _union(ivals), _union(own_ivals)
                 g = self.routing_grid.get_layer_grid(lid)
                 tracks = [pos for pos, _slot in
                           g.signal_tracks_in(0.5 * (a_lo + a_hi), p_lo, p_hi)]
@@ -1343,7 +1360,13 @@ class ReportsMixin:
                                       for lo, hi in union)]
                 used = len(used_tracks)
                 supply = len(tracks)
-                own_need, own_seat = 0.0, None
+                # The cell's OWN metal's tracks over the instance — what a
+                # positional reservation's audit checks against the
+                # reserved tracks — by the same rule as `used_tracks`.
+                own_tracks = {round(pos, 6) for pos in tracks
+                              if any(lo - eps < pos < hi + eps
+                                     for lo, hi in own_union)}
+                own_need, own_seat, own_window = 0.0, None, None
                 for f, ts in own_segs:
                     if ts.layer != lid or not (f == c.name
                                                or f.startswith(own_pre)):
@@ -1372,6 +1395,12 @@ class ReportsMixin:
                     if frac > own_need:
                         own_need = frac
                         own_seat = (ts.bundle_id, ts.seg_idx, need, pool)
+                        # The seat's slide window in ABSOLUTE coordinates —
+                        # what a positional derivation reads to say how
+                        # many reserved tracks fall inside the block's own
+                        # worst seat.
+                        own_window = (min(ts.interval_lo, ts.interval_hi),
+                                      max(ts.interval_lo, ts.interval_hi))
                 rows.append({
                     "inst": c.name, "cell": c.cell, "depth": c.depth,
                     "layer": lid, "layer_name": lname(lid),
@@ -1385,8 +1414,36 @@ class ReportsMixin:
                     # fraction of its window the bus needs (1.0 = all of
                     # it), and which (bundle, seg, need, pool) it is.
                     "own_need": own_need, "own_seat": own_seat,
+                    "own_window": own_window,
+                    # The cell's own metal's tracks over the instance on
+                    # this layer (positions) — the positional reservation
+                    # audit's other half; not part of the Tcl row.
+                    "own_tracks": sorted(own_tracks),
                 })
         return rows
+
+    def _print_layer_reserve_advisory(self):
+        """check_design's LAYER_RESERVE lines: per (cell, layer) with a
+        reservation, over its instances — reserved tracks, how many the
+        top used (min..max per instance) and how many carry the cell's own
+        metal (LOUD when non-zero: on a template that should be
+        impossible, on a top-down cell it is the BUDA-1920 gap)."""
+        rows = self._layer_reserve_audit()
+        if not rows:
+            return
+        by = {}
+        for r in rows:
+            by.setdefault((r["cell"], r["layer_name"]), []).append(r)
+        for (cell, lname), rs in sorted(by.items()):
+            used = [r["top_used"] for r in rs]
+            own = [r["own_hit"] for r in rs]
+            print(f"  LAYER_RESERVE: {cell} {lname}: {rs[0]['reserved']} "
+                  f"track(s) reserved over {len(rs)} instance(s); the top "
+                  f"uses {min(used)}..{max(used)} of them per instance; "
+                  f"own metal on reserved tracks: {min(own)}..{max(own)} "
+                  f"per instance"
+                  + ("" if max(own) == 0 else " — VIOLATED at "
+                     + ", ".join(r["inst"] for r in rs if r["own_hit"])))
 
     def _report_layer_demand(self, inst_filter="", layer_name=""):
         """`report_layer_demand`: the `_layer_demand` rows as a table (flow
@@ -1630,6 +1687,272 @@ class ReportsMixin:
                     "own_pct": own_pct, "floored": floored,
                 })
         return lines, notes, scope
+
+    def _policy_scope(self, cells, by_cell, notes):
+        """The derivation scope shared by the share and the reservation
+        derivations: the named `cells` (an EMPTY list names no cell —
+        Codex P2 on #934), else the `set_bottom_up` MARKS (the marks, not
+        the marks that happen to have demand rows), else every cell owning
+        a cell-local bundle.  Appends the scope note; returns the list."""
+        if cells is not None:
+            scope = list(cells)
+            for c in [c for c in scope if c not in by_cell]:
+                notes.append(f"cell '{c}': no placed instance — skipped")
+            scope = [c for c in scope if c in by_cell]
+            how = "named"
+        else:
+            marked = sorted(set(self.bdb.bottom_up_cells())) \
+                if self.bdb is not None else []
+            if marked:
+                for c in marked:
+                    if c not in by_cell:
+                        notes.append(f"marked cell '{c}': no placed "
+                                     f"instance — skipped")
+                scope = [c for c in marked if c in by_cell]
+                how = "marked set_bottom_up"
+            else:
+                templates = (getattr(self, "_hier_bundles_orig", None)
+                             or self.bundles)
+                owners = set()
+                for w in templates:
+                    ctx = w.input.original_bundle.cell_context
+                    if ctx:
+                        owners.add(self._bu_cell_of(ctx) or ctx)
+                scope = sorted(c for c in owners if c in by_cell)
+                how = "owning a cell-local bundle"
+        notes.append(f"scope: {len(scope)} cell(s) ({how})"
+                     + (": " + ", ".join(scope) if scope else ""))
+        return scope
+
+    # ── derive_cell_layer_reserves (convergence ladder item 6) ────────────
+
+    def _derive_cell_layer_reserves(self, cells=None):
+        """The POSITIONAL twin of _derive_cell_layer_shares: per cell in
+        scope and per layer, the UNION over the cell's instances of the
+        tracks the top placed over them (`used_tracks`), each mapped into
+        the CELL's frame (position minus the instance's origin on the
+        layer's perpendicular axis), as a `set_cell_layer_reserve` line.
+        A template is solved once and copied, so the cell must leave
+        free, on every instance, every track the top wants on ANY of them
+        — the union is the price of solve-once-copy, and the per-instance
+        `used` range says how much of it each instance really needs.
+
+        Only instances in the cell's own frame (orientation N) contribute:
+        a rotated or mirrored instance's tracks would need the inverse
+        transform, and E1's vehicles carry none — such an instance is
+        counted and said rather than folded in wrongly.
+
+        Each line reports `seat_hit` — how many of the reserved tracks
+        fall inside the cell's own worst seat window (`own_window`, read
+        off the abstract placement) — and `own_hit`, how many carry the
+        cell's own metal NOW.  Neither is a refusal: a positional
+        reservation is exactly the primitive that lets the block MOVE its
+        bus off named tracks instead of losing a fraction of every period,
+        and whether the local solve finds the room is what a run under the
+        lines measures.
+
+        Returns (lines, notes, scope): `lines` are dicts (cell, layer,
+        layer_name, positions, n_inst, n_skipped, used_lo, used_hi,
+        seat_hit, own_hit); None before a NUTS result."""
+        rows = self._layer_demand()
+        if rows is None:
+            return None
+        notes = []
+        by_cell = {}
+        for r in rows:
+            by_cell.setdefault(r["cell"], []).append(r)
+        scope = self._policy_scope(cells, by_cell, notes)
+        comps = {c.name: c for c in self.bdb.all_components()} \
+            if self.bdb is not None else {}
+        lines = []
+        frames, ocache = {}, {}
+        for cell in scope:
+            per_layer = {}
+            for r in by_cell[cell]:
+                per_layer.setdefault(r["layer"], []).append(r)
+            for lid in sorted(per_layer):
+                lrows = per_layer[lid]
+                lname = lrows[0]["layer_name"]
+                horiz = (self.layers.get_layer_dir(lid)
+                         == buda.LayerDir.HORIZONTAL)
+                # Every occurrence sharing the template frame folds in
+                # through its orientation (S/FN/FS flip the axis); a
+                # 90-degree one belongs to the clone class, whose frame an
+                # upright-stated position cannot reach (BUDA-1921).
+                if cell not in frames:
+                    frames[cell] = self._reserve_frames(
+                        cell, None, list(comps.values()), ocache)
+                fr, n_rot = frames[cell]
+                union, used_counts, skipped = [], [], 0
+
+                def to_ref(u, c, o):
+                    # The computed float, unrounded: the line's formatter
+                    # round-trips it, and a three-decimal rounding here
+                    # MOVED a track (`10.0004` -> `10.0`, outside the
+                    # audit's 1e-6 match; Codex P2 on #936).
+                    ext = (c.y2 - c.y1) if horiz else (c.x2 - c.x1)
+                    origin = c.y1 if horiz else c.x1
+                    return self._reserve_ref_pos(u - origin, o, ext, horiz)
+
+                def to_abs(q, c, o):
+                    ext = (c.y2 - c.y1) if horiz else (c.x2 - c.x1)
+                    origin = c.y1 if horiz else c.x1
+                    return origin + self._reserve_ref_pos(q, o, ext, horiz)
+
+                for r in lrows:
+                    c = comps.get(r["inst"])
+                    if c is None:
+                        continue
+                    o = fr.get(r["inst"])
+                    if o is None:
+                        skipped += 1
+                        continue
+                    used_counts.append(len(r["used_tracks"]))
+                    for u in r["used_tracks"]:
+                        loc = to_ref(u, c, o)
+                        if not any(abs(loc - q) < 1e-6 for q in union):
+                            union.append(loc)
+                if skipped:
+                    notes.append(f"{cell} {lname}: {skipped} 90-degree-"
+                                 f"rotated instance(s) not folded in (an "
+                                 f"upright-frame position has no image on "
+                                 f"the same layer there — BUDA-1921)")
+                if not union:
+                    continue                # the top takes nothing here
+                union.sort()
+                # The block's own worst seat on this layer, and how many of
+                # the reserved tracks land inside its window; the own metal
+                # currently ON reserved tracks (the union, per instance).
+                own = max(lrows, key=lambda r: r["own_need"])
+                seat_hit = 0
+                if own["own_window"] is not None:
+                    oc = comps.get(own["inst"])
+                    oo = fr.get(own["inst"])
+                    if oc is not None and oo is not None:
+                        lo, hi = own["own_window"]
+                        seat_hit = sum(1 for q in union
+                                       if lo - 1e-6 <= to_abs(q, oc, oo)
+                                       <= hi + 1e-6)
+                own_hit = 0
+                for r in lrows:
+                    c = comps.get(r["inst"])
+                    o = fr.get(r["inst"])
+                    if c is None or o is None:
+                        continue
+                    absres = [to_abs(q, c, o) for q in union]
+                    own_hit = max(own_hit, sum(
+                        1 for t_ in r.get("own_tracks", [])
+                        if any(abs(t_ - a) < 1e-6 for a in absres)))
+                lines.append({
+                    "cell": cell, "layer": lid, "layer_name": lname,
+                    "positions": union, "n_inst": len(used_counts),
+                    "n_skipped": skipped,
+                    "used_lo": min(used_counts), "used_hi": max(used_counts),
+                    "seat_hit": seat_hit,
+                    "seat": own["own_seat"], "seat_inst": own["inst"],
+                    "own_hit": own_hit,
+                })
+        return lines, notes, scope
+
+    def _report_cell_layer_reserves(self, cells=None, apply=False, path=""):
+        """`derive_cell_layer_reserves`: the derivation as a table plus the
+        `set_cell_layer_reserve` paste lines; `apply` declares them here
+        through the command itself, `path` writes them for a later session
+        to `source`.  The derivation is the reservation of every cell in
+        scope: a scoped cell's reservation on a layer with no line is
+        REMOVED (declared `off`; written as an `off` line, since a session
+        reopening the same BDB restores it before sourcing the file) — the
+        share derivation's contract (Codex P2 on #934)."""
+        out = self._derive_cell_layer_reserves(cells)
+        if out is None:
+            print("Error: derive_cell_layer_reserves needs a NUTS result to "
+                  "read the demand off (run_nuts; run_detailed_nuts for "
+                  "exact tracks) — see report_layer_demand")
+            return
+        lines, notes, scope = out
+        det = getattr(self, "detailed_result", None)
+        basis = ("detailed bit tracks" if det is not None
+                 else "abstract bus tracks")
+        print(f"=== Cell track reservations derived from the top's demand "
+              f"({basis}) ===")
+        for n in notes:
+            print(f"  {n}")
+
+        def _fmt(l):
+            return ",".join(fmt_pos(q) for q in l["positions"])
+        text = [f"set_cell_layer_reserve {l['cell']} {l['layer_name']} "
+                f"{_fmt(l)}" for l in lines]
+        names = {lid: n for n, lid in
+                 getattr(self, "_layer_name_map", {}).items()}
+        emitted = {(l["cell"], l["layer"]) for l in lines}
+        held = getattr(self, "_cell_layer_reserves", None) or {}
+        stale = [(c, lid, names.get(lid, f"L{lid}"), len(held[(c, lid)]))
+                 for (c, lid) in sorted(held)
+                 if c in scope and (c, lid) not in emitted and held[(c, lid)]]
+        if lines:
+            w_cell = max(len(l["cell"]) for l in lines)
+            print(f"  {'cell':<{w_cell}}  layer  tracks  insts  used/inst  "
+                  f"seat_hit  own_hit")
+            for l in lines:
+                seat = ""
+                if l["seat"] is not None:
+                    bid, si, need, pool = l["seat"]
+                    seat = (f" (bundle {bid} seg {si} needs {need} of "
+                            f"{pool} at {l['seat_inst']})")
+                print(f"  {l['cell']:<{w_cell}}  {l['layer_name']:<5}  "
+                      f"{len(l['positions']):>6}  {l['n_inst']:>5}  "
+                      f"{l['used_lo']:>4}..{l['used_hi']:<4}  "
+                      f"{l['seat_hit']:>8}  {l['own_hit']:>7}{seat}")
+            n_seat = sum(1 for l in lines if l["seat_hit"])
+            print(f"  {len(lines)} reservation(s) derived; {n_seat} with "
+                  f"reserved tracks inside the cell's own worst seat (the "
+                  f"local solve must move that bus — what a run under "
+                  f"these lines measures)")
+            print("  --- flow-text lines (declare BEFORE run_planner hier) ---")
+            for t in text:
+                print(f"  {t}")
+        else:
+            print("  nothing to declare: the top takes no track over any "
+                  "instance in scope")
+        if path:
+            with open(path, "w") as f:
+                f.write("# derive_cell_layer_reserves: the top's placed "
+                        f"tracks over each instance ({basis}), in the "
+                        "cell's frame; source before run_planner hier\n")
+                f.write("# scope: " + (",".join(scope) if scope else "(none)")
+                        + "\n")
+                if not text:
+                    f.write("# nothing to declare: the top takes no track "
+                            "over any instance in scope\n")
+                for t in text:
+                    f.write(t + "\n")
+                if stale:
+                    f.write("# removed: reservations held when this was "
+                            "derived that the top's demand no longer "
+                            "supports\n")
+                for c, lid, lname, n in stale:
+                    f.write(f"set_cell_layer_reserve {c} {lname} off"
+                            f"   # was {n} track(s)\n")
+            print(f"  written to {path}"
+                  + ("" if text else " (header only — no line to declare)")
+                  + (f"; {len(stale)} removal line(s)" if stale else ""))
+        if apply:
+            from buda_cmds import bdb_cmds
+            for l in lines:
+                bdb_cmds.cmd_set_cell_layer_reserve(
+                    self, "set_cell_layer_reserve",
+                    [l["cell"], l["layer_name"], _fmt(l)],
+                    f"set_cell_layer_reserve {l['cell']} {l['layer_name']} "
+                    f"{_fmt(l)}")
+            for c, lid, lname, n in stale:
+                print(f"  {c} {lname}: {n} reserved track(s) held from an "
+                      f"earlier declaration, no line derived now — removed")
+                bdb_cmds.cmd_set_cell_layer_reserve(
+                    self, "set_cell_layer_reserve", [c, lname, "off"],
+                    f"set_cell_layer_reserve {c} {lname} off")
+            print(f"  applied {len(lines)} reservation(s) to this session"
+                  + (f"; removed {len(stale)} stale reservation(s) in scope"
+                     if stale else ""))
 
     def _report_cell_layer_shares(self, cells=None, apply=False, path="",
                                   floor_own=True):

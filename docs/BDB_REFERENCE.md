@@ -1680,6 +1680,94 @@ Design notes and the measured study: `docs/internal/hier_layer_caps.md`.
 
 ---
 
+### `set_cell_layer_reserve`
+
+```
+set_cell_layer_reserve <cell> <layer> <pos>[,<pos>...]
+set_cell_layer_reserve <cell> <layer> off
+set_cell_layer_reserve * off
+```
+
+**Positional track reservation** — the primitive [convergence-ladder item 6](internal/convergence_ladder.md)
+asked for after E1 refuted the share: per cell and layer, the **tracks** the
+cell's own interconnect leaves free for the top, named by their **cell-local**
+perpendicular coordinate (`y` on an H layer, `x` on a V one — the frame the
+cell-local solve plans in, the reference instance's lower-left at the
+origin).  `set_cell_layer_share` thins every period of the pattern uniformly;
+[E1](internal/convergence_e1.md) measured that as the wrong shape, because the
+top's demand is *positional* — eight specific tracks over an instance — and a
+block whose own 32-bit bus fills its seat to 89–100 % cannot give up a
+fraction of every period without stranding that bus, while it can easily
+leave eight named tracks and seat its bus elsewhere.  This names them.
+
+Enforced where the cell is solved as a **template** (`set_bottom_up`): every
+reserved track becomes a keepout zone on the cell-local floorplan — one thin
+rect per track (the layer's narrowest SIGNAL slot, rounded outward to the
+integer grid keepouts live on), the full cell extent along: a corridor
+crossing the cell — so the local planner's band capacity and the local NUTS
+seats leave it free, and the same tracks are keepouts on the grid **clone**
+the reference DNUTS solve runs on, so the reference bits (and every copy)
+cannot land there.  The parent keeps the full grid: a reservation is room
+*for* the top, never a keepout against it, and `check_design`'s
+`LAYER_RESERVE` line reports what it bought (the top's tracks on reserved
+ones, per instance) and whether the cell's own metal honours it — the metal
+of every template solved *inside* the cell included, because a nested cell
+**inherits** the corridor: an ancestor's reservation is projected through
+the child's offset into the child's own frame (unioned over the child's
+occurrences in the ancestor, since a template is solved once) and kept free
+by the child's local solve and reference DNUTS view exactly like its own.
+That was measured before it was built: on the SoC vehicle the top's M5
+tracks over a cluster sit where the nested core's 32-bit bus seats, and a
+core solved without them seated the bus there and lost all 32 bits at
+DNUTS while the cluster's audit row read VIOLATED.  Positions are stated in
+the template's **reference frame** (the reference instance's, detected
+geometrically, since a hierarchical flip or rotate keeps the tokens `N`):
+a mirrored occurrence (S/FN/FS) folds through its orientation's involution
+on the axis — the y of an H layer flips under S/FN, the x of a V layer
+under S/FS — in the inheritance, the derivation and the audit alike, so the
+corridor over a mirrored instance is the mirror image of the upright one's.
+A 90°-rotated class is **not** governed by the cell's own reservation: a
+rotation swaps the axes, so an upright-frame track has no image on the
+same layer there; the class plans through its rotation-class clone
+template, which says so at its solve (BUDA-1921), still inherits its
+ancestors' corridors, and is counted out of the derivation with a note.  A
+reserved cell — own or inherited — planned top-down is **not** enforced and
+says so at `run_planner hier` (BUDA-1920, an inherited-only cell named with
+its source).
+
+A re-declaration REPLACES the cell's list on that layer; `off` clears one
+(`* off` every reservation).  Validation is loud: an unknown cell or layer, a
+layer with no `def_track_pattern` or whose pattern has no SIGNAL slot, a
+position outside the cell's extent on that axis, a repeated position.  The
+extent is the open BDB's; a reservation typed BEFORE any BDB is open is
+bounded by its sign alone and REVALIDATED the moment one is opened (every
+held entry is, a restored one included — a cell another session resized
+since) and again at every event that makes an entry checkable or stale — a
+layer declared AFTER the open (the check needs the layer's axis), a
+`resize_cell`, and `run_planner hier` right before the template solves
+install the keepouts, where the stack is complete and an entry on a layer id
+it does not declare is removed too — an out-of-cell position dropped with a
+WARNING and an emptied entry removed (a cell with no cell-table row is
+bounded by its reference occurrence's bbox, the frame the positions are
+stated in), and an entry naming a cell the opened BDB does not know — a typo,
+or another design's name — removed the same way rather than persisted where
+no template could enforce it.  A typed `off` (or `* off`) BEFORE the open is a
+TOMBSTONE the restore honours — the persisted entry it names is held off and
+said, so a generated policy's stale-entry removal sourced ahead of the open
+is not undone by it; a later positive declaration of the same key wins over
+its own tombstone.  The open then WRITES the validated map when
+the session holds a typed entry or applied a tombstone, so a reservation declared before the open
+reaches the file (and a typed entry that outranked a restored one is what
+the file holds); a malformed persisted row — a non-numeric or non-finite
+position, a layer that is not an id — is skipped and named rather than
+failing six stages later.  Its audit half reads the cell's own metal with
+the SAME footprint rule as the foreign demand: a wire covers the tracks
+under its width and an NDR-governed run its guard slots too, so a widened
+own wire on a reserved track is an `own_hit`.  Persisted in the open BDB (meta `layer_reserves`), restored by
+`open_bdb` with the share contract (typed entries win).  Derived from a routed top plan by
+[`derive_cell_layer_reserves`](script_reference/nuts.md#derive_cell_layer_reserves-apply-file-path-cells-ab);
+read back from Tcl with `buda::query reserves`.
+
 ### `add_inst`
 
 ```

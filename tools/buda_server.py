@@ -200,6 +200,7 @@ import buda_diag                                            # noqa: E402
 from buda_cmds import COMMANDS                              # noqa: E402
 from buda_script import split_quoted_args, unquote          # noqa: E402
 from tcl_quote import tcl_word                              # noqa: E402
+from buda_session.util import fmt_pos                        # noqa: E402
 
 
 def _n_bundles(s):
@@ -300,6 +301,46 @@ def _caps(s):
     return " ".join(rows)
 
 
+def _reserves(s):
+    # The positional track reservations in force (`set_cell_layer_reserve`)
+    # as `{cell layer {pos ...}}` rows — cell-local track centres, so a
+    # driver counts a reservation's tracks per instance of the cell (a
+    # reservation is a COUNT of named tracks, not a fraction of the
+    # supply — the number E1's efficiency prices it by).  Empty when none.
+    res = getattr(s, "_cell_layer_reserves", None) or {}
+    names = s._make_layer_names()
+    rows = []
+    for (cell, lid), pos in sorted(res.items()):
+        if not pos:
+            continue
+        rows.append("{" + " ".join([tcl_word(cell),
+                                    tcl_word(names.get(lid, f"L{lid}")),
+                                    "{" + " ".join(fmt_pos(p) for p in pos)
+                                    + "}"]) + "}")
+    return " ".join(rows)
+
+
+def _reserve_audit(s):
+    # `check_design`'s LAYER_RESERVE rows as data — one per (instance,
+    # layer) the positional reservation GOVERNS: `{inst cell layer reserved
+    # top_used own_hit}`.  Which occurrences count is the point: a 90-degree
+    # rotated occurrence of a reserved cell is NOT governed (BUDA-1921) and
+    # has no row, while every demand row carries the cell name — so a driver
+    # pricing a reservation off the demand rows alone charged the rotated
+    # occurrence as reserved (Codex P2 on #936).  -1 before run_nuts; empty
+    # when nothing is reserved.
+    rows = s._layer_reserve_audit()
+    if rows is None:
+        return "-1"
+    names = s._make_layer_names()
+    return " ".join(
+        "{" + " ".join([tcl_word(r["inst"]), tcl_word(r["cell"]),
+                        tcl_word(names.get(r["layer"], f"L{r['layer']}")),
+                        str(r["reserved"]), str(r["top_used"]),
+                        str(r["own_hit"])]) + "}"
+        for r in rows)
+
+
 # The values a flow script actually branches on.  Deliberately few: this is
 # a bridge, not a second API, and every name here is a promise to keep.
 # A count that has not been computed yet answers -1 rather than 0, because
@@ -314,6 +355,8 @@ _QUERIES = {
     "messages": _messages,
     "demand": _demand,
     "caps": _caps,
+    "reserves": _reserves,
+    "reserve_audit": _reserve_audit,
 }
 # The queries that TAKE arguments.  Every other name is a scalar about the
 # whole session, and a word after it is a typo — `buda::query overlaps M6`

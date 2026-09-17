@@ -1081,3 +1081,43 @@ otherwise.  From Tcl it is `buda::derive_cell_layer_shares apply`, or a driver
 computes its own policy from `buda::query demand`.
 
 ---
+
+### `derive_cell_layer_reserves [apply] [file <path>] [cells <a,b,...>]`
+
+```
+derive_cell_layer_reserves                    # print the derivation + paste lines
+derive_cell_layer_reserves apply              # ...and declare them in this session
+derive_cell_layer_reserves file reserves.buda # ...and write them for a later session
+derive_cell_layer_reserves cells sram_cell,tag_cell
+```
+
+The **positional twin** of `derive_cell_layer_shares` ([convergence ladder](../internal/convergence_ladder.md)
+item 6): per cell in scope and per layer, the **union over the cell's
+instances of the tracks the top placed over them** (the demand rows' track
+positions — detailed bit tracks after `run_detailed_nuts`, the abstract bus
+placement before), each mapped into the cell's frame (its position minus the
+instance's origin on the layer's perpendicular axis), as one
+`set_cell_layer_reserve` line.  A template is solved once and copied, so the
+cell must leave free on *every* instance every track the top wants on *any*
+of them: the union is the price of solve-once-copy, and the `used/inst` column
+says how much of it each instance really needs (a reservation's efficiency is
+its named-track count against the top's use, which E1's driver prices with
+`-primitive reserve`).  Positions are stated in the template's reference
+frame: every occurrence sharing it — mirrored ones (S/FN/FS, detected
+geometrically) included — folds in through its orientation's involution on
+the axis, while a 90°-rotated one belongs to the rotation-class clone
+template, whose frame an upright-stated position cannot reach: it is counted
+out and said (BUDA-1921).
+
+Every line reports two things it does not act on: `seat_hit`, how many of the
+reserved tracks fall inside the cell's own worst seat (the window the abstract
+plan gave its most crowded bus), and `own_hit`, how many carry the cell's own
+metal *now*.  Neither is a refusal — this primitive exists so the block can
+**move its bus off named tracks** instead of losing a fraction of every period,
+and whether the local solve finds the room is what a run under the lines
+measures.  Same scope rule as the share derivation (named `cells`, else the
+`set_bottom_up` marks, else every cell owning a cell-local bundle) and the same
+two doors: `apply` declares through `set_cell_layer_reserve` itself and REMOVES
+a scoped cell's reservation on a layer it emitted no line for, `file` writes
+the lines (with a `# scope:` header and `off` lines for the removals) for a
+session that sources them **before** `run_planner hier`.

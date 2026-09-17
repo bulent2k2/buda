@@ -21,10 +21,12 @@ in this module's COMMANDS dict; the buda_cmds package assembles the
 full registry that buda_cli.do_command dispatches through.
 """
 import buda
+import math
 import os
 import sys
 
 import buda_diag
+from buda_session.util import fmt_pos
 from ._options import (parse_rect_list, reject_unknown_options,
                        require_number, validate_rect_list)
 from buda_session.util import (apply_pattern_layer_facts,
@@ -785,6 +787,9 @@ def cmd_resize_cell(session, cmd, args, cmd_line):
     if session.bdb is None:
         print("Error: open_bdb first"); return
     session.bdb.resize_cell(args[0], float(args[1]), float(args[2]))
+    # A reservation names cell-local tracks; a smaller cell can leave one
+    # outside.  Same rule and voice as open_bdb (Codex P2 on #936).
+    session._revalidate_layer_reserves()
 
 
 def cmd_add_cell(session, cmd, args, cmd_line):
@@ -1659,6 +1664,125 @@ def cmd_set_cell_layer_share(session, cmd, args, cmd_line):
           f"<= declared)")
 
 
+def cmd_set_cell_layer_reserve(session, cmd, args, cmd_line):
+    # set_cell_layer_reserve <cell>|* <layer> <pos>[,<pos>...]|off
+    # The POSITIONAL reservation (convergence ladder item 6, E5's corridor):
+    # per cell and layer, the cell-local track centres (y on an H layer, x
+    # on a V one — the frame the cell-local solve plans in, the reference
+    # instance's lower-left at the origin) the cell's OWN routing leaves
+    # free for the top.  A share (set_cell_layer_share) thins every period
+    # uniformly and E1 measured that as the wrong shape for a positional
+    # demand; this names the tracks.  Enforced where the cell is solved as
+    # a TEMPLATE (set_bottom_up): keepouts on the cell-local floorplan and
+    # on the reference DNUTS grid clone — the parent keeps the full grid,
+    # so the reservation is room FOR the top, never a keepout against it.
+    # `off` clears (`* off` clears every cell); re-declaring REPLACES the
+    # cell's list on that layer.  Persisted (BDB meta `layer_reserves`),
+    # restored by open_bdb, typed entries win.
+    usage = "set_cell_layer_reserve <cell>|* <layer> <pos>[,<pos>...]|off"
+    if len(args) < 2 or (args[0] == "*" and args[1] != "off") \
+            or (args[0] != "*" and len(args) < 3):
+        print(f"Error: usage: {usage}"); return
+    cell = args[0]
+    if not hasattr(session, "_cell_layer_reserves") or \
+            session._cell_layer_reserves is None:
+        session._cell_layer_reserves = {}
+    res = session._cell_layer_reserves
+    if cell == "*":
+        n = len(res)
+        res.clear()
+        session._cell_layer_reserves_restored = set()
+        # A typed `* off` outlives the next open_bdb: the restore holds
+        # every persisted entry off (Codex P2 on #936).
+        session._cell_layer_reserves_off_all = True
+        session._cell_layer_reserves_off = set()
+        session._persist_layer_reserves()
+        print(f"[LayerReserve] cleared {n} reservation(s)")
+        return
+    lid = session._layer_name_map.get(args[1])
+    if lid is None:
+        print(f"Error: set_cell_layer_reserve: unknown layer '{args[1]}' "
+              f"(declare it with def_layer first)"); return
+    if session.bdb is not None:
+        if not any(c.cell == cell for c in session.bdb.all_components()):
+            print(f"Error: set_cell_layer_reserve: unknown cell '{cell}'")
+            return
+    if args[2].lower() == "off":
+        had = res.pop((cell, lid), None)
+        getattr(session, "_cell_layer_reserves_restored",
+                set()).discard((cell, lid))
+        # A tombstone: a later open_bdb holds this key's persisted entry
+        # off rather than restoring the entry a generated policy's `off`
+        # line removed (Codex P2 on #936).
+        if not hasattr(session, "_cell_layer_reserves_off"):
+            session._cell_layer_reserves_off = set()
+        session._cell_layer_reserves_off.add((cell, lid))
+        session._persist_layer_reserves()
+        print(f"[LayerReserve] {cell}: layer {args[1]} reservation "
+              f"{'removed' if had else 'was not set'}")
+        return
+    if (session.routing_grid is None
+            or not session.routing_grid.has_layer(lid)
+            or not session.routing_grid.get_layer_grid(lid)
+                       .global_pattern().slots):
+        print(f"Error: set_cell_layer_reserve: layer {args[1]} has no track "
+              f"pattern — declare def_track_pattern first (a reservation "
+              f"names tracks)"); return
+    pat = session.routing_grid.get_layer_grid(lid).global_pattern()
+    if not any(sl.type == "SIGNAL" for sl in pat.slots):
+        # A rail-only pattern has slots and no track anything routes on;
+        # the keepout width is the narrowest SIGNAL slot, which then falls
+        # back to a made-up 1.0 (Codex P2 on #936 — the share command
+        # already asks this).
+        print(f"Error: set_cell_layer_reserve: layer {args[1]}'s track "
+              f"pattern has no SIGNAL slots — nothing to reserve"); return
+    horiz = session.layers.get_layer_dir(lid) == buda.LayerDir.HORIZONTAL
+    # The cell's extent bounds a position.  With no BDB open it is not
+    # known yet; the declaration is accepted on the sign alone and the
+    # entry is REVALIDATED against the cell the moment a BDB is opened
+    # (`_revalidate_layer_reserves`, Codex P2 on #936), and again where a
+    # rect is built from it — so an out-of-cell position never reaches a
+    # keepout call, whichever order the flow declares things in.
+    extent = session._reserve_cell_extent(cell, horiz)
+    positions = []
+    for tok in ",".join(args[2:]).split(","):
+        tok = tok.strip()
+        if not tok:
+            continue
+        try:
+            v = float(tok)
+        except ValueError:
+            print(f"Error: set_cell_layer_reserve: position '{tok}' is not "
+                  f"a number"); return
+        if not math.isfinite(v):
+            # `nan` passes every comparison below (both false) and inf
+            # the bounds check when the cell extent is unknown; either
+            # reaches _reserve_rects as math.floor(nan) six stages later.
+            print(f"Error: set_cell_layer_reserve: position '{tok}' is not "
+                  f"a finite number"); return
+        if v < 0.0 or (extent is not None and v > extent + 1e-9):
+            print(f"Error: set_cell_layer_reserve: position {tok} lies "
+                  f"outside the cell's {'height' if horiz else 'width'} "
+                  f"({extent:g}) — positions are CELL-LOCAL "
+                  f"({'y' if horiz else 'x'} from the cell's lower-left)")
+            return
+        if any(abs(v - q) < 1e-6 for q in positions):
+            print(f"Error: set_cell_layer_reserve: position {tok} repeated")
+            return
+        positions.append(v)
+    if not positions:
+        print(f"Error: usage: {usage}"); return
+    res[(cell, lid)] = tuple(sorted(positions))
+    getattr(session, "_cell_layer_reserves_restored", set()).discard((cell, lid))
+    getattr(session, "_cell_layer_reserves_off", set()).discard((cell, lid))
+    session._persist_layer_reserves()
+    print(f"[LayerReserve] {cell}: layer {args[1]} reserves {len(positions)} "
+          f"track(s) at {'y' if horiz else 'x'} = "
+          + ", ".join(fmt_pos(v) for v in sorted(positions))
+          + " (cell-local; kept free by the cell's own routing where the "
+            "cell is solved as a template)")
+
+
 def cmd_set_bottom_up(session, cmd, args, cmd_line):
     # set_bottom_up <cell>|* [on|off]
     # Mark a cell template for bottom-up planning: its cell-local interconnect
@@ -1867,6 +1991,7 @@ COMMANDS = {
     "set_bottom_up": cmd_set_bottom_up,
     "set_cell_layer_cap": cmd_set_cell_layer_cap,
     "set_cell_layer_share": cmd_set_cell_layer_share,
+    "set_cell_layer_reserve": cmd_set_cell_layer_reserve,
     "set_layer_caps_by_depth": cmd_set_layer_caps_by_depth,
     "reserve_top_layers": cmd_reserve_top_layers,
     "align_bottom_up": cmd_align_bottom_up,

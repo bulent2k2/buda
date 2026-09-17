@@ -35,14 +35,20 @@
 #
 #   -reserve N      reserve_top_layers N before bundling (0 = none)
 #   -shares FILE    `source FILE` before bundling — the derived budget
-#   -derive FILE    derive_cell_layer_shares file FILE at the end (after
-#                   the flow's own healing, so it reads the FINAL plan)
+#   -derive FILE    derive_cell_layer_shares (or _reserves, per -primitive)
+#                   file FILE at the end (after the flow's own healing, so
+#                   it reads the FINAL plan)
 #   -derive_cells A,B  the derivation's `cells` scope (default: the
 #                   command's own — marks, else bundle-owning cells); a
 #                   second informed round passes the first round's cells
 #                   so the scope cannot drift between rounds
 #   -derive_opts T  extra derive tokens (`nofloor` = the pure complement,
 #                   the derivation's own strawman defence)
+#   -primitive P    what the derived budget IS: `share` (the fractional
+#                   `set_cell_layer_share`, E1's first run) or `reserve`
+#                   (the positional `set_cell_layer_reserve` — the tracks
+#                   the top placed, named; ladder item 6).  Selects the
+#                   derive command and how its lines are priced.
 #   -noheal         skip the vehicle's heal_if_dirty (the healerless table)
 #   -report FILE    write the machine-readable report the driver reads
 #
@@ -55,7 +61,16 @@
 #   healed 0|1
 #   wl_detailed N                 -1 when the run did not report one
 #   reserve N                     the -reserve in force
-#   share CELL LAYER PCT KEPT NSIG COLLIDE   one per derived line (-derive)
+#   share CELL LAYER PCT KEPT NSIG COLLIDE   one per derived line (-derive
+#                                 share)
+#   tracks CELL LAYER N           one per derived line (-primitive reserve):
+#                                 N cell-local tracks named — its own key,
+#                                 since `reserve` above is the scalar
+#   governed INST CELL LAYER N    one per (instance, layer) a positional
+#                                 reservation GOVERNS in this session (the
+#                                 `buda::query reserve_audit` rows): N
+#                                 tracks reserved over that instance — a
+#                                 90-degree-rotated occurrence has no row
 #   cap CELL FLOOR CAP            one per cell layer band in force (layer
 #                                 names, `-` for no floor) — which cells
 #                                 the -reserve actually capped
@@ -72,6 +87,7 @@ namespace eval converge {
     variable derive ""
     variable derive_cells ""
     variable derive_opts ""
+    variable primitive share
     variable noheal 0
     variable report ""
     variable marks 0
@@ -101,6 +117,9 @@ proc converge::opt {argv argi} {
                    set converge::derive_cells $val; return 2 }
         -derive_opts { if {!$have_val} { error "$opt needs tokens" }
                    set converge::derive_opts $val; return 2 }
+        -primitive { if {!$have_val || $val ni {share reserve}} {
+                       error "$opt takes share|reserve" }
+                   set converge::primitive $val; return 2 }
         -report  { if {!$have_val} { error "$opt needs a file" }
                    set converge::report [file normalize $val]; return 2 }
         -noheal  { set converge::noheal 1; return 1 }
@@ -153,18 +172,31 @@ proc converge::finish {healed} {
             lappend cmd cells $converge::derive_cells
         }
         lappend cmd {*}$converge::derive_opts
-        set out [buda::derive_cell_layer_shares {*}$cmd]
-        # The table rows: `cell  layer  share%  kept/nsig  insts  worst
-        # instance  worst%  own%[F]  collide (inst)` — the kept/nsig pair
-        # is what a driver needs to price the reservation, and the
-        # derivation is the one place that knows it.  The own% column sits
-        # BETWEEN worst% and collide and is matched explicitly: unanchored,
-        # the pattern captured its digits as the collision count (Codex P2
-        # on #935).
-        foreach ln [split $out \n] {
-            if {[regexp {^\s*(\S+)\s+(\S+)\s+(\d+)%\s+(\d+)/(\d+)\s+\d+\s+\S+\s+[\d.]+%\s+\d+%F?\s+(\d+)(?:\s|$)} \
-                        $ln -> cell layer pct kept nsig coll]} {
-                lappend derived [list $cell $layer $pct $kept $nsig $coll]
+        if {$converge::primitive eq "reserve"} {
+            set out [buda::derive_cell_layer_reserves {*}$cmd]
+            # The table rows: `cell  layer  tracks  insts  used/inst
+            # seat_hit  own_hit ...` — what prices a reservation is the
+            # named-track COUNT; the file's lines carry the positions.
+            foreach ln [split $out \n] {
+                if {[regexp {^\s*(\S+)\s+(\S+)\s+(\d+)\s+\d+\s+\d+\.\.\d+\s+\d+\s+\d+} \
+                            $ln -> cell layer n]} {
+                    lappend derived [list $cell $layer $n]
+                }
+            }
+        } else {
+            set out [buda::derive_cell_layer_shares {*}$cmd]
+            # The table rows: `cell  layer  share%  kept/nsig  insts  worst
+            # instance  worst%  own%[F]  collide (inst)` — the kept/nsig
+            # pair is what a driver needs to price the reservation, and
+            # the derivation is the one place that knows it.  The own%
+            # column sits BETWEEN worst% and collide and is matched
+            # explicitly: unanchored, the pattern captured its digits as
+            # the collision count (Codex P2 on #935).
+            foreach ln [split $out \n] {
+                if {[regexp {^\s*(\S+)\s+(\S+)\s+(\d+)%\s+(\d+)/(\d+)\s+\d+\s+\S+\s+[\d.]+%\s+\d+%F?\s+(\d+)(?:\s|$)} \
+                            $ln -> cell layer pct kept nsig coll]} {
+                    lappend derived [list $cell $layer $pct $kept $nsig $coll]
+                }
             }
         }
     }
@@ -182,8 +214,19 @@ proc converge::finish {healed} {
     }
     puts $f "wl_detailed $wl"
     puts $f "reserve $converge::reserve"
-    foreach d $derived { puts $f "share $d" }
+    if {$converge::primitive eq "reserve"} {
+        foreach d $derived { puts $f "tracks $d" }
+    } else {
+        foreach d $derived { puts $f "share $d" }
+    }
     foreach c [buda::query caps] { puts $f "cap $c" }
+    set gov [buda::query reserve_audit]
+    if {$gov ne "-1"} {
+        foreach g $gov {
+            lassign $g inst cell layer n _used _own
+            puts $f "governed [list $inst $cell $layer $n]"
+        }
+    }
     set rows [buda::query demand]
     if {$rows ne "-1"} {
         foreach r $rows { puts $f "demand $r" }
@@ -197,14 +240,16 @@ proc converge::finish {healed} {
 proc converge::read_report {path} {
     if {![file exists $path]} { error "converge: no report at $path" }
     set f [open $path]; set text [read $f]; close $f
-    set d [dict create shares {} caps {} demand {}]
+    set d [dict create shares {} reserves {} caps {} governed {} demand {}]
     foreach ln [split $text \n] {
         if {[string trim $ln] eq ""} { continue }
         set key [lindex $ln 0]
         set rest [lrange $ln 1 end]
         switch -- $key {
             share  { dict lappend d shares $rest }
+            tracks { dict lappend d reserves $rest }
             cap    { dict lappend d caps $rest }
+            governed { dict lappend d governed $rest }
             demand { dict lappend d demand $rest }
             default { dict set d $key $rest }
         }
@@ -225,7 +270,15 @@ proc converge::read_report {path} {
 #           tracks (the SoC's `quad_cell`, the largest footprints of all)
 #           as reserved (Codex P2 on #935);
 #   derived (`share` lines): per cell and layer, the fraction the thinning
-#           removes — `1 - kept/nsig` — of the instance's supply.
+#           removes — `1 - kept/nsig` — of the instance's supply;
+#   positional (`governed` rows of the ROUTED report, per instance and
+#           layer): the COUNT of tracks the reservation reserves over THAT
+#           instance — the audit's own rows, so an occurrence the
+#           reservation does not govern (a 90-degree-rotated one, BUDA-1921)
+#           contributes nothing, where charging the policy's `tracks` count
+#           to every demand row of the cell counted it as reserved (Codex
+#           P2 on #936).  A report without `governed` rows (an older run)
+#           falls back to the policy's per-(cell, layer) `tracks` count.
 #
 # `rep` is the round whose DEMAND is read; `policy` the report whose
 # `share` lines (derived the round before) and `cap` rows were in force —
@@ -247,6 +300,17 @@ proc converge::efficiency {rep policy} {
         lassign $c cell floor cap
         dict set cap_by_cell $cell $cap
     }
+    set n_by_cell_layer [dict create]
+    foreach r [dict get $policy reserves] {
+        lassign $r cell layer n
+        dict set n_by_cell_layer [list $cell $layer] $n
+    }
+    set n_by_inst_layer [dict create]
+    foreach g [dict get $rep governed] {
+        lassign $g inst cell layer n
+        dict set n_by_inst_layer [list $inst $cell $layer] $n
+    }
+    set have_governed [expr {[dict size $n_by_inst_layer] > 0}]
     set reserved 0.0; set used 0; set pairs 0
     foreach r [dict get $rep demand] {
         lassign $r inst cell layer bits u supply pct
@@ -258,8 +322,16 @@ proc converge::efficiency {rep policy} {
         if {[dict exists $frac_by_cell_layer [list $cell $layer]]} {
             set frac [dict get $frac_by_cell_layer [list $cell $layer]]
         }
-        if {$frac <= 0.0} { continue }
-        set reserved [expr {$reserved + $frac * $supply}]
+        set n_named 0
+        if {$have_governed} {
+            if {[dict exists $n_by_inst_layer [list $inst $cell $layer]]} {
+                set n_named [dict get $n_by_inst_layer [list $inst $cell $layer]]
+            }
+        } elseif {[dict exists $n_by_cell_layer [list $cell $layer]]} {
+            set n_named [dict get $n_by_cell_layer [list $cell $layer]]
+        }
+        if {$frac <= 0.0 && $n_named <= 0} { continue }
+        set reserved [expr {$reserved + $frac * $supply + $n_named}]
         incr used $u
         incr pairs
     }

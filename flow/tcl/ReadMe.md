@@ -11,7 +11,7 @@ exists for.
 | [`array.tcl`](array.tcl) + [`array_lib.tcl`](array_lib.tcl) | a hierarchical tile array; the front end's original vehicle |
 | [`array_save.tcl`](array_save.tcl) / [`array_resume.tcl`](array_resume.tcl) | design ITERATION over one checkpoint — build, pin, reopen, re-plan |
 | [`design.tcl`](design.tcl) / [`hdesign.tcl`](hdesign.tcl) | the one-file interactive form: route, then a pin/replan prompt |
-| [`converge.tcl`](converge.tcl) + [`converge_lib.tcl`](converge_lib.tcl) | the **E1 loop driver** ([convergence ladder](../../docs/internal/convergence_ladder.md) item 5): the blind layer-budget policy as scripted rounds against the derived budget (`derive_cell_layer_shares`), on `soc.tcl`/`tpu.tcl` through five shared hooks (`-reserve`/`-shares`/`-derive`/`-noheal`/`-report`); tables in [convergence_e1.md](../../docs/internal/convergence_e1.md) |
+| [`converge.tcl`](converge.tcl) + [`converge_lib.tcl`](converge_lib.tcl) | the **E1 loop driver** ([convergence ladder](../../docs/internal/convergence_ladder.md) item 5): the blind layer-budget policy as scripted rounds against the derived budget (`derive_cell_layer_shares`, or the positional `derive_cell_layer_reserves` under `-primitive reserve`), on `soc.tcl`/`tpu.tcl` through the shared hooks (`-reserve`/`-shares`/`-derive`/`-primitive`/`-noheal`/`-report`); tables in [convergence_e1.md](../../docs/internal/convergence_e1.md) |
 | [`corpus/`](corpus/) | the QoR corpus translated to Tcl (`tools/buda2tcl.py`) |
 
 ---

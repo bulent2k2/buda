@@ -207,12 +207,10 @@ class RRSweepsMixin:
                 # AFTER the leaf keepouts so the view matches
                 # _run_detailed_nuts exactly; no shares = no clone,
                 # byte-identical.
-                share_ovr = self._bu_share_dnuts_overrides(
-                    dn_kwargs['ref_ids'])
-                if share_ovr:
-                    ref_grid = self.routing_grid.clone()
-                    for lid, x1, y1, x2, y2, pat in share_ovr:
-                        ref_grid.add_override(lid, x1, y1, x2, y2, pat)
+                with contextlib.redirect_stdout(io.StringIO()):
+                    ref_grid, is_clone = self._bu_reference_grid(
+                        dn_kwargs['ref_ids'], tag="sweep reference view")
+                if is_clone:
                     dn_kwargs.update(ref_grid=ref_grid)
             dn_kwargs.update(grid=self.routing_grid,
                              bit_order=self._detailed_bit_order,

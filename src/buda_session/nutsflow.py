@@ -2359,14 +2359,10 @@ class NutsFlowMixin:
             # everyone else, including the parent over the cell — keeps the
             # full grid (budget, not reservation).  No shares => the plain
             # grid, byte-identical.  ref_grid must outlive eng1 (local).
-            share_ovr = self._bu_share_dnuts_overrides(ref_ids)
-            ref_grid = self.routing_grid
-            if share_ovr:
-                ref_grid = self.routing_grid.clone()
-                for lid, x1, y1, x2, y2, pat in share_ovr:
-                    ref_grid.add_override(lid, x1, y1, x2, y2, pat)
-                print(f"[LayerShare] DNUTS reference solve under "
-                      f"{len(share_ovr)} thinned override(s)")
+            # Reserved tracks (positional reservations) ride the same
+            # clone as keepouts — one function builds it for this path and
+            # the ripup sweep (_bu_reference_grid).
+            ref_grid, _is_clone = self._bu_reference_grid(ref_ids)
             eng1 = buda.DetailedNUTSEngine(ref_grid)
             if pair_align is not None:
                 eng1.set_pair_align(pair_align)

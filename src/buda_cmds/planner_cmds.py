@@ -215,6 +215,11 @@ def cmd_run_planner(session, cmd, args, cmd_line):
         # context resolves to the base cell via _bu_cell_of) and BEFORE the
         # bottom-up cell-local solves plan under the masks.
         session._apply_layer_policies()
+        # Every held reservation checked against the cells and the now
+        # complete stack — the last moment before the template solves
+        # install the keepouts (a stale or undeclared-layer entry is
+        # removed loud here; Codex P2 on #936).
+        session._revalidate_layer_reserves(final=True)
         session._plan_bottom_up_templates(iterations)
         # Expand cell-level bundles → per-instance absolute-coord wrappers.
         # Each expanded wrapper gets a unique HBundle ID.
@@ -235,6 +240,13 @@ def cmd_run_planner(session, cmd, args, cmd_line):
         # optimize_topologies plans them (a post-assignment application
         # would let a capped non-bottom-up instance plan unrestricted).
         session._apply_layer_policies(expanded)
+        # A positional reservation is enforced on TEMPLATES only; a reserved
+        # cell planned top-down is said here, before the planner works.
+        _not_enforced = session._reserved_cells_not_enforced(expanded)
+        if _not_enforced:
+            import buda_diag as _diag
+            print(_diag.format("BUDA-1920", ", ".join(_not_enforced)
+                               + " — mark them set_bottom_up to enforce"))
         # The masks are final NOW, which is the first moment a hier bundle's
         # reachable layer set is knowable — and the NDR no-op verdict is a
         # statement about exactly that set, so it is deferred out of bundling
