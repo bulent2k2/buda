@@ -94,6 +94,10 @@ SNAPSHOTTED = {
     "input.pinned_seg_layers",
     # candidate pools: count-trimmed + the dogleg slot deep-copied (dl_cand)
     "input.candidates",
+    # the DNUTS plan's reserved-track stamp on a globally solved instance,
+    # captured with hier.locked (snap['blocked']) since a class/release
+    # trial's plan recompute rewrites it
+    "hier.blocked_tracks",
 }
 EXEMPT = {
     # immutable identity / setup-time state no trial mutates

@@ -13,17 +13,19 @@
 # limitations under the License.
 
 # ============================================================
-# flow/tcl/converge.tcl — the E1 loop driver (convergence ladder item 5).
+# flow/tcl/converge.tcl — the E1/E5 loop driver (convergence ladder item 5).
 #
 #   btcl flow/tcl/converge.tcl soc 2 4 8            # healerless, every arm
 #   btcl flow/tcl/converge.tcl soc 16 -heal         # the vehicle's own healing
 #   btcl flow/tcl/converge.tcl soc 4 -step 2        # the blind policy's step
 #   btcl flow/tcl/converge.tcl tpu 8 16 -arms blind,bu
 #   btcl flow/tcl/converge.tcl soc 2 -nofloor        # the pure complement
+#   btcl flow/tcl/converge.tcl soc 2 4 -primitive reserve -arms uniform,td,bu
+#                                                   # E5: the corridor
 #
-# Three ways a block gets its layer budget, each run as a LOOP on the same
+# Four ways a block gets its layer budget, each run as a LOOP on the same
 # vehicle at the same size, until the endpoint is clean or the arm runs out
-# of moves (docs/internal/convergence_ladder.md, E1):
+# of moves (docs/internal/convergence_ladder.md, E1 and E5):
 #
 #   blind   round 1: the block routes freely, is frozen (`-bottomup`), the
 #           top routes against it.  Round k: the policy takes the block's
@@ -39,6 +41,12 @@
 #           are the top's demand on THIS geometry and its own seats are in
 #           the cell frame — and round 2 is the informed one.  Rung 0 then
 #           4.  Its round 1 is the blind arm's round 1 (one run, shared).
+#   uniform E5's conventional arm: the block reserves F feedthrough tracks
+#           per TOP layer, evenly spaced, by GUESS (`-uniform F` — the
+#           same positional primitive the derived corridor uses, so one
+#           audit prices both), is frozen, the top routes against it.
+#           Round k doubles F from `-f0` until it passes `-fmax` — the
+#           policy's own parameter swept, the strawman defence.
 #
 # Every round is one vehicle session (`soc.tcl`/`tpu.tcl` through the
 # converge_lib.tcl hooks), its log and report kept in the out dir.  What
@@ -59,8 +67,12 @@
 #                  under M4..M7)
 #   -informed R    informed rounds per derived arm (default 2; 0 = the
 #                  measurement alone — td's top-down round, bu's blind one)
-#   -arms a,b,c    subset of blind,td,bu (default all; `bu` without `blind`
-#                  runs blind round 1 only, as its measurement)
+#   -arms a,b,c    subset of blind,td,bu,uniform (default blind,td,bu; `bu`
+#                  without `blind` runs blind round 1 only, as its
+#                  measurement; `uniform` is E5's conventional arm)
+#   -f0 F          the uniform arm's first track count (default 4)
+#   -fmax F        the uniform arm's ceiling (default 32; F doubles per
+#                  round and the sweep stops when it would pass this)
 #   -nofloor       derive the PURE complement (no own-need floor): the
 #                  derivation's own strawman defence
 #   -out DIR       where logs/reports/tables go (default e1_out beside the
@@ -76,14 +88,15 @@ source [file join $repo flow tcl converge_lib.tcl]
 if {$argc < 2} {
     puts stderr "usage: converge.tcl soc|tpu <size> ... \[-heal\] \[-step N\]\
                  \[-maxreserve N\] \[-informed R\] \[-arms a,b\] \[-nofloor\]\
-                 \[-primitive share|reserve\] \[-out DIR\] \[-tag T\] \[-j N\]"
+                 \[-primitive share|reserve\] \[-f0 F\] \[-fmax F\]\
+                 \[-out DIR\] \[-tag T\] \[-j N\]"
     exit 2
 }
 set vehicle [lindex $argv 0]
 if {$vehicle ni {soc tpu}} { error "converge.tcl: vehicle must be soc|tpu, got '$vehicle'" }
 set sizes {}
 set heal 0; set step 1; set maxreserve 4; set informed 2; set nofloor 0
-set primitive share
+set primitive share; set f_start 4; set fmax 32
 set arms {blind td bu}; set out e1_out; set tag ""; set threads ""
 set i 1
 while {$i < $argc} {
@@ -107,6 +120,8 @@ while {$i < $argc} {
         -nofloor    { set nofloor 1; incr i }
         -step       { set step $v; incr i 2 }
         -primitive  { set primitive $v; incr i 2 }
+        -f0         { set f_start $v; incr i 2 }
+        -fmax       { set fmax $v; incr i 2 }
         -maxreserve { set maxreserve $v; incr i 2 }
         -informed   { set informed $v; incr i 2 }
         -arms       { set arms [split $v ,]; incr i 2 }
@@ -140,6 +155,14 @@ if {![string is integer -strict $maxreserve] || $maxreserve < 0} {
 if {![string is integer -strict $informed] || $informed < 0} {
     error "converge.tcl: -informed takes a non-negative integer, got '$informed'"
 }
+# The uniform sweep doubles from f0 until it passes fmax: a non-positive
+# start would never advance, and a ceiling below the start runs nothing.
+if {![string is integer -strict $f_start] || $f_start < 1} {
+    error "converge.tcl: -f0 takes a positive integer, got '$f_start'"
+}
+if {![string is integer -strict $fmax] || $fmax < $f_start} {
+    error "converge.tcl: -fmax takes an integer >= -f0 ($f_start), got '$fmax'"
+}
 # `-j` travels to every session as BUDA_THREADS_REQUEST and the server
 # IGNORES a request it cannot read (prints, keeps the default) — so an
 # unreadable count would run the whole experiment at a concurrency the
@@ -155,7 +178,7 @@ if {$threads ne "" && $threads ne "max" && ![regexp {^[+-]?\d+$} $threads]} {
 }
 set arms [lsearch -all -inline -not -exact $arms ""]
 if {![llength $arms]} { error "converge.tcl: -arms names no arm (blind, td, bu)" }
-foreach a $arms { if {$a ni {blind td bu}} { error "converge.tcl: unknown arm '$a'" } }
+foreach a $arms { if {$a ni {blind td bu uniform}} { error "converge.tcl: unknown arm '$a'" } }
 file mkdir $out
 set script [file join $repo flow tcl $vehicle.tcl]
 if {$threads ne ""} { set ::env(BUDA_THREADS_REQUEST) $threads }
@@ -254,6 +277,7 @@ proc row {size arm round policy rep policy_rep} {
 }
 
 set summary {}
+set notes {}
 foreach size $sizes {
     set p ${vehicle}${size}
     set blind1 ""
@@ -289,6 +313,49 @@ foreach size $sizes {
             lappend summary [list $size blind [llength $blind_rounds] $solved \
                                  [expr {[clean $last] ? "clean" : "dirty"}] \
                                  [join [dict get $last verdict] /]]
+        }
+    }
+    # ── uniform ── (E5's conventional arm: F per TOP layer, doubling)
+    if {"uniform" in $arms} {
+        set k 1
+        set solved 0
+        set urounds {}
+        set F $f_start
+        set ceiling ""
+        while {$F <= $fmax} {
+            # The sweep's ceiling is PHYSICAL before it is -fmax: `uniform F`
+            # names F real tracks over EVERY marked cell, and the engine
+            # refuses an F the smallest cell cannot host (the SoC's io_cell
+            # has 14 M5 tracks, so F=16 is refused there).  That is the end
+            # of the sweep, recorded — not a crashed session.
+            if {[catch {session ${p}_uniform_r$k $size -bottomup -uniform $F} rep opts]} {
+                if {![string match "*asks more tracks than the cell has*" $rep]} {
+                    return -options $opts $rep
+                }
+                regexp {set_cell_layer_reserve: (.*?)\) — see } $rep -> ceiling
+                puts "converge.tcl: ${p}: uniform sweep ends at F=$F — $ceiling"
+                break
+            }
+            # The round's own `governed` rows price it: the policy rep is
+            # the round itself, as for a blind round.
+            row $size uniform $k "uniform $F" $rep $rep
+            lappend urounds $rep
+            incr solved [lindex [dict get $rep marks] 0]
+            if {[clean $rep]} { break }
+            set F [expr {$F * 2}]
+            incr k
+        }
+        if {![llength $urounds]} {
+            error "converge.tcl: ${p}: uniform $f_start is already past the\
+                   smallest cell's supply ($ceiling) — lower -f0"
+        }
+        set last [lindex $urounds end]
+        lappend summary [list $size uniform [llength $urounds] $solved \
+                             [expr {[clean $last] ? "clean" : "dirty"}] \
+                             [join [dict get $last verdict] /]]
+        if {$ceiling ne ""} {
+            lappend notes "size $size, uniform: the sweep ended at F=$F, past\
+                           the smallest cell's supply ($ceiling)"
         }
     }
     # ── td ──
@@ -342,9 +409,15 @@ set lines [list $hdr $sep]
 foreach r $rows { lappend lines "| [join $r { | }] |" }
 lappend lines "" "| size | arm | rounds | classes solved | endpoint | final ovl/unpl/viol |" "|---|---|---|---|---|---|"
 foreach s $summary { lappend lines "| [join $s { | }] |" }
+if {[llength $notes]} {
+    lappend lines ""
+    foreach n $notes { lappend lines "- $n" }
+}
 set text [join $lines \n]
 puts $text
-set name e1_${vehicle}[expr {$heal ? "_healed" : "_healerless"}]_step$step[expr {$nofloor ? "_nofloor" : ""}][expr {$primitive eq "reserve" ? "_reserve" : ""}]
+# The table is E5's when the conventional corridor arm ran, E1's otherwise.
+set exp [expr {"uniform" in $arms ? "e5" : "e1"}]
+set name ${exp}_${vehicle}[expr {$heal ? "_healed" : "_healerless"}]_step$step[expr {$nofloor ? "_nofloor" : ""}][expr {$primitive eq "reserve" ? "_reserve" : ""}]
 if {$tag ne ""} { append name _$tag }
 set f [open [file join $out $name.md] w]
 puts $f "<!-- converge.tcl $argv -->"

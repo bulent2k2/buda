@@ -202,6 +202,12 @@ struct BundleHierMeta {
     // detour) and is never chosen as a rip-up victim or a replan/negotiate
     // target — moving one instance would break template uniformity.
     bool locked = false;
+    // Positional reservation for an instance solved in the global DNUTS run
+    // (not copied from its template's reference): per layer, the ABSOLUTE
+    // track positions the instance's OWN bits keep free for the top.  Set
+    // by the session's bottom-up DNUTS plan; make_bus_segments copies the
+    // layer's list onto each of the bundle's BusSegments.  Empty = none.
+    std::map<int, std::vector<double>> blocked_tracks;
 };
 
 struct BundleWrapper {

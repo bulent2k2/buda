@@ -493,8 +493,27 @@ void DetailedNUTSEngine::place_by_layer(
             // midpoint pool rather than forfeit honest placements to false
             // positives — cull_keepout_crossers (post-adjustment) removes any
             // bit whose FINAL span still crosses a keepout.
+            // A positional reservation this instance's bits must honour
+            // (BusSegment::blocked_tracks): drop the reserved tracks from
+            // EVERY pool the seat is chosen from, before the admission
+            // count reads it — so a reservation the window cannot spare
+            // strands the bits honestly rather than placing them on it.
+            auto drop_blocked =
+                [&](std::vector<std::pair<double, TrackSlot>>& pool) {
+                if (bs.blocked_tracks.empty()) return;
+                std::vector<std::pair<double, TrackSlot>> kept;
+                kept.reserve(pool.size());
+                for (auto& t : pool) {
+                    bool hit = false;
+                    for (double b : bs.blocked_tracks)
+                        if (std::fabs(t.first - b) < 1e-6) { hit = true; break; }
+                    if (!hit) kept.push_back(t);
+                }
+                pool.swap(kept);
+            };
             auto signal_tracks = grid.signal_tracks_in_span(
                 bs.span_lo, bs.span_hi, bs.interval_lo, bs.interval_hi);
+            drop_blocked(signal_tracks);
             // Span-clear-first ranking (the #523 spreader outcome): when the
             // midpoint fallback engages, the pool MIXES tracks that are clear
             // across the whole abstract span (bits on them can never be
@@ -513,6 +532,7 @@ void DetailedNUTSEngine::place_by_layer(
                     span_clear_keys.insert(track_key(t.first));
                 signal_tracks = grid.signal_tracks_in(x, bs.interval_lo,
                                                       bs.interval_hi);
+                drop_blocked(signal_tracks);
             }
 
             // Cross-layer corner bound (carried from abstract NUTS): keep only
@@ -1542,9 +1562,14 @@ std::vector<BusSegment> make_bus_segments(
     // NDR: each governed bundle's resolved rule (inactive specs skipped —
     // the BusSegment default already means "no rule").
     std::map<int, const NdrSpec*> bid_to_ndr;
+    // Positional reservation on an instance solved in THIS run (see
+    // BusSegment::blocked_tracks): the wrapper's per-layer list.
+    std::map<int, const std::map<int, std::vector<double>>*> bid_to_blocked;
     for (const auto& w : bundles) {
         const int bid = w.input.original_bundle.id;
         if (w.input.ndr.active()) bid_to_ndr[bid] = &w.input.ndr;
+        if (!w.hier.blocked_tracks.empty())
+            bid_to_blocked[bid] = &w.hier.blocked_tracks;
         bid_to_nbits[bid] =
             (int)w.input.original_bundle.get_net_names().size();
         const int sel = w.plan.selected_topology_index;
@@ -1607,6 +1632,14 @@ std::vector<BusSegment> make_bus_segments(
         // trunk's bits snap to its committed side on real signal tracks).
         bs.track_lo_bound = ts.track_lo_bound;
         bs.track_hi_bound = ts.track_hi_bound;
+        {
+            auto blk = bid_to_blocked.find(ts.bundle_id);
+            if (blk != bid_to_blocked.end()) {
+                auto lit = blk->second->find(ts.layer);
+                if (lit != blk->second->end())
+                    bs.blocked_tracks = lit->second;
+            }
+        }
 
         auto csit = bid_to_cs.find(ts.bundle_id);
         if (csit != bid_to_cs.end() &&

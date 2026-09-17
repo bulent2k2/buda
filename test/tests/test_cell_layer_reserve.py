@@ -34,6 +34,7 @@ is pinned here:
 """
 import contextlib
 import io
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -790,3 +791,157 @@ def test_the_derivation_keeps_the_computed_track_unrounded():
     import re
     m = re.search(r"^\s*set_cell_layer_reserve top_cell M6 (\S+)$", out, re.M)
     assert m and float(m[1]) == got, (out, got)      # the line round-trips it
+
+
+def test_the_uniform_form_names_real_centred_tracks(tmp_path):
+    """E5's conventional arm: `uniform F` reserves F evenly spaced SIGNAL
+    tracks over the cell, as cell-local positions of REAL tracks read
+    over the reference occurrence (u1, at 50 50) — not a spacing, so the
+    same enforcement and audit read both arms."""
+    s = _session()
+    g = s.routing_grid.get_layer_grid(6)
+    u1 = next(c for c in s.bdb.all_components() if c.name == "u1")
+    tracks = sorted({p for p, _s in g.signal_tracks_in(0.5 * (u1.x1 + u1.x2),
+                                                       u1.y1, u1.y2)})
+    n = len(tracks)
+    assert n > 8
+    out = _cmd(s, "set_cell_layer_reserve top_cell M6 uniform 4")
+    assert "reserves 4 track(s)" in out and "uniform 4" in out, out
+    pos = s._cell_layer_reserves[("top_cell", 6)]
+    assert len(pos) == 4
+    # every position is a real track in u1's frame ...
+    absolute = [p + u1.y1 for p in pos]
+    assert all(a in tracks for a in absolute), (absolute, tracks)
+    # ... spread over the extent, no pick leaning on an edge: the gaps
+    # between consecutive picks are within one track of each other and
+    # the first/last picks sit about half a gap in from the ends
+    idx = [tracks.index(a) for a in absolute]
+    gaps = [b - a for a, b in zip(idx, idx[1:])]
+    assert max(gaps) - min(gaps) <= 1, idx
+    assert abs(idx[0] - (n - 1 - idx[-1])) <= 1, idx
+    assert idx[0] >= gaps[0] // 2 - 1, idx
+    # `uniform 1` is the middle track
+    _cmd(s, "set_cell_layer_reserve top_cell M6 uniform 1")
+    (mid,) = s._cell_layer_reserves[("top_cell", 6)]
+    assert abs(tracks.index(mid + u1.y1) - (n - 1) / 2) <= 1
+    # a V layer reads x over the cell's width
+    _cmd(s, "set_cell_layer_reserve top_cell M5 uniform 3")
+    xs = s._cell_layer_reserves[("top_cell", 5)]
+    assert len(xs) == 3 and all(0 <= x <= 600 for x in xs), xs
+    # more tracks than the cell has, and the bad counts
+    out = _cmd(s, "set_cell_layer_reserve top_cell M6 uniform 999")
+    assert f"asks more tracks than the cell has ({n} signal tracks" in out, out
+    assert s._cell_layer_reserves[("top_cell", 6)] == (mid,)  # unchanged
+    assert "positive" in _cmd(s, "set_cell_layer_reserve top_cell M6 uniform 0")
+    assert "positive" in _cmd(s, "set_cell_layer_reserve top_cell M6 uniform x")
+    assert "usage" in _cmd(s, "set_cell_layer_reserve top_cell M6 uniform")
+    assert "unknown layer" in _cmd(s, "set_cell_layer_reserve top_cell M9 uniform 2")
+    assert "unknown cell" in _cmd(s, "set_cell_layer_reserve nosuch M6 uniform 2")
+    # `* TOP` names the marked cells on the TOP layers: refused with no
+    # mark, one line per (cell, TOP layer) once the cell is marked
+    assert "none is marked" in _cmd(s, "set_cell_layer_reserve * TOP uniform 2")
+    _quiet(s, "set_bottom_up top_cell")
+    out = _cmd(s, "set_cell_layer_reserve * TOP uniform 2")
+    assert out.count("[LayerReserve] top_cell:") == 3, out
+    for lid in (5, 6, 7):
+        assert len(s._cell_layer_reserves[("top_cell", lid)]) == 2, lid
+    # `leaf` is placed only as a child; a cell with no placed occurrence
+    # at all has no frame to read the tracks over
+    s2 = buda_cli.BudaSession()
+    s2.no_viz = True
+    _quiet(s2, f"source {_TRACKS}", "open_bdb :memory:",
+           "add_cell lonely 100 100")
+    assert "no placed occurrence" in \
+        _cmd(s2, "set_cell_layer_reserve lonely M6 uniform 1")
+    # the uniform lines persist like typed ones and win at the reopen
+    path = tmp_path / "u.bdb"
+    s3 = buda_cli.BudaSession()
+    s3.no_viz = True
+    design = [f"open_bdb {path}" if c == "open_bdb :memory:" else c
+              for c in _DESIGN]
+    _quiet(s3, *design, "set_cell_layer_reserve top_cell M6 uniform 4")
+    kept = s3._cell_layer_reserves[("top_cell", 6)]
+    _quiet(s3, "save_bdb")
+    s4 = buda_cli.BudaSession()
+    s4.no_viz = True
+    _quiet(s4, f"source {_TRACKS}", f"open_bdb {path}")
+    assert s4._cell_layer_reserves[("top_cell", 6)] == kept
+
+
+def test_the_uniform_reservation_is_enforced_like_a_typed_one():
+    """A cell solved as a template under `uniform F` keeps those F tracks
+    free of its own metal — the audit reads own_hit 0 on every instance,
+    which is what makes the arm comparable to the derived one."""
+    s = _template_session("set_cell_layer_reserve top_cell M6 uniform 4")
+    pos = s._cell_layer_reserves[("top_cell", 6)]
+    assert len(pos) == 4
+    rows = s._layer_reserve_audit()
+    hit = [r for r in rows if r["layer_name"] == "M6"]
+    assert {r["inst"] for r in hit} == {"u1", "u2"}, rows
+    assert all(r["own_hit"] == 0 for r in hit), hit
+    assert all(r["reserved"] == 4 for r in hit), hit
+
+
+def _own_tracks(s, cell_ctx, lid):
+    """A template's OWN bit tracks on `lid`, per instance."""
+    wr = {w.input.original_bundle.id: w for w in s.bundles}
+    out = {}
+    for ns in s.detailed_result.net_segments:
+        ob = wr[ns.bundle_id].input.original_bundle
+        if ob.cell_context == cell_ctx and ns.layer == lid:
+            out.setdefault(ob.instances[0], set()).add(ns.track_position)
+    return out
+
+
+def test_an_instance_solved_in_the_global_run_keeps_the_reservation():
+    """E5 measured the gap: a reservation reaches the reference solve as
+    grid keepouts and every COPY through the copy, but an instance
+    MISALIGNED with its reference under `on_mismatch independent` is
+    solved in the global DNUTS run on the full grid, where the reserved
+    tracks are nobody's keepout (a reservation is room FOR the top) — and
+    the audit read the cluster's own metal on one reserved track at the
+    SoC's misaligned clusters.  Such an instance now carries the reserved
+    tracks, folded into its frame, as its bundles' blocked tracks."""
+    i = _NEST.index("add_inst u2 top_cell - 900 50")
+    design = [*_NEST[:i], "add_inst u2 top_cell - 900 51", *_NEST[i + 1:]]
+
+    def run(*policy):
+        s = buda_cli.BudaSession()
+        s.no_viz = True
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            for c in [*design, "set_bottom_up *", *policy, *_NEST_TAIL]:
+                s.do_command(c)
+        return s, buf.getvalue()
+
+    s0, out0 = run()
+    assert re.search(r"cell 'top_cell': MISALIGNED — u2", out0), out0[-2000:]
+    comps = {c.name: c for c in s0.bdb.all_components()}
+    own = _own_tracks(s0, "top_cell", 6)
+    assert own.get("u2"), own
+    # reserve two of the tracks u2's OWN bus sits on, stated in the
+    # template frame (u1's), folded back for u2 — the reference's grid
+    # cannot see them and u2's window has room for the bus beside them
+    u2 = comps["u2"]
+    fr = s0._reserve_frames("top_cell")[0]
+    hit = sorted(own["u2"])[:2]
+    ext = u2.y2 - u2.y1
+    pos = [s0._reserve_ref_pos(t - u2.y1, fr["u2"], ext, True) for t in hit]
+    line = "set_cell_layer_reserve top_cell M6 " + ",".join(f"{p:g}" for p in pos)
+    s, out = run(line)
+    assert "keep their reserved tracks as blocked tracks: u2" in out, out[-3000:]
+    wr = {w.input.original_bundle.instances[0]: w for w in s.bundles
+          if w.input.original_bundle.cell_context == "top_cell"
+          and w.input.original_bundle.instances}
+    assert not wr["u1"].hier.blocked_tracks                      # the reference
+    assert wr["u2"].hier.blocked_tracks == {6: hit}, wr["u2"].hier.blocked_tracks
+    after = _own_tracks(s, "top_cell", 6)
+    assert not (after.get("u2", set()) & set(hit)), (after, hit)
+    assert len(after["u2"]) == 8 and s.detailed_result.num_unplaced == 0
+    rows = s._layer_reserve_audit()
+    assert [(r["inst"], r["own_hit"]) for r in rows] == [("u1", 0), ("u2", 0)], rows
+    # the same design aligned (u2 back on the phase) carries no blocked
+    # tracks anywhere: the copy honours the reference's keepouts
+    s2, out2 = _nested(["set_bottom_up *"], line)
+    assert "blocked tracks" not in out2
+    assert all(not w.hier.blocked_tracks for w in s2.bundles)

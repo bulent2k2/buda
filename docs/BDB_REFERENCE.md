@@ -1684,6 +1684,7 @@ Design notes and the measured study: `docs/internal/hier_layer_caps.md`.
 
 ```
 set_cell_layer_reserve <cell> <layer> <pos>[,<pos>...]
+set_cell_layer_reserve <cell>|* <layer>|TOP uniform <F>
 set_cell_layer_reserve <cell> <layer> off
 set_cell_layer_reserve * off
 ```
@@ -1716,6 +1717,17 @@ of every template solved *inside* the cell included, because a nested cell
 the child's offset into the child's own frame (unioned over the child's
 occurrences in the ancestor, since a template is solved once) and kept free
 by the child's local solve and reference DNUTS view exactly like its own.
+An instance whose bits are solved in the **global** DNUTS run rather than
+copied — one misaligned with its reference under `check_template_tracks
+on_mismatch independent`, or one whose orientation the copy cannot serve —
+sees none of those keepouts (they live on the reference's grid clone; the
+global grid is the top's, and a reservation is never a keepout against the
+top), so it carries the reserved tracks, folded into its own frame, as its
+bundles' **blocked tracks** (`BundleHierMeta.blocked_tracks` →
+`BusSegment.blocked_tracks`): DetailedNUTS drops them from every seat pool
+before the admission count, so the bits take the next tracks or strand
+honestly.  E5 measured the gap before it was closed — the SoC's misaligned
+clusters under a mirrored quad read one own track on their reservation.
 That was measured before it was built: on the SoC vehicle the top's M5
 tracks over a cluster sit where the nested core's 32-bit bus seats, and a
 core solved without them seated the bus there and lost all 32 bits at
@@ -1764,7 +1776,26 @@ failing six stages later.  Its audit half reads the cell's own metal with
 the SAME footprint rule as the foreign demand: a wire covers the tracks
 under its width and an NDR-governed run its guard slots too, so a widened
 own wire on a reserved track is an `own_hit`.  Persisted in the open BDB (meta `layer_reserves`), restored by
-`open_bdb` with the share contract (typed entries win).  Derived from a routed top plan by
+`open_bdb` with the share contract (typed entries win).
+
+**`uniform <F>`** is the *conventional* feedthrough reservation expressed
+with the same primitive — [E5](internal/convergence_e5.md)'s guess arm: `F`
+SIGNAL tracks spread evenly over the cell's extent on that layer, centred
+(the k-th of F sits at the (k+½)/F point, so `uniform 1` is the middle track
+and no count leans on an edge), named as the REAL tracks over the cell's
+reference occurrence rather than as a spacing, so a uniform reservation
+names tracks a bit can sit on and the same enforcement, inheritance and
+`LAYER_RESERVE` audit read the guessed arm and the derived one alike.  `*`
+names every `set_bottom_up`-marked cell (refused when none is marked — the
+form exists to reserve on the cells that will be solved as templates) and
+`TOP` every layer the stack declares `TOP`; the two compose, and every
+(cell, layer) pair is computed BEFORE any is stored, so a count the cell
+cannot host (`uniform F asks more tracks than the cell has (N signal tracks
+over its extent)`), a cell with no placed occurrence, or a layer without a
+SIGNAL-slot pattern refuses the whole declaration and changes nothing.  It
+needs an open BDB (the tracks are read over a placed occurrence), and its
+lines persist and restore exactly like typed positions — which they are,
+once declared.  Derived from a routed top plan by
 [`derive_cell_layer_reserves`](script_reference/nuts.md#derive_cell_layer_reserves-apply-file-path-cells-ab);
 read back from Tcl with `buda::query reserves`.
 

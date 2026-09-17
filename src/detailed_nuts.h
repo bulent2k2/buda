@@ -114,6 +114,18 @@ struct BusSegment {
     // of the split (carried from the abstract trunk's bound).  Default = unbounded.
     double      track_lo_bound    = -std::numeric_limits<double>::infinity();
     double      track_hi_bound    =  std::numeric_limits<double>::infinity();
+
+    // Track positions this segment's bits may NOT use: a positional
+    // reservation (`set_cell_layer_reserve`) on an instance whose bits are
+    // solved in the GLOBAL run rather than copied from the template's
+    // reference solve — a misaligned instance under `check_template_tracks
+    // on_mismatch independent`, or one ripup released — sees the reserved
+    // tracks here, since the reference view's grid keepouts never reach the
+    // global grid (a reservation is room FOR the top, never a keepout
+    // against it).  Copied from BundleHierMeta::blocked_tracks[layer] by
+    // make_bus_segments, so every DNUTS path (the C++ trial sweep included)
+    // reads one list.  Empty = unrestricted (byte-identical).
+    std::vector<double> blocked_tracks;
 };
 
 // Member-bit count of a BusSegment under the tapered fan-in model: the

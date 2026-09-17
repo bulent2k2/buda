@@ -49,6 +49,12 @@
 #                   (the positional `set_cell_layer_reserve` — the tracks
 #                   the top placed, named; ladder item 6).  Selects the
 #                   derive command and how its lines are priced.
+#   -uniform F      the CONVENTIONAL feedthrough reservation (ladder E5's
+#                   arm): `set_cell_layer_reserve * TOP uniform F` after
+#                   the marks — F evenly spaced signal tracks on every
+#                   TOP layer over every marked cell, a guess with no plan
+#                   behind it, named through the same primitive the
+#                   derived corridor uses so one audit reads both
 #   -noheal         skip the vehicle's heal_if_dirty (the healerless table)
 #   -report FILE    write the machine-readable report the driver reads
 #
@@ -61,6 +67,7 @@
 #   healed 0|1
 #   wl_detailed N                 -1 when the run did not report one
 #   reserve N                     the -reserve in force
+#   uniform F                     the -uniform in force (0 = none)
 #   share CELL LAYER PCT KEPT NSIG COLLIDE   one per derived line (-derive
 #                                 share)
 #   tracks CELL LAYER N           one per derived line (-primitive reserve):
@@ -88,6 +95,7 @@ namespace eval converge {
     variable derive_cells ""
     variable derive_opts ""
     variable primitive share
+    variable uniform 0
     variable noheal 0
     variable report ""
     variable marks 0
@@ -120,6 +128,13 @@ proc converge::opt {argv argi} {
         -primitive { if {!$have_val || $val ni {share reserve}} {
                        error "$opt takes share|reserve" }
                    set converge::primitive $val; return 2 }
+        -uniform {
+            if {!$have_val || ![string is integer -strict $val] || $val < 1} {
+                error "$opt takes a positive track count"
+            }
+            set converge::uniform $val
+            return 2
+        }
         -report  { if {!$have_val} { error "$opt needs a file" }
                    set converge::report [file normalize $val]; return 2 }
         -noheal  { set converge::noheal 1; return 1 }
@@ -149,6 +164,12 @@ proc converge::policy {} {
             error "converge: -shares file not found: $converge::shares"
         }
         buda::source $converge::shares
+    }
+    # The conventional corridor: F tracks per TOP layer per marked cell,
+    # evenly spaced.  `*` is the marked cells, so this belongs to a
+    # `-bottomup` session (the engine refuses it with none marked).
+    if {$converge::uniform > 0} {
+        buda::set_cell_layer_reserve * TOP uniform $converge::uniform
     }
 }
 
@@ -214,6 +235,7 @@ proc converge::finish {healed} {
     }
     puts $f "wl_detailed $wl"
     puts $f "reserve $converge::reserve"
+    puts $f "uniform $converge::uniform"
     if {$converge::primitive eq "reserve"} {
         foreach d $derived { puts $f "tracks $d" }
     } else {

@@ -1679,10 +1679,23 @@ def cmd_set_cell_layer_reserve(session, cmd, args, cmd_line):
     # `off` clears (`* off` clears every cell); re-declaring REPLACES the
     # cell's list on that layer.  Persisted (BDB meta `layer_reserves`),
     # restored by open_bdb, typed entries win.
-    usage = "set_cell_layer_reserve <cell>|* <layer> <pos>[,<pos>...]|off"
-    if len(args) < 2 or (args[0] == "*" and args[1] != "off") \
+    #
+    # `uniform <F>` is the CONVENTIONAL feedthrough reservation (ladder
+    # E5's arm): F SIGNAL tracks spread evenly over the cell's extent,
+    # named through the same primitive so the same enforcement and audit
+    # read the guess and the derived corridor alike.  `*` there means
+    # every set_bottom_up-marked cell (the ones enforcement reaches) and
+    # `TOP` every TOP layer with a pattern — the layers a top plan prefers,
+    # which is where a designer reserves feedthroughs without a plan.
+    usage = ("set_cell_layer_reserve <cell>|* <layer>|TOP <pos>[,<pos>...]"
+             "|uniform <F>|off")
+    uniform = len(args) >= 3 and args[2].lower() == "uniform"
+    if len(args) < 2 or (args[0] == "*" and args[1] != "off" and not uniform) \
             or (args[0] != "*" and len(args) < 3):
         print(f"Error: usage: {usage}"); return
+    if uniform:
+        _reserve_uniform(session, args, usage)
+        return
     cell = args[0]
     if not hasattr(session, "_cell_layer_reserves") or \
             session._cell_layer_reserves is None:
@@ -1781,6 +1794,87 @@ def cmd_set_cell_layer_reserve(session, cmd, args, cmd_line):
           + ", ".join(fmt_pos(v) for v in sorted(positions))
           + " (cell-local; kept free by the cell's own routing where the "
             "cell is solved as a template)")
+
+
+def _reserve_uniform(session, args, usage):
+    """`set_cell_layer_reserve <cell>|* <layer>|TOP uniform <F>`: F evenly
+    spaced SIGNAL tracks per (cell, layer), the E5 conventional arm."""
+    if len(args) != 4:
+        print(f"Error: usage: {usage}"); return
+    try:
+        count = int(args[3])
+    except ValueError:
+        count = 0
+    if count < 1:
+        print(f"Error: set_cell_layer_reserve: uniform takes a positive "
+              f"track count, got '{args[3]}'"); return
+    if session.bdb is None:
+        print("Error: set_cell_layer_reserve: uniform needs an open BDB "
+              "(the tracks are read over the cell's placed occurrence)")
+        return
+    if args[0] == "*":
+        cells = sorted(set(session.bdb.bottom_up_cells()))
+        if not cells:
+            print("Error: set_cell_layer_reserve: `*` names the "
+                  "set_bottom_up-marked cells and none is marked — mark "
+                  "them first, or name a cell"); return
+    else:
+        if not any(cr.name == args[0] for cr in session.bdb.all_cells()):
+            print(f"Error: set_cell_layer_reserve: unknown cell '{args[0]}'")
+            return
+        cells = [args[0]]
+    if args[1].upper() == "TOP":
+        lids = sorted(lid for lid in session._layer_name_map.values()
+                      if session.layers.get_layer_type(lid)
+                      == buda.LayerType.TOP)
+        if not lids:
+            print("Error: set_cell_layer_reserve: `TOP` names the TOP "
+                  "layers and the stack declares none"); return
+    else:
+        lid = session._layer_name_map.get(args[1])
+        if lid is None:
+            print(f"Error: set_cell_layer_reserve: unknown layer "
+                  f"'{args[1]}' (declare it with def_layer first)"); return
+        lids = [lid]
+    names = session._make_layer_names()
+    for lid in lids:
+        g = session.routing_grid
+        if (g is None or not g.has_layer(lid)
+                or not any(sl.type == "SIGNAL" for sl in
+                           g.get_layer_grid(lid).global_pattern().slots)):
+            print(f"Error: set_cell_layer_reserve: layer {names.get(lid)} "
+                  f"has no track pattern with SIGNAL slots — nothing to "
+                  f"reserve"); return
+    if not hasattr(session, "_cell_layer_reserves") or \
+            session._cell_layer_reserves is None:
+        session._cell_layer_reserves = {}
+    res = session._cell_layer_reserves
+    declared = []
+    for cell in cells:
+        for lid in lids:
+            pos, n = session._reserve_uniform_positions(cell, lid, count)
+            if not pos:
+                if n == 0:
+                    print(f"Error: set_cell_layer_reserve: cell '{cell}' "
+                          f"has no placed occurrence to read "
+                          f"{names.get(lid)}'s tracks over"); return
+                print(f"Error: set_cell_layer_reserve: {cell} {names.get(lid)}"
+                      f": uniform {count} asks more tracks than the cell "
+                      f"has ({n} signal tracks over its extent)"); return
+            declared.append((cell, lid, pos))
+    horiz_of = {lid: session.layers.get_layer_dir(lid)
+                == buda.LayerDir.HORIZONTAL for lid in lids}
+    for cell, lid, pos in declared:
+        res[(cell, lid)] = tuple(sorted(pos))
+        getattr(session, "_cell_layer_reserves_restored",
+                set()).discard((cell, lid))
+        getattr(session, "_cell_layer_reserves_off", set()).discard((cell, lid))
+        print(f"[LayerReserve] {cell}: layer {names.get(lid)} reserves "
+              f"{len(pos)} track(s) at {'y' if horiz_of[lid] else 'x'} = "
+              + ", ".join(fmt_pos(v) for v in sorted(pos))
+              + f" (uniform {count} — cell-local; kept free by the cell's "
+                "own routing where the cell is solved as a template)")
+    session._persist_layer_reserves()
 
 
 def cmd_set_bottom_up(session, cmd, args, cmd_line):

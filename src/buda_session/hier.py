@@ -2373,14 +2373,60 @@ class HierMixin:
         # occurrence; the reference instance's bbox IS the template frame
         # the positions are stated in (Codex P2 on #936 — this used to
         # leave such a cell unchecked).
+        c = self._reserve_ref_comp(cell)
+        if c is None:
+            return None
+        return (c.y2 - c.y1) if horiz else (c.x2 - c.x1)
+
+    def _reserve_ref_comp(self, cell):
+        """The placed component a cell's reservation frame is anchored on:
+        the template's reference instance when one exists, else the
+        detection default (the first placed occurrence by name — the
+        same choice `detect_instance_orients` makes), else None."""
+        if self.bdb is None:
+            return None
         comps = [c for c in self.bdb.all_components()
                  if c.cell == cell and is_placed(c)]
         if not comps:
             return None
         ref = self._reserve_ref_inst(cell)
-        c = next((c for c in comps if c.name == ref), None) \
+        return next((c for c in comps if c.name == ref), None) \
             or min(comps, key=lambda c: c.name)
-        return (c.y2 - c.y1) if horiz else (c.x2 - c.x1)
+
+    def _reserve_uniform_positions(self, cell, lid, count):
+        """`count` SIGNAL tracks of layer `lid` spread evenly over the
+        cell's extent, as cell-local positions — the conventional
+        feedthrough reservation (convergence ladder E5's F uniformly
+        spaced tracks), expressed with the positional primitive so the
+        same enforcement and audit read both arms.  The tracks are the
+        REAL ones over the reference occurrence (the frame the positions
+        are stated in), so a uniform reservation names tracks a bit can
+        sit on, not a spacing.  Returns (positions, n_available); an
+        empty list when the cell has no placed occurrence."""
+        c = self._reserve_ref_comp(cell)
+        if c is None:
+            return [], 0
+        horiz = (self.layers.get_layer_dir(lid) == buda.LayerDir.HORIZONTAL)
+        g = self.routing_grid.get_layer_grid(lid)
+        if horiz:
+            tracks = [pos for pos, _s in
+                      g.signal_tracks_in(0.5 * (c.x1 + c.x2), c.y1, c.y2)]
+            origin = c.y1
+        else:
+            tracks = [pos for pos, _s in
+                      g.signal_tracks_in(0.5 * (c.y1 + c.y2), c.x1, c.x2)]
+            origin = c.x1
+        tracks = sorted(set(tracks))
+        n = len(tracks)
+        if count > n or count < 1:
+            return [], n
+        # Centred spacing — the k-th of F sits at the (k + 1/2)/F point of
+        # the extent, the way a corridor is drawn without a plan — so
+        # `uniform 1` is the middle track and no count leans on an edge.
+        picks = [tracks[min(n - 1, max(0, int(round((i + 0.5) * n / count
+                                                        - 0.5))))]
+                 for i in range(count)]
+        return [p - origin for p in picks], n
 
     def _reserve_in_extent(self, positions, extent):
         """Split `positions` into (kept, dropped) against a cell extent —
@@ -2585,7 +2631,12 @@ class HierMixin:
     def _reserve_abs_positions(self, cell, inst, orient, comp, lid):
         """A cell's own reserved tracks on `lid` in ABSOLUTE coordinates
         over occurrence `inst` (orient relative to the cell's reference)."""
-        pos = self._cell_reserves_of(cell).get(lid, ())
+        return self._reserve_abs_of(self._cell_reserves_of(cell).get(lid, ()),
+                                    orient, comp, lid)
+
+    def _reserve_abs_of(self, pos, orient, comp, lid):
+        """Template-frame positions `pos` on `lid` folded through `orient`
+        into ABSOLUTE coordinates over the placed component `comp`."""
         horiz = self.layers.get_layer_dir(lid) == buda.LayerDir.HORIZONTAL
         ext = (comp.y2 - comp.y1) if horiz else (comp.x2 - comp.x1)
         origin = comp.y1 if horiz else comp.x1
@@ -4783,10 +4834,35 @@ class HierMixin:
             # ref→sibling transform).
             orients = self._detect_instance_orients(
                 self._bu_cell_of(cell), comps.values(), ref_name=v['ref'])
+            # The template's reservation (own ∪ inherited, in the reference
+            # frame) reaches the reference solve as grid keepouts and every
+            # COPY through the copy; an instance solved in the GLOBAL run —
+            # misaligned under `on_mismatch independent`, or one whose
+            # orientation the copy cannot serve — would see none of it, and
+            # the audit read its own metal on reserved tracks (measured on
+            # E5's SoC: the misaligned clusters under a mirrored quad).  So
+            # such an instance carries the reserved tracks, folded into its
+            # own frame, as its bundle's blocked tracks (make_bus_segments
+            # copies them onto every BusSegment, so the C++ trial sweep
+            # reads the same list); a reference or copied instance carries
+            # none — cleared here so a verdict that changes cannot leave a
+            # stale list behind.
+            eff, _src, _clone = self._effective_reserves(cell, v['ref'])
             for inst, iw in by_inst.items():
+                iw.hier.blocked_tracks = {}
+                oi = orients.get(inst)
+                global_solve = inst != v['ref'] and (
+                    inst in v['misaligned']
+                    or oi is None or oi not in self._DIR_PRESERVING)
+                if global_solve and eff:
+                    c = comps.get(inst)
+                    fold = oi if oi in self._DIR_PRESERVING else 'N'
+                    if c is not None and is_placed(c):
+                        iw.hier.blocked_tracks = {
+                            lid: sorted(self._reserve_abs_of(pos, fold, c, lid))
+                            for lid, pos in eff.items() if pos}
                 if inst == v['ref'] or inst in v['misaligned']:
                     continue        # ref solves; misaligned solve globally
-                oi = orients.get(inst)
                 if oi is None or oi not in self._DIR_PRESERVING:
                     # Shouldn't happen for locked instances (guarded at
                     # expansion) — leave it in the global solve.
@@ -4802,6 +4878,14 @@ class HierMixin:
                 skip_ids.add(iw.input.original_bundle.id)
         if not ref_ids:
             return None
+        blocked = [iw.input.original_bundle.instances[0]
+                   for _c, _t, iws in self._bottom_up_instance_groups()
+                   for iw in iws if iw.hier.blocked_tracks]
+        if blocked:
+            print(f"[LayerReserve] {len(blocked)} instance(s) solved in the "
+                  f"global DNUTS run keep their reserved tracks as blocked "
+                  f"tracks: {', '.join(sorted(blocked)[:6])}"
+                  + (f", +{len(blocked) - 6} more" if len(blocked) > 6 else ""))
         return ref_ids, copy_specs, skip_ids
 
     def _expand_hier_bundles(self, bundles):
