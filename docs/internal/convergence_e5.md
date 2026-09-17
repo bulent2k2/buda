@@ -106,8 +106,14 @@ keepouts, which live on the reference solve's grid clone.  Such an instance
 now carries the reserved tracks, folded into its frame, as its bundles'
 blocked tracks (`BundleHierMeta.blocked_tracks` → `BusSegment.blocked_tracks`,
 so the C++ trial sweep reads the same list), and every table here is from
-the fixed engine (the numbers moved by nothing but a few units of
-wirelength in two rounds — the bits took the neighbouring track).  The
+the fixed engine (the healerless numbers moved by nothing but a few units
+of wirelength in two rounds — the bits took the neighbouring track).  The
+healed rounds then found the second door of the same gap: `ripup_reroute`'s
+RELEASE pass withdraws an instance from the uniform copy and solves it
+individually — the released cores' own metal sat on their reserved tracks
+(2 of 4 at every core, NQ = 2 and 4) — so releasing stamps the same list,
+through the one helper both doors call, and a rejected release restores it
+with the lock.  The
 abstract-stage audit also read a bus seated flush against a reserved track
 as touching it (6 of 48 on `io_blk_cell`, 0 once the bits were placed); it
 now reports that reading as the estimate it is and reserves VIOLATED for

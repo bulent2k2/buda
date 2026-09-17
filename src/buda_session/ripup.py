@@ -1317,6 +1317,21 @@ class RipupMixin:
     # mismatches; `stop`-policy flows are structurally untouched.  The
     # aligned siblings keep the uniform copy; every commit is LOUD.
 
+    def _rr_release_stamp_blocked(self, w, cell, inst):
+        """Stamp a released instance's reserved tracks (see the release
+        pass): folded relative to the template's verdict reference, the
+        frame the reservation is stated in."""
+        if not (getattr(self, "_cell_layer_reserves", None) or {}) \
+                or self.bdb is None:
+            return
+        v = (getattr(self, "_template_track_verdict", None) or {}).get(cell)
+        ref = v['ref'] if v else inst
+        comps = {c.name: c for c in self.bdb.all_components()}
+        orients = self._detect_instance_orients(
+            self._bu_cell_of(cell), comps.values(), ref_name=ref)
+        w.hier.blocked_tracks = self._reserve_blocked_tracks(
+            cell, ref, inst, orients.get(inst), comps)
+
     def _rr_release_pass(self, stage, metric, cur):
         """Release-move pass: returns (committed, trials).  No-op (False, 0)
         outside stage b, without the `independent` policy, or when no
@@ -1375,6 +1390,12 @@ class RipupMixin:
             # replan then assigns fresh direction-correct layers.
             w.hier.locked = False
             w.input.pinned_seg_layers = []
+            # A released instance solves in the global run, where the
+            # reservation's keepouts (on the reference's grid clone) never
+            # reach — E5's healed rounds read the released cores' own
+            # metal on their reserved tracks.  It carries them as blocked
+            # tracks, exactly as a misaligned instance does (one helper).
+            self._rr_release_stamp_blocked(w, cell, inst)
             self._rr_invalidate_bottom_up_caches()
             self._rr_rerun(stage, full=True, skip_replan=True)
             m = metric()

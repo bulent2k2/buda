@@ -245,3 +245,44 @@ def test_mix2_release_heals_bundle166_end_to_end():
     with contextlib.redirect_stdout(buf):
         s.do_command("check_design")
     assert "Success: no violations found" in buf.getvalue(), buf.getvalue()
+
+
+def test_release_stamps_the_reservation_as_blocked_tracks():
+    """E5's healed rounds found the gap: a released instance solves in
+    the global DNUTS run, where the reservation's keepouts (on the
+    reference's grid clone) never reach, and the audit read the released
+    cores' own metal on their reserved tracks.  Releasing now stamps the
+    reserved tracks, folded into the instance's frame, as the wrapper's
+    blocked tracks — the same list a misaligned instance carries — and a
+    rejected release restores the stamp with the lock."""
+    db = _two_inst_db()
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    s.bdb = db
+    for c in (["def_layer 6 M6 H TOP 50", "def_layer 7 M7 V TOP 50",
+               "def_layer 4 M4 H 50", "def_layer 5 M5 V 50"]
+              + _PATTERNS
+              + ["run_hier_bundler", "generate_hier_topologies",
+                 "set_bottom_up proc_cell",
+                 "set_cell_layer_reserve proc_cell M6 21.5,25.5",
+                 "run_planner hier", "run_nuts",
+                 "check_template_tracks on_mismatch independent",
+                 "run_detailed_nuts"]):
+        _run_cmd(s, c)
+    w = _locked_wrapper(s)
+    assert not w.hier.blocked_tracks            # a copy carries none
+    bid = w.input.original_bundle.id
+    inst = w.input.original_bundle.instances[0]
+    comp = next(c for c in db.all_components() if c.name == inst)
+    s._open_segments = lambda: [(bid, 0, 4, 4)]
+    seen = {}
+
+    def metric():
+        seen.setdefault("blocked", dict(w.hier.blocked_tracks))
+        return (0, 0)                # never accepts — pass reverts
+    with contextlib.redirect_stdout(io.StringIO()):
+        s._rr_release_pass('b', metric, (0, 0))
+    # during the trial: the two reserved tracks, absolute over the instance
+    assert seen["blocked"] == {6: [comp.y1 + 21.5, comp.y1 + 25.5]}, seen
+    # after the rejected trial: locked again, and no stamp
+    assert w.hier.locked and not w.hier.blocked_tracks

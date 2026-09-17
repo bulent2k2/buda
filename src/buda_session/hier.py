@@ -2643,6 +2643,26 @@ class HierMixin:
         return [origin + self._reserve_ref_pos(p, orient, ext, horiz)
                 for p in pos]
 
+    def _reserve_blocked_tracks(self, cell_ctx, ref_inst, inst, orient,
+                                comps):
+        """The reserved tracks (own ∪ inherited, stated in the template's
+        reference frame) an instance solved in the GLOBAL DNUTS run keeps
+        free, folded through `orient` (relative to `ref_inst`) into
+        ABSOLUTE positions over `inst` — {layer_id: [positions]}, empty
+        when nothing is reserved or the instance is unplaced.  ONE
+        function for the DNUTS copy plan (a misaligned instance) and the
+        healer's release pass (an instance withdrawn from the copy), so
+        the two doors stamp the same list."""
+        eff, _src, _clone = self._effective_reserves(cell_ctx, ref_inst)
+        if not eff:
+            return {}
+        c = comps.get(inst)
+        if c is None or not is_placed(c):
+            return {}
+        fold = orient if orient in self._DIR_PRESERVING else 'N'
+        return {lid: sorted(self._reserve_abs_of(pos, fold, c, lid))
+                for lid, pos in eff.items() if pos}
+
     def _inherited_reserves(self, cell, ref_inst=None):
         """The reservations a template INHERITS: every ancestor instance's
         reserved tracks projected into the template's own frame, over
@@ -4847,20 +4867,15 @@ class HierMixin:
             # reads the same list); a reference or copied instance carries
             # none — cleared here so a verdict that changes cannot leave a
             # stale list behind.
-            eff, _src, _clone = self._effective_reserves(cell, v['ref'])
             for inst, iw in by_inst.items():
                 iw.hier.blocked_tracks = {}
                 oi = orients.get(inst)
                 global_solve = inst != v['ref'] and (
                     inst in v['misaligned']
                     or oi is None or oi not in self._DIR_PRESERVING)
-                if global_solve and eff:
-                    c = comps.get(inst)
-                    fold = oi if oi in self._DIR_PRESERVING else 'N'
-                    if c is not None and is_placed(c):
-                        iw.hier.blocked_tracks = {
-                            lid: sorted(self._reserve_abs_of(pos, fold, c, lid))
-                            for lid, pos in eff.items() if pos}
+                if global_solve:
+                    iw.hier.blocked_tracks = self._reserve_blocked_tracks(
+                        cell, v['ref'], inst, oi, comps)
                 if inst == v['ref'] or inst in v['misaligned']:
                     continue        # ref solves; misaligned solve globally
                 if oi is None or oi not in self._DIR_PRESERVING:
