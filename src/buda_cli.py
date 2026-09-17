@@ -456,6 +456,8 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
         self._max_bundle_bits_auto = False
         self._hier_expansion_map = {}  # original bundle id → [expanded BundleWrappers]
         self._hier_bundles_orig = []   # pre-expansion snapshot set by run_hier_bundler
+        self._plan_pins = []           # pin_plan entries (a handed-down top plan, 6c)
+        self._plan_pin_bids = set()    # bundles whose seats a pin_plan set
         self._planner_is_hier = False  # True after `run_planner hier` (self.bundles is expanded)
         self._flow_log = None          # open flow-log file (see open_flow_log); enables per-command logging
         self._flow_log_path = None     # its path (for the "Full detail →" line)

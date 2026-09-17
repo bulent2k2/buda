@@ -2104,3 +2104,170 @@ class ReportsMixin:
             _write(path)
         if apply:
             _apply()
+
+    # ── derive_top_plan (convergence ladder item 6c) ──────────────────────
+
+    def _top_plan_scope_insts(self, cells, notes):
+        """The placed instances of the cells in the derivation scope (the
+        share/reserve derivations' rule: named `cells`, else the
+        `set_bottom_up` marks, else every cell owning a cell-local bundle)
+        — the frames a handed-down plan must NOT come from, since those
+        cells are re-solved as templates under the budget the same round
+        derived for them.  Returns (paths, scope)."""
+        if self.bdb is None:
+            notes.append("scope: no BDB open — a flat design, every "
+                         "planned bundle is the top's")
+            return [], []
+        comps = [c for c in self.bdb.all_components() if is_placed(c)]
+        by_cell = {}
+        for c in comps:
+            by_cell.setdefault(c.cell, []).append(c)
+        scope = self._policy_scope(cells, by_cell, notes)
+        in_scope = set(scope)
+        return [c.name for c in comps if c.cell in in_scope], scope
+
+    def _derive_top_plan(self, cells=None):
+        """The top's PLAN — every globally planned bundle's selected
+        candidate, its per-segment layers and its abstract seats — as
+        `pin_plan` lines a later session sources before `run_planner hier`,
+        so the blocks are routed under the SAME top the reservation was
+        derived from (convergence ladder item 6c).
+
+        E5 measured why the informed loop had no fixpoint: the informed
+        round re-plans the top from scratch after the templates moved, so
+        on the recorded NQ = 2 rounds 4 of 13 top-level bundles kept their
+        topology and none kept its seat, and every derivation named a top
+        that the next round did not route.  A track PREFERENCE cannot fix
+        that (6b, measured); a pin can.
+
+        "The top" is every bundle in the routed list that is not a
+        bottom-up copy and whose frame instance is not inside a placed
+        instance of a scoped cell — the same bundles the reserve derivation
+        read as demand on those cells.  Per bundle: the selected candidate
+        by content uid (`topo_uid`) AND by its type spec (the pin that
+        survives a pool whose loci moved — the uid is tried first, the
+        spec is the fallback and is reported), the planner's layer per
+        segment by name, and the abstract seat per segment as the
+        width-wide window `[pos - w/2, pos + w/2]` (a POINT is refused by
+        NUTS's fit — `first_fit` needs `hi - lo >= width` — while the
+        width-wide window reproduces the position exactly); an unplaced
+        segment hands down no seat (`-`).
+
+        Returns (lines, notes, scope): `lines` are dicts (bid, net, type,
+        uid, layers, seats, frame); None before a NUTS result."""
+        if self.nuts_result is None or not self.bundles:
+            return None
+        notes = []
+        inside, scope = self._top_plan_scope_insts(cells, notes)
+        seats = {(t.bundle_id, t.seg_idx): t
+                 for t in self.nuts_result.segments}
+        names = self._make_layer_names()
+        lines = []
+        n_locked = n_inside = n_unplanned = 0
+        for w in self.bundles:
+            b = w.input.original_bundle
+            if getattr(w.hier, "locked", False):
+                n_locked += 1
+                continue
+            frame = b.instances[0] if b.instances else ""
+            if frame and any(frame == p or frame.startswith(p + "/")
+                             for p in inside):
+                n_inside += 1
+                continue
+            sel = w.plan.selected_topology_index
+            nets = b.get_net_names()
+            if not (0 <= sel < len(w.input.candidates)) or not nets:
+                n_unplanned += 1
+                continue
+            t = w.input.candidates[sel]
+            nseg = len(t.segments)
+            sl = list(w.plan.seg_layers)
+            layers = [(names.get(l, f"L{l}") if l >= 0 else "-")
+                      for l in (sl + [-1] * nseg)[:nseg]]
+            seat = []
+            for si in range(nseg):
+                ts = seats.get((b.id, si))
+                if ts is None or not ts.placed \
+                        or ts.track_position != ts.track_position:
+                    seat.append(None)
+                else:
+                    seat.append((ts.track_position - ts.width / 2.0,
+                                 ts.track_position + ts.width / 2.0))
+            lines.append({"bid": b.id, "net": nets[0], "type": t.type,
+                          "uid": buda.topo_uid(t), "layers": layers,
+                          "seats": seat, "frame": frame})
+        if n_locked:
+            notes.append(f"{n_locked} bottom-up copy/copies not handed "
+                         f"down (a template is solved in its own frame)")
+        if n_inside:
+            notes.append(f"{n_inside} bundle(s) framed inside a scoped "
+                         f"cell's instance not handed down (re-solved "
+                         f"under the derived budget)")
+        if n_unplanned:
+            notes.append(f"{n_unplanned} bundle(s) with no selected "
+                         f"candidate skipped")
+        return lines, notes, scope
+
+    @staticmethod
+    def _top_plan_line(l):
+        """One `pin_plan` line for a derived entry — the grammar
+        `cmd_pin_plan` reads back."""
+        def _tok(s):
+            return f'"{s}"' if any(ch.isspace() for ch in s) else s
+
+        def _seat(s):
+            return "-" if s is None else f"{fmt_pos(s[0])}:{fmt_pos(s[1])}"
+
+        return (f"pin_plan net:{_tok(l['net'])} {_tok(l['type'])} "
+                f"uid {l['uid']} layers {','.join(l['layers'])} "
+                f"seats {','.join(_seat(s) for s in l['seats'])}")
+
+    def _report_top_plan(self, cells=None, path=""):
+        """`derive_top_plan`: the plan as a table plus the `pin_plan` paste
+        lines; `path` writes them for a later session to `source` (they are
+        held until that session's `run_planner`)."""
+        out = self._derive_top_plan(cells)
+        if out is None:
+            print("Error: derive_top_plan needs a NUTS result to read the "
+                  "seats off (run_planner, then run_nuts)")
+            return
+        lines, notes, scope = out
+        print("=== The top's plan (selection, layers, seats per globally "
+              "planned bundle) ===")
+        for n in notes:
+            print(f"  {n}")
+        n_seg = sum(len(l["seats"]) for l in lines)
+        n_seated = sum(1 for l in lines for s in l["seats"] if s is not None)
+        if lines:
+            w_net = max(len(l["net"]) for l in lines)
+            w_type = max(len(l["type"]) for l in lines)
+            print(f"  {'bundle':>6}  {'net':<{w_net}}  {'type':<{w_type}}  "
+                  f"layers  seats")
+            for l in lines:
+                print(f"  {l['bid']:>6}  {l['net']:<{w_net}}  "
+                      f"{l['type']:<{w_type}}  "
+                      f"{' '.join(l['layers'])}  "
+                      f"{sum(1 for s in l['seats'] if s is not None)}"
+                      f"/{len(l['seats'])}")
+        print(f"  {len(lines)} bundle(s) handed down ({n_seg} segment(s), "
+              f"{n_seated} seated)")
+        text = [self._top_plan_line(l) for l in lines]
+        if lines:
+            print("  --- flow-text lines (source BEFORE run_planner; held "
+                  "until it runs) ---")
+            for t in text[:12]:
+                print(f"  {t}")
+            if len(text) > 12:
+                print(f"  ... {len(text) - 12} more line(s)")
+        if path:
+            with open(path, "w") as f:
+                f.write("# derive_top_plan: the globally planned bundles' "
+                        "selection, layers and abstract seats; source "
+                        "before run_planner (hier) — held until it runs\n")
+                f.write("# scope: " + (",".join(scope) if scope else "(none)")
+                        + "\n")
+                f.write(f"# bundles: {len(lines)}\n")
+                for t in text:
+                    f.write(t + "\n")
+            print(f"  written to {path}"
+                  + ("" if text else " (header only — nothing planned)"))

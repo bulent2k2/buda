@@ -194,6 +194,12 @@ def cmd_run_planner(session, cmd, args, cmd_line):
             session._hier_bundles_orig = list(session.bundles)
         # Re-planning invalidates any adopted dogleg (and its pins).
         session._reset_doglegs()
+        # A handed-down top plan (pin_plan, held until now): selection,
+        # forced layers and seat windows onto the globally planned
+        # wrappers, BEFORE the sidecar's baseline load and the template
+        # solves — the informed round routes the blocks under the same top
+        # the reservation came from (ladder item 6c).
+        session._apply_plan_pins(final=True)
         # Apply user-pinned selections to template wrappers BEFORE expansion
         # so topology_pinned + pinned_seg_layers propagate to all instances.
         # persist=True: the pre-expansion rows must learn the pin here — the
@@ -316,6 +322,9 @@ def cmd_run_planner(session, cmd, args, cmd_line):
         session._planner_pitch = session._nuts_pitch
         session._configure_capacity_mode(args)   # opt-in signal_tracks (Gap A part 2)
         session.planner.build_congestion_map()
+        # A handed-down plan (pin_plan, held until now) — see the hier
+        # branch; the flat planner honours it the same way.
+        session._apply_plan_pins(final=True)
         # Apply architect-pinned selections BEFORE optimizing so the
         # planner scores the correct topology and assigns layers for it.
         session._apply_selections()
@@ -461,6 +470,71 @@ def cmd_select_topologies(session, cmd, args, cmd_line):
         session._persist_topologies()   # refresh is_selected in the BDB
 
 
+def cmd_pin_plan(session, cmd, args, cmd_line):
+    # Usage: pin_plan <bundle_id|hint|id:N|net:NAME> <type-spec>
+    #                 [uid <hash>] [layers <name,...>] [seats <lo:hi|-,...>]
+    # ONE bundle's handed-down plan (convergence ladder item 6c): the
+    # candidate the previous round selected — by content uid first (the
+    # exact candidate), by type spec second (the shape and nearest locus,
+    # the pin that survives a pool whose loci moved) — its planner layers
+    # per segment, forced, and its abstract seats per segment as
+    # width-wide slide windows NUTS must place inside.  The lines
+    # `derive_top_plan` writes; sourced BEFORE run_planner (hier), where
+    # they are HELD until the pool exists, and applied there.  A bottom-up
+    # template's bundle is skipped and said.  `unpin_topology` frees the
+    # selection, the layers and the seats together; the pins are session
+    # state (not persisted — a resume re-sources the plan).
+    from buda_script import split_quoted_args, unquote
+    toks = [unquote(t) for t in split_quoted_args(cmd_line)]
+    if len(toks) < 2:
+        print("Error: pin_plan requires <bundle selector> <type-spec> "
+              "[uid <hash>] [layers <a,b,...>] [seats <lo:hi,...>]")
+        return
+    entry = {"sel": toks[0], "spec": toks[1], "uid": "", "layers": [],
+             "seats": [], "line": cmd_line}
+    i = 2
+    while i < len(toks):
+        t = toks[i].lower()
+        if t in ("uid", "layers", "seats") and i + 1 < len(toks):
+            v = toks[i + 1]
+            if t == "uid":
+                entry["uid"] = v
+            elif t == "layers":
+                entry["layers"] = [x for x in v.split(",")]
+            else:
+                seats = []
+                for x in v.split(","):
+                    if x == "-" or x == "":
+                        seats.append(None)
+                        continue
+                    try:
+                        lo, hi = (float(q) for q in x.split(":", 1))
+                    except ValueError:
+                        print(f"Error: pin_plan: seat '{x}' is not "
+                              f"<lo>:<hi> or -")
+                        return
+                    if hi < lo:
+                        print(f"Error: pin_plan: seat '{x}' has hi < lo")
+                        return
+                    seats.append((lo, hi))
+                entry["seats"] = seats
+            i += 2
+        else:
+            print(f"Error: pin_plan: unknown token '{toks[i]}'\n  usage: "
+                  f"pin_plan <bundle> <type-spec> [uid <hash>] "
+                  f"[layers <a,b,...>] [seats <lo:hi,...>]")
+            return
+    session._plan_pins.append(entry)
+    n = session._apply_plan_pins(final=False)
+    if n:
+        if session.planner is not None:
+            session._replan_layers()
+        session._persist_topologies()
+    elif not entry.get("skipped"):
+        print(f"pin_plan: {entry['sel']} held until run_planner (no "
+              f"candidate pool yet)")
+
+
 def cmd_unpin_topology(session, cmd, args, cmd_line):
     # Usage: unpin_topology <bundle_id|hint|id:N|net:PREFIX|*>
     # Clears select_topology's pin so the next planner run may re-choose.
@@ -536,6 +610,10 @@ def cmd_dump_pins(session, cmd, args, cmd_line):
         line = f"  bundle {bid} ({hint}) -> {what}"
         if any(l != -1 for l in forced):
             line += " layers[" + " ".join(_lname(l) for l in forced) + "]"
+        if bid in session._plan_pin_bids:
+            slo = list(getattr(w.plan, "seg_slide_lo", []) or [])
+            n_seat = sum(1 for v in slo if v == v)      # NaN = no seat
+            line += f" seats[{n_seat} of {len(slo)}] (pin_plan)"
         if getattr(w.hier, "locked", False):
             line += "  [bottom-up copy]"
         rows.append(line)
@@ -642,6 +720,7 @@ COMMANDS = {
     "set_planner_param": cmd_set_planner_param,
     "run_planner": cmd_run_planner,
     "select_topology": cmd_select_topology,
+    "pin_plan": cmd_pin_plan,
     "select_topologies": cmd_select_topologies,
     "unpin_topology": cmd_unpin_topology,
 }

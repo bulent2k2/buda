@@ -27,6 +27,8 @@ import os
 
 import buda
 
+from .util import fmt_pos
+
 
 class EditMixin:
 
@@ -1295,6 +1297,11 @@ class EditMixin:
         def _clear(w):
             w.unpin()                          # pin + forced layers, atomically
             w.input.pinned_group = []          # also clear a group pin
+            if bid in self._plan_pin_bids:
+                # A handed-down plan's seat windows (pin_plan) go with the
+                # pin: a freed bundle re-seats where NUTS puts it.
+                w.plan.seg_slide_lo = []
+                w.plan.seg_slide_hi = []
         found = False
         for w in self.bundles:
             if w.input.original_bundle.id == bid:
@@ -1317,4 +1324,202 @@ class EditMixin:
                 found = True
         if not found:
             print(f"Error: bundle {bid} not found")
+        self._plan_pin_bids.discard(bid)
         return found
+
+    # ── pin_plan (convergence ladder item 6c) ─────────────────────────────
+
+    def _plan_pin_bundle(self, sel):
+        """Resolve a pin_plan selector to (wrapper, bid, error).  A hint
+        matches the bundle whose FIRST net is exactly the hint before the
+        prefix rule — a handed-down plan names every bundle by its first
+        net, and `pc_1` must not land on `pc_10` (the sidecar's rule)."""
+        kind, val = self._split_bundle_selector(sel)
+        if kind is None:
+            return None, None, val
+        if kind == "id":
+            w = next((x for x in self.bundles
+                      if x.input.original_bundle.id == val), None)
+            if w is None:
+                ws = self._hier_expansion_map.get(val, [])
+                w = ws[0] if ws else None
+            return (w, val, None) if w is not None \
+                else (None, None, f"bundle {val} not found")
+        nets0 = []
+        for w in self.bundles:
+            try:
+                names = w.input.original_bundle.get_net_names()
+            except Exception:
+                names = None
+            if names:
+                nets0.append((w, names[0]))
+        exact = [w for w, n0 in nets0 if n0 == val]
+        if len(exact) == 1:
+            return exact[0], exact[0].input.original_bundle.id, None
+        pre = [w for w, n0 in nets0 if n0.startswith(val)]
+        if len(pre) == 1:
+            return pre[0], pre[0].input.original_bundle.id, None
+        if not pre:
+            return None, None, f"no bundle whose first net is '{val}'"
+        return None, None, (f"'{val}' is ambiguous ({len(pre)} bundles "
+                            f"match by prefix and none exactly)")
+
+    def _apply_plan_pins(self, final=False):
+        """Apply every held `pin_plan` entry that resolves now: the bundle by
+        selector, the candidate by content uid first and by type spec
+        second, the forced layers, the seat windows (`plan.seg_slide_lo/hi`
+        — NUTS's own per-segment hatch).  An entry whose bundle has no
+        candidates yet is HELD (a plan is sourced before bundling, the
+        pool exists at `run_planner`); with `final` (the planner's call)
+        such an entry is an error.  A bundle that is a bottom-up
+        template's is skipped and said: a template is solved once in its
+        own frame under the derived budget, which is the half of the loop
+        the hand-down exists to keep stable, not to pin.  Returns the
+        number applied this call."""
+        pending = [e for e in self._plan_pins
+                   if not e.get("applied") and not e.get("skipped")]
+        if not pending:
+            return 0
+        marked = set(self.bdb.bottom_up_cells()) if self.bdb is not None \
+            else set()
+        name_to_id = dict(self._layer_name_map)
+        n_applied = 0
+        for e in pending:
+            w, bid, err = self._plan_pin_bundle(e["sel"])
+            if w is None:
+                if final:
+                    e["skipped"], e["why"] = True, err
+                    print(f"Error: pin_plan {e['sel']}: {err}")
+                continue
+            if not w.input.candidates:
+                if final:
+                    e["skipped"], e["why"] = True, "no candidates"
+                    print(f"Error: pin_plan {e['sel']}: bundle {bid} has no "
+                          f"candidates — generate topologies first")
+                continue
+            ctx = w.input.original_bundle.cell_context
+            if getattr(w.hier, "locked", False) or \
+                    (ctx and (self._bu_cell_of(ctx) or ctx) in marked):
+                e["skipped"], e["why"] = True, "bottom-up template"
+                print(f"pin_plan: {e['sel']} is a bottom-up template's "
+                      f"bundle (cell {ctx}) — solved in its own frame under "
+                      f"the derived budget, not pinned; skipped")
+                continue
+            tidx, how = None, "uid"
+            if e.get("uid"):
+                for i, c in enumerate(w.input.candidates):
+                    if buda.topo_uid(c) == e["uid"]:
+                        tidx = i
+                        break
+            if tidx is None:
+                tidx, err = self._resolve_topo_spec(w, e["spec"])
+                if tidx is None:
+                    e["skipped"], e["why"] = True, err
+                    print(f"Error: pin_plan {e['sel']}: {err}")
+                    continue
+                how = ("type spec (uid not in this pool — the loci moved)"
+                       if e.get("uid") else "type spec")
+            if not self._select_single_topology_internal(bid, tidx + 1):
+                e["skipped"], e["why"] = True, "pin refused"
+                continue
+            nseg = len(w.input.candidates[tidx].segments)
+            lids, bad = [], []
+            for nm in e.get("layers") or []:
+                if nm == "-":
+                    lids.append(-1)
+                elif nm in name_to_id:
+                    lids.append(name_to_id[nm])
+                else:
+                    bad.append(nm)
+                    lids.append(-1)
+            if bad:
+                print(f"Warning: pin_plan {e['sel']}: unknown layer(s) "
+                      f"{', '.join(bad)} — those segments take the "
+                      f"planner's choice")
+            seats = list(e.get("seats") or [])
+            if (lids and len(lids) != nseg) or (seats and len(seats) != nseg):
+                print(f"Warning: pin_plan {e['sel']}: {len(lids) or len(seats)} "
+                      f"layer/seat entries for a {nseg}-segment candidate — "
+                      f"they index another shape; only the selection is "
+                      f"pinned")
+                lids, seats = [], []
+                e["layers"], e["seats"] = [], []
+            nan = float("nan")
+            slo = [nan if s is None else s[0] for s in seats]
+            shi = [nan if s is None else s[1] for s in seats]
+
+            def _set(x, lids=lids, slo=slo, shi=shi):
+                x.input.pinned_seg_layers = list(lids)
+                x.plan.seg_slide_lo = list(slo)
+                x.plan.seg_slide_hi = list(shi)
+
+            _set(w)
+            self._mirror_pin_to_original(bid, w, _set)
+            for iw in self._hier_expansion_map.get(bid, []):
+                if iw is not w:
+                    _set(iw)
+            self._plan_pin_bids.add(bid)
+            e.update(applied=True, bid=bid, how=how, nseg=nseg,
+                     nseat=sum(1 for s in seats if s is not None))
+            n_applied += 1
+        if final or n_applied:
+            done = [e for e in self._plan_pins if e.get("applied")]
+            skipped = [e for e in self._plan_pins if e.get("skipped")]
+            held = [e for e in self._plan_pins
+                    if not e.get("applied") and not e.get("skipped")]
+            by_spec = sum(1 for e in done if e["how"] != "uid")
+            print(f"[PlanPin] {len(done)} of {len(self._plan_pins)} "
+                  f"handed-down plan(s) applied ({sum(e['nseat'] for e in done)}"
+                  f" seat(s) pinned"
+                  + (f", {by_spec} by type spec rather than uid" if by_spec
+                     else "")
+                  + (f", {len(skipped)} skipped" if skipped else "")
+                  + (f", {len(held)} held" if held else "") + ")")
+        return n_applied
+
+    def _plan_pins_seated(self):
+        """After run_nuts: of the handed-down seats, how many the placement
+        honoured — (seated, total, misses) with misses as (net, seg,
+        wanted, got_or_None); None before a NUTS result."""
+        if self.nuts_result is None:
+            return None
+        placed = {(t.bundle_id, t.seg_idx): t
+                  for t in self.nuts_result.segments}
+        seated, total, misses = 0, 0, []
+        for e in self._plan_pins:
+            if not e.get("applied"):
+                continue
+            for si, s in enumerate(e.get("seats") or []):
+                if s is None:
+                    continue
+                total += 1
+                want = 0.5 * (s[0] + s[1])
+                ts = placed.get((e["bid"], si))
+                got = (ts.track_position if ts is not None and ts.placed
+                       and ts.track_position == ts.track_position else None)
+                if got is not None and abs(got - want) < 1e-6:
+                    seated += 1
+                else:
+                    misses.append((e["sel"], si, want, got))
+        return seated, total, misses
+
+    def _report_plan_pins_seated(self):
+        """The seat audit line after every run_nuts of a session holding a
+        handed-down plan: a seat NUTS could not honour is the measurement
+        (the templates' copies took it, or the window moved), never a
+        silent re-seat."""
+        if not any(e.get("applied") for e in self._plan_pins):
+            return
+        r = self._plan_pins_seated()
+        if r is None:
+            return
+        seated, total, misses = r
+        if total == 0:
+            return                      # selections pinned, no seat to audit
+        print(f"[PlanPin] seated {seated} of {total} handed-down seat(s)"
+              + ("" if not misses else f"; {len(misses)} not honoured:"))
+        for sel, si, want, got in misses[:8]:
+            print(f"  {sel} seg {si}: wanted {fmt_pos(want)}, "
+                  + ("unplaced" if got is None else f"placed {fmt_pos(got)}"))
+        if len(misses) > 8:
+            print(f"  ... {len(misses) - 8} more")

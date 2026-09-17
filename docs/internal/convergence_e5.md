@@ -541,6 +541,142 @@ reservation — the pin machinery exists — so the informed round routes the
 blocks under the SAME top the reservation came from, and measure whether a
 round is then a fixpoint.
 
+## The plan handed down, built and measured (6c)
+
+**What was built** (`derive_top_plan` → `pin_plan`; `converge.tcl
+-handdown`).  The 6b measurement above ended on the loop's missing
+fixpoint being a property of the *plan*: the informed round re-planned the
+top from scratch after the templates moved, so on the recorded NQ = 2
+rounds 4 of the 13 top-level bundles kept their topology and none kept its
+seat, and every derivation named a top the next round did not route.
+`derive_top_plan` writes, for every *globally planned* bundle — every
+routed bundle that is not a bottom-up copy and whose frame is not inside a
+scoped cell's placed instance, i.e. exactly the bundles the reserve
+derivation read as demand on those cells — one `pin_plan` line: the
+selected candidate by content uid and by type spec (the uid first, the
+exact candidate; the spec second, shape and nearest locus, for a pool
+whose loci moved), the planner's layer per segment, forced, and each
+segment's abstract seat as the width-wide slide window
+`[pos − w/2, pos + w/2]` NUTS must place inside (a *point* would be
+refused by the fit, which needs `hi − lo ≥ width`; the width-wide window
+reproduces the position exactly, and to NUTS it is a *seat pin*: every
+pass respects the interval, so the seat cannot move — while the bit stage
+gets the segment's *natural* window, the candidate's own slide cut like
+the source's, trunk margin and boundary relax included, because the first
+measurement handed the bits the width-wide window too and a
+rail-straddling M7 seat holds one signal track fewer than its 32 bits:
+32 of 85 stranded bits at NQ = 8 and 128 of 176 at NQ = 16 were the top's
+own seats the blind round had filled from its natural window).  A session
+sourcing the lines before
+bundling holds them until its `run_planner hier`, applies them there, and
+after every `run_nuts` audits the seats (`[PlanPin] seated S of N`, each
+unhonoured seat named — never a silent re-seat); a bottom-up template's
+bundle is skipped and said, since the template is what the budget
+re-solves.  The driver's `-handdown` makes the measurement round write
+its plan and every informed round source the previous round's and write
+its own, and adds two columns: `plan` (pins applied, seats honoured) and
+`fixpoint` — whether the budget a round *derived* equals the one it *ran
+under*, line for line, which is the loop's own convergence test; an
+informed round that reaches it stops the arm (the next round would be the
+same session again).  A plan is geometry, so under `-handdown` the `td`
+arm's top-down measurement round runs on the *aligned* floorplan the
+informed rounds route (`-align`: mark, `align_bottom_up`, unmark, nothing
+left marked) — on the SoC the alignment reverts every move it tries and
+the two floorplans already agree, on the mesh the rows move by a phase and
+the unaligned round's seats pinned against moved block faces were 112
+BUSTERM violations.
+
+**Healers off.**  Every column as in the tables above, plus the two new
+ones; `plan` reads `pins applied / lines sourced, seats honoured / seats
+handed down`.  E5's free re-plan rows (the healers-off table above) are
+quoted beside each round's verdict for the comparison.
+
+| size | arm | round | plan | fixpoint | ovl/unpl/viol | E5 free re-plan | detailed WL | reserved ÷ used | s |
+|---|---|---|---|---|---|---|---|---|---|
+| 2 | td | 0 | — | — | 0/0/0 | 0/0/0 | 525,144 | — | 1.9 |
+| 2 | td | 1 | 13/13, 24/24 | no (6 of 12) | 0/360/360 | 0/360/360 | (534,024) | 1.86 | 2.6 |
+| 2 | td | 2 | 13/13, 24/24 | **yes** (9) | 0/360/360 | 1/376/376 | (534,024) | 1.86 | 2.5 |
+| 2 | bu | 1 | 13/13, 36/36 | no (14 of 37) | **0/0/0** | **0/0/0** | 593,094 | 3.15 | 2.9 |
+| 4 | td | 0 | — | — | 1/16/16 | 1/16/16 | (993,477) | — | 3.8 |
+| 4 | td | 1 | 21/21, 44/44 | no (10 of 20) | 3/32/32 | 1/24/24 | (972,047) | 4.15 | 5.3 |
+| 4 | td | 2 | 21/21, 44/44 | **yes** (15) | 3/32/32 | 0/37/37 | (972,367) | 3.58 | 5.2 |
+| 4 | bu | 1 | 21/21, 57/57 | no (31 of 58) | 2/45/45 | 0/45/45 | (974,188) | 4.65 | 5.7 |
+| 4 | bu | 2 | 21/21, 57/57 | no (5 of 43) | 2/45/45 | 0/757/757 | (974,188) | 4.56 | 5.7 |
+| 4 | bu | 3 | 21/21, 57/57 | **yes** (38) | 2/45/45 | — | (974,188) | 4.56 | 5.7 |
+| 8 | td | 0 | — | — | 2/40/40 | 2/40/40 | (1,871,476) | — | 7.5 |
+| 8 | td | 1 | 37/37, 68/68 | no (12 of 24) | 7/32/32 | **0/0/0** | (1,887,276) | 4.67 | 10.8 |
+| 8 | td | 2 | 37/37, 68/68 | no (1 of 18) | 2/32/32 | — | (1,907,320) | 4.31 | 11.6 |
+| 8 | td | 3 | 37/37, 68/68 | **yes** (17) | 2/32/32 | — | (1,907,320) | 4.31 | 11.5 |
+| 8 | bu | 1 | 37/37, 105/105 | no (47 of 69) | 3/85/85 | 0/18/18 | (1,963,922) | 5.94 | 12.9 |
+| 8 | bu | 2 | 37/37, 105/105 | no (4 of 46) | 3/85/85 | 0/1444/1444 | (1,963,922) | 5.84 | 12.9 |
+| 8 | bu | 3 | 37/37, 105/105 | **yes** (42) | 3/85/85 | — | (1,963,922) | 5.84 | 12.7 |
+| 16 | td | 0 | — | — | 3/32/32 | 3/32/32 | (3,677,304) | — | 19.7 |
+| 16 | td | 1 | 69/69, 119/119 | no (16 of 23) | 6/40/40 | 7/170/170 | (3,706,425) | 6.88 | 32.7 |
+| 16 | td | 2 | 69/69, 119/119 | **yes** (15) | 6/40/40 | 0/2864/2864 | (3,706,425) | 5.71 | 30.4 |
+| 16 | bu | 1 | 69/69, 201/201 | no (53 of 77) | 0/176/176 | 1/8/8 | (4,117,714) | 7.16 | 32.9 |
+| 16 | bu | 2 | 69/69, 201/201 | no (1 of 53) | 0/176/176 | **0/0/0** | (4,117,714) | 6.56 | 32.7 |
+| 16 | bu | 3 | 69/69, 201/201 | **yes** (52) | 0/176/176 | — | (4,117,714) | 6.56 | 33.2 |
+
+The mesh control (`tpu.tcl`, healers off, the `td` round 0 on the aligned
+floorplan — which is why its wire is the bottom-up rounds' 550,528 rather
+than the compact top-down 197,376 of the control table above):
+
+| N | arm | round | plan | fixpoint | ovl/unpl/viol | detailed WL | reserved ÷ used |
+|---|---|---|---|---|---|---|---|
+| 8 | td | 0 (aligned) | — | — | 0/0/0 | 550,528 | — |
+| 8 | td | 1 | 96/96, 96/96 | **yes** (2) | **0/0/0** | 550,528 | **1.00** |
+| 8 | bu | 1 | 96/96, 96/96 | **yes** (2) | **0/0/0** | 550,528 | **1.00** |
+| 16 | td | 1 | 320/320, 320/320 | **yes** (2) | **0/0/0** | 2,174,208 | **1.00** |
+| 16 | bu | 1 | 320/320, 320/320 | **yes** (2) | **0/0/0** | 2,174,208 | **1.00** |
+
+**What the tables say.**
+
+1. **The handed-down top reproduces exactly, and the loop has a
+   fixpoint.**  Every pin applies and every seat is honoured at every size
+   on both vehicles (the `plan` column never falls short), the plan file a
+   round derives is the plan it was handed, byte for byte, and the budget
+   a round derives reproduces the budget it ran under within one to three
+   informed rounds on the SoC (`td` at NQ = 2/4/16 in two, at NQ = 8 in
+   three; `bu` at NQ = 4/8/16 in three) and in the first on the mesh —
+   where E5's free re-plan never reproduced anything (its second informed
+   rounds went to 376, 757, 1,444 and 2,864 unplaced).  On the mesh the
+   fixpoint is clean and the reservation is exactly the top's use
+   (1.00×) for both arms.  The rounds it takes on the SoC are the nested
+   templates' own buses settling, not the top's: a cluster's bus is demand
+   on the core inside it (the inherited corridor), it is re-solved under
+   that corridor each round, and the derivation lines that still move
+   between round 1 and round 2 (5 of 43, 4 of 46, 1 of 53) are those.
+
+2. **The fixpoint is exactly as clean as the top handed down — no
+   cleaner.**  The stranded bits at every dirty SoC fixpoint are the
+   pinned top's *own*, at the seats the measurement round itself could not
+   fill: NQ = 8 `td`'s 32 are `ml_0`, whose round-0 M4 seat overlaps
+   `nl_11`'s (the two overlaps round 0 reported, carried into every round
+   with the plan); NQ = 8 `bu`'s 85 are the blind round's overlaps
+   (`pn_0`×`nl_0`, `pc_0`×`nl_0`, `pc_2`×`pc_3` on M6) and its M7 seat of
+   `nl_10` and M3 keepout culls; NQ = 16 `bu`'s 176 likewise (`nl_*` on
+   M7 and M3, `pc_3` on M7).  No template bit strands in any of them.  The
+   five extra "overlaps" NQ = 8 `td` reports beside the carried one are
+   abstract-footprint touches of one unit between a pinned top seat and
+   the cluster template's bus packed against the reserved tracks' keepout
+   (the top's abstract footprint is a slot wider than the union of its
+   bit tracks), and lose no bit.
+
+3. **Pinning the top forbids the re-plan that sometimes rescues it.**
+   Where the free re-plan came out clean the hand-down does not (NQ = 8
+   `td` round 1: 0/0/0 free against 7/32 pinned; NQ = 16 `bu` round 2:
+   0/0/0 free against 0/176 pinned), and at NQ = 2 the free `bu` round
+   routes 10 % less wire (536,005 against 593,094: the pinned round keeps
+   the blind round's route, the free one finds a shorter top).  The two
+   are one trade: the free re-plan can repair the measurement round's
+   defects and cannot reproduce its top; the hand-down reproduces the top
+   and cannot repair it.  So the loop's *convergence* and its
+   *cleanliness* are two different things, now measured apart, and the
+   clean fixpoint needs a clean top to hand down — which is what the
+   healed rounds below test.
+
+<!-- HEALED-6C -->
+
 ## Provenance
 
 - `flow/tcl/converge.tcl soc 2 4 8 16 -primitive reserve -arms
@@ -564,6 +700,17 @@ round is then a fixpoint.
   traces of `soc.tcl 2 -bottomup -noheal` and the same `-shares` the
   driver derived, comparing each top-level bundle's selected topology,
   layers and seat between the two.
+- The 6c measurement: `converge.tcl soc 2 4 8 -primitive reserve -arms
+  td,bu -informed 4 -handdown` and `… soc 16 … -informed 4 -handdown`
+  (healers off), `… soc 2 4 8 -heal … -informed 3 -handdown` and `… soc 16
+  -heal … -informed 3 -handdown` (healed), `converge.tcl tpu 8 16
+  -primitive reserve -arms td,bu -informed 3 -handdown` (the control; its
+  `td` round 0 aligned by the driver).  Each run leaves
+  `<p>_<arm>_plan_r<k>.buda` beside the budget files, and the `plan` /
+  `fixpoint` columns are the driver's (`buda::query plan_pins`,
+  `converge::policy_diff`).  The stranded-bit attributions are from
+  `BUDA_RECORD` traces of the NQ = 8 rounds replayed in Python and
+  compared segment by segment against the blind round's own.
 - Engine at the merge of #936 plus this change (the `uniform` form, the
   driver's `uniform` arm, the blocked-track enforcement on globally solved
   instances, the extended report); the correction and the 6b rows at the

@@ -1121,3 +1121,37 @@ two doors: `apply` declares through `set_cell_layer_reserve` itself and REMOVES
 a scoped cell's reservation on a layer it emitted no line for, `file` writes
 the lines (with a `# scope:` header and `off` lines for the removals) for a
 session that sources them **before** `run_planner hier`.
+
+### `derive_top_plan [file <path>] [cells <a,b,...>]`
+
+```
+derive_top_plan                  # print the top's plan + the pin_plan lines
+derive_top_plan file plan.buda   # ...and write them for the next session
+derive_top_plan cells sram_cell  # scope: the cells the budget is derived FOR
+```
+
+The **top's plan handed down** ([convergence ladder](../internal/convergence_ladder.md)
+item 6c): every **globally planned** bundle's selected candidate (by content
+uid and by type spec), its planner layer per segment, and its abstract seat
+per segment, as one [`pin_plan`](planner.md#pin_plan) line each — for a
+later session to source before `run_planner hier`, beside the reservation
+the same session derives.  [E5](../internal/convergence_e5.md) measured why
+the informed loop had no fixpoint: the informed round re-planned the top
+from scratch after the templates moved, so on the recorded NQ = 2 rounds
+4 of the 13 top-level bundles kept their topology and none kept its seat,
+and every derivation named a top the next round did not route.  A track
+preference (`set_reserve_steer`, 6b) could not supply that; a pin can.
+
+"The top" is every routed bundle that is not a bottom-up copy and whose
+frame instance is not inside a placed instance of a scoped cell — the same
+scope rule as the share/reserve derivations (named `cells`, else the
+`set_bottom_up` marks, else every cell owning a cell-local bundle) — i.e.
+exactly the bundles the reserve derivation read as *demand* on those
+cells; a bundle framed inside a scoped instance is re-solved under the
+derived budget and is not handed down.  A seat is the width-wide window
+`[pos − w/2, pos + w/2]` (see `pin_plan` for why not a point); an unplaced
+segment hands down `-`.  Needs a NUTS result.  The file carries a
+`# scope:` header and `# bundles: N`.  The loop driver runs it under
+`converge.tcl -handdown`, whose table then carries the `plan` (pins applied,
+seats honoured) and `fixpoint` (a round's derived budget equal to the one it
+ran under) columns.

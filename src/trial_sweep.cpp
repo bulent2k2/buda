@@ -168,14 +168,22 @@ SweepOutcome eval_move(const std::vector<BundleWrapper>& baseline,
     if (!w || m.tidx < 0 || m.tidx >= (int)w->input.candidates.size())
         return out;                                    // ok=false
     // Pin the move — the _rr_trial mutation, incl. clearing the dogleg
-    // per-segment overrides when moving a bundle off its adopted split.
+    // per-segment overrides when moving a bundle off its adopted split,
+    // and, for ANY move to a different shape, the seat windows and the
+    // FORCED per-segment layers sized for the old one (the planner
+    // applies pinned_seg_layers to every candidate — carried onto a
+    // different-direction shape they make an unbuildable LAYER_DIR
+    // route; rr_trials.py has the measurement).  Mirrors _rr_trial
+    // exactly, so the sweep's verdict and the sequential replay agree.
+    const bool moved = (m.tidx != w->plan.selected_topology_index);
     w->plan.selected_topology_index = m.tidx;
     w->input.topology_pinned = true;
-    if (dogleg_slot_bids.count(m.bundle_id)) {
+    if (dogleg_slot_bids.count(m.bundle_id) || moved) {
         w->plan.seg_net_pull.clear();
         w->plan.seg_slide_lo.clear();
         w->plan.seg_slide_hi.clear();
     }
+    if (moved) w->input.pinned_seg_layers.clear();
     // Incremental replan on a private planner clone (cuts state is mutated
     // by the recharge; the clone shares only const refs with the session's).
     CongestionPlanner pl = planner_proto;

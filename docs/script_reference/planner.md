@@ -407,6 +407,71 @@ unpin_topology 2       # bundle 2 is no longer forced
 run_planner            # may now choose a different candidate for bundle 2
 ```
 
+### `pin_plan`
+
+```
+pin_plan <bundle> <type-spec> [uid <hash>] [layers <name,...>] [seats <lo:hi|-,...>]
+```
+
+ONE bundle's plan handed down from a previous session ([convergence
+ladder](../internal/convergence_ladder.md) item 6c) — the lines
+[`derive_top_plan`](nuts.md#derive_top_plan-file-path-cells-ab) writes.
+`<bundle>` is the [`select_topology`](#select_topology) selector, with a
+net-name hint matching the bundle whose **first net is exactly the hint**
+before the prefix rule (a plan names every bundle by its first net, and
+`pc_1` must not land on `pc_10`).  The candidate is found by content **uid**
+first — the exact candidate the previous session routed — and by the
+**type spec** second (the shape and nearest locus: the pin that survives a
+pool whose Hanan loci moved, reported as `by type spec rather than uid`).
+`layers` forces the planner's layer per segment (the `edit_commit pin`
+mechanism, `pinned_seg_layers`); `seats` gives each segment's abstract seat
+as a slide window NUTS must place inside — the width-wide window
+`[pos − w/2, pos + w/2]` around the previous session's track position, which
+reproduces it exactly (a POINT would be refused by the fit, which needs
+`hi − lo ≥ width`); `-` hands down no seat for that segment.  A window
+exactly the segment's width is a **seat pin** to NUTS: every pass respects
+the interval, so the seat cannot move — and the bit stage gets the
+segment's *natural* window (the candidate's own slide, trunk margin and
+boundary relax included: the window the previous session admitted its bits
+from, `TrackSegment.seat_nat`), not the pinned one, because a width-wide
+window on a rail-straddling seat holds one signal track fewer than the bits
+and stranded 32 of 85 bits at NQ = 8 (128 of 176 at NQ = 16) in the first
+6c measurement.
+
+The entry is **held** until the candidate pool exists — a plan is sourced
+before bundling, like the budget it comes with — and applied at
+`run_planner` / `run_planner hier` (`[PlanPin] N of M handed-down plan(s)
+applied`), or at once when typed after generation.  After every `run_nuts`
+the session audits the seats: `[PlanPin] seated S of N handed-down seat(s)`,
+naming each seat the placement could not honour (a window the templates'
+copies took, or one outside the candidate's slide range — NUTS then places
+where it can and counts a violation) — never a silent re-seat.  A bottom-up
+**template's** bundle is skipped and said (a template is solved once in its
+own frame under the derived budget — the half of the loop the hand-down
+exists to keep stable, not to pin); an unknown bundle, an unknown layer
+name, a seat list whose length is not the candidate's segment count (only
+the selection is pinned then) are each reported.  `unpin_topology` frees
+the selection, the forced layers and the seats together; `dump_pins` shows
+the pin with `seats[k of n] (pin_plan)`.  Session state, not persisted: a
+resumed session re-sources the plan.  From Tcl, `buda::query plan_pins`
+returns `{entries applied seated of}`.
+
+| Argument | Type | Description |
+|---|---|---|
+| `bundle` | int \| string | Bundle ID, net-name hint (exact first net first), or `id:<N>` / `net:<name>`. |
+| `type-spec` | string | The candidate's type as `dump_topologies` prints it (`TRUNK_H+MST@y1268`); the fallback when the uid is not in the pool. |
+| `uid <hash>` | string | The candidate's content uid (`topo_uid`), tried first. |
+| `layers <csv>` | names | One layer name per segment (`-` = the planner's choice). |
+| `seats <csv>` | `lo:hi` | One slide window per segment (`-` = none). |
+
+**Example:**
+```buda
+# the previous session's plan for the bus x, then the round that routes under it
+pin_plan net:x_0 I_H uid 63cc2a3bfb1afd90 layers M6 seats 133:167
+run_planner hier 5          # [PlanPin] 1 of 1 handed-down plan(s) applied (1 seat(s) pinned)
+run_nuts                    # [PlanPin] seated 1 of 1 handed-down seat(s)
+```
+
 ### `dump_pins`
 
 ```

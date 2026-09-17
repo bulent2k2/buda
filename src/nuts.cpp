@@ -70,7 +70,8 @@ static void build_nuts_maps(
     AlignMap&                                                     align_map,
     std::map<std::pair<int,int>, std::vector<double>>&            busterm_face_map,
     std::map<std::pair<int,int>, std::vector<PassthruCrossing>>&  passthru_map,
-    std::map<std::pair<int,int>, std::pair<double,double>>&       pull_win_map)
+    std::map<std::pair<int,int>, std::pair<double,double>>&       pull_win_map,
+    std::map<std::pair<int,int>, std::pair<double,double>>*       nat_slide_map = nullptr)
 {
     std::set<std::pair<int,int>> jog_set;   // dogleg jogs: excluded from alignment
     // Pass 1 — nominal perpendicular position from the topology.
@@ -135,6 +136,11 @@ static void build_nuts_maps(
             else
                 slide_map[key] = { static_cast<double>(cs.perp_lo),
                                    static_cast<double>(cs.perp_hi) };
+            // The candidate's OWN slide window, override or not: what a seat
+            // pin's natural window (TrackSegment::seat_nat) is cut from.
+            if (nat_slide_map)
+                (*nat_slide_map)[key] = { static_cast<double>(cs.perp_lo),
+                                          static_cast<double>(cs.perp_hi) };
 
             int n_seg = 0, n_bt = 0;
             for (const auto& c : cs.conns) {
@@ -391,10 +397,15 @@ static void relax_boundary_intervals(
         auto it = pull_map.find(key);
         if (it == pull_map.end()) continue;
         const double preferred = it->second;
-        if (std::abs(preferred - ts.interval_hi) < 0.5) {
-            ts.interval_hi += ts.width;
-        } else if (std::abs(preferred - ts.interval_lo) < 0.5) {
-            ts.interval_lo -= ts.width;
+        // A seat pin's interval is exact by contract; the relax applies to
+        // its NATURAL window instead, so that window is the one the source
+        // round's bits were admitted from (same passes, same rule).
+        double& lo = std::isnan(ts.seat_nat_lo) ? ts.interval_lo : ts.seat_nat_lo;
+        double& hi = std::isnan(ts.seat_nat_lo) ? ts.interval_hi : ts.seat_nat_hi;
+        if (std::abs(preferred - hi) < 0.5) {
+            hi += ts.width;
+        } else if (std::abs(preferred - lo) < 0.5) {
+            lo -= ts.width;
         }
     }
 }
@@ -404,18 +415,36 @@ static void apply_interval_constraints(
     const std::map<std::pair<int,int>, std::pair<double,double>>& slide_map,
     const std::set<std::pair<int,int>>&                           trunk_set,
     const std::map<std::pair<int,int>, int>&                      net_pull_map,
-    int only_layer = -1)
+    int only_layer = -1,
+    const std::map<std::pair<int,int>, std::pair<double,double>>* nat_slide_map = nullptr)
 {
     constexpr double kSentinel = 5e8;
     for (auto& ts : segments) {
         if (only_layer >= 0 && ts.layer != only_layer) continue;
         auto key = std::make_pair(ts.bundle_id, ts.seg_idx);
 
+        // The window this segment would have WITHOUT a slide override — kept
+        // for a seat pin (TrackSegment::seat_nat_lo/hi), since the pinned
+        // interval is exact for the seat and too tight for the bits.
+        double nat_lo = ts.interval_lo, nat_hi = ts.interval_hi;
+        bool seat_pin = false;
         auto sit = slide_map.find(key);
         if (sit != slide_map.end()) {
             auto [slo, shi] = sit->second;
             if (slo > -kSentinel) ts.interval_lo = std::max(ts.interval_lo, slo);
             if (shi <  kSentinel) ts.interval_hi = std::min(ts.interval_hi, shi);
+            seat_pin = (slo > -kSentinel && shi < kSentinel &&
+                        shi - slo <= ts.width + 1e-6);
+        }
+        if (seat_pin && nat_slide_map) {
+            // The window without the override: the candidate's own slide,
+            // cut exactly as the slide would have been.
+            auto nit = nat_slide_map->find(key);
+            if (nit != nat_slide_map->end()) {
+                auto [nlo, nhi] = nit->second;
+                if (nlo > -kSentinel) nat_lo = std::max(nat_lo, nlo);
+                if (nhi <  kSentinel) nat_hi = std::min(nat_hi, nhi);
+            }
         }
 
         // Propagate net_pull into TrackSegment for use in solve_layer.
@@ -423,17 +452,25 @@ static void apply_interval_constraints(
         if (npit != net_pull_map.end()) ts.net_pull = npit->second;
 
         if (trunk_set.count(key)) {
-            double span   = ts.interval_hi - ts.interval_lo;
-            double margin = 0.1 * span;
             // Apply margin only on the side opposite the pull direction so the
             // preferred edge stays reachable.  Symmetric margin for balanced trunks.
             int np = ts.net_pull;
-            double new_lo = ts.interval_lo + (np >= 0 ? margin : 0.0);
-            double new_hi = ts.interval_hi - (np <= 0 ? margin : 0.0);
-            if (new_hi - new_lo >= ts.width) {
-                ts.interval_lo = new_lo;
-                ts.interval_hi = new_hi;
-            }
+            auto shrink = [&](double& lo, double& hi) {
+                double span   = hi - lo;
+                double margin = 0.1 * span;
+                double new_lo = lo + (np >= 0 ? margin : 0.0);
+                double new_hi = hi - (np <= 0 ? margin : 0.0);
+                if (new_hi - new_lo >= ts.width) {
+                    lo = new_lo;
+                    hi = new_hi;
+                }
+            };
+            shrink(ts.interval_lo, ts.interval_hi);
+            shrink(nat_lo, nat_hi);      // the natural window, the same rule
+        }
+        if (seat_pin) {
+            ts.seat_nat_lo = nat_lo;
+            ts.seat_nat_hi = nat_hi;
         }
     }
 }
@@ -1351,7 +1388,7 @@ static NutsContext build_context(const std::vector<BundleWrapper>& bundles,
     build_nuts_maps(bundles, floorplan, ctx.pull_map, ctx.slide_map,
                     ctx.trunk_set, ctx.busterm_set, ctx.rev_conn_map,
                     ctx.net_pull_map, ctx.align_map, ctx.busterm_face_map,
-                    ctx.passthru_map, ctx.pull_win_map);
+                    ctx.passthru_map, ctx.pull_win_map, &ctx.nat_slide_map);
     for (auto& ts : segments) {
         auto bf = ctx.busterm_face_map.find({ts.bundle_id, ts.seg_idx});
         if (bf != ctx.busterm_face_map.end()) ts.busterm_faces = bf->second;
@@ -1365,7 +1402,8 @@ static NutsContext build_context(const std::vector<BundleWrapper>& bundles,
         ctx.ts_ptr_map[{ts.bundle_id, ts.seg_idx}] = &ts;
     if (prep) {
         apply_interval_constraints(segments, ctx.slide_map, ctx.trunk_set,
-                                   ctx.net_pull_map, only_layer);
+                                   ctx.net_pull_map, only_layer,
+                                   &ctx.nat_slide_map);
         relax_boundary_intervals(segments, ctx.pull_map, ctx.net_pull_map,
                                  ctx.busterm_set, only_layer);
         // AFTER the relax, deliberately: relax widens an interval OUTWARD by a
@@ -3591,6 +3629,22 @@ std::optional<std::vector<std::array<int, 3>>> NUTSEngine::screen_candidates(
         // Same hazard as _rr_trial: a dogleg-adopted target's per-segment
         // overrides index its split topology, not the screened candidate.
         w->plan.seg_net_pull.clear();
+        w->plan.seg_slide_lo.clear();
+        w->plan.seg_slide_hi.clear();
+    }
+    // The screen scores ALTERNATE shapes: the forced per-segment layers
+    // and seat windows the committed candidate carries (edit_commit pin,
+    // a handed-down plan) index that candidate's segments, and applied to
+    // a different shape they force a V layer onto an H segment — the
+    // ordering would then rank every alternate by an unbuildable plan.
+    // Cleared on this private copy; the trial that follows clears them
+    // the same way for the move it makes (rr_trials.py / trial_sweep.cpp).
+    const int cur_sel = w->plan.selected_topology_index;
+    const bool screening_others =
+        std::any_of(tidxs.begin(), tidxs.end(),
+                    [cur_sel](int t) { return t != cur_sel; });
+    if (screening_others) {
+        w->input.pinned_seg_layers.clear();
         w->plan.seg_slide_lo.clear();
         w->plan.seg_slide_hi.clear();
     }

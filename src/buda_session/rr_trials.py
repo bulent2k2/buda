@@ -61,14 +61,19 @@ class RRTrialsMixin:
         t0 = time.perf_counter()
         wm = None
         try:
+            moved = (tidx != w.plan.selected_topology_index)
             w.plan.selected_topology_index = tidx
             w.input.topology_pinned = True
-            if bid in self._dogleg_slot:
+            if bid in self._dogleg_slot or moved:
                 # Same hazard as _rr_trial: the target's per-segment dogleg
-                # overrides index its adopted split topology, not this one.
+                # overrides index its adopted split topology, not this one;
+                # and a bundle MOVED to another shape must not keep the
+                # per-segment state sized for the old one (see _rr_trial).
                 w.plan.seg_net_pull = []
                 w.plan.seg_slide_lo = []
                 w.plan.seg_slide_hi = []
+            if moved:
+                w.input.pinned_seg_layers = []
             asn = self.planner.replan_bundle(self.bundles, bid)
             if asn is None:
                 return None
@@ -276,18 +281,35 @@ class RRTrialsMixin:
         if (stage == 'b' and not full
                 and getattr(self, '_rr_fast_trials', False)):
             abort_opens = self._rr_m_primary(metric())
+        moved = (tidx != w.plan.selected_topology_index)
         w.plan.selected_topology_index = tidx
         w.input.topology_pinned = True
         bid = w.input.original_bundle.id
-        if bid in self._dogleg_slot:
+        if bid in self._dogleg_slot or moved:
             # The target carries per-segment dogleg overrides indexed by ITS
             # adopted split topology; pinning a different candidate must not
             # inherit them (misapplied slide/pull pins — the hazard
             # _reset_doglegs guards against, scoped here to the one bundle the
             # trial moves).  The snapshot restores them on rejection.
+            # The same holds for ANY bundle moved to a different shape: the
+            # seat windows a `pin_plan` / `edit_commit` set (`seg_slide_*`)
+            # index the OLD candidate's segments, and NUTS's only staleness
+            # guard is an array-length match — every Z/U shape has three.
             w.plan.seg_net_pull = []
             w.plan.seg_slide_lo = []
             w.plan.seg_slide_hi = []
+        if moved:
+            # FORCED per-segment layers (`pinned_seg_layers`, from
+            # `edit_commit pin` or a handed-down plan) apply to EVERY
+            # candidate in the planner (the unpin_topology hazard): carried
+            # onto a different-direction shape they make an unbuildable
+            # LAYER_DIR route the (opens, overlaps) metric cannot see —
+            # measured on the 6c hand-down: ripup's `topo 2->1` commit on a
+            # `pin_plan`-ed 8-bit bus left its H segment's bits on a V layer
+            # (34–66 audit violations behind a 0/0 metric).  The incremental
+            # replan assigns fresh direction-correct layers; the snapshot
+            # restores the pins on rejection.
+            w.input.pinned_seg_layers = []
         self._rr_rerun(stage, target_bid=bid, full=full,
                        abort_opens=abort_opens)
         return metric()

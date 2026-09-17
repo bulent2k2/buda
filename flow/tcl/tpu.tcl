@@ -84,7 +84,7 @@ while {$argi < $argc} {
 # `-bottomup` changes the GEOMETRY, not just the flow: congruent instances
 # need the row pitch on a track period, so the intent has to reach
 # `configure` before it sizes anything.
-if {$bottomup} { lappend overrides ALIGN 1 }
+if {$bottomup || [converge::align_wanted]} { lappend overrides ALIGN 1 }
 tpu_vehicle::configure $overrides
 puts "tpu.tcl: [tpu_vehicle::describe]"
 
@@ -109,6 +109,9 @@ if {$bottomup} {
     # only thing that has been derived from these coordinates.
     converge::mark row_cell
     buda::align_bottom_up
+} elseif {[converge::align_wanted]} {
+    # A top-down round on the bottom-up geometry (converge_lib.tcl, `-align`).
+    converge::align_only row_cell
 }
 # The E1 budget, if the driver handed one down (see converge_lib.tcl).
 converge::policy

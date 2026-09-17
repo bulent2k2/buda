@@ -133,6 +133,8 @@ def cmd_run_nuts(session, cmd, args, cmd_line):
     # trial rerun (_run_nuts_internal) deliberately does NOT clear it —
     # trials re-run DNUTS themselves and restore refs via snapshot.
     session.detailed_result = None
+    # A handed-down plan's seats, audited against the placement (6c).
+    session._report_plan_pins_seated()
     layer_names = session._make_layer_names()
     diag = session._nuts_diagnostics(session.nuts_result, layer_names, before)
     session._write_nuts_log(layer_names, extra_lines=diag)

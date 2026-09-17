@@ -980,16 +980,24 @@ class NutsFlowMixin:
         re-fallback).  Shared by the doomed-seat census and the TOP re-seat
         heal; the dead-span escalation keeps its own inline copy (its
         branches interleave with the cull-risk tier)."""
-        b_lo = max(seg.interval_lo, seg.track_lo_bound)
-        b_hi = min(seg.interval_hi, seg.track_hi_bound)
+        # A seat pin's bits are admitted from its NATURAL window, not the
+        # width-wide pinned one (TrackSegment::seat_nat — what
+        # make_bus_segments hands DetailedNUTS); a BusSegment already
+        # carries the resolved window.
+        i_lo, i_hi = seg.interval_lo, seg.interval_hi
+        nat_lo = getattr(seg, "seat_nat_lo", float("nan"))
+        if nat_lo == nat_lo:
+            i_lo, i_hi = nat_lo, seg.seat_nat_hi
+        b_lo = max(i_lo, seg.track_lo_bound)
+        b_hi = min(i_hi, seg.track_hi_bound)
         span_all = g.count_signal_tracks_in_span(
-            seg.span_lo, seg.span_hi, seg.interval_lo, seg.interval_hi)
+            seg.span_lo, seg.span_hi, i_lo, i_hi)
         if b_lo > b_hi:
             return 0          # corner bounds exclude the whole interval
         if span_all >= need:
             # Span pool wins admission; the corner bounds then filter it.
             return (span_all
-                    if (b_lo, b_hi) == (seg.interval_lo, seg.interval_hi)
+                    if (b_lo, b_hi) == (i_lo, i_hi)
                     else g.count_signal_tracks_in_span(
                         seg.span_lo, seg.span_hi, b_lo, b_hi))
         x = (seg.span_lo + seg.span_hi) / 2.0
