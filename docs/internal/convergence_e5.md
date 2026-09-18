@@ -831,7 +831,9 @@ two-instance vehicle, whose unbanded bus moves to M4/M2 under the full
 union, are both such cases.
 
 **Healers off** (`converge.tcl soc 2 4 8 16 -primitive reserve -arms td,bu
--informed 4 -handdown -yield`; the 6c rows quoted for comparison):
+-informed 4 -handdown -yield`; the 6c rows quoted for comparison).
+**Measured under the corrected derivation** (the admission-pool fix,
+`5562120`) — see the note under the healed table, which is not yet:
 
 | size | arm | round | plan | fixpoint | yielded | ovl/unpl/viol | 6c (no yield) | detailed WL | reserved ÷ used | s |
 |---|---|---|---|---|---|---|---|---|---|---|
@@ -872,7 +874,19 @@ loops shared the machine.)
 
 **Healers on** (`… -heal -informed 3 -handdown -yield`; `first` is the
 informed round's healerless verdict under the healed previous round's
-plan, `final` its healed one, 6c's pair quoted):
+plan, `final` its healed one, 6c's pair quoted).
+
+> **This table is still the PREVIOUS pass** (`a431865`, the point-probe
+> derivation), while the healerless table above and the mesh control below
+> are the corrected one.  Its re-run is in flight and **at least one row is
+> already known to move**: NQ = 16 `td` round 1 reads first 4/8/8 and final
+> **2/0/0** against the 3/8/8 → 0/0/0 below, at detailed WL 4,642,741 — so
+> it no longer heals clean, and the "seven of the eight arms" sentence in
+> *What this settles* does not survive it.  NQ = 4 and NQ = 8 `td` come back
+> identical.  Do not read this table against the one above until this note
+> is gone.  It is here rather than the corrected numbers because the last
+> round of the re-run is still solving; quoting a half-finished table would
+> be the same fault in a new place:
 
 | size | arm | round | plan | fixpoint | first | final | 6c (first → final) | detailed WL | reserved ÷ used |
 |---|---|---|---|---|---|---|---|---|---|
@@ -887,7 +901,9 @@ plan, `final` its healed one, 6c's pair quoted):
 | 16 | bu | 1 | 69/69, 196/201 | no (54 of 80, plan 6 of 72) | 4/32/32 | **0/0/0** | 0/8 → 0/0 | 4,417,825 | 6.85 |
 
 The mesh control (`converge.tcl tpu 8 16 -primitive reserve -arms td,bu
--informed 3 -handdown -yield`, healers off): clean at every round with
+-informed 3 -handdown -yield`, healers off), **re-run under the corrected
+derivation and reproduced exactly** — every round, every wirelength, both
+fixpoint verdicts: clean at every round with
 wire byte-identical to the 6c control (550,528 at N = 8, 2,174,208 at
 N = 16) and the reservation exactly the top's use (1.00×) — but the `td`
 arm's fixpoint now reads `no (1 of 2)` where 6c's read `yes (2)`: the
@@ -1005,13 +1021,30 @@ both, and is a driver policy on top of `pin_plan`, not a new primitive.
   corridor tracks left inside the core's M5 window (`varA/B2/B3/B`);
   the core's window and the inherited tracks read off the `BUDA_RECORD`
   recording of the NQ = 2 top-down round in Python.
-  Every 6d row here is the SECOND measurement.  The first went through a
-  yield that tested each seat against half of what fragments it and kept
-  one image per ancestor track (#940 review), so all three tables were
-  re-run against the corrected pass on the same commands.  The mesh
-  control came back byte-identical; the SoC moved, most of all at NQ = 16
-  bottom-up, whose 264 stranded bits — the first measurement's headline
-  cost — were the defect and not the policy.
+  **The three tables are not all from one pass right now**, which the
+  headers say individually and this bullet says once.  There have been two
+  corrections, and a row belongs to whichever it has been re-run under:
+
+  1. The FIRST measurement went through a yield that tested each seat
+     against half of what fragments it and kept one image per ancestor
+     track (#940 review).  All three tables were re-run against that
+     correction on the same commands; the mesh control came back
+     byte-identical, the SoC moved, most of all at NQ = 16 bottom-up, whose
+     264 stranded bits — the first measurement's headline cost — were the
+     defect and not the policy.
+  2. The SECOND correction is the admission pool (`5562120`): the
+     contiguous-run test read a single-x probe while the `need`/`pool` it
+     was judged against came from the seat's span-clear admission
+     arithmetic.  The healerless table and the mesh control are re-run
+     under it — the control again reproducing exactly, the healerless table
+     moving nine cells, seven of them in `yielded`, which is the column the
+     yield itself writes.  **The healed table is not**, and its re-run has
+     already turned up a row that moves the section's conclusions, so the
+     note above it says which and warns off reading the two together.
+
+  Saying this beats leaving it to be inferred: a reader at *What this
+  settles* is being asked to compare the two SoC tables, and for the moment
+  they answer to different engines.
 - Engine at the merge of #936 plus this change (the `uniform` form, the
   driver's `uniform` arm, the blocked-track enforcement on globally solved
   instances, the extended report); the correction and the 6b rows at the

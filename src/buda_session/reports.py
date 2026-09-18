@@ -1888,7 +1888,15 @@ class ReportsMixin:
         # The yield is ONE pass over the seats, after every line exists:
         # what fragments a seat is the cell's own line UNION the ancestor
         # corridors it inherits, and neither is known until then.
-        if yield_seat and lines:
+        if yield_seat:
+            # NOT `and lines`: a cell can hold a seat that an out-of-scope
+            # ancestor's corridor covers while this derivation emits no
+            # line at all, and there the pass has nothing to give back but
+            # the shortfall to REPORT — which is the half of it that exists
+            # for a seat it cannot rescue (Codex on #940, found one level
+            # further up than the report).  With no line and no inherited
+            # reserve the layer loop has nothing to walk, so this costs a
+            # call and says nothing.
             lines = self._yield_seats(lines, by_cell, scope, comps,
                                       frames, ocache, notes)
         return lines, notes, scope
@@ -2022,6 +2030,7 @@ class ReportsMixin:
                     if not lrows:
                         continue          # no seat of its own to protect
                     own = max(lrows, key=lambda r: r["own_need"])
+                    lname = lrows[0]["layer_name"]
                     d, od = comps.get(own["inst"]), fr.get(own["inst"])
                     if d is None or od is None:
                         continue
@@ -2047,7 +2056,6 @@ class ReportsMixin:
                              == buda.LayerDir.HORIZONTAL)
                     ext_d = (d.y2 - d.y1) if horiz else (d.x2 - d.x1)
                     org_d = d.y1 if horiz else d.x1
-                    lname = lrows[0]["layer_name"]
                     oline = by_line.get((cell, lid))
                     # (a) the cell's OWN reserved tracks inside the window
                     cands = []

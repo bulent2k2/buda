@@ -391,10 +391,16 @@ set notes {}
 # over the healerless run's evidence file for file — which is how a 6d
 # `yielded` column came to be unreadable against the run that produced it.
 # ONE expression, used by both, so the table and its own artifacts cannot
-# come to disagree about which run they are from.  (`-arms` needs no entry:
-# every artifact name already carries its arm.  `-f0`/`-fmax` are NOT in it,
-# so two uniform sweeps differing only in those still collide — in the table
-# too, which is where that gap would have to be closed.)
+# come to disagree about which run they are from.
+#
+# What that does and does not buy, stated per FILE rather than in one
+# sentence, because the two are distinguished by different things (Codex on
+# #940, whose point was that crediting `-arms` to both is true of only one):
+# an ARTIFACT is distinguished by policy AND by the arm its own name
+# carries, while the TABLE is distinguished by policy alone — `exp` tells a
+# `uniform` sweep from the rest and nothing else does, so `-arms td,bu` and
+# `-arms blind,td,bu` both land on one filename.  `-informed`, `-f0` and
+# `-fmax` are in neither.  The table is the one place to close any of that.
 set policy [expr {$heal ? "_healed" : "_healerless"}]_step$step[expr {$nofloor ? "_nofloor" : ""}][expr {$primitive eq "reserve" ? "_reserve" : ""}][expr {$handdown ? "_handdown" : ""}][expr {$yield ? "_yield" : ""}]
 if {$tag ne ""} { append policy _$tag }
 
