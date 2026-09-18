@@ -1442,7 +1442,7 @@ def _seat_runs(t, cell, lname):
         lo, hi = r["own_window"]
         blocked = [a for a in t._reserve_abs_of(eff.get(lid, ()), od, d, lid)
                    if lo - 1e-6 <= a <= hi + 1e-6]
-        tk = t._window_tracks(lid, d, lo, hi)
+        tk = t._seat_tracks(r)
         out[r["inst"]] = (buda_cli.BudaSession._largest_free_run(tk, blocked),
                           int(r["own_seat"][2]), len(tk))
     return out
@@ -1538,8 +1538,9 @@ def test_an_out_of_scope_ancestors_corridor_is_blocked_but_not_yielded():
     # reports seat_hit 8, yields nothing and says nothing.)
     assert (m6["positions"], m6["yielded"], m6["yield_short"]) == ([], 8, 1)
     assert m6["seat_hit"] == 0
-    assert any("still 1 short at u1/c with every yieldable track in its "
-               "window given back" in n for n in notes), notes
+    assert any("still 1 short at u1/c" in n
+               and "with every yieldable track in its window given back"
+               in n for n in notes), notes
     assert not any("top_cell" in n for n in notes), notes
     # and the seat really is still short under those lines: a corridor the
     # derivation cannot move is one the block has to live with

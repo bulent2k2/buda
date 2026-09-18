@@ -969,17 +969,23 @@ class NutsFlowMixin:
             return buda.ndr_group_demand_credited(spec, nbits, True, True)
         return buda.ndr_group_demand(spec, nbits)
 
-    def _seg_admission_pool(self, seg, g, need):
-        """The DNUTS admission pool for a placed segment on grid `g` — the
-        exact `place_by_layer` arithmetic over the segment's SEAT (span ×
-        slide): the span-clear pool over the full slide window (stored as
-        `seg.interval_lo/hi` — the slide clipped to any hard Hanan/keepout
-        boundary, so it typically spans SEVERAL between-grid-lines Hanan
-        intervals, not one), the midpoint fallback when it falls short of
-        `need`, then the corner bounds filtering whichever pool won (no
-        re-fallback).  Shared by the doomed-seat census and the TOP re-seat
-        heal; the dead-span escalation keeps its own inline copy (its
-        branches interleave with the cull-risk tier)."""
+    def _seg_admission_seat(self, seg, g, need):
+        """WHICH pool DNUTS admits a placed segment from, as
+        `(along_lo, along_hi, lo, hi, is_span, n)` — the arguments to read
+        it with, whether to read it with the SPAN walker or the point one,
+        and the count when deciding already produced it; None when the
+        corner bounds exclude the whole interval.
+
+        This is the ONE place the span-vs-midpoint branch is made, so the
+        COUNT (`_seg_admission_pool`) and the POSITIONS
+        (`_seg_admission_tracks`) cannot read different pools.  The yield's
+        contiguous-run test compares a track LIST against a `need`/`pool`
+        pair taken from here, and a list drawn from a different pool made
+        the two disagree about the same seat (Codex on #940).  The point
+        probe stays the point walker rather than the span walker's
+        `along_lo == along_hi` case: the header says they agree, but they
+        are separate implementations and this is what the count was decided
+        by."""
         # A seat pin's bits are admitted from its NATURAL window, not the
         # width-wide pinned one (TrackSegment::seat_nat — what
         # make_bus_segments hands DetailedNUTS); a BusSegment already
@@ -993,15 +999,48 @@ class NutsFlowMixin:
         span_all = g.count_signal_tracks_in_span(
             seg.span_lo, seg.span_hi, i_lo, i_hi)
         if b_lo > b_hi:
-            return 0          # corner bounds exclude the whole interval
+            return None       # corner bounds exclude the whole interval
         if span_all >= need:
             # Span pool wins admission; the corner bounds then filter it.
-            return (span_all
-                    if (b_lo, b_hi) == (i_lo, i_hi)
-                    else g.count_signal_tracks_in_span(
-                        seg.span_lo, seg.span_hi, b_lo, b_hi))
+            same = (b_lo, b_hi) == (i_lo, i_hi)
+            return (seg.span_lo, seg.span_hi, b_lo, b_hi, True,
+                    span_all if same else None)
         x = (seg.span_lo + seg.span_hi) / 2.0
-        return g.count_signal_tracks_in(x, b_lo, b_hi)
+        return (x, x, b_lo, b_hi, False, None)
+
+    def _seg_admission_pool(self, seg, g, need):
+        """The DNUTS admission pool for a placed segment on grid `g` — the
+        exact `place_by_layer` arithmetic over the segment's SEAT (span ×
+        slide): the span-clear pool over the full slide window (stored as
+        `seg.interval_lo/hi` — the slide clipped to any hard Hanan/keepout
+        boundary, so it typically spans SEVERAL between-grid-lines Hanan
+        intervals, not one), the midpoint fallback when it falls short of
+        `need`, then the corner bounds filtering whichever pool won (no
+        re-fallback).  Shared by the doomed-seat census and the TOP re-seat
+        heal; the dead-span escalation keeps its own inline copy (its
+        branches interleave with the cull-risk tier)."""
+        seat = self._seg_admission_seat(seg, g, need)
+        if seat is None:
+            return 0
+        a_lo, a_hi, lo, hi, is_span, n = seat
+        if n is not None:
+            return n
+        return (g.count_signal_tracks_in_span(a_lo, a_hi, lo, hi) if is_span
+                else g.count_signal_tracks_in(a_lo, lo, hi))
+
+    def _seg_admission_tracks(self, seg, g, need):
+        """The POSITIONS `_seg_admission_pool` counts — the signal tracks
+        DNUTS will actually admit this segment's bits from, in order.
+        `len()` of this is that pool by construction, which is what lets
+        the yield's contiguous-run test and the `need`/`pool` it is judged
+        against be one model."""
+        seat = self._seg_admission_seat(seg, g, need)
+        if seat is None:
+            return []
+        a_lo, a_hi, lo, hi, is_span, _n = seat
+        rows = (g.signal_tracks_in_span(a_lo, a_hi, lo, hi) if is_span
+                else g.signal_tracks_in(a_lo, lo, hi))
+        return sorted(pos for pos, _slot in rows)
 
     def _doomed_seats(self):
         """The supply-doomed seat census, computed quietly: returns a list of

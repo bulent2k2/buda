@@ -222,6 +222,12 @@ def cmd_derive_cell_layer_reserves(session, cmd, args, cmd_line):
                   f"[file <path>] [cells <a,b,...>] [yield]")
             return
         i += 1
+    # Resolve against the SCRIPT's directory like every other path (its
+    # twin `derive_cell_layer_shares` already did, so one flow writing both
+    # budgets side by side put them in two directories as soon as it ran
+    # from anywhere but its own — and the converge driver is such a caller).
+    if path:
+        path = resolve_script_path(session, path)
     session._report_cell_layer_reserves(cells, apply, path,
                                         yield_seat=yield_seat)
 

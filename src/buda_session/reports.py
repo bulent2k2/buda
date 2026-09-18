@@ -1367,6 +1367,7 @@ class ReportsMixin:
                               if any(lo - eps < pos < hi + eps
                                      for lo, hi in own_union)}
                 own_need, own_seat, own_window = 0.0, None, None
+                own_seg = None
                 for f, ts in own_segs:
                     if ts.layer != lid or not (f == c.name
                                                or f.startswith(own_pre)):
@@ -1395,6 +1396,10 @@ class ReportsMixin:
                     if frac > own_need:
                         own_need = frac
                         own_seat = (ts.bundle_id, ts.seg_idx, need, pool)
+                        # the SEGMENT, so a consumer can read the very
+                        # pool this (need, pool) was measured from rather
+                        # than probe the grid its own way
+                        own_seg = ts
                         # The seat's slide window in ABSOLUTE coordinates —
                         # what a positional derivation reads to say how
                         # many reserved tracks fall inside the block's own
@@ -1414,7 +1419,7 @@ class ReportsMixin:
                     # fraction of its window the bus needs (1.0 = all of
                     # it), and which (bundle, seg, need, pool) it is.
                     "own_need": own_need, "own_seat": own_seat,
-                    "own_window": own_window,
+                    "own_window": own_window, "own_seg": own_seg,
                     # The cell's own metal's tracks over the instance on
                     # this layer (positions) — the positional reservation
                     # audit's other half; not part of the Tcl row.
@@ -2020,6 +2025,23 @@ class ReportsMixin:
                     d, od = comps.get(own["inst"]), fr.get(own["inst"])
                     if d is None or od is None:
                         continue
+                    # The LINE's `seat` column is picked over every row of
+                    # the layer; this pick adds three requirements (a
+                    # resolved window and seat, and an instance in the
+                    # template's own rotation frame — a 90-degree occurrence
+                    # belongs to the clone class, BUDA-1921).  So the two
+                    # can name different instances, and saying nothing let
+                    # the table describe one seat while the policy acted on
+                    # another (Codex on #940).
+                    shown = (by_line.get((cell, lid)) or {}).get("own_row")
+                    if shown is not None and shown["inst"] != own["inst"]:
+                        notes.append(
+                            f"{cell} {lname}: the worst seat is "
+                            f"{shown['inst']}'s, which this derivation "
+                            f"cannot act on (no resolved seat, or a "
+                            f"90-degree occurrence outside the template "
+                            f"frame); yielding to {own['inst']}'s instead "
+                            f"— the row's seat column names the former")
                     lo, hi = own["own_window"]
                     horiz = (self.layers.get_layer_dir(lid)
                              == buda.LayerDir.HORIZONTAL)
@@ -2099,12 +2121,20 @@ class ReportsMixin:
                             f"in {own['inst']}'s seat window that no "
                             f"reservation in force accounts for — kept "
                             f"blocked, not yielded")
-                    if not cands:
-                        continue
-                    tracks = self._window_tracks(lid, d, lo, hi)
+                    if not cands and not fixed:
+                        continue      # nothing blocks this seat at all
+                    # A seat blocked ENTIRELY by tracks this derivation
+                    # cannot move (every blocker an out-of-scope ancestor's,
+                    # and the cell with no line of its own) reaches the pick
+                    # with no candidates — the shape the nested half exists
+                    # for, minus the cell's own line.  It used to `continue`
+                    # here in silence (Codex on #940); it now goes through
+                    # the pick, which yields nothing and reports the
+                    # shortfall `fixed` leaves.
+                    tracks = self._seat_tracks(own)
                     give, short = self._pick_yield(cands, own, tracks,
                                                    fixed=fixed)
-                    if not give:
+                    if not give and short <= 0:
                         continue
                     bid, si, need, pool = own["own_seat"]
                     seat = (f"bundle {bid} seg {si} needs {need} of {pool} "
@@ -2140,9 +2170,14 @@ class ReportsMixin:
                             by_line[(cell, lid)]["yield_short"] = short
                         notes.append(
                             f"{cell} {lname}: still {short} short at "
-                            f"{own['inst']} with every yieldable track in "
-                            f"its window given back — the seat cannot host "
-                            f"its own bus")
+                            f"{own['inst']} ({seat})"
+                            + (" with every yieldable track in its window "
+                               "given back — the seat cannot host its own "
+                               "bus" if give else
+                               f" — nothing here is this derivation's to "
+                               f"move ({len(fixed)} track(s) held by a cell "
+                               f"outside its scope); the block has to live "
+                               f"with it"))
         finally:
             self._cell_layer_reserves = saved
         for (tcell, lid), line in touched.items():
@@ -2153,17 +2188,27 @@ class ReportsMixin:
                 line, comps, frames[tcell][0])
         return lines
 
-    def _window_tracks(self, lid, comp, lo, hi):
-        """The signal track positions of `lid` inside the perpendicular
-        window [lo, hi] over the placed component `comp`, read at the
-        component's along-midpoint (the demand rows' own probe); None with
-        no grid, which makes the yield fall back to the count model."""
-        if self.routing_grid is None or not self.routing_grid.has_layer(lid):
+    def _seat_tracks(self, row):
+        """The signal tracks a demand row's worst seat is ADMITTED from —
+        `_seg_admission_tracks` on the very segment its `(need, pool)` was
+        measured from; None with no grid, which makes the yield fall back
+        to the count model.
+
+        It reads the seat's own span-clear pool (with the same midpoint
+        fallback and corner bounds), NOT a point probe at the component's
+        along-midpoint, which is what this did first (Codex on #940): a
+        keepout over part of the span is invisible to a single x, so the
+        contiguous-run test could find a run of tracks DNUTS then rejects
+        and give nothing back, stranding the bus this policy exists to
+        seat — and the no-grid branch of `_pick_yield`, which compares
+        against `pool`, was measuring a different thing from the grid
+        branch beside it.  `len()` of this IS that `pool`."""
+        seg = row.get("own_seg")
+        if (seg is None or self.routing_grid is None
+                or not self.routing_grid.has_layer(row["layer"])):
             return None
-        horiz = self.layers.get_layer_dir(lid) == buda.LayerDir.HORIZONTAL
-        mid = 0.5 * ((comp.x1 + comp.x2) if horiz else (comp.y1 + comp.y2))
-        g = self.routing_grid.get_layer_grid(lid)
-        return sorted(pos for pos, _slot in g.signal_tracks_in(mid, lo, hi))
+        g = self.routing_grid.get_layer_grid(row["layer"])
+        return self._seg_admission_tracks(seg, g, row["own_seat"][2])
 
     @staticmethod
     def _largest_free_run(tracks, blocked, eps=1e-6):
@@ -2209,10 +2254,16 @@ class ReportsMixin:
         tracks off, the count model (pool − reserved < need) decides."""
         eps = 1e-6
         bid, si, need, pool = own["own_seat"]
-        if not cands:
-            return [], 0
         need = int(need)
         fixed = list(fixed)
+        if not cands:
+            # Nothing givable, which is not the same as nothing wrong: the
+            # seat can be blocked outright by `fixed`, and returning 0 here
+            # made the shortfall expression below unreachable for exactly
+            # that case (Codex on #940).
+            if tracks is None:
+                return [], max(0, need - max(0, pool - len(fixed)))
+            return [], max(0, need - self._largest_free_run(tracks, fixed))
         blocked = [a for _k, a in cands] + fixed
         if tracks is None:
             if pool - len(blocked) >= need:
@@ -2338,8 +2389,15 @@ class ReportsMixin:
                 f.write("# scope: " + (",".join(scope) if scope else "(none)")
                         + "\n")
                 if not text:
-                    f.write("# nothing to declare: the top takes no track "
-                            "over any instance in scope\n")
+                    # The terminal line learned about `yield_seat` and this
+                    # one did not, so a run that yielded every line whole
+                    # wrote a file claiming the top takes no track at all
+                    # (Codex on #940) — and the FILE is what the next round
+                    # sources and what a reader opens later.
+                    f.write("# nothing to declare: the top takes no track"
+                            + (" the cells' seats can spare" if yield_seat
+                               else "")
+                            + " over any instance in scope\n")
                 for t in text:
                     f.write(t + "\n")
                 if stale:
