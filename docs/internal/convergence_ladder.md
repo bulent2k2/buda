@@ -37,6 +37,30 @@ None of that needs a PDN, a clock tree or a DRC deck.  It needs a controllable
 *policy* for what the block is told, a vehicle whose size is a dial, and a
 judge that is not BUDA.
 
+### What this is NOT about, and where it does apply
+
+**The objective is convergence, not minimum area.**  Nothing here is an
+argument that one floorplan, one die or one wirelength beats another.  Area and
+wire appear only as the PRICE of a policy — what the block paid to leave the
+top room, what the top paid to route around a block — and a policy that wins
+area while costing a re-spin has lost, because a re-spin is weeks and a percent
+of wire is not.  Where a figure is smaller or shorter, read it as evidence
+about the loop rather than as a result in its own right.
+
+**The techniques are not about these two designs, or about chips.**  What the
+ladder needs from a structure is only that it be HIERARCHICAL: a block
+implemented against an assumption about its context, a context integrated
+against an abstract of the block, and a boundary the two have to agree across.
+Everything built here — measuring the demand one level places on another
+(`report_layer_demand`), deriving a budget from it instead of guessing
+(`derive_cell_layer_shares`, `derive_cell_layer_reserves`), handing a plan down
+so the next round is judged against the same context (`derive_top_plan` →
+`pin_plan`), and letting the lower level keep what it cannot give up (the 6d
+yield) — is stated in terms of that boundary, not in terms of metal.  The SoC
+and the systolic array are INSTRUMENTS, chosen because one is deep and diverse
+and the other uniform, and because a generated vehicle makes size a dial.  They
+are not the subject.
+
 ### Two facts checked before designing, both load-bearing
 
 **BUDA has no fixed pin today.**  `src/busterm.cpp:82–89`: a busterm's bbox is
@@ -321,7 +345,23 @@ never cleaned NQ = 4, healed or not) and 8 bits short at NQ = 16, healed
 clean there.  The top-down source is weaker (2–35 overlaps at round 1,
 healed clean at NQ ≥ 4) and at NQ = 2 stays at E5's dirty fixpoint — the
 union reservation covering the core's own 32-bit seat — which is the
-reservation's limit, not the plan's.
+reservation's limit, not the plan's.  **6d, the derivation yielding the
+block its seat, is BUILT and measured** (2026-09-18, `derive_cell_layer_reserves
+yield`, `converge.tcl -yield`): where the corridor leaves a block's seat
+no run of consecutive free tracks its bus needs (the run, not the count —
+an abstract seat is one rectangle, and even one corridor track left in
+the core's 36-track window sent its local planner to a dead LOW layer),
+the block keeps its current seat and the top takes the loss, a nested
+template's inherited corridor included (the core has no line of its own).
+The NQ = 2 top-down round strands NOTHING in one round where 6c held the
+dirty fixpoint at 360 bits, at the price of one overlap no healer clears;
+seven of the eight healed arms are clean, NQ = 2 top-down the exception.
+It costs 8 bits at NQ = 2 bottom-up and an overlap or two at NQ = 4/8, and
+gains 8 at NQ = 16 top-down healerless, so it is a lever, not a default.
+What the re-measurement moved is what NQ = 16 top-down costs to clean
+rather than whether it does: round 1 ends 2/0/0 where it used to end
+clean, and the arm needs a SECOND informed round, entering at 46/1032/1032
+and healed to 0/0/0 in 9526 s against round 1's 220 s.
 
 ## The judge must not be BUDA
 
@@ -436,10 +476,33 @@ every "one round" measured rather than assumed.
    Found on the way and fixed: a healer move off a pinned shape carried
    its forced layers (LAYER_DIR behind a clean metric), and a top-down
    measurement round must be ALIGNED (a seat is geometry; the mesh's rows
-   move by a phase).  What remains is the reservation's own limit (the
+   move by a phase).  What remained was the reservation's own limit (the
    `td` arm at NQ = 2: a union covering the core's own seat, E5's dirty
-   fixpoint) — a derivation-policy question (yield the block its seat),
-   not a new primitive.
+   fixpoint) — a derivation-policy question, not a new primitive, and
+   ~~**6d — the derivation yields the block its seat**~~ **BUILT and
+   measured** (2026-09-18, `derive_cell_layer_reserves yield`,
+   `converge.tcl -yield`; [convergence_e5.md](convergence_e5.md), "The
+   derivation yields the block its seat"): where the corridor leaves a
+   block's seat no run of consecutive free tracks its bus needs — the
+   test is the run and not the count, since an abstract seat is one
+   rectangle and even one corridor track left in the core's window sent
+   its local planner to a dead LOW layer — the block keeps its current
+   seat and the top takes the loss, nested templates' INHERITED corridors
+   included (the core has no line of its own; its 360 bits were the
+   cluster's corridor).  The NQ = 2 top-down informed round strands
+   NOTHING in one round where 6c held the dirty fixpoint at 0/360/360
+   healerless and 0/128 healed, at the price of one overlap that no
+   healer clears — so the stranding goes, "clean" does not — and seven
+   of the eight healed arms are clean.  Elsewhere the trade is small and
+   runs both ways: 8 bits gained at NQ = 16 top-down, parity at NQ = 16
+   bottom-up, 8 bits lost at NQ = 2 bottom-up and an overlap or two at
+   NQ = 4/8.  So it ships as a lever, not a default.  (These are the
+   SECOND measurement: the first ran a yield that tested each seat
+   against half of what fragments it, and its headline cost — 264
+   stranded bits at NQ = 16 bottom-up — was that defect, not the policy,
+   which measures 0 overlaps and the no-yield baseline's 40 bits.)  What
+   would take both is a driver policy that yields AND unpins exactly the
+   top buses whose seats were yielded.
 7. **Fixed-pin primitive** — a busterm restricted to a face, then to a window
    on a face — as the interoperability piece for the partner evaluation (E3),
    last, since nothing in-house depends on it.

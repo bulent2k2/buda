@@ -754,7 +754,246 @@ SoC's `td` arm at NQ = 2 still shows is the reservation's own limit (a
 union that covers the block's seat), which no top plan fixes, and the
 next question is whether the derivation should yield there — leave the
 block its seat and hand the top the loss — which is a derivation policy,
-not a new primitive.
+not a new primitive.  That policy is built and measured below (6d).
+
+## The derivation yields the block its seat, built and measured (6d)
+
+**What was built** (`derive_cell_layer_reserves yield`; `converge.tcl
+-yield`, 2026-09-18).  The derivation's policy for the case the `td` arm
+at NQ = 2 left: where the reservation covers a block's own seat, the
+block keeps its seat and the top takes the loss.  Two things had to be
+measured before the rule was right, and both are the rule now.
+
+1. **The test is the contiguous run, not the count.**  The first cut gave
+   back the count shortfall — the reserved tracks inside the block's
+   worst seat window minus what the DNUTS admission pool leaves, the
+   doomed-seat census's own arithmetic — and changed nothing at the
+   fixpoint.  On the core (a 32-bit bus in a 36-track M5 window with 8
+   corridor tracks inside it) the count model reads 28 free and gives 4
+   back; the informed round was replayed by hand with 4, 2 and then ONE
+   corridor track left in the window, and every time the core's local
+   planner fled to a U-shaped detour on M4/M3 with no signal tracks under
+   it (`insufficient signal tracks (0)`, the same 360 bits); with none
+   left it kept `I_V` on its seat and the round routed clean.  An
+   abstract seat is *one rectangle*, so a single reserved track inside
+   the window fragments the run the planner's capacity model needs.  The
+   rule (`_pick_yield`) is therefore: no run of `need` consecutive
+   reserved-free tracks in the window → give back the block's CURRENT
+   seat first (every reserved track under its own metal's span, so the
+   local solve need not move at all), then the nearest remaining tracks
+   one at a time until such a run opens; a run long enough → nothing
+   (the block shifts within its window, which is E5's clean case).  The
+   count model stays only as the no-grid fallback.
+2. **The test is run once per seat, against the union that fragments
+   it.**  What a cell-local solve keeps free is `_effective_reserves` —
+   the cell's own line UNION every ancestor corridor projected into its
+   frame — so that union is the blocked set, and `_yield_seats` walks the
+   cells deepest first, builds it per (cell, layer), picks once, and
+   splits the give-back between the cell's own line and its ancestors'.
+   Both halves are load-bearing.  The inherited half is what E5's
+   fixpoint turned on: the core has no line of its own — the top takes no
+   track over it directly — and its 360 bits were the *cluster's*
+   corridor crossing its seat, inherited as every ancestor's reservation
+   is (`_inherited_reserves`); judging each line against its own cell's
+   seat alone yielded 4 tracks to the cluster and 8 to the io block and
+   left the cores stranded exactly as before.  The union is what the
+   first cut of this pass still got wrong, in two ways a reviewer caught
+   and the nested test now pins (`#940`): it tested the own tracks and
+   the inherited images as two separate blocked sets, so each half could
+   find a long enough free run while the union left none, and it kept one
+   image per ancestor track, although an ancestor track has a *different*
+   image at every occurrence of the nested cell — which is exactly why
+   the inheritance unions over occurrences.  Measured on the mirrored
+   nested vehicle, an 8-bit bus with a 19-track window at each of two
+   occurrences: the two-set form left it a longest free run of 6 and
+   called the seat protected; the union form leaves 13.  Giving an image
+   back removes every ancestor track behind it, since an image clears
+   only when all of them go — which also settles who pays: not the
+   nearest ancestor, all of them.  A corridor held by a cell outside the
+   derivation's scope is not this derivation's to move (a scoped
+   derivation does not replace it, and it is still in force next round):
+   it narrows the run test and what it costs the seat is said rather
+   than yielded.  Each give-back is charged to the line it came from and
+   said with the seat it served (`cluster_cell M5: 19 of 83 reserved
+   track(s) yielded to nested l1_cell's own seat`).
+
+Each give-back is a `yield` column on the line and a note naming the
+seat; a seat that cannot host its own bus even with nothing reserved is
+said as the block's own shortfall; a line yielded whole reserves nothing
+and is counted as the removal it is.  The plain derivation is
+byte-identical (`test_yield_changes_nothing_where_the_seat_keeps_a_long_enough_run`;
+the two-instance vehicle banded to M6 strands 24 bits under the full
+union and routes clean, top and block, under the yielded one).  The
+floor reads the block's seat off the *current* plan and not its
+alternatives, so a block that could have re-planned onto another layer is
+yielded to all the same — the mesh's `row_cell` (below) and E5's own
+two-instance vehicle, whose unbanded bus moves to M4/M2 under the full
+union, are both such cases.
+
+**Healers off** (`converge.tcl soc 2 4 8 16 -primitive reserve -arms td,bu
+-informed 4 -handdown -yield`; the 6c rows quoted for comparison).
+**Measured under the corrected derivation** (the admission-pool fix,
+`5562120`), as are the healed table and the mesh control below:
+
+| size | arm | round | plan | fixpoint | yielded | ovl/unpl/viol | 6c (no yield) | detailed WL | reserved ÷ used | s |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 2 | td | 0 | — | — | 38 | 0/0/0 | 0/0/0 | 525,144 | — | 2.0 |
+| 2 | td | 1 | 13/13, 24/24 | no (6 of 12) | 32 | **1/0/0** | 0/360/360 | 532,452 | 1.67 | 2.4 |
+| 2 | td | 2 | 13/13, 24/24 | **yes** (9) | 32 | 1/0/0 | — | 532,406 | 1.72 | 2.5 |
+| 2 | bu | 1 | 13/13, 36/36 | no (14 of 37) | 130 | 0/8/8 | **0/0/0** | (588,637) | 2.93 | 2.8 |
+| 2 | bu | 2 | 13/13, 36/36 | no (8 of 33) | 101 | 0/8/8 | — | (593,244) | 3.02 | 2.8 |
+| 2 | bu | 3 | 13/13, 36/36 | no (2 of 29) | 98 | 0/8/8 | — | (593,237) | 3.05 | 2.9 |
+| 2 | bu | 4 | 13/13, 36/36 | no (2 of 29) | 101 | 0/8/8 | — | (593,244) | 3.05 | 2.9 |
+| 4 | td | 0 | — | — | 149 | 1/16/16 | 1/16/16 | (993,477) | — | 3.9 |
+| 4 | td | 1 | 21/21, 44/44 | no (14 of 22) | 36 | 6/32/32 | 3/32/32 | (982,385) | 3.33 | 5.3 |
+| 4 | td | 2 | 21/21, 44/44 | no (6 of 18) | 8 | 3/32/32 | 3/32/32 | (972,655) | 3.38 | 5.1 |
+| 4 | td | 3 | 21/21, 44/44 | **yes** (15) | 8 | 3/32/32 | — | (972,655) | 3.57 | 5.0 |
+| 4 | bu | 1 | 21/21, 57/57 | no (46 of 66) | 174 | 4/45/45 | 2/45/45 | (1,018,744) | 4.17 | 5.7 |
+| 4 | bu | 2 | 21/21, 57/57 | no (44 of 65) | 77 | 3/45/45 | 2/45/45 | (992,398) | 4.40 | 6.0 |
+| 4 | bu | 3 | 21/21, 57/57 | no (1 of 42) | 77 | 3/45/45 | 2/45/45 | (992,398) | 4.50 | 6.2 |
+| 4 | bu | 4 | 21/21, 57/57 | **yes** (41) | 77 | 3/45/45 | — | (992,398) | 4.50 | 6.3 |
+| 8 | td | 0 | — | — | 107 | 2/40/40 | 2/40/40 | (1,871,476) | — | 7.7 |
+| 8 | td | 1 | 37/37, 68/68 | no (16 of 26) | 52 | 21/40/40 | 7/32/32 | (1,861,746) | 4.00 | 11.3 |
+| 8 | td | 2 | 37/37, 68/68 | no (7 of 20) | 8 | 3/40/40 | 2/32/32 | (1,834,862) | 4.14 | 10.9 |
+| 8 | td | 3 | 37/37, 68/68 | **yes** (15) | 8 | 3/40/40 | 2/32/32 | (1,882,554) | 4.36 | 11.7 |
+| 8 | bu | 1 | 37/37, 105/105 | no (52 of 71) | 133 | 6/53/53 | 3/53/53 | (2,061,941) | 5.37 | 14.3 |
+| 8 | bu | 2 | 37/37, 105/105 | no (47 of 66) | 47 | 5/53/53 | 3/53/53 | (2,007,057) | 5.96 | 14.8 |
+| 8 | bu | 3 | 37/37, 105/105 | **yes** (40) | 47 | 5/53/53 | 3/53/53 | (2,007,057) | 5.96 | 15.2 |
+| 16 | td | 0 | — | — | 87 | 3/32/32 | 3/32/32 | (3,677,304) | — | 20.6 |
+| 16 | td | 1 | 69/69, 119/119 | no (18 of 24) | 0 | 6/40/40 | 6/40/40 | (3,745,142) | 6.78 | 31.5 |
+| 16 | td | 2 | 69/69, 119/119 | no (2 of 16) | 4 | 6/40/40 | 6/40/40 | (3,745,514) | 5.96 | 30.2 |
+| 16 | td | 3 | 69/69, 119/119 | **yes** (15) | 4 | **6/32/32** | 6/40/40 | (3,746,216) | 5.96 | 30.0 |
+| 16 | bu | 1 | 69/69, 201/201 | no (41 of 71) | 142 | 10/40/40 | 0/40/40 | (4,314,900) | 6.37 | 39.7 |
+| 16 | bu | 2 | 69/69, 201/201 | no (19 of 62) | 31 | **0/40/40** | 0/40/40 | (4,351,508) | 6.48 | 34.5 |
+| 16 | bu | 3 | 69/69, 201/201 | **yes** (52) | 31 | 0/40/40 | 0/40/40 | (4,351,508) | 6.68 | 35.0 |
+
+(`yielded` is the tracks the round's own derivation gave back, i.e. what
+the NEXT round runs under; a `td` round-0 entry is the top-down
+measurement's.  The `s` column is not comparable to the 6c tables — two
+loops shared the machine.)
+
+**Healers on** (`… -heal -informed 3 -handdown -yield`; `first` is the
+informed round's healerless verdict under the healed previous round's
+plan, `final` its healed one, 6c's pair quoted).  **Measured under the
+corrected derivation**, like the two tables around it; of the previous
+pass's nine rows, eight reproduce exactly, and the ninth is NQ = 16 `td`,
+whose round 2 below is new:
+
+| size | arm | round | plan | fixpoint | first | final | 6c (first → final) | detailed WL | reserved ÷ used |
+|---|---|---|---|---|---|---|---|---|---|
+| 2 | td | 1 | 13/13, 24/24 | no (6 of 12) | 1/0/0 | 1/0/0 | 0/360 → 0/128 | 532,452 | 1.67 |
+| 2 | td | 2 | 13/13, 24/24 | **yes** (9) | 1/0/0 | 1/0/0 | — | 532,406 | 1.72 |
+| 2 | bu | 1 | 13/13, 31/36 | no (34 of 51, plan 4 of 15) | 1/8/8 | **0/0/0** | 0/0 → 0/0 | 590,991 | 2.98 |
+| 4 | td | 1 | 21/21, 37/44 | no (24 of 28, plan 8 of 25) | 5/16/16 | **0/0/0** | 2/16 → 0/0 | 1,082,463 | 3.37 |
+| 4 | bu | 1 | 21/21, 59/59 | no (22 of 54) | 0/8/8 | **0/0/0** | 0/0 → 0/0 | 1,087,535 | 4.14 |
+| 8 | td | 1 | 37/37, 54/67 | no (22 of 28, plan 14 of 44) | 20/24/24 | **0/0/0** | 7/16 → 0/0 | 2,010,662 | 3.56 |
+| 8 | bu | 1 | 37/37, 107/107 | no (20 of 57) | **0/0/0** | **0/0/0** | 0/0 → 0/0 | 2,174,952 | 5.65 |
+| 16 | td | 1 | 69/69, 114/119 | no (26 of 29, plan 4 of 71) | 4/8/8 | **2/0/0** | 35/464 → 5/0/0, then 0/0 | 4,642,741 | 5.54 |
+| 16 | td | 2 | 69/69, 116/120 | no (14 of 24, plan 4 of 71) | 46/1032/1032 | **0/0/0** | — | 4,111,278 | 7.53 |
+| 16 | bu | 1 | 69/69, 196/201 | no (54 of 80, plan 6 of 72) | 4/32/32 | **0/0/0** | 0/8 → 0/0 | 4,417,825 | 6.85 |
+
+The mesh control (`converge.tcl tpu 8 16 -primitive reserve -arms td,bu
+-informed 3 -handdown -yield`, healers off), **re-run under the corrected
+derivation and reproduced exactly** — every round, every wirelength, both
+fixpoint verdicts: clean at every round with
+wire byte-identical to the 6c control (550,528 at N = 8, 2,174,208 at
+N = 16) and the reservation exactly the top's use (1.00×) — but the `td`
+arm's fixpoint now reads `no (1 of 2)` where 6c's read `yes (2)`: the
+top-down round's derivation yields the `row_cell` M4 line whole (the
+top's 8 tracks sit in the row's own 8-bit seat with no run of 8 beside
+them), the informed round then routes the row's bus elsewhere within its
+band and its derivation reads the M4 demand back, so the one line
+oscillates while the design stays clean and the arm stops on clean.  A
+block that had an alternative is yielded to anyway, at no cost here.
+
+**What the tables say.**
+
+1. **The reservation's limit at NQ = 2 is resolved as a STRANDING, and
+   costs one overlap.**  The `td` arm's informed round strands nothing —
+   `1/0/0` healerless in one round — where 6c held E5's dirty fixpoint at
+   0/360/360 healerless and 0/128 healed.  The 32 tracks given back are
+   the cluster's corridor over the core's seat, the union over the core's
+   four occurrences of tracks the top used over *other* occurrences, so
+   the top loses nothing it needed over this one and every pin still
+   applies with every seat honoured (13/13, 24/24).  What does not go
+   away is one abstract overlap, and it is the one result the vehicle's
+   healers do not clear either: the healed `td` arm at NQ = 2 also ends
+   `1/0/0`, at a fixpoint.  So the 360 stranded bits go; "clean" does
+   not.
+2. **The cost elsewhere is small, and it runs in both directions.**
+   Healers off, against 6c: NQ = 16 `td` reaches its fixpoint eight bits
+   BETTER (6/32/32 against 6/40/40), NQ = 16 `bu` and NQ = 4 `td` land on
+   the same verdict, and the yield costs 8 bits at NQ = 2 `bu` (a pinned
+   8-bit `pc` bus, where 6c was clean), one overlap at NQ = 4 `bu`, and
+   one overlap plus 8 bits at NQ = 8.  The transient first rounds are
+   noisier than 6c's (NQ = 8 `td` round 1 reads 21 overlaps) but settle
+   by round 2 in every arm.
+   This paragraph replaced a much stronger claim, and the correction is
+   the point: the first measurement of this section reported NQ = 16 `bu`
+   going from 40 stranded bits to **264**, and read that as the policy
+   handing the pinned top a loss it cannot route around.  That was an
+   artefact of a defective pick — the yield was choosing against half of
+   what fragments a seat (see the build note above) — and not a property
+   of the policy.  Measured against the corrected pass the arm is
+   `0/40/40`: zero overlaps, and the same 40 bits as the no-yield
+   baseline.
+3. **With the vehicle's own healing, seven of the eight arms are clean**,
+   NQ = 2 `td` being the exception at `1/0/0`.  The informed rounds'
+   first (healerless) verdicts are close to 6c's at NQ = 2/16 and worse
+   at NQ = 4/8 (5/16/16 and 20/24/24 against 2/16 and 7/16), and the
+   healers clear all of them but that one.
+
+   What the re-measurement changed on NQ = 16 `td` is not WHETHER it
+   cleans but what cleaning costs, and the distinction took a second look
+   to see.  Under the previous pass that arm cleaned in ONE informed
+   round (`0/0/0` at round 1, 3,971,612).  Under the corrected derivation
+   round 1 ends `2/0/0` at 4,642,741 — two fewer seats honoured, the
+   reservation down from 6.92x used to 5.54x — and the arm carries on to
+   a SECOND informed round, which enters at `46/1032/1032` healerless and
+   is healed to `0/0/0` at 4,111,278.  That round took **9526 s against
+   round 1's 220 s**, a factor of 43, and is the only round in either SoC
+   table that needed more than a few minutes.  So the yield's price on
+   this arm is a round and a great deal of healing, not cleanliness.
+
+   This page said `six of the eight` for about an hour, which was read
+   off round 1 while round 2 was still solving — a verdict taken before
+   the arm had finished.  It is recorded here rather than quietly
+   corrected because it is the same mistake the section warns about
+   twice elsewhere: a number that has not converged is not a result.
+
+   Eight of the table's nine round-1 rows reproduce the previous pass
+   exactly, NQ = 16 `bu` included in every column, so what moved is one
+   arm.  The fixpoint column reads `no` on every healed row except the
+   NQ = 2 `td` one, as in 6c: the healers move seats (NQ = 16: 114 of 119
+   and 196 of 201 honoured) and the arms stop at clean.
+
+4. **The loop still converges** (healers off): every arm reaches a
+   budget-and-plan fixpoint in two to four informed rounds except `bu` at
+   NQ = 2, where 2 of 29 lines keep moving through four rounds — the
+   give-backs re-derive slightly differently each round as the blocks'
+   seats settle — and the dirty verdict there is the same 8 bits each
+   round.
+
+**What this settles.**  The yield is a lever with a measured trade, not a
+default — the same conclusion 6b reached from the other side, but on a
+much smaller trade than this section first recorded.  It does what it was
+built for: the block keeps its seat, and the 360 bits the reservation's
+own limit stranded at NQ = 2 are gone, healed or not.  What it costs is
+one overlap at NQ = 2 that no healer clears, 8 bits at NQ = 2 bottom-up,
+an overlap or two at NQ = 4/8, and — at NQ = 16 top-down, healed — a
+SECOND informed round whose healing runs 43x longer than the first,
+against eight bits gained at NQ = 16 top-down healerless and parity at
+NQ = 16 bottom-up.  The cost falls on the top-down arm at both ends of
+the size range, which is the arm whose plan is pinned: at NQ = 2 as an
+overlap nothing clears, at NQ = 16 as a round and the healer time to
+finish it.  Healers off, the
+strand it converts is the pinned top's, and the top's pinned plan cannot
+then move; that mechanism is real and is why the NQ = 2 overlap survives
+healing, but it is worth a few bits and an overlap here rather than the
+hundreds the first measurement claimed.  A derivation that yields AND
+re-plans the top's affected buses (unpinning exactly the bundles whose
+seats were yielded, the way the healers do) is the shape that would take
+both, and is a driver policy on top of `pin_plan`, not a new primitive.
 
 ## Provenance
 
@@ -790,6 +1029,53 @@ not a new primitive.
   `converge::policy_diff`).  The stranded-bit attributions are from
   `BUDA_RECORD` traces of the NQ = 8 rounds replayed in Python and
   compared segment by segment against the blind round's own.
+- The 6d tables: `flow/tcl/converge.tcl soc 2 4 8 16 -primitive reserve
+  -arms td,bu -informed 4 -handdown -yield` (healers off), `… -heal
+  -informed 3 -handdown -yield` (healed), `converge.tcl tpu 8 16
+  -primitive reserve -arms td,bu -informed 3 -handdown -yield` (the
+  control), all at `-j 2` with the two SoC loops sharing one four-core
+  machine (so their `s` column is not the 6c tables').  The hand replays
+  behind the contiguous-run rule: `soc.tcl 2 -noheal -bottomup -shares
+  <edited r0 file> -plan <td plan r0>` with 4, 2, 1 and 0 of the eight
+  corridor tracks left inside the core's M5 window (`varA/B2/B3/B`);
+  the core's window and the inherited tracks read off the `BUDA_RECORD`
+  recording of the NQ = 2 top-down round in Python.
+  **All three tables are from one pass**, which the headers say
+  individually and this bullet says once.  Getting there took two
+  corrections, and each MOVED rows rather than confirming them:
+
+  1. The FIRST measurement went through a yield that tested each seat
+     against half of what fragments it and kept one image per ancestor
+     track (#940 review).  All three tables were re-run against that
+     correction on the same commands; the mesh control came back
+     byte-identical, the SoC moved, most of all at NQ = 16 bottom-up, whose
+     264 stranded bits — the first measurement's headline cost — were the
+     defect and not the policy.
+  2. The SECOND correction is the admission pool (`5562120`): the
+     contiguous-run test read a single-x probe while the `need`/`pool` it
+     was judged against came from the seat's span-clear admission
+     arithmetic.  **All three tables are re-run under it**, so the
+     comparison the conclusions ask for is between rows from one engine.
+     The mesh control reproduced exactly again; the healerless table moved
+     nine cells, seven of them in `yielded`, which is the column the yield
+     itself writes; the healed table moved ONE ROW, NQ = 16 `td`, from
+     `0/0/0` to `2/0/0` AT ROUND 1 — and that arm then cleans at round 2,
+     so what moved is what cleaning it COSTS, not the section's "seven of
+     eight" count, which stands.  Both halves are written into conclusion
+     3 rather than absorbed.
+
+  The healed table's NQ = 16 rows were first taken from two `-informed 1`
+  runs, because the full `-informed 3` sweep's NQ = 16 `td` arm had carried
+  past round 1 — where the recorded run stopped at clean — and was still
+  solving round 2.  That sweep then FINISHED (9526 s on that one round),
+  and its rows reproduce both capped runs exactly, column for column, so
+  the capped measurement stands and the table is the full sweep's.  What
+  the finish added is the round 2 the capped runs could not reach, which
+  is the row that settles what the arm costs; a verdict published from the
+  capped runs alone said `six of eight` and was wrong.
+
+  Saying all this beats leaving it to be inferred: a reader at *What this
+  settles* is being asked to compare the two SoC tables.
 - Engine at the merge of #936 plus this change (the `uniform` form, the
   driver's `uniform` arm, the blocked-track enforcement on globally solved
   instances, the extended report); the correction and the 6b rows at the

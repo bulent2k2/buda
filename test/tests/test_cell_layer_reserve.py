@@ -45,6 +45,7 @@ sys.path.insert(0, str(Path(__file__).parents[2] / "src"))
 import buda_cli  # noqa: E402
 
 from test_layer_demand import _DESIGN, _cmd, _quiet  # noqa: E402
+from buda_session.util import fmt_pos  # noqa: E402
 
 _TRACKS = Path(__file__).parents[2] / "flow" / "tracks" / "tracks.buda"
 
@@ -451,7 +452,8 @@ def test_a_derived_line_reproduces_the_track_exactly(tmp_path):
             "positions": [600000.5, 1234567.5], "n_inst": 1, "n_skipped": 0,
             "used_lo": 2, "used_hi": 2, "seat_hit": 0, "seat": None,
             "seat_inst": "u1", "own_hit": 0}
-    s._derive_cell_layer_reserves = lambda cells=None: ([line], [], ["top_cell"])
+    line["yielded"] = line["yield_short"] = 0
+    s._derive_cell_layer_reserves = lambda cells=None, **kw: ([line], [], ["top_cell"])
     out = _cmd(s, f"derive_cell_layer_reserves file {tmp_path / 'r.buda'}")
     text = (tmp_path / "r.buda").read_text()
     assert "set_cell_layer_reserve top_cell M6 600000.5,1234567.5" in text, text
@@ -1261,3 +1263,506 @@ def test_the_parallel_screen_and_sweep_seat_like_the_sequential_ones():
             os.environ.pop("BUDA_RESERVE_STEER_NUTS", None)
         else:
             os.environ["BUDA_RESERVE_STEER_NUTS"] = old
+
+
+# ── ladder item 6d: the derivation yields the block its seat ─────────────
+
+def _wide(n, *policy, yield_seat=False):
+    """The two-instance vehicle with an n-bit cell-local bus and the cell
+    banded to [M5..M6] — M6 the only H layer its bus can take, so the
+    local solve cannot escape a reservation by re-planning (unbanded, the
+    8-bit vehicle moves its bus to M4/M2 and any reservation costs it
+    nothing).  Returns (blind session, derived lines, notes, the
+    template session routed under the derived lines)."""
+    design = [c.replace("loc[8]", f"loc[{n}]").replace("loc2[8]", f"loc2[{n}]")
+              for c in _DESIGN]
+    i = design.index("run_hier_bundler depth 1")
+    a = buda_cli.BudaSession()
+    a.no_viz = True
+    _quiet(a, *design[:i], "set_cell_layer_cap top_cell M6 -min M5",
+           *design[i:], "run_nuts", "run_detailed_nuts")
+    lines, notes, _ = a._derive_cell_layer_reserves(yield_seat=yield_seat)
+    text = [f"set_cell_layer_reserve {l['cell']} {l['layer_name']} "
+            + ",".join(fmt_pos(q) for q in l["positions"]) for l in lines]
+    t = buda_cli.BudaSession()
+    t.no_viz = True
+    _quiet(t, *design[:i], "set_bottom_up top_cell",
+           "set_cell_layer_cap top_cell M6 -min M5", *policy, *text,
+           *design[i:], "run_nuts",
+           "check_template_tracks on_mismatch independent",
+           "run_detailed_nuts")
+    return a, lines, notes, t
+
+
+def _placed_bits(t):
+    out = {}
+    for w in t.bundles:
+        b = w.input.original_bundle
+        bits = {n.bit_index for n in t.detailed_result.net_segments
+                if n.bundle_id == b.id}
+        out[b.get_net_names()[0]] = (len(b.get_net_names()), len(bits))
+    return out
+
+
+def test_the_derivation_yields_the_block_its_seat_where_the_union_covers_it():
+    """Ladder item 6d.  A 12-bit cell-local bus in a 19-track seat with the
+    top's 8 tracks inside it, banded so the bus cannot leave M6: under the
+    full union the block's bus strands (24 bits — every bit on both
+    instances, the doomed-seat shape E5's top-down NQ = 2 fixpoint
+    showed).  The window keeps no run of 12 consecutive free tracks with
+    the 8 in its middle, so `yield` gives back the block's current seat —
+    all 8, every one under its own metal — the line reserves nothing (a
+    removal), the block keeps its bus, and here the top keeps every bit
+    too (it seats elsewhere)."""
+    a, lines, notes, t = _wide(12)
+    assert [(len(l["positions"]), l["seat_hit"], l["yielded"]) for l in lines] \
+        == [(8, 8, 0)], lines
+    assert lines[0]["seat"][2:] == (12, 19), lines[0]["seat"]
+    assert t.detailed_result.num_unplaced == 24
+    assert _placed_bits(t) == {"loc_0": (12, 0), "loc2_0": (12, 0),
+                               "x_0": (8, 8)}, _placed_bits(t)
+    a2, lines2, notes2, t2 = _wide(12, yield_seat=True)
+    assert [(len(l["positions"]), l["seat_hit"], l["yielded"],
+             l["yield_short"]) for l in lines2] == [(0, 0, 8, 0)], lines2
+    assert any("8 of 8 reserved track(s) yielded to the cell's own seat "
+               "(bundle 4 seg 0 needs 12 of 19 at u1; the top loses them) "
+               "— nothing left to reserve here" in n for n in notes2), notes2
+    assert t2.detailed_result.num_unplaced == 0
+    assert _placed_bits(t2) == {"loc_0": (12, 12), "loc2_0": (12, 12),
+                                "x_0": (8, 8)}
+    assert "Success" in _cmd(t2, "check_design")
+    # the command's surface: the token, the column, the summary, the header
+    out = _cmd(a2, "derive_cell_layer_reserves yield")
+    assert "yielding each cell its own seat" in out and "  yield" in out
+    assert ("1 reservation(s) yielded 8 track(s) to a seat (the top loses "
+            "them; 1 line(s) yielded whole reserve nothing — a removal)") in out
+    assert "nothing to declare: the top takes no track the cells' seats " \
+        "can spare" in out, out
+    assert "unknown token" in _cmd(a2, "derive_cell_layer_reserves yields")
+
+
+def test_the_pick_is_the_contiguous_run_and_the_current_seat_first(tmp_path):
+    """The rule behind `yield` (measured on the SoC's core: with even ONE
+    corridor track left in a 36-track window the 32-bit bus's local
+    planner fled to a dead LOW layer; with none it routed clean): an
+    abstract seat is one rectangle, so the test is the longest run of
+    consecutive reserved-free tracks, not the count.  Given back first is
+    the block's CURRENT seat — every reserved track under its own metal's
+    span — then the nearest remaining one at a time until a run of `need`
+    opens; the shortfall left with nothing reserved is the block's own."""
+    pick = buda_cli.BudaSession._pick_yield
+    s = buda_cli.BudaSession()
+    t = [60.0 + 4 * i for i in range(19)]          # the window's tracks
+    res = t[5:13]                                   # 8 reserved, mid-window
+    cands = [(q, q) for q in res]
+    own = {"own_seat": (4, 0, 12, 19), "own_window": (60.0, 132.0),
+           "own_tracks": t[9:13]}                    # its metal on 4 of them
+    give, short = pick(s, cands, own, t)
+    # the 4 under its metal, then t[8] and t[7] (nearest its centre) —
+    # after which t[7..18] is a run of 12
+    assert set(give[:4]) == set(t[9:13]) and give[4:] == [t[8], t[7]], give
+    assert short == 0
+    # room enough: the run to the right of 4 reserved tracks holds 8
+    assert pick(s, [(q, q) for q in t[5:9]],
+                {"own_seat": (4, 0, 8, 19), "own_window": (60.0, 132.0),
+                 "own_tracks": []}, t) == ([], 0)
+    # a seat that cannot host its bus even unreserved: everything back,
+    # the shortfall said
+    give, short = pick(s, cands, {"own_seat": (4, 0, 20, 19),
+                                  "own_window": (60.0, 132.0),
+                                  "own_tracks": []}, t)
+    assert sorted(give) == res and short == 1, (give, short)
+    # no grid to read the tracks off: the count model, exact shortfall
+    assert pick(s, cands, own, None) == (t[10:11], 0)   # nearest its centre
+    # through a session: a whole line yielded is a removal, said, and
+    # the file carries the `off` line for a reservation it replaces
+    a, lines, notes, _t = _wide(12, yield_seat=False)
+    a._pick_yield = lambda cands, own, tracks, fixed=(): (
+        [k for k, _ in cands], 1)
+    lines, notes, _ = a._derive_cell_layer_reserves(yield_seat=True)
+    assert [l["positions"] for l in lines] == [[]], lines
+    assert any("8 of 8 reserved track(s) yielded" in n
+               and "nothing left to reserve here" in n for n in notes), notes
+    # the seat's own shortfall is its own note: a give-back can be split
+    # across the cell's line and its ancestors', and the shortfall is the
+    # SEAT's, not any one line's
+    assert any("still 1 short" in n and "cannot host its own bus" in n
+               for n in notes), notes
+    _cmd(a, "set_cell_layer_reserve top_cell M6 83,86")
+    out = _cmd(a, f"derive_cell_layer_reserves yield file {tmp_path / 'y.buda'}")
+    text = (tmp_path / "y.buda").read_text()
+    assert "each cell's own seat yielded" in text
+    assert "set_cell_layer_reserve top_cell M6 off" in text, text
+    assert "1 removal line(s)" in out and "nothing to declare" in out, out
+
+
+def test_yield_changes_nothing_where_the_seat_keeps_a_long_enough_run():
+    """The 8-bit vehicle with a 4-bit top: 4 reserved tracks in a 19-track
+    window leave a run of 8 free, so `yield` gives nothing back and the
+    lines are the plain derivation's.  (With the 8-bit top the 8 reserved
+    tracks sit mid-window and no run of 8 survives, so the whole line is
+    yielded — although E5 measured that block moving its bus to another
+    layer: the floor reads the current plan's seat, not the alternatives,
+    which the docs say.)"""
+    design = [c.replace("add_bus x[8]", "add_bus x[4]") for c in _DESIGN]
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    _quiet(s, *design, "run_nuts", "run_detailed_nuts")
+    plain, notes, _ = s._derive_cell_layer_reserves()
+    yld, notes2, _ = s._derive_cell_layer_reserves(yield_seat=True)
+    assert [l["positions"] for l in yld] == [l["positions"] for l in plain]
+    assert len(plain[0]["positions"]) == 4 and plain[0]["seat_hit"] == 4
+    assert all(l["yielded"] == 0 for l in yld) and notes2 == notes
+    out = _cmd(s, "derive_cell_layer_reserves yield")
+    assert "0 reservation(s) yielded 0 track(s)" in out, out
+    s8 = _session("run_nuts", "run_detailed_nuts")
+    yld8, notes8, _ = s8._derive_cell_layer_reserves(yield_seat=True)
+    assert [(l["positions"], l["yielded"]) for l in yld8] == [([], 8)]
+
+
+_BAND_INNER = "set_cell_layer_cap inner M6 -min M5"
+
+
+def _seat_runs(t, cell, lname):
+    """Per occurrence of `cell`, the longest run of consecutive signal
+    tracks its worst seat window leaves free of the reservations IN FORCE
+    there — `_effective_reserves`, the set the cell-local solve keeps free
+    (own UNION inherited).  Computed off the routed session rather than
+    off the derivation, so it is an independent check of what the yield
+    was supposed to buy: {inst: (free run, need, window tracks)}."""
+    lid = t._layer_name_map[lname]
+    eff, _src, _clone = t._effective_reserves(cell)
+    comps = {c.name: c for c in t.bdb.all_components()}
+    fr, _rot = t._reserve_frames(cell)
+    out = {}
+    for r in t._layer_demand():
+        if r["cell"] != cell or r["layer"] != lid or not r["own_seat"]:
+            continue
+        d, od = comps[r["inst"]], fr[r["inst"]]
+        lo, hi = r["own_window"]
+        blocked = [a for a in t._reserve_abs_of(eff.get(lid, ()), od, d, lid)
+                   if lo - 1e-6 <= a <= hi + 1e-6]
+        tk = t._seat_tracks(r)
+        out[r["inst"]] = (buda_cli.BudaSession._largest_free_run(tk, blocked),
+                          int(r["own_seat"][2]), len(tk))
+    return out
+
+
+def _derived_text(s, yield_seat):
+    lines, notes, _ = s._derive_cell_layer_reserves(yield_seat=yield_seat)
+    return [f"set_cell_layer_reserve {l['cell']} {l['layer_name']} "
+            + ",".join(fmt_pos(q) for q in l["positions"])
+            for l in lines if l["positions"]], lines, notes
+
+
+def test_the_yield_sees_the_union_of_own_and_inherited_at_every_occurrence():
+    """Codex on #940, the two findings that share one cause.  What a
+    cell-local solve keeps free is `_effective_reserves` — the cell's OWN
+    line UNION every ancestor corridor projected into its frame — so that
+    union is what fragments its seat.  Two ways of testing less than the
+    union were measured here:
+
+    (1) an ancestor track has a DIFFERENT image at each occurrence of the
+        nested cell (that is why the inheritance unions over occurrences),
+        and keying the candidates by (ancestor, track) kept only the
+        first, so the run test saw 8 of the 16 images; and
+    (2) the cell's own tracks and the inherited images were tested
+        SEPARATELY, so each half could find a long enough run while the
+        union left none.
+
+    The vehicle is the nested design with its second top instance
+    MIRRORED, so the two occurrences' images genuinely differ, and the
+    nested template banded to [M5..M6] so its bus cannot answer a
+    reservation by fleeing to a free layer (unbanded it moves to M4 and
+    the seat stops existing, which is why no test reached this pass).
+
+    Measured: `inner`'s 8-bit bus has a 19-track window at each of its two
+    occurrences.  Under the plain derivation both are fragmented below
+    what the bus needs; under the yield both clear."""
+    s0, _ = _flipped(["set_bottom_up *"], _BAND_INNER)
+    plain, _pl, _pn = _derived_text(s0, False)
+    t0, _o0 = _flipped(["set_bottom_up *"], _BAND_INNER, *plain)
+    before = _seat_runs(t0, "inner", "M6")
+    assert before == {"u1/c": (7, 8, 19), "u2/c": (6, 8, 19)}, before
+    text, lines, notes = _derived_text(s0, True)
+    t, _out = _flipped(["set_bottom_up *"], _BAND_INNER, *text)
+    after = _seat_runs(t, "inner", "M6")
+    assert after == {"u1/c": (19, 8, 19), "u2/c": (13, 8, 19)}, after
+    for inst, (run, need, _n) in after.items():
+        assert run >= need, (inst, run, need)
+    # the give-back is split across the cell's own line and the
+    # ANCESTOR's, each said with the seat it served, and the ancestor is
+    # charged by name (the core has no line of its own on the SoC — its
+    # stranded bits were the cluster's corridor crossing its seat)
+    byc = {(l["cell"], l["layer_name"]): l for l in lines}
+    assert byc[("inner", "M6")]["yielded"] == 7
+    assert byc[("top_cell", "M6")]["yielded"] == 7
+    assert len(byc[("top_cell", "M6")]["positions"]) == 9, byc
+    assert any("top_cell M6: 7 of 16 reserved track(s) yielded to nested "
+               "inner's own seat" in n and "16 inherited track(s) in its "
+               "window" in n for n in notes), notes
+    assert any("inner M6: 7 of 8 reserved track(s) yielded to the cell's "
+               "own seat" in n for n in notes), notes
+    # and the counts the table prints follow the line it reduced
+    assert byc[("top_cell", "M6")]["seat_hit"] == 1
+    assert byc[("inner", "M6")]["seat_hit"] == 1
+
+
+def test_an_out_of_scope_ancestors_corridor_is_blocked_but_not_yielded():
+    """Codex on #940: `_report_cell_layer_reserves` removes a held
+    reservation only when its cell is IN SCOPE, so an ancestor outside the
+    scope keeps its corridor and still crosses the nested cell's seat when
+    the next round routes.  The walk must therefore read the map IN FORCE
+    — what is held, with the derived lines in the scoped cells' place —
+    not the derived lines alone, which came back with no inheritance at
+    all and yielded nothing to the very seat the policy is for.
+
+    Scoped to `inner`, the enclosing corridor is real and un-givable: it
+    still narrows the run test (so the cell's own line gives way to it),
+    and no line is invented for the cell that was not asked for."""
+    s0, _ = _flipped(["set_bottom_up *"], _BAND_INNER)
+    text, _l, _n = _derived_text(s0, False)
+    top = [t for t in text if t.startswith("set_cell_layer_reserve top_cell M6")]
+    assert len(top) == 1, text
+    s, _o = _flipped(["set_bottom_up *"], _BAND_INNER, *top)
+    lines, notes, scope = s._derive_cell_layer_reserves(cells=["inner"],
+                                                        yield_seat=True)
+    assert scope == ["inner"]
+    assert {l["cell"] for l in lines} == {"inner"}
+    m6 = [l for l in lines if l["layer_name"] == "M6"][0]
+    # The held corridor is not this derivation's to move, so the cell's
+    # OWN line gives way to it — all 8 tracks — and what the corridor
+    # still costs the seat is SAID rather than left as a reservation
+    # covering it.  (Reading the derived lines alone instead of the map in
+    # force, the ancestor is invisible: the line keeps all 8 tracks,
+    # reports seat_hit 8, yields nothing and says nothing.)
+    assert (m6["positions"], m6["yielded"], m6["yield_short"]) == ([], 8, 1)
+    assert m6["seat_hit"] == 0
+    assert any("still 1 short at u1/c" in n
+               and "with every yieldable track in its window given back"
+               in n for n in notes), notes
+    assert not any("top_cell" in n for n in notes), notes
+    # and the seat really is still short under those lines: a corridor the
+    # derivation cannot move is one the block has to live with
+    txt = [f"set_cell_layer_reserve {l['cell']} {l['layer_name']} "
+           + ",".join(fmt_pos(q) for q in l["positions"])
+           for l in lines if l["positions"]]
+    t, _o2 = _flipped(["set_bottom_up *"], _BAND_INNER, *top, *txt)
+    runs = _seat_runs(t, "inner", "M6")
+    assert all(run < need for run, need, _n in runs.values()), runs
+
+
+def test_the_seats_tracks_are_the_pool_its_need_was_measured_against():
+    """Codex on #940 (round 3): the fix that could strand a bus silently
+    was not guarded, and reverting `_seat_tracks` to a point probe left the
+    whole suite green.
+
+    `own_seat`'s `(need, pool)` comes from the seat's DNUTS admission
+    arithmetic — span-clear over the slide window, midpoint fallback,
+    corner bounds.  The yield's contiguous-run test is judged against that
+    `need`, so the TRACKS it runs over have to be that same pool; a probe
+    at one x is blind to a keepout anywhere else along the span and can
+    report a run DNUTS then rejects, which is a seat left unyielded and a
+    bus stranded — the failure 6d exists to remove, reached by a keepout
+    instead of by a reservation.
+
+    A keepout over part of `u1`'s seat span and none of `u2`'s separates
+    the two readings: the pool identity holds on both, the point probe is
+    wrong by nine tracks on `u1` and right on `u2`, so `u2` is the control
+    that shows the keepout is what does it rather than the probe being
+    wrong everywhere."""
+    import buda
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    i = _DESIGN.index("run_hier_bundler depth 1")
+    _quiet(s, *_DESIGN[:i], "set_cell_layer_cap top_cell M6 -min M5",
+           # over part of u1's seat span (x 150..350) and part of its
+           # window (y 110..190), away from u1's OWN along-midpoint (350)
+           "add_keepout 160 110 200 152 6",
+           *_DESIGN[i:], "run_nuts", "run_detailed_nuts")
+    comps = {c.name: c for c in s.bdb.all_components()}
+    seen = {}
+    for r in s._layer_demand():
+        if not r["own_seat"]:
+            continue
+        lid, need, pool = r["layer"], r["own_seat"][2], r["own_seat"][3]
+        g = s.routing_grid.get_layer_grid(lid)
+        tracks = s._seat_tracks(r)
+        # (1) the identity the split exists for: the POSITIONS and the
+        # COUNT are read from one seat, so len() of one IS the other
+        assert len(tracks) == pool == s._seg_admission_pool(
+            r["own_seg"], g, need), (r["inst"], len(tracks), pool)
+        assert len(s._seg_admission_tracks(r["own_seg"], g, need)) == pool
+        # (2) what the point probe would have said
+        lo, hi = r["own_window"]
+        c = comps[r["inst"]]
+        horiz = s.layers.get_layer_dir(lid) == buda.LayerDir.HORIZONTAL
+        mid = 0.5 * ((c.x1 + c.x2) if horiz else (c.y1 + c.y2))
+        seen[r["inst"]] = (pool, len(g.signal_tracks_in(mid, lo, hi)), need)
+    # u1's span crosses the keepout, u2's does not: the probe is wrong on
+    # the one and right on the other, and wrong in the dangerous direction
+    # (it reports MORE room than the seat has, so the yield gives nothing
+    # back).  Both seats need 8, so on u1 the probe's 19 clears the run
+    # test that the true 10 need not.
+    assert seen["u1"] == (10, 19, 8), seen
+    assert seen["u2"] == (19, 19, 8), seen
+
+
+def test_a_seat_blocked_only_by_un_givable_tracks_is_reported():
+    """Codex on #940 (round 3): the branch that went in with no candidates
+    and returned silently had no test, because the in-tree vehicles could
+    not produce the shape — a cell holding a seat whose every blocker
+    belongs to a cell OUTSIDE the scope, so there is nothing to give back
+    and the shortfall is all there is to say.
+
+    Here `inner` holds an M6 seat (8 bits in a 19-track window) and the
+    derivation scoped to it emits NO line: the top places no track over
+    `inner` at all.  A corridor declared on `top_cell` — not in scope, so
+    not this derivation's to move — projects into that window at the two
+    positions that cut its 19 free tracks into runs of 7, 7 and 3, one
+    short of the 8 the bus needs.
+
+    Building it found the defect one level further up than the report:
+    the pass was gated on `lines` being non-empty, so a derivation that
+    emits no line skipped it entirely and this seat was silent however
+    the pick behaved."""
+    # u1/c's window is 230..310 with 19 signal tracks; blocking the 8th and
+    # 16th leaves no run of 8.  Positions are top_cell-local (its instances
+    # sit at y 50), so 261 and 295 absolute.
+    s, _out = _nested(["set_bottom_up *"], _BAND_INNER,
+                      "set_cell_layer_reserve top_cell M6 211,245")
+    lines, notes, scope = s._derive_cell_layer_reserves(cells=["inner"],
+                                                        yield_seat=True)
+    assert scope == ["inner"] and lines == [], lines
+    short = [n for n in notes if n.startswith("inner M6:")]
+    assert len(short) == 1, notes
+    n = short[0]
+    # the seat, the shortfall, and WHY nothing was given back — all three,
+    # since "1 short" without the reason reads as a policy that declined
+    assert "still 1 short at u1/c" in n, n
+    assert "bundle" in n and "needs 8 of 19 at u1/c" in n, n
+    assert "nothing here is this derivation's to move" in n, n
+    assert "2 track(s) held by a cell outside its scope" in n, n
+    # and it is NOT the other ending: nothing was yielded, so the note must
+    # not claim every yieldable track was given back
+    assert "given back" not in n, n
+
+
+def test_the_yield_pass_runs_even_when_the_derivation_emits_no_line():
+    """The guard above, stated on its own: with `yield_seat` the pass runs
+    whether or not there are lines, because its reporting half speaks for
+    seats it cannot rescue.  With no line AND no inherited reserve it has
+    nothing to walk and says nothing, so this costs a call."""
+    s, _out = _nested(["set_bottom_up *"], _BAND_INNER)
+    lines, notes, _scope = s._derive_cell_layer_reserves(cells=["inner"],
+                                                          yield_seat=True)
+    assert lines == []
+    assert not [n for n in notes if n.startswith("inner M6:")], notes
+
+
+def test_the_budget_file_resolves_against_the_script_not_the_cwd(tmp_path,
+                                                                monkeypatch):
+    """Codex on #940: the handler passed `file <path>` straight through
+    while its twin `derive_cell_layer_shares` resolved it against the
+    SCRIPT's directory, which is the repository's rule.  So one flow
+    writing both budgets side by side put them in two directories the
+    moment it ran from anywhere but its own — and `converge.tcl`, which
+    compares the two round to round, is exactly such a caller."""
+    s = _session("run_nuts")
+    home = tmp_path / "flowdir"
+    home.mkdir()
+    elsewhere = tmp_path / "cwd"
+    elsewhere.mkdir()
+    (home / "derive.buda").write_text(
+        "derive_cell_layer_reserves file reserves.buda\n"
+        "derive_cell_layer_shares file shares.buda\n")
+    monkeypatch.chdir(elsewhere)
+    _quiet(s, f"source {home / 'derive.buda'}")
+    # both land beside the script that asked for them, neither in the cwd
+    assert (home / "reserves.buda").exists(), list(home.iterdir())
+    assert (home / "shares.buda").exists(), list(home.iterdir())
+    assert not list(elsewhere.iterdir()), list(elsewhere.iterdir())
+    assert "set_cell_layer_reserve" in (home / "reserves.buda").read_text()
+
+
+def test_the_written_budget_says_a_whole_yield_is_not_an_empty_demand(tmp_path):
+    """Codex on #940: the terminal line learned about `yield_seat` and the
+    one written to the FILE did not, so a run that yielded every line whole
+    wrote a file asserting the top takes no track at all.  The file is the
+    copy that persists — the next round sources it and a reader opens it
+    afterwards — so it is the one that most needed to be right.
+
+    The two cases have to stay distinguished, since a scope the top never
+    crosses reaches the same branch with no yield at all."""
+    yielded = tmp_path / "yielded.buda"
+    s = _session("run_nuts", "run_detailed_nuts")
+    # every line this scope emits is given back whole, so `text` is empty
+    # for a reason that is NOT "the top takes no track"
+    out = _cmd(s, f"derive_cell_layer_reserves cells top_cell "
+                  f"yield file {yielded}")
+    text = yielded.read_text()
+    # unconditional: if the vehicle ever stops yielding every line whole
+    # this must fail rather than quietly stop testing the branch
+    assert "set_cell_layer_reserve" not in text, text
+    assert "nothing to declare" in text, text
+    assert "the cells' seats can spare" in text, text
+    assert "the cells' seats can spare" in out, out
+    # the other ending: a scope the top genuinely never crosses says the
+    # plain sentence, with no yield in it
+    plain = tmp_path / "plain.buda"
+    _cmd(s, f"derive_cell_layer_reserves cells leaf file {plain}")
+    ptext = plain.read_text()
+    assert "nothing to declare" in ptext, ptext
+    assert "seats can spare" not in ptext, ptext
+
+
+def test_a_seat_the_yield_cannot_act_on_is_named_against_the_row_shown():
+    """Codex on #940: the line's `seat` column is picked over every demand
+    row of the layer, while the yield's pick also requires a resolved
+    window and seat AND an instance in the template's own rotation frame
+    (a 90-degree occurrence belongs to the clone class, BUDA-1921).  So
+    the two can name different instances, and saying nothing let the table
+    describe one seat while the policy acted on another.
+
+    The full-flow configuration is NOT reachable on the in-tree vehicles,
+    and that is worth recording rather than leaving as a gap someone
+    re-derives: a rotated occurrence's own bus lands on the PERPENDICULAR
+    layer family, so the upright and rotated instances of one cell never
+    hold a seat on the same layer and their two picks cannot disagree
+    there.  What reproduces it exactly is the cause itself — an instance
+    absent from the frame map — so the frame map is what this perturbs,
+    and every other step runs for real.
+
+    The keepout gives `u1` the worse seat (8 of 10 against 8 of 19), so it
+    is the row the line shows; dropping it from the frame leaves the yield
+    acting on `u2`."""
+    import buda
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    i = _DESIGN.index("run_hier_bundler depth 1")
+    _quiet(s, *_DESIGN[:i], "set_cell_layer_cap top_cell M6 -min M5",
+           "add_keepout 160 110 200 152 6",
+           *_DESIGN[i:], "run_nuts", "run_detailed_nuts")
+    worst = max((r for r in s._layer_demand()
+                 if r["cell"] == "top_cell" and r["own_seat"]),
+                key=lambda r: r["own_need"])
+    assert worst["inst"] == "u1", worst["inst"]
+
+    real = s._reserve_frames
+
+    def without_u1(cell, *a, **kw):
+        fr, rot = real(cell, *a, **kw)
+        return ({k: v for k, v in fr.items() if k != "u1"}, rot)
+
+    s._reserve_frames = without_u1
+    _lines, notes, _scope = s._derive_cell_layer_reserves(yield_seat=True)
+    hit = [n for n in notes if "the worst seat is" in n]
+    assert len(hit) == 1, notes
+    n = hit[0]
+    # both instances named, which one the column means, and why the shown
+    # one is out of reach — the layer named correctly, not the previous
+    # loop's (`lname` was read before it was assigned)
+    assert n.startswith("top_cell M6:"), n
+    assert "the worst seat is u1's" in n, n
+    assert "yielding to u2's instead" in n, n
+    assert "the row's seat column names the former" in n, n
