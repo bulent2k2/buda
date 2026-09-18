@@ -1789,12 +1789,13 @@ class ReportsMixin:
         the tracks the cell's own metal sits on today (its current seat,
         so the local solve need not move at all) and then, still short,
         the nearest remaining ones until such a run opens, and says so per
-        line (`yield`) and in a note naming the seat.  A second pass does
-        the same for every NESTED template's seat against the corridors it
-        would inherit (`_yield_to_nested` — the SoC's cores, which have no
-        line of their own).  A seat that cannot host its bus even with
-        every reserved track given back is said too (the shortfall is the
-        block's, not the reservation's).  The floor reads the block's seat
+        line (`yield`) and in a note naming the seat.  The SAME pass judges
+        a NESTED template's seat against the corridors it inherits
+        (`_yield_seats`, one pass per (cell, layer) seat against the union
+        of the cell's own line and every corridor over it — the SoC's
+        cores, which have no line of their own).  A seat that cannot host
+        its bus even with every reserved track given back is said too (the
+        shortfall is the block's, not the reservation's).  The floor reads the block's seat
         off the CURRENT plan, so a block that could have re-planned onto
         another layer is yielded to all the same.  Whether a top routed
         around a kept seat is cleaner than a block stranded under a full

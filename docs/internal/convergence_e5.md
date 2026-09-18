@@ -875,9 +875,9 @@ loops shared the machine.)
 **Healers on** (`… -heal -informed 3 -handdown -yield`; `first` is the
 informed round's healerless verdict under the healed previous round's
 plan, `final` its healed one, 6c's pair quoted).  **Measured under the
-corrected derivation**, like the two tables around it; eight of its nine
-rows reproduce the previous pass exactly and the ninth is NQ = 16 `td`,
-below:
+corrected derivation**, like the two tables around it; of the previous
+pass's nine rows, eight reproduce exactly, and the ninth is NQ = 16 `td`,
+whose round 2 below is new:
 
 | size | arm | round | plan | fixpoint | first | final | 6c (first → final) | detailed WL | reserved ÷ used |
 |---|---|---|---|---|---|---|---|---|---|
@@ -1040,9 +1040,9 @@ both, and is a driver policy on top of `pin_plan`, not a new primitive.
   corridor tracks left inside the core's M5 window (`varA/B2/B3/B`);
   the core's window and the inherited tracks read off the `BUDA_RECORD`
   recording of the NQ = 2 top-down round in Python.
-  **The three tables are not all from one pass right now**, which the
-  headers say individually and this bullet says once.  There have been two
-  corrections, and a row belongs to whichever it has been re-run under:
+  **All three tables are from one pass**, which the headers say
+  individually and this bullet says once.  Getting there took two
+  corrections, and each MOVED rows rather than confirming them:
 
   1. The FIRST measurement went through a yield that tested each seat
      against half of what fragments it and kept one image per ancestor
@@ -1059,8 +1059,10 @@ both, and is a driver policy on top of `pin_plan`, not a new primitive.
      The mesh control reproduced exactly again; the healerless table moved
      nine cells, seven of them in `yielded`, which is the column the yield
      itself writes; the healed table moved ONE ROW, NQ = 16 `td`, from
-     `0/0/0` to `2/0/0` — which cost the section its "seven of eight"
-     claim and is written into conclusion 3 rather than absorbed.
+     `0/0/0` to `2/0/0` AT ROUND 1 — and that arm then cleans at round 2,
+     so what moved is what cleaning it COSTS, not the section's "seven of
+     eight" count, which stands.  Both halves are written into conclusion
+     3 rather than absorbed.
 
   The healed table's NQ = 16 rows were first taken from two `-informed 1`
   runs, because the full `-informed 3` sweep's NQ = 16 `td` arm had carried
