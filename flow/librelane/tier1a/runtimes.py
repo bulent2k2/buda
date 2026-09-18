@@ -15,6 +15,14 @@ the benchmark coordinates into it (any KEY=VALUE, merged in verbatim), and
 that each said `runs/flat` because recipe 7 invokes this from each `n<N>`
 directory were usable only by line order (Codex #881).
 
+A row for a run that FAILED says so the same way, because nothing in the
+metrics does: `--set status=failed --set failed_at=<step> --set
+failed_on=<what the flow quit on>`.  ABSENT means completed -- the 13 rows
+predating the convention carry no `status` -- so a consumer that wants only
+finished runs filters `select(.status != "failed")`, never `== "completed"`.
+The need is not hypothetical: a run that quits on deferred signoff errors
+still writes a `final/metrics.json` whose every aggregate DRC field is 0.
+
 A HIERARCHICAL arm is one top run plus the hardening of each distinct
 block, and its row must carry both (docs/internal/librelane_hier_flow.md
 §7.3).  `--block <run_dir>[:<instances>]` names a block's run and how many
@@ -67,7 +75,17 @@ METRICS = ["design__instance__area", "design__die__area", "design__instance__uti
            "power__total", "power__internal__total", "power__switching__total",
            "power__leakage__total",
            "route__wirelength", "route__drc_errors", "magic__drc_error__count",
-           "klayout__drc_error__count", "design__instance__count"]
+           "klayout__drc_error__count", "design__instance__count",
+           # `magic__drc_error__count` is absent from EVERY run in this tree --
+           # `RUN_MAGIC_DRC` is False throughout -- so the Magic verdict this
+           # study actually has is the overlap check, which rides Magic's
+           # stream-out rather than its DRC deck and IS present on every run
+           # (librelane_hier_flow.md S11 item 13).  It was the only column that
+           # could distinguish the rejected met2 blanket (6,233) from the
+           # baseline and the accepted fix (0 and 0), and a row could not carry
+           # it: a run that died on illegal overlaps had every DRC field in its
+           # row reading 0.
+           "magic__illegal_overlap__count"]
 
 
 def step_seconds(step_dir):

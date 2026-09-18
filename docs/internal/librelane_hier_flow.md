@@ -2321,13 +2321,28 @@ have: every netlist here is either authored or uniquified.
    rejected met2 BLANKET closed the same DRC and cost 6,233 illegal
    overlaps doing it: the surgical patch closes it and adds none.
 
-   **Where the four runs' metrics are.**  `hb` (baseline) and `hbnt`
-   (`notch_obs.py`) are rows in `flow/librelane/tier1a/results.jsonl`, and
-   their run directories survive.  The two REJECTED fixes are neither: their
-   run directories have been deleted, so their `final/metrics.json` is kept
-   in `flow/librelane/tier1a/hb2/variant_metrics/` — `hbabs.json` for the
-   whole abstract, `hbm2.json` for the met2 blanket — with a README naming
-   what each tag varied and the metric in each that reads clean and is not.
+   **Where the four runs' metrics are.**  All four are rows in
+   `flow/librelane/tier1a/results.jsonl`.  `hb` and `hbnt` completed and
+   their run directories survive; the two REJECTED fixes are marked
+   `"status": "failed"` with the step each quit at
+   (`Checker.PowerGridViolations`, `Checker.IllegalOverlap`), because
+   nothing in their metrics says so — absent `status` means completed, so a
+   consumer filters `select(.status != "failed")`.  Their run directories
+   have been deleted, so those two rows could not be generated (the timing
+   columns are `null` and each row's `source` says why) and their
+   `final/metrics.json` is kept in
+   `flow/librelane/tier1a/hb2/variant_metrics/` — `hbabs.json` for the whole
+   abstract, `hbm2.json` for the met2 blanket — with a README naming what
+   each tag varied and the metric in each that reads clean and is not.
+
+   The met2 blanket is also why `magic__illegal_overlap__count` is now one
+   of `runtimes.py`'s `METRICS`.  It is the only column that separates the
+   three routed runs here (6,233 against 0 and 0), and until it was added a
+   row could not carry it — so the run that died on illegal overlaps had
+   every DRC field in its row reading 0, which is the shape this item's own
+   paragraph above warns about.  `hb` and `hbnt` predate the column and
+   carry `null`; re-running `runtimes.py` on their run directories fills it
+   in.
 
 12. **`pdn_phase.py` detects, but its REMEDY is wrong** (measured
    2026-09-07 on the N = 8 artefacts).  The model now fails the

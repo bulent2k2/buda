@@ -25,13 +25,13 @@ a met2 blanket 6,233 Magic overlaps").  The four tags of that experiment are:
 
 | tag | abstract the top consumed | where its metrics are |
 |---|---|---|
-| `hb`    | Magic's LEF (baseline)            | `results.jsonl` row, run dir survives |
-| `hbabs` | the whole `<cell>.openroad.lef`   | **here** — run dir deleted |
-| `hbm2`  | `patch_obs.py`'s met2 blanket     | **here** — run dir deleted |
-| `hbnt`  | `notch_obs.py` (the accepted fix) | `results.jsonl` row, run dir survives |
+| `hb`    | Magic's LEF (baseline)            | `results.jsonl` row; run dir survives |
+| `hbabs` | the whole `<cell>.openroad.lef`   | dump **here**, row marked failed; run dir deleted |
+| `hbm2`  | `patch_obs.py`'s met2 blanket     | dump **here**, row marked failed; run dir deleted |
+| `hbnt`  | `notch_obs.py` (the accepted fix) | `results.jsonl` row; run dir survives |
 
-The two kept here are **not** benchmark rows — see "Why neither is a
-`results.jsonl` row" below.
+All four are rows in `results.jsonl`; the two kept here are the two marked
+`"status": "failed"` — see "How they appear in `results.jsonl`" below.
 
 ## Provenance
 
@@ -141,29 +141,43 @@ the baseline's 2, setup WS 0.365, hold WS 0.112, `design__lvs_error__count` 0,
 0.3869.  What is missing is the **signoff verdict**, and that verdict is a
 failure.
 
-## Why neither is a `results.jsonl` row
+## How they appear in `results.jsonl`
 
-`results.jsonl` is the benchmark table: one row per run, appended by
-`runtimes.py … --json`, and all 13 of its rows carry a routed wirelength and a
-signoff DRC count.  These two runs are not points on that benchmark — they are
-two rejected fixes — and rows would plant both traps above inside the file the
-write-up quotes:
+Both are rows, and both are **marked as failures**, because nothing in their
+metrics says so:
 
-- `hbabs` would contribute `timing__setup__ws: 1e39` and nulls for every
-  routing column.
-- `hbm2` would contribute a row whose two aggregate DRC fields are both 0,
-  beside 12 rows that completed, with its 6,233 illegal overlaps carried in a
-  key the table does not show.
+```
+"status": "failed", "failed_at": "Checker.PowerGridViolations",
+"failed_on": "125800 power grid violations (as reported by OpenROAD PSM)"
 
-`runtimes.py` refuses to compute an arm total when `route__wirelength` is
-absent, on the stated grounds that it "would be a plausible, incomplete
-number" (Codex #878).  The same reasoning applies a level up: a row is a claim
-that a run is a measurement, and these two are records of how a fix failed.
+"status": "failed", "failed_at": "Checker.IllegalOverlap",
+"failed_on": "6233 Magic Illegal Overlap errors"
+```
 
-The timing columns could not be filled in anyway — `steps`, `total_s` and the
-per-stage seconds come from each step's `runtime.txt` in the run directory,
-and the run directories are gone.  Only the per-leg wall times above survive,
-and they are not the same quantity.
+The step names are the ones the logs show each run reaching (both errors are
+LibreLane *deferred* errors, so `hbm2` ran on through `Checker.LVS` and the
+timing checkers before quitting).  **Absent `status` means completed** — the
+13 rows predating the convention carry none — so a consumer filters
+`select(.status != "failed")`, never `== "completed"`.
+
+Unmarked, each row would have carried a trap into the table the write-up
+quotes: `hbabs` contributes `timing__setup__ws: 1e39` and nulls for every
+routing column, and `hbm2` contributes a row whose two aggregate DRC fields
+are both 0, beside 12 rows that completed.
+
+`hbm2` is also why `magic__illegal_overlap__count` is now in `runtimes.py`'s
+`METRICS`.  It was the one column that could tell this run from the baseline
+and the accepted fix (6,233 against 0 and 0), and a row could not carry it —
+so a run that died on illegal overlaps had every DRC field in its row reading
+0.  `hb` and `hbnt` predate the column and carry `null` there; their
+metrics.json has it, and re-running `runtimes.py` on their surviving run
+directories would fill it in.
+
+Neither row could be generated: `steps`, `total_s` and the per-stage seconds
+come from each step's `runtime.txt` in the run directory, and the run
+directories are gone.  Those columns are `null` and each row's `source` field
+names the dump it was written from and why it is hand-written.  Only the
+per-leg wall times above survive, and they are not the same quantity.
 
 ## Regenerating
 

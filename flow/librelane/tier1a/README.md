@@ -117,26 +117,42 @@ line is a cell to look at.
 The verdict before a top run is `pdn_phase.py`; after it, the first command
 here, and PSM.
 
-## Runs that are not rows
+## Rows for runs that failed
 
-`results.jsonl` holds one row per run, appended by `runtimes.py … --json`;
-all 13 rows in it carry a routed wirelength and a signoff DRC count.  The two
-N = 8 H+B runs of §11 item 13 — the two candidate notch fixes, both rejected —
-do not, so their metrics are kept out of the table and in
-[`hb2/variant_metrics/`](hb2/variant_metrics/README.md) instead: `hbabs`, the
-whole `<cell>.openroad.lef` abstract, which quit in leg 3a on 125,800 OpenROAD
-PSM power-grid violations before any routing, and `hbm2`, `patch_obs.py`'s
-met2 blanket, which routed and passed LVS and then quit in signoff on 6,233
-Magic illegal overlaps.  Their run directories are gone, so those two dumps
-are the only record left of the runs §11 item 13 was measured from.
+`results.jsonl` holds one row per run, appended by `runtimes.py … --json`.
+Thirteen of its rows are runs that completed and carry no `status`; the two
+N = 8 H+B runs of §11 item 13 — the candidate notch fixes, both rejected —
+are marked:
 
-Read that file before quoting either one.  Both carry a metric that reads
-clean and is not: `hbabs` reports the 1e39 no-measurement sentinel as its
-setup and hold slack, and `hbm2` reports 0 in both aggregate DRC fields
-(`route__drc_errors`, `klayout__drc_error__count`) while the check it died on,
-`magic__illegal_overlap__count`, is 6,233 against 0 in the `hb` and `hbnt`
-runs beside it.
+```
+"status": "failed", "failed_at": "<step>", "failed_on": "<what the flow quit on>"
+```
 
+**Absent means completed**, so a consumer that wants only finished runs
+filters `select(.status != "failed")` and never `== "completed"`.  The two are
+`hbabs`, the whole `<cell>.openroad.lef` abstract, which quit at
+`Checker.PowerGridViolations` on 125,800 OpenROAD PSM power-grid violations
+before any routing, and `hbm2`, `patch_obs.py`'s met2 blanket, which routed
+and passed LVS and then quit at `Checker.IllegalOverlap` on 6,233 Magic
+illegal overlaps.
+
+Read [`hb2/variant_metrics/`](hb2/variant_metrics/README.md) before quoting
+either.  Both carry a metric that reads clean and is not: `hbabs` reports the
+1e39 no-measurement sentinel as its setup and hold slack, and `hbm2` reports 0
+in both aggregate DRC fields (`route__drc_errors`,
+`klayout__drc_error__count`) — the check it died on is
+`magic__illegal_overlap__count`.  That column is in `METRICS` **because of
+these rows**: `magic__drc_error__count` is absent from every run in this tree
+(`RUN_MAGIC_DRC` is `False`), so without it a run that died on illegal
+overlaps had every DRC field in its row reading 0.  The completed `hb` and
+`hbnt` predate the column and carry `null`; their metrics.json has it, at 0
+and 0, and re-running `runtimes.py` on them would fill it in.
+
+Their run directories are deleted, so these two rows could not be generated —
+`steps`, `total_s` and the per-stage seconds come from each step's
+`runtime.txt` and are `null`, and each row's `source` says so.  The dumps they
+were written from are the only record left of the runs §11 item 13 was
+measured from.
 
 What `harm.sh` decided, and why (the full statement is `harm.py`'s docstring):
 
