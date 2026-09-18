@@ -37,6 +37,30 @@ None of that needs a PDN, a clock tree or a DRC deck.  It needs a controllable
 *policy* for what the block is told, a vehicle whose size is a dial, and a
 judge that is not BUDA.
 
+### What this is NOT about, and where it does apply
+
+**The objective is convergence, not minimum area.**  Nothing here is an
+argument that one floorplan, one die or one wirelength beats another.  Area and
+wire appear only as the PRICE of a policy — what the block paid to leave the
+top room, what the top paid to route around a block — and a policy that wins
+area while costing a re-spin has lost, because a re-spin is weeks and a percent
+of wire is not.  Where a figure is smaller or shorter, read it as evidence
+about the loop rather than as a result in its own right.
+
+**The techniques are not about these two designs, or about chips.**  What the
+ladder needs from a structure is only that it be HIERARCHICAL: a block
+implemented against an assumption about its context, a context integrated
+against an abstract of the block, and a boundary the two have to agree across.
+Everything built here — measuring the demand one level places on another
+(`report_layer_demand`), deriving a budget from it instead of guessing
+(`derive_cell_layer_shares`, `derive_cell_layer_reserves`), handing a plan down
+so the next round is judged against the same context (`derive_top_plan` →
+`pin_plan`), and letting the lower level keep what it cannot give up (the 6d
+yield) — is stated in terms of that boundary, not in terms of metal.  The SoC
+and the systolic array are INSTRUMENTS, chosen because one is deep and diverse
+and the other uniform, and because a generated vehicle makes size a dial.  They
+are not the subject.
+
 ### Two facts checked before designing, both load-bearing
 
 **BUDA has no fixed pin today.**  `src/busterm.cpp:82–89`: a busterm's bbox is
