@@ -331,9 +331,13 @@ the block keeps its current seat and the top takes the loss, a nested
 template's inherited corridor included (the core has no line of its own).
 The NQ = 2 top-down round strands NOTHING in one round where 6c held the
 dirty fixpoint at 360 bits, at the price of one overlap no healer clears;
-seven of the eight healed arms are clean.  It costs 8 bits at NQ = 2
+SIX of the eight healed arms are clean, the exceptions both top-down —
+NQ = 2 at one overlap and NQ = 16 at two.  It costs 8 bits at NQ = 2
 bottom-up and an overlap or two at NQ = 4/8, and gains 8 at NQ = 16
-top-down, so it is a lever, not a default.
+top-down healerless, so it is a lever, not a default.  (Six, not seven:
+the healed table was re-measured after a second review finding and NQ = 16
+top-down moved from clean to two overlaps — the only one of its nine rows
+that moved.)
 
 ## The judge must not be BUDA
 
