@@ -329,10 +329,11 @@ an abstract seat is one rectangle, and even one corridor track left in
 the core's 36-track window sent its local planner to a dead LOW layer),
 the block keeps its current seat and the top takes the loss, a nested
 template's inherited corridor included (the core has no line of its own).
-The NQ = 2 top-down round is clean healerless in one round where 6c held
-the dirty fixpoint, and with healing every arm is clean at every size;
-healers off, the pinned top cannot route around the loss (NQ = 16
-bottom-up 40 → 264), so it is a lever, not a default.
+The NQ = 2 top-down round strands NOTHING in one round where 6c held the
+dirty fixpoint at 360 bits, at the price of one overlap no healer clears;
+seven of the eight healed arms are clean.  It costs 8 bits at NQ = 2
+bottom-up and an overlap or two at NQ = 4/8, and gains 8 at NQ = 16
+top-down, so it is a lever, not a default.
 
 ## The judge must not be BUDA
 
@@ -460,14 +461,20 @@ every "one round" measured rather than assumed.
    its local planner to a dead LOW layer — the block keeps its current
    seat and the top takes the loss, nested templates' INHERITED corridors
    included (the core has no line of its own; its 360 bits were the
-   cluster's corridor).  The NQ = 2 top-down informed round is clean
-   healerless in one round where 6c held the dirty fixpoint, and with
-   healing every arm is clean at every size; healers off, the loss the
-   policy hands the pinned top is one it cannot route around (NQ = 16
-   bottom-up 40 → 264 stranded, seven pinned 32-bit top buses), so it
-   ships as a lever, not a default.  What would take both is a driver
-   policy that yields AND unpins exactly the top buses whose seats were
-   yielded.
+   cluster's corridor).  The NQ = 2 top-down informed round strands
+   NOTHING in one round where 6c held the dirty fixpoint at 0/360/360
+   healerless and 0/128 healed, at the price of one overlap that no
+   healer clears — so the stranding goes, "clean" does not — and seven
+   of the eight healed arms are clean.  Elsewhere the trade is small and
+   runs both ways: 8 bits gained at NQ = 16 top-down, parity at NQ = 16
+   bottom-up, 8 bits lost at NQ = 2 bottom-up and an overlap or two at
+   NQ = 4/8.  So it ships as a lever, not a default.  (These are the
+   SECOND measurement: the first ran a yield that tested each seat
+   against half of what fragments it, and its headline cost — 264
+   stranded bits at NQ = 16 bottom-up — was that defect, not the policy,
+   which measures 0 overlaps and the no-yield baseline's 40 bits.)  What
+   would take both is a driver policy that yields AND unpins exactly the
+   top buses whose seats were yielded.
 7. **Fixed-pin primitive** — a busterm restricted to a face, then to a window
    on a face — as the interoperability piece for the partner evaluation (E3),
    last, since nothing in-house depends on it.

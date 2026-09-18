@@ -876,14 +876,15 @@ plan, `final` its healed one, 6c's pair quoted):
 
 | size | arm | round | plan | fixpoint | first | final | 6c (first → final) | detailed WL | reserved ÷ used |
 |---|---|---|---|---|---|---|---|---|---|
-| 2 | td | 1 | 13/13, 24/24 | no (2 of 10) | **0/0/0** | **0/0/0** | 0/360 → 0/128 | 532,356 | 1.70 |
+| 2 | td | 1 | 13/13, 24/24 | no (6 of 12) | 1/0/0 | 1/0/0 | 0/360 → 0/128 | 532,452 | 1.67 |
+| 2 | td | 2 | 13/13, 24/24 | **yes** (9) | 1/0/0 | 1/0/0 | — | 532,406 | 1.72 |
 | 2 | bu | 1 | 13/13, 31/36 | no (34 of 51, plan 4 of 15) | 1/8/8 | **0/0/0** | 0/0 → 0/0 | 590,991 | 2.98 |
-| 4 | td | 1 | 21/21, 43/44 | no (20 of 26, plan 2 of 22) | 2/16/16 | **0/0/0** | 2/16 → 0/0 | 983,364 | 4.00 |
-| 4 | bu | 1 | 21/21, 59/59 | no (16 of 51) | 0/8/8 | **0/0/0** | 0/0 → 0/0 | 1,087,535 | 4.14 |
-| 8 | td | 1 | 37/37, 64/67 | no (18 of 26, plan 4 of 39) | 7/24/24 | **0/0/0** | 7/16 → 0/0 | 2,006,770 | 4.53 |
-| 8 | bu | 1 | 37/37, 107/107 | no (14 of 54) | **0/0/0** | **0/0/0** | 0/0 → 0/0 | 2,174,952 | 5.66 |
-| 16 | td | 1 | 69/69, 116/119 | no (21 of 26, plan 4 of 71) | 3/8/8 | **0/0/0** | 35/464 → 5/0/0, then 0/0 | 3,971,612 | 6.97 |
-| 16 | bu | 1 | 69/69, 198/201 | no (43 of 73, plan 2 of 70) | 4/32/32 | **0/0/0** | 0/8 → 0/0 | 4,357,177 | 6.92 |
+| 4 | td | 1 | 21/21, 37/44 | no (24 of 28, plan 8 of 25) | 5/16/16 | **0/0/0** | 2/16 → 0/0 | 1,082,463 | 3.37 |
+| 4 | bu | 1 | 21/21, 59/59 | no (22 of 54) | 0/8/8 | **0/0/0** | 0/0 → 0/0 | 1,087,535 | 4.14 |
+| 8 | td | 1 | 37/37, 54/67 | no (22 of 28, plan 14 of 44) | 20/24/24 | **0/0/0** | 7/16 → 0/0 | 2,010,662 | 3.56 |
+| 8 | bu | 1 | 37/37, 107/107 | no (20 of 57) | **0/0/0** | **0/0/0** | 0/0 → 0/0 | 2,174,952 | 5.65 |
+| 16 | td | 1 | 69/69, 116/119 | no (21 of 26, plan 4 of 71) | 3/8/8 | **0/0/0** | 35/464 → 5/0/0, then 0/0 | 3,971,612 | 6.92 |
+| 16 | bu | 1 | 69/69, 196/201 | no (54 of 80, plan 6 of 72) | 4/32/32 | **0/0/0** | 0/8 → 0/0 | 4,417,825 | 6.85 |
 
 The mesh control (`converge.tcl tpu 8 16 -primitive reserve -arms td,bu
 -informed 3 -handdown -yield`, healers off): clean at every round with
@@ -899,57 +900,65 @@ block that had an alternative is yielded to anyway, at no cost here.
 
 **What the tables say.**
 
-1. **The reservation's limit at NQ = 2 is resolved.**  The `td` arm's
-   informed round is **0/0/0 healerless in one round** where 6c held
-   E5's dirty fixpoint at 0/360/360 (and 0/128 healed): the 16 tracks
-   given back are the cluster's corridor over the core's seat — the union
-   over the core's four occurrences of tracks the top used over *other*
-   occurrences, so the top loses nothing it needed over this one and
-   every pin still applies with every seat honoured (13/13, 24/24).
-   The healed `td` arm at NQ = 2 is clean at its first healerless
-   verdict.
-2. **Where the block's kept seat and the pinned top truly collide, the
-   top loses, and healers off it cannot move.**  The `bu` arm at NQ = 2
-   strands 8 bits in every round (a pinned 8-bit `pc` bus whose M4
-   segment now lands on a keepout, `Z_HVH` committed with overflow) where
-   6c was clean, and at NQ = 16 strands 264 where 6c stranded 40: 6c's
-   40 are the same M3 keepout culls of the `nl_*` buses, and the 224
-   more are seven pinned 32-bit top buses (`I_H` on M6, `overflow=65.5`,
-   `pinned topology overflows and cannot be rerouted`) overlapping
-   `nl_23` where the templates now keep their seats.  The `td` arm at
-   NQ = 4/8/16 is within a few bits of 6c either way (3/32 → 3/32,
-   2/32 → 3/40, 6/40 → 6/32).  A pin is what `-handdown` is, so the
-   loss the policy hands the top is one the healerless informed round
-   has no way to route around — which is the point measured: the yield
-   moves the strand from the block's bus to the top's, it does not
-   remove it.
-3. **With the vehicle's own healing, every arm at every size is clean,
-   NQ = 2 `td` included** — the pinned top is the healers' to move, and
-   the informed rounds' first (healerless) verdicts are close to 6c's
-   (NQ = 16 `td`: 3/8/8 against 6c's 35/464/464, then both clean;
-   NQ = 2/4 `bu`: 8 bits where 6c read 0/0/0; NQ = 16 `bu`: 4/32/32
-   against 0/8/8).  The fixpoint column reads `no` on every healed row,
-   as in 6c: the healers move seats (NQ = 16: 116 of 119 and 198 of 201
-   honoured) and the arms stop at clean.
+1. **The reservation's limit at NQ = 2 is resolved as a STRANDING, and
+   costs one overlap.**  The `td` arm's informed round strands nothing —
+   `1/0/0` healerless in one round — where 6c held E5's dirty fixpoint at
+   0/360/360 healerless and 0/128 healed.  The 32 tracks given back are
+   the cluster's corridor over the core's seat, the union over the core's
+   four occurrences of tracks the top used over *other* occurrences, so
+   the top loses nothing it needed over this one and every pin still
+   applies with every seat honoured (13/13, 24/24).  What does not go
+   away is one abstract overlap, and it is the one result the vehicle's
+   healers do not clear either: the healed `td` arm at NQ = 2 also ends
+   `1/0/0`, at a fixpoint.  So the 360 stranded bits go; "clean" does
+   not.
+2. **The cost elsewhere is small, and it runs in both directions.**
+   Healers off, against 6c: NQ = 16 `td` reaches its fixpoint eight bits
+   BETTER (6/32/32 against 6/40/40), NQ = 16 `bu` and NQ = 4 `td` land on
+   the same verdict, and the yield costs 8 bits at NQ = 2 `bu` (a pinned
+   8-bit `pc` bus, where 6c was clean), one overlap at NQ = 4 `bu`, and
+   one overlap plus 8 bits at NQ = 8.  The transient first rounds are
+   noisier than 6c's (NQ = 8 `td` round 1 reads 21 overlaps) but settle
+   by round 2 in every arm.
+   This paragraph replaced a much stronger claim, and the correction is
+   the point: the first measurement of this section reported NQ = 16 `bu`
+   going from 40 stranded bits to **264**, and read that as the policy
+   handing the pinned top a loss it cannot route around.  That was an
+   artefact of a defective pick — the yield was choosing against half of
+   what fragments a seat (see the build note above) — and not a property
+   of the policy.  Measured against the corrected pass the arm is
+   `0/40/40`: zero overlaps, and the same 40 bits as the no-yield
+   baseline.
+3. **With the vehicle's own healing, seven of the eight arms are clean**,
+   NQ = 2 `td` being the exception at `1/0/0`.  The informed rounds'
+   first (healerless) verdicts are close to 6c's at NQ = 2/16 and worse
+   at NQ = 4/8 (5/16/16 and 20/24/24 against 2/16 and 7/16), and the
+   healers clear all of them.  The fixpoint column reads `no` on every
+   healed row except that NQ = 2 `td` one, as in 6c: the healers move
+   seats (NQ = 16: 116 of 119 and 196 of 201 honoured) and the arms stop
+   at clean.
 4. **The loop still converges** (healers off): every arm reaches a
-   budget-and-plan fixpoint in two or three informed rounds except `bu`
-   at NQ = 2, where 2 of 29 lines keep moving through four rounds — the
+   budget-and-plan fixpoint in two to four informed rounds except `bu` at
+   NQ = 2, where 2 of 29 lines keep moving through four rounds — the
    give-backs re-derive slightly differently each round as the blocks'
    seats settle — and the dirty verdict there is the same 8 bits each
    round.
 
-**What this settles.**  The yield is a lever with a measured trade, not
-a default — the same conclusion 6b reached from the other side.  It does
-what it was built for: the block keeps its seat, the reservation's own
-limit at NQ = 2 goes away, and with healing every arm is clean at every
-size.  Healers off, it converts a block's strand into the pinned top's
-wherever the two genuinely want the same tracks, and the top's pinned
-plan cannot then move: at NQ = 16 bottom-up that is 224 bits the top
-loses for the 360 the core kept at NQ = 2.  A derivation that yields
-AND re-plans the top's affected buses (unpinning exactly the bundles
-whose seats were yielded, the way the healers do) is the shape that would
-take both, and is a driver policy on top of `pin_plan`, not a new
-primitive.
+**What this settles.**  The yield is a lever with a measured trade, not a
+default — the same conclusion 6b reached from the other side, but on a
+much smaller trade than this section first recorded.  It does what it was
+built for: the block keeps its seat, and the 360 bits the reservation's
+own limit stranded at NQ = 2 are gone, healed or not.  What it costs is
+one overlap at that size that no healer clears, 8 bits at NQ = 2
+bottom-up, and an overlap or two at NQ = 4/8 — against eight bits gained
+at NQ = 16 top-down and parity at NQ = 16 bottom-up.  Healers off, the
+strand it converts is the pinned top's, and the top's pinned plan cannot
+then move; that mechanism is real and is why the NQ = 2 overlap survives
+healing, but it is worth a few bits and an overlap here rather than the
+hundreds the first measurement claimed.  A derivation that yields AND
+re-plans the top's affected buses (unpinning exactly the bundles whose
+seats were yielded, the way the healers do) is the shape that would take
+both, and is a driver policy on top of `pin_plan`, not a new primitive.
 
 ## Provenance
 
@@ -996,6 +1005,13 @@ primitive.
   corridor tracks left inside the core's M5 window (`varA/B2/B3/B`);
   the core's window and the inherited tracks read off the `BUDA_RECORD`
   recording of the NQ = 2 top-down round in Python.
+  Every 6d row here is the SECOND measurement.  The first went through a
+  yield that tested each seat against half of what fragments it and kept
+  one image per ancestor track (#940 review), so all three tables were
+  re-run against the corrected pass on the same commands.  The mesh
+  control came back byte-identical; the SoC moved, most of all at NQ = 16
+  bottom-up, whose 264 stranded bits — the first measurement's headline
+  cost — were the defect and not the policy.
 - Engine at the merge of #936 plus this change (the `uniform` form, the
   driver's `uniform` arm, the blocked-track enforcement on globally solved
   instances, the extended report); the correction and the 6b rows at the
