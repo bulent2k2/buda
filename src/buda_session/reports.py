@@ -1746,7 +1746,7 @@ class ReportsMixin:
 
     # ── derive_cell_layer_reserves (convergence ladder item 6) ────────────
 
-    def _derive_cell_layer_reserves(self, cells=None):
+    def _derive_cell_layer_reserves(self, cells=None, yield_seat=False):
         """The POSITIONAL twin of _derive_cell_layer_shares: per cell in
         scope and per layer, the UNION over the cell's instances of the
         tracks the top placed over them (`used_tracks`), each mapped into
@@ -1771,9 +1771,30 @@ class ReportsMixin:
         and whether the local solve finds the room is what a run under the
         lines measures.
 
+        `yield_seat` (the `yield` token, convergence ladder item 6d) is
+        the derivation POLICY E5's top-down NQ = 2 fixpoint asked for: a
+        union that covers the block's own seat strands the block's bus
+        (360 bits there, the cores' 32-bit bus moved onto LOW layers that
+        cannot host it), and no plan handed down repairs that, since the
+        conflict is the reservation's own.  Under `yield` the block keeps
+        its seat and the top takes the loss: where the reserved tracks
+        inside the worst seat window leave FEWER free tracks than the bus
+        needs by the DNUTS admission arithmetic (`pool - seat_hit <
+        need`, the doomed-seat census's own numbers), the derivation gives
+        back exactly the shortfall — the tracks the cell's own metal sits
+        on today first (its current seat, so the local solve need not move
+        at all), then the rest nearest them — and says so per line
+        (`yield`) and in a note naming the seat.  A seat that cannot host
+        its bus even with every reserved track given back is said too
+        (the shortfall is the block's, not the reservation's).  Whether a
+        top routed around a kept seat is cleaner than a block stranded
+        under a full reservation is what a run under the yielded lines
+        measures; the unyielded derivation is byte-identical.
+
         Returns (lines, notes, scope): `lines` are dicts (cell, layer,
         layer_name, positions, n_inst, n_skipped, used_lo, used_hi,
-        seat_hit, own_hit); None before a NUTS result."""
+        seat_hit, own_hit, yielded, yield_short); None before a NUTS
+        result."""
         rows = self._layer_demand()
         if rows is None:
             return None
@@ -1844,15 +1865,38 @@ class ReportsMixin:
                 # the reserved tracks land inside its window; the own metal
                 # currently ON reserved tracks (the union, per instance).
                 own = max(lrows, key=lambda r: r["own_need"])
-                seat_hit = 0
+                seat_hit, yielded, yield_short = 0, 0, 0
                 if own["own_window"] is not None:
                     oc = comps.get(own["inst"])
                     oo = fr.get(own["inst"])
                     if oc is not None and oo is not None:
                         lo, hi = own["own_window"]
-                        seat_hit = sum(1 for q in union
-                                       if lo - 1e-6 <= to_abs(q, oc, oo)
-                                       <= hi + 1e-6)
+                        inwin = [q for q in union
+                                 if lo - 1e-6 <= to_abs(q, oc, oo)
+                                 <= hi + 1e-6]
+                        seat_hit = len(inwin)
+                        if yield_seat and own["own_seat"] is not None:
+                            n_all = len(union)
+                            union, yielded, yield_short = \
+                                self._yield_seat_tracks(
+                                    union, inwin, own, lambda q:
+                                    to_abs(q, oc, oo))
+                            seat_hit = len(inwin) - yielded
+                            if yielded:
+                                bid, si, need, pool = own["own_seat"]
+                                notes.append(
+                                    f"{cell} {lname}: {yielded} of {n_all} "
+                                    f"reserved track(s) yielded to the "
+                                    f"cell's own seat (bundle {bid} seg "
+                                    f"{si} needs {need} of {pool} at "
+                                    f"{own['inst']}; the top loses them)"
+                                    + (f" — still {yield_short} short: the "
+                                       f"seat cannot host its own bus even "
+                                       f"unreserved" if yield_short else "")
+                                    + ("" if union else
+                                       " — nothing left to reserve here"))
+                if not union:
+                    continue                # the whole line was yielded
                 own_hit = 0
                 for r in lrows:
                     c = comps.get(r["inst"])
@@ -1871,10 +1915,44 @@ class ReportsMixin:
                     "seat_hit": seat_hit,
                     "seat": own["own_seat"], "seat_inst": own["inst"],
                     "own_hit": own_hit,
+                    "yielded": yielded, "yield_short": yield_short,
                 })
         return lines, notes, scope
 
-    def _report_cell_layer_reserves(self, cells=None, apply=False, path=""):
+    @staticmethod
+    def _yield_seat_tracks(union, inwin, own, to_abs):
+        """The yield policy on one line: give back the shortfall between
+        what the block's worst seat needs and what the reserved tracks
+        inside its window leave it, choosing the tracks the block's own
+        metal sits on today first (its current seat — kept as is, the
+        local solve need not move), then the rest nearest that metal's
+        centre (the window's centre with none).  Returns (union without
+        the yielded tracks, yielded, short), `short` being how far the
+        seat still falls below its need with every in-window track given
+        back — the block's own shortfall, not the reservation's."""
+        bid, si, need, pool = own["own_seat"]
+        free = pool - len(inwin)
+        if free >= need or not inwin:
+            return union, 0, 0
+        k = int(need - free)
+        own_abs = list(own.get("own_tracks") or [])
+        if own_abs:
+            centre = sum(own_abs) / len(own_abs)
+        else:
+            lo, hi = own["own_window"]
+            centre = 0.5 * (lo + hi)
+
+        def rank(q):
+            a = to_abs(q)
+            on_own = any(abs(a - t) < 1e-6 for t in own_abs)
+            return (0 if on_own else 1, abs(a - centre), a)
+        give = sorted(inwin, key=rank)[:k]
+        kept = [q for q in union
+                if not any(abs(q - g) < 1e-9 for g in give)]
+        return kept, len(give), max(0, k - len(give))
+
+    def _report_cell_layer_reserves(self, cells=None, apply=False, path="",
+                                    yield_seat=False):
         """`derive_cell_layer_reserves`: the derivation as a table plus the
         `set_cell_layer_reserve` paste lines; `apply` declares them here
         through the command itself, `path` writes them for a later session
@@ -1882,8 +1960,9 @@ class ReportsMixin:
         scope: a scoped cell's reservation on a layer with no line is
         REMOVED (declared `off`; written as an `off` line, since a session
         reopening the same BDB restores it before sourcing the file) — the
-        share derivation's contract (Codex P2 on #934)."""
-        out = self._derive_cell_layer_reserves(cells)
+        share derivation's contract (Codex P2 on #934).  `yield_seat` =
+        the `yield` policy (see `_derive_cell_layer_reserves`)."""
+        out = self._derive_cell_layer_reserves(cells, yield_seat=yield_seat)
         if out is None:
             print("Error: derive_cell_layer_reserves needs a NUTS result to "
                   "read the demand off (run_nuts; run_detailed_nuts for "
@@ -1894,7 +1973,7 @@ class ReportsMixin:
         basis = ("detailed bit tracks" if det is not None
                  else "abstract bus tracks")
         print(f"=== Cell track reservations derived from the top's demand "
-              f"({basis}) ===")
+              f"({basis}{', yielding each cell its own seat' if yield_seat else ''}) ===")
         for n in notes:
             print(f"  {n}")
 
@@ -1912,7 +1991,7 @@ class ReportsMixin:
         if lines:
             w_cell = max(len(l["cell"]) for l in lines)
             print(f"  {'cell':<{w_cell}}  layer  tracks  insts  used/inst  "
-                  f"seat_hit  own_hit")
+                  f"seat_hit  own_hit  yield")
             for l in lines:
                 seat = ""
                 if l["seat"] is not None:
@@ -1922,12 +2001,19 @@ class ReportsMixin:
                 print(f"  {l['cell']:<{w_cell}}  {l['layer_name']:<5}  "
                       f"{len(l['positions']):>6}  {l['n_inst']:>5}  "
                       f"{l['used_lo']:>4}..{l['used_hi']:<4}  "
-                      f"{l['seat_hit']:>8}  {l['own_hit']:>7}{seat}")
+                      f"{l['seat_hit']:>8}  {l['own_hit']:>7}  "
+                      f"{l['yielded']:>5}{seat}")
             n_seat = sum(1 for l in lines if l["seat_hit"])
             print(f"  {len(lines)} reservation(s) derived; {n_seat} with "
                   f"reserved tracks inside the cell's own worst seat (the "
                   f"local solve must move that bus — what a run under "
                   f"these lines measures)")
+            n_y = sum(1 for l in lines if l["yielded"])
+            if yield_seat:
+                print(f"  {n_y} reservation(s) yielded "
+                      f"{sum(l['yielded'] for l in lines)} track(s) to the "
+                      f"cell's own seat (the top loses them; a line whose "
+                      f"every track was yielded is a removal above)")
             print("  --- flow-text lines (declare BEFORE run_planner hier) ---")
             for t in text:
                 print(f"  {t}")
@@ -1937,8 +2023,11 @@ class ReportsMixin:
         if path:
             with open(path, "w") as f:
                 f.write("# derive_cell_layer_reserves: the top's placed "
-                        f"tracks over each instance ({basis}), in the "
-                        "cell's frame; source before run_planner hier\n")
+                        f"tracks over each instance ({basis}"
+                        + (", each cell's own seat yielded" if yield_seat
+                           else "")
+                        + "), in the cell's frame; source before "
+                        "run_planner hier\n")
                 f.write("# scope: " + (",".join(scope) if scope else "(none)")
                         + "\n")
                 if not text:

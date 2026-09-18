@@ -158,6 +158,11 @@ def test_a_zero_step_is_refused_before_any_session_starts(tmp_path):
                        # routing session had been paid for (Codex P2 on #936)
                        (["-primitive", "reserve", "-nofloor"],
                         "-nofloor is the share derivation's control"),
+                       # the reserve derivation's seat policy has no
+                       # meaning for a share (which floors by default)
+                       (["-yield"], "-yield is the reserve derivation's policy"),
+                       (["-primitive", "share", "-yield"],
+                        "-yield is the reserve derivation's policy"),
                        # the uniform sweep doubles from -f0 until past -fmax
                        (["-f0", 0], "-f0 takes a positive integer"),
                        (["-f0", "x"], "-f0 takes a positive integer"),

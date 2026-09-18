@@ -43,7 +43,8 @@
 #                   second informed round passes the first round's cells
 #                   so the scope cannot drift between rounds
 #   -derive_opts T  extra derive tokens (`nofloor` = the pure complement,
-#                   the derivation's own strawman defence)
+#                   the derivation's own strawman defence; `yield` = the
+#                   reserve derivation's seat policy, ladder item 6d)
 #   -primitive P    what the derived budget IS: `share` (the fractional
 #                   `set_cell_layer_share`, E1's first run) or `reserve`
 #                   (the positional `set_cell_layer_reserve` — the tracks
@@ -253,8 +254,9 @@ proc converge::finish {healed} {
         if {$converge::primitive eq "reserve"} {
             set out [buda::derive_cell_layer_reserves {*}$cmd]
             # The table rows: `cell  layer  tracks  insts  used/inst
-            # seat_hit  own_hit ...` — what prices a reservation is the
-            # named-track COUNT; the file's lines carry the positions.
+            # seat_hit  own_hit  yield ...` — what prices a reservation is
+            # the named-track COUNT; the file's lines carry the positions
+            # (and under `yield` the count is AFTER the give-back).
             foreach ln [split $out \n] {
                 if {[regexp {^\s*(\S+)\s+(\S+)\s+(\d+)\s+\d+\s+\d+\.\.\d+\s+\d+\s+\d+} \
                             $ln -> cell layer n]} {

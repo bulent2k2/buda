@@ -24,6 +24,8 @@
 #                                                   # E5: the corridor
 #   btcl flow/tcl/converge.tcl soc 2 4 -primitive reserve -arms td,bu -handdown
 #                                                   # 6c: the top's plan kept
+#   btcl flow/tcl/converge.tcl soc 2 -primitive reserve -arms td,bu -handdown -yield
+#                                                   # 6d: the block keeps its seat
 #
 # Four ways a block gets its layer budget, each run as a LOOP on the same
 # vehicle at the same size, until the endpoint is clean or the arm runs out
@@ -77,6 +79,13 @@
 #                  round and the sweep stops when it would pass this)
 #   -nofloor       derive the PURE complement (no own-need floor): the
 #                  derivation's own strawman defence
+#   -yield         the reserve derivation's POLICY where the union covers a
+#                  block's own seat (ladder item 6d, `derive_cell_layer_
+#                  reserves yield`): give back the shortfall so the block
+#                  keeps its bus and the top takes the loss — E5's top-down
+#                  NQ = 2 fixpoint stranded the cores under a reservation
+#                  no plan hand-down could repair.  `-primitive reserve`
+#                  only (a share has its own floor, on by default)
 #   -handdown      hand the top's PLAN down with the budget (ladder item
 #                  6c): the measurement round writes its globally planned
 #                  bundles' selection, layers and seats (`derive_top_plan`),
@@ -112,7 +121,7 @@ set vehicle [lindex $argv 0]
 if {$vehicle ni {soc tpu}} { error "converge.tcl: vehicle must be soc|tpu, got '$vehicle'" }
 set sizes {}
 set heal 0; set step 1; set maxreserve 4; set informed 2; set nofloor 0
-set primitive share; set f_start 4; set fmax 32; set handdown 0
+set primitive share; set f_start 4; set fmax 32; set handdown 0; set yield 0
 set arms {blind td bu}; set out e1_out; set tag ""; set threads ""
 set i 1
 while {$i < $argc} {
@@ -128,13 +137,14 @@ while {$i < $argc} {
     # the whole experiment (Codex P2 on #935).  A numeric `-1` still reaches
     # its own check (`-maxreserve takes a non-negative integer`).
     set optlike [expr {[string match -* $v] && ![string is integer -strict $v]}]
-    if {$a ni {-heal -nofloor -handdown} && ([string trim $v] eq "" || $optlike)} {
+    if {$a ni {-heal -nofloor -handdown -yield} && ([string trim $v] eq "" || $optlike)} {
         error "converge.tcl: $a needs a value (got '$v')"
     }
     switch -- $a {
         -heal       { set heal 1; incr i }
         -nofloor    { set nofloor 1; incr i }
         -handdown   { set handdown 1; incr i }
+        -yield      { set yield 1; incr i }
         -step       { set step $v; incr i 2 }
         -primitive  { set primitive $v; incr i 2 }
         -f0         { set f_start $v; incr i 2 }
@@ -159,6 +169,12 @@ if {$primitive ni {share reserve}} {
 if {$nofloor && $primitive eq "reserve"} {
     error "converge.tcl: -nofloor is the share derivation's control and\
  does not apply to -primitive reserve"
+}
+# `-yield` is the RESERVE derivation's policy (the share derivation floors
+# by the block's own need by default and has no tracks to give back).
+if {$yield && $primitive ne "reserve"} {
+    error "converge.tcl: -yield is the reserve derivation's policy and\
+ needs -primitive reserve"
 }
 # The blind loop advances by `step` until it passes `maxreserve`: a zero
 # step would re-run the same round forever on a dirty design (Codex P2 on
@@ -249,6 +265,16 @@ proc fixpoint_of {r} {
 
 # The informed rounds shared by td and bu: round r sources F_{r-1}, derives
 # F_r for the next, scope pinned to F_0's cells.  Returns the rounds' reports.
+# The derivation's extra tokens, the same at every derive site: the share
+# control (`nofloor`) or the reserve policy (`yield`).
+proc derive_opts {} {
+    global nofloor yield
+    set t {}
+    if {$nofloor} { lappend t nofloor }
+    if {$yield} { lappend t yield }
+    return $t
+}
+
 proc informed_rounds {prefix size f0} {
     global informed nofloor handdown
     set cells [converge::scope_of $f0]
@@ -267,7 +293,7 @@ proc informed_rounds {prefix size f0} {
         set fr [file join [file dirname $f0] ${prefix}_shares_r$r.buda]
         set words [list -bottomup -shares $prev -derive $fr]
         if {$cells ne ""} { lappend words -derive_cells $cells }
-        if {$nofloor} { lappend words -derive_opts nofloor }
+        if {[derive_opts] ne ""} { lappend words -derive_opts [derive_opts] }
         if {$handdown} {
             # The previous round's top plan comes down with its budget,
             # and this round leaves its own for the next.
@@ -376,7 +402,7 @@ foreach size $sizes {
             # (or time) a derivation no arm reads (Codex P2 on #935).
             if {$k == 1 && "bu" in $arms} {
                 lappend words -derive [file join $out ${p}_bu_shares_r0.buda]
-                if {$nofloor} { lappend words -derive_opts nofloor }
+                if {[derive_opts] ne ""} { lappend words -derive_opts [derive_opts] }
                 if {$handdown} {
                     lappend words -derive_plan [file join $out ${p}_bu_plan_r0.buda]
                 }
@@ -445,7 +471,7 @@ foreach size $sizes {
     if {"td" in $arms} {
         set f0 [file join $out ${p}_td_shares_r0.buda]
         set words [list -derive $f0]
-        if {$nofloor} { lappend words -derive_opts nofloor }
+        if {[derive_opts] ne ""} { lappend words -derive_opts [derive_opts] }
         if {$handdown} {
             # The plan handed down is geometry, so the top-down round is
             # measured on the ALIGNED floorplan the informed rounds route
@@ -507,7 +533,7 @@ set text [join $lines \n]
 puts $text
 # The table is E5's when the conventional corridor arm ran, E1's otherwise.
 set exp [expr {"uniform" in $arms ? "e5" : "e1"}]
-set name ${exp}_${vehicle}[expr {$heal ? "_healed" : "_healerless"}]_step$step[expr {$nofloor ? "_nofloor" : ""}][expr {$primitive eq "reserve" ? "_reserve" : ""}][expr {$handdown ? "_handdown" : ""}]
+set name ${exp}_${vehicle}[expr {$heal ? "_healed" : "_healerless"}]_step$step[expr {$nofloor ? "_nofloor" : ""}][expr {$primitive eq "reserve" ? "_reserve" : ""}][expr {$handdown ? "_handdown" : ""}][expr {$yield ? "_yield" : ""}]
 if {$tag ne ""} { append name _$tag }
 set f [open [file join $out $name.md] w]
 puts $f "<!-- converge.tcl $argv -->"

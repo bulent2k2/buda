@@ -184,6 +184,7 @@ def cmd_report_layer_demand(session, cmd, args, cmd_line):
 
 def cmd_derive_cell_layer_reserves(session, cmd, args, cmd_line):
     # Usage: derive_cell_layer_reserves [apply] [file <path>] [cells <a,b,..>]
+    #                                   [yield]
     # The POSITIONAL twin of derive_cell_layer_shares (convergence ladder
     # item 6): per cell and layer, the UNION over the cell's instances of
     # the tracks the top placed over them, mapped into the cell's frame, as
@@ -191,13 +192,18 @@ def cmd_derive_cell_layer_reserves(session, cmd, args, cmd_line):
     # tracks it wants rather than as a fraction of every period.  Same
     # scope rule and the same two doors (`apply` declares here, `file`
     # writes lines a later session sources BEFORE `run_planner hier`).
-    apply, path, cells = False, "", None
+    # `yield` (ladder item 6d) is the derivation POLICY for a union that
+    # covers the block's own seat: give back the shortfall so the block
+    # keeps its bus, the top taking the loss — opt-in, said per line.
+    apply, path, cells, yield_seat = False, "", None, False
     toks = [unquote(t) for t in split_quoted_args(cmd_line)]
     i = 0
     while i < len(toks):
         t = toks[i].lower()
         if t == "apply":
             apply = True
+        elif t == "yield":
+            yield_seat = True
         elif t == "file" and i + 1 < len(toks):
             path = toks[i + 1]; i += 1
         elif t == "cells" and i + 1 < len(toks):
@@ -206,15 +212,18 @@ def cmd_derive_cell_layer_reserves(session, cmd, args, cmd_line):
                 print("Error: derive_cell_layer_reserves: `cells` names no "
                       "cell (an empty list is not \"every cell\")")
                 return
-        elif i == 0:
-            pass                                  # the command word
         else:
+            # (`split_quoted_args` has already dropped the command word;
+            # an `elif i == 0: pass` here let an unknown FIRST token pass
+            # silently — `derive_cell_layer_reserves yields` derived the
+            # plain lines and said nothing.)
             print(f"Error: derive_cell_layer_reserves: unknown token "
                   f"'{toks[i]}'\n  usage: derive_cell_layer_reserves [apply] "
-                  f"[file <path>] [cells <a,b,...>]")
+                  f"[file <path>] [cells <a,b,...>] [yield]")
             return
         i += 1
-    session._report_cell_layer_reserves(cells, apply, path)
+    session._report_cell_layer_reserves(cells, apply, path,
+                                        yield_seat=yield_seat)
 
 
 def cmd_derive_top_plan(session, cmd, args, cmd_line):
