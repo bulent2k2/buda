@@ -120,20 +120,22 @@ here, and PSM.
 ## Runs that are not rows
 
 `results.jsonl` holds one row per run, appended by `runtimes.py … --json`;
-all 13 rows in it carry a routed wirelength and a signoff DRC count.  Two runs
-of arm H+B at N = 8 do not, and their metrics are kept out of the table and in
-[`hb2/variant_metrics/`](hb2/variant_metrics/README.md) instead: `hbabs`,
-which quit in leg 3a on 125,800 OpenROAD PSM power-grid violations before any
-routing, and `hbm2`, which routed and passed LVS and then quit in signoff on
-6,233 Magic illegal-overlap errors.  Their run directories are gone, so those
-two dumps are the only record left.
+all 13 rows in it carry a routed wirelength and a signoff DRC count.  The two
+N = 8 H+B runs of §11 item 13 — the two candidate notch fixes, both rejected —
+do not, so their metrics are kept out of the table and in
+[`hb2/variant_metrics/`](hb2/variant_metrics/README.md) instead: `hbabs`, the
+whole `<cell>.openroad.lef` abstract, which quit in leg 3a on 125,800 OpenROAD
+PSM power-grid violations before any routing, and `hbm2`, `patch_obs.py`'s
+met2 blanket, which routed and passed LVS and then quit in signoff on 6,233
+Magic illegal overlaps.  Their run directories are gone, so those two dumps
+are the only record left of the runs §11 item 13 was measured from.
 
 Read that file before quoting either one.  Both carry a metric that reads
 clean and is not: `hbabs` reports the 1e39 no-measurement sentinel as its
-setup and hold slack, and `hbm2` reports `route__drc_errors` 0 and
-`klayout__drc_error__count` 0 — the two keys with "drc" in the name — while
-the check it died on, `magic__illegal_overlap__count`, is 6233 against 0 in
-the `hb` and `hbnt` runs beside it.
+setup and hold slack, and `hbm2` reports 0 in both aggregate DRC fields
+(`route__drc_errors`, `klayout__drc_error__count`) while the check it died on,
+`magic__illegal_overlap__count`, is 6,233 against 0 in the `hb` and `hbnt`
+runs beside it.
 
 
 What `harm.sh` decided, and why (the full statement is `harm.py`'s docstring):

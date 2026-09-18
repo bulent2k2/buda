@@ -2321,6 +2321,14 @@ have: every netlist here is either authored or uniquified.
    rejected met2 BLANKET closed the same DRC and cost 6,233 illegal
    overlaps doing it: the surgical patch closes it and adds none.
 
+   **Where the four runs' metrics are.**  `hb` (baseline) and `hbnt`
+   (`notch_obs.py`) are rows in `flow/librelane/tier1a/results.jsonl`, and
+   their run directories survive.  The two REJECTED fixes are neither: their
+   run directories have been deleted, so their `final/metrics.json` is kept
+   in `flow/librelane/tier1a/hb2/variant_metrics/` — `hbabs.json` for the
+   whole abstract, `hbm2.json` for the met2 blanket — with a README naming
+   what each tag varied and the metric in each that reads clean and is not.
+
 12. **`pdn_phase.py` detects, but its REMEDY is wrong** (measured
    2026-09-07 on the N = 8 artefacts).  The model now fails the
    `PDN_HOFFSET 109.3` plan correctly — 64 stranded terminals, matching
