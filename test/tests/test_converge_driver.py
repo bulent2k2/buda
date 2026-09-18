@@ -69,6 +69,22 @@ def _report(path):
     return d
 
 
+
+# The policy suffix converge.tcl names BOTH its table and every per-round
+# artifact by (its `policy`).  It exists because the per-round files used to
+# carry only vehicle+size, so a second run beside the first — healed against
+# healerless, say — wrote over its evidence file for file; asserting the two
+# through ONE expression here is what pins them to the same rule.
+def _art(out, stem, policy):
+    """A per-round artifact: `<vehicle><size>` + the policy + `_<arm>_r<k>`."""
+    v, _, tail = stem.partition("_")
+    return out / f"{v}{policy}_{tail}"
+
+
+def _table(out, exp, vehicle, policy):
+    return out / f"{exp}_{vehicle}{policy}.md"
+
+
 def test_a_vehicle_session_leaves_the_report_the_driver_reads(tmp_path):
     rep = tmp_path / "td.rep"
     shares = tmp_path / "td.buda"
@@ -191,15 +207,17 @@ def test_a_rejected_reservation_is_a_failed_round_not_a_row(tmp_path):
     r = _tclsh(_DRIVER, "soc", 2, "-arms", "blind", "-step", 5,
                "-maxreserve", 5, "-out", out, cwd=tmp_path)
     assert r.returncode != 0, r.stdout[-2000:]
-    assert "session 'soc2_blind_r2' left no report" in r.stderr, r.stderr[-1500:]
+    # the failure names the LOG, so it carries the discriminated name
+    assert "session 'soc2_healerless_step5_blind_r2' left no report" \
+        in r.stderr, r.stderr[-1500:]
     assert "Error: reserve_top_layers" in r.stderr, r.stderr[-1500:]
-    assert (out / "soc2_blind_r1.rep").exists()
-    assert not (out / "soc2_blind_r2.rep").exists()
+    assert _art(out, "soc2_blind_r1.rep", '_healerless_step5').exists()
+    assert not _art(out, "soc2_blind_r2.rep", '_healerless_step5').exists()
     assert not list(out.glob("e1_*.md"))            # no table, no reserve-5 row
     # a blind-only sweep derives no bu seed (Codex P2 on #935): the round-1
     # session is the blind arm's measurement alone, timed as such
-    assert not (out / "soc2_bu_shares_r0.buda").exists()
-    assert _report(out / "soc2_blind_r1.rep")["share"] == []
+    assert not _art(out, "soc2_bu_shares_r0.buda", '_healerless_step5').exists()
+    assert _report(_art(out, "soc2_blind_r1.rep", '_healerless_step5'))["share"] == []
 
 
 def test_zero_informed_rounds_summarize_the_measurement_itself(tmp_path):
@@ -211,7 +229,7 @@ def test_zero_informed_rounds_summarize_the_measurement_itself(tmp_path):
     r = _tclsh(_DRIVER, "soc", 2, "-arms", "td,bu", "-informed", 0,
                "-out", out, cwd=tmp_path)
     assert r.returncode == 0, r.stdout[-3000:] + r.stderr[-3000:]
-    table = (out / "e1_soc_healerless_step1.md").read_text()
+    table = _table(out, "e1", "soc", '_healerless_step1').read_text()
     summ = {ln.split("|")[2].strip(): [c.strip() for c in ln.split("|")[1:-1]]
             for ln in table.splitlines()
             if re.match(r"\| 2 \| (blind|td|bu) \|", ln)}
@@ -220,7 +238,9 @@ def test_zero_informed_rounds_summarize_the_measurement_itself(tmp_path):
     assert all(v[4] in ("clean", "dirty") for v in summ.values())
     # exactly the two sessions: blind r1 (bu's measurement) and td r0
     assert sorted(p.name for p in out.glob("*.rep")) == \
-        ["soc2_blind_r1.rep", "soc2_td_r0.rep"], list(out.iterdir())
+        [_art(out, "soc2_blind_r1.rep", '_healerless_step1').name,
+         _art(out, "soc2_td_r0.rep", '_healerless_step1').name], \
+        list(out.iterdir())
 
 
 def test_the_lib_reads_a_scope_and_decides_the_blind_sweep(tmp_path):
@@ -266,18 +286,19 @@ def test_the_driver_runs_the_three_arms_and_writes_the_table(tmp_path):
     r = _tclsh(_DRIVER, "soc", 2, "-informed", 1, "-maxreserve", 2,
                "-out", out, cwd=tmp_path)
     assert r.returncode == 0, r.stdout[-3000:] + r.stderr[-3000:]
-    table = (out / "e1_soc_healerless_step1.md").read_text()
+    table = _table(out, "e1", "soc", '_healerless_step1').read_text()
     assert table.splitlines()[0].startswith("<!-- converge.tcl soc 2")
     rows = [ln for ln in table.splitlines() if ln.startswith("| soc | 2 |")]
     arms = [ln.split("|")[4].strip() for ln in rows]
     assert "blind" in arms and "td" in arms and "bu" in arms
     # the blind arm's round 1 is the bu arm's measurement: ONE session
-    assert (out / "soc2_blind_r1.rep").exists()
-    assert (out / "soc2_bu_shares_r0.buda").exists()
-    assert not (out / "soc2_bu_r0.rep").exists()
+    assert _art(out, "soc2_blind_r1.rep", '_healerless_step1').exists()
+    assert _art(out, "soc2_bu_shares_r0.buda", '_healerless_step1').exists()
+    assert not _art(out, "soc2_bu_r0.rep", '_healerless_step1').exists()
     # every informed round sourced the previous file and derived the next
-    assert (out / "soc2_td_r0.rep").exists() and (out / "soc2_td_r1.rep").exists()
-    assert (out / "soc2_td_shares_r0.buda").exists()
+    assert _art(out, "soc2_td_r0.rep", '_healerless_step1').exists() \
+        and _art(out, "soc2_td_r1.rep", '_healerless_step1').exists()
+    assert _art(out, "soc2_td_shares_r0.buda", '_healerless_step1').exists()
     # the summary names every arm with its rounds and endpoint
     summ = [ln for ln in table.splitlines() if re.match(r"\| 2 \| (blind|td|bu) \|", ln)]
     assert len(summ) == 3, table
@@ -422,11 +443,11 @@ def test_efficiency_charges_only_the_governed_occurrences(tmp_path):
     r = _tclsh(_DRIVER, "soc", 2, "-arms", "td", "-informed", 1,
                "-primitive", "reserve", "-out", out, cwd=tmp_path)
     assert r.returncode == 0, r.stdout[-3000:] + r.stderr[-3000:]
-    assert (out / "e1_soc_healerless_step1_reserve.md").exists(), list(out.iterdir())
-    d0 = _report(out / "soc2_td_r0.rep")
+    assert _table(out, "e1", "soc", '_healerless_step1_reserve').exists(), list(out.iterdir())
+    d0 = _report(_art(out, "soc2_td_r0.rep", '_healerless_step1_reserve'))
     assert d0["tracks"] and d0["share"] == []
-    assert "set_cell_layer_reserve" in (out / "soc2_td_shares_r0.buda").read_text()
-    d1 = _report(out / "soc2_td_r1.rep")
+    assert "set_cell_layer_reserve" in _art(out, "soc2_td_shares_r0.buda", '_healerless_step1_reserve').read_text()
+    d1 = _report(_art(out, "soc2_td_r1.rep", '_healerless_step1_reserve'))
     assert re.fullmatch(r"\d+", d1["verdict"][1])
 
 
@@ -441,8 +462,8 @@ def test_the_uniform_arm_sweeps_f_and_names_the_table_e5(tmp_path):
     r = _tclsh(_DRIVER, "soc", 2, "-arms", "uniform", "-f0", 4, "-fmax", 32,
                "-primitive", "reserve", "-out", out, cwd=tmp_path)
     assert r.returncode == 0, r.stdout[-3000:] + r.stderr[-3000:]
-    assert not (out / "e1_soc_healerless_step1_reserve.md").exists()
-    table = (out / "e5_soc_healerless_step1_reserve.md").read_text()
+    assert not _table(out, "e1", "soc", '_healerless_step1_reserve').exists()
+    table = _table(out, "e5", "soc", '_healerless_step1_reserve').read_text()
     rows = [ln for ln in table.splitlines() if ln.startswith("| soc | 2 |")]
     assert rows and all(ln.split("|")[4].strip() == "uniform" for ln in rows)
     policies = [ln.split("|")[6].strip() for ln in rows]
@@ -451,22 +472,22 @@ def test_the_uniform_arm_sweeps_f_and_names_the_table_e5(tmp_path):
     # driver records the end of the sweep instead of dying on it (NQ=2 is
     # dirty at 4 and 8, so both rounds run)
     assert policies == ["uniform 4", "uniform 8"], policies
-    assert not (out / "soc2_uniform_r3.rep").exists()
-    assert (out / "soc2_uniform_r3.log").exists()
+    assert not _art(out, "soc2_uniform_r3.rep", '_healerless_step1_reserve').exists()
+    assert _art(out, "soc2_uniform_r3.log", '_healerless_step1_reserve').exists()
     assert "uniform sweep ends at F=16" in r.stdout, r.stdout[-2000:]
     note = [ln for ln in table.splitlines() if ln.startswith("- size 2, uniform:")]
     assert len(note) == 1 and "ended at F=16" in note[0] \
         and "asks more tracks than the cell has" in note[0], table
     # each round's report records the F in force and the governed rows —
     # every marked cell on every TOP layer, F tracks over each instance
-    rep = _report(out / "soc2_uniform_r1.rep")
+    rep = _report(_art(out, "soc2_uniform_r1.rep", '_healerless_step1_reserve'))
     assert rep["uniform"] == ["4"] and rep["reserve"] == ["0"]
     assert int(rep["marks"][0]) > 0
     gov = {(g[0], g[1], g[2]): int(g[3]) for g in rep["governed"]}
     assert gov and all(v == 4 for v in gov.values()), gov
     layers = {k[2] for k in gov}
     assert layers == {"M5", "M6", "M7"}, layers
-    log = (out / "soc2_uniform_r1.log").read_text()
+    log = _art(out, "soc2_uniform_r1.log", '_healerless_step1_reserve').read_text()
     assert "(uniform 4 — cell-local" in log
     # a start already past the ceiling is refused up front, naming it
     r = _tclsh(_DRIVER, "soc", 2, "-arms", "uniform", "-f0", 16,
@@ -495,31 +516,32 @@ def test_the_top_plan_is_handed_down_and_the_fixpoint_measured(tmp_path):
     r = _tclsh(_DRIVER, "soc", 2, "-arms", "bu", "-informed", 1,
                "-primitive", "reserve", "-handdown", "-out", out, cwd=tmp_path)
     assert r.returncode == 0, r.stdout[-3000:] + r.stderr[-3000:]
-    plan0 = out / "soc2_bu_plan_r0.buda"
-    plan1 = out / "soc2_bu_plan_r1.buda"
+    pol = '_healerless_step1_reserve_handdown'
+    plan0 = _art(out, "soc2_bu_plan_r0.buda", pol)
+    plan1 = _art(out, "soc2_bu_plan_r1.buda", pol)
     assert plan0.exists() and plan1.exists()
     lines0 = [l for l in plan0.read_text().splitlines() if l.startswith("pin_plan ")]
     assert lines0 and re.search(r"^# bundles: (\d+)$", plan0.read_text(), re.M)[1] == str(len(lines0))
     assert all(re.match(r"pin_plan net:\S+ \S+ uid [0-9a-f]+ layers \S+ seats \S+$", l)
                for l in lines0), lines0[:3]
     # the informed round applied every pin and NUTS honoured every seat ...
-    log = (out / "soc2_bu_r1.log").read_text()
+    log = _art(out, "soc2_bu_r1.log", '_healerless_step1_reserve_handdown').read_text()
     n = len(lines0)
     assert f"[PlanPin] {n} of {n} handed-down plan(s) applied" in log, log[-3000:]
     m = re.search(r"\[PlanPin\] seated (\d+) of (\d+) handed-down seat\(s\)$", log, re.M)
     assert m and m[1] == m[2] and int(m[2]) > 0, log[-3000:]
-    d = _report(out / "soc2_bu_r1.rep")
+    d = _report(_art(out, "soc2_bu_r1.rep", '_healerless_step1_reserve_handdown'))
     assert d["plan_pins"] == [str(n), str(n), m[1], m[2]], d["plan_pins"]
     assert d["plan_derived"] == [str(n)]
     # ... so the top it hands on is the one it was handed
     strip = lambda p: [l for l in p.read_text().splitlines() if not l.startswith("#")]
     assert strip(plan0) == strip(plan1)
     # the measurement round sourced no plan
-    d0 = _report(out / "soc2_blind_r1.rep")
+    d0 = _report(_art(out, "soc2_blind_r1.rep", '_healerless_step1_reserve_handdown'))
     assert d0["plan_pins"] == ["0", "0", "-1", "-1"] and d0["plan_derived"] == [str(n)]
     # the table: a `plan` cell for the informed round, `—` for the blind
     # one, and a fixpoint verdict of the driver's own policy comparison
-    table = (out / "e1_soc_healerless_step1_reserve_handdown.md").read_text()
+    table = _table(out, "e1", "soc", '_healerless_step1_reserve_handdown').read_text()
     assert "| plan | fixpoint |" in table
     blind = [l for l in table.splitlines() if "| blind | 1 |" in l][0]
     assert "| — | — |" in blind
@@ -567,10 +589,10 @@ def test_a_top_down_measurement_round_is_aligned_for_a_hand_down(tmp_path):
     r = _tclsh(_DRIVER, "tpu", 8, "-arms", "td", "-informed", 2,
                "-primitive", "reserve", "-handdown", "-out", out, cwd=tmp_path)
     assert r.returncode == 0, r.stdout[-3000:] + r.stderr[-3000:]
-    log0 = (out / "tpu8_td_r0.log").read_text()
+    log0 = _art(out, "tpu8_td_r0.log", '_healerless_step1_reserve_handdown').read_text()
     assert "set_bottom_up * off: cleared 1 cell(s)" in log0
-    assert _report(out / "tpu8_td_r0.rep")["marks"] == ["0"]
-    table = (out / "e1_tpu_healerless_step1_reserve_handdown.md").read_text()
+    assert _report(_art(out, "tpu8_td_r0.rep", '_healerless_step1_reserve_handdown'))["marks"] == ["0"]
+    table = _table(out, "e1", "tpu", '_healerless_step1_reserve_handdown').read_text()
     row = [l for l in table.splitlines() if "| td | 1 |" in l][0]
     assert "| 96/96 pins, 96/96 seats | yes (2) | 0/0/0 | 0/0/0 |" in row, row
     assert "| 1.00 |" in row
@@ -590,11 +612,11 @@ def test_a_healer_move_off_a_handed_down_shape_drops_its_forced_layers(tmp_path)
     r = _tclsh(_DRIVER, "soc", 4, "-arms", "td", "-informed", 1, "-heal",
                "-primitive", "reserve", "-handdown", "-out", out, cwd=tmp_path)
     assert r.returncode == 0, r.stdout[-3000:] + r.stderr[-3000:]
-    log = (out / "soc4_td_r1.log").read_text()
+    log = _art(out, "soc4_td_r1.log", '_healed_step1_reserve_handdown').read_text()
     assert "COMMIT bundle" in log or "CLASS COMMIT" in log, log[-2000:]
     assert "unbuildable" not in log, [l for l in log.splitlines()
                                        if "unbuildable" in l][:4]
-    d = _report(out / "soc4_td_r1.rep")
+    d = _report(_art(out, "soc4_td_r1.rep", '_healed_step1_reserve_handdown'))
     assert d["verdict"][2] == "0", d["verdict"]        # no audit violation
 
 
@@ -621,3 +643,35 @@ def test_the_plan_is_derived_in_the_budgets_scope(tmp_path):
     assert r.returncode == 0, r.stderr[-2000:]
     n2 = int(re.search(r"^# bundles: (\d+)$", plan2.read_text(), re.M)[1])
     assert n2 < n, (n2, n)
+
+
+@pytest.mark.mid
+def test_two_policies_in_one_out_dir_keep_their_own_evidence(tmp_path):
+    """Per-round artifacts are named by POLICY, not just by vehicle+size, so
+    a second run beside the first cannot overwrite its evidence.
+
+    They were not, and it cost a measurement: the 6d tables were produced by
+    a healerless run and a healed run sharing one out dir, and since the two
+    wrote `soc16_td_r1.log` and every budget file under identical names, the
+    healed run silently replaced the healerless run's.  Only the TABLE was
+    discriminated — so the numbers survived while the evidence behind them
+    did not, and a column read off those logs could no longer be checked
+    against the run that produced it.  Both names now come from one
+    expression in the driver, which is what keeps them from drifting apart
+    again."""
+    out = tmp_path / "e1"
+    for flags, pol in ((("-informed", 0), "_healerless_step1"),
+                       (("-informed", 0, "-heal"), "_healed_step1")):
+        r = _tclsh(_DRIVER, "soc", 2, "-arms", "td", *flags,
+                   "-out", out, cwd=tmp_path)
+        assert r.returncode == 0, r.stdout[-3000:] + r.stderr[-3000:]
+        assert _table(out, "e1", "soc", pol).exists(), list(out.iterdir())
+    # Each run's own round-0 log and report are still there, under two
+    # names.  The count is the assertion that matters: two runs of one round
+    # leave TWO reports, where the old naming left one — so this fails on
+    # the pre-fix driver by finding the second run standing on the first.
+    for ext in ("log", "rep"):
+        assert _art(out, f"soc2_td_r0.{ext}", "_healerless_step1").exists()
+        assert _art(out, f"soc2_td_r0.{ext}", "_healed_step1").exists()
+    assert len(list(out.glob("*.rep"))) == 2, list(out.iterdir())
+    assert len(list(out.glob("*_td_shares_r0.buda"))) == 2, list(out.iterdir())

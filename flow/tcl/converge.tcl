@@ -384,8 +384,25 @@ proc row {size arm round policy rep policy_rep} {
 
 set summary {}
 set notes {}
+
+# What DISTINGUISHES this run from another on the same vehicle: the policy.
+# The table has carried it since E1; the per-round artifacts (logs, reports,
+# budget and plan files) carried only vehicle+size, so a healed run wrote
+# over the healerless run's evidence file for file — which is how a 6d
+# `yielded` column came to be unreadable against the run that produced it.
+# ONE expression, used by both, so the table and its own artifacts cannot
+# come to disagree about which run they are from.  (`-arms` needs no entry:
+# every artifact name already carries its arm.  `-f0`/`-fmax` are NOT in it,
+# so two uniform sweeps differing only in those still collide — in the table
+# too, which is where that gap would have to be closed.)
+set policy [expr {$heal ? "_healed" : "_healerless"}]_step$step[expr {$nofloor ? "_nofloor" : ""}][expr {$primitive eq "reserve" ? "_reserve" : ""}][expr {$handdown ? "_handdown" : ""}][expr {$yield ? "_yield" : ""}]
+if {$tag ne ""} { append policy _$tag }
+
 foreach size $sizes {
-    set p ${vehicle}${size}
+    # `label` is what a message calls this run (`soc16`); `p` is what its
+    # files are called, which has to survive a second run beside it.
+    set label ${vehicle}${size}
+    set p ${label}${policy}
     set blind1 ""
     # ── blind ── (also bu's round 1, so it always runs when bu does)
     if {"blind" in $arms || "bu" in $arms} {
@@ -442,7 +459,7 @@ foreach size $sizes {
                     return -options $opts $rep
                 }
                 regexp {set_cell_layer_reserve: (.*?)\) — see } $rep -> ceiling
-                puts "converge.tcl: ${p}: uniform sweep ends at F=$F — $ceiling"
+                puts "converge.tcl: ${label}: uniform sweep ends at F=$F — $ceiling"
                 break
             }
             # The round's own `governed` rows price it: the policy rep is
@@ -455,7 +472,7 @@ foreach size $sizes {
             incr k
         }
         if {![llength $urounds]} {
-            error "converge.tcl: ${p}: uniform $f_start is already past the\
+            error "converge.tcl: ${label}: uniform $f_start is already past the\
                    smallest cell's supply ($ceiling) — lower -f0"
         }
         set last [lindex $urounds end]
@@ -533,8 +550,8 @@ set text [join $lines \n]
 puts $text
 # The table is E5's when the conventional corridor arm ran, E1's otherwise.
 set exp [expr {"uniform" in $arms ? "e5" : "e1"}]
-set name ${exp}_${vehicle}[expr {$heal ? "_healed" : "_healerless"}]_step$step[expr {$nofloor ? "_nofloor" : ""}][expr {$primitive eq "reserve" ? "_reserve" : ""}][expr {$handdown ? "_handdown" : ""}][expr {$yield ? "_yield" : ""}]
-if {$tag ne ""} { append name _$tag }
+# The same `policy` the artifacts are named by — built once, above.
+set name ${exp}_${vehicle}${policy}
 set f [open [file join $out $name.md] w]
 puts $f "<!-- converge.tcl $argv -->"
 puts $f $text
