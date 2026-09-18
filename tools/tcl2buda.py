@@ -50,6 +50,11 @@ back to a program.
 Usage:
   tools/tcl2buda.py flow/tcl/array.tcl 3 2 -o /tmp/array_3x2.buda
   tools/tcl2buda.py flow/tcl/array.tcl -o /tmp/a.buda --verify
+  tools/tcl2buda.py flow/tcl/soc.tcl -o /tmp/c.buda -- 32 -LAYOUT compact
+
+An argument that looks like an option belongs to the FLOW, so put it after a
+`--`: the vehicles' knobs are almost all spelled that way (`-LAYOUT compact`,
+`-NC 4`, `-bottomup`) and argparse would otherwise claim them here.
 """
 import argparse
 import os
@@ -165,7 +170,22 @@ def main(argv=None):
                     help="replay the recording through the CLI and compare "
                          "its measured result against the Tcl run's")
     ap.add_argument("--tclsh", default="tclsh")
+
+    # Everything after a `--` is the FLOW's, verbatim.  Split it off before
+    # argparse sees it: the flow arguments are the vehicles' own knobs and
+    # almost all of them look like options (`-LAYOUT compact`, `-NC 4`,
+    # `-bottomup`), so argparse claimed them as ITS options and refused the
+    # run — which made every knob unreachable through this tool although the
+    # help says the arguments are passed verbatim.  Done by hand rather than
+    # left to argparse, whose `--` handling does not survive a second
+    # positional with `nargs="*"`.
+    argv = list(sys.argv[1:] if argv is None else argv)
+    passthru = []
+    if "--" in argv:
+        i = argv.index("--")
+        argv, passthru = argv[:i], argv[i + 1:]
     a = ap.parse_args(argv)
+    a.args = list(a.args) + passthru
 
     if not shutil.which(a.tclsh):
         print(f"no {a.tclsh} on this host", file=sys.stderr)

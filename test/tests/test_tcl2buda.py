@@ -225,3 +225,41 @@ def test_a_recorded_open_bdb_carries_its_resolved_path(tmp_path):
     import buda_script
     toks = buda_script.split_quoted_args(line)
     assert toks == [str(spaced / "ck.bdb")], (line, toks)
+
+
+@pytest.mark.mid
+def test_an_option_like_flow_argument_reaches_the_flow(tmp_path):
+    """Arguments after `--` go to the FLOW, verbatim, including the ones that
+    look like options.
+
+    They could not before: argparse claimed any `-NAME` token as its own and
+    refused the run, so every knob the vehicles expose — `-LAYOUT compact`,
+    `-NC 4`, `-bottomup` — was unreachable through this tool, although the
+    help says the arguments are passed verbatim.  Recording a vehicle under
+    anything but its defaults was therefore impossible.
+
+    Checked by the one thing that cannot be faked: `soc.tcl -LAYOUT compact`
+    computes a DIFFERENT FLOORPLAN, so the recorded `add_inst` coordinates
+    differ from the default run's."""
+    band = tmp_path / "band.buda"
+    compact = tmp_path / "compact.buda"
+    assert _run("flow/tcl/soc.tcl", 2, "-o", band).returncode == 0
+    r = _run("flow/tcl/soc.tcl", "-o", compact, "--", 2, "-LAYOUT", "compact")
+    assert r.returncode == 0, r.stdout + r.stderr
+
+    b, c = _commands(band), _commands(compact)
+    assert b and c
+    # same design, different placement: the die and the top-level instances
+    # move, and that is the whole evidence the argument arrived
+    die_b = [ln for ln in b if ln.startswith("set_die ")]
+    die_c = [ln for ln in c if ln.startswith("set_die ")]
+    assert die_b and die_c and die_b != die_c, (die_b, die_c)
+
+
+@pytest.mark.mid
+def test_an_unknown_option_before_the_separator_is_still_refused(tmp_path):
+    """The passthrough must not become a way to typo one of THIS tool's own
+    options into silence: before the `--` the parser is as strict as it was."""
+    r = _run("flow/tcl/soc.tcl", 2, "-o", tmp_path / "x.buda", "--verifyy")
+    assert r.returncode != 0
+    assert "unrecognized" in (r.stdout + r.stderr).lower(), r.stderr
