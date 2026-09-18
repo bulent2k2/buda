@@ -1082,13 +1082,14 @@ computes its own policy from `buda::query demand`.
 
 ---
 
-### `derive_cell_layer_reserves [apply] [file <path>] [cells <a,b,...>]`
+### `derive_cell_layer_reserves [apply] [file <path>] [cells <a,b,...>] [yield]`
 
 ```
 derive_cell_layer_reserves                    # print the derivation + paste lines
 derive_cell_layer_reserves apply              # ...and declare them in this session
 derive_cell_layer_reserves file reserves.buda # ...and write them for a later session
 derive_cell_layer_reserves cells sram_cell,tag_cell
+derive_cell_layer_reserves yield              # the block keeps its own seat (item 6d)
 ```
 
 The **positional twin** of `derive_cell_layer_shares` ([convergence ladder](../internal/convergence_ladder.md)
@@ -1115,7 +1116,43 @@ plan gave its most crowded bus), and `own_hit`, how many carry the cell's own
 metal *now*.  Neither is a refusal — this primitive exists so the block can
 **move its bus off named tracks** instead of losing a fraction of every period,
 and whether the local solve finds the room is what a run under the lines
-measures.  Same scope rule as the share derivation (named `cells`, else the
+measures.
+
+**`yield`** is the derivation *policy* for the case where the room is not there
+([convergence ladder](../internal/convergence_ladder.md) item 6d): E5's
+top-down NQ = 2 fixpoint stranded the cores' 32-bit bus under a union that
+covered the core's own seat, and no plan handed down repairs that, since the
+conflict is the reservation's own.  Under `yield`, where the reserved tracks
+inside a cell's worst seat window leave **no run of `need` consecutive free
+tracks**, the derivation gives back the block's *current* seat — every
+reserved track under its own metal's span, so the local solve need not move at
+all — and then, still short, the nearest remaining tracks one at a time until
+such a run opens; it says so with a `yield` column per line, a note naming the
+seat (`bundle B seg S needs N of P at <inst>; the top loses them`), and a
+summary count.  The test is the contiguous run and not the count because an
+abstract seat is *one rectangle*, measured on the SoC's core at NQ = 2: a
+32-bit bus in a 36-track window with 8 corridor tracks inside it reads 28 free
+by the count, and with 4, 2 or even one reserved track left in the window the
+local planner still fled to a dead LOW layer, while with none the round routed
+clean.  A **second pass** does the same for every nested template's seat
+against the corridors it would *inherit* from the lines as they stand (a
+reservation is inherited by every template nested in the reserved cell —
+`set_cell_layer_reserve`), since the SoC's cores have no line of their own and
+their 360 stranded bits were the cluster's corridor crossing their seat; each
+give-back is charged to the ancestor's line and said with the nested seat it
+served.  A seat that cannot host its own bus even with every reserved track
+given back is said too (the shortfall is the block's, not the reservation's),
+and a line whose every track was yielded reserves nothing — counted, and a
+removal like any layer the top takes nothing on.  The floor reads the block's
+seat off the *current* plan, so a block that could have re-planned onto
+another layer is yielded to all the same (on the two-instance vehicle the
+unbanded 8-bit bus escapes any reservation by moving to M4/M2 and the whole
+line is still yielded; banded to M6 it strands under the full union and routes
+clean under the yielded one).  Whether a top routed around a kept seat is
+cleaner than a block stranded under a full reservation is what a run under the
+yielded lines measures (`converge.tcl -yield`); the plain derivation is
+byte-identical.
+Same scope rule as the share derivation (named `cells`, else the
 `set_bottom_up` marks, else every cell owning a cell-local bundle) and the same
 two doors: `apply` declares through `set_cell_layer_reserve` itself and REMOVES
 a scoped cell's reservation on a layer it emitted no line for, `file` writes

@@ -1306,12 +1306,14 @@ def _placed_bits(t):
 
 def test_the_derivation_yields_the_block_its_seat_where_the_union_covers_it():
     """Ladder item 6d.  A 12-bit cell-local bus in a 19-track seat with the
-    top's 8 tracks inside it: the full union leaves 11 free, one short, so
-    the block's bus strands under it (24 bits — every bit on both
+    top's 8 tracks inside it, banded so the bus cannot leave M6: under the
+    full union the block's bus strands (24 bits — every bit on both
     instances, the doomed-seat shape E5's top-down NQ = 2 fixpoint
-    showed); under `yield` the derivation gives back exactly the
-    shortfall (1 track, one the block's own metal sits on), the block
-    keeps its bus, and here the top keeps every bit too."""
+    showed).  The window keeps no run of 12 consecutive free tracks with
+    the 8 in its middle, so `yield` gives back the block's current seat —
+    all 8, every one under its own metal — the line reserves nothing (a
+    removal), the block keeps its bus, and here the top keeps every bit
+    too (it seats elsewhere)."""
     a, lines, notes, t = _wide(12)
     assert [(len(l["positions"]), l["seat_hit"], l["yielded"]) for l in lines] \
         == [(8, 8, 0)], lines
@@ -1320,63 +1322,64 @@ def test_the_derivation_yields_the_block_its_seat_where_the_union_covers_it():
     assert _placed_bits(t) == {"loc_0": (12, 0), "loc2_0": (12, 0),
                                "x_0": (8, 8)}, _placed_bits(t)
     a2, lines2, notes2, t2 = _wide(12, yield_seat=True)
-    l = lines2[0]
-    assert (len(l["positions"]), l["seat_hit"], l["yielded"],
-            l["yield_short"]) == (7, 7, 1, 0), l
-    # the yielded track is one the block's own metal sits on today
-    gone = [q for q in lines[0]["positions"]
-            if not any(abs(q - k) < 1e-9 for k in l["positions"])]
-    rows = a2._layer_demand()
-    own = [r for r in rows if r["inst"] == "u1" and r["layer_name"] == "M6"][0]
-    comps = {c.name: c for c in a2.bdb.all_components()}
-    assert len(gone) == 1 and any(abs(gone[0] + comps["u1"].y1 - o) < 1e-6
-                                  for o in own["own_tracks"]), (gone, own)
-    assert any("1 of 8 reserved track(s) yielded to the cell's own seat "
-               "(bundle 4 seg 0 needs 12 of 19 at u1; the top loses them)"
-               in n for n in notes2), notes2
+    assert [(len(l["positions"]), l["seat_hit"], l["yielded"],
+             l["yield_short"]) for l in lines2] == [(0, 0, 8, 0)], lines2
+    assert any("8 of 8 reserved track(s) yielded to the cell's own seat "
+               "(bundle 4 seg 0 needs 12 of 19 at u1; the top loses them) "
+               "— nothing left to reserve here" in n for n in notes2), notes2
     assert t2.detailed_result.num_unplaced == 0
     assert _placed_bits(t2) == {"loc_0": (12, 12), "loc2_0": (12, 12),
                                 "x_0": (8, 8)}
-    out = _cmd(t2, "check_design")
-    assert "Success" in out and "7 track(s) reserved" in out, out
+    assert "Success" in _cmd(t2, "check_design")
     # the command's surface: the token, the column, the summary, the header
     out = _cmd(a2, "derive_cell_layer_reserves yield")
     assert "yielding each cell its own seat" in out and "  yield" in out
-    assert "1 reservation(s) yielded 1 track(s) to the cell's own seat" in out
+    assert ("1 reservation(s) yielded 8 track(s) to a seat (the top loses "
+            "them; 1 line(s) yielded whole reserve nothing — a removal)") in out
+    assert "nothing to declare: the top takes no track the cells' seats " \
+        "can spare" in out, out
     assert "unknown token" in _cmd(a2, "derive_cell_layer_reserves yields")
 
 
-def test_a_yield_that_cannot_host_the_bus_says_so_and_reserves_nothing(tmp_path):
-    """A seat that cannot host its own bus even unreserved (need 20 of a
-    19-track pool with the top's 8 inside it): every in-window track is
-    given back, the shortfall left is the block's and said, the line
-    disappears (a removal, as any layer the top takes nothing on).  The
-    policy is exercised directly — the vehicle's planner routes a 20-bit
-    bus as a U detour whose seat the union never touches — and the wiring
-    through a session whose policy returns that answer."""
-    own = {"own_seat": (4, 0, 20, 19), "own_window": (60.0, 140.0),
-           "own_tracks": [133.0, 137.0]}
-    union = [83.0, 86.0, 89.0, 92.0, 100.0, 103.0, 106.0, 109.0, 200.0]
-    inwin = union[:8]
-    kept, n, short = buda_cli.BudaSession._yield_seat_tracks(
-        union, inwin, own, lambda q: q)
-    assert (kept, n, short) == ([200.0], 8, 1)
-    # the block's own tracks go first, then the nearest their centre
-    own2 = {"own_seat": (4, 0, 14, 19), "own_window": (60.0, 140.0),
-            "own_tracks": [100.0, 103.0]}       # 11 free of 14: 3 back
-    kept, n, short = buda_cli.BudaSession._yield_seat_tracks(
-        union, inwin, own2, lambda q: q)
-    assert (n, short) == (3, 0) and 100.0 not in kept and 103.0 not in kept
-    assert 106.0 not in kept and 92.0 in kept, kept
-    # enough room: nothing given back
-    assert buda_cli.BudaSession._yield_seat_tracks(
-        union, inwin, {"own_seat": (4, 0, 8, 19), "own_window": (60.0, 140.0),
-                       "own_tracks": []}, lambda q: q) == (union, 0, 0)
-    # through a session: the whole line yielded is a removal, said
-    a, lines, notes, t = _wide(12, yield_seat=False)
-    a._yield_seat_tracks = lambda union, inwin, own, to_abs: ([], len(inwin), 1)
+def test_the_pick_is_the_contiguous_run_and_the_current_seat_first(tmp_path):
+    """The rule behind `yield` (measured on the SoC's core: with even ONE
+    corridor track left in a 36-track window the 32-bit bus's local
+    planner fled to a dead LOW layer; with none it routed clean): an
+    abstract seat is one rectangle, so the test is the longest run of
+    consecutive reserved-free tracks, not the count.  Given back first is
+    the block's CURRENT seat — every reserved track under its own metal's
+    span — then the nearest remaining one at a time until a run of `need`
+    opens; the shortfall left with nothing reserved is the block's own."""
+    pick = buda_cli.BudaSession._pick_yield
+    s = buda_cli.BudaSession()
+    t = [60.0 + 4 * i for i in range(19)]          # the window's tracks
+    res = t[5:13]                                   # 8 reserved, mid-window
+    cands = [(q, q) for q in res]
+    own = {"own_seat": (4, 0, 12, 19), "own_window": (60.0, 132.0),
+           "own_tracks": t[9:13]}                    # its metal on 4 of them
+    give, short = pick(s, cands, own, t)
+    # the 4 under its metal, then t[8] and t[7] (nearest its centre) —
+    # after which t[7..18] is a run of 12
+    assert set(give[:4]) == set(t[9:13]) and give[4:] == [t[8], t[7]], give
+    assert short == 0
+    # room enough: the run to the right of 4 reserved tracks holds 8
+    assert pick(s, [(q, q) for q in t[5:9]],
+                {"own_seat": (4, 0, 8, 19), "own_window": (60.0, 132.0),
+                 "own_tracks": []}, t) == ([], 0)
+    # a seat that cannot host its bus even unreserved: everything back,
+    # the shortfall said
+    give, short = pick(s, cands, {"own_seat": (4, 0, 20, 19),
+                                  "own_window": (60.0, 132.0),
+                                  "own_tracks": []}, t)
+    assert sorted(give) == res and short == 1, (give, short)
+    # no grid to read the tracks off: the count model, exact shortfall
+    assert pick(s, cands, own, None) == (t[10:11], 0)   # nearest its centre
+    # through a session: a whole line yielded is a removal, said, and
+    # the file carries the `off` line for a reservation it replaces
+    a, lines, notes, _t = _wide(12, yield_seat=False)
+    a._pick_yield = lambda cands, own, tracks: ([k for k, _ in cands], 1)
     lines, notes, _ = a._derive_cell_layer_reserves(yield_seat=True)
-    assert lines == [], lines
+    assert [l["positions"] for l in lines] == [[]], lines
     assert any("8 of 8 reserved track(s) yielded" in n and "still 1 short" in n
                and "nothing left to reserve here" in n for n in notes), notes
     _cmd(a, "set_cell_layer_reserve top_cell M6 83,86")
@@ -1387,13 +1390,25 @@ def test_a_yield_that_cannot_host_the_bus_says_so_and_reserves_nothing(tmp_path)
     assert "1 removal line(s)" in out and "nothing to declare" in out, out
 
 
-def test_yield_changes_nothing_where_the_seat_has_room():
-    """The 8-bit vehicle: 11 free tracks against a need of 8, so `yield`
-    gives nothing back and the lines are the plain derivation's."""
-    s = _session("run_nuts", "run_detailed_nuts")
+def test_yield_changes_nothing_where_the_seat_keeps_a_long_enough_run():
+    """The 8-bit vehicle with a 4-bit top: 4 reserved tracks in a 19-track
+    window leave a run of 8 free, so `yield` gives nothing back and the
+    lines are the plain derivation's.  (With the 8-bit top the 8 reserved
+    tracks sit mid-window and no run of 8 survives, so the whole line is
+    yielded — although E5 measured that block moving its bus to another
+    layer: the floor reads the current plan's seat, not the alternatives,
+    which the docs say.)"""
+    design = [c.replace("add_bus x[8]", "add_bus x[4]") for c in _DESIGN]
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    _quiet(s, *design, "run_nuts", "run_detailed_nuts")
     plain, notes, _ = s._derive_cell_layer_reserves()
     yld, notes2, _ = s._derive_cell_layer_reserves(yield_seat=True)
     assert [l["positions"] for l in yld] == [l["positions"] for l in plain]
+    assert len(plain[0]["positions"]) == 4 and plain[0]["seat_hit"] == 4
     assert all(l["yielded"] == 0 for l in yld) and notes2 == notes
     out = _cmd(s, "derive_cell_layer_reserves yield")
-    assert "0 reservation(s) yielded 0 track(s)" in out and _LINE in out
+    assert "0 reservation(s) yielded 0 track(s)" in out, out
+    s8 = _session("run_nuts", "run_detailed_nuts")
+    yld8, notes8, _ = s8._derive_cell_layer_reserves(yield_seat=True)
+    assert [(l["positions"], l["yielded"]) for l in yld8] == [([], 8)]
