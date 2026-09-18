@@ -1377,11 +1377,17 @@ def test_the_pick_is_the_contiguous_run_and_the_current_seat_first(tmp_path):
     # through a session: a whole line yielded is a removal, said, and
     # the file carries the `off` line for a reservation it replaces
     a, lines, notes, _t = _wide(12, yield_seat=False)
-    a._pick_yield = lambda cands, own, tracks: ([k for k, _ in cands], 1)
+    a._pick_yield = lambda cands, own, tracks, fixed=(): (
+        [k for k, _ in cands], 1)
     lines, notes, _ = a._derive_cell_layer_reserves(yield_seat=True)
     assert [l["positions"] for l in lines] == [[]], lines
-    assert any("8 of 8 reserved track(s) yielded" in n and "still 1 short" in n
+    assert any("8 of 8 reserved track(s) yielded" in n
                and "nothing left to reserve here" in n for n in notes), notes
+    # the seat's own shortfall is its own note: a give-back can be split
+    # across the cell's line and its ancestors', and the shortfall is the
+    # SEAT's, not any one line's
+    assert any("still 1 short" in n and "cannot host its own bus" in n
+               for n in notes), notes
     _cmd(a, "set_cell_layer_reserve top_cell M6 83,86")
     out = _cmd(a, f"derive_cell_layer_reserves yield file {tmp_path / 'y.buda'}")
     text = (tmp_path / "y.buda").read_text()
@@ -1412,3 +1418,134 @@ def test_yield_changes_nothing_where_the_seat_keeps_a_long_enough_run():
     s8 = _session("run_nuts", "run_detailed_nuts")
     yld8, notes8, _ = s8._derive_cell_layer_reserves(yield_seat=True)
     assert [(l["positions"], l["yielded"]) for l in yld8] == [([], 8)]
+
+
+_BAND_INNER = "set_cell_layer_cap inner M6 -min M5"
+
+
+def _seat_runs(t, cell, lname):
+    """Per occurrence of `cell`, the longest run of consecutive signal
+    tracks its worst seat window leaves free of the reservations IN FORCE
+    there — `_effective_reserves`, the set the cell-local solve keeps free
+    (own UNION inherited).  Computed off the routed session rather than
+    off the derivation, so it is an independent check of what the yield
+    was supposed to buy: {inst: (free run, need, window tracks)}."""
+    lid = t._layer_name_map[lname]
+    eff, _src, _clone = t._effective_reserves(cell)
+    comps = {c.name: c for c in t.bdb.all_components()}
+    fr, _rot = t._reserve_frames(cell)
+    out = {}
+    for r in t._layer_demand():
+        if r["cell"] != cell or r["layer"] != lid or not r["own_seat"]:
+            continue
+        d, od = comps[r["inst"]], fr[r["inst"]]
+        lo, hi = r["own_window"]
+        blocked = [a for a in t._reserve_abs_of(eff.get(lid, ()), od, d, lid)
+                   if lo - 1e-6 <= a <= hi + 1e-6]
+        tk = t._window_tracks(lid, d, lo, hi)
+        out[r["inst"]] = (buda_cli.BudaSession._largest_free_run(tk, blocked),
+                          int(r["own_seat"][2]), len(tk))
+    return out
+
+
+def _derived_text(s, yield_seat):
+    lines, notes, _ = s._derive_cell_layer_reserves(yield_seat=yield_seat)
+    return [f"set_cell_layer_reserve {l['cell']} {l['layer_name']} "
+            + ",".join(fmt_pos(q) for q in l["positions"])
+            for l in lines if l["positions"]], lines, notes
+
+
+def test_the_yield_sees_the_union_of_own_and_inherited_at_every_occurrence():
+    """Codex on #940, the two findings that share one cause.  What a
+    cell-local solve keeps free is `_effective_reserves` — the cell's OWN
+    line UNION every ancestor corridor projected into its frame — so that
+    union is what fragments its seat.  Two ways of testing less than the
+    union were measured here:
+
+    (1) an ancestor track has a DIFFERENT image at each occurrence of the
+        nested cell (that is why the inheritance unions over occurrences),
+        and keying the candidates by (ancestor, track) kept only the
+        first, so the run test saw 8 of the 16 images; and
+    (2) the cell's own tracks and the inherited images were tested
+        SEPARATELY, so each half could find a long enough run while the
+        union left none.
+
+    The vehicle is the nested design with its second top instance
+    MIRRORED, so the two occurrences' images genuinely differ, and the
+    nested template banded to [M5..M6] so its bus cannot answer a
+    reservation by fleeing to a free layer (unbanded it moves to M4 and
+    the seat stops existing, which is why no test reached this pass).
+
+    Measured: `inner`'s 8-bit bus has a 19-track window at each of its two
+    occurrences.  Under the plain derivation both are fragmented below
+    what the bus needs; under the yield both clear."""
+    s0, _ = _flipped(["set_bottom_up *"], _BAND_INNER)
+    plain, _pl, _pn = _derived_text(s0, False)
+    t0, _o0 = _flipped(["set_bottom_up *"], _BAND_INNER, *plain)
+    before = _seat_runs(t0, "inner", "M6")
+    assert before == {"u1/c": (7, 8, 19), "u2/c": (6, 8, 19)}, before
+    text, lines, notes = _derived_text(s0, True)
+    t, _out = _flipped(["set_bottom_up *"], _BAND_INNER, *text)
+    after = _seat_runs(t, "inner", "M6")
+    assert after == {"u1/c": (19, 8, 19), "u2/c": (13, 8, 19)}, after
+    for inst, (run, need, _n) in after.items():
+        assert run >= need, (inst, run, need)
+    # the give-back is split across the cell's own line and the
+    # ANCESTOR's, each said with the seat it served, and the ancestor is
+    # charged by name (the core has no line of its own on the SoC — its
+    # stranded bits were the cluster's corridor crossing its seat)
+    byc = {(l["cell"], l["layer_name"]): l for l in lines}
+    assert byc[("inner", "M6")]["yielded"] == 7
+    assert byc[("top_cell", "M6")]["yielded"] == 7
+    assert len(byc[("top_cell", "M6")]["positions"]) == 9, byc
+    assert any("top_cell M6: 7 of 16 reserved track(s) yielded to nested "
+               "inner's own seat" in n and "16 inherited track(s) in its "
+               "window" in n for n in notes), notes
+    assert any("inner M6: 7 of 8 reserved track(s) yielded to the cell's "
+               "own seat" in n for n in notes), notes
+    # and the counts the table prints follow the line it reduced
+    assert byc[("top_cell", "M6")]["seat_hit"] == 1
+    assert byc[("inner", "M6")]["seat_hit"] == 1
+
+
+def test_an_out_of_scope_ancestors_corridor_is_blocked_but_not_yielded():
+    """Codex on #940: `_report_cell_layer_reserves` removes a held
+    reservation only when its cell is IN SCOPE, so an ancestor outside the
+    scope keeps its corridor and still crosses the nested cell's seat when
+    the next round routes.  The walk must therefore read the map IN FORCE
+    — what is held, with the derived lines in the scoped cells' place —
+    not the derived lines alone, which came back with no inheritance at
+    all and yielded nothing to the very seat the policy is for.
+
+    Scoped to `inner`, the enclosing corridor is real and un-givable: it
+    still narrows the run test (so the cell's own line gives way to it),
+    and no line is invented for the cell that was not asked for."""
+    s0, _ = _flipped(["set_bottom_up *"], _BAND_INNER)
+    text, _l, _n = _derived_text(s0, False)
+    top = [t for t in text if t.startswith("set_cell_layer_reserve top_cell M6")]
+    assert len(top) == 1, text
+    s, _o = _flipped(["set_bottom_up *"], _BAND_INNER, *top)
+    lines, notes, scope = s._derive_cell_layer_reserves(cells=["inner"],
+                                                        yield_seat=True)
+    assert scope == ["inner"]
+    assert {l["cell"] for l in lines} == {"inner"}
+    m6 = [l for l in lines if l["layer_name"] == "M6"][0]
+    # The held corridor is not this derivation's to move, so the cell's
+    # OWN line gives way to it — all 8 tracks — and what the corridor
+    # still costs the seat is SAID rather than left as a reservation
+    # covering it.  (Reading the derived lines alone instead of the map in
+    # force, the ancestor is invisible: the line keeps all 8 tracks,
+    # reports seat_hit 8, yields nothing and says nothing.)
+    assert (m6["positions"], m6["yielded"], m6["yield_short"]) == ([], 8, 1)
+    assert m6["seat_hit"] == 0
+    assert any("still 1 short at u1/c with every yieldable track in its "
+               "window given back" in n for n in notes), notes
+    assert not any("top_cell" in n for n in notes), notes
+    # and the seat really is still short under those lines: a corridor the
+    # derivation cannot move is one the block has to live with
+    txt = [f"set_cell_layer_reserve {l['cell']} {l['layer_name']} "
+           + ",".join(fmt_pos(q) for q in l["positions"])
+           for l in lines if l["positions"]]
+    t, _o2 = _flipped(["set_bottom_up *"], _BAND_INNER, *top, *txt)
+    runs = _seat_runs(t, "inner", "M6")
+    assert all(run < need for run, need, _n in runs.values()), runs

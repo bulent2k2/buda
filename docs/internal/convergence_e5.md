@@ -784,20 +784,38 @@ measured before the rule was right, and both are the rule now.
    one at a time until such a run opens; a run long enough → nothing
    (the block shifts within its window, which is E5's clean case).  The
    count model stays only as the no-grid fallback.
-2. **The corridor a block inherits counts too.**  The core has no line of
-   its own — the top takes no track over it directly — and its 360 bits
-   were the *cluster's* corridor crossing its seat, inherited as every
-   ancestor's reservation is (`_inherited_reserves`).  A first pass that
-   judges each line against its own cell's seat yielded 4 tracks to the
-   cluster and 8 to the io block and left the cores stranded exactly as
-   before.  The second pass (`_yield_to_nested`) walks every nested
-   template in scope, deepest first, computes the corridor it would
-   inherit from the lines as they stand (the local solve's own walk, run
-   with the derived lines in the ancestors' place), applies the same run
-   test at its worst instance's window, and gives back the ancestor
-   tracks whose *images* fragment that seat — charged to the ancestor's
-   line and said with the nested seat they served (`cluster_cell M5: 19
-   of 83 reserved track(s) yielded to nested l1_cell's own seat`).
+2. **The test is run once per seat, against the union that fragments
+   it.**  What a cell-local solve keeps free is `_effective_reserves` —
+   the cell's own line UNION every ancestor corridor projected into its
+   frame — so that union is the blocked set, and `_yield_seats` walks the
+   cells deepest first, builds it per (cell, layer), picks once, and
+   splits the give-back between the cell's own line and its ancestors'.
+   Both halves are load-bearing.  The inherited half is what E5's
+   fixpoint turned on: the core has no line of its own — the top takes no
+   track over it directly — and its 360 bits were the *cluster's*
+   corridor crossing its seat, inherited as every ancestor's reservation
+   is (`_inherited_reserves`); judging each line against its own cell's
+   seat alone yielded 4 tracks to the cluster and 8 to the io block and
+   left the cores stranded exactly as before.  The union is what the
+   first cut of this pass still got wrong, in two ways a reviewer caught
+   and the nested test now pins (`#940`): it tested the own tracks and
+   the inherited images as two separate blocked sets, so each half could
+   find a long enough free run while the union left none, and it kept one
+   image per ancestor track, although an ancestor track has a *different*
+   image at every occurrence of the nested cell — which is exactly why
+   the inheritance unions over occurrences.  Measured on the mirrored
+   nested vehicle, an 8-bit bus with a 19-track window at each of two
+   occurrences: the two-set form left it a longest free run of 6 and
+   called the seat protected; the union form leaves 13.  Giving an image
+   back removes every ancestor track behind it, since an image clears
+   only when all of them go — which also settles who pays: not the
+   nearest ancestor, all of them.  A corridor held by a cell outside the
+   derivation's scope is not this derivation's to move (a scoped
+   derivation does not replace it, and it is still in force next round):
+   it narrows the run test and what it costs the seat is said rather
+   than yielded.  Each give-back is charged to the line it came from and
+   said with the seat it served (`cluster_cell M5: 19 of 83 reserved
+   track(s) yielded to nested l1_cell's own seat`).
 
 Each give-back is a `yield` column on the line and a note naming the
 seat; a seat that cannot host its own bus even with nothing reserved is

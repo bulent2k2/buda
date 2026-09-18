@@ -96,3 +96,9 @@ flow/librelane/phase0/two_reg32/out/
 flow/librelane/tier1a/out/
 # stage renders/BDBs: outputs of snapshots.py, regenerable from the runs
 flow/librelane/renders/
+
+# Convergence-ladder loop output (flow/tcl/converge.tcl): per-round reports,
+# derived budget/plan files and the result tables, all regenerable by re-running
+# the driver.  Same lesson as the librelane block above -- `git add -A` after a
+# measurement run swept 100 of these into a commit (PR #940).
+e1_out/

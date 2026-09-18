@@ -1134,14 +1134,28 @@ abstract seat is *one rectangle*, measured on the SoC's core at NQ = 2: a
 32-bit bus in a 36-track window with 8 corridor tracks inside it reads 28 free
 by the count, and with 4, 2 or even one reserved track left in the window the
 local planner still fled to a dead LOW layer, while with none the round routed
-clean.  A **second pass** does the same for every nested template's seat
-against the corridors it would *inherit* from the lines as they stand (a
-reservation is inherited by every template nested in the reserved cell —
-`set_cell_layer_reserve`), since the SoC's cores have no line of their own and
-their 360 stranded bits were the cluster's corridor crossing their seat; each
-give-back is charged to the ancestor's line and said with the nested seat it
-served.  A seat that cannot host its own bus even with every reserved track
-given back is said too (the shortfall is the block's, not the reservation's),
+clean.  The test is run **once per seat** against the whole set that fragments
+it, which is what the cell-local solve keeps free: the cell's own line UNION
+the corridors it *inherits* from every ancestor (a reservation is inherited by
+every template nested in the reserved cell — `set_cell_layer_reserve`).  Both
+halves are needed and neither alone is enough.  The inherited half is what
+E5's fixpoint turned on, since the SoC's cores have no line of their own and
+their 360 stranded bits were the cluster's corridor crossing their seat; and
+testing the two halves separately lets each find a long enough free run while
+the union leaves none (a 19-track window needing 12, the own line holding the
+first four tracks and the corridor the last four, reads a run of 15 either way
+and 11 to the solve).  An ancestor track has a *different* image at each
+occurrence of the nested cell, so the images are read off the same walk the
+solve runs and attributed back over every occurrence; giving one back removes
+every ancestor track behind it, since an image clears only when all of them
+go.  A give-back is charged to the line it came from — the cell's own or the
+ancestor's — and said with the seat it served.  A corridor held by a cell
+OUTSIDE the derivation's scope is not this derivation's to move: it still
+narrows the run test, and what it costs the seat is said rather than yielded.
+Cells are walked deepest first, so a core's shortfall is settled before its
+cluster's own seat is judged on what is left of its line.  A seat that cannot
+host its own bus even with every yieldable track given back is said too (the
+shortfall is the block's, not the reservation's),
 and a line whose every track was yielded reserves nothing — counted, and a
 removal like any layer the top takes nothing on.  The floor reads the block's
 seat off the *current* plan, so a block that could have re-planned onto

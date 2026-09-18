@@ -1798,8 +1798,9 @@ class ReportsMixin:
 
         Returns (lines, notes, scope): `lines` are dicts (cell, layer,
         layer_name, positions, n_inst, n_skipped, used_lo, used_hi,
-        seat_hit, own_hit, yielded, yield_short); None before a NUTS
-        result."""
+        seat_hit, own_hit, yielded, yield_short, plus the internal
+        `own_row`/`rows` the yield pass and the hit counts read); None
+        before a NUTS result."""
         rows = self._layer_demand()
         if rows is None:
             return None
@@ -1840,11 +1841,6 @@ class ReportsMixin:
                     origin = c.y1 if horiz else c.x1
                     return self._reserve_ref_pos(u - origin, o, ext, horiz)
 
-                def to_abs(q, c, o):
-                    ext = (c.y2 - c.y1) if horiz else (c.x2 - c.x1)
-                    origin = c.y1 if horiz else c.x1
-                    return origin + self._reserve_ref_pos(q, o, ext, horiz)
-
                 for r in lrows:
                     c = comps.get(r["inst"])
                     if c is None:
@@ -1866,170 +1862,210 @@ class ReportsMixin:
                 if not union:
                     continue                # the top takes nothing here
                 union.sort()
-                # The block's own worst seat on this layer, and how many of
-                # the reserved tracks land inside its window; the own metal
-                # currently ON reserved tracks (the union, per instance).
+                # The block's own worst seat on this layer; the hit
+                # counts against it are `_reserve_line_hits`, the one rule
+                # the yield pass recomputes them with.
                 own = max(lrows, key=lambda r: r["own_need"])
-                seat_hit, yielded, yield_short = 0, 0, 0
-                if own["own_window"] is not None:
-                    oc = comps.get(own["inst"])
-                    oo = fr.get(own["inst"])
-                    if oc is not None and oo is not None:
-                        lo, hi = own["own_window"]
-                        inwin = [q for q in union
-                                 if lo - 1e-6 <= to_abs(q, oc, oo)
-                                 <= hi + 1e-6]
-                        seat_hit = len(inwin)
-                        if yield_seat and own["own_seat"] is not None:
-                            n_all = len(union)
-                            give, yield_short = self._pick_yield(
-                                [(q, to_abs(q, oc, oo)) for q in inwin],
-                                own, self._window_tracks(lid, oc, lo, hi))
-                            yielded = len(give)
-                            union = [q for q in union
-                                     if not any(abs(q - g) < 1e-9
-                                                for g in give)]
-                            seat_hit = len(inwin) - yielded
-                            if yielded:
-                                bid, si, need, pool = own["own_seat"]
-                                notes.append(
-                                    f"{cell} {lname}: {yielded} of {n_all} "
-                                    f"reserved track(s) yielded to the "
-                                    f"cell's own seat (bundle {bid} seg "
-                                    f"{si} needs {need} of {pool} at "
-                                    f"{own['inst']}; the top loses them)"
-                                    + (f" — still {yield_short} short: the "
-                                       f"seat cannot host its own bus even "
-                                       f"unreserved" if yield_short else "")
-                                    + ("" if union else
-                                       " — nothing left to reserve here"))
-                # (a line whose every track was yielded stays, with no
-                # positions: the report counts it and treats it as the
-                # removal it is)
-                own_hit = 0
-                for r in lrows:
-                    c = comps.get(r["inst"])
-                    o = fr.get(r["inst"])
-                    if c is None or o is None:
-                        continue
-                    absres = [to_abs(q, c, o) for q in union]
-                    own_hit = max(own_hit, sum(
-                        1 for t_ in r.get("own_tracks", [])
-                        if any(abs(t_ - a) < 1e-6 for a in absres)))
-                lines.append({
+                line = {
                     "cell": cell, "layer": lid, "layer_name": lname,
                     "positions": union, "n_inst": len(used_counts),
                     "n_skipped": skipped,
                     "used_lo": min(used_counts), "used_hi": max(used_counts),
-                    "seat_hit": seat_hit,
                     "seat": own["own_seat"], "seat_inst": own["inst"],
-                    "own_hit": own_hit,
-                    "yielded": yielded, "yield_short": yield_short,
-                })
+                    "yielded": 0, "yield_short": 0,
+                    # internal, not printed: what the yield pass and the
+                    # hit counts are recomputed from
+                    "own_row": own, "rows": lrows,
+                }
+                line["seat_hit"], line["own_hit"] = self._reserve_line_hits(
+                    line, comps, fr)
+                lines.append(line)
+        # The yield is ONE pass over the seats, after every line exists:
+        # what fragments a seat is the cell's own line UNION the ancestor
+        # corridors it inherits, and neither is known until then.
         if yield_seat and lines:
-            lines = self._yield_to_nested(lines, by_cell, scope, comps,
-                                          frames, ocache, notes)
+            lines = self._yield_seats(lines, by_cell, scope, comps,
+                                      frames, ocache, notes)
         return lines, notes, scope
 
-    def _yield_to_nested(self, lines, by_cell, scope, comps, frames,
-                         ocache, notes):
-        """The yield policy's second pass — the one E5's NQ = 2 fixpoint
-        actually needed.  A reservation is INHERITED by every template
-        nested inside the reserved cell (hier.py `_inherited_reserves`:
-        the ancestor's tracks projected into the nested cell's frame over
-        every occurrence, unioned), so an ancestor's line can cover a
-        nested cell's own seat while that cell has no line of its own —
-        the top takes no track over the core directly, the cluster's
-        corridor crosses it, and the core's 32-bit bus, planned around 12
-        inherited tracks, fled to a LOW layer with no supply (360 bits at
-        NQ = 2).  Measured first without this pass: the own-seat pass
-        yielded 4 tracks to the cluster and 8 to the io block and the
-        cores stranded exactly as before.
+    def _reserve_line_hits(self, line, comps, fr):
+        """`(seat_hit, own_hit)` for a line as its positions now STAND: the
+        reserved tracks inside the cell's own worst seat window, and the
+        most of the cell's own metal sitting on a reserved track at any
+        occurrence.  Both describe the LINE, so a yield moves them and they
+        are recomputed rather than adjusted (Codex on #940: the nested pass
+        reduced a line and left them at their pre-yield values, so the table
+        printed a row claiming six of its ten remaining tracks sat in a seat
+        they were no longer in, and the summary counted it).  `used_lo/hi`
+        are deliberately NOT recomputed: they count the tracks the TOP used
+        per instance, which is the demand the line was derived from and does
+        not move when the line gives a track back."""
+        eps = 1e-6
+        lid = line["layer"]
+        horiz = (self.layers.get_layer_dir(lid) == buda.LayerDir.HORIZONTAL)
 
-        Per nested cell in scope and layer: the tracks it would inherit
-        from the lines as they stand (the derived reservation put in the
-        ancestors' place for the call — the same walk the local solve will
-        run), folded to its worst instance's window; where they leave the
-        seat short, the ancestor tracks whose image lands in that window
-        are given back, the nested cell's own tracks first, then the
-        nearest their centre, ancestors processed nearest-first.  Each
-        give-back is recorded on the ancestor's line (`yielded`) and said
-        with the nested seat it served.  Ordering: nested cells deepest
-        first, so a core's shortfall is settled before its cluster's
-        inheritance from the quad is judged on what remains."""
+        def to_abs(q, c, o):
+            ext = (c.y2 - c.y1) if horiz else (c.x2 - c.x1)
+            origin = c.y1 if horiz else c.x1
+            return origin + self._reserve_ref_pos(q, o, ext, horiz)
+
+        own = line.get("own_row")
+        seat_hit = own_hit = 0
+        if own is not None and own["own_window"] is not None:
+            oc, oo = comps.get(own["inst"]), fr.get(own["inst"])
+            if oc is not None and oo is not None:
+                lo, hi = own["own_window"]
+                seat_hit = sum(1 for q in line["positions"]
+                               if lo - eps <= to_abs(q, oc, oo) <= hi + eps)
+        for r in line.get("rows") or []:
+            c, o = comps.get(r["inst"]), fr.get(r["inst"])
+            if c is None or o is None:
+                continue
+            absres = [to_abs(q, c, o) for q in line["positions"]]
+            own_hit = max(own_hit, sum(
+                1 for t_ in r.get("own_tracks", [])
+                if any(abs(t_ - a) < eps for a in absres)))
+        return seat_hit, own_hit
+
+    def _reserve_map_in_force(self, held, by_line, scope):
+        """The reserve map the NEXT run will see, which is what the yield
+        walk must read: what is HELD now, minus the scoped cells' entries
+        this derivation replaces, plus the derived lines.
+
+        An ancestor OUTSIDE the scope keeps whatever it was declared with —
+        `_report_cell_layer_reserves` removes a held reservation only when
+        its cell is in scope — and its corridor still crosses a nested
+        cell's seat when the next round routes.  Replacing the whole map
+        with the derived lines hid exactly that (Codex on #940): derive
+        over two cells in a session already holding the enclosing cell's
+        corridor and the inheritance came back empty, so nothing was
+        yielded to the seat the policy exists for."""
+        m = {k: v for k, v in (held or {}).items() if k[0] not in scope}
+        for key, l in by_line.items():
+            if l["positions"]:
+                m[key] = tuple(l["positions"])
+        return m
+
+    def _yield_seats(self, lines, by_cell, scope, comps, frames,
+                     ocache, notes):
+        """The yield policy, run ONCE per (cell, layer) SEAT.
+
+        What a cell-local solve keeps free on a layer is
+        `_effective_reserves` — the cell's OWN line UNION every ancestor
+        corridor projected into its frame — so that union is what
+        fragments its seat and is the set the contiguous-run test must
+        see.  Testing the two halves separately lets each find a long
+        enough free run while the union leaves none (Codex on #940): a
+        19-track window needing 12, the own line holding tracks 0..3 and
+        an inherited corridor 15..18, shows a free run of 15 to each half
+        and 11 to the solve, and the bus strands under a derivation that
+        yielded nothing.
+
+        The inheritance is the reason the second half exists at all: an
+        ancestor's corridor can cover a nested cell's seat while that cell
+        has no line of its own — the top takes no track over the SoC's
+        core directly, the cluster's corridor crosses it, and the core's
+        32-bit bus, planned around 12 inherited tracks, fled to a LOW
+        layer with no supply (360 bits at NQ = 2).
+
+        An ancestor track has a DIFFERENT image at every occurrence of the
+        nested cell, which is why the inheritance unions over occurrences:
+        the images come from `_inherited_reserves` (the walk the solve
+        itself runs, so the two cannot disagree) and are attributed back
+        to (ancestor, track) over EVERY occurrence.  Giving an image back
+        removes every ancestor track behind it, since an image clears only
+        when all of them go — which also settles who pays: not the nearest
+        ancestor, all of them.  An image that any ancestor OUTSIDE the
+        scope also projects is not givable at all (this derivation emits
+        no line for that cell, so it cannot move it); it stays in the
+        blocked set as a fixed track, so the run test still sees it.
+
+        Because a given-back track may project a second image elsewhere in
+        the same window, the freed set is a superset of what the pick
+        tested: the policy can give one track too many, never too few.
+
+        Cells deepest first, so a core's shortfall is settled before its
+        cluster's own seat is judged on what is left of its line."""
         eps = 1e-6
         by_line = {(l["cell"], l["layer"]): l for l in lines}
         all_comps = list(comps.values())
         by_id = {c.id: c for c in all_comps}
-        depth_of = {}
-        for cell in scope:
-            rows = by_cell.get(cell) or []
-            depth_of[cell] = max((r["depth"] for r in rows), default=0)
+        depth_of = {cell: max((r["depth"] for r in (by_cell.get(cell) or [])),
+                              default=0) for cell in scope}
         saved = getattr(self, "_cell_layer_reserves", None)
+        touched = {}
         try:
-            for cell in sorted(scope, key=lambda c: -depth_of.get(c, 0)):
+            for cell in sorted(scope, key=lambda c: (-depth_of.get(c, 0), c)):
                 rows = by_cell.get(cell) or []
                 if not rows:
-                    continue
-                # the lines as they stand, in the ancestors' place
-                self._cell_layer_reserves = {
-                    k: tuple(l["positions"]) for k, l in by_line.items()
-                    if l["positions"]}
-                inh, _src = self._inherited_reserves(cell)
-                if not inh:
                     continue
                 if cell not in frames:
                     frames[cell] = self._reserve_frames(cell, None, all_comps,
                                                         ocache)
                 fr = frames[cell][0]
-                for lid, pos_d in inh.items():
-                    lname = self._make_layer_names().get(lid, f"L{lid}")
+                # the map the next run will see, with the lines as they
+                # stand in the scoped cells' place
+                self._cell_layer_reserves = self._reserve_map_in_force(
+                    saved, by_line, scope)
+                inh, _src = self._inherited_reserves(cell)
+                layers = set(inh) | {lid for (c, lid) in by_line if c == cell}
+                for lid in sorted(layers):
                     lrows = [r for r in rows if r["layer"] == lid
                              and r["own_window"] is not None
                              and r["own_seat"] is not None
                              and r["inst"] in fr]
                     if not lrows:
-                        continue
+                        continue          # no seat of its own to protect
                     own = max(lrows, key=lambda r: r["own_need"])
-                    d = comps[own["inst"]]
-                    od = fr[own["inst"]]
+                    d, od = comps.get(own["inst"]), fr.get(own["inst"])
+                    if d is None or od is None:
+                        continue
                     lo, hi = own["own_window"]
                     horiz = (self.layers.get_layer_dir(lid)
                              == buda.LayerDir.HORIZONTAL)
-                    inwin = [a for a in self._reserve_abs_of(pos_d, od, d, lid)
-                             if lo - eps <= a <= hi + eps]
-                    bid, si, need, pool = own["own_seat"]
-                    tracks = self._window_tracks(lid, d, lo, hi)
-                    if not inwin:
-                        continue
-                    # Which ancestor tracks land in this window — through
-                    # ANY occurrence of the nested cell (the inheritance
-                    # is a union over them): ancestor line track q, its
-                    # image in the nested frame, folded to the worst
-                    # instance's absolute window.
                     ext_d = (d.y2 - d.y1) if horiz else (d.x2 - d.x1)
                     org_d = d.y1 if horiz else d.x1
-                    cands = {}          # (anc cell, q) -> abs image at d
-                    for inst, oc in fr.items():
-                        c = comps.get(inst)
-                        if c is None:
-                            continue
-                        ext_c = (c.y2 - c.y1) if horiz else (c.x2 - c.x1)
-                        org_c = c.y1 if horiz else c.x1
-                        a = by_id.get(c.parent_id)
-                        dist = 1
-                        while a is not None:
-                            line = by_line.get((a.cell, lid))
-                            if line is not None and line["positions"]:
-                                if a.cell not in frames:
-                                    frames[a.cell] = self._reserve_frames(
-                                        a.cell, None, all_comps, ocache)
-                                oa = frames[a.cell][0].get(a.name)
+                    lname = lrows[0]["layer_name"]
+                    oline = by_line.get((cell, lid))
+                    # (a) the cell's OWN reserved tracks inside the window
+                    cands = []
+                    if oline is not None:
+                        for q in oline["positions"]:
+                            a_ = org_d + self._reserve_ref_pos(q, od, ext_d,
+                                                               horiz)
+                            if lo - eps <= a_ <= hi + eps:
+                                cands.append((("own", q), a_))
+                    # (b) the INHERITED images in the same window, from the
+                    # solve's own walk — the authoritative set
+                    inwin = sorted(
+                        a_ for a_ in self._reserve_abs_of(inh.get(lid, ()),
+                                                          od, d, lid)
+                        if lo - eps <= a_ <= hi + eps)
+                    src, fixed_img = {}, set()
+                    if inwin:
+                        for inst, oc in sorted(fr.items()):
+                            c = comps.get(inst)
+                            if c is None:
+                                continue
+                            ext_c = (c.y2 - c.y1) if horiz else (c.x2 - c.x1)
+                            org_c = c.y1 if horiz else c.x1
+                            a = by_id.get(c.parent_id)
+                            while a is not None:
+                                pos_a = self._cell_reserves_of(
+                                    a.cell).get(lid, ())
+                                if pos_a:
+                                    if a.cell not in frames:
+                                        frames[a.cell] = self._reserve_frames(
+                                            a.cell, None, all_comps, ocache)
+                                    oa = frames[a.cell][0].get(a.name)
+                                else:
+                                    oa = None
                                 if oa is not None:
                                     ext_a = ((a.y2 - a.y1) if horiz
                                              else (a.x2 - a.x1))
                                     org_a = a.y1 if horiz else a.x1
-                                    for q in line["positions"]:
+                                    givable = (a.cell, lid) in by_line
+                                    for q in pos_a:
                                         g = org_a + self._reserve_ref_pos(
                                             q, oa, ext_a, horiz)
                                         local = g - org_c
@@ -2039,54 +2075,82 @@ class ReportsMixin:
                                             local, oc, ext_c, horiz)
                                         at_d = org_d + self._reserve_ref_pos(
                                             qd, od, ext_d, horiz)
-                                        if lo - eps <= at_d <= hi + eps:
-                                            key = (a.cell, q)
-                                            if key not in cands:
-                                                cands[key] = (dist, at_d)
-                            a = by_id.get(a.parent_id)
-                            dist += 1
+                                        img = next((w for w in inwin
+                                                    if abs(w - at_d) < eps),
+                                                   None)
+                                        if img is None:
+                                            continue
+                                        if givable:
+                                            src.setdefault(img, set()).add(
+                                                (a.cell, q))
+                                        else:
+                                            fixed_img.add(img)
+                                a = by_id.get(a.parent_id)
+                    fixed = [w for w in inwin
+                             if w in fixed_img or w not in src]
+                    for w in inwin:
+                        if w in src and w not in fixed_img:
+                            cands.append((("inh", w), w))
+                    blind = [w for w in inwin if w not in src
+                             and w not in fixed_img]
+                    if blind:
+                        notes.append(
+                            f"{cell} {lname}: {len(blind)} inherited track(s) "
+                            f"in {own['inst']}'s seat window that no "
+                            f"reservation in force accounts for — kept "
+                            f"blocked, not yielded")
                     if not cands:
                         continue
-                    # The inherited IMAGES the ancestors' tracks make in
-                    # this window (several ancestor tracks can share one
-                    # image, and an image clears only when every track
-                    # behind it goes): the pick is over the images, then
-                    # every track behind a picked image is given back.
-                    images = {}
-                    for (acell, q), (dist, at_d) in cands.items():
-                        images.setdefault(round(at_d, 6), []).append(
-                            (dist, acell, q))
-                    give_imgs, short = self._pick_yield(
-                        [(img, img) for img in sorted(images)], own, tracks)
-                    if not give_imgs:
+                    tracks = self._window_tracks(lid, d, lo, hi)
+                    give, short = self._pick_yield(cands, own, tracks,
+                                                   fixed=fixed)
+                    if not give:
                         continue
-                    per_anc = {}
-                    for img in give_imgs:
-                        for _dist, acell, q in images[img]:
-                            per_anc.setdefault(acell, []).append(q)
-                    for acell, qs in per_anc.items():
-                        line = by_line[(acell, lid)]
+                    bid, si, need, pool = own["own_seat"]
+                    seat = (f"bundle {bid} seg {si} needs {need} of {pool} "
+                            f"at {own['inst']}")
+                    per_cell = {}
+                    for key in give:
+                        if key[0] == "own":
+                            per_cell.setdefault(cell, set()).add(key[1])
+                        else:
+                            for acell, q in src[key[1]]:
+                                per_cell.setdefault(acell, set()).add(q)
+                    for tcell, qs in sorted(per_cell.items()):
+                        line = by_line[(tcell, lid)]
                         n_all = len(line["positions"])
                         line["positions"] = [
                             p for p in line["positions"]
                             if not any(abs(p - q) < 1e-9 for q in qs)]
-                        line["yielded"] += len(qs)
+                        gone = n_all - len(line["positions"])
+                        line["yielded"] += gone
+                        touched[(tcell, lid)] = line
+                        where = ("the cell's own seat" if tcell == cell
+                                 else f"nested {cell}'s own seat")
                         notes.append(
-                            f"{acell} {lname}: {len(qs)} of {n_all} reserved "
-                            f"track(s) yielded to nested {cell}'s own seat "
-                            f"(bundle {bid} seg {si} needs {need} of {pool} "
-                            f"at {own['inst']}, {len(inwin)} inherited "
-                            f"track(s) in its window; the top loses them)"
+                            f"{tcell} {lname}: {gone} of {n_all} reserved "
+                            f"track(s) yielded to {where} ({seat}"
+                            + (f", {len(inwin)} inherited track(s) in its "
+                               f"window" if tcell != cell else "")
+                            + "; the top loses them)"
                             + ("" if line["positions"] else
                                " — nothing left to reserve here"))
                     if short > 0:
+                        if (cell, lid) in by_line:
+                            by_line[(cell, lid)]["yield_short"] = short
                         notes.append(
                             f"{cell} {lname}: still {short} short at "
-                            f"{own['inst']} with every inherited track in "
+                            f"{own['inst']} with every yieldable track in "
                             f"its window given back — the seat cannot host "
-                            f"its own bus even unreserved")
+                            f"its own bus")
         finally:
             self._cell_layer_reserves = saved
+        for (tcell, lid), line in touched.items():
+            if tcell not in frames:
+                frames[tcell] = self._reserve_frames(tcell, None, all_comps,
+                                                     ocache)
+            line["seat_hit"], line["own_hit"] = self._reserve_line_hits(
+                line, comps, frames[tcell][0])
         return lines
 
     def _window_tracks(self, lid, comp, lo, hi):
@@ -2115,12 +2179,15 @@ class ReportsMixin:
                 best = max(best, run)
         return best
 
-    def _pick_yield(self, cands, own, tracks):
+    def _pick_yield(self, cands, own, tracks, fixed=()):
         """The yield policy on one seat.  `cands` are the reserved tracks
         inside the block's worst seat window as (key, absolute position);
-        `own` the block's demand row (its seat's need and pool, its own
-        metal's tracks); `tracks` the window's signal tracks.  Returns
-        (keys to give back, short).
+        `fixed` are positions that block the seat the same way but cannot
+        be given back by this derivation (an ancestor outside its scope
+        holds them), so they narrow the run test without ever being
+        picked; `own` the block's demand row (its seat's need and pool,
+        its own metal's tracks); `tracks` the window's signal tracks.
+        Returns (keys to give back, short).
 
         The block's seat, to the planner and to abstract NUTS, is ONE
         rectangle: the bus needs `need` CONSECUTIVE free tracks, and a
@@ -2136,15 +2203,17 @@ class ReportsMixin:
         the local solve need not move at all) and then, still short, the
         nearest remaining tracks one at a time until a run of `need`
         opens.  `short` is how far the window falls below `need` with
-        nothing reserved at all — the block's own shortfall, said rather
-        than charged to the reservation.  Without a grid to read the
+        every yieldable track given back (`fixed` still in place) — the
+        block's own shortfall, said rather than charged to the
+        reservation.  Without a grid to read the
         tracks off, the count model (pool − reserved < need) decides."""
         eps = 1e-6
         bid, si, need, pool = own["own_seat"]
         if not cands:
             return [], 0
         need = int(need)
-        blocked = [a for _k, a in cands]
+        fixed = list(fixed)
+        blocked = [a for _k, a in cands] + fixed
         if tracks is None:
             if pool - len(blocked) >= need:
                 return [], 0
@@ -2177,12 +2246,12 @@ class ReportsMixin:
                     return give, 0
                 continue
             if i + 1 >= n_span:
-                remaining = [b for kk, b in cands if kk not in give]
+                remaining = [b for kk, b in cands if kk not in give] + fixed
                 if fits(remaining):
                     return give, 0
         if k is not None:
             return give, max(0, k - len(give))
-        return give, max(0, need - self._largest_free_run(tracks, []))
+        return give, max(0, need - self._largest_free_run(tracks, fixed))
 
     def _report_cell_layer_reserves(self, cells=None, apply=False, path="",
                                     yield_seat=False):
