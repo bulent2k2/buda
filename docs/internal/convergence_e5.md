@@ -889,6 +889,7 @@ below:
 | 8 | td | 1 | 37/37, 54/67 | no (22 of 28, plan 14 of 44) | 20/24/24 | **0/0/0** | 7/16 → 0/0 | 2,010,662 | 3.56 |
 | 8 | bu | 1 | 37/37, 107/107 | no (20 of 57) | **0/0/0** | **0/0/0** | 0/0 → 0/0 | 2,174,952 | 5.65 |
 | 16 | td | 1 | 69/69, 114/119 | no (26 of 29, plan 4 of 71) | 4/8/8 | **2/0/0** | 35/464 → 5/0/0, then 0/0 | 4,642,741 | 5.54 |
+| 16 | td | 2 | 69/69, 116/120 | no (14 of 24, plan 4 of 71) | 46/1032/1032 | **0/0/0** | — | 4,111,278 | 7.53 |
 | 16 | bu | 1 | 69/69, 196/201 | no (54 of 80, plan 6 of 72) | 4/32/32 | **0/0/0** | 0/8 → 0/0 | 4,417,825 | 6.85 |
 
 The mesh control (`converge.tcl tpu 8 16 -primitive reserve -arms td,bu
@@ -936,27 +937,36 @@ block that had an alternative is yielded to anyway, at no cost here.
    of the policy.  Measured against the corrected pass the arm is
    `0/40/40`: zero overlaps, and the same 40 bits as the no-yield
    baseline.
-3. **With the vehicle's own healing, SIX of the eight arms are clean**,
-   the two top-down exceptions being NQ = 2 at `1/0/0` and NQ = 16 at
-   `2/0/0`.  The informed rounds' first (healerless) verdicts are close
-   to 6c's at NQ = 2/16 and worse at NQ = 4/8 (5/16/16 and 20/24/24
-   against 2/16 and 7/16), and the healers clear all but those two.  The
-   fixpoint column reads `no` on every healed row except the NQ = 2 `td`
-   one, as in 6c: the healers move seats (NQ = 16: 114 of 119 and 196 of
-   201 honoured) and the arms stop at clean or at their last round.
+3. **With the vehicle's own healing, seven of the eight arms are clean**,
+   NQ = 2 `td` being the exception at `1/0/0`.  The informed rounds'
+   first (healerless) verdicts are close to 6c's at NQ = 2/16 and worse
+   at NQ = 4/8 (5/16/16 and 20/24/24 against 2/16 and 7/16), and the
+   healers clear all of them but that one.
 
-   This was **seven of eight** until the healed table was re-measured
-   under the corrected derivation (the admission-pool fix), and the
-   correction is worth stating rather than absorbing: NQ = 16 `td` round 1
-   went from `0/0/0` at 3,971,612 to `2/0/0` at 4,642,741, with two fewer
-   seats honoured and the reservation down from 6.92x used to 5.54x.
-   Eight of the table's nine rows reproduce the previous pass exactly,
-   NQ = 16 `bu` included in every column — so what moved is one arm, and
-   it moved against the policy.  It is also the arm that stops being a
-   one-round arm: where the recorded run cleaned at round 1, this one
-   carries on, and its round 2 had not finished after an hour and a half
-   on the measuring machine (the recorded table never ran it, so there is
-   no earlier figure to compare that against).
+   What the re-measurement changed on NQ = 16 `td` is not WHETHER it
+   cleans but what cleaning costs, and the distinction took a second look
+   to see.  Under the previous pass that arm cleaned in ONE informed
+   round (`0/0/0` at round 1, 3,971,612).  Under the corrected derivation
+   round 1 ends `2/0/0` at 4,642,741 — two fewer seats honoured, the
+   reservation down from 6.92x used to 5.54x — and the arm carries on to
+   a SECOND informed round, which enters at `46/1032/1032` healerless and
+   is healed to `0/0/0` at 4,111,278.  That round took **9526 s against
+   round 1's 220 s**, a factor of 43, and is the only round in either SoC
+   table that needed more than a few minutes.  So the yield's price on
+   this arm is a round and a great deal of healing, not cleanliness.
+
+   This page said `six of the eight` for about an hour, which was read
+   off round 1 while round 2 was still solving — a verdict taken before
+   the arm had finished.  It is recorded here rather than quietly
+   corrected because it is the same mistake the section warns about
+   twice elsewhere: a number that has not converged is not a result.
+
+   Eight of the table's nine round-1 rows reproduce the previous pass
+   exactly, NQ = 16 `bu` included in every column, so what moved is one
+   arm.  The fixpoint column reads `no` on every healed row except the
+   NQ = 2 `td` one, as in 6c: the healers move seats (NQ = 16: 114 of 119
+   and 196 of 201 honoured) and the arms stop at clean.
+
 4. **The loop still converges** (healers off): every arm reaches a
    budget-and-plan fixpoint in two to four informed rounds except `bu` at
    NQ = 2, where 2 of 29 lines keep moving through four rounds — the
@@ -969,12 +979,14 @@ default — the same conclusion 6b reached from the other side, but on a
 much smaller trade than this section first recorded.  It does what it was
 built for: the block keeps its seat, and the 360 bits the reservation's
 own limit stranded at NQ = 2 are gone, healed or not.  What it costs is
-one overlap at that size that no healer clears, two more at NQ = 16
-top-down WITH healing (the row that moved when the healed table was
-re-measured), 8 bits at NQ = 2 bottom-up, and an overlap or two at
-NQ = 4/8 — against eight bits gained at NQ = 16 top-down healerless and
-parity at NQ = 16 bottom-up.  The cost is on the top-down arm at both
-ends of the size range, which is the arm whose plan is pinned.  Healers off, the
+one overlap at NQ = 2 that no healer clears, 8 bits at NQ = 2 bottom-up,
+an overlap or two at NQ = 4/8, and — at NQ = 16 top-down, healed — a
+SECOND informed round whose healing runs 43x longer than the first,
+against eight bits gained at NQ = 16 top-down healerless and parity at
+NQ = 16 bottom-up.  The cost falls on the top-down arm at both ends of
+the size range, which is the arm whose plan is pinned: at NQ = 2 as an
+overlap nothing clears, at NQ = 16 as a round and the healer time to
+finish it.  Healers off, the
 strand it converts is the pinned top's, and the top's pinned plan cannot
 then move; that mechanism is real and is why the NQ = 2 overlap survives
 healing, but it is worth a few bits and an overlap here rather than the
@@ -1050,16 +1062,15 @@ both, and is a driver policy on top of `pin_plan`, not a new primitive.
      `0/0/0` to `2/0/0` — which cost the section its "seven of eight"
      claim and is written into conclusion 3 rather than absorbed.
 
-  The healed re-run was taken in three pieces on one machine, which is
-  worth recording because it is not the single command the others were:
-  the full `-informed 3` sweep, then NQ = 16 `bu` and NQ = 16 `td` at
-  `-informed 1` when the full sweep's NQ = 16 `td` arm carried past round 1
-  — where the recorded run had stopped at clean — and was still solving its
-  round 2 after an hour and a half.  Every row of the table is a round 1
-  (NQ = 2 `td` also has its round 2), so capping the rounds cannot change
-  one; what it does mean is that NOTHING here measures how many rounds
-  that arm now takes, or whether it ever cleans, and the conclusion says
-  so rather than implying the arm still stops at round 1.
+  The healed table's NQ = 16 rows were first taken from two `-informed 1`
+  runs, because the full `-informed 3` sweep's NQ = 16 `td` arm had carried
+  past round 1 — where the recorded run stopped at clean — and was still
+  solving round 2.  That sweep then FINISHED (9526 s on that one round),
+  and its rows reproduce both capped runs exactly, column for column, so
+  the capped measurement stands and the table is the full sweep's.  What
+  the finish added is the round 2 the capped runs could not reach, which
+  is the row that settles what the arm costs; a verdict published from the
+  capped runs alone said `six of eight` and was wrong.
 
   Saying all this beats leaving it to be inferred: a reader at *What this
   settles* is being asked to compare the two SoC tables.
