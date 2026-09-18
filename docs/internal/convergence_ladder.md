@@ -321,7 +321,18 @@ never cleaned NQ = 4, healed or not) and 8 bits short at NQ = 16, healed
 clean there.  The top-down source is weaker (2–35 overlaps at round 1,
 healed clean at NQ ≥ 4) and at NQ = 2 stays at E5's dirty fixpoint — the
 union reservation covering the core's own 32-bit seat — which is the
-reservation's limit, not the plan's.
+reservation's limit, not the plan's.  **6d, the derivation yielding the
+block its seat, is BUILT and measured** (2026-09-18, `derive_cell_layer_reserves
+yield`, `converge.tcl -yield`): where the corridor leaves a block's seat
+no run of consecutive free tracks its bus needs (the run, not the count —
+an abstract seat is one rectangle, and even one corridor track left in
+the core's 36-track window sent its local planner to a dead LOW layer),
+the block keeps its current seat and the top takes the loss, a nested
+template's inherited corridor included (the core has no line of its own).
+The NQ = 2 top-down round is clean healerless in one round where 6c held
+the dirty fixpoint, and with healing every arm is clean at every size;
+healers off, the pinned top cannot route around the loss (NQ = 16
+bottom-up 40 → 264), so it is a lever, not a default.
 
 ## The judge must not be BUDA
 
@@ -436,10 +447,27 @@ every "one round" measured rather than assumed.
    Found on the way and fixed: a healer move off a pinned shape carried
    its forced layers (LAYER_DIR behind a clean metric), and a top-down
    measurement round must be ALIGNED (a seat is geometry; the mesh's rows
-   move by a phase).  What remains is the reservation's own limit (the
+   move by a phase).  What remained was the reservation's own limit (the
    `td` arm at NQ = 2: a union covering the core's own seat, E5's dirty
-   fixpoint) — a derivation-policy question (yield the block its seat),
-   not a new primitive.
+   fixpoint) — a derivation-policy question, not a new primitive, and
+   ~~**6d — the derivation yields the block its seat**~~ **BUILT and
+   measured** (2026-09-18, `derive_cell_layer_reserves yield`,
+   `converge.tcl -yield`; [convergence_e5.md](convergence_e5.md), "The
+   derivation yields the block its seat"): where the corridor leaves a
+   block's seat no run of consecutive free tracks its bus needs — the
+   test is the run and not the count, since an abstract seat is one
+   rectangle and even one corridor track left in the core's window sent
+   its local planner to a dead LOW layer — the block keeps its current
+   seat and the top takes the loss, nested templates' INHERITED corridors
+   included (the core has no line of its own; its 360 bits were the
+   cluster's corridor).  The NQ = 2 top-down informed round is clean
+   healerless in one round where 6c held the dirty fixpoint, and with
+   healing every arm is clean at every size; healers off, the loss the
+   policy hands the pinned top is one it cannot route around (NQ = 16
+   bottom-up 40 → 264 stranded, seven pinned 32-bit top buses), so it
+   ships as a lever, not a default.  What would take both is a driver
+   policy that yields AND unpins exactly the top buses whose seats were
+   yielded.
 7. **Fixed-pin primitive** — a busterm restricted to a face, then to a window
    on a face — as the interoperability piece for the partner evaluation (E3),
    last, since nothing in-house depends on it.
