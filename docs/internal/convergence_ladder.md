@@ -393,9 +393,35 @@ every "one round" measured rather than assumed.
 ## What gets built, in order
 
 1. **E4 write-up, E2 run** — nothing new, one clean plot each.  **Done**: [convergence_e4.md](convergence_e4.md), [convergence_e2.md](convergence_e2.md).
-2. **`tools/independent_audit.py`** — the judge, before any A/B table is
-   written (Q3: it judges every table; one OpenROAD `read_guides` witness on
-   one row only if the audience needs it).
+2. ~~**`tools/independent_audit.py`** — the judge, before any A/B table is
+   written~~ **BUILT** (2026-09-20, [independent_audit.md](independent_audit.md);
+   Q3: it judges every table; one OpenROAD `read_guides` witness on one row
+   only if the audience needs it).  It reads the persisted BDB tables with
+   `sqlite3` and imports NO engine (tested twice, statically and by running
+   it with `PYTHONPATH` emptied): every bit on a SIGNAL slot of its layer's
+   effective pattern, no two nets overlapping on a layer, no bit over a
+   keepout that blocks its layer, every net one connected piece reaching
+   every endpoint block, no wire across its layer's direction, and a net a
+   bundle carries with no metal at all.  `converge.tcl -judge` gives each
+   round a durable checkpoint and puts the verdict in the table as its own
+   column BESIDE the engine's — two columns, never one, because a row where
+   they disagree is what the judge is for.  It was built OUT OF ORDER: E4,
+   E2, E1 and E5 (6b, 6c, 6d with them) were all written under
+   `check_design`, and what it found on its first application to those
+   rounds is why the build order put it first.  **The mesh control, the
+   SoC's top-down round, `flow/soc_small.buda` and four small hier flows all
+   judge CLEAN, agreeing with `check_design`** — and the SoC's BOTTOM-UP
+   round does not: 96 bit-wires of `core_cell`'s three copied instances land
+   on no M3 signal track at all (the copy is a rigid translation by an
+   offset 16 short of the layer's 18-unit period, so the bits sit inside a
+   GROUND slot), while `check_template_tracks` reports the cell ALIGNED and
+   `align_bottom_up` had already warned those instances were off phase and
+   not fixable by translation.  The reference instance is 32/32 on grid and
+   every copy is 0/32; the aligned mesh and the copy-free top-down round are
+   clean, so the fault is the COPY.  The mechanism is not established and is
+   not guessed at; the consequence for the tables is stated on the page —
+   every "clean" in E1 and E5 is a `check_design` clean, in both arms
+   alike.
 3. **Per-instance per-layer demand query** — read off the top-down plan;
    exposed through `buda::query` so a Tcl driver can branch on it.  **Done**
    (2026-09-15): [`report_layer_demand`](../script_reference/nuts.md#layer-demand-reporting)
