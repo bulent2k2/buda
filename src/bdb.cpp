@@ -4541,8 +4541,18 @@ void BDB::set_grid_override(const GridOverrideRow& r) {
 }
 
 std::vector<GridOverrideRow> BDB::grid_overrides() const {
+    // DECLARATION order, not coordinate order.  `RoutingGrid::effective_
+    // pattern_at` returns the FIRST override containing the point, so with
+    // overlapping regions on one layer the order rows come back in decides
+    // which pattern wins — and sorting by coordinates restored a different
+    // winner than the session that wrote them had (Codex P2 on #942).
+    // `rowid` is insertion order, which is declaration order, and it is as
+    // deterministic as the coordinate sort it replaces.  The exposure it
+    // leaves is a VACUUM, which renumbers rowids; nothing in this tree
+    // vacuums a BDB, and an explicit ordinal column is the stronger fix if
+    // one ever does.
     Stmt q(_db, "SELECT layer_id,x1,y1,x2,y2,origin,slots FROM grid_override"
-                " ORDER BY layer_id,x1,y1,x2,y2");
+                " ORDER BY rowid");
     auto txt = [](sqlite3_stmt* st, int c) -> std::string {
         const unsigned char* p = sqlite3_column_text(st, c);
         return p ? reinterpret_cast<const char*>(p) : std::string();

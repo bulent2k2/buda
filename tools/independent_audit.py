@@ -102,6 +102,13 @@ TOL = 1e-6
 KINDS = ("OFF_GRID", "SHORT", "KEEPOUT", "OPEN", "NO_METAL", "LAYER_DIR")
 
 
+class Unjudgeable(Exception):
+    """The file holds nothing this audit can speak about.  Distinct from a
+    dirty verdict: exit 2, never 1 — "I cannot judge this" and "this is
+    broken" must not share a status, or a harness gating on the judge reads
+    a missing route as a clean one."""
+
+
 # ---------------------------------------------------------------------------
 # Reading the design
 # ---------------------------------------------------------------------------
@@ -114,7 +121,11 @@ def open_design(path):
     import rule (`sqlite3` and nothing of BUDA's).
     """
     if not os.path.isfile(path):
-        raise SystemExit(f"independent_audit: no such file: {path}")
+        # NOT SystemExit(str), which exits 1 — the status this file documents
+        # as "violations".  A design that cannot be READ is unjudgeable, and
+        # automation gating on the contract would otherwise book a typo'd
+        # path as a dirty route (Codex P2 on #942).
+        raise Unjudgeable(f"no such file: {path}")
     if path.endswith(".sql"):
         con = sqlite3.connect(":memory:")
         with open(path, encoding="utf-8") as f:
@@ -226,19 +237,28 @@ class Grid:
                 return pat
         return self.patterns.get(layer)
 
-    def override_count_along(self, layer, x1, y1, x2, y2):
-        """How many DISTINCT effective patterns a wire's span passes through.
+    def pattern_varies_along(self, layer, x1, y1, x2, y2):
+        """Does the effective pattern CHANGE along this wire?
 
-        Used for the note, not for a verdict — see the module docstring.
+        Asked of the pattern, not of the rectangles: a wire lying wholly
+        inside one override intersects that override, and counting
+        intersections reported it as crossing a boundary it never reaches
+        (Codex P3 on #942).  What the note claims is that the wire is judged
+        at a point where the pattern in force is not the pattern in force
+        everywhere along it, so the honest test is whether the two ends and
+        the midpoint resolve to the SAME pattern.
+
+        Three samples, not a sweep: this feeds a NOTE, and a wire that
+        re-enters its starting region between the samples is a shape no
+        `add_grid_override` in this tree produces.  Under-reporting a note
+        is the safe direction; a VERDICT would deserve the sweep.
         """
-        ovs = self.overrides.get(layer, ())
-        if not ovs:
-            return 1
-        seen = 0
-        for ox1, oy1, ox2, oy2 in ((o[0], o[1], o[2], o[3]) for o in ovs):
-            if not (x2 < ox1 or ox2 < x1 or y2 < oy1 or oy2 < y1):
-                seen += 1
-        return seen + 1 if seen else 1
+        if not self.overrides.get(layer):
+            return False
+        mx, my = (x1 + x2) / 2.0, (y1 + y2) / 2.0
+        a = self.at(layer, x1, y1)
+        return (self.at(layer, x2, y2) is not a
+                or self.at(layer, mx, my) is not a)
 
 
 class Wire:
@@ -340,7 +360,7 @@ def check_on_grid(wires, grid):
             bad.append((w, f"M{w.layer} has no track pattern, so this wire "
                            f"lies on no track this file can name"))
             continue
-        if grid.override_count_along(w.layer, w.x1, w.y1, w.x2, w.y2) > 1:
+        if grid.pattern_varies_along(w.layer, w.x1, w.y1, w.x2, w.y2):
             crossing += 1
         if not pat.is_signal_track(w.pos):
             bad.append((w, f"track {w.pos:g} is not a SIGNAL slot centre of "
@@ -619,13 +639,6 @@ def check_connectivity(con, wires, max_report):
 # ---------------------------------------------------------------------------
 # Driver
 # ---------------------------------------------------------------------------
-
-class Unjudgeable(Exception):
-    """The file holds nothing this audit can speak about.  Distinct from a
-    dirty verdict: exit 2, never 1 — "I cannot judge this" and "this is
-    broken" must not share a status, or a harness gating on the judge reads
-    a missing route as a clean one."""
-
 
 def audit(path, max_report=8):
     """Judge one design.  Returns a result dict; raises `Unjudgeable` when

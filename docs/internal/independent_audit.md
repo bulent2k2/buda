@@ -69,15 +69,16 @@ tool does.
 
 **A judge is worth what it catches**, so the tests are a mutation matrix:
 each fault is planted in the tables in SQL, one at a time, and the judge must
-name it.  Reverting any one of its **sixteen** rules fails at least one
+name it.  Reverting any one of its **eighteen** rules fails at least one
 named test: short, keepout, off-grid, layer-direction, metal in two pieces,
 a net that does not reach its block, a net with no metal, a via that does not
 land on the wires it claims to join, the abutment control (a T-junction
 touches and does not overlap, and a judge that called that a short would
 fail every correct route), the unjudgeable exit status, both halves of the
 hierarchy rule below, both halves of the membership fallback (falling back
-at all, and saying so), both halves of the rectangle rule below, and the
-partial-coverage refusal.
+at all, and saying so), both halves of the rectangle rule below, the
+partial-coverage refusal, the unreadable-input status, and the
+override-crossing note.
 
 ## What it deliberately does not claim
 
@@ -102,10 +103,10 @@ rather than left to be discovered:
   fallback is NAMED in the output.  A silent narrowing is how an audit comes
   to mean less than its reader thinks.
 
-### Two more, from review
+### Five, from review
 
-Codex found both on the first pass over the file, and both are about the
-same thing — a judge must not pass what it did not evaluate:
+Codex's two passes found five, and the first four are the same thing — a
+judge must not pass, or mis-say, what it did not evaluate:
 
 * **Overlap is a property of two rectangles**, not of what either wire says
   about itself.  The short check bucketed and intersected through each
@@ -121,8 +122,30 @@ same thing — a judge must not pass what it did not evaluate:
   with nothing else firing — exited 0, so a converge table would read
   `clean` for metal nothing judged.  A routed layer with no pattern is now
   exit 2, with the layer named.
+* **Exit 1 is for violations.**  A path that does not exist raised
+  `SystemExit(str)`, which exits **1** — so automation gating on the
+  documented contract booked a typo'd path as a dirty route.  A design that
+  cannot be READ is unjudgeable: exit 2.
+* **A wire inside an override crosses no boundary.**  The note counted any
+  wire whose rectangle INTERSECTED an override, so an ordinary wire routed
+  inside one was reported as spanning a boundary it never reaches.  The
+  honest test is whether the effective pattern CHANGES along the wire, which
+  is what the note claims, so it now samples the two ends and the midpoint
+  and compares the patterns.
 
-Neither moved a verdict: every design in the table below judges exactly as
+And one outside the judge, in the engine it reads:
+
+* **Overlapping region overrides lost their declaration order on restore.**
+  `effective_pattern_at` returns the FIRST override containing a point, and
+  `grid_overrides()` handed them back `ORDER BY layer_id,x1,y1,x2,y2` — so a
+  checkpoint could resolve an overlap to a different pattern than the
+  session that wrote it, silently, both patterns being legal.  Rows are
+  inserted in declaration order, so the restore reads them `ORDER BY rowid`.
+  The exposure that leaves is a VACUUM, which renumbers rowids; nothing here
+  vacuums a BDB, and an explicit ordinal column is the stronger fix if one
+  ever does.  Pinned by a test that fails under the coordinate sort.
+
+None of them moved a verdict: every design in the table below judges exactly as
 it did before, the bottom-up finding bundle for bundle.  That is what a
 correctness fix to a judge should look like — it changes what the file is
 ENTITLED to say, not what it happened to say here.

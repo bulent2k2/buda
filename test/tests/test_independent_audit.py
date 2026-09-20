@@ -534,3 +534,49 @@ def test_metal_on_an_unpatterned_layer_cannot_be_judged(vias, tmp_path):
     assert code == 2, out
     assert f"M{victim}" in out and "no track pattern" in out, out
     assert "must not read as a clean one" in out, out
+
+
+def test_an_unreadable_design_is_unjudgeable_not_dirty(tmp_path):
+    """Exit 2, not 1.  A path that does not exist is a design this file
+    cannot READ, and exit 1 is documented as violations — automation gating
+    on that contract would book a typo'd path as a dirty route (Codex P2 on
+    #942)."""
+    code, out = _judge(tmp_path / "nope.bdb")
+    assert code == 2, out
+    assert "cannot judge" in out and "no such file" in out, out
+
+
+def test_a_wire_inside_one_override_crosses_no_boundary(routed, tmp_path):
+    """The note counts wires whose effective pattern CHANGES along them.
+
+    A wire lying wholly inside one region override intersects that
+    override, and counting intersections reported it as spanning a boundary
+    it never reaches (Codex P3 on #942).  The first override covers the
+    whole design, so EVERY wire is inside one and none crosses; the second
+    ends at x = 200, under `loc_0`'s run (x 150..350), so some do.
+
+    (The override also makes those wires OFF_GRID, since its pattern puts
+    tracks elsewhere — true, and beside the point here: this test reads the
+    note, not the verdict.)"""
+    import json
+    slots = json.dumps([{"t": "SIGNAL", "l": "", "w": 1.0, "s": 2.0}])
+    inside = _mutated(
+        routed, tmp_path,
+        "INSERT INTO grid_override (layer_id,x1,y1,x2,y2,origin,slots) "
+        f"VALUES (6,0,0,2000,400,0,'{slots}')")
+    out_json = tmp_path / "in.json"
+    code, out = _judge(inside, "--json", str(out_json))
+    res = json.loads(out_json.read_text())
+    assert res["notes"]["wires_crossing_a_region_override"] == 0, out
+
+    # ...and a wire that genuinely leaves the region is still counted.
+    d = tmp_path / "crossing"
+    d.mkdir()
+    crossing = _mutated(
+        routed, d,
+        "INSERT INTO grid_override (layer_id,x1,y1,x2,y2,origin,slots) "
+        f"VALUES (6,0,0,200,300,0,'{slots}')")
+    out_json = d / "cross.json"
+    code, out = _judge(crossing, "--json", str(out_json))
+    res = json.loads(out_json.read_text())
+    assert res["notes"]["wires_crossing_a_region_override"] > 0, out

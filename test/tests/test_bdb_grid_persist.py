@@ -254,3 +254,39 @@ def test_a_design_that_never_had_a_grid_is_not_accused(tmp_path):
                         f"open_bdb {db}", "load_pipeline"])
     assert "BUDA-1503" not in out
     assert "rehydrated" in out            # it really did restore
+
+
+def test_overlapping_overrides_keep_their_declaration_order(tmp_path):
+    """`effective_pattern_at` returns the FIRST override containing a point,
+    so with overlapping regions on one layer the order they are installed in
+    decides which pattern wins.
+
+    The restore read them back `ORDER BY layer_id,x1,y1,x2,y2`, so a
+    checkpoint could hand a DIFFERENT winner to the session that reopened it
+    than the session that wrote it had — silently, since both patterns are
+    legal and the grid looks fine (Codex P2 on #942).  Declaration order is
+    the thing to preserve, and rows are inserted in it.
+
+    Declared here so the winner is NOT the coordinate-order first: the wide
+    region comes first and starts at a LARGER x than the narrow one it
+    shadows, so sorting by x picks the wrong one.
+    """
+    db = str(tmp_path / "ord.bdb")
+    setup = ["def_layer 4 M4 H LOW 30"]
+    s1, _ = _session(setup + [
+        f"open_bdb {db}",
+        "def_track_pattern 4 0 _ 1 1",
+        # first declared, and second by coordinate: pitch 8
+        "add_grid_override 4 20 0 200 200 0 _ 4 4",
+        # second declared, first by coordinate: pitch 2
+        "add_grid_override 4 0 0 100 100 0 _ 1 1",
+    ])
+    at = lambda s: (s.routing_grid.get_layer_grid(4)
+                    .effective_pattern_at(50, 50).unit_pitch())
+    assert at(s1) == 8.0, "the first DECLARED override wins in the session"
+
+    s2, out = _session(setup + [f"open_bdb {db}"])
+    assert "restored the routing grid" in out
+    assert at(s2) == at(s1), (
+        "the reopened checkpoint resolves the overlap to a different "
+        "pattern than the session that wrote it")
