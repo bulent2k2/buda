@@ -135,6 +135,7 @@ Updated as files land. `L` = `@landed`, `F` = `@future`, `D` = `@doc`.
 | Hanan-line trunk loci (opens #13a) | `hanan_trunk_loci.feature` | L | `test_topo_hanan_loci.py` |
 | TEG / multi-rect blocks (teg_multirect_status.md, arc closed 2026-08-25; the hier/BDB declaration `set_cell_rects` landed 2026-08-27) | `busterm_over_the_block.feature`, `multi_rect_block.feature` | L | `test_busterm_over_the_block.py`, `test_multi_rect_block.py`, `test_teg_open.py`, `test_teg_resume.py`, `test_teg_thru_census.py`, `test_teg_hier_demos.py`, `test_bdb_multirect_cell.py` |
 | Roadmap / opens | `future_directions.feature` | F | — (pending) |
+| Fixed pins (convergence-ladder build item 7, design only — docs/internal/fixed_pin_design.md) | `fixed_pin.feature` | F | — (spec ahead of code; scenarios written against admitted / refused landings, not the token grammar, so the grammar may move without rotting them; flip to L and bind per PR as the design's three changes land) |
 
 ## Maintenance rule
 

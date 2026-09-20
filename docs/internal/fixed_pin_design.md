@@ -1,7 +1,10 @@
 # The fixed-pin primitive: `fix_pin`
 
 *Design proposal, 2026-09-20 — convergence-ladder build item 7.  Not built.
-Revised the same day after a review round (see *Corrections after review*).
+Revised twice the same day, after two review rounds (see *Corrections after
+review*); the behavioural contract is spelled out AHEAD of the code in
+`test/tests/features/fixed_pin.feature` (`@future`), written against admitted
+and refused landings rather than the token grammar.
 Published for outside review as the [Fixed Pin Primitive](https://claude.ai/artifact/T75FBqiYjTEax8A5Q5jdLN) page; this
 file is its twin in the tree.  The open questions at the end are the ones a
 reader with a real pin-assignment flow can answer; the pushbacks are the
@@ -58,21 +61,39 @@ cut of this note claimed they did (Codex on #944):
   one-unit north and south ends — a vertical stub could satisfy `H`.  The
   face TAG is what those two predicates, and their twin in the audit,
   consult: a landing counts only on the tagged edge.
-- **Two consumers read the floorplan, not the busterm.**  The pass-through
-  clamp (`tighten_passthrough`, `topology_analysis.cpp`) and the audit
-  (`verify.cpp`, a dozen `get_block_rects` sites) fetch a block's rects from
-  the `Floorplan`, so a strip installed at `mk_bt` alone would let a trunk
-  generated through a point pin slide anywhere across the physical block and
-  still pass `BUSTERM_OPEN` — the opposite of "a point pin admits no
-  pass-through".  The admissible geometry is therefore SINGLE-SOURCED:
-  `Floorplan::landing_rects(block, pin-set)` — the tagged strips, or the
-  block's own rects with every edge a face when nothing is fixed — called by
-  `mk_bt`, the pass-through clamp and every audit site in place of
-  `get_block_rects`, the one-function-three-callers rule the TEG contact
-  predicate already follows.
+- **Many consumers read the floorplan, not the busterm — and they ask two
+  DIFFERENT questions.**  The pass-through clamp (`tighten_passthrough`,
+  `topology_analysis.cpp`), the NUTS pass-through anchor (`nuts.cpp`), the
+  edit session's landing candidates (`topo_edit.cpp`, `bt_all_rects`), the
+  auto bit cap (`bundling_cmds.py`) and the audit (`verify.cpp`, a dozen
+  sites) all fetch a block's rects from the `Floorplan`, so a strip
+  installed at `mk_bt` alone would let a trunk generated through a point
+  pin slide anywhere across the physical block and still pass
+  `BUSTERM_OPEN` — the opposite of "a point pin admits no pass-through".
+  But the planner's LOW-layer obstruction cache (`congestion_planner.cpp`,
+  `leaf_rects_cache_`) and `Floorplan::low_layer_keepouts` read the SAME
+  call for the OPPOSITE question — where a leaf's body BLOCKS the lower
+  stack — and a resolver that replaced `get_block_rects` for them too would
+  turn a macro into a routable notch on LOW layers the moment its pins were
+  fixed (second review round).  So there are TWO geometries, named so they
+  cannot be conflated: **`landing_rects(block, bundle)`** — the face-tagged
+  strips, or the block's own rects with every edge a face when nothing is
+  fixed — read by every consumer asking "may this wire attach here"; and
+  **`obstruction_rects(block)`** — the physical footprint, NEVER strips —
+  read by every consumer asking "what does this block block".  The census
+  says which each site reads:
 
-A design with no fix is byte-identical, because the resolver then returns
-exactly what `get_block_rects` returns today.
+| asks | sites | reads |
+|---|---|---|
+| may this wire attach here (generator) | `mk_bt` in `generate_2pin` / the n-pin generator; `annotate_endpoints` through the busterm; the per-bundle Hanan grid (`bt_all_rects`) | `landing_rects` |
+| may this wire attach here (analysis, NUTS, edit, bundler) | `tighten_passthrough`; the pass-through anchor in `nuts.cpp`; `topo_edit.cpp`'s `bt_all_rects`; `set_max_bundle_bits auto` in `bundling_cmds.py` | `landing_rects` |
+| may this wire attach here (audit) | every `get_block_rects` / `get_block_bounds` site in `verify.cpp` | `landing_rects` |
+| what does this block block | `congestion_planner.cpp` `leaf_rects_cache_`; `Floorplan::low_layer_keepouts`; footprint keepouts on the grid | `obstruction_rects` — unchanged by any fix |
+| what do I draw or report | `viz_explorer/{analysis,draw,edit}.py`, `viz_common.py`, `web/serialize.py`, `buda_session/util.py`, `buda_cmds/setup_cmds.py` | BOTH: the physical outline as today, the strips drawn over it where a fix exists |
+
+A design with no fix is byte-identical, because `landing_rects` then returns
+exactly what `get_block_rects` returns today and `obstruction_rects` never
+changes at all.
 
 The alternative — an admissibility *predicate* consulted by the generator and
 the gate, with the busterm left whole — was considered and is more code for
@@ -128,7 +149,36 @@ bus), a glob (`d_*`), or `*`.
   has a small inward thickness (one unit, or one pitch on the landing layer)
   because `Rect` is integer and a zero-area rect is refused everywhere — and
   its face tag says which of its four edges the wire must END on; the inner
-  edge and the two short ends are not faces.
+  edge and the two short ends are not faces.  **A fix replaces BOTH
+  spellings of the busterm's rects** (second round): `annotate_endpoints`
+  unions the margin-inset `rects` with the physical `orig_rects` (PR #835
+  P2, so a restored endpoint on a margined block keeps its tap), and a tag
+  that narrowed only which edge of a rect counts would leave the physical
+  face as a second, untagged landing path — under a nonzero corner margin,
+  exactly when `orig_rects` is populated.  Under a fix, `rects` and
+  `orig_rects` are the same strips, so there is one spelling to tag.
+  **A declared window is physical and is NOT margin-inset** (second round):
+  `at 20..60` is stated in the block's own coordinates on the physical face;
+  the corner margin is a DEFAULT for faces nobody constrained, and a user
+  who named a window has constrained that face — so the strip is built from
+  the window as written, the per-rect inset (`shrink_rects`) does not apply
+  to it, the `2*margin >= face_extent` guard has no strip to act on, and the
+  margin still governs the block's other faces.  `dump_pin_fixes` prints the
+  window as declared, so what it reports and what the strip is cannot
+  differ.  **The strips are Hanan loci, deliberately and with a bound**
+  (second round): the per-bundle grid is built from the busterm rects
+  (`bt_all_rects`), so a strip's bounds become loci a trunk can snap to —
+  without which a level-5 window could have no legal locus at all.  A strip
+  contributes its ALONG-axis edges only (the face line and the window's two
+  ends), never its one-unit perpendicular pair, so a `*` fix over many
+  blocks does not multiply loci the item-12 way; PR 1b measures the grid
+  size on the SoC under `fix_pin cell:* H` against the unfixed grid.
+- **`set_max_bundle_bits auto` reads the admissible window** (second round).
+  The auto cap bounds a bundle by the bits its endpoint faces can host and
+  computes that from the whole block's shortest edge (`get_block_bounds`);
+  under `at 20..60` the face is 40 units, so a 32-bit bundle would pass a
+  cap sized from a 500-unit edge and then have nowhere to land.  The cap
+  reads `landing_rects` — the claim it already makes, now true under a fix.
 - **Pass-through is automatic.**  A trunk crossing the block is a landing
   today when it crosses the busterm rect; with strips it is a landing when it
   crosses a strip.  So an `H` fix admits a horizontal pass-through and a
@@ -174,8 +224,13 @@ bus), a glob (`d_*`), or `*`.
   fix is a property of the cell.
 - **Precedence** follows `set_feedthru`: instance beats cell, a named pin
   beats its bus beats `*`, a later line on the same key replaces.  Declare
-  BEFORE bundling, like `set_ndr` (the bundler may split a bundle whose bits
-  carry different fixes — open question Q2).
+  BEFORE bundling, like `set_ndr`.
+- **Decision (was Q2): a bundle whose bits carry different fixes is SPLIT
+  into fix-uniform parts, loudly**, the way the NDR bundler splits a
+  mixed-rule bundle (second round).  That is what makes
+  `landing_rects(block, bundle)` well-defined — after the split every
+  bundle resolves to ONE fix per block, so the key is `(block, bundle)` and
+  not `(block)` alone; the obstruction geometry needs no bundle key at all.
 - **Failure is loud and never strands.**  A bundle with no candidate honouring
   its fix keeps its best candidate and reports at generation (a new
   BUDA-192x WARNING naming the pin and the fix), the way `filter_uncovered`
@@ -234,15 +289,32 @@ that finally consumes it.
    pin's centroid and direction only (`CellPinRow` has no layer).  It should
    keep the pin as a RECT strip on its LAYER, because a pin has extent and
    the layer is the fourth knob.  Small, and orthogonal to the rest.
-7. **Two PRs, not one.**  First: the tagged strips and the single-sourced
-   `landing_rects` resolver (generator, pass-through clamp, audit), `rect`,
-   `at`, persistence, the template transform — levels 1, 2, 3, 5 — with the
-   die-port identity as a test (a DEF `PIN` routed as today must equal the
-   same port declared as a full-strength `fix_pin`, byte for byte) and a
-   test that a stub ending on a strip's inner edge or short end is NOT a
-   landing.  Second: `layer` with the approach/metal split and the endpoint
-   via, per-landing `order`, per-bit targets, `from_pins` — levels 4, 6 and
-   the LEF change — touching the planner and DNUTS.
+7. **Three changes, not one, and Q7 first.**  **PR 1a**: the two-geometry
+   split — `landing_rects` and `obstruction_rects` as the two resolvers,
+   every site in the census moved onto the one it asks for, NO `fix_pin`
+   command at all — a pure refactor, byte-identical, corpus-guarded, so the
+   risky half lands where it can be measured against nothing changing.
+   **PR 1b**: the tagged strips and the command (faces, `rect`, `at`),
+   persistence, the template transform, the auto-cap and Hanan rules —
+   levels 1, 2, 3, 5 — with the die-port RELATION as a test (a DEF `PIN` is
+   a busterm whose every edge is a face, so a port declared with ALL FOUR
+   faces admissible must route byte-identically to today's port, and a
+   single-face fix on it must admit a SUBSET of the unfixed port's landings;
+   the first cut asked for byte-identity against a FULL-STRENGTH fix, which
+   admits one tagged face and cannot equal a four-face port) and a test that
+   a stub ending on a strip's inner edge or short end is NOT a landing.
+   **PR 2**: `layer` with the approach/metal split and the endpoint via,
+   per-landing `order`, per-bit targets, `from_pins` — levels 4, 6 and the
+   LEF change — touching the planner and DNUTS.  And **Q7 is the gate on
+   PR 1b**: if the wrap-around pin is routine in the flows this is for, the
+   forced-face shape family comes first and the command is premature.
+8. **Reserved names, reserved HERE and not in the catalogue.**  The message
+   id is **BUDA-1922** (1918–1921 are taken) and the audit kind is
+   **`PIN_FIX`**.  Neither is added to `buda_diag.py` or the `ViolationKind`
+   enum by this note: `test_every_registered_id_is_emitted_somewhere` makes
+   the catalogue a contract that every id it holds is emitted, so an id
+   lands WITH its emitter in PR 1b, and this note is where the reservation
+   lives until then.
 
 ## Corrections after review (2026-09-20)
 
@@ -272,6 +344,43 @@ the current ones.
    declared per landing, must agree on one straight segment (refused loudly
    otherwise), and may differ across a bend.
 
+### Second round (2026-09-20, the owner's review on #944)
+
+Eight findings, each checked against the source and each right, plus two
+housekeeping items.  The first is the serious one: the first correction's
+"single-sourced resolver" would have broken the obstruction model.
+
+1. **Two geometries, not one.**  `congestion_planner.cpp`'s
+   `leaf_rects_cache_` and `Floorplan::low_layer_keepouts` read
+   `get_block_rects` to know where a leaf BLOCKS the lower stack; a resolver
+   replacing that call everywhere would make a fixed macro's body a routable
+   notch on LOW layers.  `landing_rects` and `obstruction_rects` are now
+   distinct, with a census of which site reads which.
+2. **`orig_rects` was a second, untagged landing path.**  Under a nonzero
+   corner margin the annotator unions the inset rects with the physical
+   ones; a fix now replaces both spellings with the same strips.
+3. **Margin versus window had no precedence.**  A declared window is
+   physical and not inset; the margin governs only the unconstrained faces.
+4. **The die-port identity test could not pass as stated.**  A port's every
+   edge is a face; a full-strength fix admits one.  Restated as a relation:
+   an all-faces fix is byte-identical, a single-face fix admits a subset.
+5. **`set_max_bundle_bits auto` would under-cap.**  It sized the cap from
+   the whole block's shortest edge; it reads the admissible window now.
+6. **The consumer census was short.**  The NUTS pass-through anchor,
+   `topo_edit.cpp`, the bundler and seven Python readers are in the table.
+7. **Hanan coupling was unstated.**  Strips are loci by design, contributing
+   along-axis edges only, with the grid size measured in PR 1b.
+8. **Q2 was load-bearing.**  It fixes the resolver's key; promoted to a
+   decision (split, like NDR), so the key is `(block, bundle)`.
+
+Housekeeping: the contract is in `test/tests/features/fixed_pin.feature`
+(`@future`, listed in the coverage plan), written against outcomes because
+`feedthru.feature` is this repository's own record of what happens to a
+spec written against a grammar that then moved; and BUDA-1922 / `PIN_FIX`
+are reserved in pushback 8 rather than in the catalogue, for the reason
+given there.  The sequencing suggestions — Q7 first, PR 1 split into a
+byte-identical refactor and the command — are adopted in pushback 7.
+
 ## Open questions
 
 - **Q1 — Where do fixed pins come from in your flow?**  A hard macro's LEF
@@ -279,9 +388,8 @@ the current ones.
   the boundary (instance-level), a pin-assignment spreadsheet or Tcl?  This
   decides whether `inst:` matters in the first PR and what `from_pins`
   should read.
-- **Q2 — A bundle whose bits carry different fixes: split or refuse?**  The
-  NDR bundler splits a mixed-rule bundle into rule-uniform parts, loudly.
-  Same here (lean), or refuse the declaration?
+- **Q2 — DECIDED (second round): split**, like the NDR bundler, loudly; the
+  number is kept so answers by number stay valid.
 - **Q3 — Is `from_pins` ever a default once positions are present?**  Lean
   no: opt-in and byte-identical without it, like every other policy here.
 - **Q4 — Local or absolute coordinates for a flat block's `at`?**  Lean
@@ -294,10 +402,12 @@ the current ones.
   says yes where the block's obstruction model allows it.  If your
   methodology forbids it regardless of `OBS`, the primitive needs an
   `outward` token after all.
-- **Q7 — How common is the wrap-around pin** (a pin on the face away from
-  its partner)?  If it is a floorplan defect nobody routes around, pushback
-  5 is fine; if it is routine, the generator needs a forced-face shape
-  family before the primitive is useful to you.
+- **Q7 — THE GATE: how common is the wrap-around pin** (a pin on the face
+  away from its partner)?  If it is a floorplan defect nobody routes around,
+  pushback 5 is fine and PR 1b proceeds; if it is routine, the generator
+  needs a forced-face shape family BEFORE the primitive is useful to you,
+  and PR 1b waits for it.  This is the one answer that decides whether the
+  command gets built next or later.
 - **Q8 — Bit order: LSB at the low coordinate, or by side?**  `index` assumes
   bit 0 at the lowest coordinate along the face.  If your convention flips
   with the face (LSB nearest a corner, say), `order` needs a per-face form.
