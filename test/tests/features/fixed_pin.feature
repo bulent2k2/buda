@@ -45,6 +45,23 @@ Feature: Fixed pins — a busterm restricted to a set of admissible landings
     Then every landing is on the east face inside the window
     And the placement pass slides the landing only inside the window
 
+  # Levels 2 and 3 differ only on a shape with more than one face of a
+  # direction, so a rectangle cannot tell them apart — which is why the
+  # rectilinear block is the fixture for both.  "Exposed" is the load-bearing
+  # word: the edge where two rects of one block meet is not a face.
+
+  Scenario: A face fix admits every exposed face of that direction
+    Given "core" is a rectilinear L whose shape has two exposed east faces
+    When I fix "core.d_in" to the east face
+    Then a landing on either exposed east face is admitted
+    And a landing on the edge interior to the union is refused
+
+  Scenario: A precise-face fix admits one named rect's face
+    Given "core" is a rectilinear L whose shape has two exposed east faces
+    When I fix "core.d_in" to the east face of its second rect
+    Then a landing on the second rect's east face is admitted
+    And a landing on the first rect's east face is refused
+
   # ── first round, finding 1: the face tag ────────────────────────────────
 
   Scenario: A stub ending on a strip's inner edge is not a landing
@@ -66,12 +83,30 @@ Feature: Fixed pins — a busterm restricted to a set of admissible landings
     Then the lower-layer obstruction over "core" is unchanged
     And no lower-layer segment routes through the block body
 
+  Scenario: A fixed pin does not change the block's footprint keepout
+    Given "core" is a leaf block that blocks the lower layers
+    When I fix "core.d_in" to one point on the east face
+    Then the footprint keepout for "core" is unchanged
+
   # ── second round, finding 2: the physical-face spelling ─────────────────
 
   Scenario: A margined block admits no landing on its physical face outside the strip
     Given "core" carries a corner margin of 4
     When I fix "core.d_in" to a window on the east face
     Then a stub ending on the physical east face outside the window is refused
+
+  # The twin, and the reason the scenario above is not the whole story: the
+  # physical spelling is accepted on purpose, so that a hand-built or restored
+  # endpoint on a margined block keeps its tap.  Refusing the physical face by
+  # DELETING that path would satisfy the scenario above and silently break
+  # every checkpoint holding such a segment.  Both must hold at once.
+
+  Scenario: A restored endpoint inside the window keeps its tap on the physical face
+    Given "core" carries a corner margin of 4
+    And a checkpoint holds a segment landing on the physical east face inside the window
+    When I fix "core.d_in" to a window on the east face
+    And the checkpoint is restored
+    Then that landing is admitted
 
   # ── second round, finding 3: margin versus window ───────────────────────
 
@@ -109,6 +144,11 @@ Feature: Fixed pins — a busterm restricted to a set of admissible landings
 
   # ── layer: the approach layer, not the pin's metal ──────────────────────
 
+  Scenario: A compatible approach layer is honoured
+    When I fix "core.d_in" to the east face on a horizontal layer
+    Then the landing stub is on that layer
+    And no layer-direction violation is reported
+
   Scenario: A layer that runs the wrong way for the face is refused
     When I fix "core.d_in" to the east face on a vertical layer
     Then the declaration is refused naming the face and the layer
@@ -145,9 +185,16 @@ Feature: Fixed pins — a busterm restricted to a set of admissible landings
     Examples:
       | orient | face  | end  |
       | N      | east  | low  |
+      | S      | west  | high |
       | FN     | west  | low  |
-      | E      | north | low  |
       | FS     | east  | high |
+      | E      | north | low  |
+      | W      | south | high |
+
+  Scenario: A bottom-up template's copies inherit the fix
+    Given "core_cell" is a bottom-up template with congruent instances
+    When I fix "core_cell.d_in" to a window on the east face
+    Then every copied instance lands inside its own transformed window
 
   # ── failure is loud and never strands ───────────────────────────────────
 
