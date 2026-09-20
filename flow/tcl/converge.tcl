@@ -122,6 +122,7 @@ if {$vehicle ni {soc tpu}} { error "converge.tcl: vehicle must be soc|tpu, got '
 set sizes {}
 set heal 0; set step 1; set maxreserve 4; set informed 2; set nofloor 0
 set primitive share; set f_start 4; set fmax 32; set handdown 0; set yield 0
+set judge 0
 set arms {blind td bu}; set out e1_out; set tag ""; set threads ""
 set i 1
 while {$i < $argc} {
@@ -137,7 +138,7 @@ while {$i < $argc} {
     # the whole experiment (Codex P2 on #935).  A numeric `-1` still reaches
     # its own check (`-maxreserve takes a non-negative integer`).
     set optlike [expr {[string match -* $v] && ![string is integer -strict $v]}]
-    if {$a ni {-heal -nofloor -handdown -yield} && ([string trim $v] eq "" || $optlike)} {
+    if {$a ni {-heal -nofloor -handdown -yield -judge} && ([string trim $v] eq "" || $optlike)} {
         error "converge.tcl: $a needs a value (got '$v')"
     }
     switch -- $a {
@@ -145,6 +146,7 @@ while {$i < $argc} {
         -nofloor    { set nofloor 1; incr i }
         -handdown   { set handdown 1; incr i }
         -yield      { set yield 1; incr i }
+        -judge      { set judge 1; incr i }
         -step       { set step $v; incr i 2 }
         -primitive  { set primitive $v; incr i 2 }
         -f0         { set f_start $v; incr i 2 }
@@ -222,15 +224,26 @@ if {$threads ne ""} { set ::env(BUDA_THREADS_REQUEST) $threads }
 # the report is the result.  No report = the session crashed: stop, and
 # name the log.
 proc session {name size args} {
-    global script out heal primitive
+    global script out heal primitive judge repo
     set log [file join $out $name.log]
     set rep [file join $out $name.rep]
     file delete -force $rep
     set words [list $size {*}$args -report $rep -primitive $primitive]
     if {!$heal} { lappend words -noheal }
+    # `-judge`: give this round's `open_bdb :memory:` a durable home so the
+    # independent audit has tables to read.  The vehicle's text does not
+    # change — the redirect is the same one `btcl -b` arms — and the engine
+    # REFUSES an existing target (a `:memory:` open builds a fresh
+    # database), so a re-run of the same round must clear it first.
+    set ckpt [file join $out $name.bdb]
+    if {$judge} {
+        file delete -force $ckpt
+        set ::env(BUDA_BDB_MEMORY_TO) $ckpt
+    }
     set t0 [clock milliseconds]
     catch {exec [info nameofexecutable] $script {*}$words > $log 2>@1}
     set secs [expr {([clock milliseconds] - $t0) / 1000.0}]
+    if {$judge} { unset -nocomplain ::env(BUDA_BDB_MEMORY_TO) }
     if {![file exists $rep]} {
         # A session that died before its report is a FAILED round, never a
         # row: a rejected policy (`reserve_top_layers N` past the stack's
@@ -248,7 +261,37 @@ proc session {name size args} {
     dict set r name $name
     dict set r secs $secs
     dict set r words $words
+    if {$judge} { dict set r judge [judge_verdict $ckpt $out $name] }
     return $r
+}
+
+# The independent verdict for one round: `tools/independent_audit.py` over
+# the round's own checkpoint, run as a separate process with no BUDA on its
+# path.  That separation is the point of the column — a table whose rows are
+# scored by the router alone is the router marking its own work — so this
+# reports what the judge said and never substitutes its own opinion:
+# `clean`, a violation count, or `—` when the judge declined to judge (exit
+# 2), which is not the same as clean and must not read as it.
+proc judge_verdict {ckpt out name} {
+    global repo
+    if {![file exists $ckpt]} { return "—" }
+    set tool [file join $repo tools independent_audit.py]
+    set js [file join $out $name.judge.json]
+    set rc 0
+    # `python3`, not `[info nameofexecutable]` — this driver runs under
+    # tclsh and that is what the vehicle sessions are launched with, but the
+    # judge is a Python file; handing it to tclsh returned "could not judge"
+    # for every clean round, which is the reading that must never be
+    # produced by a mistake in the harness.  Same spelling the Tcl bridge
+    # uses to start the engine (`tools/buda.tcl`).
+    if {[catch {exec python3 $tool $ckpt --json $js --quiet} err opts]} {
+        set rc [lindex [dict get $opts -errorcode] 2]
+    }
+    if {$rc == 0} { return "clean" }
+    if {$rc != 1 || ![file exists $js]} { return "—" }
+    set fh [open $js]; set text [read $fh]; close $fh
+    if {[regexp {"total":\s*(\d+)} $text -> n]} { return $n }
+    return "?"
 }
 
 proc clean {r} {
@@ -340,7 +383,7 @@ proc plan_file {prefix k f0} {
 # ── the table ─────────────────────────────────────────────────────────────
 set rows {}
 proc row {size arm round policy rep policy_rep} {
-    global rows vehicle heal
+    global rows vehicle heal judge
     lassign [dict get $rep verdict_first] fo fu fv
     lassign [dict get $rep verdict] o u v
     set eff "—"
@@ -376,10 +419,15 @@ proc row {size arm round policy rep policy_rep} {
             set fix "no ([join $parts {, }])"
         }
     }
-    lappend rows [list $vehicle $size [expr {$heal ? "on" : "off"}] $arm $round $policy \
-                      $plan $fix \
-                      "$fo/$fu/$fv" "$o/$u/$v" $wl_s [lindex [dict get $rep marks] 0] \
-                      $reserved $used $eff [format %.1f [dict get $rep secs]]]
+    set r [list $vehicle $size [expr {$heal ? "on" : "off"}] $arm $round $policy \
+                $plan $fix \
+                "$fo/$fu/$fv" "$o/$u/$v" $wl_s [lindex [dict get $rep marks] 0] \
+                $reserved $used $eff [format %.1f [dict get $rep secs]]]
+    # The independent verdict sits NEXT TO the engine's own, never instead
+    # of it: the two columns disagreeing on a row is the finding the judge
+    # exists to make possible.
+    if {$judge} { lappend r [expr {[dict exists $rep judge] ? [dict get $rep judge] : "—"}] }
+    lappend rows $r
 }
 
 set summary {}
@@ -401,7 +449,7 @@ set notes {}
 # `uniform` sweep from the rest and nothing else does, so `-arms td,bu` and
 # `-arms blind,td,bu` both land on one filename.  `-informed`, `-f0` and
 # `-fmax` are in neither.  The table is the one place to close any of that.
-set policy [expr {$heal ? "_healed" : "_healerless"}]_step$step[expr {$nofloor ? "_nofloor" : ""}][expr {$primitive eq "reserve" ? "_reserve" : ""}][expr {$handdown ? "_handdown" : ""}][expr {$yield ? "_yield" : ""}]
+set policy [expr {$heal ? "_healed" : "_healerless"}]_step$step[expr {$nofloor ? "_nofloor" : ""}][expr {$primitive eq "reserve" ? "_reserve" : ""}][expr {$handdown ? "_handdown" : ""}][expr {$yield ? "_yield" : ""}][expr {$judge ? "_judged" : ""}]
 if {$tag ne ""} { append policy _$tag }
 
 foreach size $sizes {
@@ -544,6 +592,10 @@ foreach size $sizes {
 # ── print ─────────────────────────────────────────────────────────────────
 set hdr "| vehicle | size | heal | arm | round | policy | plan | fixpoint | first ovl/unpl/viol | final ovl/unpl/viol | detailed WL | classes | reserved | used | reserved÷used | s |"
 set sep "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"
+if {$judge} {
+    append hdr " judge |"
+    append sep "---|"
+}
 set lines [list $hdr $sep]
 foreach r $rows { lappend lines "| [join $r { | }] |" }
 lappend lines "" "| size | arm | rounds | classes solved | endpoint | final ovl/unpl/viol | fixpoint |" "|---|---|---|---|---|---|---|"

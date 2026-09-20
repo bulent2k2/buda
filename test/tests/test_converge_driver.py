@@ -675,3 +675,58 @@ def test_two_policies_in_one_out_dir_keep_their_own_evidence(tmp_path):
         assert _art(out, f"soc2_td_r0.{ext}", "_healed_step1").exists()
     assert len(list(out.glob("*.rep"))) == 2, list(out.iterdir())
     assert len(list(out.glob("*_td_shares_r0.buda"))) == 2, list(out.iterdir())
+
+
+def test_the_judge_scores_every_round_beside_the_engine(tmp_path):
+    """`-judge` (convergence ladder item 2): each round gets a durable
+    checkpoint and `tools/independent_audit.py` judges it, in its own
+    process with no BUDA on its path, and the verdict lands in the table
+    NEXT TO the engine's own.
+
+    The two are separate columns on purpose — a row where they disagree is
+    the finding the judge exists to make possible — so what is pinned here
+    is that the column carries the JUDGE's answer (the same one the tool
+    prints when run by hand on that round's checkpoint) rather than a
+    restatement of the verdict beside it."""
+    out = tmp_path / "e1"
+    r = _tclsh(_DRIVER, "soc", 2, "-arms", "blind", "-maxreserve", 0,
+               "-informed", 0, "-judge", "-out", out, cwd=tmp_path)
+    assert r.returncode == 0, r.stdout[-3000:] + r.stderr[-3000:]
+
+    policy = "_healerless_step1_judged"
+    table = _table(out, "e1", "soc", policy).read_text()
+    # the file opens with a `<!-- converge.tcl ... -->` provenance line
+    hdr_line = next(ln for ln in table.splitlines()
+                    if ln.startswith("| vehicle |"))
+    hdr = [c.strip() for c in hdr_line.split("|")]
+    assert hdr[-2] == "judge", table
+    row = next(ln for ln in table.splitlines() if re.match(r"\| soc \| 2 \|", ln))
+    cells = [c.strip() for c in row.split("|")[1:-1]]
+    assert len(cells) == len(hdr) - 2, (cells, hdr)
+    verdict = cells[-1]
+
+    ckpt = _art(out, "soc2_blind_r1.bdb", policy)
+    assert ckpt.is_file(), sorted(p.name for p in out.iterdir())
+    judged = subprocess.run(
+        [sys.executable, str(_ROOT / "tools" / "independent_audit.py"),
+         str(ckpt)], capture_output=True, encoding="utf-8", cwd=str(_ROOT))
+    by_hand = ("clean" if judged.returncode == 0
+               else re.search(r"VERDICT: \w+ \((\d+)\)", judged.stdout).group(1))
+    assert verdict == by_hand, (verdict, judged.stdout)
+    # and the run kept the machine-readable form beside the round
+    assert _art(out, "soc2_blind_r1.judge.json", policy).is_file()
+
+
+def test_without_the_flag_a_round_leaves_no_checkpoint(tmp_path):
+    """The control: judging costs a file per round (a `:memory:` design made
+    durable), so it is opt-in and a run that did not ask for it is
+    unchanged — no checkpoint, no judge column."""
+    out = tmp_path / "e1"
+    r = _tclsh(_DRIVER, "soc", 2, "-arms", "blind", "-maxreserve", 0,
+               "-informed", 0, "-out", out, cwd=tmp_path)
+    assert r.returncode == 0, r.stdout[-3000:] + r.stderr[-3000:]
+    assert not list(out.glob("*.bdb")), list(out.iterdir())
+    table = _table(out, "e1", "soc", "_healerless_step1").read_text()
+    hdr_line = next(ln for ln in table.splitlines()
+                    if ln.startswith("| vehicle |"))
+    assert "judge" not in hdr_line, table
