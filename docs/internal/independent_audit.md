@@ -69,16 +69,20 @@ tool does.
 
 **A judge is worth what it catches**, so the tests are a mutation matrix:
 each fault is planted in the tables in SQL, one at a time, and the judge must
-name it.  Reverting any one of its eleven rules fails at least one named
-test — short, keepout, off-grid, layer-direction, metal in two pieces, a net
-that does not reach its block, a net with no metal, the abutment control, the
-unjudgeable exit status, and both halves of the hierarchy rule below.
+name it.  Reverting any one of its **fourteen** rules fails at least one
+named test: short, keepout, off-grid, layer-direction, metal in two pieces,
+a net that does not reach its block, a net with no metal, a via that does not
+land on the wires it claims to join, the abutment control (a T-junction
+touches and does not overlap, and a judge that called that a short would
+fail every correct route), the unjudgeable exit status, both halves of the
+hierarchy rule below, and both halves of the membership fallback (falling
+back at all, and saying so).
 
 ## What it deliberately does not claim
 
 A clean verdict here is about GEOMETRY and nothing else: not timing, not
 DRC at a real detailed router's rule deck, nothing the ladder page's
-"What is deliberately not claimed" disclaims.  Three limitations are stated
+"What is deliberately not claimed" disclaims.  Four limitations are stated
 rather than left to be discovered:
 
 * **Region overrides** make the effective pattern a function of position,
