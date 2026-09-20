@@ -20,9 +20,10 @@ BUDA closes that gap early.  Given a netlist and a floorplan, it groups the
 wires into buses, generates several candidate shapes for each bus, picks a
 shape and metal layer for every bus under a congestion model, packs them onto
 real tracks around the power grid, and hands the result to a conventional
-router as guidance.  Each stage is fast enough to re-run in seconds to
-minutes, so a designer can move a block and see the wiring consequence
-immediately.
+router as guidance.  On the checked-in designs the planning stages re-run
+in seconds to minutes, so a designer can move a block and see the wiring
+consequence in the same sitting; the healers, which search, can take hours at
+the largest sizes (one healing round on a 32-cluster design took 9,526 s).
 
 Three properties distinguish it from a router:
 
@@ -155,7 +156,7 @@ product.
 | --- | --- |
 | Engine (C++20) | 41,066 lines, excluding the bundled SQLite |
 | Command layer and viewer (Python) | 45,889 lines; tools a further 23,714 |
-| Tests | 109,721 lines in 362 files; 2,105 tests pass in CI in about 5 min, plus 52 Gherkin feature specs |
+| Tests | 109,721 lines in 362 files; 4,352 tests collected at the source commit, every tier run by CI on each push and PR — 9m37s on this document's own branch; 2,105 when the gate landed on 1 August 2026 — plus 52 Gherkin feature specs |
 | Documentation | 156 Markdown files, 57,548 lines, with a test that walks every link |
 | QoR corpus | 57 full-pipeline flows swept nightly, and on a PR when it carries the `run-qor` label — a deliberate opt-in, since the sweep gates the merge for about 20 min; 47 end clean |
 | Merged pull requests | 859, every one reviewed by an automated reviewer (Codex); 385 commits answer a review finding by name |
@@ -179,7 +180,8 @@ Four practices do most of the work:
    are authored by Claude, 1,731 by the founder, under a written engineering
    rulebook (`CLAUDE.md`) and independent automated review on every pull
    request.  This is how one engineer sustained 1,000-plus commits a month
-   while every change carried tests and a corpus measurement.
+   while every change ran the full test suite, and every engine change
+   labelled for it a corpus sweep.
 
 The build runs natively on macOS, Linux and Windows (a manual Windows
 validation workflow exercises both MSVC generator paths), installs with
