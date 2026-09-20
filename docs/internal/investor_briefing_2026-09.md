@@ -153,7 +153,7 @@ product.
 | Command layer and viewer (Python) | 45,889 lines; tools a further 23,714 |
 | Tests | 109,721 lines in 362 files; 2,105 tests pass in CI in about 5 min, plus 52 Gherkin feature specs |
 | Documentation | 156 Markdown files, 57,548 lines, with a test that walks every link |
-| QoR corpus | 57 full-pipeline flows swept nightly and on every PR that touches the engine; 47 end clean |
+| QoR corpus | 57 full-pipeline flows swept nightly, and on a PR when it carries the `run-qor` label — a deliberate opt-in, since the sweep gates the merge for about 20 min; 47 end clean |
 | Merged pull requests | 859, every one reviewed by an automated reviewer (Codex); 385 commits answer a review finding by name |
 
 Four practices do most of the work:
@@ -218,8 +218,10 @@ flat flow never sees.  The study's own success criterion — beat the flat flow
 by 2× on wall time at a size where flat becomes slow — is not yet measured;
 the flat run at ~55 k cells takes 76 min and the next doubling five to six
 hours, which is where hierarchy is expected to pay.  One setup-slack
-regression of 0.0185 ns remains, reproduced bit-identically on a repeat run,
-on a flow that has never been timing-driven.
+regression remains: 0.021 ns before the LEF fix, 0.0185 ns after it.  It is
+real rather than noise — an independent repeat of the pre-fix arm reproduced
+every metric bit for bit, that slack included — while the post-fix figure is
+a single run.  The flow has never been timing-driven.
 
 On BUDA's own vehicles, the healer stack takes a dual-core RISC-V SoC (1,230
 nets, 44 leaves at four depths) from 66 audit violations to clean; a
@@ -238,8 +240,10 @@ study notes, not from a wish list.
 
 1. **Timing.**  BUDA has never run timing-driven: no timing constraints reach
    the planner and the per-pin timing budgets designed for the OpenROAD
-   handoff are unbuilt.  The one metric H+B still loses to H is setup slack,
-   by 0.0185 ns — small, but real, reproduced bit-for-bit.  A timing-aware
+   handoff are unbuilt.  The one metric H+B still loses to H is setup slack:
+   0.0185 ns on the notch-fixed arm, 0.021 ns before the fix, where an
+   independent repeat reproduced the loss bit for bit — small, but real.  A
+   timing-aware
    planner is the next thing that number asks for, and it is the feature the
    original Galaxy work was valued for (fast timing feedback to RTL).
 2. **The die-area penalty of hierarchy.**  A hard-macro flow pays for block
