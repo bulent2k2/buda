@@ -2005,11 +2005,46 @@ class PersistMixin:
                                width=d["w"], space_after=d["s"])
                 for d in (json.loads(text) if text else [])]
 
-    def _persist_track_pattern(self, layer_id, pattern, is_horiz, source):
-        """Write through one `define_layer` declaration.  No BDB = no-op, so
-        every install site can call it unconditionally."""
-        if self.bdb is None:
+    def _journal_grid(self, kind, payload):
+        """Record one grid declaration so a BDB opened LATER still gets it.
+
+        Write-through alone was not enough, and the gap is the commonest
+        shape in the tree rather than an edge case: a flow that sources its
+        track patterns BEFORE `open_bdb` — which almost every flow here does,
+        `flow/hier_four_blocks.buda` and the demo designs included — left a
+        checkpoint with ZERO `track_pattern` rows while its session routed
+        against six.  Resumed, that checkpoint hits exactly the failure v29
+        was built to remove (see the section comment above); judged by
+        `tools/independent_audit.py`, it cannot be judged at all, since every
+        on-grid question against a design with no stored grid is vacuous.
+
+        Journalling the DECLARATION rather than reading the built grid back
+        keeps the v29 contract: the same values, in the same order, replayed
+        by `_flush_grid_journal` into whatever BDB is opened next."""
+        self._grid_journal.append((kind, payload))
+
+    def _flush_grid_journal(self):
+        """Replay this session's grid declarations into the open BDB.
+
+        Called by `open_bdb` AFTER `_restore_grid_from_bdb`, which is the
+        precedence order the rest of the restore already follows: what the
+        checkpoint holds fills in what this session has not declared, and
+        what this session HAS declared wins and is written down.  Replaying
+        the journal is not the same as re-reading the grid — an entry
+        carries the declaration, so a pattern the session declared and the
+        checkpoint also holds ends up stored as the one in force."""
+        if self.bdb is None or not self._grid_journal:
             return
+        for kind, payload in self._grid_journal:
+            if kind == "pattern":
+                lid, pattern, is_horiz, source = payload
+                self._write_track_pattern(lid, pattern, is_horiz, source)
+            elif kind == "override":
+                self._write_grid_override(*payload)
+            elif kind == "keepouts":
+                self._write_keepouts(payload)
+
+    def _write_track_pattern(self, layer_id, pattern, is_horiz, source):
         row = buda.TrackPatternRow()
         row.layer_id = int(layer_id)
         row.origin   = float(pattern.origin)
@@ -2021,9 +2056,16 @@ class PersistMixin:
         row.slots    = self._slots_json(pattern)
         self.bdb.set_track_pattern(row)
 
-    def _persist_grid_override(self, layer_id, x1, y1, x2, y2, pattern):
+    def _persist_track_pattern(self, layer_id, pattern, is_horiz, source):
+        """Record one `define_layer` declaration and write it through.  No
+        BDB = journal only, so every install site can call it
+        unconditionally and a later `open_bdb` still gets the pattern."""
+        self._journal_grid("pattern", (layer_id, pattern, is_horiz, source))
         if self.bdb is None:
             return
+        self._write_track_pattern(layer_id, pattern, is_horiz, source)
+
+    def _write_grid_override(self, layer_id, x1, y1, x2, y2, pattern):
         row = buda.GridOverrideRow()
         row.layer_id = int(layer_id)
         row.x1, row.y1, row.x2, row.y2 = int(x1), int(y1), int(x2), int(y2)
@@ -2031,8 +2073,14 @@ class PersistMixin:
         row.slots  = self._slots_json(pattern)
         self.bdb.set_grid_override(row)
 
+    def _persist_grid_override(self, layer_id, x1, y1, x2, y2, pattern):
+        self._journal_grid("override", (layer_id, x1, y1, x2, y2, pattern))
+        if self.bdb is None:
+            return
+        self._write_grid_override(layer_id, x1, y1, x2, y2, pattern)
+
     def _persist_keepouts(self, zones):
-        """Write through a burst of keepout declarations.
+        """Record a burst of keepout declarations and write it through.
 
         `zones` is [(x1,y1,x2,y2, [layer_ids], inside_block, net)] — the zone
         as declared, layer set included, because a zone is the object
@@ -2040,9 +2088,16 @@ class PersistMixin:
         lose it.  `net` rides along for the same reason the importer carries
         it rather than re-splitting a provenance string: a power strap's
         identity has to survive intact.  One call per burst so the 13k a DEF
-        import declares are one transaction rather than 13k."""
-        if self.bdb is None or not zones:
+        import declares are one transaction rather than 13k — and the
+        journal keeps the burst whole for the same reason."""
+        if not zones:
             return
+        self._journal_grid("keepouts", list(zones))
+        if self.bdb is None:
+            return
+        self._write_keepouts(zones)
+
+    def _write_keepouts(self, zones):
         rows = []
         for x1, y1, x2, y2, lids, inside, net in zones:
             r = buda.KeepoutRow()

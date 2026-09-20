@@ -196,6 +196,13 @@ def cmd_open_bdb(session, cmd, args, cmd_line):
     # The routing grid + keepouts (v29), same contract: session-declared
     # entries win, restored ones fill in what this session has not declared.
     session._restore_grid_from_bdb()
+    # ...and the other direction, which write-through alone could not reach:
+    # a grid declared BEFORE this open (the order nearly every flow in the
+    # tree is written in) had no BDB to be written to, so the checkpoint
+    # carried a route and no grid at all.  Replaying the journal here, after
+    # the restore, keeps the same precedence — what this session declared
+    # wins and is what gets stored.
+    session._flush_grid_journal()
 
 
 def cmd_set_import_scale(session, cmd, args, cmd_line):

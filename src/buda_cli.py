@@ -314,6 +314,11 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
         # must fire for a second `def_track_pattern` in one session and
         # NOT for a flow re-declaring what its own checkpoint restored.
         self._pattern_restored = set()
+        # Every routing-grid declaration this session has made, in order, so
+        # a BDB opened LATER still gets them (v29 wrote through only while a
+        # BDB was open, and most flows declare their tracks before they open
+        # one — see `_flush_grid_journal`).
+        self._grid_journal = []
         # Wire WIDTH per layer, from LEF.  DEF TRACKS give a pitch and a
         # position but no width — only the technology knows that — so a
         # tech import feeds this and `import_def_lef` consumes it.
