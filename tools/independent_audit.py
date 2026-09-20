@@ -326,19 +326,26 @@ def _bucketed(wires, key_lo, key_hi, size):
 # ---------------------------------------------------------------------------
 
 def check_on_grid(wires, grid):
-    """Every bit lies on a SIGNAL slot of its layer's effective pattern."""
-    bad, unpatterned, crossing = [], set(), 0
+    """Every bit lies on a SIGNAL slot of its layer's effective pattern.
+
+    `audit` refuses a design whose routed layers are not all patterned, so
+    an unpatterned layer cannot reach here; a wire on one is reported rather
+    than skipped, because a checker that silently passes what it cannot
+    evaluate is the failure this file exists to avoid.
+    """
+    bad, crossing = [], 0
     for w in wires:
         pat = grid.at(w.layer, *w.mid())
         if pat is None:
-            unpatterned.add(w.layer)
+            bad.append((w, f"M{w.layer} has no track pattern, so this wire "
+                           f"lies on no track this file can name"))
             continue
         if grid.override_count_along(w.layer, w.x1, w.y1, w.x2, w.y2) > 1:
             crossing += 1
         if not pat.is_signal_track(w.pos):
             bad.append((w, f"track {w.pos:g} is not a SIGNAL slot centre of "
                            f"the M{w.layer} pattern in force there"))
-    return bad, sorted(unpatterned), crossing
+    return bad, crossing
 
 
 def check_layer_dir(wires, grid):
@@ -366,27 +373,36 @@ def check_shorts(wires, max_report):
     for w in wires:
         by_layer[w.layer].append(w)
     for layer, ws in by_layer.items():
-        # Bucket on the PERPENDICULAR axis: two wires can only overlap there
-        # if their tracks are within a width of each other, so a bin one
-        # maximum-width tall bounds every candidate pair.
+        # ONE axis for the whole layer, and the STORED rectangles — never
+        # each wire's own `along`/`perp`, which are a function of its
+        # `is_horiz`.  A wire whose orientation is wrong (the LAYER_DIR
+        # case) would otherwise be bucketed on a different physical axis
+        # from its neighbours and compared x-against-y, so a checkpoint
+        # could report LAYER_DIR and hide the SHORT in the same metal
+        # (Codex P2 on #942).  Overlap is a property of two rectangles;
+        # what each wire CLAIMS about its direction does not enter into it.
+        n_horiz = sum(1 for w in ws if w.horiz)
+        by_y = n_horiz >= len(ws) - n_horiz     # bin on the majority's thin axis
+        b_lo = (lambda w: w.y1) if by_y else (lambda w: w.x1)
+        b_hi = (lambda w: w.y2) if by_y else (lambda w: w.x2)
+        s_lo = (lambda w: w.x1) if by_y else (lambda w: w.y1)
+        s_hi = (lambda w: w.x2) if by_y else (lambda w: w.y2)
         size = max((w.width for w in ws), default=1.0)
-        bins, size = _bucketed(ws, lambda w: w.perp()[0],
-                               lambda w: w.perp()[1], size)
+        bins, size = _bucketed(ws, b_lo, b_hi, size)
         seen = set()
         for group in bins.values():
-            group.sort(key=lambda w: w.along()[0])
+            group.sort(key=s_lo)
             active = []
             for w in group:
-                a_lo, a_hi = w.along()
-                active = [o for o in active if o.along()[1] > a_lo - TOL]
+                active = [o for o in active if s_hi(o) > s_lo(w) - TOL]
                 for o in active:
                     if o.net == w.net:
                         continue
                     pair = (o.key, w.key) if o.key < w.key else (w.key, o.key)
                     if pair in seen:
                         continue
-                    if (_overlap(*w.along(), *o.along())
-                            and _overlap(*w.perp(), *o.perp())):
+                    if (_overlap(w.x1, w.x2, o.x1, o.x2)
+                            and _overlap(w.y1, w.y2, o.y1, o.y2)):
                         seen.add(pair)
                         n += 1
                         if len(bad) < max_report:
@@ -623,8 +639,21 @@ def audit(path, max_report=8):
     if not grid.patterns:
         raise Unjudgeable(f"{path} declares no track pattern — every "
                           f"on-grid question would be vacuous")
+    # ...and the same is true ONE LAYER AT A TIME.  A checkpoint carrying a
+    # pattern for some layers and none for a layer that holds wires would
+    # otherwise pass the guard above, leave OFF_GRID entirely unevaluated
+    # for those wires, and — if nothing else fired — exit 0, so a converge
+    # table would read `clean` for metal nothing judged (Codex P1 on #942).
+    # Partial coverage is exactly the case exit 2 exists for.
+    blind = sorted({w.layer for w in wires} - set(grid.patterns))
+    if blind:
+        raise Unjudgeable(
+            f"{path} carries metal on "
+            f"{', '.join('M%d' % l for l in blind)} with no track pattern "
+            f"there — OFF_GRID cannot be judged for those wires, and a "
+            f"partial verdict must not read as a clean one")
 
-    off_grid, unpatterned, crossing = check_on_grid(wires, grid)
+    off_grid, crossing = check_on_grid(wires, grid)
     dirs = check_layer_dir(wires, grid)
     shorts, n_short = check_shorts(wires, max_report)
     ko, n_ko = check_keepouts(wires, read_keepouts(con), max_report)
@@ -659,7 +688,6 @@ def audit(path, max_report=8):
         "total": sum(counts.values()),
         "clean": sum(counts.values()) == 0,
         "notes": {
-            "layers_without_a_pattern": unpatterned,
             "wires_crossing_a_region_override": crossing,
             "endpoint_blocks_unplaced": unplaced,
             "bundle_membership_known": scoped,
@@ -681,11 +709,6 @@ def report(res, quiet=False):
     for e in res["examples"]:
         print(f"[judge]     {e['kind']}: {e['where']}: {e['why']}")
     notes = res["notes"]
-    if notes["layers_without_a_pattern"]:
-        print(f"[judge] note: {len(notes['layers_without_a_pattern'])} layer(s) "
-              f"carry metal with no track pattern "
-              f"({','.join('M%d' % l for l in notes['layers_without_a_pattern'])}) "
-              f"— not judged on-grid")
     if notes["wires_crossing_a_region_override"]:
         print(f"[judge] note: {notes['wires_crossing_a_region_override']} wire(s) "
               f"span a region-override boundary — judged at their midpoint")

@@ -482,3 +482,55 @@ def test_a_via_joins_two_wires_only_where_it_lands_on_both(vias, tmp_path):
     assert code == 1, out
     assert "OPEN" in _kinds(out), out
     assert "disconnected pieces" in out, out
+
+
+# ---------------------------------------------------------------------------
+# Overlap is a property of two rectangles, not of what they claim
+# ---------------------------------------------------------------------------
+
+def test_a_short_under_a_wrong_orientation_is_still_caught(routed, tmp_path):
+    """One wire with the WRONG `is_horiz`, overlapping another net's metal.
+
+    Both faults are real and both must be named.  Bucketing or intersecting
+    by each wire's own `along`/`perp` makes those a function of its declared
+    orientation, so the pair lands in unrelated bins and the comparison that
+    does happen is one wire's x-interval against the other's y-interval — a
+    checkpoint could then report LAYER_DIR and hide the SHORT in the very
+    same metal (Codex P2 on #942).
+
+    `loc_0` stretched to x = 500 overlaps `x_0` (x 430..920, same track) by
+    70 x 2 units of metal, whichever way either wire says it runs."""
+    nid = _net_id(routed)
+    p = _mutated(routed, tmp_path,
+                 f"UPDATE net_segment SET x2=500, is_horiz=0 WHERE net_id={nid}")
+    code, out = _judge(p)
+    assert code == 1, out
+    assert _kinds(out) == {"LAYER_DIR", "SHORT"}, out
+    assert "two different nets on M6" in out and "x_0" in out, out
+
+
+# ---------------------------------------------------------------------------
+# Partial coverage is not a clean verdict
+# ---------------------------------------------------------------------------
+
+def test_metal_on_an_unpatterned_layer_cannot_be_judged(vias, tmp_path):
+    """A checkpoint patterned on SOME of its routed layers.
+
+    The whole-design guard passes (patterns exist), and if nothing else
+    fires the tool would exit 0 with OFF_GRID entirely unevaluated for that
+    layer's wires — a converge table reading `clean` for metal nothing
+    judged (Codex P1 on #942).  Partial coverage is exactly what exit 2 is
+    for, and the layer is NAMED so the reader knows which metal went
+    unjudged."""
+    con = sqlite3.connect(vias)
+    layers = sorted({r[0] for r in con.execute("SELECT DISTINCT layer FROM net_segment")})
+    con.close()
+    assert len(layers) > 1, layers      # else the whole-design guard covers it
+    victim = layers[0]
+
+    p = _mutated(vias, tmp_path,
+                 f"DELETE FROM track_pattern WHERE layer_id={victim}")
+    code, out = _judge(p)
+    assert code == 2, out
+    assert f"M{victim}" in out and "no track pattern" in out, out
+    assert "must not read as a clean one" in out, out

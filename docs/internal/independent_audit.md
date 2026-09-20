@@ -69,14 +69,15 @@ tool does.
 
 **A judge is worth what it catches**, so the tests are a mutation matrix:
 each fault is planted in the tables in SQL, one at a time, and the judge must
-name it.  Reverting any one of its **fourteen** rules fails at least one
+name it.  Reverting any one of its **sixteen** rules fails at least one
 named test: short, keepout, off-grid, layer-direction, metal in two pieces,
 a net that does not reach its block, a net with no metal, a via that does not
 land on the wires it claims to join, the abutment control (a T-junction
 touches and does not overlap, and a judge that called that a short would
 fail every correct route), the unjudgeable exit status, both halves of the
-hierarchy rule below, and both halves of the membership fallback (falling
-back at all, and saying so).
+hierarchy rule below, both halves of the membership fallback (falling back
+at all, and saying so), both halves of the rectangle rule below, and the
+partial-coverage refusal.
 
 ## What it deliberately does not claim
 
@@ -100,6 +101,31 @@ rather than left to be discovered:
   shorts and broken metal are still judged, `NO_METAL` is not — and the
   fallback is NAMED in the output.  A silent narrowing is how an audit comes
   to mean less than its reader thinks.
+
+### Two more, from review
+
+Codex found both on the first pass over the file, and both are about the
+same thing — a judge must not pass what it did not evaluate:
+
+* **Overlap is a property of two rectangles**, not of what either wire says
+  about itself.  The short check bucketed and intersected through each
+  wire's own `along`/`perp`, which are a function of its `is_horiz`, so a
+  wire with the WRONG orientation — the `LAYER_DIR` case — was binned on a
+  different physical axis from its neighbours and then compared one wire's
+  x-interval against the other's y-interval.  A checkpoint could report
+  `LAYER_DIR` and hide the `SHORT` in the very same metal.  The layer now
+  picks ONE axis and intersects the stored rectangles.
+* **Partial coverage is not a clean verdict.**  The guard refused a design
+  with no track pattern at all, but a checkpoint patterned on SOME of its
+  routed layers passed it, left `OFF_GRID` unevaluated for the rest, and —
+  with nothing else firing — exited 0, so a converge table would read
+  `clean` for metal nothing judged.  A routed layer with no pattern is now
+  exit 2, with the layer named.
+
+Neither moved a verdict: every design in the table below judges exactly as
+it did before, the bottom-up finding bundle for bundle.  That is what a
+correctness fix to a judge should look like — it changes what the file is
+ENTITLED to say, not what it happened to say here.
 
 ### The hierarchy rule, and how it was got wrong first
 
