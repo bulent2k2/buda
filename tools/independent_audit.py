@@ -49,8 +49,12 @@ Usage:
     tools/independent_audit.py ckpt.bdb --quiet          # exit code only
     tools/independent_audit.py ckpt.bdb --max-report 20  # examples per kind
 
-Exit status is 0 when the design is clean, 1 when any violation is found and
-2 when the file cannot be judged (no routed rows, no track patterns).  A
+Exit status is 0 when the design is clean, 1 when any violation is found,
+2 when the file cannot be judged (no routed rows, no track patterns, a
+routed layer with no pattern, a file that cannot be read) and 3 when the
+design WAS judged and the `--json` output could not be written — four
+statuses because conflating any two of them is how a harness comes to book
+a missing file as a broken design.  A
 clean verdict from this file is a claim about GEOMETRY — tracks, overlaps,
 blockages, connectivity — and about nothing else: not timing, not a real
 detailed router's rule deck, not anything the ladder page's "What is
@@ -152,6 +156,11 @@ def _table_exists(con, name):
     return row is not None
 
 
+def _column_exists(con, table, column):
+    return any(r[1] == column
+               for r in con.execute(f"PRAGMA table_info({table})"))
+
+
 def _rows(con, sql, args=()):
     return con.execute(sql, args).fetchall()
 
@@ -232,9 +241,19 @@ class Grid:
                     r["bound_lo"], r["bound_hi"])
                 self.is_horiz[int(r["layer_id"])] = bool(r["is_horiz"])
         if _table_exists(con, "grid_override"):
-            # Stored order is insertion order, which is the order the engine
-            # resolves them in (first match wins).
-            for r in _rows(con, "SELECT rowid, * FROM grid_override ORDER BY rowid"):
+            # The order the engine resolves them in — first match wins, so
+            # with overlapping regions on one layer the order IS the grid.
+            # `ord` is that order, stored (schema v31); rowid is the
+            # tie-break, which is what a pre-v31 file (no column, or every
+            # `ord` 0) is read by.  `BDB::grid_overrides` reads it exactly
+            # this way, and a reader that ordered by rowid alone could
+            # resolve an overlap differently from the session that wrote it
+            # — reporting an OFF_GRID that is not there, or missing one that
+            # is (Codex P2 on #942, the reader half of the engine fix).
+            order = ("ord, rowid" if _column_exists(con, "grid_override", "ord")
+                     else "rowid")
+            for r in _rows(con,
+                           f"SELECT rowid, * FROM grid_override ORDER BY {order}"):
                 slots = [Slot(d) for d in json.loads(r["slots"] or "[]")]
                 self.overrides[int(r["layer_id"])].append(
                     (r["x1"], r["y1"], r["x2"], r["y2"],
@@ -466,21 +485,33 @@ def read_layer_stack(con):
 
 
 def read_keepouts(con):
-    """(layer -> [(x1, y1, x2, y2, who, kind)]).
+    """(layer -> [(x1, y1, x2, y2, who, kind)], [zones that block EVERY layer]).
 
-    An EMPTY layer list governs no layer — that is what the restore does with
-    it, so a zone declared with no layers blocks nothing here either.
+    An EMPTY layer list blocks EVERY layer, which is the engine's own
+    convention wherever a zone is tested — `verify.cpp::zone_on_layer` is
+    `layer_ids.empty() || layer_ids.count(layer)`, and `nuts_geom.h`'s
+    `keepout_occupied` reads the same way — and it is what the restore
+    produces, since `_restore_grid_from_bdb` hands `add_keepout_zone` the
+    empty list the CSV parses to.  This file had it exactly backwards and
+    said so in a comment, so a zone declared with no layers let every wire
+    through and could carry a design to a clean verdict (Codex P1 on #942).
+    They are returned separately because which layers "every" means is the
+    caller's question: the audit applies them to every layer that carries
+    metal.
     """
-    out = defaultdict(list)
+    out, universal = defaultdict(list), []
     if not _table_exists(con, "keepout"):
-        return out
+        return out, universal
     for r in _rows(con, "SELECT * FROM keepout"):
-        for t in str(r["layers"]).split(","):
-            if t.strip():
-                out[int(t)].append((float(r["x1"]), float(r["y1"]),
-                                    float(r["x2"]), float(r["y2"]),
-                                    r["net"] or "", "zone"))
-    return out
+        z = (float(r["x1"]), float(r["y1"]), float(r["x2"]), float(r["y2"]),
+             r["net"] or "", "zone")
+        lids = [t for t in str(r["layers"]).split(",") if t.strip()]
+        if not lids:
+            universal.append(z)
+            continue
+        for t in lids:
+            out[int(t)].append(z)
+    return out, universal
 
 
 def read_leaf_keepouts(con, layers):
@@ -769,7 +800,9 @@ def audit(path, max_report=8):
     dirs = check_layer_dir(wires, grid)
     shorts, n_short = check_shorts(wires, max_report)
     layers = read_layer_stack(con)
-    zones = read_keepouts(con)
+    zones, universal = read_keepouts(con)
+    for lid in {w.layer for w in wires}:
+        zones[lid].extend(universal)        # an empty layer list blocks all
     leaf_zones, leaf_notes = read_leaf_keepouts(con, layers)
     for lid, zs in leaf_zones.items():
         zones[lid].extend(zs)
@@ -887,9 +920,23 @@ def main(argv=None):
         return 2
     report(res, quiet=a.quiet)
     if a.json:
-        with open(a.json, "w", encoding="utf-8") as f:
-            json.dump(res, f, indent=2, sort_keys=True)
-            f.write("\n")
+        try:
+            with open(a.json, "w", encoding="utf-8") as f:
+                json.dump(res, f, indent=2, sort_keys=True)
+                f.write("\n")
+        except OSError as e:
+            # NOT 0 or 1, and not 2 either.  The design WAS judged — the
+            # verdict is in this line, and on stdout above unless --quiet
+            # silenced it — so calling it unjudgeable would be as wrong as
+            # letting a clean design exit 1 because a directory was missing
+            # (Codex P2 on #942).  Its own status, so a caller gating on the
+            # contract learns that the file it asked for is not there and
+            # that the verdict it can see is real.
+            print(f"independent_audit: judged "
+                  f"({'CLEAN' if res['clean'] else 'VIOLATIONS'}, "
+                  f"{res['total']}), but could not write {a.json}: {e}",
+                  file=sys.stderr)
+            return 3
     return 0 if res["clean"] else 1
 
 

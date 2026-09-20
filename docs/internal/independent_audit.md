@@ -40,7 +40,9 @@ puts the verdict in the table as its own column, beside the engine's:
 Two columns, never one.  A row where they disagree is the finding the judge
 exists to make possible, so the driver reports what the judge said and never
 substitutes its own reading: `clean`, a violation count, or `—` when the
-judge declined to judge — which is not clean and must not read as it.
+judge declined to judge — which is not clean and must not read as it.  (A
+fourth status, **3**, says the design WAS judged and the `--json` file could
+not be written — see the fourth pass below.)
 
 ## What it checks
 
@@ -70,7 +72,7 @@ tool does.
 
 **A judge is worth what it catches**, so the tests are a mutation matrix:
 each fault is planted in the tables in SQL, one at a time, and the judge must
-name it.  Reverting any one of its **twenty-two** rules fails at least one
+name it.  Reverting any one of its **twenty-five** rules fails at least one
 named test: short, keepout, off-grid, layer-direction, metal in two pieces,
 a net that does not reach its block, a net with no metal, a via that does not
 land on the wires it claims to join, the abutment control (a T-junction
@@ -82,7 +84,9 @@ partial-coverage refusal, the unreadable-input status, the
 override-crossing note, the implicit leaf-cell keepout, its TOP-layer
 control (the same wire over the same cell on a TOP layer is ordinary
 over-the-cell routing and must stay clean), and the note a checkpoint gets
-when it does not record which layers are TOP.  (The count read *eighteen*
+when it does not record which layers are TOP, a keepout with no layer set
+blocking every layer, the override order read from the stored ordinal, and
+a failed `--json` write keeping its own status.  (The count read *eighteen*
 while the list held nineteen — the override-crossing note was added to the
 list and not to the number.)
 
@@ -193,6 +197,41 @@ the P1 above.
   which is the commonest shape in this tree — the same asymmetry the journal
   itself exists for — and that is the case the test plants.
 * **The keepouts nobody declares.**  The P1, and its own section below.
+
+### The fourth pass
+
+Three more, all real, and two of them are the same lesson as the third
+pass's: a status that is not a verdict must not wear a verdict's number.
+
+* **A keepout with no layer set blocks EVERY layer (P1).**  That is the
+  engine's convention wherever a zone is tested — `verify.cpp::zone_on_layer`
+  is `layer_ids.empty() || layer_ids.count(layer)`, `nuts_geom.h`'s
+  `keepout_occupied` reads the same way — and it is what the restore builds,
+  since the stored CSV parses to an empty list and `add_keepout_zone` takes
+  it as-is.  This file had it exactly BACKWARDS and said so in a comment
+  ("an empty layer list governs no layer — that is what the restore does
+  with it"), so such a zone blocked nothing here and could carry a design to
+  a clean verdict.  A comment asserting the opposite of the code it
+  describes is worse than none: it is what a reader checks instead of
+  checking.  No design in this tree carries one — every checkpoint measured
+  reads 0 of 0 — so it was a latent hole rather than a live miss, which is
+  exactly the kind a mutation test is for.
+* **The override order needed reading, not just storing.**  The engine's v31
+  fix gave `grid_override` its declaration ordinal and `BDB::grid_overrides`
+  reads `ORDER BY ord, rowid`; this file still ordered by `rowid` alone, so
+  on a checkpoint whose `ord` disagrees with row order the judge resolved an
+  overlap differently from the session that wrote it — an OFF_GRID reported
+  where there is none, or one missed.  Fixing the writer and leaving the
+  second reader behind is its own failure mode, and the reason it is worth
+  naming: the judge reads the same tables the engine does, so every schema
+  change has two sides here.
+* **A failed `--json` write is not a violation.**  The write happens after
+  the verdict, outside the guarded audit, so an unwritable path exited **1**
+  — the status reserved for geometry violations — and a clean design would
+  be booked as dirty by a caller gating on the contract.  It is not exit 2
+  either: the design WAS judged.  It gets its own status, **3**, and the
+  message carries the verdict so nothing is lost when `--quiet` silenced the
+  report.
 
 None of them moved a verdict: every design in the table below judges exactly as
 it did before, the bottom-up finding bundle for bundle.  That is what a

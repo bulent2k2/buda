@@ -701,3 +701,75 @@ def test_a_wire_inside_one_override_crosses_no_boundary(routed, tmp_path):
     code, out = _judge(crossing, "--json", str(out_json))
     res = json.loads(out_json.read_text())
     assert res["notes"]["wires_crossing_a_region_override"] > 0, out
+
+
+def test_a_keepout_with_no_layers_blocks_every_layer(routed, tmp_path):
+    """The engine's own convention, which this file had exactly backwards.
+
+    `verify.cpp::zone_on_layer` is `layer_ids.empty() || count(layer)` and
+    `nuts_geom.h::keepout_occupied` reads the same way, so a zone with no
+    layer set blocks EVERYTHING — and that is what the restore builds, since
+    the CSV parses to an empty list. The judge assigned such a zone to no
+    layer at all (and said so in a comment), so it let every wire through
+    and could carry a design to a clean verdict (Codex P1 on #942)."""
+    nid = _net_id(routed)
+    con = sqlite3.connect(routed)
+    x1, y1, x2, y2 = con.execute(
+        "SELECT x1,y1,x2,y2 FROM net_segment WHERE net_id=?", (nid,)).fetchone()
+    con.close()
+    p = _mutated(routed, tmp_path,
+                 "INSERT INTO keepout(x1,y1,x2,y2,layers,inside_block,net)"
+                 f" VALUES({x1 + 1},{y1 - 1},{x2 - 1},{y2 + 1},'',0,'')")
+    code, out = _judge(p)
+    assert code == 1, out
+    assert "KEEPOUT" in _kinds(out), out
+
+
+def test_the_override_order_is_read_from_the_stored_ordinal(routed, tmp_path):
+    """The reader half of the engine's v31 fix.
+
+    `BDB::grid_overrides` returns them `ORDER BY ord, rowid` because with
+    overlapping regions on one layer the order IS the grid — first match
+    wins. This file ordered by `rowid` alone, so on a checkpoint whose `ord`
+    disagrees with row order it resolved the overlap the other way and could
+    report an OFF_GRID that is not there (Codex P2 on #942).
+
+    Planted as two overlapping M6 overrides over `loc_0`'s wire: the one
+    inserted SECOND carries `ord` 0 and is therefore the winner, and its
+    pattern is the design's own, so the wire is on grid. Read by rowid, the
+    first row wins and its pattern puts the tracks elsewhere."""
+    nid = _net_id(routed)
+    con = sqlite3.connect(routed)
+    x1, y1, x2, y2 = con.execute(
+        "SELECT x1,y1,x2,y2 FROM net_segment WHERE net_id=?", (nid,)).fetchone()
+    live = con.execute("SELECT origin,slots FROM track_pattern WHERE layer_id=6"
+                       ).fetchone()
+    con.close()
+    box = (int(x1) - 50, int(y1) - 50, int(x2) + 50, int(y2) + 50)
+    off = '[{"t": "SIGNAL", "l": "", "w": 7.0, "s": 7.0}]'
+    p = _mutated(
+        routed, tmp_path,
+        # rowid 1, ord 1 — loses on `ord`, wins on rowid
+        "INSERT INTO grid_override(layer_id,x1,y1,x2,y2,origin,slots,ord)"
+        f" VALUES(6,{box[0]},{box[1]},{box[2]},{box[3]},0,'{off}',1)",
+        # rowid 2, ord 0 — the winner, and it agrees with the live grid
+        "INSERT INTO grid_override(layer_id,x1,y1,x2,y2,origin,slots,ord)"
+        f" VALUES(6,{box[0] - 1},{box[1] - 1},{box[2] + 1},{box[3] + 1},"
+        f"{live[0]},'{live[1]}',0)")
+    code, out = _judge(p)
+    assert code == 0, out
+    assert "VERDICT: CLEAN" in out, out
+
+
+def test_a_json_write_failure_is_not_a_violation(routed, tmp_path):
+    """Exit 3, not 1 and not 2.
+
+    The `--json` write happens after the verdict, outside the guarded audit,
+    so an unwritable path exited 1 — the status reserved for geometry
+    violations — and a caller gating on the contract would book a CLEAN
+    design as dirty (Codex P2 on #942). Nor is it 2: the design was judged,
+    and the verdict is in the message."""
+    code, out = _judge(routed, "--json", str(tmp_path / "no" / "such" / "x.json"))
+    assert code == 3, out
+    assert "could not write" in out and "CLEAN" in out, out
+    assert "Traceback" not in out, out
