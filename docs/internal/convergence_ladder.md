@@ -505,7 +505,12 @@ every "one round" measured rather than assumed.
    top buses whose seats were yielded.
 7. **Fixed-pin primitive** — a busterm restricted to a face, then to a window
    on a face — as the interoperability piece for the partner evaluation (E3),
-   last, since nothing in-house depends on it.
+   last, since nothing in-house depends on it.  **Designed (2026-09-20), not built:**
+   [fixed_pin_design.md](fixed_pin_design.md) — one `fix_pin` command from
+   "horizontal only" to "this bit at this point on this layer", as a rewrite of
+   the bundle's busterm into admissible face strips, with pushbacks and eight
+   open questions; published for outside review as the
+   [Fixed Pin Primitive](https://claude.ai/artifact/T75FBqiYjTEax8A5Q5jdLN) page.
 
 ## Decisions (2026-09-13)
 
