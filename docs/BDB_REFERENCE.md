@@ -157,7 +157,9 @@ track_pattern    layer_id (PK), origin, is_horiz, bounded, bound_lo,
                  bound_hi, source ('script'|'lef'|'def'), slots (JSON)
                  — one layer's global pattern as DECLARED, not a read-back
                  of the built grid (v29)
-grid_override    layer_id, x1, y1, x2, y2, origin, slots (JSON)
+grid_override    layer_id, x1, y1, x2, y2, origin, slots (JSON),
+                 ord — the DECLARATION order (v31), which decides which of
+                 two overlapping regions wins
                  PRIMARY KEY (layer_id, x1, y1, x2, y2)
 keepout          x1, y1, x2, y2, layers (CSV), inside_block, net
                  — the ZONE with its layer set, stored whole rather than
@@ -173,7 +175,10 @@ meta             key (TEXT PK), value  — die_w, die_h, units, lu_per_um,
                  user_ops:<bundle_id>:<topo_uid>
 ```
 
-**30 tables, 232 columns** at schema v29.  A `bundle.ndr_rule` note for
+**31 tables, 240 columns** at schema v31 — counted from a fresh database
+rather than carried forward: the line still read "30 tables, 232 columns"
+after v30 had added a whole table (`cell_rect`) and a column
+(`cell.teg_mode`).  A `bundle.ndr_rule` note for
 anyone reading the DDL: that column is added by the v21 *migration* and is
 absent from `BUNDLE_DDL`, so it exists in every database (a fresh one
 migrates from 0) but cannot be found by reading the `CREATE TABLE` text
@@ -325,6 +330,20 @@ instance gets them transformed with it.  A pre-v30 checkpoint holds no rect
 rows and every cell reads `THRU`, which is exactly the design it stored: a
 cell that WANTED a footprint could not have said so.  See
 [`set_cell_rects`](#set_cell_rects).
+
+v31 added the region override's **declaration order** — `grid_override.ord`.
+`RoutingGrid::effective_pattern_at` returns the FIRST override containing the
+point, so with overlapping regions on one layer the order is not a
+presentation detail but part of what the stored grid MEANS, and nothing
+carried it: rows came back sorted by coordinate, which could hand the
+reopened session a different winner than the one that wrote it, and an upsert
+keeps a re-declared region's original rowid, so rowid alone could not replace
+the sort.  The set is now written WHOLE, in the order the live grid holds it
+(`_sync_grid_overrides`, from the same journal `open_bdb` replays), and a
+region declared twice keeps its FIRST pattern — which is the one every lookup
+returns, where the upsert had stored the later one.  A pre-v31 checkpoint has
+every `ord` 0 and is read by the rowid tie-break, i.e. in exactly the order it
+always was.
 
 `tools/bdb_serialize.py` preserves the version across the `*.bdb.sql`
 round-trip.

@@ -950,6 +950,40 @@ class PersistMixin:
         digest = hashlib.sha256(repr(rows).encode("utf-8")).hexdigest()
         self.bdb.set_route_snapshot(digest, n_seg, n_via, stage,
                                     n_net_seg, n_net_via)
+        self._sync_layer_stack()
+
+    def _sync_layer_stack(self):
+        """Record WHICH LAYERS ARE TOP beside the route they carry.
+
+        The checkpoint holds the grid (v29) but never held the layer STACK:
+        `track_pattern.is_horiz` says which way a layer runs and nothing says
+        whether it is TOP — and TOP is not decoration, it is what decides
+        whether a leaf cell's footprint blocks a wire.  Every keepout-aware
+        stage in the engine audits against `Floorplan::low_layer_keepouts`,
+        which is the declared zones PLUS every solid leaf footprint on the
+        NON-TOP layers; a reader with only the tables could see the zones and
+        not the footprints, so `tools/independent_audit.py` could call a
+        LOW-layer wire over a cell clean (Codex P1 on #942).
+
+        Written here, at the route snapshot, rather than at `def_layer`: the
+        stack can be built by a script, by `import_lef_tech`, or by one
+        replacing the other, and a fact this reader needs about a ROUTE
+        belongs where the route is written — one site that cannot be reached
+        without it being current.
+        """
+        if self.bdb is None or self.layers is None:
+            return
+        names = {i: n for n, i in getattr(self, "_layer_name_map", {}).items()}
+        rows = []
+        for horiz, d in ((True, buda.LayerDir.HORIZONTAL),
+                         (False, buda.LayerDir.VERTICAL)):
+            for lid in self.layers.get_layer_ids_by_dir(d):
+                rows.append({"id": int(lid), "name": names.get(int(lid), ""),
+                             "horiz": horiz,
+                             "top": bool(self.layers.is_top(int(lid)))})
+        rows.sort(key=lambda r: r["id"])
+        import json as _json
+        self.bdb.meta_set("layer_stack", _json.dumps(rows, sort_keys=True))
 
     def _persist_bundle_vias(self, w):
         """Record one symbolic bus-via per layer-transition in a bundle's placed
@@ -2039,10 +2073,12 @@ class PersistMixin:
             if kind == "pattern":
                 lid, pattern, is_horiz, source = payload
                 self._write_track_pattern(lid, pattern, is_horiz, source)
-            elif kind == "override":
-                self._write_grid_override(*payload)
             elif kind == "keepouts":
                 self._write_keepouts(payload)
+        # Overrides are written as a SET, in one pass, for the reason
+        # `_sync_grid_overrides` gives — replaying them one at a time cannot
+        # express "this is the whole list, in this order".
+        self._sync_grid_overrides()
 
     def _write_track_pattern(self, layer_id, pattern, is_horiz, source):
         row = buda.TrackPatternRow()
@@ -2065,19 +2101,57 @@ class PersistMixin:
             return
         self._write_track_pattern(layer_id, pattern, is_horiz, source)
 
-    def _write_grid_override(self, layer_id, x1, y1, x2, y2, pattern):
-        row = buda.GridOverrideRow()
-        row.layer_id = int(layer_id)
-        row.x1, row.y1, row.x2, row.y2 = int(x1), int(y1), int(x2), int(y2)
-        row.origin = float(pattern.origin)
-        row.slots  = self._slots_json(pattern)
-        self.bdb.set_grid_override(row)
+    def _sync_grid_overrides(self):
+        """Store the region overrides AS A LIST, in the order the live grid
+        holds them.
+
+        Order is part of what an override set MEANS: `effective_pattern_at`
+        returns the first override containing the point, so with overlapping
+        regions on one layer the order decides which pattern wins.  Writing
+        them one at a time could not carry that — an upsert keeps a
+        re-declared region's original row, so a session declaring the same
+        regions in a different order wrote a checkpoint that restored the OLD
+        winner, and it stored the LATER pattern for a repeated region where
+        the live grid keeps the EARLIER one (Codex P2 on #942).
+
+        The journal is the live list: `_journal_grid` appends each
+        declaration and `_restore_grid_from_bdb` appends what it installs, in
+        the same place `RoutingGridStack::add_override` puts it — so mirroring
+        the journal is mirroring the grid, and there is no second rule to keep
+        in step.  A region declared twice collapses to its FIRST entry, which
+        is the one the lookup returns.
+
+        Cheap because the object is small — the whole tree declares 64
+        overrides across every flow — and the write only happens when a flow
+        declares one at all.
+        """
+        seen, rows = set(), []
+        for kind, payload in self._grid_journal:
+            if kind != "override":
+                continue
+            layer_id, x1, y1, x2, y2, pattern = payload
+            key = (int(layer_id), int(x1), int(y1), int(x2), int(y2))
+            if key in seen:
+                continue                    # first declaration wins, as live
+            seen.add(key)
+            row = buda.GridOverrideRow()
+            row.layer_id = key[0]
+            row.x1, row.y1, row.x2, row.y2 = key[1:]
+            row.origin = float(pattern.origin)
+            row.slots  = self._slots_json(pattern)
+            row.ord    = len(rows)
+            rows.append(row)
+        if not rows:
+            return
+        self.bdb.clear_grid_overrides()
+        for row in rows:
+            self.bdb.set_grid_override(row)
 
     def _persist_grid_override(self, layer_id, x1, y1, x2, y2, pattern):
         self._journal_grid("override", (layer_id, x1, y1, x2, y2, pattern))
         if self.bdb is None:
             return
-        self._write_grid_override(layer_id, x1, y1, x2, y2, pattern)
+        self._sync_grid_overrides()
 
     def _persist_keepouts(self, zones):
         """Record a burst of keepout declarations and write it through.
@@ -2147,10 +2221,22 @@ class PersistMixin:
             apply_pattern_layer_facts(self.layers, lid, pat)
             restored_layers.append(lid)
         for r in ovrs:
-            if self.routing_grid is None or not self.routing_grid.has_layer(r.layer_id):
-                continue
             pat = buda.TrackPattern(origin=r.origin,
                                     slots=self._slots_from_json(r.slots))
+            # Journalled in the position `add_override` is about to give it,
+            # so the journal keeps mirroring the live list and
+            # `_sync_grid_overrides` writes back what this session actually
+            # routes against — a restored override a later declaration
+            # overlaps would otherwise be dropped from the checkpoint by the
+            # next sync.  Journalled even when it CANNOT be installed (a
+            # layer this session never declared): it is still part of the
+            # stored set, it can shadow nothing live because that layer has
+            # no live entries, and dropping it would lose a checkpoint's own
+            # data on the next sync.
+            self._journal_grid("override",
+                               (r.layer_id, r.x1, r.y1, r.x2, r.y2, pat))
+            if self.routing_grid is None or not self.routing_grid.has_layer(r.layer_id):
+                continue
             self.routing_grid.add_override(r.layer_id, r.x1, r.y1, r.x2, r.y2, pat)
         n_zones = 0
         for r in zones:

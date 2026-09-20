@@ -33,6 +33,7 @@ that moved them is a result, not a regression:
 """
 import re
 import shutil
+import sqlite3
 import subprocess
 import sys
 from pathlib import Path
@@ -730,3 +731,55 @@ def test_without_the_flag_a_round_leaves_no_checkpoint(tmp_path):
     hdr_line = next(ln for ln in table.splitlines()
                     if ln.startswith("| vehicle |"))
     assert "judge" not in hdr_line, table
+
+
+def _judge_verdict_proc():
+    """The driver's own `judge_verdict`, lifted out of `converge.tcl`.
+
+    The driver is a top-to-bottom script — sourcing it RUNS the rounds — so
+    the proc is extracted by brace matching rather than copied, which is the
+    point: a copy would pass this test forever while the file it is meant to
+    guard drifted away from it.
+    """
+    text = _DRIVER.read_text()
+    i = text.index("proc judge_verdict ")
+    j = text.index("{", text.index("}", i))     # the body's opening brace
+    depth, k = 0, j
+    while True:
+        if text[k] == "{":
+            depth += 1
+        elif text[k] == "}":
+            depth -= 1
+            if depth == 0:
+                break
+        k += 1
+    return text[i:k + 1]
+
+
+def test_a_rerun_never_reports_the_previous_runs_judge_json(tmp_path):
+    """The sidecar is cleared BEFORE the judge runs, as the checkpoint and
+    the report already are.
+
+    `judge_verdict` reads `<round>.judge.json` for the violation total, and
+    the judge writes that file only when it reaches a verdict — so a rerun
+    of a named round whose judge did not write one would leave the previous
+    run's file in place, and the run would publish a sidecar naming this
+    round while holding the last one's numbers (Codex P2 on #942).  Here the
+    judge declines outright (exit 2, an empty database): the column is `—`
+    either way, and what separates the fix from the defect is that the stale
+    artifact is gone rather than left behind contradicting the table.
+    """
+    out = tmp_path / "out"
+    out.mkdir()
+    ckpt = tmp_path / "r1.bdb"
+    sqlite3.connect(str(ckpt)).close()          # a real file with no route
+    stale = out / "r1.judge.json"
+    stale.write_text('{"clean": false, "total": 999}\n')
+
+    script = tmp_path / "drive.tcl"
+    script.write_text(f'set repo {{{_ROOT}}}\n' + _judge_verdict_proc() +
+                      f'\nputs [judge_verdict {{{ckpt}}} {{{out}}} r1]\n')
+    r = _tclsh(script, cwd=tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert r.stdout.strip() == "—", r.stdout + r.stderr
+    assert not stale.exists(), "the previous run's judge JSON survived"

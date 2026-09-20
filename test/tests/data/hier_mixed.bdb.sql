@@ -1,5 +1,5 @@
 -- BUDA BDB text dump (sqlite3 iterdump); regenerate via tools/bdb_serialize.py
-PRAGMA user_version=30;
+PRAGMA user_version=31;
 BEGIN TRANSACTION;
 CREATE TABLE bundle (
         id             TEXT PRIMARY KEY,
@@ -200,6 +200,7 @@ CREATE TABLE grid_override (
             x2 INTEGER NOT NULL, y2 INTEGER NOT NULL,
             origin REAL NOT NULL DEFAULT 0,
             slots  TEXT NOT NULL DEFAULT '[]',
+            ord    INTEGER NOT NULL DEFAULT 0,
             PRIMARY KEY (layer_id, x1, y1, x2, y2)
         );
 CREATE TABLE grp (
@@ -226,7 +227,7 @@ CREATE TABLE meta (
             key   TEXT PRIMARY KEY,
             value TEXT
         );
-INSERT INTO "meta" VALUES('schema_version','30');
+INSERT INTO "meta" VALUES('schema_version','31');
 INSERT INTO "meta" VALUES('bdb_tool','buda-bdb');
 CREATE TABLE ndr_rule (
             name         TEXT PRIMARY KEY,

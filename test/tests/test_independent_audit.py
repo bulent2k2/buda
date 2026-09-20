@@ -546,6 +546,127 @@ def test_an_unreadable_design_is_unjudgeable_not_dirty(tmp_path):
     assert "cannot judge" in out and "no such file" in out, out
 
 
+def test_a_corrupt_database_is_unjudgeable_not_dirty(routed, tmp_path):
+    """The file EXISTS and cannot be read.  `sqlite3.DatabaseError` escaping
+    the audit exits 1 through Python's own traceback — the status this tool
+    documents as violations — so a truncated or garbage checkpoint would be
+    booked as a broken design (Codex P2 on #942)."""
+    p = tmp_path / "corrupt.bdb"
+    p.write_bytes(b"SQLite format 3\x00" + b"\xff" * 4096)
+    code, out = _judge(p)
+    assert code == 2, out
+    assert "cannot judge" in out and "cannot be read" in out, out
+    assert "Traceback" not in out, out
+
+
+def test_a_malformed_sql_dump_is_unjudgeable_not_dirty(tmp_path):
+    """The `.bdb.sql` half of the same rule: a half-written text dump is
+    replayed with `executescript`, which raises rather than returning a
+    design."""
+    p = tmp_path / "half.bdb.sql"
+    p.write_text("CREATE TABLE net_segment (bundle_id INTEGER,\n")
+    code, out = _judge(p)
+    assert code == 2, out
+    assert "cannot be read" in out, out
+
+
+def test_an_unparseable_slot_list_is_unjudgeable_not_dirty(routed, tmp_path):
+    """A stored track pattern whose slots are not JSON.  This one is the
+    reason the guard is around the WHOLE audit and not around the open: the
+    file opens fine and the failure surfaces at the query that reads it —
+    and a grid that cannot be parsed makes every on-grid question vacuous,
+    which is exit 2's own definition."""
+    p = _mutated(routed, tmp_path,
+                 "UPDATE track_pattern SET slots = '[{not json'")
+    code, out = _judge(p)
+    assert code == 2, out
+    assert "cannot be read" in out, out
+    assert "Traceback" not in out, out
+
+
+def _leaf_over_the_wire(routed, tmp_path, name, low=True):
+    """Put a leaf cell over `_NET`'s wire, and say whether the layer it runs
+    on is TOP.
+
+    The cell is ADDED rather than an existing one moved: every leaf in this
+    vehicle is an endpoint of some net, so moving one strands its own wires
+    and the design comes back OPEN before the rule under test is reached.
+    A component with no pins is an obstacle and nothing else, which is
+    exactly the fault being planted."""
+    import json
+    p = str(tmp_path / name)
+    shutil.copy(routed, p)
+    con = sqlite3.connect(p)
+    nid = con.execute("SELECT id FROM net WHERE name=?", (_NET,)).fetchone()[0]
+    x1, y1, x2, y2, layer = con.execute(
+        "SELECT x1,y1,x2,y2,layer FROM net_segment WHERE net_id=?",
+        (nid,)).fetchone()
+    con.execute(
+        "INSERT INTO component(name,cell,parent_id,depth,x1,y1,x2,y2,"
+        "                      is_leaf,is_port,is_replicated,orient)"
+        " VALUES('blocker','leaf',NULL,0,?,?,?,?,1,0,0,'N')",
+        (x1 - 10, y1 - 10, x2 + 10, y2 + 10))
+    if low:
+        row = con.execute(
+            "SELECT value FROM meta WHERE key='layer_stack'").fetchone()[0]
+        stack = json.loads(row)
+        for d in stack:
+            if d["id"] == layer:
+                d["top"] = False
+        con.execute("UPDATE meta SET value=? WHERE key='layer_stack'",
+                    (json.dumps(stack, sort_keys=True),))
+    con.commit()
+    con.close()
+    return p
+
+
+def test_a_wire_over_a_cell_on_a_non_top_layer_is_a_keepout(routed, tmp_path):
+    """The keepouts NOBODY DECLARED.
+
+    Every keepout-aware stage in the engine tests against
+    `Floorplan::low_layer_keepouts` — the declared zones PLUS every solid
+    leaf footprint on the non-TOP layers — and `verify.cpp` audits against
+    that same list.  A judge reading only the `keepout` table would call a
+    LOW-layer wire lying over a cell clean where `check_design` reports
+    KEEPOUT_CROSS, which is the one direction a referee must never be weaker
+    in (Codex P1 on #942)."""
+    p = _leaf_over_the_wire(routed, tmp_path, "low.bdb", low=True)
+    code, out = _judge(p)
+    assert code == 1, out
+    assert _kinds(out) == {"KEEPOUT"}, out      # the planted fault and no other
+    assert "lies over the leaf cell" in out, out
+    assert "not a TOP layer" in out, out
+
+
+def test_the_same_wire_over_the_same_cell_on_a_TOP_layer_is_fine(routed,
+                                                                 tmp_path):
+    """The control that keeps the rule honest, and it is the whole reason the
+    layer classification had to be stored: routing OVER a cell on a TOP layer
+    is ordinary over-the-cell routing, not a violation.  Same geometry, same
+    cell, one flag different."""
+    p = _leaf_over_the_wire(routed, tmp_path, "top.bdb", low=False)
+    code, out = _judge(p)
+    assert code == 0, out
+    assert "VERDICT: CLEAN" in out, out
+
+
+def test_a_checkpoint_without_the_layer_types_says_the_rule_was_not_applied(
+        routed, tmp_path):
+    """A checkpoint written before the classification was stored still
+    judges — it just cannot judge THIS rule, and says so.  Silence would be
+    the bad outcome: a CLEAN that quietly covered less than the one beside it
+    in the same table."""
+    p = _leaf_over_the_wire(routed, tmp_path, "old.bdb", low=True)
+    con = sqlite3.connect(p)
+    con.execute("DELETE FROM meta WHERE key='layer_stack'")
+    con.commit()
+    con.close()
+    code, out = _judge(p)
+    assert code == 0, out                  # the planted fault is invisible
+    assert "does not record which layers are TOP" in out, out
+    assert "KEEPOUT covers the declared zones alone" in out, out
+
+
 def test_a_wire_inside_one_override_crosses_no_boundary(routed, tmp_path):
     """The note counts wires whose effective pattern CHANGES along them.
 

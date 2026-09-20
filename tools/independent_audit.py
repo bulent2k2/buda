@@ -102,6 +102,15 @@ TOL = 1e-6
 KINDS = ("OFF_GRID", "SHORT", "KEEPOUT", "OPEN", "NO_METAL", "LAYER_DIR")
 
 
+# What "cannot be read" is made of: a corrupt or truncated SQLite file, a
+# `.bdb.sql` that is not valid SQL or not valid UTF-8, a slot list that is not
+# valid JSON, a path that turns out to be unreadable between the isfile check
+# and the open.  Named rather than spelled `except Exception` so a genuine
+# defect in this file still crashes loudly instead of being reported as an
+# unjudgeable design.
+UNREADABLE = (sqlite3.Error, json.JSONDecodeError, OSError, UnicodeDecodeError)
+
+
 class Unjudgeable(Exception):
     """The file holds nothing this audit can speak about.  Distinct from a
     dirty verdict: exit 2, never 1 — "I cannot judge this" and "this is
@@ -432,8 +441,32 @@ def check_shorts(wires, max_report):
     return bad, n
 
 
+def read_layer_stack(con):
+    """{layer id -> {"name", "horiz", "top"}}, or None when the checkpoint
+    does not record it.
+
+    Which layers are TOP is not decoration: it decides whether a solid cell
+    footprint blocks a wire (`read_leaf_keepouts`).  `track_pattern` says
+    which way a layer runs and nothing says whether it is TOP, so this is a
+    meta row the session writes beside the route snapshot; a checkpoint from
+    before that is judged WITHOUT the implicit keepouts, and says so rather
+    than passing them over in silence.
+    """
+    if not _table_exists(con, "meta"):
+        return None
+    row = con.execute("SELECT value FROM meta WHERE key='layer_stack'").fetchone()
+    if not row or not row[0]:
+        return None
+    out = {}
+    for d in json.loads(row[0]):
+        out[int(d["id"])] = {"name": d.get("name", ""),
+                             "horiz": bool(d.get("horiz")),
+                             "top": bool(d.get("top"))}
+    return out or None
+
+
 def read_keepouts(con):
-    """(layer -> [(x1, y1, x2, y2, net)]).
+    """(layer -> [(x1, y1, x2, y2, who, kind)]).
 
     An EMPTY layer list governs no layer — that is what the restore does with
     it, so a zone declared with no layers blocks nothing here either.
@@ -446,8 +479,67 @@ def read_keepouts(con):
             if t.strip():
                 out[int(t)].append((float(r["x1"]), float(r["y1"]),
                                     float(r["x2"]), float(r["y2"]),
-                                    r["net"] or ""))
+                                    r["net"] or "", "zone"))
     return out
+
+
+def read_leaf_keepouts(con, layers):
+    """The keepouts nobody declared: every solid LEAF cell's footprint, on
+    every non-TOP layer.
+
+    This is not the judge inventing a rule — it is the rule the engine
+    enforces everywhere.  `Floorplan::low_layer_keepouts` hands the planner,
+    NUTS, DetailedNUTS and `verify.cpp` the declared zones PLUS one zone per
+    non-container leaf block on the non-TOP layers, and a reader that saw
+    only the `keepout` table could therefore call a LOW-layer wire over a
+    cell clean where `check_design` says KEEPOUT_CROSS (Codex P1 on #942).
+
+    A container is transparent by design (its content is the obstacle, not
+    its box), an UNPLACED component has no footprint, and a MULTI-RECT cell
+    is skipped rather than approximated: its rects tile its bbox exactly, so
+    using the bbox would claim the notches too and accuse a wire that routes
+    through a gap the design left open.  Both are counted and reported.  A
+    boundary PORT is skipped too — it is a terminal a wire is supposed to
+    reach, so blocking it would accuse the very metal that lands on it.
+
+    Applied over the whole design, which is STRICTER than the engine: the
+    engine enforces it per routing frame, where a container is transparent
+    and a deep leaf inside it is not in the frame at all, so a top-level LOW
+    wire over a distant cell is permitted there.  That is the right way round
+    for a judge — the metal is physically over a cell either way — and it is
+    measured silent: `flow/soc_small.buda` (5,680 LOW wires over 219 leaves),
+    `flow/soc_mid.buda` (21,456 over 843) and a bottom-up `soc.tcl 2` round
+    (536 over 63) report ZERO, while the same probe on the TOP layers finds
+    1,461 crossings on soc_small alone — over-the-cell routing, legal, and
+    the control that says the test can see anything at all.
+    """
+    out, notes = defaultdict(list), {"multirect": 0, "unplaced": 0}
+    if layers is None or not _table_exists(con, "component"):
+        return out, notes
+    low = sorted(lid for lid, l in layers.items() if not l["top"])
+    if not low:
+        return out, notes
+    multirect = set()
+    if _table_exists(con, "cell_rect"):
+        multirect = {r[0] for r in
+                     con.execute("SELECT DISTINCT cell FROM cell_rect")}
+    for r in _rows(con, "SELECT name,cell,x1,y1,x2,y2 FROM component"
+                        " WHERE is_leaf=1 AND is_port=0"):
+        # Degeneracy is the test, not a sign check: the no-placement
+        # convention is `-1,-1,-1,-1`, which is degenerate, while a design
+        # legitimately placed across the origin is not this audit's business
+        # to refuse.
+        if r["x1"] is None or r["x2"] <= r["x1"] or r["y2"] <= r["y1"]:
+            notes["unplaced"] += 1
+            continue
+        if r["cell"] in multirect:
+            notes["multirect"] += 1
+            continue
+        z = (float(r["x1"]), float(r["y1"]), float(r["x2"]), float(r["y2"]),
+             r["name"], "leaf")
+        for lid in low:
+            out[lid].append(z)
+    return out, notes
 
 
 def check_keepouts(wires, zones, max_report):
@@ -480,10 +572,17 @@ def check_keepouts(wires, zones, max_report):
             if hit:
                 n += 1
                 if len(bad) < max_report:
-                    who = f" ({hit[4]})" if hit[4] else ""
-                    bad.append((w, f"lies over a keepout on M{layer} at "
-                                   f"({hit[0]:g},{hit[1]:g})-"
-                                   f"({hit[2]:g},{hit[3]:g}){who}"))
+                    where = (f"({hit[0]:g},{hit[1]:g})-"
+                             f"({hit[2]:g},{hit[3]:g})")
+                    if hit[5] == "leaf":
+                        bad.append((w, f"lies over the leaf cell {hit[4]} "
+                                       f"at {where} — M{layer} is not a TOP "
+                                       f"layer, so the cell's own footprint "
+                                       f"blocks it"))
+                    else:
+                        who = f" ({hit[4]})" if hit[4] else ""
+                        bad.append((w, f"lies over a keepout on M{layer} at "
+                                       f"{where}{who}"))
     return bad, n
 
 
@@ -669,7 +768,12 @@ def audit(path, max_report=8):
     off_grid, crossing = check_on_grid(wires, grid)
     dirs = check_layer_dir(wires, grid)
     shorts, n_short = check_shorts(wires, max_report)
-    ko, n_ko = check_keepouts(wires, read_keepouts(con), max_report)
+    layers = read_layer_stack(con)
+    zones = read_keepouts(con)
+    leaf_zones, leaf_notes = read_leaf_keepouts(con, layers)
+    for lid, zs in leaf_zones.items():
+        zones[lid].extend(zs)
+    ko, n_ko = check_keepouts(wires, zones, max_report)
     conn, n_open, n_no_metal, unplaced, scoped = check_connectivity(
         con, wires, max_report)
 
@@ -704,6 +808,10 @@ def audit(path, max_report=8):
             "wires_crossing_a_region_override": crossing,
             "endpoint_blocks_unplaced": unplaced,
             "bundle_membership_known": scoped,
+            "layer_types_known": layers is not None,
+            "leaf_cells_blocking": sum(len(z) for z in leaf_zones.values()),
+            "leaf_cells_multirect": leaf_notes["multirect"],
+            "leaf_cells_unplaced": leaf_notes["unplaced"],
         },
         "examples": examples,
     }
@@ -728,6 +836,16 @@ def report(res, quiet=False):
     if notes["endpoint_blocks_unplaced"]:
         print(f"[judge] note: {notes['endpoint_blocks_unplaced']} endpoint "
               f"block(s) are unplaced — reach not judged for those")
+    if not notes["layer_types_known"]:
+        print("[judge] note: this checkpoint does not record which layers "
+              "are TOP, so the implicit keepouts — every solid leaf cell's "
+              "footprint on the non-TOP layers — were NOT judged; KEEPOUT "
+              "covers the declared zones alone")
+    if notes["leaf_cells_multirect"]:
+        print(f"[judge] note: {notes['leaf_cells_multirect']} leaf "
+              f"component(s) have a multi-rect footprint — not judged as "
+              f"implicit keepouts, since their bbox includes notches the "
+              f"design leaves routable")
     if not notes["bundle_membership_known"]:
         print("[judge] note: this design records no bundle membership "
               "(`bundle_net` is empty), so a net with NO metal cannot be "
@@ -752,6 +870,20 @@ def main(argv=None):
         res = audit(a.design, max_report=a.max_report)
     except Unjudgeable as e:
         print(f"independent_audit: cannot judge: {e}", file=sys.stderr)
+        return 2
+    except UNREADABLE as e:
+        # A file that cannot be READ is the same verdict as one that holds
+        # nothing to judge, and emphatically not the same as a dirty route:
+        # an uncaught sqlite3.DatabaseError exits 1 through Python's own
+        # traceback, which is the status this file documents as violations,
+        # so a harness gating on the contract would book a truncated
+        # checkpoint or a half-written `.bdb.sql` as a broken design (Codex
+        # P2 on #942 — the missing-path guard above covers only the case
+        # where there is no file at all).  Caught around the WHOLE audit
+        # rather than at the open, because the reads are lazy: a corrupt
+        # page surfaces at whichever query first touches it.
+        print(f"independent_audit: cannot judge: {a.design} cannot be read "
+              f"({type(e).__name__}: {e})", file=sys.stderr)
         return 2
     report(res, quiet=a.quiet)
     if a.json:

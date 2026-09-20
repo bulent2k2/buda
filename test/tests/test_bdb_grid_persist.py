@@ -290,3 +290,133 @@ def test_overlapping_overrides_keep_their_declaration_order(tmp_path):
     assert at(s2) == at(s1), (
         "the reopened checkpoint resolves the overlap to a different "
         "pattern than the session that wrote it")
+
+
+def test_a_redeclared_region_keeps_the_pattern_the_grid_uses(tmp_path):
+    """Declare the SAME region twice: `add_pattern_override` appends both and
+    `effective_pattern_at` returns the FIRST, so the first pattern is the one
+    in force — and the one the checkpoint must hold.
+
+    The write-through upserted with `DO UPDATE`, storing the LATER pattern, so
+    the checkpoint disagreed with the session that wrote it about a grid
+    neither had any reason to doubt (Codex P2 on #942)."""
+    db = str(tmp_path / "dup.bdb")
+    setup = ["def_layer 4 M4 H LOW 30"]
+    s1, _ = _session(setup + [
+        f"open_bdb {db}",
+        "def_track_pattern 4 0 _ 1 1",
+        "add_grid_override 4 0 0 200 200 0 _ 4 4",     # pitch 8, in force
+        "add_grid_override 4 0 0 200 200 0 _ 9 9",     # pitch 18, shadowed
+    ])
+    at = lambda s: (s.routing_grid.get_layer_grid(4)
+                    .effective_pattern_at(50, 50).unit_pitch())
+    assert at(s1) == 8.0, "the first declaration wins in the session"
+
+    s2, out = _session(setup + [f"open_bdb {db}"])
+    assert "restored the routing grid" in out
+    assert at(s2) == 8.0, "the checkpoint stored the shadowed pattern"
+
+
+def test_an_override_declared_before_the_open_is_stored_where_it_wins(tmp_path):
+    """Declarations made BEFORE `open_bdb` go FIRST in the live grid — the
+    restore appends the checkpoint's overrides after them — so a region this
+    session declared shadows an overlapping one the checkpoint holds.  The
+    stored set has to say the same thing, or the next session resolves the
+    overlap the other way.
+
+    Writing each declaration through on its own could not: the stored rows
+    kept their positions and the replayed one landed after them, so the
+    checkpoint restored the OLD winner (Codex P2 on #942).  The journal is
+    the live list — `_restore_grid_from_bdb` records what it installs, in the
+    place it installs it — and the whole set is written from it in order.
+
+    Codex's own scenario, the same design REBUILT with its regions declared
+    the other way round, does NOT diverge and is worth saying why: `open_bdb`
+    installs the checkpoint's overrides into the live grid before the flow's
+    lines run, so the rebuilding session inherits the stored order too and
+    both resolve the overlap identically (asserted below).  The divergence is
+    reachable, but through the pre-open declaration, which is the commonest
+    shape in this tree — the same asymmetry the journal itself exists for.
+    """
+    db = str(tmp_path / "pre.bdb")
+    setup = ["def_layer 4 M4 H LOW 30"]
+    wide = "add_grid_override 4 20 0 200 200 0 _ 4 4"      # pitch 8
+    narrow = "add_grid_override 4 0 0 100 100 0 _ 1 1"     # pitch 2
+    at = lambda s: (s.routing_grid.get_layer_grid(4)
+                    .effective_pattern_at(50, 50).unit_pitch())
+
+    # Session 1 builds the checkpoint: wide first, so wide wins.
+    s1, _ = _session(setup + [f"open_bdb {db}", "def_track_pattern 4 0 _ 1 1",
+                              wide, narrow])
+    assert at(s1) == 8.0
+
+    # A REBUILD declaring them the other way round inherits the stored order
+    # at the open, so its own live grid still resolves to wide — the
+    # checkpoint and the session agree, which is the claim that matters.
+    s2, _ = _session(setup + [f"open_bdb {db}", "def_track_pattern 4 0 _ 1 1",
+                              narrow, wide])
+    assert at(s2) == 8.0
+
+    # Declared BEFORE the open: narrow goes in first and wins in the session.
+    s3, _ = _session(setup + ["def_track_pattern 4 0 _ 1 1", narrow,
+                              f"open_bdb {db}"])
+    assert at(s3) == 2.0, "a pre-open declaration is first in the live grid"
+
+    # ...and the checkpoint now says so too.
+    s4, out = _session(setup + [f"open_bdb {db}"])
+    assert "restored the routing grid" in out
+    assert at(s4) == at(s3), (
+        "the checkpoint restores a different winner than the session that "
+        "wrote it")
+    # both regions survived the rewrite — a set written in order, not a subset
+    assert len(s4.bdb.grid_overrides()) == 2
+
+
+def test_the_row_writer_keeps_the_first_declaration_of_a_region(tmp_path):
+    """The single-row API's own rule, at the BDB level.
+
+    `_sync_grid_overrides` writes the set and collapses a repeat before SQL
+    sees it, so this rule is not on that path — but `set_grid_override` is a
+    public writer and must mean what the grid means: two declarations of one
+    region are both appended live and the FIRST answers every lookup, so an
+    upsert that overwrites with the LATER pattern stores a grid nobody
+    routed against (Codex P2 on #942).  `ord` is stored, and read back in
+    it."""
+    db = buda.BDB(str(tmp_path / "rows.bdb"))
+    def row(x1, slots, ord_):
+        r = buda.GridOverrideRow()
+        r.layer_id, r.x1, r.y1, r.x2, r.y2 = 4, x1, 0, x1 + 100, 100
+        r.origin, r.slots, r.ord = 0.0, slots, ord_
+        return r
+    first = '[{"t": "SIGNAL", "l": "", "w": 4.0, "s": 4.0}]'
+    later = '[{"t": "SIGNAL", "l": "", "w": 9.0, "s": 9.0}]'
+    db.set_grid_override(row(20, first, 0))
+    db.set_grid_override(row(0, later, 1))
+    db.set_grid_override(row(20, later, 7))     # the repeat, ignored
+
+    got = db.grid_overrides()
+    assert [(r.x1, r.ord) for r in got] == [(20, 0), (0, 1)]
+    assert got[0].slots == first, "the shadowed declaration overwrote the live one"
+
+
+def test_a_stored_override_for_an_undeclared_layer_survives(tmp_path):
+    """A session writing the override SET must not delete what it cannot
+    install.
+
+    The set is mirrored from the journal, and the restore skips an override
+    whose layer this session never declared — so journalling only what it
+    INSTALLED would have dropped that row from the checkpoint the moment the
+    session declared any override of its own.  It shadows nothing live (its
+    layer has no live entries), so it rides along in its stored order."""
+    db = str(tmp_path / "skip.bdb")
+    both = ["def_layer 4 M4 H LOW 30", "def_layer 5 M5 V LOW 30"]
+    _session(both + [f"open_bdb {db}",
+                     "def_track_pattern 4 0 _ 1 1", "def_track_pattern 5 0 _ 1 1",
+                     "add_grid_override 4 0 0 100 100 0 _ 2 2",
+                     "add_grid_override 5 0 0 100 100 0 _ 2 2"])
+
+    # a session that knows nothing about M5, and declares an override of its own
+    s, _ = _session(["def_layer 4 M4 H LOW 30", f"open_bdb {db}",
+                     "add_grid_override 4 200 0 300 100 0 _ 3 3"])
+    layers = sorted(r.layer_id for r in s.bdb.grid_overrides())
+    assert layers == [4, 4, 5], layers

@@ -503,6 +503,7 @@ void BDB::_create_schema() {
             x2 INTEGER NOT NULL, y2 INTEGER NOT NULL,
             origin REAL NOT NULL DEFAULT 0,
             slots  TEXT NOT NULL DEFAULT '[]',
+            ord    INTEGER NOT NULL DEFAULT 0,
             PRIMARY KEY (layer_id, x1, y1, x2, y2)
         );
         CREATE TABLE IF NOT EXISTS keepout (
@@ -959,6 +960,16 @@ void BDB::_migrate() {
               " x1 REAL NOT NULL, y1 REAL NOT NULL,"
               " x2 REAL NOT NULL, y2 REAL NOT NULL,"
               " PRIMARY KEY (cell, ord));");
+    }
+    if (v < 31) {
+        // v30 -> v31: the region override's DECLARATION order.  A pre-v31
+        // checkpoint stored the set without it; `ord` defaults to 0 there,
+        // and `grid_overrides()` falls back to rowid for the ties, which is
+        // exactly the order that checkpoint was read in before — so an old
+        // file resumes to the same grid it always did.
+        sqlite3_exec(_db,
+            "ALTER TABLE grid_override ADD COLUMN ord INTEGER NOT NULL DEFAULT 0",
+            nullptr, nullptr, nullptr);   // ignored if the column already exists
     }
     if (v < SCHEMA_VERSION) {
         // Refresh provenance (incl. the meta.schema_version mirror) on EVERY
@@ -4525,11 +4536,17 @@ std::vector<TrackPatternRow> BDB::track_patterns() const {
 void BDB::clear_track_patterns() { _exec("DELETE FROM track_pattern;"); }
 
 void BDB::set_grid_override(const GridOverrideRow& r) {
+    // DO NOTHING, not DO UPDATE.  Two declarations of the SAME region are
+    // both appended to the live grid and the FIRST one wins every lookup
+    // (`effective_pattern_at` is first-match), so the pattern to keep is the
+    // one already stored; DO UPDATE stored the LATER pattern and made the
+    // checkpoint disagree with the session that wrote it.  The caller writes
+    // the whole set in declaration order (`_sync_grid_overrides`), so a
+    // conflict here means a genuine re-declaration and nothing else.
     Stmt s(_db,
-        "INSERT INTO grid_override(layer_id,x1,y1,x2,y2,origin,slots)"
-        " VALUES(?,?,?,?,?,?,?)"
-        " ON CONFLICT(layer_id,x1,y1,x2,y2) DO UPDATE SET"
-        " origin=excluded.origin, slots=excluded.slots");
+        "INSERT INTO grid_override(layer_id,x1,y1,x2,y2,origin,slots,ord)"
+        " VALUES(?,?,?,?,?,?,?,?)"
+        " ON CONFLICT(layer_id,x1,y1,x2,y2) DO NOTHING");
     sqlite3_bind_int   (s, 1, r.layer_id);
     sqlite3_bind_int   (s, 2, r.x1);
     sqlite3_bind_int   (s, 3, r.y1);
@@ -4537,6 +4554,7 @@ void BDB::set_grid_override(const GridOverrideRow& r) {
     sqlite3_bind_int   (s, 5, r.y2);
     sqlite3_bind_double(s, 6, r.origin);
     sqlite3_bind_text  (s, 7, r.slots.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int   (s, 8, r.ord);
     step_checked(_db, s, "set_grid_override");
 }
 
@@ -4546,13 +4564,14 @@ std::vector<GridOverrideRow> BDB::grid_overrides() const {
     // overlapping regions on one layer the order rows come back in decides
     // which pattern wins — and sorting by coordinates restored a different
     // winner than the session that wrote them had (Codex P2 on #942).
-    // `rowid` is insertion order, which is declaration order, and it is as
-    // deterministic as the coordinate sort it replaces.  The exposure it
-    // leaves is a VACUUM, which renumbers rowids; nothing in this tree
-    // vacuums a BDB, and an explicit ordinal column is the stronger fix if
-    // one ever does.
-    Stmt q(_db, "SELECT layer_id,x1,y1,x2,y2,origin,slots FROM grid_override"
-                " ORDER BY rowid");
+    // `ord` is that order, stored (v31).  rowid was tried first and is not
+    // enough on its own: an upsert keeps a re-declared region's ORIGINAL
+    // rowid, so a rebuild declaring the same regions in a new order wrote a
+    // checkpoint that restored the OLD winner, and a VACUUM may renumber
+    // rowids besides.  rowid stays as the tie-break, which is what a pre-v31
+    // file (every `ord` 0) is read by — the order it always had.
+    Stmt q(_db, "SELECT layer_id,x1,y1,x2,y2,origin,slots,ord FROM grid_override"
+                " ORDER BY ord, rowid");
     auto txt = [](sqlite3_stmt* st, int c) -> std::string {
         const unsigned char* p = sqlite3_column_text(st, c);
         return p ? reinterpret_cast<const char*>(p) : std::string();
@@ -4567,6 +4586,7 @@ std::vector<GridOverrideRow> BDB::grid_overrides() const {
         r.y2 = sqlite3_column_int(q, 4);
         r.origin = sqlite3_column_double(q, 5);
         r.slots  = txt(q, 6);
+        r.ord    = sqlite3_column_int(q, 7);
         rows.push_back(std::move(r));
     }
     return rows;

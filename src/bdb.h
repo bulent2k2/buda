@@ -340,6 +340,14 @@ struct GridOverrideRow {
     int         x1 = 0, y1 = 0, x2 = 0, y2 = 0;
     double      origin = 0.0;
     std::string slots  = "[]";
+    // DECLARATION order (v31).  `RoutingGrid::effective_pattern_at` returns
+    // the FIRST override containing the point, so with overlapping regions
+    // on one layer the order decides which pattern wins — it is part of the
+    // stored grid, not a presentation detail, and rowid could not carry it:
+    // an upsert keeps a re-declared region's ORIGINAL rowid, so a session
+    // declaring the same regions in a new order left the old winner in the
+    // checkpoint (Codex P2 on #942).
+    int         ord    = 0;
 };
 
 // One keep-out zone (v29 keepout table), stored as the ZONE the declaration
@@ -620,7 +628,7 @@ public:
     //       because the footprint is a property of the cell type (LEF's
     //       `SIZE` is), so one declaration governs every instance and the
     //       rects survive a move by construction.
-    static constexpr int SCHEMA_VERSION = 30;
+    static constexpr int SCHEMA_VERSION = 31;
 
     explicit BDB(const std::string& db_path);
     ~BDB();

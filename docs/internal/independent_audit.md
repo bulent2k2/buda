@@ -49,6 +49,7 @@ judge declined to judge — which is not clean and must not read as it.
 | `OFF_GRID` | a bit-wire whose track position is not the centre of a SIGNAL slot of its layer's effective pattern |
 | `SHORT` | two DIFFERENT nets whose metal overlaps on one layer |
 | `KEEPOUT` | a bit-wire lying over a keepout that blocks its layer |
+| | — the DECLARED zones **and** the ones nobody declares: every solid leaf cell's footprint, on every non-TOP layer, which is the list `Floorplan::low_layer_keepouts` hands the engine's own audit |
 | `OPEN` | a net whose metal is not one connected piece, or that does not reach an endpoint block |
 | | — two wires count as joined by a via only where the via LANDS ON BOTH: a `net_via` row *says* two segments are joined, and whether they are is geometry |
 | `NO_METAL` | a net a bundle carries with no placed metal at all |
@@ -69,7 +70,7 @@ tool does.
 
 **A judge is worth what it catches**, so the tests are a mutation matrix:
 each fault is planted in the tables in SQL, one at a time, and the judge must
-name it.  Reverting any one of its **eighteen** rules fails at least one
+name it.  Reverting any one of its **twenty-two** rules fails at least one
 named test: short, keepout, off-grid, layer-direction, metal in two pieces,
 a net that does not reach its block, a net with no metal, a via that does not
 land on the wires it claims to join, the abutment control (a T-junction
@@ -77,14 +78,19 @@ touches and does not overlap, and a judge that called that a short would
 fail every correct route), the unjudgeable exit status, both halves of the
 hierarchy rule below, both halves of the membership fallback (falling back
 at all, and saying so), both halves of the rectangle rule below, the
-partial-coverage refusal, the unreadable-input status, and the
-override-crossing note.
+partial-coverage refusal, the unreadable-input status, the
+override-crossing note, the implicit leaf-cell keepout, its TOP-layer
+control (the same wire over the same cell on a TOP layer is ordinary
+over-the-cell routing and must stay clean), and the note a checkpoint gets
+when it does not record which layers are TOP.  (The count read *eighteen*
+while the list held nineteen — the override-crossing note was added to the
+list and not to the number.)
 
 ## What it deliberately does not claim
 
 A clean verdict here is about GEOMETRY and nothing else: not timing, not
 DRC at a real detailed router's rule deck, nothing the ladder page's
-"What is deliberately not claimed" disclaims.  Four limitations are stated
+"What is deliberately not claimed" disclaims.  Five limitations are stated
 rather than left to be discovered:
 
 * **Region overrides** make the effective pattern a function of position,
@@ -97,6 +103,13 @@ rather than left to be discovered:
   block face with the block's own routing taking it from there.
 * **An unplaced component** (the `-1,-1,-1,-1` convention) is skipped for
   reach, counted, and named.
+* **A MULTI-RECT leaf cell contributes no implicit keepout.**  Its rects
+  tile its bbox exactly (`set_cell_rects` requires the union to EQUAL the
+  declared extent), so judging the bbox would claim the notches too and
+  accuse a wire routed through a gap the design left open.  Skipped,
+  counted, and named — and a checkpoint that does not record which layers
+  are TOP gets the whole rule skipped, with a note saying `KEEPOUT` covered
+  the declared zones alone.
 * **A design with no `bundle_net` rows** cannot say which nets were supposed
   to carry metal, so the scope falls back to the nets that HAVE metal —
   shorts and broken metal are still judged, `NO_METAL` is not — and the
@@ -139,16 +152,94 @@ And one outside the judge, in the engine it reads:
   `effective_pattern_at` returns the FIRST override containing a point, and
   `grid_overrides()` handed them back `ORDER BY layer_id,x1,y1,x2,y2` — so a
   checkpoint could resolve an overlap to a different pattern than the
-  session that wrote it, silently, both patterns being legal.  Rows are
-  inserted in declaration order, so the restore reads them `ORDER BY rowid`.
-  The exposure that leaves is a VACUUM, which renumbers rowids; nothing here
-  vacuums a BDB, and an explicit ordinal column is the stronger fix if one
-  ever does.  Pinned by a test that fails under the coordinate sort.
+  session that wrote it, silently, both patterns being legal.
+
+### The third pass
+
+Codex was asked to look again and found four more, all real.  Three are the
+first pass's lesson at a finer grain — a judge must not report what it did
+not evaluate, and must not report a number it did not produce — and one is
+the P1 above.
+
+* **An unreadable database is unjudgeable, not dirty.**  The missing-path
+  guard covered a path with no file; a file that EXISTS and cannot be parsed
+  — a truncated `.bdb`, a half-written `.bdb.sql`, a stored slot list that is
+  not JSON — raised out of `audit()` and exited **1** through Python's own
+  traceback, which is the status this page documents as violations.  Caught
+  around the whole audit rather than at the open, because the reads are lazy
+  and a corrupt page surfaces at whichever query first touches it.
+* **The stale judge sidecar.**  `converge.tcl` reads `<round>.judge.json`
+  for the violation total, and the judge writes it only on a verdict — so a
+  rerun of a named round whose judge died before writing left the previous
+  run's file in place, and the run published a sidecar naming this round
+  while holding the last one's numbers.  Cleared before the judge runs, as
+  the checkpoint and the report already were.
+* **The override order needed an explicit ordinal after all.**  `ORDER BY
+  rowid` fixed the coordinate sort and left two holes the second pass named:
+  an upsert keeps a re-declared region's ORIGINAL rowid, so a rebuild
+  declaring the same regions in a new order wrote a checkpoint that restored
+  the OLD winner, and `DO UPDATE` stored the LATER pattern for a repeated
+  region where the live grid keeps the EARLIER one.  Both are gone: the set
+  is written WHOLE, in the order the live grid holds it, with the order
+  stored (`grid_override.ord`, schema **v31**) and a repeat collapsing to its
+  first declaration.  The journal is what makes that exact — it already held
+  every declaration in order, and the restore now records what IT installs in
+  the place `add_override` puts it, so mirroring the journal is mirroring the
+  grid and there is no second rule to keep in step.  Measured while pinning
+  it: the rebuild-in-a-new-order case does NOT diverge on its own, because
+  `open_bdb` installs the stored overrides into the live grid before the
+  flow's lines run, so the rebuilding session inherits the stored order too.
+  The divergence is real and reachable through the PRE-OPEN declaration,
+  which is the commonest shape in this tree — the same asymmetry the journal
+  itself exists for — and that is the case the test plants.
+* **The keepouts nobody declares.**  The P1, and its own section below.
 
 None of them moved a verdict: every design in the table below judges exactly as
 it did before, the bottom-up finding bundle for bundle.  That is what a
 correctness fix to a judge should look like — it changes what the file is
 ENTITLED to say, not what it happened to say here.
+
+### The keepouts nobody declares, and what measuring them showed
+
+Every keepout-aware stage in the engine tests against
+`Floorplan::low_layer_keepouts` — the declared zones PLUS one zone per solid
+non-container leaf block on the non-TOP layers — and `verify.cpp` audits
+against that same list.  The judge read only the `keepout` table, so it could
+call a LOW-layer wire lying over a cell clean where `check_design` reports
+`KEEPOUT_CROSS`: the one direction a referee must never be weaker in.
+
+Adopting the rule was not obvious, and the reason is the hierarchy mistake in
+a new direction.  The engine enforces it PER ROUTING FRAME, where a container
+is transparent and a deep leaf inside it is not in the frame at all — so a
+top-level LOW wire over a distant cell is permitted there, and a judge
+applying leaf footprints over the whole design is STRICTER than the engine.
+That is the right way round for a judge (the metal is physically over a cell
+either way), but "stricter" is exactly how the 2048-OPEN rule started, so it
+was **measured before it was adopted**, with a probe that applies the rule
+universally and counts:
+
+| design | leaves | wires on a non-TOP layer | crossings |
+|---|---:|---:|---:|
+| `flow/soc_small.buda` | 219 | 5,680 | **0** |
+| `flow/soc_mid.buda` | 843 | 21,456 | **0** |
+| `soc.tcl 2 -bottomup` | 63 | 536 | **0** |
+| control: the same probe on the TOP layers, soc_small | 219 | 3,648 | 1,461 |
+
+The control is the half that makes the zeros mean something: over-the-cell
+routing on a TOP layer is everywhere, so the probe can see crossings when
+there are any.  The rule is now applied, and every verdict in the table below
+is unchanged with it live — soc_small clean over **657** implicit zones,
+soc_mid clean over **2,529**, the mesh control clean over **288**, the
+bottom-up round still exactly 96 `OFF_GRID` and 0 `KEEPOUT`.
+
+It needed one thing from the engine, for the same reason the grid did: the
+checkpoint holds `track_pattern.is_horiz` and nothing that says which layers
+are **TOP**, and TOP is not decoration here — it is what decides whether a
+cell's footprint blocks a wire.  The session now writes the layer stack as a
+meta row beside the route snapshot (one site, which cannot be reached without
+the stack being current, where `def_layer` and `import_lef_tech` and one
+replacing the other are four).  A checkpoint written before that judges
+without the rule and SAYS so.
 
 ### The hierarchy rule, and how it was got wrong first
 
@@ -184,6 +275,13 @@ journal after the restore.  Precedence is unchanged — what the checkpoint
 holds fills in what this session has not declared, what this session
 declared wins and is what gets stored — and both orders now store the same
 patterns, asserted row for row.
+
+The second thing it needed is the same shape: the **layer stack**, written as
+a meta row beside the route snapshot, because `track_pattern` says which way
+a layer runs and nothing said whether it is TOP — and without that the
+implicit leaf keepouts above cannot be judged at all.  Both are facts the
+route is meaningless without, and in both cases the checkpoint held the route
+and not the fact.
 
 ## First verdicts
 

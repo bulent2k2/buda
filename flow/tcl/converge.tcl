@@ -291,6 +291,13 @@ proc judge_verdict {ckpt out name} {
     if {![file exists $ckpt]} { return "—" }
     set tool [file join $repo tools independent_audit.py]
     set js [file join $out $name.judge.json]
+    # Clear the sidecar FIRST, as the checkpoint and the report already are.
+    # The rc==1 branch below reads this file for the violation total, and the
+    # judge writes it only on a verdict — so a rerun of a named round whose
+    # judge died before writing (a crash, an unwritable path) would otherwise
+    # report the PREVIOUS run's total as this round's, which is a stale number
+    # wearing a fresh row (Codex P2 on #942).
+    file delete -force $js
     set rc 0
     # `python3`, not `[info nameofexecutable]` — this driver runs under
     # tclsh and that is what the vehicle sessions are launched with, but the

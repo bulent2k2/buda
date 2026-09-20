@@ -153,7 +153,8 @@ void bind_db(py::module_& m) {
         .def_readwrite("x2", &GridOverrideRow::x2)
         .def_readwrite("y2", &GridOverrideRow::y2)
         .def_readwrite("origin", &GridOverrideRow::origin)
-        .def_readwrite("slots",  &GridOverrideRow::slots);
+        .def_readwrite("slots",  &GridOverrideRow::slots)
+        .def_readwrite("ord",    &GridOverrideRow::ord);
 
     py::class_<KeepoutRow>(m, "KeepoutRow")
         .def(py::init<>())
