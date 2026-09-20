@@ -52,7 +52,9 @@ the power grid to legalise them without a full router.
 
 The paper records where it was used and what it bought.  Manzano's full-chip
 designer planned about 95 % of signal wires with auto bus planning early in
-the design, cutting the bussing effort from two weeks to one day.  Tanglewood
+the design, so that RC extraction and timing could be run within days; the
+accompanying presentation ([docs/origin/talk_contents.md](../origin/talk_contents.md))
+puts the bussing effort at two weeks before and one day after.  Tanglewood
 planned all full-chip buses with assisted planning to blocks two or more
 levels down.  Nehalem piloted a bottom-up/top-down flow on a five-level
 hierarchy.  Tejas planned buses through repeater stations.  Those results
@@ -123,7 +125,7 @@ Around the pipeline:
   in 0.3 s), GDSII in and out (deterministic bytes, round-trip tested), an
   SQLite design database at schema v30 that persists every stage so a
   session can resume at any point.
-- **Three ways to drive it.**  A script language (`.buda`, 316 checked-in
+- **Three ways to drive it.**  A script language (`.buda`, 293 checked-in
   flows), a Tcl front end that turns any command into `buda::<name>` (81 Tcl
   vehicles), and a web server with a Scala.js client.  An interactive
   Floorplanner GUI edits placement and launches the flow.
@@ -131,8 +133,10 @@ Around the pipeline:
   opens, layer-direction errors, keepout crossings, antennas, bit shorts,
   unplaced bits — and a census of seats that cannot host their bus.
 - **OpenROAD handoff.**  Corridors are written in the guide format
-  OpenROAD's router reads, so BUDA's plan becomes the router's instruction
-  rather than advice.
+  OpenROAD's router reads.  The guides are advisory by design — the router
+  follows them where it can and deviates where it must — so the measured
+  result below is what the router actually did with them, not what BUDA
+  asked for.
 
 Scale, as measured on the checked-in vehicles: a real 45 nm CPU core
 (Ariane, 5,576 nets, 133 SRAM macros, 13,034 obstruction rectangles) plans
@@ -343,7 +347,8 @@ should add or confirm:
 
 The public repository ([github.com/bulent2k2/buda](https://github.com/bulent2k2/buda),
 Apache 2.0) and its `git log` through commit 63d4e67c;
-[docs/origin/paper.md](../origin/paper.md);
+[docs/origin/paper.md](../origin/paper.md) and
+[docs/origin/talk_contents.md](../origin/talk_contents.md);
 [librelane_hier_flow.md](librelane_hier_flow.md) (§7 results, §11 open
 items); [opens.md](opens.md); [qor/qor_table.md](../../qor/qor_table.md)
 (snapshot of 31 August 2026); and the CI workflow's measured suite size
