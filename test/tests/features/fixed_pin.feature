@@ -38,7 +38,15 @@ Feature: Fixed pins — a busterm restricted to a set of admissible landings
   Scenario: A point pin admits no pass-through
     When I fix "core.d_in" to one point on the east face
     Then no trunk crossing "core" is a landing
+    And a horizontal trunk at the point's own coordinate is refused
     And the pass-through clamp does not let a trunk slide across the block
+
+  # ── third round, finding 3: a pass-through is two landings ──────────────
+
+  Scenario: A single-face fix admits no pass-through
+    When I fix "core.d_in" to the east face
+    Then a wire ending on the east face is a landing
+    And no trunk crossing "core" is a landing, since it would leave by a face the fix does not admit
 
   Scenario: A window is a landing range along one face
     When I fix "core.d_in" to a window on the east face
@@ -159,11 +167,34 @@ Feature: Fixed pins — a busterm restricted to a set of admissible landings
     Then the landing stub is on an adjacent horizontal layer
     And each bit carries one via between the stub and the pin metal
 
+  # ── third round, finding 1: the endpoint via is its own kind ────────────
+
+  Scenario: An endpoint via is not a shield bond strap
+    Given "core.d_in" is a LEF pin on a vertical layer on the east face
+    And the bundle's rule bonds its shields
+    When I consume the block's pins
+    Then each bit's endpoint via survives the bond-strap pass
+    And it is persisted on the bit's own net
+    And a bottom-up copy of the instance carries it
+
+  # ── third round, finding 2: the layer set binds the landing stub only ───
+
+  Scenario: A layer set binds the landing stub and nothing else
+    When I fix "core.d_in" to the east face on either of two horizontal layers
+    Then the landing stub is on one of the two
+    And the vertical leg of a bent candidate may take any vertical layer
+
   # ── order: per landing, not per segment ─────────────────────────────────
 
-  Scenario: Two landings on one straight segment must agree on order
-    When I fix both ends of a straight segment with opposite orders
-    Then the declaration is refused naming both pins
+  # Third round, finding 4: a fix precedes bundling, so no segment exists
+  # at declaration to ask whether two landings share one.  The check is per
+  # candidate, at generation.
+
+  Scenario: Opposite orders drop the straight candidate and keep the bend
+    When I fix two pins facing each other with opposite orders
+    Then the declaration is accepted
+    And a candidate joining them with one straight segment is dropped naming both pins
+    And a bent candidate joining them survives
 
   Scenario: Orders may differ across a bend
     When I fix one leg of an L to index order and the other to reverse order

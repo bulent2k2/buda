@@ -1,8 +1,8 @@
 # The fixed-pin primitive: `fix_pin`
 
 *Design proposal, 2026-09-20 — convergence-ladder build item 7.  Not built.
-Revised twice the same day, after two review rounds (see *Corrections after
-review*); the behavioural contract is spelled out AHEAD of the code in
+Revised three times the same day, after three review rounds (see *Corrections
+after review*); the behavioural contract is spelled out AHEAD of the code in
 `test/tests/features/fixed_pin.feature` (`@future`), written against admitted
 and refused landings rather than the token grammar.
 Published for outside review as the [Fixed Pin Primitive](https://claude.ai/artifact/T75FBqiYjTEax8A5Q5jdLN) page; this
@@ -179,12 +179,21 @@ bus), a glob (`d_*`), or `*`.
   under `at 20..60` the face is 40 units, so a 32-bit bundle would pass a
   cap sized from a 500-unit edge and then have nowhere to land.  The cap
   reads `landing_rects` — the claim it already makes, now true under a fix.
-- **Pass-through is automatic.**  A trunk crossing the block is a landing
-  today when it crosses the busterm rect; with strips it is a landing when it
-  crosses a strip.  So an `H` fix admits a horizontal pass-through and a
-  point pin admits none.  Nothing to declare — provided the pass-through
-  CLAMP and the audit read the strips too, which today they do not (above);
-  that is the single-sourced resolver's job.
+- **Pass-through is automatic, and it is TWO landings** (third round).  A
+  trunk crossing the block is a landing today when it crosses the busterm
+  rect.  Under a fix a pass-through is a landing on BOTH faces it crosses —
+  it enters on one and leaves on the other — and is admitted only when the
+  fix admits both, each at the trunk's perpendicular coordinate.  So an `H`
+  fix admits a horizontal pass-through (east and west both admitted); a bare
+  `east` admits none, since the exit on the west face is not a landing; and
+  a point pin admits none for the same reason — NOT because its strip is
+  thin.  The second-round text said "a landing when it crosses a strip", and
+  a strip one pitch wide at `y = 18` IS crossed by a horizontal trunk at
+  `y = 18`, so that rule admitted exactly the trunk the point-pin contract
+  refuses (Codex on #944, third round).  Nothing to declare — provided the
+  pass-through readers (the clamp, the NUTS anchor, the audit's coverage
+  count) ask `landing_rects` the two-face question rather than "does the
+  segment span the block", which today they do not (above).
 - **`layer`** names the APPROACH segment's layer(s) — the stub that lands —
   and must be direction-compatible with the face: an east or west face is
   reached by a horizontal stub, so it takes H layers; a north or south face,
@@ -195,22 +204,48 @@ bus), a glob (`d_*`), or `*`.
   M1 or M3 plus a via, not by an H wire on M2.  So `from_pins` records the
   pin's metal layer and DERIVES the approach layer — the pin layer itself
   when the directions agree, else the adjacent compatible layer — and DNUTS
-  emits one ENDPOINT VIA per bit between the two, riding the `net_via` row
-  with a negative `to_seg` that the NDR shield bond straps already use for
-  "the far end is not a segment".  The planner enforces the approach set the
-  way it enforces `pinned_seg_layers` and `allowed_layers`, inside the STRICT
-  enumeration, so a fixed layer steers the choice rather than the ladder
-  escalating past it.
+  emits one ENDPOINT VIA per bit between the two, as a `net_via` row of its
+  own KIND (third round).  The second-round text rode the negative-`to_seg`
+  row the NDR shield bond straps use, and that sign is read as "bond strap"
+  by every consumer: `emit_shield_bond_vias` deletes every negative row
+  before regenerating straps (`detailed_nuts.cpp`), route persistence
+  assigns them to the rule's shield net (`persist.py`), and the bottom-up
+  copier skips them (`nutsflow.py`) — so an endpoint via encoded that way
+  would be deleted, persisted on GND, or missing from every copied instance.
+  `NetVia` gets an explicit `kind` (`SEG`, `BOND`, `ENDPOINT`; persisted as
+  a `net_via.kind` column in the same schema bump as `pin_fix`), the three
+  consumers filter on the kind rather than the sign, and the strap's negative
+  ordinal keeps its meaning.  The approach set is enforced PER LANDING
+  SEGMENT and as a SET, which neither existing mechanism carries (third
+  round): `BundleInput::allowed_layers` masks EVERY segment of a candidate,
+  so an east pin held to horizontal M5 would starve the vertical leg of an
+  `L`, and `pinned_seg_layers` holds ONE layer per segment, so it cannot say
+  `layer M3,M5`.  The landing stub carries its own allowed set
+  (`Segment::layer_set`, empty = unconstrained), stamped by the generator on
+  the CANDIDATE — never index-keyed on the input, the `pinned_seg_layers`
+  hazard a trial moving a bundle to another shape already taught — and
+  intersected with the band mask inside the STRICT enumeration, so a fixed
+  layer steers the choice rather than the ladder escalating past it.
 - **`order`** is a bit permutation per LANDING, not per segment (Codex on
   #944).  `BusSegment::bit_order` is one value for a whole segment — today
   `run_detailed_nuts [lo_hi|hi_lo]` sets it for the whole run — and a
   straight segment with a fixed pin at each end (an `I` shape, or a
   pass-through trunk touching several fixed pins) has several landings.  A
   straight wire cannot reverse its bits, so two landings on ONE segment must
-  agree and a disagreement is refused loudly at declaration; across a BEND
-  they may differ, since the per-bit via crossing simply mirrors, so an L
-  with `index` at one end and `rindex` at the other is legal and each leg
-  takes its landing's order.  `index` sorts the bundle's nets by (bus name,
+  agree; across a BEND they may differ, since the per-bit via crossing
+  simply mirrors, so an L with `index` at one end and `rindex` at the other
+  is legal and each leg takes its landing's order.  The agreement is checked
+  PER CANDIDATE at generation, not at declaration (third round): fixes are
+  declared before bundling, so no segment exists yet to ask whether two
+  landings share one, and the generator may produce both a direct `I` (the
+  orders conflict) and an `L` (each leg its own) for the same pair of pins —
+  a declaration-time refusal would be undecidable or would discard the
+  routable bend.  A candidate whose straight segment joins two landings of
+  opposite order is DROPPED with a printed note naming both pins, like the
+  coverage gate; when every candidate is dropped the pool is kept with the
+  warning and the audit reports `PIN_FIX`, so the bus never strands.  The
+  declaration validates only what is decidable there: the token and the
+  target.  `index` sorts the bundle's nets by (bus name,
   bit index) then scalars, and lays bits out low to high along the strip;
   `rindex` reverses.  A per-bit `at` becomes a per-bit track TARGET in
   DNUTS's stub placement (`bit_targets`), the one genuinely new piece in that
@@ -303,9 +338,11 @@ that finally consumes it.
    the first cut asked for byte-identity against a FULL-STRENGTH fix, which
    admits one tagged face and cannot equal a four-face port) and a test that
    a stub ending on a strip's inner edge or short end is NOT a landing.
-   **PR 2**: `layer` with the approach/metal split and the endpoint via,
-   per-landing `order`, per-bit targets, `from_pins` — levels 4, 6 and the
-   LEF change — touching the planner and DNUTS.  And **Q7 is the gate on
+   **PR 2**: `layer` with the approach/metal split, the per-segment layer
+   SET on the landing stub and the endpoint via as its own via KIND,
+   per-landing `order` with the per-candidate agreement gate, per-bit
+   targets, `from_pins` — levels 4, 6 and the LEF change — touching the
+   generator, the planner and DNUTS.  And **Q7 is the gate on
    PR 1b**: if the wrap-around pin is routine in the flows this is for, the
    forced-face shape family comes first and the command is premature.
 8. **Reserved names, reserved HERE and not in the catalogue.**  The message
@@ -380,6 +417,33 @@ spec written against a grammar that then moved; and BUDA-1922 / `PIN_FIX`
 are reserved in pushback 8 rather than in the catalogue, for the reason
 given there.  The sequencing suggestions — Q7 first, PR 1 split into a
 byte-identical refactor and the command — are adopted in pushback 7.
+
+### Third round (2026-09-20, Codex on #944 at `cb8a086`)
+
+Four findings, each checked against the source and each right.  Three are
+the first round's class again — a mechanism named for reuse that does not
+carry what the design asked of it — and the fourth is a check placed where
+it cannot be made.
+
+1. **The endpoint via cannot ride the bond strap's row.**  A negative
+   `to_seg` means "bond strap" to three consumers: `emit_shield_bond_vias`
+   deletes every such row before regenerating straps, route persistence puts
+   them on the shield net, and the bottom-up copier skips them.  `NetVia`
+   gets an explicit `kind`, and the consumers filter on it.
+2. **The approach layer needs a per-segment SET.**  `allowed_layers` masks
+   every segment of the candidate (an east pin held to M5 starves the `L`'s
+   vertical leg) and `pinned_seg_layers` holds one layer per segment (no
+   `M3,M5`).  The landing stub carries its own set, on the candidate.
+3. **A point pin was still crossed by an aligned trunk.**  "A landing when
+   it crosses a strip" admitted a horizontal trunk at the point's own
+   coordinate.  A pass-through is two landings, on the faces it enters and
+   leaves, and a fix admitting only one of them admits no pass-through — the
+   thinness of the strip was never the argument.
+4. **Order agreement cannot be checked at declaration.**  Fixes precede
+   bundling, so no segment exists to ask; the check is per candidate at
+   generation, dropping the straight candidate and keeping the bend.  The
+   first round's reply argued against exactly this option as "later and
+   quieter"; that premise assumed a segment to check, and there is none.
 
 ## Open questions
 
