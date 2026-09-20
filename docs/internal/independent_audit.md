@@ -138,7 +138,22 @@ patterns, asserted row for row.
 
 ## First verdicts
 
-Every design judged so far, with `check_design`'s verdict beside it:
+Every design judged so far, with `check_design`'s verdict beside it.
+
+**Provenance, because this page's own subject is who is entitled to score
+what**: every row below was re-measured on a build that MATCHES the source.
+The first pass was not — this container's `build/` was 53 minutes' work and
+53 HOURS old, predating C++ that had landed on `main`, which
+`tools/measure_guard.py` says exactly the right thing about: *"the sweep
+would measure a binary that does not match the source — a wrong number, not
+an error."*  It caught it, in a mid-tier test, after the rows were taken.
+On the rebuild every one of them reproduces — all six flows, both controls
+and both bottom-up rounds, detailed wirelengths included (525,144 for the
+top-down round, 550,528 for the mesh, 584,581 and 980,908 for the two
+bottom-up ones) — and the finding below reproduces bundle for bundle and
+track for track.  So nothing here moved — but it is recorded rather than
+quietly dropped, because "I re-ran it and it was the same" and "I never
+checked" are indistinguishable in a table.
 
 | design | `check_design` | judge |
 |---|---|---|
