@@ -74,7 +74,7 @@ tool does.
 
 **A judge is worth what it catches**, so the tests are a mutation matrix:
 each fault is planted in the tables in SQL, one at a time, and the judge must
-name it.  Reverting any one of its **thirty** rules fails at least one
+name it.  Reverting any one of its **thirty-three** rules fails at least one
 named test: short, keepout, off-grid, layer-direction, metal in two pieces,
 a net that does not reach its block, a net with no metal, a via that does not
 land on the wires it claims to join, the abutment control (a T-junction
@@ -94,7 +94,10 @@ unjudgeable, judging the metal rather than the recorded position, reporting
 the two when they disagree, and taking the perpendicular axis from the
 LAYER — with the two controls that keep the last three apart (a row moved
 consistently is `OFF_GRID` alone, a scalar moved alone is `ROW_MISMATCH`
-alone).  (The count read *eighteen*
+alone), an unresolvable net id and an unresolvable bundle membership row
+each being unjudgeable, a malformed `keepout.layers` CSV being unjudgeable,
+and its control (an EMPTY list is the every-layer convention, not a
+malformed one).  (The count read *eighteen*
 while the list held nineteen — the override-crossing note was added to the
 list and not to the number.)
 
@@ -299,6 +302,42 @@ Two, both real, and the second is the one worth keeping in mind.
   the four hier flows and the mesh control still clean, the bottom-up rounds
   still exactly 104 and 201, the finding's 96 off-grid copies bundle for
   bundle.
+
+### The sixth pass
+
+Two, and both are a stored field the judge read without asking whether it
+could.
+
+* **An unresolvable net id was collapsed, not refused.**  A wire whose
+  `net_id` named no `net` row took the EMPTY name, so two DIFFERENT nets
+  read as one and their overlapping metal was not a short.  Measured on the
+  two-instance vehicle by overlapping `x_0` onto `loc_0` — 70 x 2 units of
+  real metal — and then deleting the two `net` rows: `SHORT` while the names
+  resolve, **exit 0 CLEAN** once they are gone.  The id alone would keep the
+  two apart, but it would give the connectivity checks no endpoints, and the
+  rule here since the partial-coverage refusal is that a partial verdict
+  must not read as a clean one — so the design is refused, naming the count
+  and the first wire.
+
+  `bundle_net` is refused the same way, which is beyond the finding: that
+  table IS the scope `NO_METAL` is judged over, so a row naming a net
+  nothing defines would judge that kind over a subset and still report
+  clean.  The fifth pass had already taught that fixing one reader of a
+  stored field and leaving its twin is its own failure mode.
+
+* **A malformed `keepout.layers` CSV was a traceback.**  `int('M4')`, or the
+  `x` of `6,x`, raised out of a reader neither `_decode` nor `UNREADABLE`
+  covered, exiting **1**.  Same treatment as the fifth pass's JSON rows and
+  for the same reason.  Its control matters as much as the fix: an EMPTY
+  list is the convention for a zone that blocks every layer (the fourth
+  pass's P1), so a guard that rejected it would quietly turn that fix off
+  while looking stricter.
+
+Both latent: a census of all **34** checkpoints on disk reads **0**
+unresolved net ids and **0** malformed layer tokens, and `persist.py` binds
+every name through `_ensure_net`, so neither can fire on a file the engine
+wrote.  No verdict moves — soc_small, soc_mid, the four hier flows and the
+mesh control still clean, the bottom-up rounds still exactly 104 and 201.
 
 ### The keepouts nobody declares, and what measuring them showed
 

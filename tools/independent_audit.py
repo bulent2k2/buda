@@ -201,6 +201,29 @@ def _decode(text, what, build):
         raise Unjudgeable(f"{what} cannot be read: {e}") from e
 
 
+def _layer_ids(text, what):
+    """The layer ids in a stored CSV, refusing a malformed one.
+
+    `int(t)` on `M4` or on the `x` of `6,x` raises a `ValueError` that no
+    guard covered, so the process exited 1 with a traceback — the status
+    reserved for geometry violations (Codex P2 on #942).  Same treatment as
+    a malformed JSON row, for the same reason: a stored field this file
+    cannot parse means it cannot judge the design, not that the design is
+    broken.  An EMPTY list is not malformed — it is the convention for a
+    zone that blocks every layer.
+    """
+    out = []
+    for t in str(text or "").split(","):
+        t = t.strip()
+        if not t:
+            continue
+        try:
+            out.append(int(t))
+        except ValueError as e:
+            raise Unjudgeable(f"{what} cannot be read: {e}") from e
+    return out
+
+
 class Slot:
     __slots__ = ("type", "label", "width", "space_after")
 
@@ -390,14 +413,40 @@ class Wire:
 
 
 def read_wires(con):
-    """Every placed bit-wire with its net NAME resolved."""
+    """Every placed bit-wire with its net NAME resolved.
+
+    A wire whose `net_id` is NULL or names no `net` row is REFUSED, not
+    given the empty name: identity is what SHORT is about ("two DIFFERENT
+    nets"), so collapsing every unresolvable wire onto one name makes them
+    read as the SAME net and hides real overlapping metal — measured, 70 x 2
+    units of overlap between two distinct ids reported SHORT while the names
+    resolved and exited 0 CLEAN once the `net` rows were gone (Codex P2 on
+    #942).  The id alone would keep them apart, but it would not give the
+    connectivity checks the endpoints they need, and this file's rule since
+    the partial-coverage refusal is that a partial verdict must not read as
+    a clean one.
+
+    `persist.py` binds the id through `_ensure_net`, so a name always has a
+    row and this cannot fire on a checkpoint the engine wrote: every one of
+    the 34 measured reads 0.  It is the partial or hand-edited file the
+    guard is for.
+    """
     if not _table_exists(con, "net_segment"):
         return []
     names = {}
     if _table_exists(con, "net"):
         names = {int(r["id"]): r["name"] for r in _rows(con, "SELECT id, name FROM net")}
-    return [Wire(r, names.get(r["net_id"], ""))
-            for r in _rows(con, "SELECT * FROM net_segment")]
+    rows = _rows(con, "SELECT * FROM net_segment")
+    bad = [r for r in rows if r["net_id"] is None or int(r["net_id"]) not in names]
+    if bad:
+        r = bad[0]
+        raise Unjudgeable(
+            f"{len(bad)} of {len(rows)} bit-wire(s) name a net this file "
+            f"cannot resolve (first: bundle {r['bundle_id']} seg "
+            f"{r['seg_idx']} bit {r['bit_index']}, net_id {r['net_id']}) — "
+            f"without identities two different nets cannot be told apart, so "
+            f"a short between them would go unreported")
+    return [Wire(r, names[int(r["net_id"])]) for r in rows]
 
 
 # ---------------------------------------------------------------------------
@@ -587,12 +636,12 @@ def read_keepouts(con):
     for r in _rows(con, "SELECT * FROM keepout"):
         z = (float(r["x1"]), float(r["y1"]), float(r["x2"]), float(r["y2"]),
              r["net"] or "", "zone")
-        lids = [t for t in str(r["layers"]).split(",") if t.strip()]
+        lids = _layer_ids(r["layers"], "a keepout's layer list")
         if not lids:
             universal.append(z)
             continue
-        for t in lids:
-            out[int(t)].append(z)
+        for lid in lids:
+            out[lid].append(z)
     return out, universal
 
 
@@ -737,6 +786,21 @@ def check_connectivity(con, wires, max_report):
     if _table_exists(con, "net"):
         names = {int(r["id"]): r["name"] for r in _rows(con, "SELECT id, name FROM net")}
     if _table_exists(con, "bundle_net"):
+        # An unresolvable membership row is refused for the same reason
+        # `read_wires` refuses an unresolvable wire, one step earlier in the
+        # same chain: this set IS the NO_METAL scope, so dropping a row
+        # nothing defines would judge that kind over a subset and still
+        # report CLEAN.  Beyond the finding, which named the wire side; the
+        # fifth pass had already taught that fixing one reader of a stored
+        # field and leaving its twin is its own failure mode.
+        miss = [r["net_id"] for r in _rows(con, "SELECT DISTINCT net_id FROM bundle_net")
+                if r["net_id"] is None or int(r["net_id"]) not in names]
+        if miss:
+            raise Unjudgeable(
+                f"{len(miss)} bundle membership row(s) name a net this file "
+                f"cannot resolve (first net_id {miss[0]}) — the nets a bundle "
+                f"carries are the scope NO_METAL is judged over, so a partial "
+                f"scope must not read as a clean verdict")
         for r in _rows(con, "SELECT DISTINCT net_id FROM bundle_net"):
             nm = names.get(r["net_id"])
             if nm:

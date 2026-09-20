@@ -868,3 +868,81 @@ def test_a_stale_position_over_sound_metal_is_mismatch_alone(routed, tmp_path):
     code, out = _judge(p)
     assert code == 1, out
     assert _kinds(out) == {"ROW_MISMATCH"}, out
+
+
+def test_an_unresolvable_net_id_is_unjudgeable_not_clean(routed, tmp_path):
+    """Identity is what SHORT is about, so it cannot be collapsed.
+
+    Every wire whose `net_id` named no `net` row took the EMPTY name, so
+    two DIFFERENT nets read as the same one and their overlapping metal was
+    not a short — measured before the fix: 70 x 2 units of real overlap
+    between two distinct ids reports `SHORT` while the names resolve and
+    exits **0 CLEAN** once the `net` rows are gone (Codex P2 on #942).
+
+    The id alone would keep them apart, but it would give the connectivity
+    checks no endpoints, and this file's rule since the partial-coverage
+    refusal is that a partial verdict must not read as a clean one."""
+    nid = _net_id(routed)
+    xid = _net_id(routed, "x_0")
+    p = _mutated(routed, tmp_path,
+                 # overlap the two nets: the fault a resolved read reports
+                 f"UPDATE net_segment SET y1=132, y2=134, x1=200, x2=400"
+                 f" WHERE net_id={xid}",
+                 f"DELETE FROM net WHERE id IN ({nid},{xid})",
+                 f"DELETE FROM bundle_net WHERE net_id IN ({nid},{xid})")
+    code, out = _judge(p)
+    assert code == 2, out
+    assert "cannot resolve" in out, out
+    assert "Traceback" not in out, out
+
+
+def test_an_unresolvable_membership_row_is_unjudgeable_too(routed, tmp_path):
+    """The same field, one step earlier in the same chain.
+
+    `bundle_net` IS the scope `NO_METAL` is judged over, so a row naming a
+    net nothing defines would judge that kind over a subset and still
+    report clean. Beyond the finding, which named the wire side."""
+    p = _mutated(routed, tmp_path,
+                 "INSERT INTO bundle_net(bundle_id,net_id,ord)"
+                 " VALUES('4',99999,99)")
+    code, out = _judge(p)
+    assert code == 2, out
+    assert "bundle membership row" in out and "cannot resolve" in out, out
+    assert "Traceback" not in out, out
+
+
+def test_a_malformed_keepout_layer_list_is_unjudgeable_not_dirty(
+        routed, tmp_path):
+    """`int('M4')` raised out of a reader no guard covered.
+
+    The fifth pass caught the JSON rows; `keepout.layers` is a stored CSV
+    and had the identical hole, exiting 1 with a traceback — the status
+    reserved for geometry violations (Codex P2 on #942). Each shape below
+    defeats `int()` a different way."""
+    for csv in ("M4", "6,x", "6;7"):
+        p = _mutated(routed, tmp_path,
+                     "INSERT INTO keepout(x1,y1,x2,y2,layers,inside_block,net)"
+                     f" VALUES(0,0,10,10,'{csv}',0,'')")
+        code, out = _judge(p)
+        assert code == 2, f"{csv}: {out}"
+        assert "keepout's layer list cannot be read" in out, f"{csv}: {out}"
+        assert "Traceback" not in out, f"{csv}: {out}"
+
+
+def test_an_empty_keepout_layer_list_is_not_malformed(routed, tmp_path):
+    """The control the parse must not swallow.
+
+    An empty list is the CONVENTION for a zone that blocks every layer (the
+    fourth pass's P1), so the new refusal must leave it alone — a guard that
+    rejected it would turn that fix back off while looking stricter."""
+    nid = _net_id(routed)
+    con = sqlite3.connect(routed)
+    x1, y1, x2, y2 = con.execute(
+        "SELECT x1,y1,x2,y2 FROM net_segment WHERE net_id=?", (nid,)).fetchone()
+    con.close()
+    p = _mutated(routed, tmp_path,
+                 "INSERT INTO keepout(x1,y1,x2,y2,layers,inside_block,net)"
+                 f" VALUES({x1 + 1},{y1 - 1},{x2 - 1},{y2 + 1},'',0,'')")
+    code, out = _judge(p)
+    assert code == 1, out
+    assert "KEEPOUT" in _kinds(out), out
