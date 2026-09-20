@@ -359,6 +359,26 @@ def test_a_design_with_no_route_cannot_be_judged_either(routed, tmp_path):
 # Hierarchy: which component a bundle is entitled to stop at
 # ---------------------------------------------------------------------------
 
+def _flow(tmp_path_factory, flow, name):
+    """Route a checked-in flow into a checkpoint through the `:memory:`
+    redirect (the one `btcl -b` arms), so its text is untouched."""
+    out = str(tmp_path_factory.mktemp(name) / f"{name}.bdb")
+    env = buda_env(_ROOT, BUDA_BDB_MEMORY_TO=out)
+    r = subprocess.run([sys.executable, str(_ROOT / "src" / "buda_cli.py"),
+                        str(_ROOT / "flow" / flow), "--no-viz"],
+                       capture_output=True, text=True, env=env, cwd=str(_ROOT))
+    assert os.path.isfile(out), r.stdout + r.stderr
+    return out
+
+
+@pytest.fixture(scope="module")
+def vias(tmp_path_factory):
+    """`flow/hier_four_blocks.buda` — 34 bit-wires over M5/M6/M7 with 20
+    per-bit vias.  The two-instance vehicle routes entirely on M6 and has
+    NONE, so nothing else here exercises a via at all."""
+    return _flow(tmp_path_factory, "hier_four_blocks.buda", "vias")
+
+
 @pytest.fixture(scope="module")
 def hier(tmp_path_factory):
     """`flow/hier_testcase.buda` routed into a checkpoint (~0.2s).
@@ -368,13 +388,7 @@ def hier(tmp_path_factory):
     section is about.  This flow carries `s2p_0`, whose pins sit on the
     container `src_i` AND on `src_i/buf_i` inside it.
     """
-    out = str(tmp_path_factory.mktemp("hier") / "hier_testcase.bdb")
-    env = buda_env(_ROOT, BUDA_BDB_MEMORY_TO=out)
-    r = subprocess.run([sys.executable, str(_ROOT / "src" / "buda_cli.py"),
-                        str(_ROOT / "flow" / "hier_testcase.buda"), "--no-viz"],
-                       capture_output=True, text=True, env=env, cwd=str(_ROOT))
-    assert os.path.isfile(out), r.stdout + r.stderr
-    return out
+    return _flow(tmp_path_factory, "hier_testcase.buda", "hier")
 
 
 # `s2p_0` runs x 230..370 on M6 and happens to touch both leaves
@@ -423,3 +437,48 @@ def test_the_container_only_counts_because_it_carries_a_pin(hier, tmp_path):
     assert code == 1, out
     assert _kinds(out) == {"OPEN"}, out
     assert "net s2p_0 does not reach its endpoint block src_i/buf_i" in out, out
+
+
+def test_without_bundle_membership_the_judge_narrows_and_says_so(routed, tmp_path):
+    """A design that never mirrored its nets into the BDB has no
+    `bundle_net` rows, and "which nets were supposed to carry metal" is then
+    unanswerable.  The judge falls back to the nets that HAVE metal — so
+    shorts and broken metal are still judged — and NAMES what the fallback
+    costs, because a silent narrowing is how an audit comes to mean less
+    than the reader thinks.  Without the fallback the scope is empty and
+    connectivity is judged for nothing at all, silently."""
+    p = _mutated(routed, tmp_path, "DELETE FROM bundle_net")
+    code, out = _judge(p)
+    assert code == 0, out
+    assert "records no bundle membership" in out, out
+    assert "NO_METAL not judged" in out, out
+
+    # and it still judges: the same planted short is still caught
+    nid = _net_id(routed)
+    short_dir = tmp_path / "short"
+    short_dir.mkdir()
+    q = _mutated(routed, short_dir, "DELETE FROM bundle_net",
+                 f"UPDATE net_segment SET x2=500 WHERE net_id={nid}")
+    code, out = _judge(q)
+    assert code == 1, out
+    assert _kinds(out) == {"SHORT"}, out
+
+
+def test_a_via_joins_two_wires_only_where_it_lands_on_both(vias, tmp_path):
+    """A `net_via` row SAYS two segments are joined; whether they are is
+    geometry.  Move one via off its own wires and the net it was holding
+    together falls into two pieces — a judge that took the row's word for
+    it would report the design connected."""
+    con = sqlite3.connect(vias)
+    assert con.execute("SELECT count(*) FROM net_via").fetchone()[0] > 0
+    con.close()
+    code, out = _judge(vias)
+    assert code == 0, out                  # as routed
+
+    p = _mutated(vias, tmp_path,
+                 """UPDATE net_via SET x = x + 10000, y = y + 10000
+                    WHERE rowid = (SELECT min(rowid) FROM net_via)""")
+    code, out = _judge(p)
+    assert code == 1, out
+    assert "OPEN" in _kinds(out), out
+    assert "disconnected pieces" in out, out

@@ -481,8 +481,11 @@ def check_connectivity(con, wires, max_report):
     for w in wires:
         by_net[w.net].append(w)
 
-    # Which nets are supposed to carry metal: the ones a bundle holds.
-    in_scope, names = set(), {}
+    # Which nets are supposed to carry metal: the ones a bundle holds.  A
+    # net no bundle carries is out of scope — `flow/tpu`'s 256 edge-of-array
+    # ports are the design, not an open — and saying so is the difference
+    # between a judge and a noise generator.
+    in_scope, names, scoped = set(), {}, True
     if _table_exists(con, "net"):
         names = {int(r["id"]): r["name"] for r in _rows(con, "SELECT id, name FROM net")}
     if _table_exists(con, "bundle_net"):
@@ -490,6 +493,14 @@ def check_connectivity(con, wires, max_report):
             nm = names.get(r["net_id"])
             if nm:
                 in_scope.add(nm)
+    if not in_scope:
+        # No membership rows at all (a flow that never mirrored its nets into
+        # the BDB).  Fall back to the nets that HAVE metal, so shorts and
+        # broken metal are still judged, and say what the fallback costs: a
+        # net with no metal cannot be distinguished from a net that was never
+        # meant to have any, so NO_METAL is not judged here.
+        in_scope = set(by_net) - {""}
+        scoped = False
 
     vias = defaultdict(list)
     if _table_exists(con, "net_via"):
@@ -500,7 +511,7 @@ def check_connectivity(con, wires, max_report):
                 continue
             vias[names.get(r["net_id"], "")].append(
                 (r["bundle_id"], int(r["from_seg"]), int(r["to_seg"]),
-                 int(r["bit_index"])))
+                 int(r["bit_index"]), float(r["x"]), float(r["y"])))
 
     # Endpoint blocks per net, from the pin table — reduced to the OUTERMOST
     # pin-bearing components, which is the level the bundle actually routes
@@ -538,10 +549,23 @@ def check_connectivity(con, wires, max_report):
                                   f"bundle and has no placed metal"))
             continue
         uf = _UF()
+        at = {}
         for w in ws:
             uf.find(w.key)
-        for bundle, fseg, tseg, bit in vias.get(net, ()):
-            uf.union((bundle, fseg, bit), (bundle, tseg, bit))
+            at[w.key] = w
+        for bundle, fseg, tseg, bit, vx, vy in vias.get(net, ()):
+            a, b = (bundle, fseg, bit), (bundle, tseg, bit)
+            wa, wb = at.get(a), at.get(b)
+            # A via joins two wires only where it LANDS ON BOTH.  Taking the
+            # row's word for it would let a via placed off its own wires
+            # report a net connected that physically is not — the row says
+            # two segments are joined, and whether they are is geometry.
+            if wa is None or wb is None:
+                continue
+            if not all(w.x1 - TOL <= vx <= w.x2 + TOL
+                       and w.y1 - TOL <= vy <= w.y2 + TOL for w in (wa, wb)):
+                continue
+            uf.union(a, b)
         # Metal contact, bucketed per layer like the short check.
         by_layer = defaultdict(list)
         for w in ws:
@@ -573,7 +597,7 @@ def check_connectivity(con, wires, max_report):
                     bad.append((ws[0], f"OPEN: net {net} does not reach its "
                                        f"endpoint block {name}"))
                 break
-    return bad, n_open, n_no_metal, unplaced
+    return bad, n_open, n_no_metal, unplaced, scoped
 
 
 # ---------------------------------------------------------------------------
@@ -604,7 +628,8 @@ def audit(path, max_report=8):
     dirs = check_layer_dir(wires, grid)
     shorts, n_short = check_shorts(wires, max_report)
     ko, n_ko = check_keepouts(wires, read_keepouts(con), max_report)
-    conn, n_open, n_no_metal, unplaced = check_connectivity(con, wires, max_report)
+    conn, n_open, n_no_metal, unplaced, scoped = check_connectivity(
+        con, wires, max_report)
 
     counts = {
         "OFF_GRID": len(off_grid),
@@ -637,6 +662,7 @@ def audit(path, max_report=8):
             "layers_without_a_pattern": unpatterned,
             "wires_crossing_a_region_override": crossing,
             "endpoint_blocks_unplaced": unplaced,
+            "bundle_membership_known": scoped,
         },
         "examples": examples,
     }
@@ -666,6 +692,10 @@ def report(res, quiet=False):
     if notes["endpoint_blocks_unplaced"]:
         print(f"[judge] note: {notes['endpoint_blocks_unplaced']} endpoint "
               f"block(s) are unplaced — reach not judged for those")
+    if not notes["bundle_membership_known"]:
+        print("[judge] note: this design records no bundle membership "
+              "(`bundle_net` is empty), so a net with NO metal cannot be "
+              "told from one that was never routed — NO_METAL not judged")
     print(f"[judge] VERDICT: {'CLEAN' if res['clean'] else 'VIOLATIONS'} "
           f"({res['total']})")
 

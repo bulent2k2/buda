@@ -100,6 +100,19 @@
 #                  that reaches it stops the arm).  The td
 #                  arm's measurement round then runs on the ALIGNED
 #                  floorplan (`-align`), since a seat is geometry
+#   -judge         score every round with `tools/independent_audit.py` too
+#                  (convergence ladder item 2, docs/internal/
+#                  independent_audit.md): each round's `open_bdb :memory:`
+#                  is given a durable home — the same redirect `btcl -b`
+#                  arms, so the vehicle's text is untouched — and the
+#                  judge's verdict lands in the table as its own column
+#                  BESIDE the engine's.  Two columns, never one: a row
+#                  where they disagree is the finding the judge exists to
+#                  make possible.  `clean`, a violation count, or `—` when
+#                  the judge declined to judge, which is not clean.
+#                  Opt-in: it costs a checkpoint per round, and the table
+#                  name carries `_judged` so a judged run keeps its own
+#                  evidence beside an unjudged one
 #   -out DIR       where logs/reports/tables go (default e1_out beside the
 #                  current directory)
 #   -tag T         a tag in the table file's name
@@ -114,7 +127,8 @@ if {$argc < 2} {
     puts stderr "usage: converge.tcl soc|tpu <size> ... \[-heal\] \[-step N\]\
                  \[-maxreserve N\] \[-informed R\] \[-arms a,b\] \[-nofloor\]\
                  \[-primitive share|reserve\] \[-f0 F\] \[-fmax F\]\
-                 \[-handdown\] \[-out DIR\] \[-tag T\] \[-j N\]"
+                 \[-handdown\] \[-yield\] \[-judge\] \[-out DIR\] \[-tag T\]\
+                 \[-j N\]"
     exit 2
 }
 set vehicle [lindex $argv 0]

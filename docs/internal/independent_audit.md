@@ -50,6 +50,7 @@ judge declined to judge — which is not clean and must not read as it.
 | `SHORT` | two DIFFERENT nets whose metal overlaps on one layer |
 | `KEEPOUT` | a bit-wire lying over a keepout that blocks its layer |
 | `OPEN` | a net whose metal is not one connected piece, or that does not reach an endpoint block |
+| | — two wires count as joined by a via only where the via LANDS ON BOTH: a `net_via` row *says* two segments are joined, and whether they are is geometry |
 | `NO_METAL` | a net a bundle carries with no placed metal at all |
 | `LAYER_DIR` | a bit-wire running across its layer's declared direction |
 
@@ -90,6 +91,11 @@ rather than left to be discovered:
   block face with the block's own routing taking it from there.
 * **An unplaced component** (the `-1,-1,-1,-1` convention) is skipped for
   reach, counted, and named.
+* **A design with no `bundle_net` rows** cannot say which nets were supposed
+  to carry metal, so the scope falls back to the nets that HAVE metal —
+  shorts and broken metal are still judged, `NO_METAL` is not — and the
+  fallback is NAMED in the output.  A silent narrowing is how an audit comes
+  to mean less than its reader thinks.
 
 ### The hierarchy rule, and how it was got wrong first
 
