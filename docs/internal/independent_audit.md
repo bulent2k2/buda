@@ -145,6 +145,7 @@ Every design judged so far, with `check_design`'s verdict beside it:
 | two-instance reserve vehicle (24 wires) | Success | clean |
 | `flow/hier_bundle1`, `hier_four_blocks`, `hier_four_blocks_cell`, `hier_testcase` | Success | clean |
 | `flow/soc_small.buda` (9328 wires, 6 layers) | Success | clean |
+| `flow/soc_mid.buda` (**35,096** wires, 6 layers — judged in 1.2 s) | Success | clean |
 | `converge tpu 8 -arms blind` (mesh, bottom-up) | 0/0/0 | clean |
 | `converge soc 2 -arms td` (no copies) | 0/0/0 | clean |
 | `converge soc 2 -arms blind` (bottom-up) | 1/8/8 | **104** |
