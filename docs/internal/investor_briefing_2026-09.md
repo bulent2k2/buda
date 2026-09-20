@@ -276,9 +276,10 @@ study notes, not from a wish list.
    bottom-up path is exercised only on generated arrays.  Recovering
    repetition from a uniquified netlist, or planning above synthesis, is an
    open design question.
-6. **Residual quality.**  10 of the 57 corpus flows end with overlaps or
-   unplaced bits; the chip-scale top-down vehicle strands 134 bits; the
-   generated SoC's bottom-up arm strands the same 8 bits of one bus from 16
+6. **Residual quality.**  10 of the 57 corpus flows end with a residual —
+   nine with overlaps or unplaced bits, one (the real 45 nm core) with audit
+   violations only; the chip-scale top-down vehicle strands 134 bits; the
+   generated SoC's bottom-up arm strands the same 8 bits of one bus from 32
    clusters up, and a 128-cluster channel sweep ran 90 minutes without
    finishing.  Each is diagnosed; none is fixed.
 7. **Runtime at scale.**  The healers are measured search; on the largest
