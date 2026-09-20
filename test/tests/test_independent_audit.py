@@ -773,3 +773,98 @@ def test_a_json_write_failure_is_not_a_violation(routed, tmp_path):
     assert code == 3, out
     assert "could not write" in out and "CLEAN" in out, out
     assert "Traceback" not in out, out
+
+
+def test_structurally_malformed_slot_json_is_unjudgeable_not_dirty(
+        routed, tmp_path):
+    """`json.loads` succeeding is not the same as the row being readable.
+
+    `'[{}]'` is valid JSON, so `JSONDecodeError` never fires; the fault
+    surfaced later as a `KeyError` out of `Slot.__init__` and Python exited
+    1 through its own traceback — the status reserved for geometry
+    violations (Codex P2 on #942). Each shape below defeats the parse a
+    different way and each must be exit 2 with the row named."""
+    for slots, why in (
+            ('[{}]', "a slot with no fields at all"),           # KeyError
+            ('[{"t":"SIGNAL","l":"","w":"x","s":1}]', "a non-numeric width"),
+            ('{"t":"SIGNAL"}', "an object where a list belongs"),  # TypeError
+            ('["SIGNAL"]', "a bare string where a slot belongs")):
+        p = _mutated(routed, tmp_path,
+                     f"UPDATE track_pattern SET slots='{slots}'")
+        code, out = _judge(p)
+        assert code == 2, f"{why}: {out}"
+        assert "track pattern's slot list cannot be read" in out, f"{why}: {out}"
+        assert "Traceback" not in out, f"{why}: {out}"
+
+
+def test_a_malformed_layer_stack_is_unjudgeable_not_dirty(routed, tmp_path):
+    """The same hole in the OTHER reader of a stored JSON row.
+
+    The finding named the slot list; `read_layer_stack` does `int(d["id"])`
+    on the meta row the same way, and fixing one reader while leaving the
+    other is the failure mode the override-ordinal pass had already taught
+    on this file."""
+    p = _mutated(routed, tmp_path,
+                 "UPDATE meta SET value='[{}]' WHERE key='layer_stack'")
+    code, out = _judge(p)
+    assert code == 2, out
+    assert "layer stack" in out and "cannot be read" in out, out
+    assert "Traceback" not in out, out
+
+
+def test_the_metal_is_judged_not_the_recorded_track_position(routed, tmp_path):
+    """The rectangle is the wire; `track_position` is a claim about it.
+
+    A `net_segment` row carries the position twice and `persist.py` derives
+    the rectangle from the scalar, so they cannot honestly disagree. This
+    file checked ONLY the scalar, so a rectangle moved off the grid under a
+    `track_position` still naming a signal track was called CLEAN — an
+    audit grading the router's arithmetic instead of its metal (Codex P2 on
+    #942).
+
+    Planted as a half-slot shift of the rectangle alone: 132..134 becomes
+    132.5..134.5, centre 133.5, which is between M6 signal slots (centres 3
+    apart) and touches no neighbour, so nothing else fires and the two new
+    kinds are the whole verdict."""
+    nid = _net_id(routed)
+    p = _mutated(routed, tmp_path,
+                 "UPDATE net_segment SET y1=y1+0.5, y2=y2+0.5"
+                 f" WHERE net_id={nid} AND seg_idx=0 AND bit_index=0")
+    code, out = _judge(p)
+    assert code == 1, out
+    assert _kinds(out) == {"OFF_GRID", "ROW_MISMATCH"}, out
+    assert "the metal is centred on 133.5" in out, out
+    assert "track_position 133" in out, out
+
+
+def test_a_consistent_row_moved_off_grid_is_off_grid_alone(routed, tmp_path):
+    """The control that separates the two kinds.
+
+    Move the scalar WITH the rectangle and the row no longer contradicts
+    itself: the wire is off grid and that is all, so ROW_MISMATCH must stay
+    silent. Without this, reporting both on every off-grid wire would pass
+    the test above while saying nothing."""
+    nid = _net_id(routed)
+    p = _mutated(routed, tmp_path,
+                 "UPDATE net_segment SET y1=y1+0.5, y2=y2+0.5,"
+                 " track_position=track_position+0.5"
+                 f" WHERE net_id={nid} AND seg_idx=0 AND bit_index=0")
+    code, out = _judge(p)
+    assert code == 1, out
+    assert _kinds(out) == {"OFF_GRID"}, out
+
+
+def test_a_stale_position_over_sound_metal_is_mismatch_alone(routed, tmp_path):
+    """The mirror control: metal on grid, scalar stale.
+
+    Only the scalar moves, so the metal is exactly where it was and
+    OFF_GRID must stay silent while ROW_MISMATCH fires. This is the fault
+    the finding describes read the other way round, and it is the one that
+    proves the new kind is not just OFF_GRID under another name."""
+    nid = _net_id(routed)
+    p = _mutated(routed, tmp_path,
+                 "UPDATE net_segment SET track_position=track_position+0.5"
+                 f" WHERE net_id={nid} AND seg_idx=0 AND bit_index=0")
+    code, out = _judge(p)
+    assert code == 1, out
+    assert _kinds(out) == {"ROW_MISMATCH"}, out

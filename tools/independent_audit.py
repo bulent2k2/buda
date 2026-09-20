@@ -34,8 +34,11 @@ rather than being reproduced faithfully by both sides.
 
 What it checks, per the ladder page:
 
-  OFF_GRID     a bit-wire whose track position is not the centre of a SIGNAL
-               slot of its layer's effective pattern
+  OFF_GRID     a bit-wire whose METAL is not centred on a SIGNAL slot of its
+               layer's effective pattern
+  ROW_MISMATCH a bit-wire whose recorded `track_position` contradicts the
+               rectangle stored beside it — the two are redundant by
+               construction, so one of them is stale
   SHORT        two DIFFERENT nets whose metal overlaps on one layer
   KEEPOUT      a bit-wire lying over a keepout that blocks its layer
   OPEN         a net whose metal is not one connected piece, or that does not
@@ -87,6 +90,13 @@ LIMITATIONS, stated rather than discovered later:
     NET, never by a container that merely encloses it.
   * An UNPLACED component (the -1,-1,-1,-1 convention) is skipped for reach,
     counted, and named in the summary.
+  * Every check reads the stored RECTANGLE.  A `net_segment` row carries the
+    track position twice — as the scalar the engine recorded and as the
+    rectangle `persist.py` derives from it — and this file judges the
+    rectangle, because that is the metal; the scalar is the router's claim
+    about it, and an audit that reads the claim is grading the router's own
+    arithmetic.  Their disagreement is ROW_MISMATCH rather than a silent
+    preference for either.
 """
 
 import argparse
@@ -103,7 +113,8 @@ from collections import defaultdict
 # geometry (the finest declared slot width in the tree is 0.07 um).
 TOL = 1e-6
 
-KINDS = ("OFF_GRID", "SHORT", "KEEPOUT", "OPEN", "NO_METAL", "LAYER_DIR")
+KINDS = ("OFF_GRID", "ROW_MISMATCH", "SHORT", "KEEPOUT", "OPEN",
+         "NO_METAL", "LAYER_DIR")
 
 
 # What "cannot be read" is made of: a corrupt or truncated SQLite file, a
@@ -163,6 +174,31 @@ def _column_exists(con, table, column):
 
 def _rows(con, sql, args=()):
     return con.execute(sql, args).fetchall()
+
+
+def _decode(text, what, build):
+    """Build objects from a stored JSON list, refusing a malformed one.
+
+    `json.loads` SUCCEEDS on `[{}]`, on a bare object, and on a slot whose
+    width is the string "x", so `JSONDecodeError` never fires for any of
+    them: the fault surfaces later as a KeyError/TypeError/ValueError out of
+    the reader and Python exits 1 through its own traceback — the status
+    this file reserves for geometry violations (Codex P2 on #942).
+
+    Caught HERE, where the row can be NAMED, rather than widened into
+    `UNREADABLE`: design-wide those three are also the shape of an ordinary
+    defect in this file, and a judge that reports its own bugs as an
+    unjudgeable design is exactly what naming that set was for.  The scope
+    is one parse of one stored row, which is where a malformed input
+    appears and where a bug of mine would be obvious.
+    """
+    try:
+        data = json.loads(text or "[]")
+        if not isinstance(data, list):
+            raise TypeError(f"expected a list, got {type(data).__name__}")
+        return [build(d) for d in data]
+    except (ValueError, TypeError, KeyError, IndexError) as e:
+        raise Unjudgeable(f"{what} cannot be read: {e}") from e
 
 
 class Slot:
@@ -235,7 +271,9 @@ class Grid:
         self.overrides = defaultdict(list)   # layer_id -> [(x1,y1,x2,y2,Pattern)]
         if _table_exists(con, "track_pattern"):
             for r in _rows(con, "SELECT * FROM track_pattern"):
-                slots = [Slot(d) for d in json.loads(r["slots"] or "[]")]
+                slots = _decode(r["slots"],
+                                f"the M{int(r['layer_id'])} track pattern's "
+                                f"slot list", Slot)
                 self.patterns[int(r["layer_id"])] = Pattern(
                     r["origin"], slots, r["bounded"],
                     r["bound_lo"], r["bound_hi"])
@@ -254,7 +292,9 @@ class Grid:
                      else "rowid")
             for r in _rows(con,
                            f"SELECT rowid, * FROM grid_override ORDER BY {order}"):
-                slots = [Slot(d) for d in json.loads(r["slots"] or "[]")]
+                slots = _decode(r["slots"],
+                                f"an M{int(r['layer_id'])} region override's "
+                                f"slot list", Slot)
                 self.overrides[int(r["layer_id"])].append(
                     (r["x1"], r["y1"], r["x2"], r["y2"],
                      Pattern(r["origin"], slots)))
@@ -305,6 +345,13 @@ class Wire:
         # snap); every consumer takes min/max and so does this one.
         self.x1, self.x2 = sorted((float(r["x1"]), float(r["x2"])))
         self.y1, self.y2 = sorted((float(r["y1"]), float(r["y2"])))
+        # The row carries the track position TWICE: as the scalar the engine
+        # recorded and as the rectangle it derived from it (`persist.py`
+        # writes `track_position +/- width/2`, and it is the only writer).
+        # `pos` is the CLAIM and `mid_perp()` is the METAL, so every check
+        # here reads the metal and their disagreement is its own finding
+        # (Codex P2 on #942) — preferring either one silently would be the
+        # same error in the other direction.
         self.pos = float(r["track_position"])
         self.width = float(r["width"])
 
@@ -320,6 +367,22 @@ class Wire:
 
     def mid(self):
         return ((self.x1 + self.x2) / 2.0, (self.y1 + self.y2) / 2.0)
+
+    def mid_perp(self, horiz=None):
+        """The rectangle's own centre across the routing direction.
+
+        `horiz` is the LAYER's declared direction where the design states
+        one, not this row's `is_horiz`: which axis is perpendicular is a
+        property of the layer, and taking it from the row would make a
+        single flipped flag report as three faults — the wrong direction
+        (LAYER_DIR, correctly), plus an OFF_GRID and a ROW_MISMATCH read
+        off the wire's own length.  The metal has not moved; only the
+        claim about it has, and LAYER_DIR is the finding for that.
+        """
+        if horiz is None:
+            horiz = self.horiz
+        lo, hi = (self.y1, self.y2) if horiz else (self.x1, self.x2)
+        return (lo + hi) / 2.0
 
     def label(self):
         return (f"{self.net or '?'} (bundle {self.bundle} seg {self.seg} "
@@ -374,14 +437,26 @@ def _bucketed(wires, key_lo, key_hi, size):
 # ---------------------------------------------------------------------------
 
 def check_on_grid(wires, grid):
-    """Every bit lies on a SIGNAL slot of its layer's effective pattern.
+    """Every bit's METAL lies on a SIGNAL slot of its layer's pattern.
+
+    Judged on the RECTANGLE, not on the recorded `track_position`: the
+    rectangle is the wire, the scalar is the engine's claim about it, and an
+    audit that reads the claim is grading the router's own arithmetic — the
+    thing this file exists not to do.  They are redundant by construction
+    (one writer, `persist.py`, deriving the rect from the scalar), so a
+    disagreement is a defect in the record: it is reported as its own kind
+    rather than resolved, since a stale scalar over sound metal and sound
+    metal under a stale scalar are different faults and neither is
+    OFF_GRID.  Before this the scalar was the only thing checked, so a
+    rectangle moved off the grid under a `track_position` still naming a
+    signal track was called CLEAN (Codex P2 on #942).
 
     `audit` refuses a design whose routed layers are not all patterned, so
     an unpatterned layer cannot reach here; a wire on one is reported rather
     than skipped, because a checker that silently passes what it cannot
     evaluate is the failure this file exists to avoid.
     """
-    bad, crossing = [], 0
+    bad, mismatched, crossing = [], [], 0
     for w in wires:
         pat = grid.at(w.layer, *w.mid())
         if pat is None:
@@ -390,10 +465,16 @@ def check_on_grid(wires, grid):
             continue
         if grid.pattern_varies_along(w.layer, w.x1, w.y1, w.x2, w.y2):
             crossing += 1
-        if not pat.is_signal_track(w.pos):
-            bad.append((w, f"track {w.pos:g} is not a SIGNAL slot centre of "
+        here = w.mid_perp(grid.is_horiz.get(w.layer))
+        if not pat.is_signal_track(here):
+            bad.append((w, f"track {here:g} is not a SIGNAL slot centre of "
                            f"the M{w.layer} pattern in force there"))
-    return bad, crossing
+        if abs(here - w.pos) > TOL:
+            mismatched.append(
+                (w, f"the metal is centred on {here:g} but the row records "
+                    f"track_position {w.pos:g} — one of the two is stale, "
+                    f"and every other check here reads the metal"))
+    return bad, mismatched, crossing
 
 
 def check_layer_dir(wires, grid):
@@ -477,10 +558,11 @@ def read_layer_stack(con):
     if not row or not row[0]:
         return None
     out = {}
-    for d in json.loads(row[0]):
-        out[int(d["id"])] = {"name": d.get("name", ""),
-                             "horiz": bool(d.get("horiz")),
-                             "top": bool(d.get("top"))}
+    for d in _decode(row[0], "the stored layer stack (meta 'layer_stack')",
+                     lambda d: (int(d["id"]), {"name": d.get("name", ""),
+                                               "horiz": bool(d.get("horiz")),
+                                               "top": bool(d.get("top"))})):
+        out[d[0]] = d[1]
     return out or None
 
 
@@ -796,7 +878,7 @@ def audit(path, max_report=8):
             f"there — OFF_GRID cannot be judged for those wires, and a "
             f"partial verdict must not read as a clean one")
 
-    off_grid, crossing = check_on_grid(wires, grid)
+    off_grid, mismatched, crossing = check_on_grid(wires, grid)
     dirs = check_layer_dir(wires, grid)
     shorts, n_short = check_shorts(wires, max_report)
     layers = read_layer_stack(con)
@@ -812,6 +894,7 @@ def audit(path, max_report=8):
 
     counts = {
         "OFF_GRID": len(off_grid),
+        "ROW_MISMATCH": len(mismatched),
         "SHORT": n_short,
         "KEEPOUT": n_ko,
         "OPEN": n_open,
@@ -819,7 +902,8 @@ def audit(path, max_report=8):
         "LAYER_DIR": len(dirs),
     }
     examples = []
-    for kind, rows in (("OFF_GRID", off_grid), ("LAYER_DIR", dirs),
+    for kind, rows in (("OFF_GRID", off_grid),
+                       ("ROW_MISMATCH", mismatched), ("LAYER_DIR", dirs),
                        ("SHORT", shorts), ("KEEPOUT", ko)):
         for w, why in rows[:max_report]:
             examples.append({"kind": kind, "where": w.label(), "why": why})

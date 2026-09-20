@@ -48,7 +48,9 @@ not be written — see the fourth pass below.)
 
 | kind | what it says |
 |---|---|
-| `OFF_GRID` | a bit-wire whose track position is not the centre of a SIGNAL slot of its layer's effective pattern |
+| `OFF_GRID` | a bit-wire whose METAL is not centred on a SIGNAL slot of its layer's effective pattern |
+| | — the stored RECTANGLE, not the `track_position` recorded beside it: the rectangle is the wire and the scalar is the router's claim about it |
+| `ROW_MISMATCH` | a bit-wire whose recorded `track_position` contradicts that rectangle — they are redundant by construction, so one of them is stale |
 | `SHORT` | two DIFFERENT nets whose metal overlaps on one layer |
 | `KEEPOUT` | a bit-wire lying over a keepout that blocks its layer |
 | | — the DECLARED zones **and** the ones nobody declares: every solid leaf cell's footprint, on every non-TOP layer, which is the list `Floorplan::low_layer_keepouts` hands the engine's own audit |
@@ -72,7 +74,7 @@ tool does.
 
 **A judge is worth what it catches**, so the tests are a mutation matrix:
 each fault is planted in the tables in SQL, one at a time, and the judge must
-name it.  Reverting any one of its **twenty-five** rules fails at least one
+name it.  Reverting any one of its **thirty** rules fails at least one
 named test: short, keepout, off-grid, layer-direction, metal in two pieces,
 a net that does not reach its block, a net with no metal, a via that does not
 land on the wires it claims to join, the abutment control (a T-junction
@@ -86,7 +88,13 @@ control (the same wire over the same cell on a TOP layer is ordinary
 over-the-cell routing and must stay clean), and the note a checkpoint gets
 when it does not record which layers are TOP, a keepout with no layer set
 blocking every layer, the override order read from the stored ordinal, and
-a failed `--json` write keeping its own status.  (The count read *eighteen*
+a failed `--json` write keeping its own status, a structurally malformed
+slot list and a structurally malformed layer-stack row each being
+unjudgeable, judging the metal rather than the recorded position, reporting
+the two when they disagree, and taking the perpendicular axis from the
+LAYER — with the two controls that keep the last three apart (a row moved
+consistently is `OFF_GRID` alone, a scalar moved alone is `ROW_MISMATCH`
+alone).  (The count read *eighteen*
 while the list held nineteen — the override-crossing note was added to the
 list and not to the number.)
 
@@ -237,6 +245,60 @@ None of them moved a verdict: every design in the table below judges exactly as
 it did before, the bottom-up finding bundle for bundle.  That is what a
 correctness fix to a judge should look like — it changes what the file is
 ENTITLED to say, not what it happened to say here.
+
+### The fifth pass
+
+Two, both real, and the second is the one worth keeping in mind.
+
+* **`json.loads` succeeding is not the same as the row being readable.**
+  `'[{}]'` is valid JSON; so is a slot whose width is the string `"x"`, and
+  so is a bare object where a list belongs.  `JSONDecodeError` therefore
+  never fires for any of them, and the fault surfaced later as a
+  `KeyError`/`TypeError`/`ValueError` out of the reader, exiting **1**
+  through Python's own traceback — the third pass's unreadable-input fix
+  reached through the one door it had left open.  Those three are caught at
+  the PARSE, where the row can be named, rather than widened into
+  `UNREADABLE`: design-wide they are also the shape of an ordinary defect in
+  this file, and a judge that reports its own bugs as an unjudgeable design
+  is precisely what naming that set was for.  The finding named the slot
+  list; `read_layer_stack` does `int(d["id"])` on the `meta` row the same
+  way, so both readers go through the one guard — fixing one and leaving the
+  other is the failure mode the override ordinal had already taught here.
+
+* **The judge was reading the router's claim, not its metal.**  A
+  `net_segment` row carries the track position TWICE: as the scalar the
+  engine recorded and as the rectangle `persist.py` derives from it
+  (`track_position ± width/2`, and it is the only writer).  `check_on_grid`
+  tested the scalar.  So a rectangle moved off the grid under a
+  `track_position` still naming a signal track was called **CLEAN** —
+  reproduced before the fix on the two-instance vehicle by shifting one
+  wire's rectangle half a slot and leaving the scalar alone: exit 0, verdict
+  clean, while the same shift applied to BOTH fields is reported.  Every
+  other check in this file reads the rectangle, so the one check that did
+  not was also the one grading the engine's arithmetic instead of its
+  geometry, which is the thing this file exists not to do.
+
+  Now the rectangle is judged and the disagreement is its own kind,
+  `ROW_MISMATCH`, rather than a silent preference for either field: a stale
+  scalar over sound metal and sound metal under a stale scalar are different
+  faults, and neither is `OFF_GRID`.  Two controls hold them apart, because
+  a fix that reported both on every off-grid wire would pass the first test
+  while saying nothing.
+
+  Building it exposed a flaw in the first cut, and an existing test caught
+  it: taking the perpendicular axis from the row's own `is_horiz` made a
+  single flipped flag report as THREE faults — `LAYER_DIR`, correctly, plus
+  an `OFF_GRID` and a `ROW_MISMATCH` read off the wire's own length.  The
+  metal had not moved; only a claim about it had.  The axis comes from the
+  LAYER's declared direction now, which is the same principle as the fix
+  itself one level down.
+
+  Latent here, like the empty-layer keepout: `ROW_MISMATCH` is **0** on
+  every checkpoint measured, the disagreeing pair being a persistence fault
+  no run in this tree produces.  So no verdict moves — soc_small, soc_mid,
+  the four hier flows and the mesh control still clean, the bottom-up rounds
+  still exactly 104 and 201, the finding's 96 off-grid copies bundle for
+  bundle.
 
 ### The keepouts nobody declares, and what measuring them showed
 
