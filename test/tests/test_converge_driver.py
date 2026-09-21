@@ -33,6 +33,7 @@ that moved them is a result, not a regression:
 """
 import re
 import shutil
+import sqlite3
 import subprocess
 import sys
 from pathlib import Path
@@ -675,3 +676,110 @@ def test_two_policies_in_one_out_dir_keep_their_own_evidence(tmp_path):
         assert _art(out, f"soc2_td_r0.{ext}", "_healed_step1").exists()
     assert len(list(out.glob("*.rep"))) == 2, list(out.iterdir())
     assert len(list(out.glob("*_td_shares_r0.buda"))) == 2, list(out.iterdir())
+
+
+def test_the_judge_scores_every_round_beside_the_engine(tmp_path):
+    """`-judge` (convergence ladder item 2): each round gets a durable
+    checkpoint and `tools/independent_audit.py` judges it, in its own
+    process with no BUDA on its path, and the verdict lands in the table
+    NEXT TO the engine's own.
+
+    The two are separate columns on purpose — a row where they disagree is
+    the finding the judge exists to make possible — so what is pinned here
+    is that the column carries the JUDGE's answer (the same one the tool
+    prints when run by hand on that round's checkpoint) rather than a
+    restatement of the verdict beside it."""
+    out = tmp_path / "e1"
+    r = _tclsh(_DRIVER, "soc", 2, "-arms", "blind", "-maxreserve", 0,
+               "-informed", 0, "-judge", "-out", out, cwd=tmp_path)
+    assert r.returncode == 0, r.stdout[-3000:] + r.stderr[-3000:]
+
+    policy = "_healerless_step1_judged"
+    table = _table(out, "e1", "soc", policy).read_text()
+    # the file opens with a `<!-- converge.tcl ... -->` provenance line
+    hdr_line = next(ln for ln in table.splitlines()
+                    if ln.startswith("| vehicle |"))
+    hdr = [c.strip() for c in hdr_line.split("|")]
+    assert hdr[-2] == "judge", table
+    row = next(ln for ln in table.splitlines() if re.match(r"\| soc \| 2 \|", ln))
+    cells = [c.strip() for c in row.split("|")[1:-1]]
+    assert len(cells) == len(hdr) - 2, (cells, hdr)
+    verdict = cells[-1]
+
+    ckpt = _art(out, "soc2_blind_r1.bdb", policy)
+    assert ckpt.is_file(), sorted(p.name for p in out.iterdir())
+    judged = subprocess.run(
+        [sys.executable, str(_ROOT / "tools" / "independent_audit.py"),
+         str(ckpt)], capture_output=True, encoding="utf-8", cwd=str(_ROOT))
+    by_hand = ("clean" if judged.returncode == 0
+               else re.search(r"VERDICT: \w+ \((\d+)\)", judged.stdout).group(1))
+    assert verdict == by_hand, (verdict, judged.stdout)
+    # and the run kept the machine-readable form beside the round
+    assert _art(out, "soc2_blind_r1.judge.json", policy).is_file()
+
+
+def test_without_the_flag_a_round_leaves_no_checkpoint(tmp_path):
+    """The control: judging costs a file per round (a `:memory:` design made
+    durable), so it is opt-in and a run that did not ask for it is
+    unchanged — no checkpoint, no judge column."""
+    out = tmp_path / "e1"
+    r = _tclsh(_DRIVER, "soc", 2, "-arms", "blind", "-maxreserve", 0,
+               "-informed", 0, "-out", out, cwd=tmp_path)
+    assert r.returncode == 0, r.stdout[-3000:] + r.stderr[-3000:]
+    assert not list(out.glob("*.bdb")), list(out.iterdir())
+    table = _table(out, "e1", "soc", "_healerless_step1").read_text()
+    hdr_line = next(ln for ln in table.splitlines()
+                    if ln.startswith("| vehicle |"))
+    assert "judge" not in hdr_line, table
+
+
+def _judge_verdict_proc():
+    """The driver's own `judge_verdict`, lifted out of `converge.tcl`.
+
+    The driver is a top-to-bottom script — sourcing it RUNS the rounds — so
+    the proc is extracted by brace matching rather than copied, which is the
+    point: a copy would pass this test forever while the file it is meant to
+    guard drifted away from it.
+    """
+    text = _DRIVER.read_text()
+    i = text.index("proc judge_verdict ")
+    j = text.index("{", text.index("}", i))     # the body's opening brace
+    depth, k = 0, j
+    while True:
+        if text[k] == "{":
+            depth += 1
+        elif text[k] == "}":
+            depth -= 1
+            if depth == 0:
+                break
+        k += 1
+    return text[i:k + 1]
+
+
+def test_a_rerun_never_reports_the_previous_runs_judge_json(tmp_path):
+    """The sidecar is cleared BEFORE the judge runs, as the checkpoint and
+    the report already are.
+
+    `judge_verdict` reads `<round>.judge.json` for the violation total, and
+    the judge writes that file only when it reaches a verdict — so a rerun
+    of a named round whose judge did not write one would leave the previous
+    run's file in place, and the run would publish a sidecar naming this
+    round while holding the last one's numbers (Codex P2 on #942).  Here the
+    judge declines outright (exit 2, an empty database): the column is `—`
+    either way, and what separates the fix from the defect is that the stale
+    artifact is gone rather than left behind contradicting the table.
+    """
+    out = tmp_path / "out"
+    out.mkdir()
+    ckpt = tmp_path / "r1.bdb"
+    sqlite3.connect(str(ckpt)).close()          # a real file with no route
+    stale = out / "r1.judge.json"
+    stale.write_text('{"clean": false, "total": 999}\n')
+
+    script = tmp_path / "drive.tcl"
+    script.write_text(f'set repo {{{_ROOT}}}\n' + _judge_verdict_proc() +
+                      f'\nputs [judge_verdict {{{ckpt}}} {{{out}}} r1]\n')
+    r = _tclsh(script, cwd=tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert r.stdout.strip() == "—", r.stdout + r.stderr
+    assert not stale.exists(), "the previous run's judge JSON survived"

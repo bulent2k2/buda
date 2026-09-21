@@ -3,6 +3,56 @@
 Deferred follow-ups for track assignment (`src/nuts.cpp`,
 `src/detailed_nuts.cpp`). Index: [`wishlist.md`](wishlist.md).
 
+## A bottom-up COPY can land off the track grid — OPEN (found 2026-09-20)
+
+**What:** on `soc.tcl`'s bottom-up arm, 96 bit-wires land on no M3 signal
+track at all, and no in-house audit reports them.  Found by the ladder's
+independent judge on its first application to a converge round
+([independent_audit.md](../independent_audit.md), "The first finding"),
+which is the argument for that build item's place in the order.
+
+**Measured**, on `converge.tcl soc 2 -arms blind -maxreserve 0 -informed 0
+-judge` and reproducing identically at NQ = 4:
+
+* the 96 are bundles 127/128/129 — `bu_locked` copies of `core_cell`'s
+  `regf→alu` template at `quad_0/cl_1/core`, `quad_1/cl_0/core`,
+  `quad_1/cl_1/core`;
+* the REFERENCE instance's bundle is 32/32 on grid, each copy **0/32**;
+* the copy is a rigid translation by the instance offset (reference bit 0 at
+  x = 336.5, `quad_0/cl_1/core`'s at 1360.5 — exactly the instances'
+  Δx = 1024), and 1024 mod 18 = 16 against M3's 18-unit period, so 1360.5
+  sits INSIDE the GROUND slot spanning 1359..1361;
+* the four instances' x phases mod 18 are 4, 2, 14, 12 — four phases, one
+  template;
+* `align_bottom_up` said so in the same run (*"sits off cell 'core_cell's
+  chosen phase … not fixable by translation"*) and reverted its one move;
+* `check_template_tracks` nevertheless reports `cell 'core_cell': ALIGNED —
+  4 instance(s) see identical signal tracks (12 window(s) compared)`, so
+  DNUTS copied;
+* the same cell's M5 and M6 copies are 32/32 on grid (M6 is horizontal and
+  every instance shares y = 112; the M5 deltas are multiples of its period).
+
+**Two controls**, both pointing at the copy rather than the design or the
+judge: the MESH (`tpu 8`), whose `-bottomup` snaps the row pitch onto the
+stack's track period, is clean; and the SoC's own TOP-DOWN round, which
+makes no copies, is clean at the same size.
+
+**Where to start:** `_check_template_tracks` (`src/buda_session/hier.py`).
+`rel_tracks` compares each instance's pool relative to its own origin, which
+SHOULD see a phase shift — so the place to look is upstream of the
+comparison: which windows reach it (`segs_by_bid` is built from the FIXED
+segments, and the reference's own routing may not be among them, in which
+case `segs_by_bid[ref_bid]` is empty and that template contributes no
+window), and whether an instance with zero compared windows can fall through
+to `aligned`.  The mechanism is NOT established — that sentence is a lead,
+not a diagnosis.
+
+**Why it matters beyond the defect:** `on_mismatch independent` exists to
+solve a misaligned instance individually rather than copy to it, so a
+checker that reports ALIGNED where the aligner did not align disables the
+policy silently.  Every "clean" in E1 and E5 (6b/6c/6d included) is a
+`check_design` clean, and their bottom-up arms carry this metal.
+
 ## Pull-target breakpoint clamp — ✅ SHIPPED (the b44 tug-of-war fix)
 
 **What (2026-07-17):** `net_pull` is a *direction*; NUTS's pull placement
