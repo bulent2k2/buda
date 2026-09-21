@@ -478,3 +478,195 @@ def test_a_compare_that_cannot_run_does_not_exit_the_regression_code(tmp_path, m
     assert not isinstance(exc, SystemExit) or exc.code != q.EXIT_REGRESSED, (
         "a compare that could not parse its input exited the code that means "
         "'measured, and worse' — the nightly would offer to promote it")
+
+
+# ── sweep provenance ───────────────────────────────────────────────────────
+# A sweep says where it came from, and `--compare` says it back.  The thing
+# these guard is not a computation — it is that the page a red nightly prints
+# can be READ.  Twenty-seven consecutive nightlies reported one delta against
+# a baseline whose age appeared nowhere on it (docs/internal/opens_ci.md
+# item 5), so every one of them looked exactly like a fresh regression.
+
+
+def _roundtrip(tmp_path, payload):
+    p = tmp_path / "sweep.json"
+    p.write_text(json.dumps(payload))
+    return qc.load_results(str(p))
+
+
+def test_a_sweep_written_by_out_carries_its_provenance(tmp_path, monkeypatch):
+    """`--out` writes meta + rows, and load_results reads them back."""
+    out = tmp_path / "mine.json"
+    monkeypatch.setattr(qc, "sweep", lambda *a, **k: [{"flow": "a.buda"}])
+    monkeypatch.chdir(tmp_path)
+    qc.cmd_run(["a.buda"], str(out))
+    meta, rows = qc.load_results(str(out))
+    assert rows == [{"flow": "a.buda"}]
+    # Present even when empty: a reader must never have to tell "did not
+    # know" from "predates the field".
+    assert set(meta) == {"commit", "written", "arch", "run", "run_id",
+                         "pins"}
+
+
+def test_a_pre_provenance_sweep_still_loads(tmp_path):
+    """The bare LIST shape.
+
+    Not a legacy nicety — the nightly's baseline is a cache entry written by
+    whatever harness ran that night, so the one file this change exists to
+    describe is exactly the one with no meta in it.
+    """
+    meta, rows = _roundtrip(tmp_path, [{"flow": "a.buda", "overlaps": 0}])
+    assert meta == {} and rows == [{"flow": "a.buda", "overlaps": 0}]
+
+
+def test_a_file_that_is_neither_shape_is_refused_by_name(tmp_path):
+    meta_err = None
+    try:
+        _roundtrip(tmp_path, {"flow": "a.buda"})     # a row, not a sweep
+    except ValueError as e:
+        meta_err = str(e)
+    assert meta_err and "not a sweep" in meta_err
+
+
+def test_compare_says_when_the_baseline_has_no_provenance(
+        tmp_path, monkeypatch, capsys):
+    row = {"flow": "a.buda", "overlaps": 0, "unplaced": 0, "viol_bundles": 0}
+    _compare_exit(tmp_path, monkeypatch, [row], [row])
+    out = capsys.readouterr().out
+    assert "no provenance recorded" in out
+
+
+def _aged(days, **kw):
+    stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ",
+                          time.gmtime(time.time() - days * 86400))
+    return {"commit": "0" * 40, "written": stamp, "arch": "", "run": "",
+            "run_id": "", "pins": "in_force", **kw}
+
+
+def test_a_stale_baseline_is_called_out_with_its_age(tmp_path, monkeypatch, capsys):
+    """The line whose absence cost twenty-seven nights."""
+    row = {"flow": "a.buda", "overlaps": 0, "unplaced": 0, "viol_bundles": 0}
+    worse = dict(row, unplaced=22)
+    _compare_exit(tmp_path, monkeypatch,
+                  {"meta": _aged(27), "rows": [row]}, [worse])
+    out = capsys.readouterr().out
+    assert "27 day(s) old" in out
+    assert "27 days old" in out and "promote_baseline" in out
+
+
+def test_a_fresh_baseline_gets_no_staleness_note(tmp_path, monkeypatch, capsys):
+    """The note must mean something.
+
+    A gate that shouts on every run is a gate nobody reads, which is the
+    failure this is trying to undo, not repeat.
+    """
+    row = {"flow": "a.buda", "overlaps": 0, "unplaced": 0, "viol_bundles": 0}
+    _compare_exit(tmp_path, monkeypatch,
+                  {"meta": _aged(0), "rows": [row]}, [row])
+    out = capsys.readouterr().out
+    assert "0 day(s) old" in out
+    assert "promote_baseline" not in out
+
+
+def test_two_sweeps_at_different_march_are_called_not_comparable(
+        tmp_path, monkeypatch, capsys):
+    """Routing is ISA-sensitive, which is why CI pins one."""
+    row = {"flow": "a.buda", "overlaps": 0, "unplaced": 0, "viol_bundles": 0}
+    _compare_exit(tmp_path, monkeypatch,
+                  {"meta": _aged(0, arch="x86-64-v2"), "rows": [row]},
+                  {"meta": _aged(0, arch="native"), "rows": [row]})
+    out = capsys.readouterr().out
+    assert "DIFFERENT target ISAs" in out and "x86-64-v2" in out
+
+
+def test_an_arch_only_one_side_recorded_is_not_a_mismatch(
+        tmp_path, monkeypatch, capsys):
+    """Absent is "did not say", never "disagrees".
+
+    Otherwise the note fires on every pre-provenance baseline — i.e. on
+    exactly the files that cannot answer the question.
+    """
+    row = {"flow": "a.buda", "overlaps": 0, "unplaced": 0, "viol_bundles": 0}
+    _compare_exit(tmp_path, monkeypatch, [row],
+                  {"meta": _aged(0, arch="native"), "rows": [row]})
+    out = capsys.readouterr().out
+    # The compare must have REACHED its summary.  Asserting only the absence
+    # of the note lets a crash inside the note satisfy the test — which is
+    # exactly what a naive `b.get("arch") != m.get("arch")` does here, since
+    # the message then formats a key the baseline does not have.
+    assert "unchanged (of 1 flows)" in out
+    assert "DIFFERENT target ISAs" not in out
+
+
+def test_a_pin_free_sweep_compared_against_a_pinned_one_says_so(
+        tmp_path, monkeypatch, capsys):
+    """qor_nopin neutralizes the pins, and `--compare` is qor_corpus's.
+
+    Without the marker the pin delta would read as a build delta on a page
+    that says "base" and "branch".
+    """
+    row = {"flow": "a.buda", "overlaps": 0, "unplaced": 0, "viol_bundles": 0}
+    _compare_exit(tmp_path, monkeypatch,
+                  {"meta": _aged(0, pins="neutralized"), "rows": [row]},
+                  {"meta": _aged(0), "rows": [row]})
+    out = capsys.readouterr().out
+    assert "pins NEUTRALIZED" in out and "baseline" in out
+
+
+def test_check_reads_both_sweep_shapes(tmp_path, capsys):
+    """`--check` gates the nightly; it must not start refusing old sweeps."""
+    err = {"flow": "a.buda", "err": "boom"}
+    for payload in ([err], {"meta": _aged(0), "rows": [err]}):
+        p = tmp_path / "s.json"
+        p.write_text(json.dumps(payload))
+        assert qc.cmd_check(str(p)) == 1
+        assert "errored" in capsys.readouterr().out
+
+
+def test_the_recorded_arch_is_the_builds_not_the_environments(
+        tmp_path, monkeypatch):
+    """`BUDA_ARCH=... bin/bb` then a plain sweep leaves the variable unset
+    while the extension it loads is very much pinned, so the env is the wrong
+    place to ask.  The cmake cache sits beside the artifact and answers for
+    it."""
+    (tmp_path / "build").mkdir()
+    (tmp_path / "build" / "CMakeCache.txt").write_text(
+        "//comment\nBUDA_ARCH:STRING=x86-64-v2\nOTHER:BOOL=ON\n")
+    monkeypatch.setattr(qc, "_ROOT", str(tmp_path))
+    monkeypatch.setenv("BUDA_ARCH", "native")     # the env DISAGREES
+    assert qc._build_arch() == "x86-64-v2"
+
+
+def test_no_build_cache_records_an_empty_arch_rather_than_guessing(
+        tmp_path, monkeypatch):
+    """And NOT the environment, even when it is set.
+
+    Without a cache the variable describes a build it did not configure, so
+    recording it invents an ISA for an artifact whose ISA is unknown — which
+    can manufacture a mismatch, or (both sides reading the same value) make
+    two unknown builds compare equal and suppress a real one.  Codex P2 on
+    #945: the first cut kept the env as a fallback, contradicting this
+    function's own docstring.
+    """
+    monkeypatch.setattr(qc, "_ROOT", str(tmp_path))
+    monkeypatch.setenv("BUDA_ARCH", "x86-64-v2")
+    assert qc._build_arch() == ""
+
+
+def test_two_pin_free_sweeps_are_not_called_a_pin_mismatch(
+        tmp_path, monkeypatch, capsys):
+    """qor_nopin's own documented recipe, across THIS commit.
+
+    Capture on each build then compare: the base-side capture predates the
+    provenance field, so it is a bare list with no `pins` key while the
+    branch side records "neutralized".  Both are pin-free.  Treating the
+    absent key as "pins in force" reported the tool's own workflow as not a
+    build A/B (Codex P2 on #945, reproduced before fixing) — and contradicted
+    the rule stated three lines above it in the same function.
+    """
+    row = {"flow": "a.buda", "overlaps": 0, "unplaced": 0, "viol_bundles": 0}
+    _compare_exit(tmp_path, monkeypatch, [row],
+                  {"meta": _aged(0, pins="neutralized"), "rows": [row]})
+    out = capsys.readouterr().out
+    assert "unchanged (of 1 flows)" in out      # the compare REACHED its end
+    assert "pins NEUTRALIZED" not in out

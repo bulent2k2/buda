@@ -277,7 +277,8 @@ def test_the_advisory_is_printed_before_the_builds(tmp_path, monkeypatch,
                         lambda *a, **kw: seen.append("baseline sweep"))
     monkeypatch.setattr(qc, "cmd_run",
                         lambda *a, **kw: seen.append("branch sweep"))
-    monkeypatch.setattr(qc, "cmd_compare", lambda base, mine: 0)
+    monkeypatch.setattr(qc, "cmd_compare",
+                        lambda base, mine, **kw: 0)   # **kw: base_hint
     qc.cmd_vs("main", str(tmp_path / "o.json"), jobs=1, flows=["x.buda"])
 
     out = capsys.readouterr().out
