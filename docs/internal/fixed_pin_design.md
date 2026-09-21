@@ -1,7 +1,7 @@
 # The fixed-pin primitive: `fix_pin`
 
 *Design proposal, 2026-09-20 — convergence-ladder build item 7.  Not built.
-Revised three times the same day, after three review rounds (see *Corrections
+Revised four times the same day, after four review rounds (see *Corrections
 after review*); the behavioural contract is spelled out AHEAD of the code in
 `test/tests/features/fixed_pin.feature` (`@future`), written against admitted
 and refused landings rather than the token grammar.
@@ -88,6 +88,7 @@ cut of this note claimed they did (Codex on #944):
 | may this wire attach here (generator) | `mk_bt` in `generate_2pin` / the n-pin generator; `annotate_endpoints` through the busterm; the per-bundle Hanan grid (`bt_all_rects`) | `landing_rects` |
 | may this wire attach here (analysis, NUTS, edit, bundler) | `tighten_passthrough`; the pass-through anchor in `nuts.cpp`; `topo_edit.cpp`'s `bt_all_rects`; `set_max_bundle_bits auto` in `bundling_cmds.py` | `landing_rects` |
 | may this wire attach here (audit) | every `get_block_rects` / `get_block_bounds` site in `verify.cpp` | `landing_rects` |
+| is this trunk a pass-through here (reporting) | `buda_session/util.py`'s `seg_spans_block` / `passthru_blocks` — one definition for `dump_topologies --conn`'s `passthru:` line and the web client's markers — and the explorer's hand-copied twin in `viz_explorer/analysis.py` | `landing_rects`, the two-face question: what is reported must be what is admitted (fourth round) |
 | what does this block block | `congestion_planner.cpp` `leaf_rects_cache_`; `Floorplan::low_layer_keepouts`; footprint keepouts on the grid | `obstruction_rects` — unchanged by any fix |
 | what do I draw or report | `viz_explorer/{analysis,draw,edit}.py`, `viz_common.py`, `web/serialize.py`, `buda_session/util.py`, `buda_cmds/setup_cmds.py` | BOTH: the physical outline as today, the strips drawn over it where a fix exists |
 
@@ -123,7 +124,12 @@ each instance's orientation; an owner that is an **instance path** or a
 **flat block** governs one occurrence.  `cell:` / `inst:` disambiguate only
 when a name is both.  The pin part is a pin name, a **bus name** (every bit,
 through `bus_names.py`, so declared `d_in_3` and imported `d_in[3]` are one
-bus), a glob (`d_*`), or `*`.
+bus), a PREFIX, or `*` — resolved longest-prefix-wins with `*` the global
+default outranked by any real prefix, the rule `set_bundling`, `set_ndr`,
+`set_bus_layers` and the scoped `set_max_bundle_bits` already share, so `d_`
+means here what it means there (fourth round: the first cut spelled a glob,
+`d_*`, which is a new meaning for `*` in a family where it already means the
+default — a customization adds a spelling, never changes what one means).
 
 **The six levels, in that spelling:**
 
@@ -193,7 +199,14 @@ bus), a glob (`d_*`), or `*`.
   refuses (Codex on #944, third round).  Nothing to declare — provided the
   pass-through readers (the clamp, the NUTS anchor, the audit's coverage
   count) ask `landing_rects` the two-face question rather than "does the
-  segment span the block", which today they do not (above).
+  segment span the block", which today they do not (above).  The two
+  REPORTERS of the same question read it too (fourth round):
+  `buda_session/util.py`'s `seg_spans_block` / `passthru_blocks` — one
+  definition for `dump_topologies --conn`'s `passthru:` line and the web
+  client's pass-through markers — and the explorer's hand-copied twin in
+  `viz_explorer/analysis.py`, which would otherwise report a pass-through
+  the fix refuses; both are in the census, and that one is already a copy
+  of the other is the note's own single-sourcing argument.
 - **`layer`** names the APPROACH segment's layer(s) — the stub that lands —
   and must be direction-compatible with the face: an east or west face is
   reached by a horizontal stub, so it takes H layers; a north or south face,
@@ -225,7 +238,42 @@ bus), a glob (`d_*`), or `*`.
   the CANDIDATE — never index-keyed on the input, the `pinned_seg_layers`
   hazard a trial moving a bundle to another shape already taught — and
   intersected with the band mask inside the STRICT enumeration, so a fixed
-  layer steers the choice rather than the ladder escalating past it.
+  layer steers the choice rather than the ladder escalating past it.  Three
+  more facts about that set (fourth round).  **It is OUTSIDE
+  `topology_fingerprint` and INSIDE the schema.**  The fingerprint IS the
+  persisted `topo_uid` — the identity `_apply_bdb_pins`, `select_topology`'s
+  uid path and `pin_plan uid` resolve by — and `h_seg` hashes start, end,
+  `layer_hint`, `is_jog` and `edge_id` only; hashing a new field, even at
+  size 0, moves every uid in every checkpoint in the tree, so pins stop
+  re-attaching while the route stays identical, which is why
+  `Segment::perp_clamp_lo/hi` is left out (`topology.h`, in those words)
+  with `clear_analysis_cache()` as the mitigation.  `layer_set` follows that
+  precedent, and gets a `topology_segment` column in the `pin_fix` bump:
+  every per-segment fact that became load-bearing has one (`assigned_layer`,
+  `edge_id` v14, `perp_clamp` v16), and a fact derived at generation with no
+  load path is what resumed a fan-in UNTAPERED until v27.  **It is the
+  FOURTH claimant on a bundle's mask**, after the cell band, the NDR rule's
+  layers and `set_bus_layers` — which already exists
+  (`buda_session/bus_layers.py`, built for the phase-0 pin-template flip of
+  2026-09-06, where a 0.8 um move took a bus off the layer its handoff was
+  built around) and IS level 4 at bundle scope; the per-landing-SEGMENT
+  scope is the only new piece.  Each claimant INTERSECTS
+  (`reapply_ndr_layer_restrictions`' rule, R2d), so `fix_pin d_in layer M5`
+  against `set_bus_layers d_ M3` is an empty intersection and a hard error
+  naming both, applied LAST since it is the narrowest.  On a hier flow that
+  verdict WAITS for `_layer_masks_resolved`: `_apply_layer_policies` owns
+  `allowed_layers` and rewrites it at every wrapper-set transition, so the
+  fix's set is re-applied after the bus layers there, and judged earlier it
+  would refuse a cell for a layer its band never reaches (the BUDA-1913
+  lesson, Codex P2 on #737) — with a FORCED site before the planner, since a
+  flat flow carrying policies never runs the resolver.  **And the via kind
+  has a FOURTH reader**, the one that fails by PASSING:
+  `build_ndr_audit_index` (`ndr_cmds.py`) counts every negative `to_seg` as
+  a strap for the R9 audit, so an endpoint via on a bonding bundle would
+  read as proof of bonding to the very audit that catches floating shield
+  metal — the failure `nutsflow.py`'s copier warns about in prose; eight
+  test sites filter the same sign.  The kind flip is a four-consumer,
+  eight-test change, not a struct field.
 - **`order`** is a bit permutation per LANDING, not per segment (Codex on
   #944).  `BusSegment::bit_order` is one value for a whole segment — today
   `run_detailed_nuts [lo_hi|hi_lo]` sets it for the whole run — and a
@@ -342,7 +390,9 @@ that finally consumes it.
    SET on the landing stub and the endpoint via as its own via KIND,
    per-landing `order` with the per-candidate agreement gate, per-bit
    targets, `from_pins` — levels 4, 6 and the LEF change — touching the
-   generator, the planner and DNUTS.  And **Q7 is the gate on
+   generator, the planner and DNUTS; the via kind a four-consumer,
+   eight-test change and `layer_set` a column plus a fingerprint exclusion,
+   placed after `set_bus_layers` in the mask order (fourth round).  And **Q7 is the gate on
    PR 1b**: if the wrap-around pin is routine in the flows this is for, the
    forced-face shape family comes first and the command is premature.
 8. **Reserved names, reserved HERE and not in the catalogue.**  The message
@@ -379,7 +429,9 @@ the current ones.
 4. **Bit order is per landing, not per segment.**  A straight segment with a
    fixed pin at each end has one `bit_order` and two landings.  Orders are
    declared per landing, must agree on one straight segment (refused loudly
-   otherwise), and may differ across a bend.
+   otherwise — SUPERSEDED in the third round: checked per candidate at
+   generation, since no segment exists at declaration), and may differ
+   across a bend.
 
 ### Second round (2026-09-20, the owner's review on #944)
 
@@ -444,6 +496,42 @@ it cannot be made.
    generation, dropping the straight candidate and keeping the bend.  The
    first round's reply argued against exactly this option as "later and
    quieter"; that premise assumed a segment to check, and there is none.
+
+### Fourth round (2026-09-20, the owner's review on #944 at `c32b572`)
+
+Seven items, each checked against the source.  The third round holds; the
+worst of these is the deepest the class has reached, in `topo_uid`, and it
+is reachable at all because the design now names its mechanisms precisely
+enough to check.
+
+1. **`Segment::layer_set` had to say which side of `topo_uid` it falls on,
+   and needs a column.**  Outside the fingerprint (the `perp_clamp`
+   precedent: hashing a new field churns every persisted uid, so pins stop
+   re-attaching on every checkpoint in the tree while the route stays
+   identical), inside the schema bump (every load-bearing per-segment fact
+   has a column; `seg_bits` with no load path resumed untapered until v27).
+   The contract gains the scenario the route cannot see: a checkpoint
+   written before fixed pins existed re-attaches its pins.
+2. **The via sign has a fourth reader, and it fails by passing.**
+   `build_ndr_audit_index` counts every negative `to_seg` as a strap for the
+   R9 audit, so an endpoint via would read as proof of bonding; eight test
+   sites filter the same sign.  Named in the layer bullet and in PR 2's
+   scope.
+3. **`set_bus_layers` already exists and is level 4 at bundle scope.**  The
+   fix's set is the fourth claimant on the mask, intersecting like the
+   others, applied last; a fix layer against a bus layer with no common
+   member is a hard error naming both.
+4. **On a hier flow the empty-intersection verdict waits for
+   `_layer_masks_resolved`**, with a forced site for a flat flow — the two
+   sites the NDR no-op report ended up with, for the same reason.
+5. **The target selector spelled a glob.**  The pin part is a prefix now,
+   longest-prefix-wins with `*` the outranked default, the rule every other
+   prefix-keyed knob shares.
+6. **Two pass-through REPORTERS were outside the census** — `util.py`'s one
+   definition for the dump and the web markers, and the explorer's
+   hand-copied twin.  In the table, reading the two-face question.
+7. **The rounds log contradicted itself**: first-round correction 4 is
+   marked superseded by third-round 4.
 
 ## Open questions
 

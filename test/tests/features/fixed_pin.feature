@@ -227,6 +227,41 @@ Feature: Fixed pins — a busterm restricted to a set of admissible landings
     When I fix "core_cell.d_in" to a window on the east face
     Then every copied instance lands inside its own transformed window
 
+  # ── fourth round: what a checkpoint holds ───────────────────────────────
+  # The route cannot see these.  A candidate's identity is a content hash,
+  # so a new per-segment field must stay out of it, and a fact with no load
+  # path is lost on resume (the fan-in taper was, until v27).
+
+  Scenario: A checkpoint written before fixed pins existed re-attaches its pins
+    Given a checkpoint holding a pinned candidate, written before fixed pins existed
+    When the design is rebuilt from it under the build that has fixed pins
+    Then the pin re-attaches to the same candidate
+
+  Scenario: A layer set survives a checkpoint
+    Given "core.d_in" is fixed to the east face on either of two horizontal layers
+    And a checkpoint is written after generation
+    When the session is resumed from the checkpoint
+    Then the restored candidate's landing stub is still held to those two layers
+
+  # ── fourth round: the fix's layer set is one claimant among several ─────
+
+  Scenario: A fix layer with no member in the bus's own layer scope is refused
+    Given the bus "d_" is scoped to one horizontal layer
+    When I fix "core.d_in" to the east face on a different horizontal layer
+    Then the declaration is refused naming both constraints
+
+  Scenario: A fix layer inside a cell's band is honoured on every instance
+    Given "core_cell" is capped to a band that holds the fixed layer
+    When I fix "core_cell.d_in" to the east face on that layer
+    Then every instance's landing stub is on that layer
+
+  # ── fourth round: what is reported is what is admitted ──────────────────
+
+  Scenario: The reporters agree with the engine about a pass-through
+    When I fix "core.d_in" to the east face
+    Then the connectivity dump reports no pass-through of "core"
+    And the explorer marks no pass-through of "core"
+
   # ── failure is loud and never strands ───────────────────────────────────
 
   Scenario: A fix no candidate can honour is reported and the bus still routes
