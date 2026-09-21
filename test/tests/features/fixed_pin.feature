@@ -227,6 +227,41 @@ Feature: Fixed pins — a busterm restricted to a set of admissible landings
     When I fix "core_cell.d_in" to a window on the east face
     Then every copied instance lands inside its own transformed window
 
+  # ── fifth round: a copied class cannot carry one occurrence's fix ───────
+  # A template is solved once and byte-copied, so a fix that binds one
+  # instance and not its siblings is refused, the way an NDR scope naming
+  # one instance's prefix is; the release path is the declared willingness
+  # to solve instances individually.
+
+  Scenario: An instance fix on a bottom-up cell is refused naming the class
+    Given "core_cell" is a bottom-up template with congruent instances
+    When I fix one instance's "d_in" to the east face
+    Then the declaration is refused naming the class and both remedies
+
+  Scenario: An instance fix on a released bottom-up instance binds that instance alone
+    Given "core_cell" is a bottom-up template with congruent instances
+    And instances may be solved individually on a mismatch
+    When I fix one instance's "d_in" to the east face
+    Then that instance is solved on its own and lands on its east face
+    And its siblings keep the uniform copy
+
+  # ── fifth round: a pin is ports, plural ─────────────────────────────────
+
+  Scenario: A multi-port pin is consumed as every port's face
+    Given "core.d_in" is a LEF pin with two ports on different layers
+    When I consume the block's pins
+    Then a landing on either port's face is admitted
+    And no landing is placed at the pin's centroid unless a port lies there
+
+  # ── fifth round: the fix split precedes the bit cap ─────────────────────
+
+  Scenario: Each fix-uniform part is capped by its own window
+    Given the bundle bit bound is automatic
+    And "core.d_in" bits 0 to 15 carry one window and bits 16 to 31 a narrower one
+    When the bundler runs
+    Then the bundle is split into fix-uniform parts first
+    And each part's cap is sized from its own window
+
   # ── fourth round: what a checkpoint holds ───────────────────────────────
   # The route cannot see these.  A candidate's identity is a content hash,
   # so a new per-segment field must stay out of it, and a fact with no load

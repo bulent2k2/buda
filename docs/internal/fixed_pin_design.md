@@ -1,7 +1,7 @@
 # The fixed-pin primitive: `fix_pin`
 
 *Design proposal, 2026-09-20 — convergence-ladder build item 7.  Not built.
-Revised four times the same day, after four review rounds (see *Corrections
+Revised five times in a day, after five review rounds (see *Corrections
 after review*); the behavioural contract is spelled out AHEAD of the code in
 `test/tests/features/fixed_pin.feature` (`@future`), written against admitted
 and refused landings rather than the token grammar.
@@ -303,8 +303,18 @@ default — a customization adds a spelling, never changes what one means).
   takes into every projection.  A window rotates with its face, `H` becomes
   `V` under a quarter turn, and the order direction travels with the strip so
   a mirrored instance keeps bit 0 at the right end.  A `set_bottom_up`
-  template solved once and copied is consistent by construction, since the
-  fix is a property of the cell.
+  template solved once and copied is consistent only while EVERY occurrence
+  resolves to the same fix — and the target grammar above lets an `inst:`
+  owner govern ONE occurrence, which on a copied class would give one
+  instance an admissible set its byte-copied siblings do not have (fifth
+  round: the first cut said "consistent by construction", which is true
+  only when nobody uses the spelling this note documents).  The R2d rule
+  applies: an `inst:` fix on an occurrence of a `set_bottom_up` cell
+  REFUSES loudly, naming the class and both remedies — scope the cell
+  (`cell:`), or declare `check_template_tracks on_mismatch independent`,
+  the willingness ripup's uniformity break is already gated on, under which
+  that instance is RELEASED from the copy, solved individually, and bound
+  by its fix alone while its siblings keep the uniform copy.
 - **Precedence** follows `set_feedthru`: instance beats cell, a named pin
   beats its bus beats `*`, a later line on the same key replaces.  Declare
   BEFORE bundling, like `set_ndr`.
@@ -314,12 +324,28 @@ default — a customization adds a spelling, never changes what one means).
   `landing_rects(block, bundle)` well-defined — after the split every
   bundle resolves to ONE fix per block, so the key is `(block, bundle)` and
   not `(block)` alone; the obstruction geometry needs no bundle key at all.
+  The split has a POSITION in an order both bundlers already keep (fifth
+  round): each site splits by the bit cap FIRST and the NDR rule class
+  SECOND (`bundling_cmds.py`, in those words), and the fix-uniform split
+  cannot simply take a third slot — the auto cap reads
+  `landing_rects(block, bundle)`, whose key this split is what defines, so
+  the cap cannot be computed until the fix-uniform parts exist.  The fix
+  split goes FIRST, the cap second, the rule class third, and the
+  resolver's key is re-derived after EVERY split rather than resolved once,
+  since the cap pass splits again.
 - **Failure is loud and never strands.**  A bundle with no candidate honouring
   its fix keeps its best candidate and reports at generation (a new
-  BUDA-192x WARNING naming the pin and the fix), the way `filter_uncovered`
+  BUDA-1922 WARNING naming the pin and the fix), the way `filter_uncovered`
   already keeps an all-broken pool with a WARNING; `check_design` gains a
   `PIN_FIX` kind (defense in depth: a landing off its admissible set, or on a
-  layer outside its set).  Refusing would strand the bus; silence would be
+  layer outside its set).  A `ViolationKind` has THREE sites, not two (fifth
+  round): `verify.h`'s enum, `bind_nuts.cpp`'s `.value()`, and the
+  hand-kept reason table `_CONN_KIND_REASON` in `buda_session/reports.py`,
+  read with a `.get` that degrades SILENTLY to the bare kind where every
+  other kind prints a sentence — invisible to the suite, since no test
+  asserts the table covers the bound kinds.  PR 1b, the first new kind in a
+  while, lands with the one-line guard the message catalogue already has
+  for ids: every kind bound in `bind_nuts.cpp` has a reason entry.  Refusing would strand the bus; silence would be
   worse.
 - **Persistence.**  A v31 `pin_fix` table (owner kind, owner, pin selector,
   faces, rect index, lo, hi, layers CSV, order), written through by the
@@ -368,10 +394,23 @@ that finally consumes it.
    reports loudly where they fail; whether a partner's pin placement is
    routable at all is E3's own question, so measuring it is the experiment
    rather than something to design around in advance.
-6. **`from_pins` needs one importer change.**  `_parse_lef_pins` keeps a
-   pin's centroid and direction only (`CellPinRow` has no layer).  It should
-   keep the pin as a RECT strip on its LAYER, because a pin has extent and
-   the layer is the fourth knob.  Small, and orthogonal to the rest.
+6. **`from_pins` needs one PROJECTION change, inside the schema bump — and
+   a pin is PORTS, plural.**  The BDB keeps a pin's centroid and direction
+   only (`_lef_pins` projects `{cx − ox, cy − oy, dir}`; `cell_pin` is
+   `dir, px, py`), but the LEF READER is already complete:
+   `LefPinDef::ports` is a vector of `LefPort`, each with its layer and its
+   rects, and the file's own comment records that the old scanner
+   "collapsed by averaging every RECT it saw" (fifth round; the first cut
+   called this an importer change and "orthogonal to the rest").  What is
+   missing is the projection plus a `cell_pin` home for port geometry — the
+   `cell.cls` (v24) / `cell_rect` (v30) class of change, a LEF fact that
+   had to reach the BDB — which puts it INSIDE the `pin_fix` bump, since a
+   schema bump is done once.  And a pin may have several ports on different
+   layers, which is why a multi-port pin's CENTROID can lie on no port at
+   all: `from_pins` reading a centroid today can name a point outside the
+   metal.  The design's own idiom answers it — a fix is a SET of landings,
+   so `from_pins` on a multi-port pin admits every port's face, and the set
+   is the pin.
 7. **Three changes, not one, and Q7 first.**  **PR 1a**: the two-geometry
    split — `landing_rects` and `obstruction_rects` as the two resolvers,
    every site in the census moved onto the one it asks for, NO `fix_pin`
@@ -532,6 +571,37 @@ enough to check.
    hand-copied twin.  In the table, reading the two-face question.
 7. **The rounds log contradicted itself**: first-round correction 4 is
    marked superseded by third-round 4.
+
+### Fifth round (2026-09-21, the owner's review on #944 at `62c3991`)
+
+Five items and a verdict — mergeable: the note is docs plus an inert
+`@future` file, it merges clean against the day's `main` with the guards
+passing on the MERGED tree, and the rounds have converged (4, 8, 4, 7, 5
+findings, the last round's being one self-contradiction, one missing
+sentence, one to-do, one character and one sharpening of a pushback the
+note had already got right).  The class that ran through rounds 1–4
+produced no new instance.
+
+1. **Pushback 6 sharpened twice.**  The LEF reader is complete (`LefPort`
+   carries layer and rects); what is missing is the BDB PROJECTION and a
+   `cell_pin` column, inside the `pin_fix` bump rather than orthogonal to
+   it.  And a pin is ports, plural — a multi-port pin's centroid can lie on
+   no port — so `from_pins` admits every port's face.
+2. **"Consistent by construction" was contradicted by the grammar two
+   paragraphs up.**  An `inst:` owner governs one occurrence and instance
+   beats cell, so a per-instance fix on a `set_bottom_up` class would
+   diverge one byte-copied sibling — expressible ON PURPOSE, where R2d's
+   inconsistency is an accident of prefix matching.  Refused like R2d,
+   naming the class and both remedies, with the release path under
+   `on_mismatch independent`.  The one item to fix before merging, since it
+   was a claim made wrongly rather than one omitted.
+3. **The fix-uniform split needed its position** in the bundlers' order:
+   FIRST, since the auto cap reads a key the split defines; the key
+   re-derived after every split.
+4. **`PIN_FIX` has a third site with no guard**: the hand-kept reason table
+   in `reports.py`, read with a `.get` that degrades silently.  PR 1b adds
+   the guard.
+5. **One `BUDA-192x` survived** in the failure bullet; it reads BUDA-1922.
 
 ## Open questions
 
