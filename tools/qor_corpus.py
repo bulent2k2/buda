@@ -613,9 +613,17 @@ def _build_arch(root=None):
     while the extension it loads is very much pinned.  The cache is written by
     cmake beside that extension, so it answers for the artifact.
 
-    Empty when there is no cache to read (a pip-installed or relocated build).
-    Empty is "this sweep did not say", which no comparison treats as evidence
-    — the wrong direction to fail would be to guess.
+    Empty when there is no cache to read (a pip-installed or relocated build),
+    and EMPTY IS THE ANSWER there — not a fall back to `BUDA_ARCH`.  That
+    variable is wrong for the same reason it is wrong when a cache exists,
+    and the harm is worse without one: setting it before sweeping a build it
+    did not configure invents an ISA for an artifact whose ISA is unknown,
+    which can manufacture a mismatch note or, with both sides picking up the
+    same value, make two unknown builds compare equal and SUPPRESS a real
+    one.  Empty is "this sweep did not say", which no comparison treats as
+    evidence — the wrong direction to fail would be to guess.  (Codex P2 on
+    #945: the first cut kept the env as a fallback, contradicting this very
+    paragraph two lines below it.)
     """
     try:
         with open(os.path.join(root or _ROOT, "build", "CMakeCache.txt")) as fh:
@@ -624,7 +632,7 @@ def _build_arch(root=None):
                     return line.split("=", 1)[1].strip()
     except OSError:
         pass
-    return os.environ.get("BUDA_ARCH", "")
+    return ""
 
 
 def sweep_meta():
@@ -640,6 +648,15 @@ def sweep_meta():
         "arch": _build_arch(),
         "run": os.environ.get("GITHUB_RUN_NUMBER", ""),
         "run_id": os.environ.get("GITHUB_RUN_ID", ""),
+        # Recorded EXPLICITLY, though it is this tool's only value, so that
+        # `qor_nopin`'s "neutralized" can be compared against something.  An
+        # ordinary sweep that merely omitted the key would make "absent" do
+        # double duty — pins in force, or a sweep too old to say — and the
+        # pin note would then fire on two PIN-FREE sweeps whenever the older
+        # one predates this field, which is exactly qor_nopin's documented
+        # base-before/branch-after recipe across this commit (Codex P2 on
+        # #945, reproduced before fixing).
+        "pins": "in_force",
     }
 
 
@@ -692,8 +709,8 @@ def _mismatch_notes(base_meta, mine_meta):
             f"ISA-sensitive, which is why CI pins one — so the rows below "
             f"mix the ISA difference into every delta and cannot be read as "
             f"a code change.  Re-measure both sides at one -march.")
-    if b.get("pins", "") != m.get("pins", ""):
-        which = "baseline" if b.get("pins") == "neutralized" else "branch"
+    if b.get("pins") and m.get("pins") and b["pins"] != m["pins"]:
+        which = "baseline" if b["pins"] == "neutralized" else "branch"
         notes.append(
             f"NOTE: one side was swept with topology pins NEUTRALIZED (the "
             f"{which}; qor_nopin.py) and the other with them in force.  That "

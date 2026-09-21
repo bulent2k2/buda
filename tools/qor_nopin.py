@@ -139,6 +139,10 @@ def cmd_run(flows, out, jobs=1):
             # pins NEUTRALIZED.  Comparing a pinned sweep against a pin-free
             # one is not a build A/B at all, and `--compare` is qc's, so
             # without the marker nothing on the page would say which is which.
+            # Overrides sweep_meta's "in_force".  Both kinds record the
+            # field, so `--compare` can require BOTH sides to have said
+            # something before it calls a pin difference — absent stays
+            # "did not say" (Codex P2 on #945).
             json.dump({"meta": {**qc.sweep_meta(), "pins": "neutralized"},
                        "rows": results}, fh, indent=1)
         print(f"wrote {len(results)} results (pins neutralized) -> {out}")

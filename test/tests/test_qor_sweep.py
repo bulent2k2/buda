@@ -504,7 +504,8 @@ def test_a_sweep_written_by_out_carries_its_provenance(tmp_path, monkeypatch):
     assert rows == [{"flow": "a.buda"}]
     # Present even when empty: a reader must never have to tell "did not
     # know" from "predates the field".
-    assert set(meta) == {"commit", "written", "arch", "run", "run_id"}
+    assert set(meta) == {"commit", "written", "arch", "run", "run_id",
+                         "pins"}
 
 
 def test_a_pre_provenance_sweep_still_loads(tmp_path):
@@ -539,7 +540,7 @@ def _aged(days, **kw):
     stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ",
                           time.gmtime(time.time() - days * 86400))
     return {"commit": "0" * 40, "written": stamp, "arch": "", "run": "",
-            "run_id": "", **kw}
+            "run_id": "", "pins": "in_force", **kw}
 
 
 def test_a_stale_baseline_is_called_out_with_its_age(tmp_path, monkeypatch, capsys):
@@ -632,12 +633,40 @@ def test_the_recorded_arch_is_the_builds_not_the_environments(
     (tmp_path / "build" / "CMakeCache.txt").write_text(
         "//comment\nBUDA_ARCH:STRING=x86-64-v2\nOTHER:BOOL=ON\n")
     monkeypatch.setattr(qc, "_ROOT", str(tmp_path))
-    monkeypatch.delenv("BUDA_ARCH", raising=False)
+    monkeypatch.setenv("BUDA_ARCH", "native")     # the env DISAGREES
     assert qc._build_arch() == "x86-64-v2"
 
 
 def test_no_build_cache_records_an_empty_arch_rather_than_guessing(
         tmp_path, monkeypatch):
+    """And NOT the environment, even when it is set.
+
+    Without a cache the variable describes a build it did not configure, so
+    recording it invents an ISA for an artifact whose ISA is unknown — which
+    can manufacture a mismatch, or (both sides reading the same value) make
+    two unknown builds compare equal and suppress a real one.  Codex P2 on
+    #945: the first cut kept the env as a fallback, contradicting this
+    function's own docstring.
+    """
     monkeypatch.setattr(qc, "_ROOT", str(tmp_path))
-    monkeypatch.delenv("BUDA_ARCH", raising=False)
+    monkeypatch.setenv("BUDA_ARCH", "x86-64-v2")
     assert qc._build_arch() == ""
+
+
+def test_two_pin_free_sweeps_are_not_called_a_pin_mismatch(
+        tmp_path, monkeypatch, capsys):
+    """qor_nopin's own documented recipe, across THIS commit.
+
+    Capture on each build then compare: the base-side capture predates the
+    provenance field, so it is a bare list with no `pins` key while the
+    branch side records "neutralized".  Both are pin-free.  Treating the
+    absent key as "pins in force" reported the tool's own workflow as not a
+    build A/B (Codex P2 on #945, reproduced before fixing) — and contradicted
+    the rule stated three lines above it in the same function.
+    """
+    row = {"flow": "a.buda", "overlaps": 0, "unplaced": 0, "viol_bundles": 0}
+    _compare_exit(tmp_path, monkeypatch, [row],
+                  {"meta": _aged(0, pins="neutralized"), "rows": [row]})
+    out = capsys.readouterr().out
+    assert "unchanged (of 1 flows)" in out      # the compare REACHED its end
+    assert "pins NEUTRALIZED" not in out

@@ -200,13 +200,23 @@ exists because the two-night case above recurred at twenty-seven nights
 `arch` comes from `build/CMakeCache.txt` rather than from `BUDA_ARCH` in the
 environment, because the variable says what the *next* build would use:
 `BUDA_ARCH=x86-64-v2 bin/bb` followed by a plain sweep leaves it unset while the
-extension being measured is pinned. Two sweeps at different `-march` are
-reported NOT COMPARABLE from that field, as is a pin-free `qor_nopin` sweep read
-against a pinned one. A field only one side recorded is "did not say", never a
-disagreement — otherwise the note would fire on every pre-provenance baseline,
-which is exactly the file that cannot answer. Both shapes load, for the same
-reason: the nightly's cached baseline is a bare list written by whatever harness
-ran that night.
+extension being measured is pinned. There is **no fallback** to it when the
+cache is missing either — without a cache the variable describes a build it did
+not configure, so reading it would invent an ISA for an artifact whose ISA is
+unknown, which can manufacture a mismatch or (both sides reading the same value)
+make two unknown builds compare equal and suppress a real one.
+
+Two sweeps at different `-march` are reported NOT COMPARABLE from that field, as
+is a pin-free `qor_nopin` sweep read against a pinned one — which is why an
+ordinary sweep records `pins: in_force` **explicitly** rather than leaving the
+key out: otherwise "absent" would mean both *pins in force* and *a sweep too old
+to say*, and the note would fire on two genuinely pin-free sweeps whenever the
+older one predates the field — i.e. on `qor_nopin`'s own documented
+base-before/branch-after recipe. A field only one side recorded is "did not
+say", never a disagreement, for the same reason it must not fire on every
+pre-provenance baseline: those are exactly the files that cannot answer. Both
+shapes load, for the same reason again — the nightly's cached baseline is a bare
+list written by whatever harness ran that night.
 
 **An errored sweep is rejected before either.** `cmd_run` records a flow that
 raises as `{"flow": ..., "err": ...}` and still exits 0, and `cmd_compare`

@@ -240,7 +240,16 @@ from the same meta: a `-march` mismatch (routing is ISA-sensitive, which is why
 CI pins one) and a pin-free `qor_nopin` sweep read against a pinned one. A
 field only one side recorded is "did not say", never a disagreement — the
 opposite would fire on every pre-provenance baseline, i.e. on exactly the files
-that cannot answer.
+that cannot answer. An ordinary sweep therefore records `pins: in_force`
+explicitly instead of omitting the key, so that "absent" is not made to mean
+both *pins in force* and *too old to say*; the first cut did omit it, and
+reported two genuinely pin-free sweeps as not-an-A/B whenever the older one
+predated the field — `qor_nopin`'s own documented recipe across this very
+commit (Codex P2 on #945). The same review caught `_build_arch` keeping
+`BUDA_ARCH` as a fallback when no cache exists, which contradicts that
+function's own docstring: without a cache the variable describes a build it did
+not configure, so it can invent an ISA, or make two unknown builds compare equal
+and suppress a real warning. Both reproduced before fixing, both guarded.
 
 `arch` is read from `build/CMakeCache.txt`, not from `BUDA_ARCH` in the
 environment: the variable says what the *next* build would use, and
