@@ -180,6 +180,34 @@ bank a broken sweep. It annotates a `::warning::` and writes the acceptance into
 the job summary, so the record shows a human moved the baseline. Use it for a new
 detector or new corpus flows; a routing regression is what the red is *for*.
 
+**A sweep says where it came from, and the compare says it back.** Until
+2026-09 both sides of a `--compare` were anonymous lists of rows, so a red
+nightly printed a delta with nothing on the page saying whether the baseline
+was from last night or last month. `--out` now writes a sweep's provenance
+beside its rows — `commit`, `written`, `arch`, and the CI `run`/`run_id` — and
+`--compare` prints it above the table, adding a loud note once the baseline is
+older than `STALE_BASELINE_DAYS` (3): a baseline that old on a nightly means
+the same diff has been reported every night since, the delta is everything that
+changed in that window rather than last night's news, and a genuinely new
+regression is sitting in it unremarked.
+
+That is a *reporting* change only — the tool still never promotes a baseline
+and never decides a delta is acceptable, both of which stay a human's call. It
+exists because the two-night case above recurred at twenty-seven nights
+(2026-08-26 to 09-21, one row, cause published in the commit that made it);
+[opens_ci.md](opens_ci.md) item 5 has the account.
+
+`arch` comes from `build/CMakeCache.txt` rather than from `BUDA_ARCH` in the
+environment, because the variable says what the *next* build would use:
+`BUDA_ARCH=x86-64-v2 bin/bb` followed by a plain sweep leaves it unset while the
+extension being measured is pinned. Two sweeps at different `-march` are
+reported NOT COMPARABLE from that field, as is a pin-free `qor_nopin` sweep read
+against a pinned one. A field only one side recorded is "did not say", never a
+disagreement — otherwise the note would fire on every pre-provenance baseline,
+which is exactly the file that cannot answer. Both shapes load, for the same
+reason: the nightly's cached baseline is a bare list written by whatever harness
+ran that night.
+
 **An errored sweep is rejected before either.** `cmd_run` records a flow that
 raises as `{"flow": ..., "err": ...}` and still exits 0, and `cmd_compare`
 prints a flow that is *new* to the corpus as `(new)` without counting it in

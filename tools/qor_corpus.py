@@ -90,6 +90,7 @@ Notes:
     contention, so pass `-j 1` when the per-flow timing itself is the point.
 """
 import argparse
+import calendar
 import contextlib
 import io
 import json
@@ -568,6 +569,176 @@ def sweep(run_fn, flows, jobs, progress=None):
     return [results[i] for i in range(len(flows))]
 
 
+# ── sweep provenance ───────────────────────────────────────────────────────
+# A sweep is one HALF of a comparison, and until 2026-09 it carried nothing
+# saying which half: `--out` wrote a bare list of per-flow rows, so a
+# `--compare` could report a delta but never how OLD the baseline it read
+# was.  For the two-checkout recipe that costs little — you built both sides
+# minutes apart and know it.  For the NIGHTLY it is the whole problem: its
+# baseline is a cache entry promoted only by a CLEAN run, so one accepted
+# regression freezes it, and every later night re-reports that same delta
+# against an ever-older sweep with nothing on the page saying so.
+#
+# Measured, twice.  2026-08-11: two nights, which is what `promote_baseline`
+# was built for (docs/internal/opens_ci.md item 5).  2026-08-26 to 09-21:
+# TWENTY-SEVEN, on one delta whose cause was published in the commit that
+# made it.  The number nobody could see either time is how long the gate had
+# been reporting history rather than news.
+#
+# So a sweep now records where it came from, and `--compare` says it.  This
+# is REPORTING and nothing else: the tool still never promotes a baseline,
+# and never decides that a delta is acceptable.  Both remain a human's call,
+# for the reason that page records — the one time a baseline was promoted on
+# an uncontrolled reading, it permanently silenced a real regression.
+#
+# STALE_BASELINE_DAYS is a nightly's cadence plus slack: a baseline older
+# than this on a job that runs every night has been reporting the same diff
+# for that many nights.
+STALE_BASELINE_DAYS = 3
+
+
+def _build_arch(root=None):
+    """The `-march` the BUILD BEING MEASURED was compiled at, or ''.
+
+    `root` is the checkout whose `build/` was swept — the working tree by
+    default, and under `--vs` the BASELINE's worktree for the baseline side.
+    Reading the working tree's cache for both would not merely mislabel the
+    baseline: it would make the two sides agree by construction and so
+    SUPPRESS the very mismatch note this field exists for.
+
+    Read from `build/CMakeCache.txt` rather than from `BUDA_ARCH` in the
+    environment, because the env says what the next build WOULD use and the
+    question here is what this one DID: `BUDA_ARCH=x86-64-v2 bin/bb` followed
+    by a plain sweep leaves the variable unset in the sweep's own environment
+    while the extension it loads is very much pinned.  The cache is written by
+    cmake beside that extension, so it answers for the artifact.
+
+    Empty when there is no cache to read (a pip-installed or relocated build).
+    Empty is "this sweep did not say", which no comparison treats as evidence
+    — the wrong direction to fail would be to guess.
+    """
+    try:
+        with open(os.path.join(root or _ROOT, "build", "CMakeCache.txt")) as fh:
+            for line in fh:
+                if line.startswith("BUDA_ARCH:"):
+                    return line.split("=", 1)[1].strip()
+    except OSError:
+        pass
+    return os.environ.get("BUDA_ARCH", "")
+
+
+def sweep_meta():
+    """Where this sweep came from: commit, time, ISA, and the CI run if any.
+
+    Best-effort by construction — a field nothing can answer is recorded
+    EMPTY rather than omitted, so a reader never has to tell "this sweep did
+    not know its commit" from "this sweep predates the field".
+    """
+    return {
+        "commit": _rev_parse("HEAD"),
+        "written": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "arch": _build_arch(),
+        "run": os.environ.get("GITHUB_RUN_NUMBER", ""),
+        "run_id": os.environ.get("GITHUB_RUN_ID", ""),
+    }
+
+
+def load_results(path):
+    """Read a sweep written by `--out` as `(meta, rows)`.
+
+    Accepts BOTH shapes on purpose.  The nightly's baseline is a cache entry
+    that can be months old and was written by whatever harness ran that
+    night, so a loader that required the new shape would reject the one file
+    this change exists to describe.  A bare list is a pre-provenance sweep:
+    no meta, which `--compare` then SAYS rather than leaving blank.
+    """
+    with open(path) as fh:
+        data = json.load(fh)
+    if isinstance(data, list):                  # pre-provenance sweep
+        return {}, data
+    if isinstance(data, dict) and isinstance(data.get("rows"), list):
+        meta = data.get("meta")
+        return (meta if isinstance(meta, dict) else {}), data["rows"]
+    raise ValueError(
+        f"{path} is not a sweep: expected a list of per-flow rows, or an "
+        f"object with a 'rows' list, got {type(data).__name__}")
+
+
+def _age_days(meta):
+    """Whole days between `meta['written']` and now, or None if unknowable."""
+    stamp = (meta or {}).get("written") or ""
+    try:
+        then = time.strptime(stamp, "%Y-%m-%dT%H:%M:%SZ")
+    except (ValueError, TypeError):
+        return None
+    return max(0, int((time.time() - calendar.timegm(then)) // 86400))
+
+
+def _mismatch_notes(base_meta, mine_meta):
+    """Notes for the ways two sweeps can be UNCOMPARABLE rather than merely
+    different — conditions of the measurement, not results of it.
+
+    Only for a field BOTH sides recorded.  An absent field is "this sweep did
+    not say", which is not evidence of disagreement, and treating it as one
+    would fire on every pre-provenance baseline — i.e. on exactly the files
+    that already cannot answer anything.
+    """
+    notes = []
+    b, m = base_meta or {}, mine_meta or {}
+    if b.get("arch") and m.get("arch") and b["arch"] != m["arch"]:
+        notes.append(
+            f"NOTE: the two sweeps were built at DIFFERENT target ISAs "
+            f"(-march={b['arch']} vs {m['arch']}).  Routing decisions are "
+            f"ISA-sensitive, which is why CI pins one — so the rows below "
+            f"mix the ISA difference into every delta and cannot be read as "
+            f"a code change.  Re-measure both sides at one -march.")
+    if b.get("pins", "") != m.get("pins", ""):
+        which = "baseline" if b.get("pins") == "neutralized" else "branch"
+        notes.append(
+            f"NOTE: one side was swept with topology pins NEUTRALIZED (the "
+            f"{which}; qor_nopin.py) and the other with them in force.  That "
+            f"is not a build A/B — the delta below is mostly the pins.")
+    return notes
+
+
+def describe_baseline(meta, mine_meta=None, age=None):
+    """The lines `--compare` prints about the baseline it is reading.
+
+    Returns a list so a caller with nothing to say prints nothing, and so the
+    staleness note is one string a test can assert on.
+    """
+    if not meta:
+        return ["baseline: no provenance recorded (written before this tool "
+                "kept it) — its age and commit are unknown, so how much of "
+                "the diff below is NEW cannot be read off this page."
+                ] + _mismatch_notes(meta, mine_meta)
+    bits = []
+    if meta.get("commit"):
+        bits.append(meta["commit"][:12])
+    if meta.get("written"):
+        bits.append(meta["written"])
+    if meta.get("run"):
+        bits.append(f"CI run #{meta['run']}")
+    if meta.get("arch"):
+        bits.append(f"-march={meta['arch']}")
+    age = _age_days(meta) if age is None else age
+    if age is not None:
+        bits.append(f"{age} day(s) old")
+    out = ["baseline: " + ", ".join(bits) if bits else "baseline: (empty)"]
+    if age is not None and age >= STALE_BASELINE_DAYS:
+        out.append(
+            f"NOTE: that baseline is {age} days old.  On a NIGHTLY gate a "
+            f"baseline is promoted only by a clean run, so an age like this "
+            f"means the same diff has been reported every night since — the "
+            f"delta below is everything that changed in {age} days, not last "
+            f"night's news, and a genuinely new regression would be sitting "
+            f"in it unremarked.  Read the rows against the commits in that "
+            f"window; if the delta was already reviewed and accepted, "
+            f"re-baseline (the nightly's `promote_baseline` dispatch input) "
+            f"so tomorrow's run can see something new.")
+    return out + _mismatch_notes(meta, mine_meta)
+
+
 def cmd_run(flows, out, jobs=1):
     # Resolve BEFORE the chdir: `--out results.json` means "here", where the
     # user is, not "wherever this tool happens to chdir to".  A no-op for the
@@ -584,7 +755,14 @@ def cmd_run(flows, out, jobs=1):
           f"(jobs={max(1, jobs)})")
     if out:
         with open(out, "w") as fh:
-            json.dump(results, fh, indent=1)
+            # The OBJECT shape (meta + rows), read back by load_results.  A
+            # reader older than this change sees a dict where it wants a
+            # list and says so loudly; it never mis-reads one as the other,
+            # which is what mattered when choosing between this and, say, a
+            # sentinel row inside the list (a row with no "flow" key would
+            # have crashed `--compare`'s index on a KeyError two steps later,
+            # naming nothing).
+            json.dump({"meta": sweep_meta(), "rows": results}, fh, indent=1)
         print(f"wrote {len(results)} results -> {out}")
     return results
 
@@ -891,7 +1069,16 @@ def cmd_vs(rev, out, jobs, flows=None, build=True):
     cmd_run(flows or CORPUS, mine, jobs=jobs)
 
     print(f"\n[--vs] {commit[:12]} ({rev}) -> working tree\n")
-    regressed = cmd_compare(base, mine)
+    regressed = cmd_compare(base, mine, base_hint={
+        "commit": commit,
+        # The baseline was swept just now, by this command.  Its FILE may say
+        # nothing (an old harness in the worktree), and without this it would
+        # read as an age-unknown baseline on the one path where the age is
+        # certain.
+        "written": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        # The BASELINE's own build, in its worktree — not ours.
+        "arch": _build_arch(wt),
+    })
     if not out:
         print(f"\n[--vs] result JSONs: {base} , {mine}")
     return regressed
@@ -1102,9 +1289,22 @@ def _decisions_report(base_path, mine_path):
         print(f"  {f}: {na} -> {nb} record(s)")
 
 
-def cmd_compare(base_path, mine_path):
-    base_rows = json.load(open(base_path))
-    mine_rows = json.load(open(mine_path))
+def cmd_compare(base_path, mine_path, base_hint=None):
+    base_meta, base_rows = load_results(base_path)
+    mine_meta, mine_rows = load_results(mine_path)
+    # `--vs` knows facts the baseline FILE cannot carry: it chose the commit
+    # and it swept it minutes ago, while the harness that wrote the file is
+    # the BASELINE's own copy and may predate provenance entirely.  The hint
+    # fills only what the file left blank — a recorded field always wins, so
+    # this can add knowledge and never overwrite it.
+    if base_hint:
+        base_meta = {**base_hint, **base_meta}
+    # BEFORE the table.  A baseline's age changes how every row below should
+    # be read, and a note printed after them has already let you read them
+    # the other way.
+    for line in describe_baseline(base_meta, mine_meta):
+        print(line)
+    print()
     base = {r["flow"]: r for r in base_rows}
     mine = {r["flow"]: r for r in mine_rows}
     # An A/B whose two sides are indistinguishable is the shape EVERY
@@ -1202,8 +1402,7 @@ def cmd_check(path):
     nightly and the PR gate share one implementation instead of two copies that
     can drift.
     """
-    with open(path) as fh:
-        rows = json.load(fh)
+    _meta, rows = load_results(path)
     bad = [r for r in rows if "err" in r]
     for r in bad:
         print(f"::error::corpus flow errored in {path}: {r['flow']}: {r['err']}")

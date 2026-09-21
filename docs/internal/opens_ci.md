@@ -167,6 +167,99 @@ did *not* move. Teaching the gate to recognise that itself — an audit-version
 field in the row schema, say, so a detector change is a separate axis from a QoR
 change — is a real design and is not attempted here.
 
+### The same thing again, for twenty-seven nights — 2026-08-26 to 09-21
+
+The paragraph above closed with "four nights". It happened again immediately,
+an order of magnitude longer, and the second time is what says which part of
+this is a design gap rather than an attention lapse.
+
+**The streak.** Nightly run 28 (2026-08-25) was the last green one. Runs
+**29 through 55 — twenty-seven consecutive nights — all failed**, every one of
+them reporting the identical single row:
+
+    chip/chip_stack_topdown.buda      21/241/18      22/263/21   WORSE
+
+Identical is not a figure of speech: run 29's compare table and run 55's are
+the same numbers, and so is the +2,460 (+0.11%) abstract-WL mover beside them.
+Nothing new landed in that column for a month, and nothing would have been
+visible if it had.
+
+**The cause, found and published in the commit that made it.** `27baed7`
+(PR #850, merged 2026-08-26T00:34, inside the window between run 28 and run
+29) — *"Topology generation: merge a FREE collinear-adjacent split"*. It is a
+correctness fix, ALWAYS ON by design because the shape it removes is
+electrically broken: two collinear segments joined by nothing, each free to be
+seated on its own track and each an ANTENNA. Its own commit message carries
+the corpus A/B verbatim, this exact row included, and the diagnosis:
+
+> the merge changes 3 of 660 pools, each GAINING a candidate and losing none
+> (16425 -> 16429), and NONE of the four newly-admitted candidates is selected
+> anywhere — only 5 of 660 selections move, all in bundles whose pool did not
+> change and all between candidates present on both sides. Candidates are
+> WL-SORTED, so admitting a repaired one renumbers indices and perturbs the
+> greedy order; a design at 241 unplaced re-lands 22 away.
+
+That is the same mechanism the pool-mutating knobs (`set_trim_mst_legs`,
+`set_trim_trunk_stubs`, `set_prune_dominated`, `set_dedup_loci`) are opt-in to
+avoid — the difference being that those mutate VALID candidates, so opting out
+keeps a working alternative, and this one removes a broken one.
+
+**Reproduced independently before any of this was written down**: today's
+`main` (240450d), built at CI's pinned `-march=x86-64-v2`, measures
+`22 / 263 / 21` with abstract WL 2,281,562 and detailed WL 39,180,310 — digit
+for digit the branch side CI reports. The checked-in snapshot
+`qor/qor_table_rows.json` has carried the same triple since it was created on
+2026-08-29, so the repository's own authoritative record and the nightly's
+cached baseline have disagreed about this row for three weeks.
+
+**What actually failed here.** Not the bisect — the answer was in a commit
+message the whole time, again. Not the accept path — `promote_baseline` works
+and was deliberately never pressed. What failed is that **a red nightly was
+illegible**. `--compare` printed "0 better, 1 worse, 49 unchanged" over two
+anonymous files: the baseline JSON was a bare list of rows carrying no commit,
+no date and no ISA, so nothing on the page distinguished
+
+  * *a regression that landed last night*, from
+  * *the twenty-seventh reprint of a delta accepted a month ago*.
+
+Twenty-seven pages that looked identical to the first one is the predictable
+outcome of that, and no amount of attention fixes a page that does not carry
+the fact.
+
+**Fixed — the reporting half, 2026-09-21.** `--out` now records a sweep's
+provenance (`commit`, `written`, `arch`, and the CI `run`/`run_id` when
+present) beside its rows, and `--compare` prints it before the table, with a
+loud note once the baseline passes `STALE_BASELINE_DAYS` (3 — a nightly's
+cadence plus slack) saying how old it is, that the delta is therefore
+everything since then rather than last night's news, that a genuinely new
+regression would be sitting in it unremarked, and what to do about it. The
+loader accepts both shapes, because the one file this exists to describe — the
+nightly's cache entry — is a pre-provenance bare list. Two conditions that
+make two sweeps *uncomparable* rather than merely different are called out
+from the same meta: a `-march` mismatch (routing is ISA-sensitive, which is why
+CI pins one) and a pin-free `qor_nopin` sweep read against a pinned one. A
+field only one side recorded is "did not say", never a disagreement — the
+opposite would fire on every pre-provenance baseline, i.e. on exactly the files
+that cannot answer.
+
+`arch` is read from `build/CMakeCache.txt`, not from `BUDA_ARCH` in the
+environment: the variable says what the *next* build would use, and
+`BUDA_ARCH=x86-64-v2 bin/bb` followed by a plain sweep leaves it unset while
+the extension being measured is very much pinned. The cache sits beside that
+extension and answers for it.
+
+Still **nothing automatic**, and deliberately so — the tool does not promote a
+baseline and does not decide that a delta is acceptable, for the reason two
+sections up: the one time a baseline was promoted on an uncontrolled reading it
+permanently silenced a real 99-overlap regression. What changed is only that
+the page now says what a human needs to make that call on night one instead of
+night twenty-seven.
+
+**Still owed**: the baseline for this streak has not been re-established, so
+the nightly is still red on `chip_stack_topdown` and still blind to anything
+new behind it. That is a `promote_baseline` dispatch, and it is an operator
+decision — the evidence above is what it should be made on.
+
 ## 4. Execute the web ports — **RESOLVED 2026-08-03/04; only the Scala.js LINK step remains**
 
 The display-geometry rule (`viz_common.snap_endpoint_extents`) has three
