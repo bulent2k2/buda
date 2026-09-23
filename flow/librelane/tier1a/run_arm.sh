@@ -55,7 +55,7 @@ ll_run() {   # ll_run <log> <librelane args...>
 
 TOPTAG=${TOPTAG:-$tag}
 stamp "harm.sh start"
-"$here/harm.sh" "$N" "${pins[@]}" "$@"
+"$here/harm.sh" "$N" ${pins[@]+"${pins[@]}"} "$@"
 cells=$(sed -n 's/^MACRO \([A-Za-z_][A-Za-z0-9_]*\).*/\1/p' "$d/tpu.lef")
 if [ -n "${TOP_SET:-}" ]; then
     python3 - "$d/h/top/config.json" $TOP_SET <<'PY'
