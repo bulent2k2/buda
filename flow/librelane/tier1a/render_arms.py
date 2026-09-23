@@ -69,12 +69,18 @@ TAP = re.compile(r"__tapvpwrvgnd")
 
 
 def find_lef():
+    """An explicit $PDK_ROOT wins outright; the ciel cache (its newest version)
+    is consulted only when there is none -- a cache appended AFTER the
+    configured PDK would silently outrank it (Codex on #951)."""
     root = os.environ.get("PDK_ROOT")
-    cands = []
     if root:
-        cands += glob.glob(os.path.join(root, "sky130A", "libs.ref", "sky130_fd_sc_hd", "lef",
-                                        "sky130_fd_sc_hd.lef"))
-    cands += sorted(glob.glob(os.path.expanduser(
+        hit = glob.glob(os.path.join(root, "sky130A", "libs.ref", "sky130_fd_sc_hd", "lef",
+                                     "sky130_fd_sc_hd.lef"))
+        if hit:
+            return hit[0]
+        sys.exit(f"render_arms: PDK_ROOT={root} holds no sky130A/libs.ref/sky130_fd_sc_hd/lef/"
+                 "sky130_fd_sc_hd.lef")
+    cands = sorted(glob.glob(os.path.expanduser(
         "~/.ciel/ciel/sky130/versions/*/sky130A/libs.ref/sky130_fd_sc_hd/lef/sky130_fd_sc_hd.lef")))
     if not cands:
         sys.exit("render_arms: no sky130_fd_sc_hd.lef under $PDK_ROOT or ~/.ciel -- install the PDK "
