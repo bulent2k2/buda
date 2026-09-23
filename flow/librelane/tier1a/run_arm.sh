@@ -9,7 +9,13 @@
 #        guides put in, LibreLane's DetailedRouting resumed on them)
 # Extra arguments go to harm.sh (`--density 65`).  Every stage is timed into
 # $d/h/stages.txt and logged under $d/h/log/; the row for the table is
-# appended to $d/results.jsonl.  Requires `librelane` on PATH (the venv) and
+# appended to $d/results.jsonl.  Environment knobs:
+#   REUSE_BLOCKS=1        skip hardening + notch (every block's final/ and
+#                         .notch.lef must exist) -- a TOP-only re-run
+#   TOPTAG=<tag>          the top's run tag (default = the arm tag), so a
+#                         re-run keeps the earlier top beside it
+#   TOP_SET="K=V K=V"     JSON values patched into top/config.json after
+#                         harm.sh writes it (`FP_TAPCELL_DIST=5`)  Requires `librelane` on PATH (the venv) and
 # Docker running.  Every LibreLane call passes `--docker-no-tty`: this runs
 # unattended, and `--dockerized` otherwise asks Docker for a terminal it does
 # not have ("cannot attach stdin to a TTY-enabled container").
@@ -36,9 +42,26 @@ mkdir -p "$d/h/log"
 stages="$d/h/stages.txt"
 stamp() { echo "$(date +%s) $1" >> "$stages"; echo "run_arm: $(date '+%H:%M:%S') $1"; }
 
+TOPTAG=${TOPTAG:-$tag}
 stamp "harm.sh start"
 "$here/harm.sh" "$N" "${pins[@]}" "$@"
 cells=$(sed -n 's/^MACRO \([A-Za-z_][A-Za-z0-9_]*\).*/\1/p' "$d/tpu.lef")
+if [ -n "${TOP_SET:-}" ]; then
+    python3 - "$d/h/top/config.json" $TOP_SET <<'PY'
+import json, sys
+p = sys.argv[1]; c = json.load(open(p))
+for kv in sys.argv[2:]:
+    k, v = kv.split("=", 1); c[k] = json.loads(v)
+    print(f"run_arm: top config {k} = {v}")
+json.dump(c, open(p, "w"), indent=4)
+PY
+fi
+if [ "${REUSE_BLOCKS:-0}" = 1 ]; then
+    for c in $cells; do
+        [ -f "$d/h/$c/runs/h/final/lef/$c.lef" ] || { echo "run_arm: REUSE_BLOCKS but $c has no final/lef" >&2; exit 1; }
+    done
+    stamp "blocks reused; notch reused"
+else
 
 # 1. harden the blocks, in parallel (the wall figure is the batch)
 stamp "blocks start"
@@ -65,29 +88,32 @@ fi
 stamp "notch start"
 "$here/notch.sh" "$N" > "$d/h/log/notch.log" 2>&1
 stamp "notch end"
+fi
 
 # 3. the top
 stamp "top start"
 if [ "$tag" = h ]; then
-    (cd "$d/h/top" && "${LL[@]}" --run-tag h config.json > "$d/h/log/top.log" 2>&1)
+    (cd "$d/h/top" && "${LL[@]}" --run-tag "$TOPTAG" config.json > "$d/h/log/top_$TOPTAG.log" 2>&1)
 else
-    (cd "$d/h/top" && "${LL[@]}" --run-tag hb \
-        --to OpenROAD.DetailedRouting --skip OpenROAD.DetailedRouting config.json > "$d/h/log/top_a.log" 2>&1)
+    (cd "$d/h/top" && "${LL[@]}" --run-tag "$TOPTAG" \
+        --to OpenROAD.DetailedRouting --skip OpenROAD.DetailedRouting config.json > "$d/h/log/top_${TOPTAG}_a.log" 2>&1)
     stamp "top cut at DetailedRouting; guides start"
-    (cd "$here" && TAG=hb T1A_DIR="${T1A_DIR:-$here}" ./guides.sh "$N" > "$d/h/log/guides.log" 2>&1)
-    ODB=$(ls -t "$d"/h/top/runs/hb/*/*.odb | head -1)
-    (cd "$d/h" && "$root/flow/librelane/phase0/measure/run_or.sh" top/runs/hb "$here/guide_route.tcl" \
-        ODB="$ODB" GUIDE="$d/h/top/out/buda_bus.guide" OUT="$d/h/top/out" > "$d/h/log/guide_route.log" 2>&1)
-    grep -q "wrote" "$d/h/log/guide_route.log" || { echo "run_arm: guide_route.tcl wrote nothing (see $d/h/log/guide_route.log)" >&2; exit 1; }
+    (cd "$here" && TAG="$TOPTAG" T1A_DIR="${T1A_DIR:-$here}" ./guides.sh "$N" > "$d/h/log/guides_$TOPTAG.log" 2>&1)
+    ODB=$(ls -t "$d"/h/top/runs/"$TOPTAG"/*/*.odb | head -1)
+    (cd "$d/h" && "$root/flow/librelane/phase0/measure/run_or.sh" top/runs/"$TOPTAG" "$here/guide_route.tcl" \
+        ODB="$ODB" GUIDE="$d/h/top/out/buda_bus.guide" OUT="$d/h/top/out" > "$d/h/log/guide_route_$TOPTAG.log" 2>&1)
+    grep -q "wrote" "$d/h/log/guide_route_$TOPTAG.log" || { echo "run_arm: guide_route.tcl wrote nothing (see $d/h/log/guide_route_$TOPTAG.log)" >&2; exit 1; }
     stamp "guides in; top resume"
     (cd "$d/h/top" && "${LL[@]}" --last-run --from OpenROAD.DetailedRouting \
-        -e odb="$d/h/top/out/guided.odb" config.json > "$d/h/log/top_b.log" 2>&1)
+        -e odb="$d/h/top/out/guided.odb" config.json > "$d/h/log/top_${TOPTAG}_b.log" 2>&1)
 fi
 stamp "top end"
-grep -q "Flow complete" "$d/h/log/top"*.log || { echo "run_arm: the top did not complete" >&2; exit 1; }
+# LibreLane exits non-zero on a DEFERRED error (an LVS count) after writing
+# final/; that is a verdict for the row, not a reason to lose it.
+grep -q "Flow complete\|ReportManufacturability" "$d/h/log/top_$TOPTAG"*.log || { echo "run_arm: the top did not complete" >&2; exit 1; }
 
 # 4. the row
 arm=$([ "$tag" = h ] && echo H || echo H+B)
-python3 "$here/runtimes.py" "$d/h/top/runs/$tag" --set N="$N" --set arm="$arm" --blocks-from "$d/h/top/config.json" | tee "$d/h/log/row.txt"
-python3 "$here/runtimes.py" "$d/h/top/runs/$tag" --set N="$N" --set arm="$arm" --blocks-from "$d/h/top/config.json" --json >> "$d/results.jsonl"
+python3 "$here/runtimes.py" "$d/h/top/runs/$TOPTAG" --set N="$N" --set arm="$arm" --blocks-from "$d/h/top/config.json" | tee "$d/h/log/row_$TOPTAG.txt"
+python3 "$here/runtimes.py" "$d/h/top/runs/$TOPTAG" --set N="$N" --set arm="$arm" --blocks-from "$d/h/top/config.json" --json >> "$d/results.jsonl"
 stamp "done"
