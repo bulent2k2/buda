@@ -65,8 +65,12 @@ Three properties distinguish it from a router:
   result, and the tool reports its own failures rather than printing a clean
   score over broken wiring.
 
-It is written in C++ with a Python command layer, reads and writes the
-industry's standard design-file formats, keeps its own design database, and
+Its engine is written in C++ under a Python command layer, and there are
+three ways to drive it: BUDA's own short script language (`.buda`), the
+quickest way in for a new user; a Tcl front end, which lets it slot into an
+existing chip-design flow next to other tools, since Tcl is the scripting
+language those tools are driven with; and a web front end that runs it from
+a browser.  It reads and writes the industry's standard design-file formats, keeps its own design database, and
 drives the open-source OpenROAD/LibreLane chip-building flow end to end.  It
 has been public on GitHub since 30 April 2026 under the Apache 2.0
 open-source license, at
