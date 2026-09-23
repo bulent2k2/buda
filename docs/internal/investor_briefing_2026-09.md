@@ -91,7 +91,7 @@ weight buffers below and accumulators above: 104 blocks joined by 152 buses.
 ![Systolic array floorplan: 64 processing units in 8 rows, feeders on the left, weight buffers below, accumulators above](img/investor_briefing_tpu8_fp.png)
 
 With BUDA's plan: all 2,944 individual wires on real tracks, none
-overlapping, none left unplaced, and the design check clean, in 1.4 s.
+overlapping, none left unplaced, and the design check clean, in 1.5 s.
 
 ![Systolic array after BUDA: 2,944 individual wires, horizontal runs along each row and vertical runs down each column](img/investor_briefing_tpu8_dnuts.png)
 
@@ -110,9 +110,13 @@ check, in 7.7 s end to end.
 ![System-on-chip after BUDA: long horizontal buses between quads on the upper layers, short local wiring inside each cluster](img/investor_briefing_soc8c_dnuts.png)
 
 The four pictures regenerate with `tools/render_design.py` from recordings of
-the two Tcl flows (`tools/tcl2buda.py flow/tcl/tpu.tcl -o tpu8.buda -- 8` and
+the two Tcl flows (`tools/tcl2buda.py flow/tcl/tpu.tcl -o tpu8.buda -- 8 -X0 248` and
 `tools/tcl2buda.py flow/tcl/soc.tcl -o soc8c.buda -- 8 -LAYOUT compact`),
-which also writes the counts quoted here.
+which also writes the counts quoted here.  The array is rendered with a
+wider west margin (`-X0 248`) because the generator's default places the
+feeder column at x = −140, outside its own die (the known emitter quirk
+[librelane_hier_flow.md](librelane_hier_flow.md) §7c records); the routing
+is unchanged by it — the same 197,376 detailed wire length either way.
 
 ## Results
 
