@@ -338,13 +338,14 @@ notes, not from a wish list.
    repetition to settle.  Two refinements measured as wins at some sizes and
    losses at others, so they ship as optional switches.  Making this loop a
    one-command default is unfinished.
-5. **Real designs lose their repetition.**  Planning a repeated block once
-   and copying it is the hierarchical flow's main saving, and it needs many
-   identical copies of one block.  But real designs come out of synthesis
-   (the step that turns a logic description into gates) with every copy made
-   unique (**uniquified**): every real netlist measured (NVDLA: 307 module
-   types for 306 instances; Ariane: 127 for 125) has no block type used
-   twice, so this path is exercised only on generated arrays.  Recovering the
+5. **The real netlists measured have lost their repetition.**  Planning a
+   repeated block once and copying it is the hierarchical flow's main
+   saving, and it needs many identical copies of one block.  Synthesis (the
+   step that turns a logic description into gates) can give every copy its
+   own unique name (**uniquified**), and both real netlists measured came
+   out that way (NVDLA: 307 module types for 306 instances; Ariane: 127 for
+   125): neither has a block type used twice, so this path is exercised only
+   on generated arrays.  Recovering the
    repetition, or planning before synthesis, is an open design question.
 6. **Remaining quality gaps.**  10 of the 57 benchmark designs end with a
    residual — nine with overlapping or unplaced wires, one (the real 45 nm
