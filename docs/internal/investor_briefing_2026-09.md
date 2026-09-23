@@ -426,7 +426,7 @@ The chip-design terms used above, in plain words.
 | Term | Meaning |
 | --- | --- |
 | Block (hard macro) | A self-contained piece of a chip, designed once and placed as a unit |
-| Bus | A group of wires that start and end in the same places and are planned together |
+| Bus | A group of related wires planned and routed together: wires joining the same blocks, or wires that share only one end — many sources feeding one block, or one block feeding many |
 | Die | The finished piece of silicon; its area is the chip's size |
 | DRC | Design-rule check: the manufacturer's geometry rules; any violation means the chip cannot be made as drawn |
 | Floorplan | Where each block sits on the chip |
