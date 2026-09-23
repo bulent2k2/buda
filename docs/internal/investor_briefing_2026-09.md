@@ -110,12 +110,14 @@ the chip by 38 %, cut the wiring between blocks by 63 %, and fixed a
 hold-timing failure — the kind of failure a chip cannot run with at any
 clock speed.  The price is 0.021 ns of setup margin, which stays positive.
 
-The gains come from three separate things BUDA supplies, and controlled runs
-measured each one, so the table is not one lump: how big each block should
-be (**block sizes**: die 6.35 → 3.94 mm²), where each block's connection
-points go (**pin placement**), and the wiring lanes (**corridors**) it hands
-to the router.  Against a control run that used BUDA's block sizes only, the
-pins and corridors cut the between-block wire by 59.9 % while adding 40.8 %
+The gains come from three things BUDA supplies: how big each block should
+be (**block sizes**), where each block's connection points go (**pin
+placement**), and the wiring lanes (**corridors**) it hands to the router.
+Controlled runs split them in two, so the table is not one lump: the block
+sizes were measured on their own (die 6.35 → 3.94 mm²), while the pins and
+corridors were measured together, as a pair, and their separate shares are
+not known.  Against a control run that used BUDA's block sizes only, the
+pins and corridors together cut the between-block wire by 59.9 % while adding 40.8 %
 to the blocks' own wire — a net 2.8 % saving on total wire at N = 8.  The
 between-block saving grew from N = 2 to N = 8 while the block-side cost
 held.  The two manufacturing-rule markers traced to one hole in one block's
