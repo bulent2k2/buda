@@ -41,6 +41,17 @@ LL=(librelane --docker-no-tty --docker-mount "${T1A_DIR:-$here}" --dockerized)
 mkdir -p "$d/h/log"
 stages="$d/h/stages.txt"
 stamp() { echo "$(date +%s) $1" >> "$stages"; echo "run_arm: $(date '+%H:%M:%S') $1"; }
+# A LibreLane leg that fails must be SAID, with its last error lines, before
+# `set -e` ends the run -- the first silent exit cost a watch that saw only
+# "top start" (a DPL-0036 legalization failure two minutes in).
+ll_run() {   # ll_run <log> <librelane args...>
+    local log=$1; shift
+    if ! "${LL[@]}" "$@" > "$log" 2>&1; then
+        stamp "LIBRELANE FAILED ($log)"
+        tr '\r' '\n' < "$log" | grep -E "ERROR|\[[A-Z]+-[0-9]+\]" | tail -6 | cut -c1-200 | sed 's/^/run_arm:   /'
+        exit 1
+    fi
+}
 
 TOPTAG=${TOPTAG:-$tag}
 stamp "harm.sh start"
@@ -67,7 +78,7 @@ else
 stamp "blocks start"
 pids=()
 for c in $cells; do
-    (cd "$d/h/$c" && "${LL[@]}" --run-tag h config.json > "$d/h/log/$c.log" 2>&1) &
+    (cd "$d/h/$c" && ll_run "$d/h/log/$c.log" --run-tag h config.json) &
     pids+=($!)
 done
 fail=0
@@ -93,10 +104,10 @@ fi
 # 3. the top
 stamp "top start"
 if [ "$tag" = h ]; then
-    (cd "$d/h/top" && "${LL[@]}" --run-tag "$TOPTAG" config.json > "$d/h/log/top_$TOPTAG.log" 2>&1)
+    (cd "$d/h/top" && ll_run "$d/h/log/top_$TOPTAG.log" --run-tag "$TOPTAG" config.json)
 else
-    (cd "$d/h/top" && "${LL[@]}" --run-tag "$TOPTAG" \
-        --to OpenROAD.DetailedRouting --skip OpenROAD.DetailedRouting config.json > "$d/h/log/top_${TOPTAG}_a.log" 2>&1)
+    (cd "$d/h/top" && ll_run "$d/h/log/top_${TOPTAG}_a.log" --run-tag "$TOPTAG" \
+        --to OpenROAD.DetailedRouting --skip OpenROAD.DetailedRouting config.json)
     stamp "top cut at DetailedRouting; guides start"
     (cd "$here" && TAG="$TOPTAG" T1A_DIR="${T1A_DIR:-$here}" ./guides.sh "$N" > "$d/h/log/guides_$TOPTAG.log" 2>&1)
     ODB=$(ls -t "$d"/h/top/runs/"$TOPTAG"/*/*.odb | head -1)
@@ -104,8 +115,10 @@ else
         ODB="$ODB" GUIDE="$d/h/top/out/buda_bus.guide" OUT="$d/h/top/out" > "$d/h/log/guide_route_$TOPTAG.log" 2>&1)
     grep -q "wrote" "$d/h/log/guide_route_$TOPTAG.log" || { echo "run_arm: guide_route.tcl wrote nothing (see $d/h/log/guide_route_$TOPTAG.log)" >&2; exit 1; }
     stamp "guides in; top resume"
-    (cd "$d/h/top" && "${LL[@]}" --last-run --from OpenROAD.DetailedRouting \
-        -e odb="$d/h/top/out/guided.odb" config.json > "$d/h/log/top_${TOPTAG}_b.log" 2>&1)
+    # a DEFERRED error (an LVS count) exits non-zero AFTER final/ is written;
+    # that is a verdict for the row, so this leg is allowed to fail
+    (cd "$d/h/top" && ("${LL[@]}" --last-run --from OpenROAD.DetailedRouting \
+        -e odb="$d/h/top/out/guided.odb" config.json > "$d/h/log/top_${TOPTAG}_b.log" 2>&1 || true))
 fi
 stamp "top end"
 # LibreLane exits non-zero on a DEFERRED error (an LVS count) after writing
