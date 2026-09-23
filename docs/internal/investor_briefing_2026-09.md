@@ -93,7 +93,7 @@ weight buffers below and accumulators above: 104 blocks joined by 2,944 connecti
 With BUDA's plan: every one of the 2,944 connections on a real track, none
 overlapping, none left unplaced, and the design check clean, in 1.5 s.
 
-![Systolic array after BUDA: 2,944 individual wires, horizontal runs along each row and vertical runs down each column](img/investor_briefing_tpu8_dnuts.png)
+![Systolic array after BUDA: 2,944 connections, horizontal runs along each row and vertical runs down each column](img/investor_briefing_tpu8_dnuts.png)
 
 **A system-on-chip with 16 processor clusters**, in the compact floorplan.
 Eight quads of two clusters each, plus a shared memory block and an
@@ -109,12 +109,13 @@ wire-level check found 80 violations in 4 buses; the repair steps cleared
 them, and the design ends with no overlaps, nothing unplaced and a clean
 check, in 7.7 s end to end.
 
-![System-on-chip after BUDA: long horizontal buses between quads on the upper layers, short local wiring inside each cluster](img/investor_briefing_soc8c_dnuts.png)
+![System-on-chip after BUDA: 8,272 connections as 9,328 straight wire pieces, long horizontal buses between quads on the upper layers, short local wiring inside each cluster](img/investor_briefing_soc8c_dnuts.png)
 
 The four pictures regenerate with `tools/render_design.py` from recordings of
 the two Tcl flows (`tools/tcl2buda.py flow/tcl/tpu.tcl -o tpu8.buda -- 8 -X0 248` and
 `tools/tcl2buda.py flow/tcl/soc.tcl -o soc8c.buda -- 8 -LAYOUT compact`),
-which also writes the counts quoted here.  The array is rendered with a
+which also writes the counts quoted here (the panel titles are relabelled
+in plain words for this page).  The array is rendered with a
 wider west margin (`-X0 248`) because the generator's default places the
 feeder column at x = −140, outside its own die (the known emitter quirk
 [librelane_hier_flow.md](librelane_hier_flow.md) §7c records); the routing
