@@ -297,8 +297,8 @@ def draw_placement(ax, arm):
                                lw=0.9, ls=(0, (4, 3)), zorder=4))
     _frame(ax, arm, "#222", 0.6)
     d = arm.die
-    ax.set_title(f"{TITLE[arm.name]}\n{d[2]-d[0]:,.0f} × {d[3]-d[1]:,.0f} µm = "
-                 f"{arm.die_area()/1e6:.3f} mm²\n{n:,} logic cells", fontsize=11, loc="left")
+    ax.set_title(f"{TITLE[arm.name]}\n{d[2]-d[0]:,.0f} × {d[3]-d[1]:,.0f} µm\n"
+                 f"{arm.die_area()/1e6:.3f} mm², {n:,} logic cells", fontsize=10, loc="left")
     return n
 
 
