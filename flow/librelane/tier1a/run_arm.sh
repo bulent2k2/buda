@@ -15,8 +15,11 @@
 #   TOPTAG=<tag>          the top's run tag (default = the arm tag), so a
 #                         re-run keeps the earlier top beside it
 #   TOP_SET="K=V K=V"     JSON values patched into top/config.json after
-#                         harm.sh writes it (`FP_TAPCELL_DIST=5`)  Requires `librelane` on PATH (the venv) and
-# Docker running.  Every LibreLane call passes `--docker-no-tty`: this runs
+#                         harm.sh writes it (`FP_TAPCELL_DIST=5`)
+#   LL_HOME=<dir>         a home OUTSIDE $HOME for librelane's unconditional
+#                         home mount (needs PDK_ROOT outside $HOME too; see
+#                         the LL definition below for why and the copy recipe)
+# Requires `librelane` on PATH (the venv) and Docker running.  Every LibreLane call passes `--docker-no-tty`: this runs
 # unattended, and `--dockerized` otherwise asks Docker for a terminal it does
 # not have ("cannot attach stdin to a TTY-enabled container").
 set -euo pipefail
@@ -38,6 +41,23 @@ export PDK_ROOT="${PDK_ROOT:-$HOME/.ciel}"
 # containers sit at 0 % CPU).  Mount the arm's tree explicitly instead, so a
 # T1A_DIR outside $HOME mounts only itself and the PDK.
 LL=(librelane --docker-no-tty --docker-mount "${T1A_DIR:-$here}" --dockerized)
+# That is NOT enough: librelane/container.py mounts `Path.home()` UNCONDITIONALLY,
+# so every run still carries `-v $HOME:$HOME`, and on 2026-09-23 a restarted
+# VM was stalling again three minutes later with that mount alone (`init.log`:
+# "inotify injection stalled for 1m0s" every minute) while the same resume ran
+# ten steps in a minute without it.  LL_HOME=<dir outside $HOME> makes
+# librelane see THAT as home; DOCKER_CONFIG keeps the docker CLI's Desktop
+# context, which lives in the real ~/.docker.  PDK_ROOT must be outside $HOME
+# too (copy: `cp -RL ~/.ciel/sky130A <dir>/pdk/sky130A`, then ciel fetches its
+# own store beside it on first use), or the PDK mount brings $HOME back.
+if [ -n "${LL_HOME:-}" ]; then
+    case $PDK_ROOT in "$HOME"|"$HOME"/*)
+        echo "run_arm: LL_HOME is set but PDK_ROOT=$PDK_ROOT is under \$HOME, which the PDK mount would bring back -- copy the PDK out (cp -RL ~/.ciel/sky130A <dir>/pdk/sky130A) and set PDK_ROOT=<dir>/pdk" >&2
+        exit 1 ;;
+    esac
+    mkdir -p "$LL_HOME"
+    LL=(env HOME="$LL_HOME" DOCKER_CONFIG="${DOCKER_CONFIG:-$HOME/.docker}" "${LL[@]}")
+fi
 mkdir -p "$d/h/log"
 stages="$d/h/stages.txt"
 stamp() { echo "$(date +%s) $1" >> "$stages"; echo "run_arm: $(date '+%H:%M:%S') $1"; }
