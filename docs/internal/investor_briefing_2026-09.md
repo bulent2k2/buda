@@ -190,7 +190,9 @@ documented by cause.
 ## Origin: a proven idea, rebuilt
 
 BUDA is the second life of a technique that shipped inside Galaxy, Intel's
-in-house full-chip layout tool, in 2000–2005.  The founder's paper of that
+in-house full-chip layout tool, in 2000–2005 (the span is the founder's
+account; the paper and the project results it cites date from 2002–2003).
+The founder's paper of that
 period, *Assisted and Auto Bus Planning in Full-Chip Layout* (kept in this
 repository at [docs/origin/paper.md](../origin/paper.md)), describes the
 same two ideas BUDA is built on: sketch a handful of candidate paths
@@ -500,4 +502,5 @@ Apache 2.0) and its `git log` through commit 63d4e67c;
 [librelane_hier_flow.md](librelane_hier_flow.md) (§7 results, §11 open
 items); [opens.md](opens.md); [qor/qor_table.md](../../qor/qor_table.md)
 (snapshot of 31 August 2026); and the CI workflow's measured suite size
-(`.github/workflows/ci.yml`).
+(`.github/workflows/ci.yml`).  The 2000–2005 dating of the Intel work is
+the founder's.
