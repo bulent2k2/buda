@@ -241,8 +241,8 @@ Around the pipeline:
   repository), a front end in Tcl, the scripting language chip-design tools
   conventionally use (81 Tcl flows), and a web interface.  An interactive
   Floorplanner GUI edits block placement and launches the flow.
-- **Checks.**  A design check (`check_design`) runs at every stage and
-  reports each problem by type — broken connections, wires on the wrong
+- **Checks.**  A design check (`check_design`), which a flow can run after
+  any stage, reports each problem by type — broken connections, wires on the wrong
   layer or crossing blocked areas, dangling wire, two signals sharing one
   track, wires that could not be placed — plus a list of spots where a bus
   physically cannot fit.
