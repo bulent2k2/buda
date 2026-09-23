@@ -16,7 +16,7 @@ glossary at the end explains the terms.
   weeks of schedule.
 - **The idea.**  Plan the wiring early and in groups, the way a city lays out
   its highways before its streets.  The founder's version of this shipped
-  inside Intel's in-house layout tool in 2002–2003 and was used or piloted on
+  inside Intel's in-house layout tool in 2000–2005 and was used or piloted on
   four Intel processor projects.
 - **What exists.**  A complete open-source rebuild, public since April 2026:
   3,778 changes in under nine months, 4,352 automated tests, and a working
@@ -71,6 +71,44 @@ drives the open-source OpenROAD/LibreLane chip-building flow end to end.  It
 has been public on GitHub since 30 April 2026 under the Apache 2.0
 open-source license, at
 [github.com/bulent2k2/buda](https://github.com/bulent2k2/buda).
+
+## What it looks like
+
+Two of the repository's test designs, each shown twice: first the floorplan
+alone (every block, at every level of nesting), then the same chip after BUDA
+has planned it down to individual wires.  In the wiring pictures each colour
+is one metal layer; layers alternate between horizontal and vertical wires,
+and the connections between them are the vias.
+
+**An 8×8 systolic array**, the same kind of design as the headline result
+below.  The 64 orange processing units sit in 8 rows, fed from the left, with
+weight buffers below and accumulators above: 104 blocks joined by 152 buses.
+
+![Systolic array floorplan: 64 processing units in 8 rows, feeders on the left, weight buffers below, accumulators above](img/investor_briefing_tpu8_fp.png)
+
+With BUDA's plan: all 2,944 individual wires on real tracks, none
+overlapping, none left unplaced, and the design check clean, in 1.4 s.
+
+![Systolic array after BUDA: 2,944 individual wires, horizontal runs along each row and vertical runs down each column](img/investor_briefing_tpu8_dnuts.png)
+
+**A system-on-chip with 16 processor clusters**, in the compact floorplan.
+Eight quads of two clusters each, plus a shared memory block and an
+input/output block in the top-right corner: 219 bottom-level blocks of 11
+types, nested up to three levels deep, joined by 323 buses.
+
+![System-on-chip floorplan: eight quads of two clusters each, with the shared memory and I/O blocks in the top-right corner](img/investor_briefing_soc8c_fp.png)
+
+With BUDA's plan: 9,328 individual wires on six metal layers.  The first
+wire-level check found 80 violations in 4 buses; the repair steps cleared
+them, and the design ends with no overlaps, nothing unplaced and a clean
+check, in 7.7 s end to end.
+
+![System-on-chip after BUDA: long horizontal buses between quads on the upper layers, short local wiring inside each cluster](img/investor_briefing_soc8c_dnuts.png)
+
+The four pictures regenerate with `tools/render_design.py` from recordings of
+the two Tcl flows (`tools/tcl2buda.py flow/tcl/tpu.tcl -o tpu8.buda -- 8` and
+`tools/tcl2buda.py flow/tcl/soc.tcl -o soc8c.buda -- 8 -LAYOUT compact`),
+which also writes the counts quoted here.
 
 ## Results
 
@@ -148,7 +186,7 @@ documented by cause.
 ## Origin: a proven idea, rebuilt
 
 BUDA is the second life of a technique that shipped inside Galaxy, Intel's
-in-house full-chip layout tool, in 2002–2003.  The founder's paper of that
+in-house full-chip layout tool, in 2000–2005.  The founder's paper of that
 period, *Assisted and Auto Bus Planning in Full-Chip Layout* (kept in this
 repository at [docs/origin/paper.md](../origin/paper.md)), describes the
 same two ideas BUDA is built on: sketch a handful of candidate paths
@@ -199,7 +237,7 @@ had none, September counts to the 18th):
 
 | Date | Milestone |
 | --- | --- |
-| 2002–2003 | Bus planning ships in Galaxy, Intel's in-house layout tool; used on the Manzano, Tanglewood, Nehalem and Tejas processor projects |
+| 2000–2005 | Bus planning ships in Galaxy, Intel's in-house layout tool; used on the Manzano, Tanglewood, Nehalem and Tejas processor projects |
 | 1 Jan 2026 | Fresh start for version 2; the first prototype archived |
 | 28 Apr 2026 | The core track-fitting engine (NUTS) and the full pipeline specification land |
 | 30 Apr 2026 | Public on GitHub under Apache 2.0 |
@@ -407,7 +445,7 @@ should add or confirm:
 
 - [ ] **Team and history.**  Founder background beyond the Galaxy paper; who
   else has contributed; what the archived v1 was and why it was reset.
-- [ ] **IP position.**  The 2002–2003 work was done at Intel.  State plainly
+- [ ] **IP position.**  The 2000–2005 work was done at Intel.  State plainly
   that BUDA is a new implementation of published ideas and what, if
   anything, carries over.
 - [ ] **Market and customer.**  Who buys interconnect planning today, at
