@@ -86,11 +86,11 @@ and the connections between them are the vias.
 
 **An 8×8 systolic array**, the same kind of design as the headline result
 below.  The 64 orange processing units sit in 8 rows, fed from the left, with
-weight buffers below and accumulators above: 104 blocks joined by 152 buses.
+weight buffers below and accumulators above: 104 blocks joined by 2,944 connections, which BUDA groups into 152 buses.
 
 ![Systolic array floorplan: 64 processing units in 8 rows, feeders on the left, weight buffers below, accumulators above](img/investor_briefing_tpu8_fp.png)
 
-With BUDA's plan: all 2,944 individual wires on real tracks, none
+With BUDA's plan: every one of the 2,944 connections on a real track, none
 overlapping, none left unplaced, and the design check clean, in 1.5 s.
 
 ![Systolic array after BUDA: 2,944 individual wires, horizontal runs along each row and vertical runs down each column](img/investor_briefing_tpu8_dnuts.png)
@@ -98,11 +98,13 @@ overlapping, none left unplaced, and the design check clean, in 1.5 s.
 **A system-on-chip with 16 processor clusters**, in the compact floorplan.
 Eight quads of two clusters each, plus a shared memory block and an
 input/output block in the top-right corner: 219 bottom-level blocks of 11
-types, nested up to three levels deep, joined by 323 buses.
+types, nested up to three levels deep, joined by 8,272 connections grouped into 323
+buses.
 
 ![System-on-chip floorplan: eight quads of two clusters each, with the shared memory and I/O blocks in the top-right corner](img/investor_briefing_soc8c_fp.png)
 
-With BUDA's plan: 9,328 individual wires on six metal layers.  The first
+With BUDA's plan: the 8,272 connections laid out as 9,328 straight wire
+pieces on six metal layers.  The first
 wire-level check found 80 violations in 4 buses; the repair steps cleared
 them, and the design ends with no overlaps, nothing unplaced and a clean
 check, in 7.7 s end to end.
