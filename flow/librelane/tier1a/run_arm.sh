@@ -25,6 +25,13 @@ case $tag in
     *)  echo "run_arm: tag must be h or hb" >&2; exit 1 ;;
 esac
 export PDK_ROOT="${PDK_ROOT:-$HOME/.ciel}"
+# `--dockerized` mounts the COMMON path of the working directory and PDK_ROOT.
+# Run from a tree under $HOME with the PDK in ~/.ciel and that is all of
+# $HOME -- every file change under it is injected into the VM, and on a busy
+# machine the file-sharing layer stalls ("inotify injection stalled", the
+# containers sit at 0 % CPU).  Mount the arm's tree explicitly instead, so a
+# T1A_DIR outside $HOME mounts only itself and the PDK.
+LL=(librelane --docker-no-tty --docker-mount "${T1A_DIR:-$here}" --dockerized)
 mkdir -p "$d/h/log"
 stages="$d/h/stages.txt"
 stamp() { echo "$(date +%s) $1" >> "$stages"; echo "run_arm: $(date '+%H:%M:%S') $1"; }
@@ -37,7 +44,7 @@ cells=$(sed -n 's/^MACRO \([A-Za-z_][A-Za-z0-9_]*\).*/\1/p' "$d/tpu.lef")
 stamp "blocks start"
 pids=()
 for c in $cells; do
-    (cd "$d/h/$c" && librelane --docker-no-tty --dockerized --run-tag h config.json > "$d/h/log/$c.log" 2>&1) &
+    (cd "$d/h/$c" && "${LL[@]}" --run-tag h config.json > "$d/h/log/$c.log" 2>&1) &
     pids+=($!)
 done
 fail=0
@@ -62,9 +69,9 @@ stamp "notch end"
 # 3. the top
 stamp "top start"
 if [ "$tag" = h ]; then
-    (cd "$d/h/top" && librelane --docker-no-tty --dockerized --run-tag h config.json > "$d/h/log/top.log" 2>&1)
+    (cd "$d/h/top" && "${LL[@]}" --run-tag h config.json > "$d/h/log/top.log" 2>&1)
 else
-    (cd "$d/h/top" && librelane --docker-no-tty --dockerized --run-tag hb \
+    (cd "$d/h/top" && "${LL[@]}" --run-tag hb \
         --to OpenROAD.DetailedRouting --skip OpenROAD.DetailedRouting config.json > "$d/h/log/top_a.log" 2>&1)
     stamp "top cut at DetailedRouting; guides start"
     (cd "$here" && TAG=hb T1A_DIR="${T1A_DIR:-$here}" ./guides.sh "$N" > "$d/h/log/guides.log" 2>&1)
@@ -73,7 +80,7 @@ else
         ODB="$ODB" GUIDE="$d/h/top/out/buda_bus.guide" OUT="$d/h/top/out" > "$d/h/log/guide_route.log" 2>&1)
     grep -q "wrote" "$d/h/log/guide_route.log" || { echo "run_arm: guide_route.tcl wrote nothing (see $d/h/log/guide_route.log)" >&2; exit 1; }
     stamp "guides in; top resume"
-    (cd "$d/h/top" && librelane --docker-no-tty --dockerized --last-run --from OpenROAD.DetailedRouting \
+    (cd "$d/h/top" && "${LL[@]}" --last-run --from OpenROAD.DetailedRouting \
         -e odb="$d/h/top/out/guided.odb" config.json > "$d/h/log/top_b.log" 2>&1)
 fi
 stamp "top end"
