@@ -630,7 +630,7 @@ def utilization_advice(cell, w, h):
     return line
 
 
-def write_h(n_dir, out_dir, halo, pins_dir=None):
+def write_h(n_dir, out_dir, halo, pins_dir=None, density=None):
     n_dir = os.path.abspath(n_dir)
     out_dir = os.path.abspath(out_dir)
     for f in ("tpu_rtl.v", "tpu.def", "tpu.lef"):
@@ -740,6 +740,8 @@ def write_h(n_dir, out_dir, halo, pins_dir=None):
                "CLOCK_PORT": "clk", "CLOCK_PERIOD": CLOCK_PERIOD,
                "FP_SIZING": "absolute", "DIE_AREA": [0, 0, w, h]}
         cfg.update(BLOCK_SETTINGS)
+        if density is not None:
+            cfg["PL_TARGET_DENSITY_PCT"] = density
         if cell in templates:
             cfg["FP_DEF_TEMPLATE"] = "dir::" + os.path.relpath(
                 templates[cell], d).replace(os.sep, "/")
@@ -1168,6 +1170,10 @@ def main(argv=None):
     ap.add_argument("--halo", type=float, nargs=2, metavar=("HX", "HY"),
                     default=(pp.SKY130["FP_MACRO_HORIZONTAL_HALO"], pp.SKY130["FP_MACRO_VERTICAL_HALO"]),
                     help="FP_MACRO_HORIZONTAL_HALO / VERTICAL_HALO written to the top and used by the checks")
+    ap.add_argument("--density", type=int, metavar="PCT",
+                    help=f"PL_TARGET_DENSITY_PCT for every block config (default "
+                         f"{BLOCK_SETTINGS['PL_TARGET_DENSITY_PCT']}); the knob a compact "
+                         "block needs, since the placer refuses a die whose cells exceed it")
     ap.add_argument("--pins", metavar="DIR",
                     help="BUDA's pin templates (flow/librelane/tier1a/pins.sh N writes "
                          "n<N>/pins/): each block config gets FP_DEF_TEMPLATE and is capped "
@@ -1176,7 +1182,7 @@ def main(argv=None):
     a = ap.parse_args(argv)
     try:
         r = write_h(a.n_dir, a.out or os.path.join(a.n_dir, "h"), tuple(a.halo),
-                    pins_dir=a.pins)
+                    pins_dir=a.pins, density=a.density)
     except Shape as e:
         print(f"harm: ERROR: {e}", file=sys.stderr)
         return 1

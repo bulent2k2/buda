@@ -87,7 +87,7 @@ namespace eval tpu_vehicle {
         PPX      0      PPY      0
         ROWM    12      ROWGAP   0
         EDGEW    0      EDGEH    0
-        EDGEGAP 48
+        EDGEGAP 48      EDGEGAPX 0
         X0      60      Y0     120
         AW       8
         PW      24
@@ -99,6 +99,7 @@ namespace eval tpu_vehicle {
         CHAN    48
         ALIGN    0
         YPERIOD 306
+        EDGEIN   0
     }
 }
 
@@ -187,11 +188,35 @@ proc tpu_vehicle::configure {{overrides {}}} {
     set P(RW) [expr {2*$P(ROWM) + ($P(N)-1)*$P(PPX) + $P(PEW)}]
     set P(RH) [expr {2*$P(ROWM) + $P(PEH)}]
     set P(RPY) [expr {$P(RH) + $P(ROWGAP)}]
-    # The die: the array plus both edges plus the tail, with X0/Y0 of slack.
-    set P(DIEW) [expr {$P(X0) + $P(RW) + $P(EDGEW) + $P(EDGEGAP) + $P(X0)}]
-    set P(DIEH) [expr {$P(Y0) + $P(N)*$P(RPY) + $P(EDGEGAP) + $P(EDGEH)
-                       + ($P(PIPE)+1)*$P(PIPEGAP) + $P(PIPE)*$P(EDGEH)
-                       + $P(Y0)}]
+    # The array's origin.  Legacy (EDGEIN 0): the rows start at X0/Y0 and
+    # the feeder column and weight-buffer row sit OUTSIDE them, at
+    # X0 - EDGEW - EDGEGAP and Y0 - EDGEH - EDGEGAP -- i.e. at a NEGATIVE x
+    # for the default X0, outside the die, while DIEW/DIEH budget the edge
+    # on the far side (docs/internal/librelane_hier_flow.md §7c; harm.py
+    # shifts the placement to compensate).  EDGEIN 1 puts the edge cells at
+    # X0/Y0 and the rows beyond them, with the die symmetric about the
+    # array, so every block is inside its die with X0/Y0 of slack all
+    # round.  A knob rather than a fix so the default emit stays byte for
+    # byte what every recorded LibreLane run placed.
+    # EDGEGAPX: the feeder column's gap, when it must differ from the
+    # north/south edge gap (0 = EDGEGAP).  One knob for both axes cannot sit
+    # on two lattices at once (sky130: x 0.92 um, y 2.72 um).
+    if {$P(EDGEGAPX) == 0} { set P(EDGEGAPX) $P(EDGEGAP) }
+    if {$P(EDGEIN)} {
+        set P(AX) [expr {$P(X0) + $P(EDGEW) + $P(EDGEGAPX)}]
+        set P(AY) [expr {$P(Y0) + $P(EDGEH) + $P(EDGEGAP)}]
+        set P(DIEW) [expr {$P(AX) + $P(RW) + $P(X0)}]
+        set P(DIEH) [expr {$P(AY) + $P(N)*$P(RPY) + $P(EDGEGAP) + $P(EDGEH)
+                           + $P(PIPE)*($P(PIPEGAP) + $P(EDGEH)) + $P(Y0)}]
+    } else {
+        set P(AX) $P(X0)
+        set P(AY) $P(Y0)
+        # The die: the array plus both edges plus the tail, with X0/Y0 of slack.
+        set P(DIEW) [expr {$P(X0) + $P(RW) + $P(EDGEW) + $P(EDGEGAPX) + $P(X0)}]
+        set P(DIEH) [expr {$P(Y0) + $P(N)*$P(RPY) + $P(EDGEGAP) + $P(EDGEH)
+                           + ($P(PIPE)+1)*$P(PIPEGAP) + $P(PIPE)*$P(EDGEH)
+                           + $P(Y0)}]
+    }
     return [array get P]
 }
 
@@ -207,7 +232,37 @@ proc tpu_vehicle::get {k} {
 # the same arithmetic.
 proc tpu_vehicle::col_x {c} {
     variable P
-    return [expr {$P(X0) + $P(ROWM) + $c*$P(PPX)}]
+    return [expr {$P(AX) + $P(ROWM) + $c*$P(PPX)}]
+}
+
+# The feeder column's x and the weight-buffer row's y: at X0/Y0 under
+# EDGEIN, outside the array's origin otherwise (see `configure`).
+proc tpu_vehicle::feed_x {} {
+    variable P
+    if {$P(EDGEIN)} { return $P(X0) }
+    return [expr {$P(X0) - $P(EDGEW) - $P(EDGEGAPX)}]
+}
+proc tpu_vehicle::wbuf_y {} {
+    variable P
+    if {$P(EDGEIN)} { return $P(Y0) }
+    return [expr {$P(Y0) - $P(EDGEH) - $P(EDGEGAP)}]
+}
+
+# A DEF coordinate: the DEF is written at DATABASE MICRONS 1000, and a knob
+# may be FRACTIONAL microns (the sky130 lattice is 0.92 / 2.72 um), so the
+# product is rounded to a whole DBU -- for an integer knob this is the
+# `$x*1000` it always was, byte for byte.
+proc tpu_vehicle::dbu {um} {
+    return [expr {int(round($um*1000))}]
+}
+
+# A micron value for the LEF: whole DBU, printed without the float noise a
+# fractional knob's arithmetic leaves (140.95999999999998 for 32 + 108.96);
+# an integer knob prints as the integer it always was.
+proc tpu_vehicle::um {v} {
+    set n [expr {int(round($v*1000))}]
+    if {$n % 1000 == 0} { return [expr {$n/1000}] }
+    return [string trimright [string trimright [format %.3f [expr {$n/1000.0}]] 0] .]
 }
 
 # ── the metal stack ───────────────────────────────────────────────────────
@@ -257,21 +312,18 @@ proc tpu_vehicle::build_hierarchy {} {
 
     # N rows, stacked north to south; a west feeder beside each
     for {set r 0} {$r < $N} {incr r} {
-        set y [expr {$P(Y0) + $r*$P(RPY)}]
-        buda::add_inst row_$r row_cell - $P(X0) $y
-        buda::add_inst feed_$r feed_cell - \
-            [expr {$P(X0) - $P(EDGEW) - $P(EDGEGAP)}] \
-            [expr {$y + $P(ROWM)}]
+        set y [expr {$P(AY) + $r*$P(RPY)}]
+        buda::add_inst row_$r row_cell - $P(AX) $y
+        buda::add_inst feed_$r feed_cell - [feed_x] [expr {$y + $P(ROWM)}]
     }
 
     # north edge: one weight buffer per column
     for {set c 0} {$c < $N} {incr c} {
-        buda::add_inst wbuf_$c wbuf_cell - [col_x $c] \
-            [expr {$P(Y0) - $P(EDGEH) - $P(EDGEGAP)}]
+        buda::add_inst wbuf_$c wbuf_cell - [col_x $c] [wbuf_y]
     }
 
     # south edge: one accumulator per column, then the deep tail
-    set accy [expr {$P(Y0) + $N*$P(RPY) + $P(EDGEGAP)}]
+    set accy [expr {$P(AY) + $N*$P(RPY) + $P(EDGEGAP)}]
     for {set c 0} {$c < $N} {incr c} {
         buda::add_inst acc_$c acc_cell - [col_x $c] $accy
     }
@@ -406,20 +458,16 @@ proc tpu_vehicle::leaf_instances {} {
     set N $P(N)
     set out {}
     for {set r 0} {$r < $N} {incr r} {
-        set y [expr {$P(Y0) + $r*$P(RPY)}]
+        set y [expr {$P(AY) + $r*$P(RPY)}]
         for {set c 0} {$c < $N} {incr c} {
-            lappend out [list row_$r/pe_$c pe_cell \
-                [expr {$P(X0) + $P(ROWM) + $c*$P(PPX)}] \
-                [expr {$y + $P(ROWM)}]]
+            lappend out [list row_$r/pe_$c pe_cell [col_x $c] [expr {$y + $P(ROWM)}]]
         }
-        lappend out [list feed_$r feed_cell \
-            [expr {$P(X0) - $P(EDGEW) - $P(EDGEGAP)}] [expr {$y + $P(ROWM)}]]
+        lappend out [list feed_$r feed_cell [feed_x] [expr {$y + $P(ROWM)}]]
     }
     for {set c 0} {$c < $N} {incr c} {
-        lappend out [list wbuf_$c wbuf_cell [col_x $c] \
-            [expr {$P(Y0) - $P(EDGEH) - $P(EDGEGAP)}]]
+        lappend out [list wbuf_$c wbuf_cell [col_x $c] [wbuf_y]]
     }
-    set accy [expr {$P(Y0) + $N*$P(RPY) + $P(EDGEGAP)}]
+    set accy [expr {$P(AY) + $N*$P(RPY) + $P(EDGEGAP)}]
     for {set c 0} {$c < $N} {incr c} {
         lappend out [list acc_$c acc_cell [col_x $c] $accy]
     }
@@ -768,12 +816,12 @@ proc tpu_vehicle::emit_def {path} {
     puts $f "BUSBITCHARS \"\[\]\" ;"
     puts $f "DESIGN tpu_top ;"
     puts $f "UNITS DISTANCE MICRONS 1000 ;"
-    puts $f "DIEAREA ( 0 0 ) ( [expr {$P(DIEW)*1000}] [expr {$P(DIEH)*1000}] ) ;"
+    puts $f "DIEAREA ( 0 0 ) ( [dbu $P(DIEW)] [dbu $P(DIEH)] ) ;"
     puts $f ""
     puts $f "COMPONENTS [llength $insts] ;"
     foreach i $insts {
         lassign $i name cell x y
-        puts $f "- $name $cell + PLACED ( [expr {$x*1000}] [expr {$y*1000}] ) N ;"
+        puts $f "- $name $cell + PLACED ( [dbu $x] [dbu $y] ) N ;"
     }
     puts $f "END COMPONENTS"
     puts $f ""
@@ -803,7 +851,7 @@ proc tpu_vehicle::emit_lef {path} {
         puts $f "MACRO $cell"
         puts $f "  CLASS CORE ;"
         puts $f "  ORIGIN 0 0 ;"
-        puts $f "  SIZE $w BY $h ;"
+        puts $f "  SIZE [um $w] BY [um $h] ;"
         puts $f "  SYMMETRY X Y ;"
         puts $f "END $cell"
         puts $f ""
