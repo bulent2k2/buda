@@ -141,12 +141,6 @@ proc tpu_vehicle::configure {{overrides {}}} {
     # no row fragment between accumulators for a well tap to miss.
     if {$P(ACCW) == 0} { set P(ACCW) $P(EDGEW) }
     if {$P(ACCH) == 0} { set P(ACCH) $P(EDGEH) }
-    # An accumulator sits on its PE's column (col_x) and the die's width is
-    # the PE row's envelope, so one wider than the PE overlaps its neighbour
-    # and, in the last column, leaves the die (Codex on #957).
-    if {$P(ACCW) > $P(PEW)} {
-        error "tpu_vehicle: ACCW $P(ACCW) exceeds PEW $P(PEW) -- the accumulator sits on the PE column and the die ends at the last PE's edge; widen PEW or narrow ACCW"
-    }
     if {$P(PPX) == 0}   { set P(PPX)   [expr {$P(PEW) + $P(CHAN)}] }
     # ROWGAP: compact by default, SNAPPED when the caller intends to solve
     # one row and copy it.  Congruent instances must see identical tracks,
@@ -230,6 +224,14 @@ proc tpu_vehicle::configure {{overrides {}}} {
         set P(DIEH) [expr {$P(Y0) + $P(N)*$P(RPY) + $P(EDGEGAP) + $P(ACCH)
                            + ($P(PIPE)+1)*$P(PIPEGAP) + $P(PIPE)*$P(ACCH)
                            + $P(Y0)}]
+    }
+    # An accumulator sits on its PE's column, so its width is bounded by the
+    # column PITCH (else it overlaps its neighbour) and, in the last column,
+    # by the die's right edge -- the REAL bounds, not PEW: with the default
+    # 48 um channel a 120 um accumulator on a 100 um PE fits (Codex on #957).
+    set accmax [expr {min($P(PPX), $P(DIEW) - ($P(AX) + $P(ROWM) + ($P(N)-1)*$P(PPX)))}]
+    if {$P(ACCW) > $accmax} {
+        error "tpu_vehicle: ACCW $P(ACCW) exceeds $accmax -- an accumulator sits on its PE column (pitch $P(PPX)) and the last one must end inside the die; widen PEW or CHAN, or narrow ACCW"
     }
     return [array get P]
 }

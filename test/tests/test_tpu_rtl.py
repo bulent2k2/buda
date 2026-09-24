@@ -177,6 +177,10 @@ def test_an_accumulator_wider_than_the_pe_is_refused_by_the_emitter(tmp_path):
     die and every other one over its neighbour (Codex on #957)."""
     from wrapper_select import wrapper_command
     btcl = wrapper_command(_ROOT, "btcl")
-    r = subprocess.run([*btcl, str(_ROOT / "flow/tcl/tpu.tcl"), "4", "-PEW", "100", "-ACCW", "140",
+    r = subprocess.run([*btcl, str(_ROOT / "flow/tcl/tpu.tcl"), "4", "-PEW", "100", "-ACCW", "160",
                         "-emit", str(tmp_path)], capture_output=True, encoding="utf-8", timeout=600)
-    assert r.returncode != 0 and "ACCW 140 exceeds PEW 100" in (r.stdout + r.stderr)
+    assert r.returncode != 0 and "ACCW 160 exceeds 148" in (r.stdout + r.stderr)   # the 148 um column pitch
+    # 140 fits: the bound is the column pitch (PE 100 + the default 48 um channel), not the PE
+    r = subprocess.run([*btcl, str(_ROOT / "flow/tcl/tpu.tcl"), "4", "-PEW", "100", "-ACCW", "140",
+                        "-emit", str(tmp_path / "ok")], capture_output=True, encoding="utf-8", timeout=600)
+    assert r.returncode == 0, r.stdout + r.stderr

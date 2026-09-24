@@ -83,6 +83,15 @@ def die(n, pew, peh, edgew, edgeh, chan=CHAN, rowm=ROWM, acch=None):
     return w, h, ppx, ppy
 
 
+def acc_width_bound(n, pew, peh, edgew, edgeh, acch=None):
+    """The widest accumulator the emitter can place: it sits on its PE's
+    column, so the column PITCH bounds it (a wider one overlaps its
+    neighbour) and, in the last column, so does the die's right edge -- the
+    same two bounds `tpu_vehicle::configure` refuses on (Codex on #957)."""
+    w, _h, ppx, _py = die(n, pew, peh, edgew, edgeh, acch=acch)
+    return min(ppx, w - (X0 + ROWM + (n - 1) * ppx))
+
+
 def usable_core(w, h):
     """The core area a `w x h` block actually offers, from `harm.py`'s own
     `block_core` and row snapping — NOT the nominal die.
@@ -234,7 +243,7 @@ def main(argv=None):
         d = json.load(open(os.path.join(a.sizes, "pe_cell.json"))).get("derivation", {})
         fn = d.get("face_needs", {})
         got = best_aspect("pe_cell", fn.get("w", 0.0), fn.get("h", 0.0),
-                          a.n, edgew, edgeh, acch=acch, min_w=accw)
+                          a.n, edgew, edgeh, acch=acch, min_w=max(0, accw - CHAN))
         if got is None:
             sys.exit("apply_sizes: no PE size within 600 um clears the "
                      "placer's bar — check harm.cell_area_estimate('pe_cell')")
@@ -260,18 +269,19 @@ def main(argv=None):
             grown = True
         if grown:
             aspect_note += f"; acc grown to {accw} x {acch} for the same reason"
-    if accw > pew:
-        # The emitter places the accumulator on its PE's column and the die
-        # is the PE row's envelope, so a wider one overlaps its neighbour and
-        # leaves the die in the last column; the emitter refuses the pair too
-        # (Codex on #957) -- and an accumulator INHERITING the edge size is
-        # bound the same way, since ACCW left at 0 IS EDGEW there.  Judged
-        # AFTER --optimize-aspect, whose search takes accw as its width
-        # floor and so can widen the PE to it (Codex on #957, again).
+    accmax = acc_width_bound(a.n, pew, peh, edgew, edgeh, acch)
+    if accw > accmax:
+        # The emitter places the accumulator on its PE's column: the column
+        # pitch bounds its width (else it overlaps its neighbour) and so does
+        # the die's right edge in the last column; the emitter refuses the
+        # same pair (Codex on #957) -- an accumulator INHERITING the edge
+        # size is bound the same way, since ACCW left at 0 IS EDGEW there.
+        # Judged AFTER --optimize-aspect, whose search takes accw - CHAN as
+        # its width floor and so can widen the PE to fit it.
         what = "acc_cell needs" if ACC in sizes else "the edge size (which acc_cell inherits) is"
-        sys.exit(f"apply_sizes: {what} {accw} um of width but the accumulator sits on the PE column "
-                 f"({pew} um): widen the PE (its face or -PEPAD) or narrow the edge cells, or this "
-                 f"emitter cannot honour the rule")
+        sys.exit(f"apply_sizes: {what} {accw} um of width but the accumulator sits on the PE column, "
+                 f"whose pitch and die margin allow {accmax:g}: widen the PE (its face or -PEPAD) or "
+                 f"narrow the edge cells, or this emitter cannot honour the rule")
     # BOTH paths are checked: a size the placer refuses is not a size, and
     # the rule's own die is measured against the DIE while the placer
     # measures the CORE (Codex #890).

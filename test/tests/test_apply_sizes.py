@@ -210,21 +210,25 @@ def test_an_accumulator_wider_than_the_pe_is_refused(tmp_path):
     """The emitter places acc_cell on its PE's column and ends the die at the
     last PE's edge, so a wider accumulator would overlap and leave the die
     (Codex on #957): refused here, with the remedy, and by the emitter."""
-    d = _sizes_dir(tmp_path, [_frag("pe_cell", 100.0, 47.5), _frag("acc_cell", 140.0, 51.1)])
+    d = _sizes_dir(tmp_path, [_frag("pe_cell", 100.0, 47.5), _frag("acc_cell", 160.0, 51.1)])
     r = _run(d, "--n", "8", "--args")
-    assert r.returncode != 0 and "sits on the PE column" in r.stderr
+    assert r.returncode != 0 and "sits on the PE column, whose pitch and die margin allow 148" in r.stderr
+    # 140 fits: the bound is the 148 um column pitch (PE 100 + channel 48), not the PE
+    (tmp_path / "ok").mkdir()
+    d = _sizes_dir(tmp_path / "ok", [_frag("pe_cell", 100.0, 47.5), _frag("acc_cell", 140.0, 51.1)])
+    assert _run(d, "--n", "8", "--args").stdout.strip().endswith("-ACCW 140 -ACCH 52")
 
 
 def test_optimize_aspect_never_narrows_the_pe_below_the_accumulator(tmp_path):
     """The reshaped PE is what the accumulator sits on, so the search's width
     floor is the accumulator's, not the face's alone (Codex on #957: a 221 um
     rule PE with a 100 um face floor and a 140 um accumulator recommended
-    -PEW 101 -ACCW 140, which the emitter refuses)."""
+    -PEW 101 -ACCW 160, which the emitter refuses)."""
     d = _sizes_dir(tmp_path, [
         _frag("pe_cell", 221, 59, area=5964, util=46.0, face_w=100.0, face_h=34.0),
-        _frag("acc_cell", 140.0, 51.1), _frag("feed_cell", 44.2, 44.2)])
+        _frag("acc_cell", 160.0, 51.1), _frag("feed_cell", 44.2, 44.2)])
     opt = json.loads(_run(d, "--n", "8", "--optimize-aspect", "--json").stdout)
-    assert opt["pe"]["w"] >= 140 and opt["acc"]["w"] == 140
+    assert opt["pe"]["w"] + A.CHAN >= 160 and opt["acc"]["w"] == 160
     assert all(c["clears"] for c in opt["checks"]), opt["checks"]
 
 
@@ -233,7 +237,7 @@ def test_an_inherited_edge_size_wider_than_the_pe_is_refused_too(tmp_path):
     the emitter binds to the PE column exactly the same way (Codex on #957: a
     100 um PE with a 140 um feed recommended -PEW 100 -EDGEW 140 and the
     emitter refused it as ACCW 140)."""
-    d = _sizes_dir(tmp_path, [_frag("pe_cell", 100.0, 47.5), _frag("feed_cell", 140.0, 44.2)])
+    d = _sizes_dir(tmp_path, [_frag("pe_cell", 100.0, 47.5), _frag("feed_cell", 160.0, 44.2)])
     r = _run(d, "--n", "8", "--args")
     assert r.returncode != 0 and "acc_cell inherits" in r.stderr
 
@@ -244,10 +248,10 @@ def test_optimize_aspect_widens_the_pe_to_the_accumulator_rather_than_refusing(t
     input to --optimize-aspect, which widens it (Codex on #957)."""
     d = _sizes_dir(tmp_path, [
         _frag("pe_cell", 100.0, 120.0, area=5964, util=46.0, face_w=100.0, face_h=34.0),
-        _frag("acc_cell", 140.0, 51.1), _frag("feed_cell", 44.2, 44.2)])
+        _frag("acc_cell", 160.0, 51.1), _frag("feed_cell", 44.2, 44.2)])
     assert _run(d, "--n", "8", "--args").returncode != 0            # the plain path refuses
     opt = json.loads(_run(d, "--n", "8", "--optimize-aspect", "--json").stdout)
-    assert opt["pe"]["w"] >= 140 and opt["acc"]["w"] == 140
+    assert opt["pe"]["w"] + A.CHAN >= 160 and opt["acc"]["w"] == 160
 
 
 def test_margins_and_density_are_the_hardenings_own(tmp_path):
