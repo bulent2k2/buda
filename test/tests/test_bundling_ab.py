@@ -78,7 +78,7 @@ def test_refuses_a_flow_with_no_bundler_of_its_own():
 @pytest.mark.parametrize("cap", ["set_max_bundle_bits 8",
                                  "set_max_bundle_bits 4 for pc_"])
 def test_refuses_a_flow_with_its_own_cap(cap):
-    with pytest.raises(ab.Refused, match="line 2"):
+    with pytest.raises(ab.Refused, match="flow:2"):
         ab.unbundled_text(f"open_bdb x\n{cap}\nrun_hier_bundler\n")
 
 
@@ -133,3 +133,92 @@ def test_render_shows_wirelength_as_a_percent():
     other = dict(row, detailed_wl=1887680)
     table = ab.render("f", {"bundled": row, "unbundled": other})
     assert "| detailed wirelength | 1,968,672 | 1,887,680 | -4.1 % |" in table
+
+
+# ── Codex on #953 ─────────────────────────────────────────────────────────
+
+def test_refuses_a_cap_declared_in_a_sourced_file(tmp_path):
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "caps.buda").write_text(
+        "set_max_bundle_bits 4 for pc_\n")
+    (tmp_path / "setup.buda").write_text("source sub/caps\n")  # nested, no suffix
+    flow = "source setup.buda\nrun_hier_bundler\n"
+    with pytest.raises(ab.Refused, match="caps.buda:1"):
+        ab.unbundled_text(flow, base_dir=str(tmp_path))
+
+
+def test_a_sourced_file_without_a_cap_is_fine(tmp_path):
+    (tmp_path / "setup.buda").write_text("def_layer 3 M3 H TOP 10\n")
+    out = ab.unbundled_text("source setup.buda\nrun_bundler STRICT\n",
+                            base_dir=str(tmp_path))
+    assert ab.INJECTED in out
+
+
+def test_an_unreadable_source_refuses(tmp_path):
+    with pytest.raises(ab.Refused, match="cannot be read"):
+        ab.unbundled_text("source missing.buda\nrun_bundler STRICT\n",
+                          base_dir=str(tmp_path))
+
+
+# A flat flow's generation, as the FLOW LOG has it: one line per bundle
+# (the terminal shows only one of them), and generated twice.
+FLAT_LOG = """\
+━━━ run_bundler strict ━━━
+Bundler created 3 hbundles.
+━━━ generate_topologies ━━━
+Generated 1 topologies for bundle 1 (a->b) 2 nets
+Generated 1 topologies for bundle 2 (a->c) 2 nets
+Generated 1 topologies for bundle 3 (b->c) 2 nets
+━━━ generate_topologies double_detour ━━━
+Generated 7 topologies for bundle 1 (a->b) 2 nets
+Generated 5 topologies for bundle 2 (a->c) 2 nets
+Generated 4 topologies for bundle 3 (b->c) 2 nets
+━━━ run_planner 10 ━━━
+Generated 99 topologies for bundle 1 (not a generation command)
+"""
+
+
+def test_flat_candidates_are_summed_from_the_log_last_generation_only():
+    stdout = ("  generate_topologies   0.02s  Generated 4 topologies for "
+              "bundle 3 (b->c) …\n")
+    row = ab.summarize({}, stdout, FLAT_LOG)
+    assert row["bundles"] == 3
+    assert row["candidates"] == 16
+
+
+def test_flat_candidates_without_a_log_are_unknown_not_one_bundle():
+    stdout = ("  generate_topologies   0.02s  Generated 4 topologies for "
+              "bundle 3 (b->c) …\n")
+    assert ab.summarize({}, stdout)["candidates"] is None
+
+
+def _fake_run(report):
+    def run(argv, **kw):
+        path = Path(argv[argv.index("--report-json") + 1])
+        path.write_text(ab.json.dumps(report))
+        return ab.subprocess.CompletedProcess(argv, 0, "", "")
+    return run
+
+
+def test_a_run_whose_commands_reported_errors_fails(tmp_path, monkeypatch):
+    flow = tmp_path / "f.buda"
+    flow.write_text("run_bundler STRICT\n")
+    monkeypatch.setattr(ab.subprocess, "run", _fake_run(
+        {"exit_status": 0, "commands": [
+            {"command": "run_bundler STRICT", "seconds": 0.1, "errors": 0},
+            {"command": "run_planner bogus", "seconds": 0.1, "errors": 1}]}))
+    with pytest.raises(RuntimeError, match="run_planner bogus"):
+        ab.run_arm(flow, flow.read_text(), "bundled")
+    assert not list(tmp_path.glob(".bundling_ab_*"))   # variant cleaned up
+
+
+def test_a_clean_run_returns_its_log(tmp_path, monkeypatch):
+    flow = tmp_path / "f.buda"
+    flow.write_text("run_bundler STRICT\n")
+    (tmp_path / "log").mkdir()
+    (tmp_path / "log" / ".bundling_ab_f_bundled_flow.log").write_text("LOG")
+    monkeypatch.setattr(ab.subprocess, "run", _fake_run(
+        {"exit_status": 0, "commands": [
+            {"command": "run_bundler STRICT", "seconds": 0.1, "errors": 0}]}))
+    report, stdout, log = ab.run_arm(flow, flow.read_text(), "bundled")
+    assert log == "LOG" and report["wall_seconds"] >= 0

@@ -14,7 +14,9 @@ python3 tools/bundling_ab.py flow/soc_small.buda --json ab.json
 every bundle into one-net parts: every connection becomes its own "bus".
 Floorplan, layer stack, planner settings and repair steps are the flow's
 own text in both runs.  The tool refuses a flow whose bundler it cannot
-reach, or that sets its own cap.
+reach, or that sets its own cap anywhere in its source tree.  It fails a
+run whose report records a command error, since the CLI prints `Error:` and
+carries on.
 
 ## The measurement
 
@@ -41,10 +43,11 @@ reach, or that sets its own cap.
 | final check (violations) | 0 | 0 | |
 | detailed wirelength | 1,968,672 | 1,887,680 | -4.1 % |
 
-**Repeatability.** Three runs of the same build agree exactly on every
-count and on wirelength.  Engine time is 102x, 97x and 98.5x across the
-three.  Only the last run's table has the bus-level row, which was added
-after the first two.
+**Repeatability.** Four runs of the same build agree exactly on every
+count and on wirelength.  Engine time is 102x, 97x, 98.5x and 95x across
+the four.  The fourth ran after the Codex fixes on #953, which read counts
+from the flow log and fail a run that reports a command error; it passed
+that gate.  The table above is the third run.
 
 ## What it says
 
