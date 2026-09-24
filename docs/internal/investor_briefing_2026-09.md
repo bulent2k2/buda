@@ -27,9 +27,10 @@ glossary at the end explains the terms.
   63 % shorter, and it turned a timing failure into a pass.
 - **The main risk.**  Every result so far is on designs BUDA's own tooling
   generated or on public benchmarks.  At this small size the conventional
-  all-at-once (flat) flow still beats it on run time, and on chip size in
-  the recorded arms (a compaction study on 24 September brought the
-  hierarchical die just under the flat one, 0.998 against 1.032 mm²); the
+  all-at-once (flat) flow still beats it on run time and chip size in the
+  recorded arms (a compaction study on 24 September brought the hierarchical
+  die just under the flat one, 0.998 against 1.032 mm², and its run time to
+  1,018 s against 4,541 s — one run, under concurrent load); the
   larger size where BUDA is expected to win outright, and a first customer
   design, are both still to be measured.
 
