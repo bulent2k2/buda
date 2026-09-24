@@ -1,6 +1,6 @@
 # BUDA: Progress and the Road Ahead
 
-Internal briefing for prospective angel investors, as of 2026-09-20.  The
+Internal briefing for prospective angel investors, as of 2026-09-24.  The
 tree twin of the published page listed in [artifacts.md](../artifacts.md);
 every number here is read from this repository, its design notes and the
 founder's paper as of commit 63d4e67c (2026-09-18) — the compaction rounds
@@ -27,7 +27,9 @@ glossary at the end explains the terms.
   63 % shorter, and it turned a timing failure into a pass.
 - **The main risk.**  Every result so far is on designs BUDA's own tooling
   generated or on public benchmarks.  At this small size the conventional
-  all-at-once (flat) flow still beats it on run time and chip size; the
+  all-at-once (flat) flow still beats it on run time, and on chip size in
+  the recorded arms (a compaction study on 24 September brought the
+  hierarchical die just under the flat one, 0.998 against 1.032 mm²); the
   larger size where BUDA is expected to win outright, and a first customer
   design, are both still to be measured.
 
