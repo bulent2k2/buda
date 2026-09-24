@@ -292,3 +292,55 @@ def test_each_run_owns_its_files(tmp_path, monkeypatch):
     assert sorted(p.name for p in tmp_path.iterdir()
                   if p.is_file()) == sorted(
         [b.name for b in bystanders] + ["f.buda"])
+
+
+# ── Codex, third round on #953 ────────────────────────────────────────────
+
+def test_a_file_sourced_twice_is_walked_twice(tmp_path):
+    """The engine runs every `source`; an alias redefined between two runs
+    of one file can make only the SECOND declare a cap."""
+    (tmp_path / "knobs.buda").write_text("knob 4 for pc_\n")
+    flow = ("alias knob report_overhead\n"
+            "source knobs.buda\n"
+            "alias knob set_max_bundle_bits\n"
+            "source knobs.buda\n"
+            "run_hier_bundler\n")
+    with pytest.raises(ab.Refused, match="knobs.buda:1"):
+        ab.unbundled_text(flow, base_dir=str(tmp_path))
+
+
+def test_a_flow_that_sources_itself_refuses(tmp_path):
+    (tmp_path / "a.buda").write_text("source b.buda\n")
+    (tmp_path / "b.buda").write_text("source a.buda\n")
+    with pytest.raises(ab.Refused, match="already being sourced"):
+        ab.unbundled_text("source a.buda\nrun_bundler STRICT\n",
+                          base_dir=str(tmp_path))
+    top = tmp_path / "top.buda"
+    top.write_text("source top.buda\nrun_bundler STRICT\n")
+    with pytest.raises(ab.Refused, match="already being sourced"):
+        ab.unbundled_text(top.read_text(), base_dir=str(tmp_path),
+                          name=str(top))
+
+
+def test_stage_times_resolve_case_and_aliases():
+    """The report records a command as TYPED."""
+    report = {"commands": [
+        {"command": "alias plan run_planner", "seconds": 0.0},
+        {"command": "GENERATE_HIER_TOPOLOGIES", "seconds": 2.0},
+        {"command": "plan hier", "seconds": 3.0},
+        {"command": "unalias plan", "seconds": 0.0},
+        {"command": "Run_NUTS", "seconds": 5.0},
+    ]}
+    st = ab.summarize(report, "")["stages"]
+    assert st["path generation"] == 2.0
+    assert st["planner"] == 3.0
+    assert st["track fitting (bus)"] == 5.0
+
+
+def test_an_aliased_generator_is_found_in_the_log():
+    log = ("━━━ alias gen generate_topologies ━━━\n"
+           "━━━ gen double_detour ━━━\n"
+           "Generated 2 topologies for bundle 1 (a->b) 2 nets\n"
+           "Generated 3 topologies for bundle 2 (a->c) 2 nets\n"
+           "━━━ run_planner 10 ━━━\n")
+    assert ab.summarize({}, "", log)["candidates"] == 5

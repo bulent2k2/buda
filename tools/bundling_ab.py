@@ -94,7 +94,34 @@ def _resolve_source(base_dir, raw):
     return full
 
 
-def _source_tree(text, base_dir, name, aliases=None, seen=None,
+def _canonical(toks, aliases):
+    """The command `toks` runs, as `BudaSession.do_command` dispatches it —
+    lower-cased, then resolved through `aliases` — and the alias table
+    updated by it, as `cmd_alias`/`cmd_unalias` would (a target is stored
+    already resolved, so a chain collapses).  ONE rule for every reader
+    here: the flow walk, the report's command list and the flow log's
+    headers all record a command as it was TYPED (Codex P1 on #953, twice)."""
+    word = toks[0].lower()
+    word = aliases.get(word, word)
+    if word == "alias" and len(toks) >= 3:
+        target = toks[2].lower()
+        aliases[toks[1].lower()] = aliases.get(target, target)
+    elif word == "unalias":
+        for a in toks[1:]:
+            aliases.pop(a.lower(), None)
+    return word
+
+
+def _canonical_words(commands):
+    """Canonical first words of command lines in the order they RAN."""
+    aliases, out = {}, []
+    for c in commands:
+        toks = c.split()
+        out.append(_canonical(toks, aliases) if toks else "")
+    return out
+
+
+def _source_tree(text, base_dir, name, aliases=None, stack=None,
                  top=True):
     """Yield (file, line number, command, top-level line index or None) for
     every line of `text` and, recursively, of every file it `source`s, in
@@ -108,36 +135,40 @@ def _source_tree(text, base_dir, name, aliases=None, seen=None,
     resolved, like `cmd_alias`, and `unalias` removes names; a real command
     cannot be aliased away, so no registry lookup is needed to mirror the
     engine.  A sourced file that cannot be read refuses: a cap declared in
-    it could not be ruled out."""
+    it could not be ruled out.
+
+    A file sourced TWICE is walked twice, because the engine runs it twice
+    and an alias redefined in between can make the second run declare a
+    cap the first did not (Codex P2 on #953); only a file sourcing itself,
+    directly or through others, is refused — `cmd_source` has no guard, so
+    the engine would recurse until Python stops it."""
     aliases = {} if aliases is None else aliases
-    seen = set() if seen is None else seen
+    stack = [] if stack is None else stack
     for i, line in enumerate(text.splitlines()):
         n = i + 1
         toks = strip_inline_comment(line).split()
         if not toks:
             continue
-        word = toks[0].lower()
-        word = aliases.get(word, word)
+        word = _canonical(toks, aliases)
         yield name, n, word, (i if top else None)
-        if word == "alias" and len(toks) >= 3:
-            target = toks[2].lower()
-            aliases[toks[1].lower()] = aliases.get(target, target)
-        elif word == "unalias":
-            for a in toks[1:]:
-                aliases.pop(a.lower(), None)
-        elif word == "source":
+        if word == "source":
             raw = sole_path_arg(strip_inline_comment(line).strip())
             path = _resolve_source(base_dir, raw) if raw else ""
             if not path or not os.path.isfile(path):
                 raise Refused(f"{name}:{n} sources {raw!r}, which cannot "
                               f"be read, so a bundle-bit cap in it cannot "
                               f"be ruled out")
-            if path in seen:
-                continue
-            seen.add(path)
-            yield from _source_tree(Path(path).read_text(),
-                                    os.path.dirname(path), path, aliases,
-                                    seen, top=False)
+            if os.path.realpath(path) in stack:
+                raise Refused(f"{name}:{n} sources {raw!r}, which is "
+                              f"already being sourced: the flow sources "
+                              f"itself and the engine would not finish")
+            stack.append(os.path.realpath(path))
+            try:
+                yield from _source_tree(Path(path).read_text(),
+                                        os.path.dirname(path), path,
+                                        aliases, stack, top=False)
+            finally:
+                stack.pop()
 
 
 def unbundled_text(text, base_dir=None, name="flow"):
@@ -152,7 +183,10 @@ def unbundled_text(text, base_dir=None, name="flow"):
         # No sourced files can be read; a `source` line refuses.
         base_dir = os.path.join(os.sep, "nonexistent-bundling-ab")
     first = None
-    for where, n, w, top_i in _source_tree(text, base_dir, name):
+    top = os.path.join(base_dir, name)
+    stack = [os.path.realpath(top)] if os.path.isfile(top) else []
+    for where, n, w, top_i in _source_tree(text, base_dir, name,
+                                           stack=stack):
         if w == "set_max_bundle_bits":
             raise Refused(
                 f"{where}:{n} already sets set_max_bundle_bits; its cap, or "
@@ -175,8 +209,9 @@ def unbundled_text(text, base_dir=None, name="flow"):
 
 
 def _sum_stage(commands, words):
-    return round(sum(c["seconds"] for c in commands
-                     if c["command"].split()[0] in words), 2)
+    canon = _canonical_words([c["command"] for c in commands])
+    return round(sum(c["seconds"] for c, w in zip(commands, canon)
+                     if w in words), 2)
 
 
 def _last_int(pattern, text):
@@ -195,9 +230,9 @@ def _last_generation(log):
     per-bundle `Generated N topologies` lines are only all there in the log
     (one per bundle); and a flow that generates twice must not count both."""
     heads = list(_HEADER.finditer(log))
+    canon = _canonical_words([h.group(1) for h in heads])
     for k in range(len(heads) - 1, -1, -1):
-        if heads[k].group(1).split()[:1] and \
-                heads[k].group(1).split()[0] in GENERATORS:
+        if canon[k] in GENERATORS:
             end = heads[k + 1].start() if k + 1 < len(heads) else len(log)
             return log[heads[k].end():end]
     return ""
@@ -342,7 +377,7 @@ def main(argv=None):
     text = flow.read_text()
     try:
         variant = unbundled_text(text, base_dir=str(flow.parent),
-                                 name=args.flow)
+                                 name=str(flow))
     except Refused as e:
         print(f"bundling_ab: refused: {e}", file=sys.stderr)
         return 2
