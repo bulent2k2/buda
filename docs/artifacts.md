@@ -8,8 +8,9 @@ tree that outlives the link.
 **Dates.**  *v1* is the earliest date the page is known to have existed: the
 commit that first recorded its link in this repository where there is one,
 otherwise the day it was first entered here.  *latest* is the artifact
-service's last-updated date, read on 2026-09-13.  A single date means the page
-was published once and never revised.
+service's last-updated date, read on 2026-09-13; a row revised since carries
+the date of that revision instead (the investor briefing's 2026-09-24).  A
+single date means the page was published once and never revised.
 
 | artifact | what it is | v1 | latest | in the tree |
 |---|---|---|---|---|
