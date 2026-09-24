@@ -781,6 +781,69 @@ def test_the_fallback_is_judged_on_the_grid_the_reference_solves_on():
     assert "MISALIGNED" in out and "midpoint" in out, out
 
 
+def test_a_difference_only_on_a_thinned_slot_does_not_misalign():
+    """The other half of judging on the solve view (Codex P2 on #955): a
+    slot the share removes can never be picked by the reference, so two
+    midpoint pools differing ONLY there copy legally.  Comparing the full
+    grid's pools called that MISALIGNED, and `stop` refused the run.
+
+    Same vehicle and share as the test above, with the band keepout now
+    across the WHOLE span in both instances (the fallback engages, and
+    the band cuts both midpoint pools alike), plus one keepout pair over a
+    thinned-away slot: off the midpoint in proc_i1, across it in proc_i2.
+    The full-grid midpoint pools differ by that slot; the thinned ones do
+    not."""
+    s = _bare_session(_two_inst_db(x2=504, y2=304))
+    for c in (["def_layer 6 M6 H TOP 50", "def_layer 7 M7 V TOP 50",
+               "def_layer 4 M4 H 50", "def_layer 5 M5 V 50",
+               "def_track_pattern 6 0 (SIGNAL 1 1)x4",
+               "def_track_pattern 7 0 (SIGNAL 1 1)x4",
+               "def_track_pattern 4 0 (SIGNAL 1 1)x4",
+               "def_track_pattern 5 0 (SIGNAL 1 1)x4",
+               "run_hier_bundler", "generate_hier_topologies",
+               "set_bottom_up proc_cell", "run_planner hier", "run_nuts"]):
+        _run_cmd(s, c)
+    ref, sib = sorted((ts for ts in s._bottom_up_fixed_segments()
+                       if ts.horiz and ts.layer == 6),
+                      key=lambda ts: ts.interval_lo)
+    rlo, rhi = sorted((ref.span_lo, ref.span_hi))
+    slo, shi = sorted((sib.span_lo, sib.span_hi))
+    y0, y1 = int(ref.interval_lo), int(ref.interval_hi)
+    for dx, dy, lo, hi in ((0, 0, rlo, rhi), (504, 304, slo, shi)):
+        s.routing_grid.add_keepout(6, int(lo) - 1, y0 + dy, int(hi) + 1,
+                                   y1 - 10 + dy)
+    out = _run_cmd(s, "set_cell_layer_share proc_cell M6 50")
+    assert "Error" not in out, out
+    # A thinned-away slot in the free window: a full-grid track of the
+    # reference's span the thinned solve view does not have.
+    g = s.routing_grid.get_layer_grid(6)
+    rg, _ = s._bu_reference_grid({ref.bundle_id}, verbose=False)
+    full = {p for p, _ in g.signal_tracks_in_span(
+        rlo, rhi, ref.interval_lo, ref.interval_hi)}
+    kept = {p for p, _ in rg.get_layer_grid(6).signal_tracks_in_span(
+        rlo, rhi, ref.interval_lo, ref.interval_hi)}
+    dropped = sorted(full - kept)
+    assert dropped and len(kept) < 4, (full, kept)   # the fallback engages
+    t = dropped[0]
+    s.routing_grid.add_keepout(6, int(rlo) + 1, int(t - 0.5), int(rlo) + 5,
+                               int(t + 0.5))
+    mid = int((slo + shi) / 2)
+    s.routing_grid.add_keepout(6, mid - 2, int(t - 0.5) + 304, mid + 3,
+                               int(t + 0.5) + 304)
+    midp = [len(g.signal_tracks_in((lo + hi) / 2, ts.interval_lo,
+                                   ts.interval_hi))
+            for ts, (lo, hi) in ((ref, (rlo, rhi)), (sib, (slo, shi)))]
+    assert midp[0] == midp[1] + 1, midp        # full grid: one slot apart
+
+    out = _run_cmd(s, "check_template_tracks")
+    assert "MISALIGNED" not in out, out
+    out = _run_cmd(s, "run_detailed_nuts")     # default `stop` policy
+    assert "Error" not in out and s.detailed_result is not None, out
+    for ns in s.detailed_result.net_segments:  # no copied bit on the slot
+        if ns.bundle_id == sib.bundle_id and ns.layer == 6:
+            assert abs(ns.track_position - (t + 304)) > 1e-6
+
+
 def test_dnuts_copies_aligned_instances():
     """Aligned cell: the reference instance's bits are solved once and the
     sibling's bits are exact translates; vias copied too."""

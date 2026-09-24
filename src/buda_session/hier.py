@@ -4253,36 +4253,44 @@ class HierMixin:
                     rel = [(round(extent - p, 6), w)
                            for p, w in reversed(rel)]
                 return rel
+            # The midpoint pool is read on the SOLVE view (solve_grid): a
+            # shared cell's thinned slots can never be picked by the
+            # reference, so a sibling differing only on one of them copies
+            # legally and must not read MISALIGNED (Codex P2 on #955).
+            mg = solve_grid()
+            mg = (mg.get_layer_grid(ts.layer)
+                  if mg.has_layer(ts.layer) else g)
             return (("span-clear", norm(g.signal_tracks_in_span(
                         lo, hi, ts.interval_lo, ts.interval_hi))),
-                    ("midpoint", norm(g.signal_tracks_in(
+                    ("midpoint", norm(mg.signal_tracks_in(
                         (lo + hi) / 2.0, ts.interval_lo, ts.interval_hi))))
 
-        # The grid the reference DNUTS solve RUNS ON: the session grid, or
-        # a clone carrying each shared cell's thinned override over its
-        # reference (_bu_reference_grid, the one builder the DNUTS path and
-        # the ripup sweep use).  The fallback test must count its tracks
-        # there — a full-grid pool can hold the bits while the thinned one
-        # the solve actually reads does not (Codex P1 on #955).
-        ref_grid_memo = []
+        # The SOLVE view: the session grid, or a clone carrying each shared
+        # cell's thinned override over EVERY instance of a template here
+        # (_bu_reference_grid, the one builder the DNUTS path and the ripup
+        # sweep use).  Over the reference it is exactly the grid the
+        # reference DNUTS solve runs on, so the fallback test counts its
+        # tracks there — a full-grid pool can hold the bits while the
+        # thinned one the solve reads does not (Codex P1 on #955).  Over a
+        # sibling it is the same thinning at the same phase, so the
+        # midpoint pools compare kept slot against kept slot: the only
+        # tracks the reference can pick, and so the only ones a copy lands
+        # on.  Instances do not overlap, so no override reaches past its own.
+        solve_grid_memo = []
 
-        def ref_grid():
-            if not ref_grid_memo:
-                ref_ids = {iw.input.original_bundle.id
-                           for groups in cells.values() for iws in groups
-                           for iw in iws
-                           if iw.input.original_bundle.instances
-                           and iw.input.original_bundle.instances[0]
-                           == groups[0][0].input.original_bundle
-                           .instances[0]}
-                ref_grid_memo.append(self._bu_reference_grid(
-                    ref_ids, verbose=False)[0])
-            return ref_grid_memo[0]
+        def solve_grid():
+            if not solve_grid_memo:
+                ids = {iw.input.original_bundle.id
+                       for groups in cells.values() for iws in groups
+                       for iw in iws}
+                solve_grid_memo.append(self._bu_reference_grid(
+                    ids, verbose=False)[0])
+            return solve_grid_memo[0]
 
         def midpoint_engaged(iw, ts, blocked):
             # Does DetailedNUTS fall back to the midpoint pool when it
             # solves the REFERENCE segment ts?  Its own test, mirrored, on
-            # its own grid (ref_grid): the span-clear pool with the
+            # its own grid (solve_grid): the span-clear pool with the
             # reference's blocked tracks dropped (`drop_blocked`) against
             # the uncredited group demand (`bus_seg_demand`,
             # detailed_nuts.cpp).  The copies inherit the
@@ -4301,7 +4309,7 @@ class HierMixin:
                                                 layer=ts.layer)
             except Exception:
                 return True
-            rg = ref_grid()
+            rg = solve_grid()
             if not rg.has_layer(ts.layer):
                 return True
             g = rg.get_layer_grid(ts.layer)
