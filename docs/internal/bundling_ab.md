@@ -69,12 +69,17 @@ design, such as `add_bus` at about 0.07 s each.
 | first detailed check (violations) | 40 | 0 | |
 | final check (violations) | 0 | 0 | |
 | detailed wirelength | 1,968,672 | 1,887,680 | -4.1 % |
+| judge (independent_audit) | clean | clean | |
 
 **Repeatability.** Four runs of the same build agree exactly on every
 count and on wirelength.  Engine time is 102x, 97x, 98.5x and 95x across
 the four.  The fourth ran after the Codex fixes on #953, which read counts
 from the flow log and fail a run that reports a command error; it passed
-that gate.  The table above is the third run.
+that gate.  A fifth, after each arm was given its own files and ends with
+the judge's snapshot, agrees again on every count and on wirelength (engine
+time 3.64 s against 349.96 s, 96x), and the judge row comes from it: the
+judge calls both arms clean, agreeing with `check_design`'s final check.
+The rest of the table above is the third run.
 
 ## What it says
 
