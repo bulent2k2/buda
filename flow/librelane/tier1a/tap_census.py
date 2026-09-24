@@ -56,12 +56,18 @@ import render_arms as ra  # noqa: E402
 
 def census(def_path):
     die, comps, _core = ra.parse_def(def_path)
-    rows = []
+    # The DEF's own UNITS, as parse_def scales the components: a 2000-DBU DEF
+    # read at 1000 put every row twice as far out as its cells, so no cell
+    # fell in any fragment and the census passed vacuously (Codex on #952).
+    units, rows = 1000, []
     for line in open(def_path):
+        if line.startswith("UNITS"):
+            units = int(line.split()[3])
+            continue
         m = re.match(r"ROW \S+ \S+ (-?\d+) (-?\d+) \S+ DO (\d+) BY (\d+) STEP (\d+) (\d+)", line)
         if m:
             x, y, nx, ny, sx, sy = map(int, m.groups())
-            rows.append((x / 1000, y / 1000, (x + nx * sx) / 1000))
+            rows.append((x / units, y / units, (x + nx * sx) / units))
     by_y = collections.defaultdict(list)
     for x0, y, x1 in rows:
         by_y[round(y, 3)].append((x0, x1))
