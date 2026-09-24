@@ -418,10 +418,17 @@ every "one round" measured rather than assumed.
    `align_bottom_up` had already warned those instances were off phase and
    not fixable by translation.  The reference instance is 32/32 on grid and
    every copy is 0/32; the aligned mesh and the copy-free top-down round are
-   clean, so the fault is the COPY.  The mechanism is not established and is
-   not guessed at; the consequence for the tables is stated on the page —
-   every "clean" in E1 and E5 is a `check_design` clean, in both arms
-   alike.
+   clean, so the fault is the COPY.  The mechanism was then found and
+   FIXED (#946): the core's M3 window lies over a keepout, so the
+   span-clear pool `check_template_tracks` compared was empty at every
+   instance and read identical, while DetailedNUTS seated the bits from its
+   MIDPOINT fallback pool, which is a phase apart per instance; the check
+   now compares both pools, `core_cell` reads MISALIGNED, and the copies are
+   solved on their own tracks (NQ = 2: judge 104 → 8, the eight being the
+   `pc_0` bits `check_design` reports too).  The consequence for the tables
+   is stated on the page — every "clean" in E1 and E5 is a `check_design`
+   clean, in both arms alike, and the bottom-up rows are owed a re-run
+   under the fix.
 3. **Per-instance per-layer demand query** — read off the top-down plan;
    exposed through `buda::query` so a Tcl driver can branch on it.  **Done**
    (2026-09-15): [`report_layer_demand`](../script_reference/nuts.md#layer-demand-reporting)

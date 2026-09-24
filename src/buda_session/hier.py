@@ -2801,7 +2801,8 @@ class HierMixin:
                   + self._reserve_note(eff, src))
         return n
 
-    def _bu_reference_grid(self, ref_ids, tag="DNUTS reference solve"):
+    def _bu_reference_grid(self, ref_ids, tag="DNUTS reference solve",
+                           verbose=True):
         """The grid the bottom-up reference DNUTS solve runs on: the
         session grid itself when nothing thins, else a CLONE carrying
         every shared cell's thinned override — ONE function for the
@@ -2825,8 +2826,9 @@ class HierMixin:
         grid = self.routing_grid.clone()
         for lid, x1, y1, x2, y2, pat in share_ovr:
             grid.add_override(lid, x1, y1, x2, y2, pat)
-        print(f"[LayerShare] {tag} under {len(share_ovr)} thinned "
-              f"override(s)")
+        if verbose:
+            print(f"[LayerShare] {tag} under {len(share_ovr)} thinned "
+                  f"override(s)")
         return grid, True
 
     def _reserved_cells_not_enforced(self, wrappers=None):
@@ -4224,24 +4226,99 @@ class HierMixin:
         comps = {c.name: c for c in self.bdb.all_components()}
 
         def rel_tracks(ts, inst_name, refl=False, extent=0.0):
-            # Track pool of ts's window, relative to the instance origin.
-            # For a mirrored sibling (refl) the pool is reflected back into
-            # the REFERENCE frame (rel' = extent - rel, order reversed) so
-            # physically identical tracks compare equal position-by-position.
+            # EVERY track pool DetailedNUTS can seat ts's bits from, relative
+            # to the instance origin: the span-clear pool it prefers AND the
+            # midpoint pool it falls back to when the span-clear one is short
+            # of the bits (`signal_tracks_in` at the span midpoint,
+            # detailed_nuts.cpp).  Comparing the span-clear pool alone let a
+            # window over a LOW-layer keepout compare EMPTY against EMPTY and
+            # read ALIGNED while the bits came from midpoint pools a phase
+            # apart — 96 bit-wires of the SoC's copied cores landed in a
+            # GROUND slot (#946).  For a mirrored sibling (refl) each pool is
+            # reflected back into the REFERENCE frame (rel' = extent - rel,
+            # order reversed) so physically identical tracks compare equal
+            # position-by-position.
             if self.routing_grid is None \
                     or not self.routing_grid.has_layer(ts.layer):
                 return None
             g = self.routing_grid.get_layer_grid(ts.layer)
             lo, hi = sorted((ts.span_lo, ts.span_hi))
-            tracks = g.signal_tracks_in_span(lo, hi,
-                                             ts.interval_lo, ts.interval_hi)
             c = comps[inst_name]
             off = c.y1 if ts.horiz else c.x1
-            rel = [(round(p - off, 6), round(slot.width, 6))
-                   for p, slot in tracks]
-            if refl:
-                rel = [(round(extent - p, 6), w) for p, w in reversed(rel)]
-            return rel
+
+            def norm(tracks):
+                rel = [(round(p - off, 6), round(slot.width, 6))
+                       for p, slot in tracks]
+                if refl:
+                    rel = [(round(extent - p, 6), w)
+                           for p, w in reversed(rel)]
+                return rel
+            # The midpoint pool is read on the SOLVE view (solve_grid): a
+            # shared cell's thinned slots can never be picked by the
+            # reference, so a sibling differing only on one of them copies
+            # legally and must not read MISALIGNED (Codex P2 on #955).
+            mg = solve_grid()
+            mg = (mg.get_layer_grid(ts.layer)
+                  if mg.has_layer(ts.layer) else g)
+            return (("span-clear", norm(g.signal_tracks_in_span(
+                        lo, hi, ts.interval_lo, ts.interval_hi))),
+                    ("midpoint", norm(mg.signal_tracks_in(
+                        (lo + hi) / 2.0, ts.interval_lo, ts.interval_hi))))
+
+        # The SOLVE view: the session grid, or a clone carrying each shared
+        # cell's thinned override over EVERY instance of a template here
+        # (_bu_reference_grid, the one builder the DNUTS path and the ripup
+        # sweep use).  Over the reference it is exactly the grid the
+        # reference DNUTS solve runs on, so the fallback test counts its
+        # tracks there — a full-grid pool can hold the bits while the
+        # thinned one the solve reads does not (Codex P1 on #955).  Over a
+        # sibling it is the same thinning at the same phase, so the
+        # midpoint pools compare kept slot against kept slot: the only
+        # tracks the reference can pick, and so the only ones a copy lands
+        # on.  Instances do not overlap, so no override reaches past its own.
+        solve_grid_memo = []
+
+        def solve_grid():
+            if not solve_grid_memo:
+                ids = {iw.input.original_bundle.id
+                       for groups in cells.values() for iws in groups
+                       for iw in iws}
+                solve_grid_memo.append(self._bu_reference_grid(
+                    ids, verbose=False)[0])
+            return solve_grid_memo[0]
+
+        def midpoint_engaged(iw, ts, blocked):
+            # Does DetailedNUTS fall back to the midpoint pool when it
+            # solves the REFERENCE segment ts?  Its own test, mirrored, on
+            # its own grid (solve_grid): the span-clear pool with the
+            # reference's blocked tracks dropped (`drop_blocked`) against
+            # the uncredited group demand (`bus_seg_demand`,
+            # detailed_nuts.cpp).  The copies inherit the
+            # reference's solve, so only the pool that solve actually draws
+            # from can put a copy off its own tracks — comparing the
+            # midpoint pool when it is never read would refuse a valid run
+            # under `stop` over tracks nobody uses (Codex P2 on #955).  An
+            # unknown demand answers True: comparing a pool the engine does
+            # not read can only over-report, never hide a copy off grid.
+            try:
+                sel = iw.plan.selected_topology_index
+                if sel < 0 or sel >= len(iw.input.candidates):
+                    return True
+                need = self._seg_admission_need(iw, sel, ts.seg_idx,
+                                                credited=False,
+                                                layer=ts.layer)
+            except Exception:
+                return True
+            rg = solve_grid()
+            if not rg.has_layer(ts.layer):
+                return True
+            g = rg.get_layer_grid(ts.layer)
+            lo, hi = sorted((ts.span_lo, ts.span_hi))
+            blk = blocked.get(ts.layer, ())
+            n = sum(1 for p, _slot in g.signal_tracks_in_span(
+                        lo, hi, ts.interval_lo, ts.interval_hi)
+                    if not any(abs(p - b) < 1e-6 for b in blk))
+            return n < need
 
         cells = {}
         for cell, tid, iws in self._bottom_up_instance_groups():
@@ -4255,6 +4332,11 @@ class HierMixin:
             rch = round(rc.y2 - rc.y1, 6) if rc else 0.0
             aligned, misaligned = [ref_name], {}
             n_windows = 0
+            # The reference is solved in the DNUTS run, so it keeps its
+            # cell's reserved tracks as blocked tracks — the same list
+            # _stamp_reserve_blocked_tracks hands the engine.
+            ref_blocked = self._reserve_blocked_tracks(
+                cell, ref_name, ref_name, orients.get(ref_name), comps)
             for iws in cells[cell]:
                 ref_iw = next((iw for iw in iws
                                if iw.input.original_bundle.instances[0]
@@ -4302,16 +4384,29 @@ class HierMixin:
                         if a is None or b is None:
                             continue
                         n_windows += 1
-                        if len(a) != len(b):
-                            issues.append(
-                                f"L{rts.layer} seg{si}: {len(b)} track(s) "
-                                f"vs {len(a)} at reference")
-                            continue
-                        for (pa, wa), (pb, wb) in zip(a, b):
-                            if abs(pa - pb) > 1e-6 or abs(wa - wb) > 1e-6:
+                        for (kind, pa_), (_, pb_) in zip(a, b):
+                            if kind == "midpoint" and not midpoint_engaged(
+                                    ref_iw, rts, ref_blocked):
+                                continue
+                            # The span-clear pool keeps its historical
+                            # wording; the midpoint fallback says which.
+                            tag = "" if kind == "span-clear" else f" {kind}"
+                            if len(pa_) != len(pb_):
                                 issues.append(
-                                    f"L{rts.layer} seg{si}: track at rel "
-                                    f"{pb:+.3f} vs reference {pa:+.3f}")
+                                    f"L{rts.layer} seg{si}{tag}: "
+                                    f"{len(pb_)} track(s) vs {len(pa_)} "
+                                    f"at reference")
+                                break
+                            bad = next(
+                                ((pa, pb) for (pa, wa), (pb, wb)
+                                 in zip(pa_, pb_)
+                                 if abs(pa - pb) > 1e-6
+                                 or abs(wa - wb) > 1e-6), None)
+                            if bad is not None:
+                                issues.append(
+                                    f"L{rts.layer} seg{si}{tag}: track at "
+                                    f"rel {bad[1]:+.3f} vs reference "
+                                    f"{bad[0]:+.3f}")
                                 break
                     if issues:
                         misaligned[inst] = issues
