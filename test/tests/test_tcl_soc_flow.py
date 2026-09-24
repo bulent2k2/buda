@@ -378,6 +378,68 @@ def test_bottom_up_routes_the_diverse_hierarchy_clean(tmp_path):
     assert "supply-doomed" not in r.stdout, r.stdout
 
 
+def test_a_copied_core_lands_on_its_own_signal_tracks(tmp_path):
+    """#946: the bottom-up COPY put a whole core's bus in a GROUND slot while
+    `check_template_tracks` read `core_cell` ALIGNED.
+
+    The core's M3 segment sits over a LOW-layer keepout, so the span-clear
+    pool the check compared was EMPTY at the reference and at every copy —
+    empty against empty, "identical" — while DetailedNUTS, finding it short
+    of the bits, seats them from the MIDPOINT pool instead
+    (`signal_tracks_in`, detailed_nuts.cpp), and those are a phase apart:
+    the copies sit at x offsets 1024 / 2080 / 3104, none a multiple of the
+    layer's 18-unit period.  So the verdict gated a copy onto tracks the
+    sibling does not have.  The check now compares every pool the bits can
+    come from, and the misaligned core is solved on its own under
+    `on_mismatch independent`.
+
+    Judged by `tools/independent_audit.py`, which reads the stored
+    rectangles and none of the engine: on the defect the NQ=1 round had 32
+    OFF_GRID bit-wires (every bit of one copied core; 96 at NQ=2), and the
+    engine's own verdict could not see it — `check_design` has no on-grid
+    check (#947) and reported the same 1/8/8 before and after, all of it
+    the `pc_0` supply-doomed seat.  `-noheal` because a healer re-roll can
+    move the copy and hide the fault; the remaining judge findings (the
+    eight `pc_0` OPENs, the cross-bundle SHORTs of #948) are not this
+    defect and are deliberately not asserted here."""
+    import json
+    ckpt = tmp_path / "ckpt.bdb"
+    env = dict(os.environ, BUDA_BDB_MEMORY_TO=str(ckpt))
+    r = subprocess.run(["tclsh", str(_VEHICLE), "1", "-bottomup", "-noheal"],
+                       capture_output=True, encoding="utf-8",
+                       errors="replace", cwd=tmp_path, env=env, timeout=900)
+    out = r.stdout + r.stderr
+    # The checkpoint is written CONTINUOUSLY, so its existence says nothing
+    # about whether the flow finished: a crash after the verdict line below
+    # would leave a partial route the judge could call clean on the kinds
+    # asserted here (Codex P2 on #955).  So the run must reach its own
+    # verdict (`_verdict` refuses a run that printed none), exit as that
+    # verdict says — `-noheal` is dirty here on purpose (the `pc_0` seat),
+    # which is why the exit code is not simply 0 — and have run the
+    # detailed copy stage this test is about.
+    v = _verdict(r)
+    assert r.returncode == (0 if v == (0, 0, 0) else 1), out[-4000:]
+    assert re.search(r"\[BottomUp\] DNUTS: \d+ reference bit\(s\) solved "
+                     r"once, [1-9]\d* copied", out), out[-6000:]
+    assert ckpt.exists(), out[-4000:]
+    # the engine's check now SEES the misaligned core, by the pool it missed
+    assert re.search(r"\[TemplateTracks\] cell 'core_cell': MISALIGNED — "
+                     r"\S+: L3 seg\d+ midpoint:", out), out[-6000:]
+
+    res = tmp_path / "judge.json"
+    judged = subprocess.run(
+        ["python3", str(_ROOT / "tools" / "independent_audit.py"),
+         str(ckpt), "--json", str(res), "--quiet"],
+        capture_output=True, encoding="utf-8", errors="replace",
+        env=dict(os.environ, PYTHONPATH=""), timeout=300)
+    assert judged.returncode in (0, 1), judged.stdout + judged.stderr
+    verdict = json.loads(res.read_text())
+    counts = verdict["counts"]
+    assert verdict["wires"] > 0, verdict      # a route to judge, not none
+    assert counts["OFF_GRID"] == 0, (counts, judged.stdout[-4000:])
+    assert counts["ROW_MISMATCH"] == 0, counts
+
+
 def test_bottom_up_changes_the_flow_and_not_the_geometry(tmp_path):
     """`-bottomup` used to widen the channel behind the caller's back
     (`GAP 24 M 24`), because a fixed copy at every instance left overlaps
