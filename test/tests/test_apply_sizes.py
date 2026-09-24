@@ -248,3 +248,24 @@ def test_optimize_aspect_widens_the_pe_to_the_accumulator_rather_than_refusing(t
     assert _run(d, "--n", "8", "--args").returncode != 0            # the plain path refuses
     opt = json.loads(_run(d, "--n", "8", "--optimize-aspect", "--json").stdout)
     assert opt["pe"]["w"] >= 140 and opt["acc"]["w"] == 140
+
+
+def test_margins_and_density_are_the_hardenings_own(tmp_path):
+    """The bar is judged on the core the BLOCKS will be hardened with (Codex on
+    #957): at 1 row / 2 sites the aspect search lands a smaller PE than at
+    LibreLane's 4 rows / 12 sites, and a size refused at density 50 clears at 75."""
+    d = _sizes_dir(tmp_path, [
+        _frag("pe_cell", 221, 59, area=5964, util=46.0, face_w=100.0, face_h=34.0),
+        _frag("acc_cell", 96.0, 51.1), _frag("feed_cell", 44.2, 44.2)])
+    dflt = json.loads(_run(d, "--n", "8", "--optimize-aspect", "--json").stdout)
+    tight = json.loads(_run(d, "--n", "8", "--optimize-aspect", "--margins", "1", "2", "--json").stdout)
+    assert tight["predicted_die"]["mm2"] < dflt["predicted_die"]["mm2"]
+    assert tight["judged_against"] == {"margins": [1, 2], "density": 50}
+    # 5964 um^2 of cells in a 140 x 100 PE (53 % of its default core, x1.25
+    # advisory margin = 66): refused at density 50, clears at 75
+    (tmp_path / "b").mkdir()
+    d2 = _sizes_dir(tmp_path / "b", [_frag("pe_cell", 140, 100, area=5964, util=46.0)])
+    at50 = json.loads(_run(d2, "--n", "8", "--json").stdout)
+    at75 = json.loads(_run(d2, "--n", "8", "--density", "75", "--json").stdout)
+    pe = lambda r: [c for c in r["checks"] if c["cell"] == "pe_cell"][0]
+    assert not pe(at50)["clears"] and pe(at75)["clears"]

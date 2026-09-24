@@ -185,12 +185,30 @@ def main(argv=None):
     ap.add_argument("--optimize-aspect", action="store_true",
                     help="reshape the PE to minimise the ARRAY's die (same area "
                          "and the same face floors, a different aspect)")
+    ap.add_argument("--margins", type=int, nargs=2, metavar=("ROWS", "SITES"),
+                    help="the blocks' core margins the hardening will use (harm.sh --margins): the "
+                         "placer's bar is judged on THAT core, not on LibreLane's 4-row/12-site default")
+    ap.add_argument("--density", type=int, metavar="PCT",
+                    help="the PL_TARGET_DENSITY_PCT the hardening will use (harm.sh --density), the bar "
+                         "every size here is judged against")
     ap.add_argument("--args", action="store_true", help="print only the gen.sh arguments")
     ap.add_argument("--json", action="store_true", help="print the whole result as JSON")
     a = ap.parse_args(argv)
     if a.n < 2:
         sys.exit("apply_sizes: --n must be at least 2")
 
+    # The bar and the core this judges against are the ones the BLOCKS will be
+    # hardened with, or the advice models a different block from the one
+    # harm.sh writes (Codex on #957: the PE search for the measured area is
+    # 101 x 188 at the default margins and 100 x 158 at 1 row / 2 sites).
+    if a.margins:
+        rows, sites = a.margins
+        if rows < 1 or sites < 1:
+            ap.error("--margins needs at least one row and one site")
+        harm.BLOCK_SETTINGS.update({"BOTTOM_MARGIN_MULT": rows, "TOP_MARGIN_MULT": rows,
+                                    "LEFT_MARGIN_MULT": sites, "RIGHT_MARGIN_MULT": sites})
+    if a.density is not None:
+        harm.BLOCK_SETTINGS["PL_TARGET_DENSITY_PCT"] = a.density
     sizes = read_sizes(a.sizes)
     if "pe_cell" not in sizes:
         sys.exit(f"apply_sizes: no pe_cell fragment in {a.sizes} — the PE sets "
@@ -278,6 +296,7 @@ def main(argv=None):
                          for c, w, h, ok, u, cr in checks],
               "pe": {"w": pew, "h": peh}, "edge": {"w": edgew, "h": edgeh},
               "acc": {"w": accw, "h": acch},
+              "judged_against": {"margins": a.margins, "density": harm.BLOCK_SETTINGS["PL_TARGET_DENSITY_PCT"]},
               "predicted_die": {"w": w, "h": h, "mm2": round(w * h / 1e6, 4)},
               "pitch": {"x": ppx, "y": ppy}}
 
@@ -317,6 +336,11 @@ def main(argv=None):
         print(f"  {cell:<10} rule {cw:7.1f} x {ch:6.1f}  binds {b}{note}")
     if aspect_note:
         print(f"apply_sizes: {aspect_note}")
+    if a.margins or a.density is not None:
+        print("apply_sizes: judged against " + ", ".join(
+            ([f"margins {a.margins[0]} row(s) / {a.margins[1]} site(s)"] if a.margins else [])
+            + ([f"density {a.density}"] if a.density is not None else []))
+            + " -- harden with the same harm.sh options")
     for cell, cw, ch, ok, util, core in checks:
         if util is None:
             continue
