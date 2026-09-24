@@ -121,6 +121,26 @@ feeder column at x = −140, outside its own die (the known emitter quirk
 [librelane_hier_flow.md](librelane_hier_flow.md) §7c records); the routing
 is unchanged by it — the same 197,376 detailed wire length either way.
 
+**The same array, hardened five ways** (24 September 2026).  Left to right,
+at one scale: the flat flow F (1.032 mm²); the hierarchical flow without
+BUDA, H (6.347 mm²); the hierarchical flow with BUDA as measured in the
+table below, H+B (3.935 mm²); and two rounds of a compaction study on the
+H+B arm.  The first round (1.131 mm²) cut the blocks' internal margins, the
+channels between blocks and the three small edge-block types to what their
+logic needs; the third (0.998 mm², 0.97× the flat die) placed the processing
+units at 69 % utilisation and kept every one-row gap as a lane for the top
+level's repeaters.  The third round passes every check the recorded arms
+pass — manufacturing rules, layout-versus-schematic, antenna — with positive
+timing margins (setup +0.41 ns, hold +0.12 ns) and 59,363 µm of top-level
+wire, 6 % of the flat flow's.  Orange cells are logic gates, blue
+flip-flops, green buffers; each black rectangle is a hardened block.
+
+![Five hardened arrays at one scale: flat, hierarchical without BUDA, hierarchical with BUDA, and the two compaction rounds, the last smaller than the flat die](img/investor_briefing_compaction.png)
+
+Rendered by `flow/librelane/tier1a/render_arms.py` from the signoff
+placements; the rounds are §7.5 of
+[librelane_hier_flow.md](librelane_hier_flow.md).
+
 ## Results
 
 The headline measurement comes from an 8×8 **systolic array** — a grid of 64
@@ -176,8 +196,13 @@ fully clean for the first time.
 What the table does not say, stated plainly: at this small size, the
 hierarchical flow with BUDA is still 5.6 % slower than the flat flow and its
 die is 3.8× larger, because building from separate blocks pays for padding
-and wiring channels around each block that the flat flow never needs.  The
-case for hierarchy is at larger sizes, where flat runs slow down steeply: a
+and wiring channels around each block that the flat flow never needs.  A
+compaction study run since, on 24 September 2026, closed most of that gap:
+with the blocks' margins and the channels between them cut to what the logic
+needs, the H+B die reaches 0.998 mm², 0.97× the flat die, with every signoff
+check clean (the last picture above; the rounds are in
+[librelane_hier_flow.md](librelane_hier_flow.md) §7.5).  The table keeps the
+recorded arms it was measured on.  The case for hierarchy is at larger sizes, where flat runs slow down steeply: a
 flat run at ~55 k cells takes 76 min and the next doubling five to six
 hours.  The study's own success test — beat the flat flow by 2× on run time
 at a size where flat becomes slow — has not yet been measured.  One small
@@ -373,9 +398,10 @@ notes, not from a wish list.
    feedback to the chip's logic designers.
 2. **The chip-size penalty of hierarchy.**  Building from separate blocks
    pays for padding and routing channels around each block that the flat
-   flow never needs: 3.8× the flat die at N = 8.  Two levers are identified
-   (channel width, then padding), and the cost is reported rather than used
-   as a pass/fail gate.  Closing it is a question about the whole flow as
+   flow never needs: 3.8× the flat die at N = 8 in the recorded arms, 0.97×
+   after the compaction study of 24 September 2026 (block margins, channels,
+   edge blocks and utilisation, in that order of effect).  The cost is
+   reported rather than used as a pass/fail gate.  Closing it is a question about the whole flow as
    much as about BUDA.
 3. **The crossover has not been measured.**  The case for hierarchy is that
    flat runs stop scaling: at ~55 k cells a flat run takes 76 min, and the
