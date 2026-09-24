@@ -599,11 +599,13 @@ def cell_area_estimate(cell):
     return rough * YOSYS_TO_LIBRELANE, "ROUGH: §7.1's Yosys total x %.1f" % YOSYS_TO_LIBRELANE
 
 
-def utilization_advice(cell, w, h):
+def utilization_advice(cell, w, h, density=None):
     """One line per cell: how full its die will be, against BOTH bars the
     placer applies in turn -- `GPL-0301 Utilization exceeds 100%` first, then
     `PL_TARGET_DENSITY_PCT` (GPL-0302) -- and, when either is at risk, the
-    PEPAD to regenerate the whole set with."""
+    PEPAD to regenerate the whole set with.  `density` is the target the
+    block's config will carry (`--density`); judging against the default
+    told a compact set to undo its compaction (Codex on #952)."""
     c = block_core(w, h)
     rows = int(math.floor((c[3] - c[1]) / pp.SITE_H + 1e-9))
     core_area = (c[2] - c[0]) * rows * pp.SITE_H
@@ -611,7 +613,8 @@ def utilization_advice(cell, w, h):
     if area is None:
         return f"{cell}: {w:g} x {h:g}, {rows} rows, {core_area:.0f} um^2 of core"
     util = 100.0 * area / core_area if core_area > 0 else math.inf
-    density = BLOCK_SETTINGS["PL_TARGET_DENSITY_PCT"]
+    if density is None:
+        density = BLOCK_SETTINGS["PL_TARGET_DENSITY_PCT"]
     line = (f"{cell}: {w:g} x {h:g}, {rows} rows = {core_area:.0f} um^2 of core; ~{area:.0f} um^2 of "
             f"cells ({how}) = ~{util:.0f} % utilization")
     if util * ADVICE_MARGIN <= density:
@@ -785,7 +788,7 @@ def write_h(n_dir, out_dir, halo, pins_dir=None, density=None):
             json.dump(cfg, f, indent=4)
             f.write("\n")
         write_predicted_lef(os.path.join(pred_dir, f"{cell}.lef"), cell, w, h, cells[cell][2])
-        advice.append(utilization_advice(cell, w, h))
+        advice.append(utilization_advice(cell, w, h, density))
 
     top = os.path.join(out_dir, "top")
     os.makedirs(os.path.join(top, "src"), exist_ok=True)
