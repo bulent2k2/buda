@@ -409,6 +409,18 @@ def test_a_copied_core_lands_on_its_own_signal_tracks(tmp_path):
                        capture_output=True, encoding="utf-8",
                        errors="replace", cwd=tmp_path, env=env, timeout=900)
     out = r.stdout + r.stderr
+    # The checkpoint is written CONTINUOUSLY, so its existence says nothing
+    # about whether the flow finished: a crash after the verdict line below
+    # would leave a partial route the judge could call clean on the kinds
+    # asserted here (Codex P2 on #955).  So the run must reach its own
+    # verdict (`_verdict` refuses a run that printed none), exit as that
+    # verdict says — `-noheal` is dirty here on purpose (the `pc_0` seat),
+    # which is why the exit code is not simply 0 — and have run the
+    # detailed copy stage this test is about.
+    v = _verdict(r)
+    assert r.returncode == (0 if v == (0, 0, 0) else 1), out[-4000:]
+    assert re.search(r"\[BottomUp\] DNUTS: \d+ reference bit\(s\) solved "
+                     r"once, [1-9]\d* copied", out), out[-6000:]
     assert ckpt.exists(), out[-4000:]
     # the engine's check now SEES the misaligned core, by the pool it missed
     assert re.search(r"\[TemplateTracks\] cell 'core_cell': MISALIGNED — "
@@ -421,7 +433,9 @@ def test_a_copied_core_lands_on_its_own_signal_tracks(tmp_path):
         capture_output=True, encoding="utf-8", errors="replace",
         env=dict(os.environ, PYTHONPATH=""), timeout=300)
     assert judged.returncode in (0, 1), judged.stdout + judged.stderr
-    counts = json.loads(res.read_text())["counts"]
+    verdict = json.loads(res.read_text())
+    counts = verdict["counts"]
+    assert verdict["wires"] > 0, verdict      # a route to judge, not none
     assert counts["OFF_GRID"] == 0, (counts, judged.stdout[-4000:])
     assert counts["ROW_MISMATCH"] == 0, counts
 

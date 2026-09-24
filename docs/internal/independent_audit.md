@@ -526,7 +526,10 @@ instances whose own midpoint pools are elsewhere.  `rel_tracks` did see a
 phase shift wherever it LOOKED; it looked at the one pool that was empty.
 
 The check now compares every pool DetailedNUTS can seat the bits from —
-the span-clear pool and the midpoint fallback — and reports the latter by
+the span-clear pool, and the midpoint fallback wherever the reference's own
+solve would read it (its span-clear pool, less its blocked tracks, short of
+the segment's demand: the engine's test, mirrored, so a midpoint pool
+nobody reads cannot refuse a valid copy) — and reports the latter by
 name (`L3 seg0 midpoint: 64 track(s) vs 63 at reference`), so `core_cell`
 reads MISALIGNED and, under `on_mismatch independent`, the three copies are
 solved on their own tracks.  Measured: NQ = 2 goes from 104 judge findings

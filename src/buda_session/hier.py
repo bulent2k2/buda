@@ -4256,6 +4256,35 @@ class HierMixin:
                     ("midpoint", norm(g.signal_tracks_in(
                         (lo + hi) / 2.0, ts.interval_lo, ts.interval_hi))))
 
+        def midpoint_engaged(iw, ts, blocked):
+            # Does DetailedNUTS fall back to the midpoint pool when it
+            # solves the REFERENCE segment ts?  Its own test, mirrored: the
+            # span-clear pool with the reference's blocked tracks dropped
+            # (`drop_blocked`) against the uncredited group demand
+            # (`bus_seg_demand`, detailed_nuts.cpp).  The copies inherit the
+            # reference's solve, so only the pool that solve actually draws
+            # from can put a copy off its own tracks — comparing the
+            # midpoint pool when it is never read would refuse a valid run
+            # under `stop` over tracks nobody uses (Codex P2 on #955).  An
+            # unknown demand answers True: comparing a pool the engine does
+            # not read can only over-report, never hide a copy off grid.
+            try:
+                sel = iw.plan.selected_topology_index
+                if sel < 0 or sel >= len(iw.input.candidates):
+                    return True
+                need = self._seg_admission_need(iw, sel, ts.seg_idx,
+                                                credited=False,
+                                                layer=ts.layer)
+            except Exception:
+                return True
+            g = self.routing_grid.get_layer_grid(ts.layer)
+            lo, hi = sorted((ts.span_lo, ts.span_hi))
+            blk = blocked.get(ts.layer, ())
+            n = sum(1 for p, _slot in g.signal_tracks_in_span(
+                        lo, hi, ts.interval_lo, ts.interval_hi)
+                    if not any(abs(p - b) < 1e-6 for b in blk))
+            return n < need
+
         cells = {}
         for cell, tid, iws in self._bottom_up_instance_groups():
             cells.setdefault(cell, []).append(iws)
@@ -4268,6 +4297,11 @@ class HierMixin:
             rch = round(rc.y2 - rc.y1, 6) if rc else 0.0
             aligned, misaligned = [ref_name], {}
             n_windows = 0
+            # The reference is solved in the DNUTS run, so it keeps its
+            # cell's reserved tracks as blocked tracks — the same list
+            # _stamp_reserve_blocked_tracks hands the engine.
+            ref_blocked = self._reserve_blocked_tracks(
+                cell, ref_name, ref_name, orients.get(ref_name), comps)
             for iws in cells[cell]:
                 ref_iw = next((iw for iw in iws
                                if iw.input.original_bundle.instances[0]
@@ -4316,6 +4350,9 @@ class HierMixin:
                             continue
                         n_windows += 1
                         for (kind, pa_), (_, pb_) in zip(a, b):
+                            if kind == "midpoint" and not midpoint_engaged(
+                                    ref_iw, rts, ref_blocked):
+                                continue
                             # The span-clear pool keeps its historical
                             # wording; the midpoint fallback says which.
                             tag = "" if kind == "span-clear" else f" {kind}"

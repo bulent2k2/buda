@@ -671,6 +671,55 @@ def test_check_template_tracks_misaligned():
     assert s.detailed_result is None
 
 
+def test_an_unread_midpoint_pool_does_not_misalign_a_copy():
+    """The midpoint pool is compared only when DetailedNUTS would READ it
+    (#946, Codex P2 on #955).  The engine falls back from the span-clear
+    pool to the midpoint pool only when the span-clear one is short of the
+    bits, so two instances whose span-clear pools are identical and
+    sufficient copy correctly whatever their midpoint pools say.
+
+    Built on the aligned pair (proc_i2 = proc_i1 + (500, 300)): each
+    instance gets an M6 keepout over the SAME five relative tracks, but
+    proc_i1's lies off its segment's midpoint and proc_i2's across it.  The
+    span-clear pools therefore match (35 of 40 tracks, the 4-bit bus fits),
+    while the midpoint pools differ (40 against 35).  Reading the midpoint
+    pool unconditionally called proc_i2 MISALIGNED and the default `stop`
+    policy refused a run whose copy lands on real tracks."""
+    s, _ = _dnuts_flow(_two_inst_db(x2=500, y2=300))
+    horiz = [ts for ts in s._bottom_up_fixed_segments()
+             if ts.horiz and ts.layer == 6]
+    assert len(horiz) == 2, horiz
+    by_y = sorted(horiz, key=lambda ts: ts.interval_lo)
+    ref, sib = by_y                       # proc_i1 (y 0..200), proc_i2
+    rlo, rhi = sorted((ref.span_lo, ref.span_hi))
+    slo, shi = sorted((sib.span_lo, sib.span_hi))
+    y0 = int(ref.interval_lo)
+    # proc_i1: the keepout covers only the first part of the span
+    s.routing_grid.add_keepout(6, int(rlo) + 1, y0, int(rlo) + 5, y0 + 10)
+    # proc_i2: the same relative tracks, across the span's midpoint
+    mid = int((slo + shi) / 2)
+    s.routing_grid.add_keepout(6, mid - 2, y0 + 300, mid + 3, y0 + 310)
+    g = s.routing_grid.get_layer_grid(6)
+    span = [len(g.signal_tracks_in_span(lo, hi, ts.interval_lo,
+                                        ts.interval_hi))
+            for ts, (lo, hi) in ((ref, (rlo, rhi)), (sib, (slo, shi)))]
+    midp = [len(g.signal_tracks_in((lo + hi) / 2, ts.interval_lo,
+                                   ts.interval_hi))
+            for ts, (lo, hi) in ((ref, (rlo, rhi)), (sib, (slo, shi)))]
+    assert span[0] == span[1] >= 4, span       # the pool DNUTS reads
+    assert midp[0] != midp[1], midp             # the one it does not
+    out = _run_cmd(s, "check_template_tracks")
+    assert "MISALIGNED" not in out, out
+    out = _run_cmd(s, "run_detailed_nuts")       # default `stop` policy
+    assert "Error" not in out and s.detailed_result is not None, out
+    assert "[BottomUp] DNUTS:" in out
+    # ...and the copied bits sit clear of proc_i2's keepout.
+    for ns in s.detailed_result.net_segments:
+        if ns.bundle_id == sib.bundle_id and ns.layer == 6:
+            assert not (y0 + 300 <= ns.track_position <= y0 + 310
+                        and ns.span_lo < mid + 3 and ns.span_hi > mid - 2)
+
+
 def test_dnuts_copies_aligned_instances():
     """Aligned cell: the reference instance's bits are solved once and the
     sibling's bits are exact translates; vias copied too."""
