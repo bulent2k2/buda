@@ -204,3 +204,12 @@ def test_it_runs_on_the_checked_in_arrays_own_fragments(tmp_path):
     # went out at acc's 96 x 53 (§8 step 3c's figure).
     assert j["gen_args"] == "-PEW 221 -PEH 59 -EDGEW 32 -EDGEH 31 -ACCW 96 -ACCH 53"
     assert abs(j["baseline"]["die"]["mm2"] - 3.079) < 5e-3      # the PEPAD-24 set
+
+
+def test_an_accumulator_wider_than_the_pe_is_refused(tmp_path):
+    """The emitter places acc_cell on its PE's column and ends the die at the
+    last PE's edge, so a wider accumulator would overlap and leave the die
+    (Codex on #957): refused here, with the remedy, and by the emitter."""
+    d = _sizes_dir(tmp_path, [_frag("pe_cell", 100.0, 47.5), _frag("acc_cell", 140.0, 51.1)])
+    r = _run(d, "--n", "8", "--args")
+    assert r.returncode != 0 and "sits on the PE column" in r.stderr

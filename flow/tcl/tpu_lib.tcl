@@ -141,6 +141,12 @@ proc tpu_vehicle::configure {{overrides {}}} {
     # no row fragment between accumulators for a well tap to miss.
     if {$P(ACCW) == 0} { set P(ACCW) $P(EDGEW) }
     if {$P(ACCH) == 0} { set P(ACCH) $P(EDGEH) }
+    # An accumulator sits on its PE's column (col_x) and the die's width is
+    # the PE row's envelope, so one wider than the PE overlaps its neighbour
+    # and, in the last column, leaves the die (Codex on #957).
+    if {$P(ACCW) > $P(PEW)} {
+        error "tpu_vehicle: ACCW $P(ACCW) exceeds PEW $P(PEW) -- the accumulator sits on the PE column and the die ends at the last PE's edge; widen PEW or narrow ACCW"
+    }
     if {$P(PPX) == 0}   { set P(PPX)   [expr {$P(PEW) + $P(CHAN)}] }
     # ROWGAP: compact by default, SNAPPED when the caller intends to solve
     # one row and copy it.  Congruent instances must see identical tracks,

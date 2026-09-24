@@ -170,3 +170,13 @@ def test_the_accumulator_has_its_own_size_and_the_edge_size_is_its_default(tmp_p
     wa, ha = map(int, die(tmp_path / "a")); wb, hb = map(int, die(tmp_path / "b"))
     assert wb == wa, "the accumulator's width changes no die width (it sits on the PE pitch)"
     assert hb - ha == 3 * (52 - 40) * 1000, "PIPE (default 2) + 1 accumulator rows, each ACCH - EDGEH taller"
+
+
+def test_an_accumulator_wider_than_the_pe_is_refused_by_the_emitter(tmp_path):
+    """-ACCW above -PEW would put the last column's accumulator outside the
+    die and every other one over its neighbour (Codex on #957)."""
+    from wrapper_select import wrapper_command
+    btcl = wrapper_command(_ROOT, "btcl")
+    r = subprocess.run([*btcl, str(_ROOT / "flow/tcl/tpu.tcl"), "4", "-PEW", "100", "-ACCW", "140",
+                        "-emit", str(tmp_path)], capture_output=True, encoding="utf-8", timeout=600)
+    assert r.returncode != 0 and "ACCW 140 exceeds PEW 100" in (r.stdout + r.stderr)

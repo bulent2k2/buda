@@ -205,6 +205,14 @@ def main(argv=None):
     # which is what the emitter does with ACCW/ACCH left at 0.
     if ACC in sizes:
         accw, acch = (int(math.ceil(v)) for v in sizes[ACC][:2])
+        if accw > pew:
+            # The emitter places the accumulator on its PE's column and the
+            # die is the PE row's envelope, so a wider one overlaps its
+            # neighbour and leaves the die in the last column; the emitter
+            # refuses the pair too (Codex on #957).
+            sys.exit(f"apply_sizes: acc_cell needs {accw} um of width but sits on the PE column "
+                     f"({pew} um): widen the PE (its face or -PEPAD) or the accumulator's rule "
+                     f"cannot be honoured by this emitter")
     else:
         accw, acch = edgew, edgeh
     rule_pew, rule_peh, aspect_note = pew, peh, None
