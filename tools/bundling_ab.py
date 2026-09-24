@@ -44,13 +44,14 @@ second arm used to inherit the first arm's rows, which kills a flow that
 builds its design into a named file — and every file the flow writes
 (`save_bdb`, `emit_*`, `export_*`, a `derive_* file`) is renamed into the
 arm, so the A/B never writes into the user's tree: it used to leave a
-checked-in fixture holding the one-net arm's route.  A single `:memory:` or
-`.sql` open needs no rewrite: the engine's own redirect, the one `btcl -b`
-uses (`BUDA_BDB_MEMORY_TO` / `BUDA_BDB_MATERIALIZE_TO`), puts it in the
-arm with the flow's text unchanged.  Each arm's databases stay in a temp directory, printed, and
-when the flow opens exactly one BDB its routed checkpoint is scored by the
-judge (`tools/independent_audit.py`) in a row of its own beside
-`check_design`'s.
+checked-in fixture holding the one-net arm's route.  A `:memory:` or
+`.sql` open writes nothing of the user's and is left as it is.
+
+When the flow opens a BDB, the arm also appends `save_bdb` to a checkpoint
+in its own temp directory — after the flow's last line and before every
+top-level `exit` — and the judge (`tools/independent_audit.py`) scores that
+checkpoint in a row of its own beside `check_design`'s.  The snapshot is
+the tool's, not the flow's, so its seconds are left out of the arm's times.
 
 A flow with no bundler in its own text is refused — one reached through
 `source` cannot be injected before — and so is a flow that sets
@@ -279,18 +280,21 @@ WORK_ROOT = None
 _TOKEN = re.compile(r'"[^"]*"|\'[^\']*\'|\S+')
 
 
+SNAPSHOT_TAG = "# bundling_ab: the judge's checkpoint"
+
+
 class Isolation:
     """How one arm runs apart from the other: its flow text (every file the
-    flow opens or writes renamed into the arm's own directory), the
-    environment redirect for a single `:memory:` or `.sql` open, the
-    pre-A/B databases to copy in, and the checkpoint the judge scores
-    (None, with the reason in `no_judge`)."""
+    flow opens or writes renamed into the arm's own directory, and a
+    `save_bdb` snapshot for the judge after its last line), the pre-A/B
+    databases to copy in, and the checkpoint the judge scores (None, with
+    the reason in `no_judge`)."""
 
     def __init__(self):
         self.text = None
-        self.env = {}
         self.copies = []            # (flow's file, the arm's copy)
         self.checkpoint = None
+        self.snapshot = None        # the appended command, as the report has it
         self.no_judge = "the flow opens no BDB"
 
 
@@ -331,11 +335,11 @@ def isolate(text, base_dir, name, arm_dir):
     before the A/B, so both arms start from the same state and neither
     writes the flow's own file; a file the flow writes is renamed into the
     arm; a later open of a file the arm itself wrote follows it there.
+    A `:memory:` or `.sql` open is never written to the user's tree and is
+    left as it is.
     Refused: a `.sql` opened with `writeback` (each arm would dump its
-    route into the fixture, and the engine's own redirect declines that
-    shape), and a durable open or a write in a SOURCED file — its text is
-    not ours to rewrite, and the engine redirect covers only a `:memory:`
-    or `.sql` open."""
+    route into the fixture), and a durable open or a write in a SOURCED
+    file — its text is not ours to rewrite."""
     base_dir, stack = _walk_root(base_dir, name)
     iso = Isolation()
     lines = text.splitlines(keepends=True)
@@ -355,8 +359,11 @@ def isolate(text, base_dir, name, arm_dir):
             line = line[:lo] + path + line[hi:]
         lines[i] = line
 
+    exits = []
     for where, n, w, top_i, bare in _source_tree(text, base_dir, name,
                                                  stack=stack):
+        if w == "exit" and top_i is not None and opens:
+            exits.append(top_i)     # an exit before any open needs none
         if w == "open_bdb":
             path, opts = leading_path_and_options(bare)
             writeback = bool(opts) and opts[0] == "writeback"
@@ -389,23 +396,27 @@ def isolate(text, base_dir, name, arm_dir):
                         f"separately (move it into the flow's own text)")
                 continue
             rewrite(top_i, _path_spans(lines[top_i], *OUTPUT_WRITERS[w]))
-    iso.text = "".join(lines)
-    if len(opens) == 1:
-        path = opens[0]
+    if opens:
+        # The judge's checkpoint is a SNAPSHOT of whatever database is open
+        # when the flow ends — the one holding its final route — taken by
+        # the engine's own save-as after the flow's last line and before
+        # every top-level `exit`.  Not a redirect of the open itself: moving
+        # a `:memory:` database onto disk makes every command that writes
+        # it commit to disk, and on soc_small that added ~9 s of setup to a
+        # 3.7 s arm, which is the column the table exists to compare.  The
+        # snapshot's own seconds are taken back out of the arm's total.
         ckpt = os.path.join(arm_dir, "checkpoint.bdb")
-        if path == ":memory:":
-            iso.env["BUDA_BDB_MEMORY_TO"] = ckpt
-            iso.checkpoint = ckpt
-        elif path.endswith(".sql"):
-            iso.env["BUDA_BDB_MATERIALIZE_TO"] = ckpt
-            iso.checkpoint = ckpt
-        elif path:
-            iso.checkpoint = mapped[os.path.realpath(
-                os.path.join(base_dir, path))]
+        iso.snapshot = f"save_bdb {_quote(ckpt)}"
+        nl = "\r\n" if lines and lines[0].endswith("\r\n") else "\n"
+        snap = [f"{SNAPSHOT_TAG}{nl}", f"{iso.snapshot}{nl}"]
+        for i in sorted(exits, reverse=True):
+            lines[i:i] = snap
+        if lines and not lines[-1].endswith("\n"):
+            lines[-1] += nl
+        lines += snap
+        iso.checkpoint = ckpt
         iso.no_judge = None
-    elif opens:
-        iso.no_judge = (f"the flow opens {len(opens)} databases, so which "
-                        f"one holds the route is not known")
+    iso.text = "".join(lines)
     return iso
 
 
@@ -537,9 +548,9 @@ def run_arm(flow, text, tag, iso=None):
                    [str(ROOT / "build"), str(ROOT / "src"),
                     str(ROOT / "tools")])}
         for k in ("BUDA_BDB_MEMORY_TO", "BUDA_BDB_MATERIALIZE_TO"):
-            env.pop(k, None)          # only this arm's own redirect applies
-        if iso is not None:
-            env.update(iso.env)
+            # A redirect left in the caller's shell names ONE file, which
+            # the second arm would find already written.
+            env.pop(k, None)
         t0 = time.time()
         r = subprocess.run(
             [sys.executable, str(ROOT / "src" / "buda_cli.py"), "--no-viz",
@@ -561,6 +572,15 @@ def run_arm(flow, text, tag, iso=None):
                 f"the {tag} run reported errors (exit status "
                 f"{report.get('exit_status')}; commands: "
                 f"{', '.join(failed) or 'none'})")
+        if iso is not None and iso.snapshot:
+            # The judge's snapshot is the tool's, not the flow's: out of the
+            # arm's commands and its total.
+            snap = [c for c in report.get("commands", [])
+                    if c["command"] == iso.snapshot]
+            report["commands"] = [c for c in report.get("commands", [])
+                                  if c["command"] != iso.snapshot]
+            if snap and report.get("total_seconds") is not None:
+                report["total_seconds"] -= sum(c["seconds"] for c in snap)
         report["wall_seconds"] = round(wall, 1)
         log = log_path.read_text() if log_path.exists() else ""
         if log:

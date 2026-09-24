@@ -27,17 +27,23 @@ arm's database: a flow that builds its design into a named `open_bdb` file
 died in the second arm on rows the first had written, and a flow's own
 `save_bdb` left its checked-in fixture holding the one-net arm's route
 (both measured).  A named database is copied into each arm as it stood
-before the A/B; every file the flow writes is renamed into the arm; a single
-`:memory:` or `.sql` open goes through the engine's own redirect, the one
-`btcl -b` uses.  What cannot be kept apart is refused before either arm
-runs: a `.sql` opened with `writeback`, or a named open or file write inside
-a sourced file.  Of the 293 checked-in flows, none gains a refusal and 10
-have their text rewritten.
+before the A/B, and every file the flow writes is renamed into the arm.  A
+`:memory:` or `.sql` open writes nothing of the user's and is left as it
+is.  What cannot be kept apart is refused before either arm runs: a `.sql`
+opened with `writeback`, or a named open or file write inside a sourced
+file.  Of the 293 checked-in flows, none gains a refusal and 10 have a path
+rewritten.
 
-When the flow opens exactly one database, each arm's routed checkpoint is
-also scored by the judge, `tools/independent_audit.py`, which reads the
-stored geometry and imports no engine.  Its verdict is a row of its own,
-beside `check_design`'s.
+When the flow opens a database, each arm also ends with a `save_bdb`
+snapshot of it, and the judge, `tools/independent_audit.py`, scores that
+checkpoint.  The judge reads the stored geometry and imports no engine; its
+verdict is a row of its own, beside `check_design`'s.  The snapshot is the
+tool's, so its seconds are left out of the arm's times.  It is a snapshot
+rather than a redirect of the open because moving `soc_small`'s `:memory:`
+database onto disk made every command that writes it commit to disk: its
+bundled arm went from 3.7 s to 12.7 s.  The six timed stages moved from
+2.77 s to 2.84 s between them; the rest was in the commands that build the
+design, such as `add_bus` at about 0.07 s each.
 
 ## The measurement
 

@@ -359,10 +359,9 @@ def test_a_durable_open_is_renamed_into_the_arm(tmp_path):
     text = "open_bdb ckpt.bdb   # the design\nrun_hier_bundler\n"
     iso = ab.isolate(text, str(tmp_path), "f.buda", str(tmp_path / "arm"))
     first = iso.text.splitlines()[0]
-    assert first.startswith("open_bdb " + str(tmp_path / "arm"))
+    assert first.startswith("open_bdb " + str(tmp_path / "arm" / "0_ckpt.bdb"))
     assert first.endswith("# the design")
-    assert iso.checkpoint == str(tmp_path / "arm" / "0_ckpt.bdb")
-    assert iso.copies == [] and iso.env == {}
+    assert iso.copies == []
 
 
 def test_an_existing_database_is_copied_not_written(tmp_path, monkeypatch):
@@ -380,30 +379,39 @@ def test_an_existing_database_is_copied_not_written(tmp_path, monkeypatch):
     monkeypatch.setattr(ab.subprocess, "run", _fake_run(
         {"exit_status": 0, "commands": []}))
     ab.run_arm(flow, flow.read_text(), "bundled", iso=iso)
-    with sqlite3.connect(iso.checkpoint) as c:
+    assert iso.copies == [(str(db), str(arm / "0_ckpt.bdb"))]
+    with sqlite3.connect(iso.copies[0][1]) as c:
         assert c.execute("select x from t").fetchall() == [(7,)]
     assert db.read_bytes() == before
 
 
-def test_a_single_memory_or_sql_open_is_redirected_by_the_engine(tmp_path):
-    for path, var in ((":memory:", "BUDA_BDB_MEMORY_TO"),
-                      ("in.bdb.sql", "BUDA_BDB_MATERIALIZE_TO")):
-        iso = ab.isolate(f"open_bdb {path}\nrun_bundler STRICT\n",
-                         str(tmp_path), "f.buda", str(tmp_path / "arm"))
-        assert iso.env == {var: str(tmp_path / "arm" / "checkpoint.bdb")}
-        assert iso.checkpoint == iso.env[var]
-        assert iso.text.startswith(f"open_bdb {path}\n")   # text unchanged
+def test_the_judge_snapshot_follows_the_flow_and_precedes_each_exit(tmp_path):
+    """Not a redirect of the open: a `:memory:` database moved onto disk
+    commits every write to disk, which added ~9 s of setup to soc_small's
+    3.7 s bundled arm -- the very column the table compares."""
+    arm = tmp_path / "arm"
+    text = ("exit 3\nopen_bdb :memory:\nrun_hier_bundler\nexit\n"
+            "run_nuts")                      # no final newline
+    iso = ab.isolate(text, str(tmp_path), "f.buda", str(arm))
+    snap = f"save_bdb {arm / 'checkpoint.bdb'}"
+    assert iso.snapshot == snap and iso.checkpoint == str(arm / "checkpoint.bdb")
+    assert iso.text.splitlines() == [
+        "exit 3",                     # before any open: no snapshot needed
+        "open_bdb :memory:", "run_hier_bundler",
+        ab.SNAPSHOT_TAG, snap, "exit",
+        "run_nuts", ab.SNAPSHOT_TAG, snap]
 
 
-def test_several_opens_or_none_leave_no_judge_column(tmp_path):
+def test_every_open_is_judged_and_no_open_is_not(tmp_path):
     iso = ab.isolate("open_bdb a.bdb.sql\nopen_bdb :memory:\n"
                      "run_bundler STRICT\n", str(tmp_path), "f.buda",
                      str(tmp_path / "arm"))
-    assert iso.checkpoint is None and "2 databases" in iso.no_judge
-    assert iso.env == {}
+    assert iso.checkpoint and iso.no_judge is None
+    assert iso.text.startswith("open_bdb a.bdb.sql\nopen_bdb :memory:\n")
     iso = ab.isolate("run_bundler STRICT\n", str(tmp_path), "f.buda",
                      str(tmp_path / "arm"))
     assert iso.checkpoint is None and "no BDB" in iso.no_judge
+    assert iso.text == "run_bundler STRICT\n"
 
 
 def test_writeback_and_a_sourced_durable_open_refuse(tmp_path):
@@ -460,22 +468,26 @@ def test_a_refusal_comes_before_either_arm_runs(tmp_path, monkeypatch):
     assert list((tmp_path / "work").iterdir()) == []
 
 
-def test_an_arm_sees_only_its_own_redirect(tmp_path, monkeypatch):
+def test_the_snapshot_is_not_timed_and_no_shell_redirect_leaks(
+        tmp_path, monkeypatch):
     flow = tmp_path / "f.buda"
-    flow.write_text("run_bundler STRICT\n")
+    flow.write_text("open_bdb :memory:\nrun_bundler STRICT\n")
     iso = ab.isolate(flow.read_text(), str(tmp_path), str(flow),
                      str(tmp_path))
-    iso.env = {"BUDA_BDB_MEMORY_TO": "mine"}
-    monkeypatch.setenv("BUDA_BDB_MATERIALIZE_TO", "stale")
+    monkeypatch.setenv("BUDA_BDB_MEMORY_TO", "stale")
     seen = {}
 
     def run(argv, **kw):
         seen.update(kw["env"])
-        return _fake_run({"exit_status": 0, "commands": []})(argv, **kw)
+        return _fake_run({"exit_status": 0, "total_seconds": 5.0, "commands": [
+            {"command": "run_bundler STRICT", "seconds": 3.0, "errors": 0},
+            {"command": iso.snapshot, "seconds": 2.0, "errors": 0}]})(
+                argv, **kw)
     monkeypatch.setattr(ab.subprocess, "run", run)
-    ab.run_arm(flow, flow.read_text(), "bundled", iso=iso)
-    assert seen["BUDA_BDB_MEMORY_TO"] == "mine"
-    assert "BUDA_BDB_MATERIALIZE_TO" not in seen
+    report, _, _ = ab.run_arm(flow, flow.read_text(), "bundled", iso=iso)
+    assert "BUDA_BDB_MEMORY_TO" not in seen
+    assert report["total_seconds"] == 3.0
+    assert [c["command"] for c in report["commands"]] == ["run_bundler STRICT"]
 
 
 def test_a_flow_building_into_a_named_database_runs_both_arms(
