@@ -539,8 +539,20 @@ to 73 — OFF_GRID 96 → 0 and NO_METAL 64 → 32, with the remaining 32
 NO_METAL, 37 OPEN and the 4 cross-bundle SHORTs of #948 left standing and
 the engine's own count falling from 117 to 85 unplaced.  `tpu 8` stays
 clean, and the QoR corpus is unchanged (0 better / 0 worse / 56
-unchanged, abstract and detailed WL +0 — no corpus flow has a template
-whose span-clear pool is short).  Pinned by
+unchanged, abstract and detailed WL +0).  That corpus result is NOT "no
+corpus flow reaches the defect", and reading it that way would have been
+the mistake this page exists to catch: detailed WL cannot see a wire moved
+onto another track, and the QoR triple is read at the END of a flow.
+`flow/rnr/mix2_fast_bottomup_shared.buda` reaches it — `dnuts2`'s L2
+window is short of span-clear tracks there, and its midpoint pools sit a
+half track apart per instance — and judged right after its FIRST
+`run_detailed_nuts` it holds **36 OFF_GRID bits on `main` and 0 with the
+fix** (the 229 OPEN / 48 NO_METAL / 2 SHORT of that healer-bound mid-state
+identical on both).  Its healers then re-solve those instances, which is
+why its endpoint judges the same on both sides (2 SHORTs, 0 OFF_GRID) and
+why the corpus could not tell; the fix solves the 20 `dnuts2` instances
+individually from the start (88 bits copied to 23 siblings → 48 to 3).
+Pinned by
 `test_tcl_soc_flow.py::test_a_copied_core_lands_on_its_own_signal_tracks`,
 which fails on the pre-fix engine (NQ = 1, 32 OFF_GRID).  A flow under the
 default `on_mismatch stop` that used to copy such a cell now REFUSES DNUTS

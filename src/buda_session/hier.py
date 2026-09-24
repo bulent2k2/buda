@@ -2801,7 +2801,8 @@ class HierMixin:
                   + self._reserve_note(eff, src))
         return n
 
-    def _bu_reference_grid(self, ref_ids, tag="DNUTS reference solve"):
+    def _bu_reference_grid(self, ref_ids, tag="DNUTS reference solve",
+                           verbose=True):
         """The grid the bottom-up reference DNUTS solve runs on: the
         session grid itself when nothing thins, else a CLONE carrying
         every shared cell's thinned override — ONE function for the
@@ -2825,8 +2826,9 @@ class HierMixin:
         grid = self.routing_grid.clone()
         for lid, x1, y1, x2, y2, pat in share_ovr:
             grid.add_override(lid, x1, y1, x2, y2, pat)
-        print(f"[LayerShare] {tag} under {len(share_ovr)} thinned "
-              f"override(s)")
+        if verbose:
+            print(f"[LayerShare] {tag} under {len(share_ovr)} thinned "
+                  f"override(s)")
         return grid, True
 
     def _reserved_cells_not_enforced(self, wrappers=None):
@@ -4256,12 +4258,34 @@ class HierMixin:
                     ("midpoint", norm(g.signal_tracks_in(
                         (lo + hi) / 2.0, ts.interval_lo, ts.interval_hi))))
 
+        # The grid the reference DNUTS solve RUNS ON: the session grid, or
+        # a clone carrying each shared cell's thinned override over its
+        # reference (_bu_reference_grid, the one builder the DNUTS path and
+        # the ripup sweep use).  The fallback test must count its tracks
+        # there — a full-grid pool can hold the bits while the thinned one
+        # the solve actually reads does not (Codex P1 on #955).
+        ref_grid_memo = []
+
+        def ref_grid():
+            if not ref_grid_memo:
+                ref_ids = {iw.input.original_bundle.id
+                           for groups in cells.values() for iws in groups
+                           for iw in iws
+                           if iw.input.original_bundle.instances
+                           and iw.input.original_bundle.instances[0]
+                           == groups[0][0].input.original_bundle
+                           .instances[0]}
+                ref_grid_memo.append(self._bu_reference_grid(
+                    ref_ids, verbose=False)[0])
+            return ref_grid_memo[0]
+
         def midpoint_engaged(iw, ts, blocked):
             # Does DetailedNUTS fall back to the midpoint pool when it
-            # solves the REFERENCE segment ts?  Its own test, mirrored: the
-            # span-clear pool with the reference's blocked tracks dropped
-            # (`drop_blocked`) against the uncredited group demand
-            # (`bus_seg_demand`, detailed_nuts.cpp).  The copies inherit the
+            # solves the REFERENCE segment ts?  Its own test, mirrored, on
+            # its own grid (ref_grid): the span-clear pool with the
+            # reference's blocked tracks dropped (`drop_blocked`) against
+            # the uncredited group demand (`bus_seg_demand`,
+            # detailed_nuts.cpp).  The copies inherit the
             # reference's solve, so only the pool that solve actually draws
             # from can put a copy off its own tracks — comparing the
             # midpoint pool when it is never read would refuse a valid run
@@ -4277,7 +4301,10 @@ class HierMixin:
                                                 layer=ts.layer)
             except Exception:
                 return True
-            g = self.routing_grid.get_layer_grid(ts.layer)
+            rg = ref_grid()
+            if not rg.has_layer(ts.layer):
+                return True
+            g = rg.get_layer_grid(ts.layer)
             lo, hi = sorted((ts.span_lo, ts.span_hi))
             blk = blocked.get(ts.layer, ())
             n = sum(1 for p, _slot in g.signal_tracks_in_span(

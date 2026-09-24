@@ -720,6 +720,67 @@ def test_an_unread_midpoint_pool_does_not_misalign_a_copy():
                         and ns.span_lo < mid + 3 and ns.span_hi > mid - 2)
 
 
+def test_the_fallback_is_judged_on_the_grid_the_reference_solves_on():
+    """With a `set_cell_layer_share`, the reference DNUTS solve runs on a
+    CLONE carrying the cell's thinned pattern (`_bu_reference_grid`), so its
+    span-clear pool can be short of the bits while the full grid's is not.
+    The midpoint fallback DetailedNUTS then takes is the one the copy must
+    agree on, and judging the fallback on the full grid called such a copy
+    ALIGNED (Codex P1 on #955).
+
+    The M6 pattern is four signal slots per 8-unit period and the share
+    keeps the first two.  Each instance gets a keepout over the same
+    relative band, leaving 5 full-grid tracks along the whole span; off the
+    midpoint in proc_i1 and across it in proc_i2, so the span-clear pools
+    agree while the midpoint pools do not.  Full grid: 5 >= 4 bits, no
+    fallback.  Thinned: fewer than 4, fallback — and the midpoint pools
+    differ, so the copy is MISALIGNED."""
+    s = _bare_session(_two_inst_db(x2=504, y2=304))
+    for c in (["def_layer 6 M6 H TOP 50", "def_layer 7 M7 V TOP 50",
+               "def_layer 4 M4 H 50", "def_layer 5 M5 V 50",
+               "def_track_pattern 6 0 (SIGNAL 1 1)x4",
+               "def_track_pattern 7 0 (SIGNAL 1 1)x4",
+               "def_track_pattern 4 0 (SIGNAL 1 1)x4",
+               "def_track_pattern 5 0 (SIGNAL 1 1)x4",
+               "run_hier_bundler", "generate_hier_topologies",
+               "set_bottom_up proc_cell", "run_planner hier", "run_nuts"]):
+        _run_cmd(s, c)
+    horiz = sorted((ts for ts in s._bottom_up_fixed_segments()
+                    if ts.horiz and ts.layer == 6),
+                   key=lambda ts: ts.interval_lo)
+    assert len(horiz) == 2, horiz
+    ref, sib = horiz
+    rlo, rhi = sorted((ref.span_lo, ref.span_hi))
+    slo, shi = sorted((sib.span_lo, sib.span_hi))
+    y0, y1 = int(ref.interval_lo), int(ref.interval_hi)
+    band = (y0, y1 - 10)                  # leaves 5 tracks at the top
+    s.routing_grid.add_keepout(6, int(rlo) + 1, band[0], int(rlo) + 5,
+                               band[1])
+    mid = int((slo + shi) / 2)
+    s.routing_grid.add_keepout(6, mid - 2, band[0] + 304, mid + 3,
+                               band[1] + 304)
+    out = _run_cmd(s, "set_cell_layer_share proc_cell M6 50")
+    assert "Error" not in out, out
+
+    g = s.routing_grid.get_layer_grid(6)
+    full = [len(g.signal_tracks_in_span(lo, hi, ts.interval_lo,
+                                        ts.interval_hi))
+            for ts, (lo, hi) in ((ref, (rlo, rhi)), (sib, (slo, shi)))]
+    assert full[0] == full[1] >= 4, full         # no fallback on full grid
+    rg, is_clone = s._bu_reference_grid({ref.bundle_id}, verbose=False)
+    assert is_clone
+    thin = len(rg.get_layer_grid(6).signal_tracks_in_span(
+        rlo, rhi, ref.interval_lo, ref.interval_hi))
+    assert thin < 4, thin                        # ...but on the solve's
+    midp = [len(g.signal_tracks_in((lo + hi) / 2, ts.interval_lo,
+                                   ts.interval_hi))
+            for ts, (lo, hi) in ((ref, (rlo, rhi)), (sib, (slo, shi)))]
+    assert midp[0] != midp[1], midp
+
+    out = _run_cmd(s, "check_template_tracks")
+    assert "MISALIGNED" in out and "midpoint" in out, out
+
+
 def test_dnuts_copies_aligned_instances():
     """Aligned cell: the reference instance's bits are solved once and the
     sibling's bits are exact translates; vias copied too."""
