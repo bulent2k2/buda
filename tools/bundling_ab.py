@@ -271,6 +271,16 @@ OUTPUT_WRITERS = {
     "derive_top_plan": (None, ("file",)),
 }
 
+# The commands that REFUSE a row already there (`BDB::add_inst` and
+# `BDB::add_comp` throw "insert failed (name exists?)"; `add_cell` and
+# `add_cell_pin` upsert, and an import clears its tables first).  A named
+# database the flow runs one of these into is one the flow BUILDS, so a copy
+# of it as it stood — say, after the user's own last run — makes the arm die
+# on its first instance (the owner's re-review of #953).  Such a database
+# starts EMPTY in each arm instead, the engine's own rule for a database a
+# flow builds (`_redirect_memory_bdb`: "the target must not exist yet").
+BUILDERS = ("add_inst", "add_comp")
+
 # Where each arm's files are made.  None = the system temp directory; a
 # test points it at its own tmp_path.
 WORK_ROOT = None
@@ -296,6 +306,7 @@ class Isolation:
         self.checkpoint = None
         self.snapshot = None        # the appended command, as the report has it
         self.no_judge = "the flow opens no BDB"
+        self.notes = []             # what the isolation decided, to print
 
 
 def _quote(path):
@@ -360,11 +371,21 @@ def isolate(text, base_dir, name, arm_dir):
         lines[i] = line
 
     exits = []
+    current = None                  # the named open now in force, if copied
     for where, n, w, top_i, bare in _source_tree(text, base_dir, name,
                                                  stack=stack):
         if w == "exit" and top_i is not None and opens:
             exits.append(top_i)     # an exit before any open needs none
+        if w in BUILDERS and current is not None:
+            src, dst, open_at = current
+            iso.copies.remove((src, dst))
+            iso.notes.append(
+                f"{open_at} opens {src}, which the flow builds into "
+                f"({where}:{n} `{w}`), so each arm starts it empty rather "
+                f"than from a copy the flow's own rows would collide with")
+            current = None
         if w == "open_bdb":
+            current = None
             path, opts = leading_path_and_options(bare)
             writeback = bool(opts) and opts[0] == "writeback"
             opens.append(path)
@@ -385,6 +406,7 @@ def isolate(text, base_dir, name, arm_dir):
                     f"separately (move it into the flow's own text)")
             if real not in mapped and os.path.exists(real):
                 iso.copies.append((real, arm_path(real)))
+                current = (real, mapped[real], f"{where}:{n}")
             rewrite(top_i, _path_spans(lines[top_i], "lead", ()))
         elif w in OUTPUT_WRITERS:
             if top_i is None:
@@ -433,9 +455,12 @@ def _copy_bdb(src, dst):
 
 
 def judge(checkpoint):
-    """The judge's verdict on one arm's checkpoint: "clean", "dirty (N)",
-    or "unjudgeable" — `tools/independent_audit.py` run as its own process,
-    since it imports no engine and must not share one with anything."""
+    """The judge's verdict on one arm's checkpoint, by its own four exit
+    statuses: "clean" (0), "dirty (N)" (1), "unjudgeable" (2), and "judged,
+    no result file" (3 — it judged but could not write the `--json` this
+    caller reads the verdict from; not the same thing as 2, which is the
+    point of the judge having four).  `tools/independent_audit.py` runs as
+    its own process, since it imports no engine and must not share one."""
     if not checkpoint or not os.path.isfile(checkpoint):
         return None
     fd, out = tempfile.mkstemp(suffix=".json")
@@ -449,7 +474,8 @@ def judge(checkpoint):
         if r.returncode in (0, 1):
             res = json.loads(Path(out).read_text())
             return "clean" if res["clean"] else f"dirty ({res['total']})"
-        return "unjudgeable"
+        return {2: "unjudgeable", 3: "judged, no result file"}.get(
+            r.returncode, f"judge failed (exit {r.returncode})")
     finally:
         os.unlink(out)
 
@@ -674,18 +700,26 @@ def main(argv=None):
             shutil.rmtree(d, ignore_errors=True)
         print(f"bundling_ab: refused: {e}", file=sys.stderr)
         return 2
+    status = 1
     try:
-        return _measure(args, arms, isos)
+        status = _measure(args, arms, isos)
+        return status
     finally:
-        for d in dirs:              # an arm that kept no database
+        for d in dirs:
+            if status != 0:
+                # A failed arm's copies are nothing anyone will read.
+                shutil.rmtree(d, ignore_errors=True)
+                continue
             try:
-                os.rmdir(d)
+                os.rmdir(d)         # an arm that kept no database
             except OSError:
                 pass
 
 
 def _measure(args, arms, isos):
     iso = isos["bundled"]
+    for note in iso.notes:
+        print(f"[bundling_ab] note: {note}", flush=True)
     if iso.no_judge:
         print(f"[bundling_ab] no judge column: {iso.no_judge}", flush=True)
 

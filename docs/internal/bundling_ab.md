@@ -31,13 +31,27 @@ before the A/B, and every file the flow writes is renamed into the arm.  A
 `:memory:` or `.sql` open writes nothing of the user's and is left as it
 is.  What cannot be kept apart is refused before either arm runs: a `.sql`
 opened with `writeback`, or a named open or file write inside a sourced
-file.  Of the 293 checked-in flows, none gains a refusal and 10 have a path
-rewritten.
+file.
+
+One named database is not copied: one the flow BUILDS, meaning an
+`add_inst` or `add_comp` runs into it.  Those two refuse a row already
+there, so a copy of a checkpoint the user's own last run left behind made
+the first arm die on its first instance.  Such a database starts empty in
+each arm, which is the engine's rule for a database a flow builds.  Every
+other command keeps the copy: `add_cell` and `add_cell_pin` upsert, an
+import clears its tables first, and a flow that only moves components is
+editing a design that must be there.
+
+Of the 293 checked-in flows, none gains a refusal.  57 have their text
+changed: 47 only by the appended snapshot described below, and 10 by a
+rewritten path as well.  None builds into a named database.
 
 When the flow opens a database, each arm also ends with a `save_bdb`
 snapshot of it, and the judge, `tools/independent_audit.py`, scores that
 checkpoint.  The judge reads the stored geometry and imports no engine; its
-verdict is a row of its own, beside `check_design`'s.  The snapshot is the
+verdict is a row of its own, beside `check_design`'s, and keeps the judge's
+four statuses apart: clean, dirty, unjudgeable, and judged with no result
+file.  The snapshot is the
 tool's, so its seconds are left out of the arm's times.  It is a snapshot
 rather than a redirect of the open because moving `soc_small`'s `:memory:`
 database onto disk made every command that writes it commit to disk: its
@@ -126,9 +140,11 @@ Those are reasons to plan in groups that a wirelength column cannot score.
 * **The judge does not model non-default rules.** A wire governed by an NDR
   spans several signal slots, so its centre is not a slot centre, and the
   judge reports it `OFF_GRID`.  On `flow/ndr_shield_hier.buda` built into a
-  named file, it reported 20 of them, all on NDR-governed nets, where
-  `check_design` reported none.  Read a judge row on an NDR design with
-  that in mind.
+  named file, it reported 20 of them on the bundled arm and 30 on the
+  one-net arm, all on NDR-governed nets, where `check_design` reported
+  none.  Read a judge row on an NDR design with that in mind; the judge's
+  own page lists it among its
+  [limitations](independent_audit.md#what-it-deliberately-does-not-claim).
 * **A file the flow READS after writing it** is followed into the arm only
   by `open_bdb`.  No checked-in flow reads one of its own outputs any other
   way.

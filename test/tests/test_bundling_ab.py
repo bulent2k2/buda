@@ -490,17 +490,22 @@ def test_the_snapshot_is_not_timed_and_no_shell_redirect_leaks(
     assert [c["command"] for c in report["commands"]] == ["run_bundler STRICT"]
 
 
+def _durable_flow(tmp_path):
+    root = Path(__file__).resolve().parents[2]
+    text = (root / "flow" / "ndr_shield_hier.buda").read_text()
+    assert "open_bdb :memory:" in text and "add_inst " in text
+    flow = tmp_path / "durable.buda"
+    flow.write_text(text.replace("open_bdb :memory:", "open_bdb ckpt.bdb"))
+    return flow
+
+
 def test_a_flow_building_into_a_named_database_runs_both_arms(
         tmp_path, monkeypatch):
     """The owner's case, run for real: a self-contained hier flow whose
     `open_bdb` names a durable file.  The second arm used to die on the
     first arm's rows (`add_inst: insert failed (name exists?)`), leaving
     the flow's file holding the bundled route."""
-    root = Path(__file__).resolve().parents[2]
-    text = (root / "flow" / "ndr_shield_hier.buda").read_text()
-    assert "open_bdb :memory:" in text
-    flow = tmp_path / "durable.buda"
-    flow.write_text(text.replace("open_bdb :memory:", "open_bdb ckpt.bdb"))
+    flow = _durable_flow(tmp_path)
     monkeypatch.setattr(ab, "WORK_ROOT", str(tmp_path))
     out = tmp_path / "rows.json"
     assert ab.main([str(flow), "--json", str(out)]) == 0
@@ -508,6 +513,74 @@ def test_a_flow_building_into_a_named_database_runs_both_arms(
     assert rows["bundled"]["bundles"] < rows["unbundled"]["bundles"]
     assert rows["bundled"]["judge"] and rows["unbundled"]["judge"]
     assert not (tmp_path / "ckpt.bdb").exists()
+
+
+def test_a_flow_that_already_built_its_database_measures_again(
+        tmp_path, monkeypatch):
+    """The owner's re-review: the same flow AFTER a run of its own has left
+    `ckpt.bdb` holding the design.  The copy-in handed each arm those rows
+    and the bundled arm died on its first `add_inst`; the flow BUILDS that
+    database, so each arm starts it empty.  The user's file is untouched."""
+    import hashlib
+    flow = _durable_flow(tmp_path)
+    root = Path(__file__).resolve().parents[2]
+    env = {**ab.os.environ, "PYTHONPATH": ab.os.pathsep.join(
+        [str(root / "build"), str(root / "src"), str(root / "tools")])}
+    r = ab.subprocess.run([ab.sys.executable, str(root / "src" / "buda_cli.py"),
+                           "--no-viz", str(flow)], capture_output=True,
+                          text=True, env=env)
+    assert r.returncode == 0 and (tmp_path / "ckpt.bdb").is_file()
+    before = hashlib.sha256((tmp_path / "ckpt.bdb").read_bytes()).hexdigest()
+    monkeypatch.setattr(ab, "WORK_ROOT", str(tmp_path))
+    assert ab.main([str(flow)]) == 0
+    assert ab.main([str(flow)]) == 0
+    after = hashlib.sha256((tmp_path / "ckpt.bdb").read_bytes()).hexdigest()
+    assert after == before
+
+
+def test_only_a_database_the_flow_builds_into_starts_empty(tmp_path):
+    (tmp_path / "d.bdb").write_bytes(b"")
+    arm = str(tmp_path / "arm")
+    built = ab.isolate("open_bdb d.bdb\nadd_inst u1 c top 0 0\n"
+                       "run_hier_bundler\n", str(tmp_path), "f.buda", arm)
+    assert built.copies == [] and "builds into" in built.notes[0]
+    assert built.text.startswith(f"open_bdb {arm}/0_d.bdb\n")
+    # Moving what is already there is editing it: the copy stays.
+    moved = ab.isolate("open_bdb d.bdb\nmove_comp u1 5 5\n"
+                       "run_hier_bundler\n", str(tmp_path), "f.buda", arm)
+    assert moved.copies == [(str(tmp_path / "d.bdb"), f"{arm}/0_d.bdb")]
+    assert moved.notes == []
+    # A builder after a LATER open builds that one, not the first.
+    later = ab.isolate("open_bdb d.bdb\nopen_bdb :memory:\n"
+                       "add_comp x c top 0 0 1 1\nrun_hier_bundler\n",
+                       str(tmp_path), "f.buda", arm)
+    assert len(later.copies) == 1 and later.notes == []
+
+
+@pytest.mark.parametrize("code, verdict", [
+    (2, "unjudgeable"), (3, "judged, no result file"),
+    (9, "judge failed (exit 9)")])
+def test_the_judge_s_statuses_keep_their_meaning(tmp_path, monkeypatch,
+                                                 code, verdict):
+    """3 is 'judged, but the --json write failed' in the judge's own
+    contract, not 'cannot judge' -- #942 made them distinct words."""
+    ckpt = tmp_path / "c.bdb"
+    ckpt.write_bytes(b"")
+    monkeypatch.setattr(ab.subprocess, "run",
+                        lambda argv, **kw: ab.subprocess.CompletedProcess(
+                            argv, code, "", ""))
+    assert ab.judge(str(ckpt)) == verdict
+
+
+def test_a_failed_run_leaves_no_arm_directory(tmp_path, monkeypatch):
+    (tmp_path / "d.bdb").write_bytes(b"not a database")
+    flow = tmp_path / "f.buda"
+    flow.write_text("open_bdb d.bdb\nrun_bundler STRICT\n")
+    work = tmp_path / "work"
+    work.mkdir()
+    monkeypatch.setattr(ab, "WORK_ROOT", str(work))
+    assert ab.main([str(flow)]) == 1          # the copy-in fails
+    assert list(work.iterdir()) == []
 
 
 def test_a_named_database_that_is_not_one_fails_the_run(tmp_path):

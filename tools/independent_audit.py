@@ -65,6 +65,11 @@ deliberately not claimed" section disclaims.
 
 LIMITATIONS, stated rather than discovered later:
 
+  * Non-default rules are not modelled: a bit governed by an NDR width
+    spans several signal slots, so its metal is centred between slot
+    centres and is reported OFF_GRID -- a false-positive class, measured on
+    flow/ndr_shield_hier.buda (docs/internal/independent_audit.md).
+
   * A region override (`add_grid_override`) makes the effective pattern a
     function of position, and this file evaluates it at each wire's MIDPOINT.
     A wire whose span crosses an override boundary is counted and reported as

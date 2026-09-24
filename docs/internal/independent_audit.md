@@ -105,7 +105,7 @@ list and not to the number.)
 
 A clean verdict here is about GEOMETRY and nothing else: not timing, not
 DRC at a real detailed router's rule deck, nothing the ladder page's
-"What is deliberately not claimed" disclaims.  Five limitations are stated
+"What is deliberately not claimed" disclaims.  Six limitations are stated
 rather than left to be discovered:
 
 * **Region overrides** make the effective pattern a function of position,
@@ -130,6 +130,20 @@ rather than left to be discovered:
   shorts and broken metal are still judged, `NO_METAL` is not — and the
   fallback is NAMED in the output.  A silent narrowing is how an audit comes
   to mean less than its reader thinks.
+* **Non-default rules are not modelled.**  A bit governed by an NDR width
+  (`def_ndr … width x1.5`) spans several signal slots, so its metal is
+  centred between slot centres and this file reports it `OFF_GRID` — a
+  FALSE POSITIVE class, not a routing fault.  Measured on
+  `flow/ndr_shield_hier.buda` built into a named file (found by
+  `tools/bundling_ab.py`'s judge row, #953): 20 `OFF_GRID` on the bundled
+  arm and 30 on the one-net arm, every one on an NDR-governed net (`loc_*`,
+  `t2x_*`), where `check_design` reports none; the one-net arm's single
+  `OPEN` (`tdef_0` not reaching `u1`) is the fault `check_design` reports
+  too, so the two agree on the real one.  Read a judge row on an NDR design
+  with that in mind — through `converge.tcl -judge` as much as through the
+  A/B.  Modelling it means reading `ndr_rule` / `bundle.ndr_rule` and
+  accepting a run of `width_slots` slots as one wire, which is the engine's
+  own `ndr_spec_for_layer` arithmetic re-derived here, not imported.
 
 ### Five, from review
 
