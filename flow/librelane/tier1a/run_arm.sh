@@ -26,7 +26,12 @@ set -euo pipefail
 N=${1:?usage: run_arm.sh N h|hb [harm.sh args]}; shift
 tag=${1:?usage: run_arm.sh N h|hb [harm.sh args]}; shift
 here=$(cd "$(dirname "$0")" && pwd); root=$(cd "$here/../../.." && pwd)
-d="${T1A_DIR:-$here}/n$N"
+# ABSOLUTE from here on: the block and top legs `cd` into the tree, so a
+# relative T1A_DIR (the `T1A_DIR=../..` form the generated README hands a
+# comparison root) would resolve its logs from the wrong place and reach
+# docker as an invalid mount source (Codex on #952; notch.sh has the same rule).
+t1a=$(cd "${T1A_DIR:-$here}" 2>/dev/null && pwd) || { echo "run_arm: T1A_DIR=${T1A_DIR:-} is not a directory" >&2; exit 1; }
+d="$t1a/n$N"
 [ -f "$d/tpu.def" ] || { echo "run_arm: $d has no emitted set" >&2; exit 1; }
 case $tag in
     h)  pins=() ;;
@@ -40,7 +45,7 @@ export PDK_ROOT="${PDK_ROOT:-$HOME/.ciel}"
 # machine the file-sharing layer stalls ("inotify injection stalled", the
 # containers sit at 0 % CPU).  Mount the arm's tree explicitly instead, so a
 # T1A_DIR outside $HOME mounts only itself and the PDK.
-LL=(librelane --docker-no-tty --docker-mount "${T1A_DIR:-$here}" --dockerized)
+LL=(librelane --docker-no-tty --docker-mount "$t1a" --dockerized)
 # That is NOT enough: librelane/container.py mounts `Path.home()` UNCONDITIONALLY,
 # so every run still carries `-v $HOME:$HOME`, and on 2026-09-23 a restarted
 # VM was stalling again three minutes later with that mount alone (`init.log`:
@@ -141,7 +146,7 @@ else
     (cd "$d/h/top" && ll_run "$d/h/log/top_${TOPTAG}_a.log" --run-tag "$TOPTAG" \
         --to OpenROAD.DetailedRouting --skip OpenROAD.DetailedRouting config.json)
     stamp "top cut at DetailedRouting; guides start"
-    (cd "$here" && TAG="$TOPTAG" T1A_DIR="${T1A_DIR:-$here}" ./guides.sh "$N" > "$d/h/log/guides_$TOPTAG.log" 2>&1)
+    (cd "$here" && TAG="$TOPTAG" T1A_DIR="$t1a" ./guides.sh "$N" > "$d/h/log/guides_$TOPTAG.log" 2>&1)
     ODB=$(ls -t "$d"/h/top/runs/"$TOPTAG"/*/*.odb | head -1)
     (cd "$d/h" && ${LLENV[@]+"${LLENV[@]}"} "$root/flow/librelane/phase0/measure/run_or.sh" top/runs/"$TOPTAG" "$here/guide_route.tcl" \
         ODB="$ODB" GUIDE="$d/h/top/out/buda_bus.guide" OUT="$d/h/top/out" > "$d/h/log/guide_route_$TOPTAG.log" 2>&1)
@@ -153,9 +158,18 @@ else
         -e odb="$d/h/top/out/guided.odb" config.json > "$d/h/log/top_${TOPTAG}_b.log" 2>&1 || true))
 fi
 stamp "top end"
-# LibreLane exits non-zero on a DEFERRED error (an LVS count) after writing
-# final/; that is a verdict for the row, not a reason to lose it.
-grep -q "Flow complete\|ReportManufacturability" "$d/h/log/top_$TOPTAG"*.log || { echo "run_arm: the top did not complete" >&2; exit 1; }
+# Did the top COMPLETE?  Read the leg that ends the flow -- for H+B the
+# resume leg's log, never the `_a` cut, whose own "Flow complete" would pass
+# a `_b` killed before signoff (Codex on #952) -- and accept the two shapes
+# a finished run has: "Flow complete", or the DEFERRED-error ending, which
+# prints no "Flow complete" at all (measured: a run ending on a hold
+# violation, exit 2, final/ written) but is a verdict for the row.  Either
+# way final/metrics.json must exist, which a killed run never writes.
+toplog="$d/h/log/top_$TOPTAG.log"; [ "$tag" = hb ] && toplog="$d/h/log/top_${TOPTAG}_b.log"
+if ! { tr '\r' '\n' < "$toplog" | grep -q "Flow complete\|deferred errors"; } \
+   || [ ! -f "$d/h/top/runs/$TOPTAG/final/metrics.json" ]; then
+    echo "run_arm: the top did not complete (see $toplog)" >&2; exit 1
+fi
 
 # 4. the row
 arm=$([ "$tag" = h ] && echo H || echo H+B)
