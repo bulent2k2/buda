@@ -1,10 +1,10 @@
 # BUDA: Progress and the Road Ahead
 
-Internal briefing for prospective angel investors, as of 2026-09-20.  The
+Internal briefing for prospective angel investors, as of 2026-09-24.  The
 tree twin of the published page listed in [artifacts.md](../artifacts.md);
 every number here is read from this repository, its design notes and the
-founder's paper as of commit 63d4e67c (2026-09-18), and the sources are
-listed at the end.  It is written for readers outside chip design: a
+founder's paper as of commit 63d4e67c (2026-09-18) — the compaction rounds
+dated 24 September from PR #957 — and the sources are listed at the end.  It is written for readers outside chip design: a
 glossary at the end explains the terms.
 
 ## In short
@@ -27,7 +27,10 @@ glossary at the end explains the terms.
   63 % shorter, and it turned a timing failure into a pass.
 - **The main risk.**  Every result so far is on designs BUDA's own tooling
   generated or on public benchmarks.  At this small size the conventional
-  all-at-once (flat) flow still beats it on run time and chip size; the
+  all-at-once (flat) flow still beats it on run time and chip size in the
+  recorded arms (a compaction study on 24 September brought the hierarchical
+  die just under the flat one, 0.998 against 1.032 mm², and its run time to
+  1,018 s against 4,541 s — one run, under concurrent load); the
   larger size where BUDA is expected to win outright, and a first customer
   design, are both still to be measured.
 
@@ -121,6 +124,27 @@ feeder column at x = −140, outside its own die (the known emitter quirk
 [librelane_hier_flow.md](librelane_hier_flow.md) §7c records); the routing
 is unchanged by it — the same 197,376 detailed wire length either way.
 
+**The same array, hardened five ways** (24 September 2026).  Left to right,
+at one scale: the flat flow F (1.032 mm²); the hierarchical flow without
+BUDA, H (6.347 mm²); the hierarchical flow with BUDA as measured in the
+table below, H+B (3.935 mm²); and two rounds of a compaction study on the
+H+B arm.  The first round (1.131 mm²) cut the blocks' internal margins, the
+channels between blocks and the three small edge-block types to what their
+logic needs; the third (0.998 mm², 0.97× the flat die) placed the processing
+units at 69 % utilisation and kept every one-row gap as a lane for the top
+level's repeaters.  The third round passes every check the recorded arms
+pass — manufacturing rules, layout-versus-schematic, antenna — with positive
+timing margins (setup +0.41 ns, hold +0.12 ns), 79 pins of the blocks' reset
+inputs missing the maximum-slew rule as 78 do in the flat flow, and
+59,363 µm of top-level wire, 6 % of the flat flow's.  Orange cells are logic gates, blue
+flip-flops, green buffers; each black rectangle is a hardened block.
+
+![Five hardened arrays at one scale: flat, hierarchical without BUDA, hierarchical with BUDA, and the two compaction rounds, the last smaller than the flat die](img/investor_briefing_compaction.png)
+
+Rendered by `flow/librelane/tier1a/render_arms.py` from the signoff
+placements; the rounds are §7.5 of
+[librelane_hier_flow.md](librelane_hier_flow.md).
+
 ## Results
 
 The headline measurement comes from an 8×8 **systolic array** — a grid of 64
@@ -176,11 +200,22 @@ fully clean for the first time.
 What the table does not say, stated plainly: at this small size, the
 hierarchical flow with BUDA is still 5.6 % slower than the flat flow and its
 die is 3.8× larger, because building from separate blocks pays for padding
-and wiring channels around each block that the flat flow never needs.  The
-case for hierarchy is at larger sizes, where flat runs slow down steeply: a
+and wiring channels around each block that the flat flow never needs.  A
+compaction study run since, on 24 September 2026, closed most of that gap:
+with the blocks' margins and the channels between them cut to what the logic
+needs, the H+B die reaches 0.998 mm², 0.97× the flat die, clean on
+manufacturing rules, layout-versus-schematic and antenna, with 79 max-slew
+pins remaining on the blocks' reset inputs — a residual the flat flow carries
+too, 78 on the same check (the last picture above; the rounds are in
+[librelane_hier_flow.md](librelane_hier_flow.md) §7.5).  The table keeps the
+recorded arms it was measured on.  The case for hierarchy is at larger sizes, where flat runs slow down steeply: a
 flat run at ~55 k cells takes 76 min and the next doubling five to six
 hours.  The study's own success test — beat the flat flow by 2× on run time
-at a size where flat becomes slow — has not yet been measured.  One small
+at a size where flat becomes slow — is met provisionally by the compact run
+of 24 September on its run-time half (1,018 s against the flat flow's
+4,541 s at N = 8: one run, under concurrent load, not yet repeated in a
+controlled one) and not on its size half, since N = 8 is not a size where
+the flat flow is slow.  One small
 timing loss remains: setup slack is 0.021 ns lower than without BUDA before
 the LEF fix, and 0.0185 ns lower after it.  It is real rather than noise —
 an independent repeat of the pre-fix arm reproduced every metric bit for
@@ -373,15 +408,20 @@ notes, not from a wish list.
    feedback to the chip's logic designers.
 2. **The chip-size penalty of hierarchy.**  Building from separate blocks
    pays for padding and routing channels around each block that the flat
-   flow never needs: 3.8× the flat die at N = 8.  Two levers are identified
-   (channel width, then padding), and the cost is reported rather than used
-   as a pass/fail gate.  Closing it is a question about the whole flow as
-   much as about BUDA.
-3. **The crossover has not been measured.**  The case for hierarchy is that
-   flat runs stop scaling: at ~55 k cells a flat run takes 76 min, and the
-   next doubling five to six hours.  The next size up (N = 16), where H+B is
-   expected to overtake flat, needs a 20 GB machine and hours per run, and
-   has not been run.
+   flow never needs: 3.8× the flat die at N = 8 in the recorded arms, 0.97×
+   after the compaction study of 24 September 2026 (block margins, channels
+   and edge blocks in one round, then utilisation).  The cost is
+   reported rather than used as a pass/fail gate.  What remains is reproducing the compact result under
+   controlled conditions and keeping it at N = 16, where the blocks' own
+   wiring grows.
+3. **The crossover is measured only provisionally.**  The case for
+   hierarchy is that flat runs stop scaling: at ~55 k cells a flat run takes
+   76 min, and the next doubling five to six hours.  The next size up
+   (N = 16), where H+B is expected to overtake flat, needs a 20 GB machine
+   and hours per run, and has not been run.  The compact run of 24 September
+   beats the flat flow 4.5× on wall time at N = 8 (1,018 against 4,541 s),
+   one run under concurrent load; the controlled rerun, and the size where
+   flat is slow, are still to be done.
 4. **Keeping the levels in step, by default.**  When blocks and the top
    level are planned separately, a change at one level can undo the other,
    so the planning must be repeated until it stops changing (a fixpoint).
@@ -452,7 +492,8 @@ notes, not from a wish list.
 ## What this document does not claim, and what to add
 
 Everything above is read from the repository, its design notes and the
-founder's paper as of 18 September 2026.  Nothing here is a market figure, a
+founder's paper as of 18 September 2026, except the compaction results dated
+24 September, which are in PR #957 to the same repository.  Nothing here is a market figure, a
 revenue figure or a forecast.  Before this goes to an investor, the founder
 should add or confirm:
 
@@ -503,7 +544,9 @@ The chip-design terms used above, in plain words.
 ## Sources
 
 The public repository ([github.com/bulent2k2/buda](https://github.com/bulent2k2/buda),
-Apache 2.0) and its `git log` through commit 63d4e67c;
+Apache 2.0) and its `git log` through commit 63d4e67c, plus PR #957 for the
+compaction rounds of 24 September (`flow/librelane/tier1a/results.jsonl`,
+§7.5 of the flow document);
 [docs/origin/paper.md](../origin/paper.md) and
 [docs/origin/talk_contents.md](../origin/talk_contents.md);
 [librelane_hier_flow.md](librelane_hier_flow.md) (§7 results, §11 open
