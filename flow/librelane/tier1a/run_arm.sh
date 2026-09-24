@@ -50,14 +50,21 @@ LL=(librelane --docker-no-tty --docker-mount "${T1A_DIR:-$here}" --dockerized)
 # context, which lives in the real ~/.docker.  PDK_ROOT must be outside $HOME
 # too (copy: `cp -RL ~/.ciel/sky130A <dir>/pdk/sky130A`, then ciel fetches its
 # own store beside it on first use), or the PDK mount brings $HOME back.
+LLENV=()
 if [ -n "${LL_HOME:-}" ]; then
     case $PDK_ROOT in "$HOME"|"$HOME"/*)
         echo "run_arm: LL_HOME is set but PDK_ROOT=$PDK_ROOT is under \$HOME, which the PDK mount would bring back -- copy the PDK out (cp -RL ~/.ciel/sky130A <dir>/pdk/sky130A) and set PDK_ROOT=<dir>/pdk" >&2
         exit 1 ;;
     esac
     mkdir -p "$LL_HOME"
-    LL=(env HOME="$LL_HOME" DOCKER_CONFIG="${DOCKER_CONFIG:-$HOME/.docker}" "${LL[@]}")
+    LLENV=(env HOME="$LL_HOME" DOCKER_CONFIG="${DOCKER_CONFIG:-$HOME/.docker}")
+    LL=("${LLENV[@]}" "${LL[@]}")
 fi
+# The same prefix goes on EVERY containerised helper, not only librelane:
+# notch.sh and run_or.sh each `docker run` with `-v $HOME:$HOME` of their own
+# (and mount a tree outside it explicitly), so without it an H run could stall
+# at the notch and an H+B run at the guide install, after the expensive
+# LibreLane legs (Codex on #952).  guides.sh runs on the host.
 mkdir -p "$d/h/log"
 stages="$d/h/stages.txt"
 stamp() { echo "$(date +%s) $1" >> "$stages"; echo "run_arm: $(date '+%H:%M:%S') $1"; }
@@ -117,7 +124,12 @@ fi
 
 # 2. the patched abstracts the top's MACROS name
 stamp "notch start"
-"$here/notch.sh" "$N" > "$d/h/log/notch.log" 2>&1
+# met2 AND met3: the compact H+B arm's clean row needed a met3 notch patched
+# too (7.5 -- two KLayout m3.2 errors at one PE's a_in pins, both edges of an
+# abstract hole on met3), and notch.sh prices a layer with no notch at one
+# more pass reporting zero pieces, so the recorded met2-only arms are
+# unchanged by naming it.
+${LLENV[@]+"${LLENV[@]}"} "$here/notch.sh" "$N" --layers met2,met3 > "$d/h/log/notch.log" 2>&1
 stamp "notch end"
 fi
 
@@ -131,7 +143,7 @@ else
     stamp "top cut at DetailedRouting; guides start"
     (cd "$here" && TAG="$TOPTAG" T1A_DIR="${T1A_DIR:-$here}" ./guides.sh "$N" > "$d/h/log/guides_$TOPTAG.log" 2>&1)
     ODB=$(ls -t "$d"/h/top/runs/"$TOPTAG"/*/*.odb | head -1)
-    (cd "$d/h" && "$root/flow/librelane/phase0/measure/run_or.sh" top/runs/"$TOPTAG" "$here/guide_route.tcl" \
+    (cd "$d/h" && ${LLENV[@]+"${LLENV[@]}"} "$root/flow/librelane/phase0/measure/run_or.sh" top/runs/"$TOPTAG" "$here/guide_route.tcl" \
         ODB="$ODB" GUIDE="$d/h/top/out/buda_bus.guide" OUT="$d/h/top/out" > "$d/h/log/guide_route_$TOPTAG.log" 2>&1)
     grep -q "wrote" "$d/h/log/guide_route_$TOPTAG.log" || { echo "run_arm: guide_route.tcl wrote nothing (see $d/h/log/guide_route_$TOPTAG.log)" >&2; exit 1; }
     stamp "guides in; top resume"

@@ -35,9 +35,21 @@ extra=(); for kv in "$@"; do extra+=(-e "$kv"); done
 # (The `${a[@]+"${a[@]}"}` spelling is how an array that may be EMPTY is
 # expanded under `set -u` on bash 3.2, where a bare "${a[@]}" is "unbound".)
 tty=(); [ -t 0 ] && tty=(-t)
+# The script and the run are read INSIDE the container, so each needs a mount;
+# $HOME covers the normal layout, and a path outside it (a checkout or a run
+# tree elsewhere -- tier1a's run_arm.sh runs with HOME pointed at a scratch
+# directory to keep the real home off the VM, Codex on #952) gets its own.
+# A path already under a mounted root is skipped -- a repeated destination
+# is a docker error ("Duplicate mount point"), and run_dir is often $PWD.
+mounts=(-v "$HOME:$HOME" -v "$PDK_ROOT:$PDK_ROOT"); roots=("$HOME" "$PDK_ROOT")
+for p in "$(dirname "$script")" "$run_dir" "$PWD"; do
+    covered=0
+    for r in "${roots[@]}"; do case "$p" in "$r"|"$r"/*) covered=1 ;; esac; done
+    [ $covered = 1 ] || { mounts+=(-v "$p:$p"); roots+=("$p"); }
+done
 docker run --rm ${tty[@]+"${tty[@]}"} \
-  -v "$HOME:$HOME" -v "$PDK_ROOT:$PDK_ROOT" -e "PDK_ROOT=$PDK_ROOT" \
-  -v "$PWD:$PWD" -w "$PWD" \
+  "${mounts[@]}" -e "PDK_ROOT=$PDK_ROOT" \
+  -w "$PWD" \
   -e "RUN_DIR=$run_dir" -e "RT_MIN_LAYER=${cfg[0]}" -e "RT_MAX_LAYER=${cfg[1]}" \
   -e "TECH_LEF=${cfg[2]}" -e "CELL_LEFS=${cfg[3]}" -e "DESIGN_NAME=${cfg[4]}" \
   ${extra[@]+"${extra[@]}"} "$LIBRELANE_IMAGE" openroad -exit -no_splash "$script"
