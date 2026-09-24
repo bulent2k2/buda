@@ -710,6 +710,158 @@ numbers that forced it rather than made silently: a number chosen after
 seeing the data proves nothing, so a clause dropped after seeing the data
 has to say what it was measuring and why that was the wrong thing.
 
+### 7.5 Compaction — measured 2026-09-23
+
+§7.4's lever table predicted what pulling the channel and the block padding
+as hard as they go would buy H+B: 2.166 mm², 0.55× the recorded die, 2.10× F.
+This section MEASURES it, at N = 8, on both hierarchical arms, with every
+block re-hardened at the compact size — and the measurement beats the
+prediction, because the table only moved two knobs and the emitter has
+more.  The runs live outside the tree, in a session scratch directory —
+`librelane --dockerized` mounts `$HOME` unconditionally and that one mount
+stalls Docker Desktop's file sharing on this box, twice on the day (the
+`LL_HOME` comment in `run_arm.sh` has the diagnosis and the recipe); the
+tooling that ran them is in the tree:
+`flow/tcl/tpu_lib.tcl`'s `EDGEIN` / `EDGEGAPX` / fractional knobs,
+`harm.sh --density / --halo`, `run_arm.sh` (an arm unattended, top-only
+re-runs with `REUSE_BLOCKS=1 TOPTAG=<tag> TOP_SET="K=V"`), `tap_census.py`
+and `render_arms.py --extra`.
+
+**What "compact" means here.**  Three things at once, all of them on the
+sky130 lattice (met2/met4 pitch 0.92 µm in x, the site row 2.72 µm in y —
+a PE pitch that is not a whole number of tracks shifts every copy's pins
+off the grid its neighbour's are on, and the emitter's `dbu`/`um` helpers
+are there so a fractional knob lands EXACTLY):
+
+* **Blocks sized for ~60 % utilisation** (`--density 65`, `PEPAD` down from
+  100).  The recorded arms hardened `pe_cell` at 50 % and the edge cells at
+  12–17 %, so half of every block was air.
+* **The pin pitch at its floor** (`-BITPITCH 1`, the emitter's bit pitch
+  at one track): the pin-driven block padding was sized for the recorded
+  pitch, and the pins are what the block's face has to be wide enough for.
+* **The channel at its floor**, which is where the two arms PART: H+B's
+  channels went to 1.84 µm (two tracks, `-CHAN 1.84 -ROWGAP 2.72`) and its
+  edge-cell gaps to 9.32 / 38.08 µm; H needed the recorded 48 µm back —
+  see below.
+
+The edge cells moved INSIDE the die (`EDGEIN 1`), where the recorded
+emitter put the feeder column at a negative x and let `harm.py` shift the
+whole placement to compensate; the die is now the array's envelope plus
+`X0`/`Y0` of slack and nothing else.
+
+**H+B compact — clean.**  `tpu.tcl 8 -EDGEIN 1 -PEW 121.44 -PEH
+130.56 -EDGEW 96.6 -EDGEH 62.56 -CHAN 1.84 -ROWM 0 -ROWGAP 2.72 -EDGEGAP
+38.08 -EDGEGAPX 9.32 -PIPEGAP 2.72 -X0 10 -Y0 10.88`, blocks at density 65,
+top with `--halo 13.5 10`, `FP_TAPCELL_DIST 5`, `PL_MAX_DISPLACEMENT_Y
+400`, met2+met3 abstract notches (run `hb5`):
+
+| | F (recorded) | H (recorded) | **H compact** | H+B (recorded) | **H+B compact** |
+|---|---|---|---|---|---|
+| die | 1.032 mm² | 6.347 mm² | **3.304 mm²** (0.52× recorded) | 3.935 mm² | **1.576 mm²** (0.40× recorded, 1.53× F) |
+| logic / die | 43.0 % | 8.5 % | 16.3 % | 13.6 % | **34.1 %** |
+| blocks / die | – | 49.3 % | 51.9 % | 37.1 % | 79.7 % |
+| top wire | 934,831 µm (all of it) | 803,897 µm | 677,212 µm | 300,704 µm | 171,558 µm |
+| arm wire (blocks flattened in) | 934,831 | 1,980,337 | 1,680,956 | 1,682,776 | 1,462,062 |
+| setup WNS | −0.550 ns | +0.389 ns | +0.393 ns | +0.368 ns | **+0.064 ns** |
+| hold WNS | +0.091 ns | −1.075 ns | −0.288 ns | +0.112 ns | +0.117 ns |
+| power | 17.2 mW | 24.9 mW | 24.4 mW | 24.0 mW | 24.1 mW |
+| route DRC / KLayout DRC / LVS | 0 / 0 / 0 | 0 / 0 / 0 | 0 / 0 / 0 | 0 / 2 / 0 | **0 / 0 / 0** |
+| top-only wall | 4,541 s | 5,882 s | 1,727 s | 4,496 s | 845 s |
+| arm wall (blocks ∥ + top) | 4,541 s | 6,208 s | 1,997 s | 4,797 s | 1,084 s |
+
+The compact walls are step sums under load (the two arms' retries ran
+concurrently, and both tops were interrupted by a Docker stall and
+resumed), so read them as a scale.  The rows themselves are in
+`flow/librelane/tier1a/results.jsonl` (`arm` = `H compact` / `H+B
+compact`, each with a `note`).
+
+H+B's die is 0.73× what the lever table promised, at a setup slack that
+came DOWN by 0.30 ns (the wires are shorter) and still positive, with
+signoff clean.  The top's wall time fell 5.3× because the top's INSTANCE
+count did — 33,852 against 528,418 — and that count is almost all fill
+and decap: signoff (RCX, nine-corner STA, KLayout, netgen) is priced by
+what is on the die, not by what does anything.  §7.4's crossover clause
+reads differently against this row: H+B's top-only 845 s is 0.19× F's
+4,541 s, and the arm total (blocks 239 s in parallel + top) is 1,084 s,
+0.24× F — measured with the H arm's retries running concurrently on the
+same box, so a favourable reading, not a controlled one.  The recorded
+1.06× was a die 2.5× this size being filled and signed off.
+
+**What it cost to get there — the tap rule.**  The first compact top
+(`hb`) routed clean and FAILED LVS with 978 errors, all of them floating
+n-wells: `tap_census.py` on its placement DEF counts **764 row fragments
+with cells and no `tapvpwrvgnd`**, 162 of them holding real cells
+(clock-delay buffers).  The 96.6 µm edge cells on the 121.44 µm PE pitch
+leave 26.7 µm gaps; a 10 µm macro halo on each side cuts those to 6.7 µm
+fragments, shorter than the 13 µm tap pitch, so `cut_rows` made rows that
+`FP_TAPCELL_DIST` could not tap and the fill pass then padded with decaps
+whose VPB is on no net.  The recorded H+B arm has 253 such fragments, all
+decap-only, and passes — so the census is strict (any fragment with
+cells) and marks the ones with REAL cells, which is the part known to
+fail.  The fix is the halo: `--halo 13.5 10` removes those fragments
+outright (halo 1 fails `harm.py`'s strap-pair-per-fragment rule; 13
+leaves a 0.68 µm sliver, above the 0.46 µm site), plus `FP_TAPCELL_DIST
+5` for the 12 µm right-margin slivers beside the narrower edge cells and
+`PL_MAX_DISPLACEMENT_Y 400` for output buffers that lost their rows at
+the die's top edge (DPL-0036).  The larger halo pushes the clock buffers
+off the macros and costs top wire: 115 k → 171 k µm.  What the compaction
+is really constrained by is this interaction — edge-cell width against
+PE pitch against halo against tap pitch — and not the channel width; run
+the census on the detailed-placement DEF before paying for the router.
+Two KLayout m3.2 errors then remained at one PE's `a_in` pins, both edges
+of an abstract hole on met3 (the recorded arm's notch class one layer
+up); `notch.sh --layers met2,met3` closed them.
+
+**H compact — the channel is the pin escape.**  Same die recipe, LibreLane's
+own pins (`hc`: `-EDGEIN 1 -BITPITCH 1 -PEPAD 108.96 -ROWGAP 46.24 -EDGEGAP
+38.08 -EDGEGAPX 38.56`): the blocks harden clean (PE 60.5 % utilisation,
+edge cells 5.6 %) and the census reads 0 untapped at `CHAN 9.92`, but the
+top does NOT route at 9.92, 24.64 or 39.36 µm — `GRT-0116`, met4 overflow
+11,156 / 13,251 / 8,914 — where the recorded H at 48 µm had 0.  The
+reason is on the PEs' faces: the IO placer put 18 of 24 `p_in` and 22 of
+24 `p_out` pins on each PE's EAST face, so a PE's partial-sum bus leaves
+sideways into the vertical channel and turns, and the channel has to
+carry it; BUDA's pins put `p_in` on the south face and `p_out` on the
+north, straight across to the neighbour, and the channel carries nothing
+(the recorded arms' top-wire figures tell the same story — H's 803,897 µm
+against H+B's 300,704 for the same nets).  So H+B's compaction is one the H arm cannot follow: what the
+channel width was buying H was room for the router to undo the pin
+assignment, and a compact die takes that room away.
+
+**So H compact keeps the recorded channel** — 48.56 µm, the on-lattice
+spelling of 48 (PE pitch 189.52 µm = 206 tracks), `X0` widened to 24.72
+so the 24.5 µm halo the channel needs fits inside the die margin (the
+first attempt put a macro outside its own die by 4.5 µm and `harm.py`
+refused it) — with everything else compact: blocks at density 65, pin
+pitch at one track, row gap 46.24, edge gaps 38.08 / 38.56 (run `h48`,
+`FP_TAPCELL_DIST 5`, `PL_MAX_DISPLACEMENT_Y 400`, census 0 untapped).  It
+routes with **zero overflow on every layer** (met4 at 17.6 % usage, where
+the three narrower channels overflowed by 9–13 k) and signs off at DRC
+0 / 0, LVS 0, antenna 0; its one deferred error is the hold violation the
+recorded H also carries (−0.288 ns here against −1.075), the arm's own
+class since §7.4 — H+B fixes it by construction and so does not carry it
+compact either.  The die is 3.304 mm²: 0.52× the recorded H, but 2.10×
+the compact H+B and 3.20× F, and the whole difference between the two
+compact arms is the channel the H pins need: the block footprint is 52 %
+of H compact's die and 80 % of H+B compact's.
+
+**The lesson for §7.4.**  The die clause it dropped (H+B within 10 % of
+F) was dropped for the right reason and the wrong number: the ceiling on
+tuning was not 2.10× F but 1.53×, and the levers the table did not price
+— block density, the pin pitch, the edge cells' placement — were the
+larger half.  What stands is the shape of the argument, not its figure:
+H+B pays for hard-macro channels and pin-driven faces, F pays nothing,
+and the gap is now 0.54 mm² at N = 8 — while H's gap to H+B, 2.4 mm² at
+the recorded size, is 1.7 mm² compact and is ALL channel.  Every figure in this section is
+one run each (§7.4's zero-noise measurement licenses that; it does not
+license the wall times, which were taken under load).
+
+![F, H, H+B recorded, and the two compact arms at one scale — standard cells by kind, hardened blocks outlined](img/librelane_n8_compact_placement.png)
+
+`render_arms.py placement --extra "H compact=<top DEF>=<blocks dir>"
+--extra "H+B compact=…"` draws it from the signoff DEFs; `utilization` with
+the same `--extra`s prints the logic/die row.
+
 ## 8. Recipes — macOS + Docker, in order
 
 Everything below runs on macOS 15+ (Apple Silicon or Intel) with Docker
