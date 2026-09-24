@@ -74,9 +74,11 @@ this audit the grid was consulted when a bit was placed and never again, so a
 bottom-up copy landing in a GROUND slot (#946) reported clean.  Only
 `check_design` runs it; `check_dnuts` called without a routing grid does not.
 Its first corpus run found one design it objects to, and rightly:
-`flow/rv/soc_conv_div.buda` places 33 M6 bits on tracks its DEF never
+`flow/rv/soc_conv_div.buda` placed 33 M6 bits on tracks its DEF never
 declared, 32 of them past the die's right edge, because the span-clear track
-pool ignores a bounded pattern's extent (#956).
+pool ignored a bounded pattern's extent (#956).  That is fixed; the flow's
+earlier clean verdict had depended on those phantom tracks, and it is clean
+again on real ones.
 
 The `nuts` and `dnuts` stages also audit **TEG contact** (`TEG_OPEN`): every
 rect of a `teg_mode over` multi-rect block must be touched by the bundle's

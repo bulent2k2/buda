@@ -218,6 +218,29 @@ def test_def_tracks_install_a_bounded_pattern(tmp_path):
     assert len(pat.tracks_in_range(100.0, 200.0)) == 0   # far outside: none
 
 
+def test_every_track_walk_honours_the_bound(tmp_path):
+    """Issue #956.  `tracks_in_range` clamped to the declared extent, but the
+    SPAN-CLEAR walk (`signal_tracks_in_span`, the pool DetailedNUTS seats bits
+    from) and the midpoint COUNT twin tiled the pattern without it — so on
+    `flow/rv/soc_conv_div` 33 M6 bits sat on tracks the DEF never declared,
+    32 past the die edge, and `check_design` called it clean until OFF_GRID
+    could see it.  All four walks must agree, inside the bound and past it."""
+    s, _ = _run(tmp_path)
+    g = s.routing_grid.get_layer_grid(s._layer_name_map["metal2"])
+    pat = g.global_pattern()
+    for lo, hi in ((0.0, 10.0), (100.0, 200.0), (3.0, 50.0)):
+        declared = [c for c, sl in pat.tracks_in_range(lo, hi)
+                    if sl.type == "SIGNAL"]
+        mid = 0.5 * (lo + hi)
+        assert len(g.signal_tracks_in(mid, lo, hi)) == len(declared), (lo, hi)
+        assert g.count_signal_tracks_in(mid, lo, hi) == len(declared), (lo, hi)
+        span = g.signal_tracks_in_span(-1.0, 1.0, lo, hi)
+        assert sorted(c for c, _ in span) == sorted(declared), (lo, hi)
+        assert g.count_signal_tracks_in_span(-1.0, 1.0, lo, hi) \
+            == len(declared), (lo, hi)
+    assert g.count_signal_tracks_in_span(-1.0, 1.0, 100.0, 200.0) == 0
+
+
 def test_agreeing_def_and_lef_pitches_say_nothing(tmp_path):
     """The fixture's LEF PITCH 0.4 and its DEF STEP 400 @1000 DBU/um are the
     same grid, so the composition is silent.  Pinned first because a check

@@ -58,8 +58,12 @@ def _dangling(s, bundle_id):
     """Per bit-wire: metal lying past its own outermost via, per axis.
 
     A via marks a real junction, so anything beyond the outermost one on a
-    wire attaches to nothing.  Wires whose ends are busterm taps (no via
-    there) are excluded — a tap is a legitimate end.
+    wire attaches to nothing.  A busterm tap is a legitimate end too: a wire
+    with fewer than two vias is excluded outright, and on the rest the
+    segment's own tap positions (its BUSTERM connections) count alongside
+    the vias.  Counting vias alone read a trunk's run from its last junction
+    to the block it taps as dangling — 3,956,000 units on bundle 41's
+    `TRUNK_V@x125000`, whose trunk ends on u_lsu's face at y=688000.
     """
     dr = s.detailed_result
     is_h = (lambda lid:
@@ -69,6 +73,16 @@ def _dangling(s, bundle_id):
         if v.bundle_id == bundle_id:
             vias[(v.bit_index, v.from_seg)].append(v)
             vias[(v.bit_index, v.to_seg)].append(v)
+    taps = collections.defaultdict(list)
+    for wr in s.bundles:
+        if (wr.input.original_bundle.id == bundle_id
+                and wr.plan.selected_topology_index >= 0):
+            ct = buda.ConnTopology()
+            ct.build(wr.input.candidates[wr.plan.selected_topology_index],
+                     s.fp)
+            for si, cs in enumerate(ct.segs()):
+                taps[si] += [c.at_pos for c in cs.conns
+                             if c.kind == buda.SegConnKind.BUSTERM]
     out = {True: 0.0, False: 0.0}
     for w in dr.net_segments:
         if w.bundle_id != bundle_id:
@@ -77,7 +91,8 @@ def _dangling(s, bundle_id):
         if not vs or len(vs) < 2:
             continue                       # an end is a tap, not a junction
         coord = (lambda v: v.x) if is_h(w.layer) else (lambda v: v.y)
-        lo, hi = min(map(coord, vs)), max(map(coord, vs))
+        ends = list(map(coord, vs)) + taps[w.seg_idx]
+        lo, hi = min(ends), max(ends)
         lead = max(lo - min(w.span_lo, w.span_hi), 0.0)
         trail = max(max(w.span_lo, w.span_hi) - hi, 0.0)
         out[is_h(w.layer)] += lead + trail

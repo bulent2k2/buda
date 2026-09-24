@@ -874,7 +874,16 @@ their edges:
 | | `all` (main) | `outside`, unconditional |
 |---|---|---|
 | bundle 42 | `TRUNK_V@x108000`, **2 segments** | `TRUNK_V@x125000`, **4 segments** |
-| dangling metal | 0 | **3,956,000** |
+| dangling metal (as measured then) | 0 | **3,956,000** |
+
+> **Correction (#959).** The dangling-metal row was the test's measurement,
+> and the measurement was wrong: `test_tapered_bit_spans`' heuristic counted
+> every metre of a wire past its outermost VIA as attached to nothing, so the
+> 4-segment trunk's run from its last junction to the block it TAPS
+> (`u_cl/u_c0/u_lsu`, y = 688000 — 20 bits x 197,800) read as dangling.
+> Re-measured with the segment's own busterm taps counted as legitimate ends,
+> that trunk carries **0**.  The rest of this section stands: the knob still
+> removed the 2-segment candidate, which is a trade and why it is opt-in.
 
 Two things are worth keeping from how that was caught:
 

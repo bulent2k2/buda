@@ -1140,7 +1140,7 @@ class NutsFlowMixin:
 
     def _escalate_dead_low_segments(self, max_iter: int = 5,
                                     cull_risk: bool = False,
-                                    only=None) -> int:
+                                    only=None, seek_host: bool = False) -> int:
         """Post-NUTS dead-span escalation (opt-in: `set_dead_span_escalate on`).
 
         After abstract NUTS, a LOW-layer segment whose ACTUAL placed geometry
@@ -1183,6 +1183,15 @@ class NutsFlowMixin:
         wrecks the placement (16 -> 140 opens, correctly rejected).  Only
         the refold uses this tier — its accept contract prices the residual
         uncertainty at zero; the unconditional entry/auto heals never do.
+
+        `seek_host` (ripup's post-climb refold ONLY): when the cheapest
+        same-direction TOP cannot host an ungoverned segment's seat, look for
+        one that can — the other TOPs, then the same-direction LOW layers
+        highest-first — instead of moving it onto a guaranteed strand.  Off
+        everywhere else, because an earlier heal's different move shifts the
+        basin every later healer climbs from (measured on
+        flow/rv/soc_conv_div: on in the run_detailed_nuts cull heal it ended
+        at 20 opens).
         """
         if self.nuts_result is None or self.routing_grid is None:
             return 0
@@ -1218,6 +1227,33 @@ class NutsFlowMixin:
         top_v = _cheapest_top(buda.LayerDir.VERTICAL)
 
         _member_bits = self._seg_member_bits
+
+        def _hosts(lid, w, sel, seg, b_lo, b_hi):
+            # DetailedNUTS admission on a candidate target layer — the same
+            # arithmetic the dead test above applies to the layer being left:
+            # the span-clear pool when it covers the full demand, else the
+            # midpoint pool, bounded by the cross-layer corner bounds.
+            if b_lo > b_hi or not self.routing_grid.has_layer(lid):
+                return False
+            g2 = self.routing_grid.get_layer_grid(lid)
+            need_l = self._seg_admission_need(w, sel, seg.seg_idx,
+                                              layer=lid)
+            pool_l = self._seg_admission_need(w, sel, seg.seg_idx,
+                                              credited=False, layer=lid)
+            if g2.count_signal_tracks_in_span(
+                    seg.span_lo, seg.span_hi,
+                    seg.interval_lo, seg.interval_hi) >= pool_l:
+                n = g2.count_signal_tracks_in_span(
+                    seg.span_lo, seg.span_hi, b_lo, b_hi)
+            else:
+                n = g2.count_signal_tracks_in(
+                    (seg.span_lo + seg.span_hi) / 2.0, b_lo, b_hi)
+            return n >= need_l
+
+        # Layers each segment has been moved to in THIS call, so the
+        # host-seeking fallback below cannot ping-pong a segment between two
+        # LOW layers across the re-solve iterations.
+        tried = {}
 
         total = 0
         for _ in range(max_iter):
@@ -1275,6 +1311,15 @@ class NutsFlowMixin:
                 if b_lo > b_hi:
                     pass          # bounds exclude the whole interval: 0 pool
                 elif cull_risk:
+                    # The stranding was MEASURED on the layer the segment had
+                    # when this call began; once this call has moved it,
+                    # that measurement says nothing about the new layer, so
+                    # it is not re-judged here — the caller's measured accept
+                    # is what judges the move.  (Re-judging it drove a
+                    # die-pin stub on flow/rv/soc_conv_div M5 -> M3 -> M1 ->
+                    # M7 in one call, ending on the one layer with no track.)
+                    if (seg.bundle_id, seg.seg_idx) in tried:
+                        continue
                     # Measured stranding + SURVIVAL predictor (refold tier):
                     # bits actually missing in the detailed result, and a
                     # bounded span-clear pool that cannot host the member
@@ -1346,10 +1391,10 @@ class NutsFlowMixin:
                 # can't-host TOP is no worse than staying on a dead LOW, and
                 # refusing to move would forfeit the escape.
                 #
-                # GOVERNED segments only.  The ungoverned path is
-                # corpus-measured and tuned (bigHalf no-rr opens 566 -> 135),
-                # so it stays byte-identical here; making the search general
-                # is a QoR question that deserves its own measurement.
+                # GOVERNED segments.  The ungoverned path is corpus-measured
+                # and tuned (bigHalf no-rr opens 566 -> 135), so it keeps the
+                # cheapest TOP whenever that TOP can host — see the branch
+                # below for the one case it now departs from.
                 if w.input.ndr.active():
                     cands = (pool if pool is not None else
                              [l for l in self.layers.get_layer_ids_by_dir(want_dir)
@@ -1364,8 +1409,39 @@ class NutsFlowMixin:
                                 seg.span_lo, seg.span_hi, b_lo, b_hi) >= need_l:
                             new_layer = l
                             break
+                # UNGOVERNED, and only under `seek_host` (the refold): the
+                # cheapest TOP stays the choice whenever it can host the seat
+                # (the corpus-tuned path).  Only when it CANNOT — a move that is a guaranteed strand
+                # on arrival — is a host sought: the other TOPs
+                # cheapest-first, then the same-direction LOW layers highest-
+                # first (in the band, for a governed cell).  Found on
+                # flow/rv/soc_conv_div once #956 removed the phantom tracks:
+                # a die-pin stub whose 500-unit window holds no M7 track at
+                # all (pitch 800) was escalated M5 -> M7 and stranded, while
+                # M3 hosts it clean.  No host anywhere keeps the historical
+                # unconditional move.
+                elif (seek_host and new_layer is not None
+                      and not _hosts(new_layer, w, sel, seg, b_lo, b_hi)):
+                    seen = tried.setdefault(
+                        (seg.bundle_id, seg.seg_idx), {seg.layer})
+                    same = [l for l in (w.input.allowed_layers
+                                        or self.layers.get_layer_ids_by_dir(
+                                            want_dir))
+                            if self.layers.has_layer(l)
+                            and self.layers.get_layer_dir(l) == want_dir
+                            and l not in seen]
+                    order = (sorted(l for l in same if self.layers.is_top(l))
+                             + sorted((l for l in same
+                                       if not self.layers.is_top(l)),
+                                      reverse=True))
+                    for l in order:
+                        if _hosts(l, w, sel, seg, b_lo, b_hi):
+                            new_layer = l
+                            break
                 if new_layer is None or new_layer == seg.layer:
                     continue
+                tried.setdefault((seg.bundle_id, seg.seg_idx),
+                                 {seg.layer}).add(new_layer)
                 sl = list(w.plan.seg_layers)
                 if seg.seg_idx >= len(sl) or sl[seg.seg_idx] == new_layer:
                     continue
