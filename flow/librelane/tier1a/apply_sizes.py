@@ -239,7 +239,31 @@ def main(argv=None):
     else:
         accw, acch = edgew, edgeh
     rule_pew, rule_peh, aspect_note = pew, peh, None
+    edge_note = ""
     if a.optimize_aspect:
+        # The edge knobs have to clear the placer's bar too, or the recipe
+        # still cannot harden: grow each (the feed/wbuf size as one, the
+        # accumulator's on its own) to the smallest that holds its cells'
+        # core -- BEFORE the PE search, which prices the die with them, and
+        # with an accumulator that INHERITS the edge size re-read after the
+        # growth (Codex on #957: the emitter inherits the grown EDGEH, so a
+        # stale copy predicted a die 366 um shorter than the emitted one).
+        grown = False
+        while any(not clears_bar(c, edgew, edgeh)[0]
+                  for c in EDGE_CELLS if c in sizes) and edgeh < 600:
+            edgeh += 1
+            grown = True
+        if grown:
+            edge_note += f"; edge grown to {edgew} x {edgeh} for the same reason"
+        if ACC in sizes:
+            grown = False
+            while not clears_bar(ACC, accw, acch)[0] and acch < 600:
+                acch += 1
+                grown = True
+            if grown:
+                edge_note += f"; acc grown to {accw} x {acch} for the same reason"
+        else:
+            accw, acch = edgew, edgeh
         d = json.load(open(os.path.join(a.sizes, "pe_cell.json"))).get("derivation", {})
         fn = d.get("face_needs", {})
         got = best_aspect("pe_cell", fn.get("w", 0.0), fn.get("h", 0.0),
@@ -250,25 +274,7 @@ def main(argv=None):
         pew, peh = got
         aspect_note = (f"PE reshaped {rule_pew} x {rule_peh} -> {pew} x {peh} "
                        f"to minimise the ARRAY's die, subject to the placer's "
-                       f"bar on its own core")
-    if a.optimize_aspect:
-        # The edge knobs have to clear too, or the recipe still cannot harden:
-        # grow each (the feed/wbuf size as one, the accumulator's on its own)
-        # to the smallest that holds its cells' core.
-        grown = False
-        while any(not clears_bar(c, edgew, edgeh)[0]
-                  for c in EDGE_CELLS if c in sizes) and edgeh < 600:
-            edgeh += 1
-            grown = True
-        if grown:
-            aspect_note += (f"; edge grown to {edgew} x {edgeh} for the same "
-                            f"reason")
-        grown = False
-        while ACC in sizes and not clears_bar(ACC, accw, acch)[0] and acch < 600:
-            acch += 1
-            grown = True
-        if grown:
-            aspect_note += f"; acc grown to {accw} x {acch} for the same reason"
+                       f"bar on its own core") + edge_note
     accmax = acc_width_bound(a.n, pew, peh, edgew, edgeh, acch)
     if accw > accmax:
         # The emitter places the accumulator on its PE's column: the column

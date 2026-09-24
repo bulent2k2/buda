@@ -273,3 +273,19 @@ def test_margins_and_density_are_the_hardenings_own(tmp_path):
     at75 = json.loads(_run(d2, "--n", "8", "--density", "75", "--json").stdout)
     pe = lambda r: [c for c in r["checks"] if c["cell"] == "pe_cell"][0]
     assert not pe(at50)["clears"] and pe(at75)["clears"]
+
+
+def test_an_inherited_accumulator_follows_the_grown_edge(tmp_path):
+    """With no acc_cell fragment the emitter inherits the FINAL edge height, so
+    the model must too: after --optimize-aspect grows EDGEH for the feed cell,
+    the acc height, the search and the predicted die all read the grown value
+    (Codex on #957: a stale copy predicted a die 366 um shorter than emitted)."""
+    d = _sizes_dir(tmp_path, [
+        _frag("pe_cell", 221, 59, area=5964, util=46.0, face_w=128.0, face_h=34.0),
+        _frag("feed_cell", 44.2, 20.0, area=1275, util=46.0)])      # too short for its cells
+    opt = json.loads(_run(d, "--n", "8", "--optimize-aspect", "--json").stdout)
+    assert "edge grown" in opt["aspect_note"] and opt["edge"]["h"] > 20
+    assert opt["acc"] == opt["edge"]
+    w, h, _px, _py = A.die(8, opt["pe"]["w"], opt["pe"]["h"], opt["edge"]["w"], opt["edge"]["h"],
+                           acch=opt["acc"]["h"])
+    assert opt["predicted_die"] == {"w": w, "h": h, "mm2": round(w * h / 1e6, 4)}
