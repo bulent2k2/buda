@@ -21,6 +21,24 @@ a sourced file).  It fails a
 run whose report records a command error, since the CLI prints `Error:` and
 carries on.
 
+The arms run one after the other, so each gets its own copy of every file
+the flow opens or writes.  Without that, the second arm inherited the first
+arm's database: a flow that builds its design into a named `open_bdb` file
+died in the second arm on rows the first had written, and a flow's own
+`save_bdb` left its checked-in fixture holding the one-net arm's route
+(both measured).  A named database is copied into each arm as it stood
+before the A/B; every file the flow writes is renamed into the arm; a single
+`:memory:` or `.sql` open goes through the engine's own redirect, the one
+`btcl -b` uses.  What cannot be kept apart is refused before either arm
+runs: a `.sql` opened with `writeback`, or a named open or file write inside
+a sourced file.  Of the 293 checked-in flows, none gains a refusal and 10
+have their text rewritten.
+
+When the flow opens exactly one database, each arm's routed checkpoint is
+also scored by the judge, `tools/independent_audit.py`, which reads the
+stored geometry and imports no engine.  Its verdict is a row of its own,
+beside `check_design`'s.
+
 ## The measurement
 
 **Setup.** Run on 2026-09-24:
@@ -90,6 +108,19 @@ Those are reasons to plan in groups that a wirelength column cannot score.
 * **One configuration.** Both arms run the flow's own settings.  No
   setting was tried that might suit one-net planning better, in time or
   in wire.
+* **The wire column's sign depends on the design.** On
+  `demo/comprehensive_demo.buda` the one-net arm uses **1.5 % MORE** wire
+  (70,104 against 71,152), the opposite direction to `soc_small`'s −4.1 %.
+  The speed result holds on both.
+* **The judge does not model non-default rules.** A wire governed by an NDR
+  spans several signal slots, so its centre is not a slot centre, and the
+  judge reports it `OFF_GRID`.  On `flow/ndr_shield_hier.buda` built into a
+  named file, it reported 20 of them, all on NDR-governed nets, where
+  `check_design` reported none.  Read a judge row on an NDR design with
+  that in mind.
+* **A file the flow READS after writing it** is followed into the arm only
+  by `open_bdb`.  No checked-in flow reads one of its own outputs any other
+  way.
 * **`set_max_bundle_bits 1` splits AFTER bundling.** The bundler's grouping
   runs and is then undone, which is why the bundler row is not faster in
   the one-net arm.  It measures planning one net at a time, not a bundler

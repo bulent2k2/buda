@@ -37,13 +37,31 @@ on one flow cannot collide; its flow log is kept and its path printed
 detail, and where the counts are read from, since the terminal carries one
 summary line per command) for anyone checking a row.
 
+The two arms run one after the other, so each gets its OWN copy of every
+file the flow opens or writes (the owner's review of #953).  A named
+`open_bdb` target is copied into the arm as it stood before the A/B — the
+second arm used to inherit the first arm's rows, which kills a flow that
+builds its design into a named file — and every file the flow writes
+(`save_bdb`, `emit_*`, `export_*`, a `derive_* file`) is renamed into the
+arm, so the A/B never writes into the user's tree: it used to leave a
+checked-in fixture holding the one-net arm's route.  A single `:memory:` or
+`.sql` open needs no rewrite: the engine's own redirect, the one `btcl -b`
+uses (`BUDA_BDB_MEMORY_TO` / `BUDA_BDB_MATERIALIZE_TO`), puts it in the
+arm with the flow's text unchanged.  Each arm's databases stay in a temp directory, printed, and
+when the flow opens exactly one BDB its routed checkpoint is scored by the
+judge (`tools/independent_audit.py`) in a row of its own beside
+`check_design`'s.
+
 A flow with no bundler in its own text is refused — one reached through
 `source` cannot be injected before — and so is a flow that sets
 `set_max_bundle_bits` anywhere in its source tree, whose own cap (or a
 scoped rule, which outranks the global one for its prefix) would make "one
 net per bundle" untrue for part of the design while the table still said
 it.  A run whose report records a command error fails rather than being
-tabled: the CLI prints `Error:` and carries on, exit 0.
+tabled: the CLI prints `Error:` and carries on, exit 0.  Also refused is
+what cannot be kept apart: a `.sql` opened with `writeback`, and a named
+database open or a file write in a SOURCED file, whose text is not the
+tool's to rewrite.  Every refusal is decided before either arm runs.
 
 Exit 0 on a measurement, 2 on a refusal, 1 when a run fails.
 """
@@ -52,6 +70,8 @@ import argparse
 import json
 import os
 import re
+import shutil
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -60,7 +80,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
-from buda_script import sole_path_arg, strip_inline_comment  # noqa: E402
+from buda_script import (leading_path_and_options, sole_path_arg,  # noqa: E402
+                         strip_inline_comment)
 
 BUNDLERS = ("run_hier_bundler", "run_bundler")
 INJECTED = "set_max_bundle_bits 1"
@@ -123,9 +144,10 @@ def _canonical_words(commands):
 
 def _source_tree(text, base_dir, name, aliases=None, stack=None,
                  top=True):
-    """Yield (file, line number, command, top-level line index or None) for
-    every line of `text` and, recursively, of every file it `source`s, in
-    the order the engine runs them.
+    """Yield (file, line number, command, top-level line index or None,
+    the line with its comment stripped) for every line of `text` and,
+    recursively, of every file it `source`s, in the order the engine runs
+    them.
 
     The command is CANONICAL, the way `BudaSession.do_command` dispatches
     it: lower-cased, then resolved through the `alias` table as the walk
@@ -146,13 +168,14 @@ def _source_tree(text, base_dir, name, aliases=None, stack=None,
     stack = [] if stack is None else stack
     for i, line in enumerate(text.splitlines()):
         n = i + 1
-        toks = strip_inline_comment(line).split()
+        bare = strip_inline_comment(line).strip()
+        toks = bare.split()
         if not toks:
             continue
         word = _canonical(toks, aliases)
-        yield name, n, word, (i if top else None)
+        yield name, n, word, (i if top else None), bare
         if word == "source":
-            raw = sole_path_arg(strip_inline_comment(line).strip())
+            raw = sole_path_arg(bare)
             path = _resolve_source(base_dir, raw) if raw else ""
             if not path or not os.path.isfile(path):
                 raise Refused(f"{name}:{n} sources {raw!r}, which cannot "
@@ -171,6 +194,17 @@ def _source_tree(text, base_dir, name, aliases=None, stack=None,
                 stack.pop()
 
 
+def _walk_root(base_dir, name):
+    """(base_dir, recursion stack) to start a walk of the flow `name` from.
+    With no `base_dir` no sourced file can be read, so a `source` refuses;
+    the flow itself is on the stack when it is a real file, so a flow that
+    sources itself is caught at the first hop."""
+    if base_dir is None:
+        return os.path.join(os.sep, "nonexistent-bundling-ab"), []
+    top = os.path.join(base_dir, name)
+    return base_dir, ([os.path.realpath(top)] if os.path.isfile(top) else [])
+
+
 def unbundled_text(text, base_dir=None, name="flow"):
     """`text` with INJECTED placed right before its first bundler.
 
@@ -179,14 +213,10 @@ def unbundled_text(text, base_dir=None, name="flow"):
     when `base_dir` says where those resolve from, any file it sources —
     already declares a bundle-bit cap."""
     lines = text.splitlines(keepends=True)
-    if base_dir is None:
-        # No sourced files can be read; a `source` line refuses.
-        base_dir = os.path.join(os.sep, "nonexistent-bundling-ab")
+    base_dir, stack = _walk_root(base_dir, name)
     first = None
-    top = os.path.join(base_dir, name)
-    stack = [os.path.realpath(top)] if os.path.isfile(top) else []
-    for where, n, w, top_i in _source_tree(text, base_dir, name,
-                                           stack=stack):
+    for where, n, w, top_i, _ in _source_tree(text, base_dir, name,
+                                              stack=stack):
         if w == "set_max_bundle_bits":
             raise Refused(
                 f"{where}:{n} already sets set_max_bundle_bits; its cap, or "
@@ -206,6 +236,211 @@ def unbundled_text(text, base_dir=None, name="flow"):
     inject = [f"# bundling_ab: every net its own bundle{nl}",
               f"{INJECTED}{nl}"]
     return "".join(lines[:i] + inject + lines[i:])
+
+
+# ── Each arm's own database ───────────────────────────────────────────────
+#
+# The two arms run one after the other against the flow's OWN `open_bdb`
+# target, so without this the second inherits whatever the first left there.
+# A flow that BUILDS its design into a named file (`add_cell` / `add_inst`)
+# then fails in the second arm on rows the first arm wrote — an engine FATAL
+# after the first arm has run to completion — and either way the user's
+# checkpoint is left holding one arm's route with nothing saying which (the
+# owner's review of #953).  So each arm gets its own copy of every database
+# the flow opens, as the file stood BEFORE the A/B, and the flow's own files
+# are never written.  The same machinery gives each arm a routed checkpoint
+# the judge (`tools/independent_audit.py`) can score.
+
+# Every command that writes a file the flow names, and where the name is:
+# "lead" = the first argument, "rest" = the whole rest of the line (a
+# command whose one argument IS a path), and option words whose value is a
+# path.  A flow writing through any of these would have the second arm
+# overwrite the first arm's output in the user's tree — measured: the A/B
+# of `flow/hier_user_topos.buda` rewrote the checked-in
+# `flow/hier_user_topos.bdb.sql` through the flow's own `save_bdb`.
+OUTPUT_WRITERS = {
+    "save_bdb": ("rest", ()),
+    "emit_guides": ("lead", ("tcl", "csv")),
+    "emit_pin_def": ("lead", ()),
+    "emit_block_size": ("lead", ()),
+    "export_def_blockages": ("lead", ()),
+    "export_gds": ("lead", ()),
+    "derive_cell_layer_shares": (None, ("file",)),
+    "derive_cell_layer_reserves": (None, ("file",)),
+    "derive_top_plan": (None, ("file",)),
+}
+
+# Where each arm's files are made.  None = the system temp directory; a
+# test points it at its own tmp_path.
+WORK_ROOT = None
+
+# A token the way the engine's tokenizer reads one: a quote is honoured only
+# where a token BEGINS (buda_script.split_quoted_args).
+_TOKEN = re.compile(r'"[^"]*"|\'[^\']*\'|\S+')
+
+
+class Isolation:
+    """How one arm runs apart from the other: its flow text (every file the
+    flow opens or writes renamed into the arm's own directory), the
+    environment redirect for a single `:memory:` or `.sql` open, the
+    pre-A/B databases to copy in, and the checkpoint the judge scores
+    (None, with the reason in `no_judge`)."""
+
+    def __init__(self):
+        self.text = None
+        self.env = {}
+        self.copies = []            # (flow's file, the arm's copy)
+        self.checkpoint = None
+        self.no_judge = "the flow opens no BDB"
+
+
+def _quote(path):
+    if not any(c.isspace() for c in path):
+        return path
+    for q in ('"', "'"):
+        if q not in path:
+            return f"{q}{path}{q}"
+    raise Refused(f"no quoting can carry the path {path!r}")
+
+
+def _unquote(tok):
+    return tok[1:-1] if len(tok) >= 2 and tok[0] == tok[-1] in "\"'" else tok
+
+
+def _path_spans(line, slot, opts):
+    """(start, end) of every path argument on `line` for a command whose
+    paths sit at `slot` ("lead", "rest" or None) and after `opts`."""
+    body = strip_inline_comment(line).rstrip()
+    toks = [(m.start(), m.end()) for m in _TOKEN.finditer(body)][1:]
+    if not toks:
+        return []
+    if slot == "rest":
+        return [(toks[0][0], len(body))]
+    spans = [toks[0]] if slot == "lead" else []
+    for k in range(len(toks) - 1):
+        if body[toks[k][0]:toks[k][1]].lower() in opts:
+            spans.append(toks[k + 1])
+    return spans
+
+
+def isolate(text, base_dir, name, arm_dir):
+    """An Isolation for running `text` (the flow `name`, resolving from
+    `base_dir`) with every file it opens or writes in `arm_dir`.
+
+    A durable database the flow opens is COPIED into the arm as it stood
+    before the A/B, so both arms start from the same state and neither
+    writes the flow's own file; a file the flow writes is renamed into the
+    arm; a later open of a file the arm itself wrote follows it there.
+    Refused: a `.sql` opened with `writeback` (each arm would dump its
+    route into the fixture, and the engine's own redirect declines that
+    shape), and a durable open or a write in a SOURCED file — its text is
+    not ours to rewrite, and the engine redirect covers only a `:memory:`
+    or `.sql` open."""
+    base_dir, stack = _walk_root(base_dir, name)
+    iso = Isolation()
+    lines = text.splitlines(keepends=True)
+    mapped, opens = {}, []
+
+    def arm_path(real):
+        if real not in mapped:
+            mapped[real] = os.path.join(
+                arm_dir, f"{len(mapped)}_{os.path.basename(real)}")
+        return mapped[real]
+
+    def rewrite(i, spans):
+        line = lines[i]
+        new = [_quote(arm_path(os.path.realpath(os.path.join(
+            base_dir, _unquote(line[lo:hi].strip()))))) for lo, hi in spans]
+        for (lo, hi), path in reversed(list(zip(spans, new))):
+            line = line[:lo] + path + line[hi:]
+        lines[i] = line
+
+    for where, n, w, top_i, bare in _source_tree(text, base_dir, name,
+                                                 stack=stack):
+        if w == "open_bdb":
+            path, opts = leading_path_and_options(bare)
+            writeback = bool(opts) and opts[0] == "writeback"
+            opens.append(path)
+            real = (os.path.realpath(os.path.join(base_dir, path))
+                    if path and path != ":memory:" else None)
+            if path.endswith(".sql") and writeback:
+                raise Refused(
+                    f"{where}:{n} opens {path} with `writeback`, so each arm "
+                    f"would write its route back into that file")
+            durable = real is not None and not path.endswith(".sql")
+            if not (durable or real in mapped):
+                continue            # :memory: / a .sql input: never written
+            if top_i is None:
+                raise Refused(
+                    f"{where}:{n} opens the database {path}, which both arms "
+                    f"would share and the first would leave its route in; an "
+                    f"open in a sourced file cannot be given to each arm "
+                    f"separately (move it into the flow's own text)")
+            if real not in mapped and os.path.exists(real):
+                iso.copies.append((real, arm_path(real)))
+            rewrite(top_i, _path_spans(lines[top_i], "lead", ()))
+        elif w in OUTPUT_WRITERS:
+            if top_i is None:
+                if _path_spans(bare, *OUTPUT_WRITERS[w]):
+                    raise Refused(
+                        f"{where}:{n} `{w}` writes a file, which the second "
+                        f"arm would overwrite in your tree; a write in a "
+                        f"sourced file cannot be given to each arm "
+                        f"separately (move it into the flow's own text)")
+                continue
+            rewrite(top_i, _path_spans(lines[top_i], *OUTPUT_WRITERS[w]))
+    iso.text = "".join(lines)
+    if len(opens) == 1:
+        path = opens[0]
+        ckpt = os.path.join(arm_dir, "checkpoint.bdb")
+        if path == ":memory:":
+            iso.env["BUDA_BDB_MEMORY_TO"] = ckpt
+            iso.checkpoint = ckpt
+        elif path.endswith(".sql"):
+            iso.env["BUDA_BDB_MATERIALIZE_TO"] = ckpt
+            iso.checkpoint = ckpt
+        elif path:
+            iso.checkpoint = mapped[os.path.realpath(
+                os.path.join(base_dir, path))]
+        iso.no_judge = None
+    elif opens:
+        iso.no_judge = (f"the flow opens {len(opens)} databases, so which "
+                        f"one holds the route is not known")
+    return iso
+
+
+def _copy_bdb(src, dst):
+    """A consistent copy of the SQLite database `src` (its WAL included),
+    through SQLite's own backup rather than a byte copy of the main file."""
+    s = sqlite3.connect(f"file:{src}?mode=ro", uri=True)
+    d = sqlite3.connect(dst)
+    try:
+        s.backup(d)
+    finally:
+        d.close()
+        s.close()
+
+
+def judge(checkpoint):
+    """The judge's verdict on one arm's checkpoint: "clean", "dirty (N)",
+    or "unjudgeable" — `tools/independent_audit.py` run as its own process,
+    since it imports no engine and must not share one with anything."""
+    if not checkpoint or not os.path.isfile(checkpoint):
+        return None
+    fd, out = tempfile.mkstemp(suffix=".json")
+    os.close(fd)
+    try:
+        r = subprocess.run(
+            [sys.executable, str(ROOT / "tools" / "independent_audit.py"),
+             checkpoint, "--json", out, "--quiet"],
+            capture_output=True, text=True,
+            env={**os.environ, "PYTHONPATH": ""})
+        if r.returncode in (0, 1):
+            res = json.loads(Path(out).read_text())
+            return "clean" if res["clean"] else f"dirty ({res['total']})"
+        return "unjudgeable"
+    finally:
+        os.unlink(out)
 
 
 def _sum_stage(commands, words):
@@ -268,14 +503,24 @@ def summarize(report, stdout, log=""):
     }
 
 
-def run_arm(flow, text, tag):
+def run_arm(flow, text, tag, iso=None):
     """Run `text` as a sibling of `flow`; return (report, stdout, log).
 
     The variant and its report are EXCLUSIVE files this call creates
     (`mkstemp`), so two invocations on one flow cannot truncate or delete
     each other's, nor a file that happened to carry a fixed name (Codex P2
-    on #953); only those two are removed afterwards."""
+    on #953); only those two are removed afterwards.  With `iso`, the arm
+    runs `iso.text` against its own databases (see `isolate`), and the
+    report carries the judge's verdict on its checkpoint."""
     flow = Path(flow).resolve()
+    if iso is not None:
+        text = iso.text
+        for src, dst in iso.copies:
+            try:
+                _copy_bdb(src, dst)
+            except sqlite3.Error as e:
+                raise RuntimeError(f"the {tag} arm could not copy {src} "
+                                   f"({e})") from e
     stem = f".bundling_ab_{flow.stem}_{tag}_"
     fd, vpath = tempfile.mkstemp(prefix=stem, suffix=".buda", dir=flow.parent)
     variant = Path(vpath)
@@ -291,6 +536,10 @@ def run_arm(flow, text, tag):
                "PYTHONPATH": os.pathsep.join(
                    [str(ROOT / "build"), str(ROOT / "src"),
                     str(ROOT / "tools")])}
+        for k in ("BUDA_BDB_MEMORY_TO", "BUDA_BDB_MATERIALIZE_TO"):
+            env.pop(k, None)          # only this arm's own redirect applies
+        if iso is not None:
+            env.update(iso.env)
         t0 = time.time()
         r = subprocess.run(
             [sys.executable, str(ROOT / "src" / "buda_cli.py"), "--no-viz",
@@ -316,6 +565,13 @@ def run_arm(flow, text, tag):
         log = log_path.read_text() if log_path.exists() else ""
         if log:
             print(f"[bundling_ab] {tag} flow log: {log_path}", flush=True)
+        if iso is not None:
+            if iso.checkpoint and os.path.isfile(iso.checkpoint):
+                print(f"[bundling_ab] {tag} checkpoint: {iso.checkpoint}",
+                      flush=True)
+                report["judge"] = judge(iso.checkpoint)
+            else:
+                report["judge"] = None
         return report, r.stdout, log
     finally:
         for p in (variant, report_path):
@@ -363,6 +619,9 @@ def render(flow, rows):
         u["final_violations"], compare=None)
     row("detailed wirelength", b["detailed_wl"], u["detailed_wl"],
         compare=_delta)
+    if b.get("judge") or u.get("judge"):
+        row("judge (independent_audit)", b.get("judge"), u.get("judge"),
+            compare=None)
     return "\n".join(out)
 
 
@@ -382,13 +641,42 @@ def main(argv=None):
         print(f"bundling_ab: refused: {e}", file=sys.stderr)
         return 2
 
+    # Every refusal is decided here, BEFORE either arm runs: a flow the
+    # second arm cannot run must not cost the first arm's minutes.
+    arms, isos, dirs = (("bundled", text), ("unbundled", variant)), {}, []
+    try:
+        for tag, t in arms:
+            dirs.append(tempfile.mkdtemp(
+                prefix=f"bundling_ab_{flow.stem}_{tag}_", dir=WORK_ROOT))
+            isos[tag] = isolate(t, str(flow.parent), str(flow), dirs[-1])
+    except Refused as e:
+        for d in dirs:
+            shutil.rmtree(d, ignore_errors=True)
+        print(f"bundling_ab: refused: {e}", file=sys.stderr)
+        return 2
+    try:
+        return _measure(args, arms, isos)
+    finally:
+        for d in dirs:              # an arm that kept no database
+            try:
+                os.rmdir(d)
+            except OSError:
+                pass
+
+
+def _measure(args, arms, isos):
+    iso = isos["bundled"]
+    if iso.no_judge:
+        print(f"[bundling_ab] no judge column: {iso.no_judge}", flush=True)
+
     rows = {}
     try:
-        for tag, t in (("bundled", text), ("unbundled", variant)):
+        for tag, t in arms:
             print(f"[bundling_ab] running {tag}...", flush=True)
-            report, stdout, log = run_arm(args.flow, t, tag)
+            report, stdout, log = run_arm(args.flow, t, tag, iso=isos[tag])
             rows[tag] = summarize(report, stdout, log)
             rows[tag]["wall_seconds"] = report["wall_seconds"]
+            rows[tag]["judge"] = report.get("judge")
     except RuntimeError as e:
         print(f"bundling_ab: {e}", file=sys.stderr)
         return 1

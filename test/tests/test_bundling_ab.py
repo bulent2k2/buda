@@ -194,6 +194,8 @@ def test_flat_candidates_without_a_log_are_unknown_not_one_bundle():
 
 def _fake_run(report, log=None):
     def run(argv, **kw):
+        if "--report-json" not in argv:      # the judge, on a checkpoint
+            return ab.subprocess.CompletedProcess(argv, 2, "", "")
         path = Path(argv[argv.index("--report-json") + 1])
         path.write_text(ab.json.dumps(report))
         if log is not None:
@@ -344,3 +346,164 @@ def test_an_aliased_generator_is_found_in_the_log():
            "Generated 3 topologies for bundle 2 (a->c) 2 nets\n"
            "━━━ run_planner 10 ━━━\n")
     assert ab.summarize({}, "", log)["candidates"] == 5
+
+
+# ── The owner's review on #953: each arm its own files ────────────────────
+#
+# The arms run one after the other, so every file the flow opens or writes
+# was shared: a flow BUILDING its design into a named `open_bdb` target
+# died in the second arm on the first arm's rows, and a flow's `save_bdb`
+# left its checked-in fixture holding the one-net arm's route.
+
+def test_a_durable_open_is_renamed_into_the_arm(tmp_path):
+    text = "open_bdb ckpt.bdb   # the design\nrun_hier_bundler\n"
+    iso = ab.isolate(text, str(tmp_path), "f.buda", str(tmp_path / "arm"))
+    first = iso.text.splitlines()[0]
+    assert first.startswith("open_bdb " + str(tmp_path / "arm"))
+    assert first.endswith("# the design")
+    assert iso.checkpoint == str(tmp_path / "arm" / "0_ckpt.bdb")
+    assert iso.copies == [] and iso.env == {}
+
+
+def test_an_existing_database_is_copied_not_written(tmp_path, monkeypatch):
+    import sqlite3
+    db = tmp_path / "ckpt.bdb"
+    with sqlite3.connect(db) as c:
+        c.execute("create table t(x)")
+        c.execute("insert into t values (7)")
+    before = db.read_bytes()
+    flow = tmp_path / "f.buda"
+    flow.write_text("open_bdb ckpt.bdb\nrun_bundler STRICT\n")
+    arm = tmp_path / "arm"
+    arm.mkdir()
+    iso = ab.isolate(flow.read_text(), str(tmp_path), str(flow), str(arm))
+    monkeypatch.setattr(ab.subprocess, "run", _fake_run(
+        {"exit_status": 0, "commands": []}))
+    ab.run_arm(flow, flow.read_text(), "bundled", iso=iso)
+    with sqlite3.connect(iso.checkpoint) as c:
+        assert c.execute("select x from t").fetchall() == [(7,)]
+    assert db.read_bytes() == before
+
+
+def test_a_single_memory_or_sql_open_is_redirected_by_the_engine(tmp_path):
+    for path, var in ((":memory:", "BUDA_BDB_MEMORY_TO"),
+                      ("in.bdb.sql", "BUDA_BDB_MATERIALIZE_TO")):
+        iso = ab.isolate(f"open_bdb {path}\nrun_bundler STRICT\n",
+                         str(tmp_path), "f.buda", str(tmp_path / "arm"))
+        assert iso.env == {var: str(tmp_path / "arm" / "checkpoint.bdb")}
+        assert iso.checkpoint == iso.env[var]
+        assert iso.text.startswith(f"open_bdb {path}\n")   # text unchanged
+
+
+def test_several_opens_or_none_leave_no_judge_column(tmp_path):
+    iso = ab.isolate("open_bdb a.bdb.sql\nopen_bdb :memory:\n"
+                     "run_bundler STRICT\n", str(tmp_path), "f.buda",
+                     str(tmp_path / "arm"))
+    assert iso.checkpoint is None and "2 databases" in iso.no_judge
+    assert iso.env == {}
+    iso = ab.isolate("run_bundler STRICT\n", str(tmp_path), "f.buda",
+                     str(tmp_path / "arm"))
+    assert iso.checkpoint is None and "no BDB" in iso.no_judge
+
+
+def test_writeback_and_a_sourced_durable_open_refuse(tmp_path):
+    with pytest.raises(ab.Refused, match="writeback"):
+        ab.isolate("open_bdb x.bdb.sql writeback\nrun_bundler STRICT\n",
+                   str(tmp_path), "f.buda", str(tmp_path / "arm"))
+    (tmp_path / "setup.buda").write_text("open_bdb ckpt.bdb\n")
+    with pytest.raises(ab.Refused, match="setup.buda:1 opens the database"):
+        ab.isolate("source setup.buda\nrun_bundler STRICT\n",
+                   str(tmp_path), "f.buda", str(tmp_path / "arm"))
+    (tmp_path / "out.buda").write_text("save_bdb snap.bdb.sql\n")
+    with pytest.raises(ab.Refused, match="out.buda:1 `save_bdb` writes"):
+        ab.isolate("run_bundler STRICT\nsource out.buda\n",
+                   str(tmp_path), "f.buda", str(tmp_path / "arm"))
+
+
+def test_every_file_the_flow_writes_is_renamed_into_the_arm(tmp_path):
+    arm = str(tmp_path / "arm dir")
+    text = ("open_bdb :memory:\nrun_hier_bundler\n"
+            "save_bdb my snap.bdb.sql\n"
+            "emit_guides out/g.json margin 20 csv out/g.csv tcl out/g.tcl\n"
+            "EXPORT_GDS out/c.gds outline 10   # upper case runs too\n"
+            "derive_top_plan cells a file out/plan.buda\n"
+            "save_bdb\n")
+    out = ab.isolate(text, str(tmp_path), "f.buda", arm).text.splitlines()
+    assert out[2] == f'save_bdb "{arm}/0_my snap.bdb.sql"'
+    assert out[3] == (f'emit_guides "{arm}/1_g.json" margin 20 '
+                      f'csv "{arm}/2_g.csv" tcl "{arm}/3_g.tcl"')
+    assert out[4] == (f'EXPORT_GDS "{arm}/4_c.gds" outline 10   '
+                      f'# upper case runs too')
+    assert out[5] == f'derive_top_plan cells a file "{arm}/5_plan.buda"'
+    assert out[6] == "save_bdb"          # no path: nothing of the user's
+
+
+def test_an_open_of_a_file_the_arm_wrote_follows_it(tmp_path):
+    text = ("open_bdb :memory:\nrun_bundler STRICT\nsave_bdb s.bdb.sql\n"
+            "open_bdb s.bdb.sql\n")
+    iso = ab.isolate(text, str(tmp_path), "f.buda", str(tmp_path / "arm"))
+    out = iso.text.splitlines()
+    assert out[3] == f"open_bdb {tmp_path}/arm/0_s.bdb.sql"
+
+
+def test_a_refusal_comes_before_either_arm_runs(tmp_path, monkeypatch):
+    (tmp_path / "setup.buda").write_text("open_bdb ckpt.bdb\n")
+    flow = tmp_path / "f.buda"
+    flow.write_text("source setup.buda\nrun_bundler STRICT\n")
+    monkeypatch.setattr(ab, "WORK_ROOT", str(tmp_path / "work"))
+    (tmp_path / "work").mkdir()
+
+    def never(*a, **k):
+        raise AssertionError("an arm ran")
+    monkeypatch.setattr(ab.subprocess, "run", never)
+    assert ab.main([str(flow)]) == 2
+    assert list((tmp_path / "work").iterdir()) == []
+
+
+def test_an_arm_sees_only_its_own_redirect(tmp_path, monkeypatch):
+    flow = tmp_path / "f.buda"
+    flow.write_text("run_bundler STRICT\n")
+    iso = ab.isolate(flow.read_text(), str(tmp_path), str(flow),
+                     str(tmp_path))
+    iso.env = {"BUDA_BDB_MEMORY_TO": "mine"}
+    monkeypatch.setenv("BUDA_BDB_MATERIALIZE_TO", "stale")
+    seen = {}
+
+    def run(argv, **kw):
+        seen.update(kw["env"])
+        return _fake_run({"exit_status": 0, "commands": []})(argv, **kw)
+    monkeypatch.setattr(ab.subprocess, "run", run)
+    ab.run_arm(flow, flow.read_text(), "bundled", iso=iso)
+    assert seen["BUDA_BDB_MEMORY_TO"] == "mine"
+    assert "BUDA_BDB_MATERIALIZE_TO" not in seen
+
+
+def test_a_flow_building_into_a_named_database_runs_both_arms(
+        tmp_path, monkeypatch):
+    """The owner's case, run for real: a self-contained hier flow whose
+    `open_bdb` names a durable file.  The second arm used to die on the
+    first arm's rows (`add_inst: insert failed (name exists?)`), leaving
+    the flow's file holding the bundled route."""
+    root = Path(__file__).resolve().parents[2]
+    text = (root / "flow" / "ndr_shield_hier.buda").read_text()
+    assert "open_bdb :memory:" in text
+    flow = tmp_path / "durable.buda"
+    flow.write_text(text.replace("open_bdb :memory:", "open_bdb ckpt.bdb"))
+    monkeypatch.setattr(ab, "WORK_ROOT", str(tmp_path))
+    out = tmp_path / "rows.json"
+    assert ab.main([str(flow), "--json", str(out)]) == 0
+    rows = ab.json.loads(out.read_text())
+    assert rows["bundled"]["bundles"] < rows["unbundled"]["bundles"]
+    assert rows["bundled"]["judge"] and rows["unbundled"]["judge"]
+    assert not (tmp_path / "ckpt.bdb").exists()
+
+
+def test_a_named_database_that_is_not_one_fails_the_run(tmp_path):
+    (tmp_path / "ckpt.bdb").write_text("not a database")
+    flow = tmp_path / "f.buda"
+    flow.write_text("open_bdb ckpt.bdb\nrun_bundler STRICT\n")
+    arm = tmp_path / "arm"
+    arm.mkdir()
+    iso = ab.isolate(flow.read_text(), str(tmp_path), str(flow), str(arm))
+    with pytest.raises(RuntimeError, match="could not copy"):
+        ab.run_arm(flow, flow.read_text(), "bundled", iso=iso)
