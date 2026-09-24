@@ -236,3 +236,15 @@ def test_an_inherited_edge_size_wider_than_the_pe_is_refused_too(tmp_path):
     d = _sizes_dir(tmp_path, [_frag("pe_cell", 100.0, 47.5), _frag("feed_cell", 140.0, 44.2)])
     r = _run(d, "--n", "8", "--args")
     assert r.returncode != 0 and "acc_cell inherits" in r.stderr
+
+
+def test_optimize_aspect_widens_the_pe_to_the_accumulator_rather_than_refusing(tmp_path):
+    """The width refusal is judged AFTER the aspect search, whose floor is the
+    accumulator's width: a rule PE narrower than its accumulator is a valid
+    input to --optimize-aspect, which widens it (Codex on #957)."""
+    d = _sizes_dir(tmp_path, [
+        _frag("pe_cell", 100.0, 120.0, area=5964, util=46.0, face_w=100.0, face_h=34.0),
+        _frag("acc_cell", 140.0, 51.1), _frag("feed_cell", 44.2, 44.2)])
+    assert _run(d, "--n", "8", "--args").returncode != 0            # the plain path refuses
+    opt = json.loads(_run(d, "--n", "8", "--optimize-aspect", "--json").stdout)
+    assert opt["pe"]["w"] >= 140 and opt["acc"]["w"] == 140

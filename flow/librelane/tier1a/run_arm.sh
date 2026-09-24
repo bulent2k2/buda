@@ -99,9 +99,11 @@ ll_run() {   # ll_run <log> <librelane args...>
 # fields, so a row without the status would file a run that failed signoff
 # as a finished experiment (Codex on #957).  ll_final records it in DEFERRED.
 DEFERRED=
-ll_final() {   # ll_final <log> <run_dir> <librelane args...>
-    local log=$1 run=$2; shift 2
-    if "${LL[@]}" "$@" > "$log" 2>&1; then return 0; fi
+# It runs in THIS shell and cds inside, because `(cd ... && ll_final ...)`
+# would set DEFERRED in a subshell and lose it (Codex on #957).
+ll_final() {   # ll_final <log> <run_dir> <cwd> <librelane args...>
+    local log=$1 run=$2 cwd=$3; shift 3
+    if (cd "$cwd" && "${LL[@]}" "$@") > "$log" 2>&1; then return 0; fi
     if { tr '\r' '\n' < "$log" | grep -q "deferred errors"; } && [ -f "$run/final/metrics.json" ]; then
         DEFERRED=$(tr '\r' '\n' < "$log" | grep -A4 "deferred errors" | grep -vE "deferred errors|encountered:" \
                    | sed -E 's/[[:space:]]+[a-z_]+\.py:[0-9]+[[:space:]]*$//' | tr -s '[:space:]' ' ' | sed -E 's/^ //; s/ $//')
@@ -169,7 +171,7 @@ fi
 # 3. the top
 stamp "top start"
 if [ "$tag" = h ]; then
-    (cd "$d/h/top" && ll_final "$d/h/log/top_$TOPTAG.log" "$d/h/top/runs/$TOPTAG" --run-tag "$TOPTAG" config.json)
+    ll_final "$d/h/log/top_$TOPTAG.log" "$d/h/top/runs/$TOPTAG" "$d/h/top" --run-tag "$TOPTAG" config.json
 else
     (cd "$d/h/top" && ll_run "$d/h/log/top_${TOPTAG}_a.log" --run-tag "$TOPTAG" \
         --to OpenROAD.DetailedRouting --skip OpenROAD.DetailedRouting config.json)
@@ -196,8 +198,8 @@ else
         ODB="$ODB" GUIDE="$d/h/top/out/buda_bus.guide" OUT="$d/h/top/out" > "$d/h/log/guide_route_$TOPTAG.log" 2>&1)
     grep -q "wrote" "$d/h/log/guide_route_$TOPTAG.log" || { echo "run_arm: guide_route.tcl wrote nothing (see $d/h/log/guide_route_$TOPTAG.log)" >&2; exit 1; }
     stamp "guides in; top resume"
-    (cd "$d/h/top" && ll_final "$d/h/log/top_${TOPTAG}_b.log" "$d/h/top/runs/$TOPTAG" --last-run --from OpenROAD.DetailedRouting \
-        -e odb="$d/h/top/out/guided.odb" config.json)
+    ll_final "$d/h/log/top_${TOPTAG}_b.log" "$d/h/top/runs/$TOPTAG" "$d/h/top" --last-run --from OpenROAD.DetailedRouting \
+        -e odb="$d/h/top/out/guided.odb" config.json
 fi
 stamp "top end"
 # Did the top COMPLETE?  Read the leg that ends the flow -- for H+B the
