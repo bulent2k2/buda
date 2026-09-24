@@ -87,6 +87,22 @@ enum class ViolationKind {
                   // though every block is tapped and every junction touches
                   // (e.g. a TopoEdit session that removed the only bridging
                   // stub and committed with comps=2)
+    OFF_GRID,     // a placed bit-wire (or shield) whose METAL is not on the
+                  // SIGNAL slots of its layer's track pattern in force at its
+                  // along-midpoint: the extent [pos - w/2, pos + w/2] must
+                  // begin at the low edge of one SIGNAL slot and end at the
+                  // high edge of one, with every slot between them SIGNAL
+                  // (no rail inside the wire).  A plain bit is a run of one;
+                  // an NDR bit of width_slots k is a run of k, its centre
+                  // between slot centres by construction — so the rule is
+                  // the run's EDGES, not the centre (the judge's centre rule
+                  // flags every even-k NDR wire, #954); whether the run has
+                  // the RIGHT k is NDR_WIDTH's question, not this one.
+                  // Unbuildable in the same way LAYER_DIR is: metal the
+                  // technology has no track for.  dnuts only (abstract NUTS
+                  // positions are not track-snapped), and only when
+                  // check_dnuts is handed the routing grid (issue #947 — the
+                  // gap that let #946's off-grid copies audit clean)
 };
 
 struct ConnViolation {
@@ -178,9 +194,21 @@ ConnResult check_nuts(const ConnTopology& ct, const NUTSResult& nuts,
 // Includes block-coverage check for pass-through blocks at placed positions,
 // layer-direction validity (H segment on H layer, V on V), and the
 // KEEPOUT_CROSS audit (zone_fp as in check_nuts).
+//
+// grid: the routing grid the bits were placed on; when given, every placed
+// bit-wire and shield is also audited OFF_GRID (see ViolationKind).
+// nullptr = no on-grid audit (the historical behaviour, and what every
+// caller that is not `check_design` still gets).
 ConnResult check_dnuts(const ConnTopology& ct, const DetailedNUTSResult& dnuts,
                        const Topology& topo, const Floorplan& fp,
                        const LayerStack& layers, int bundle_id, int num_bits,
-                       const Floorplan* zone_fp = nullptr);
+                       const Floorplan* zone_fp = nullptr,
+                       const RoutingGridStack* grid = nullptr);
+
+// The on-grid predicate itself, on one wire: does the metal extent
+// [lo, hi] (perpendicular axis) coincide with the outer edges of a run of
+// one or more consecutive SIGNAL slots of `pat`?  Exposed so the rule has
+// ONE statement a test can drive directly.
+bool metal_on_signal_run(const TrackPattern& pat, double lo, double hi);
 
 } // namespace buda

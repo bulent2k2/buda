@@ -179,8 +179,10 @@ being reports and become blockers:
   slot.  As FIXED metal that is a short to the power grid.  The check that
   licensed the copy compared an empty span-clear pool while the bits came
   from the midpoint fallback; it now compares both.
-* **#947**: `check_design` has no on-grid check.  The writer must not rely
-  on an audit that cannot see the fault it would ship.
+* **#947** (FIXED 2026-09-24): `check_design` had no on-grid check.  The
+  writer must not rely on an audit that cannot see the fault it would ship;
+  it now reports `OFF_GRID`, NDR runs included (judged by the metal's
+  edges).
 * **#948**: two different bundles' nets overlapping on one layer.  As FIXED
   metal that is a short between signals.
 

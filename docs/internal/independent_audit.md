@@ -143,7 +143,14 @@ rather than left to be discovered:
   with that in mind — through `converge.tcl -judge` as much as through the
   A/B.  Modelling it means reading `ndr_rule` / `bundle.ndr_rule` and
   accepting a run of `width_slots` slots as one wire, which is the engine's
-  own `ndr_spec_for_layer` arithmetic re-derived here, not imported.
+  own `ndr_spec_for_layer` arithmetic re-derived here, not imported (#954).
+  The POSITIONAL half needs none of that, as the engine's own on-grid audit
+  (`OFF_GRID`, #947) shows: judged by the metal's EDGES — the extent must
+  start on a SIGNAL slot's low edge and end on one's high edge, with no
+  non-SIGNAL slot between — a k-slot wire is on grid whatever k is, and only
+  the question of WHICH k (the engine's `NDR_WIDTH`) needs the rule.  Adopting
+  that rule here would retire the false-positive class and leave width to a
+  separate kind, as #954 proposes.
 
 ### Five, from review
 
@@ -476,7 +483,10 @@ never agrees is measuring itself.
 
 On the SoC's bottom-up arm the judge reports **96 bit-wires on no signal
 track at all**, at NQ = 2 and NQ = 4 alike, and no in-house audit mentions
-them.  The engine's own verdict for that NQ = 2 round is `1/8/8` — one
+them.  (None could: `check_design` had no on-grid kind at all.  It has one
+now — `OFF_GRID`, #947 — and `test_off_grid_audit.py` forces the same copy
+onto a sibling half a pitch away and requires the engine itself to report
+it.)  The engine's own verdict for that NQ = 2 round is `1/8/8` — one
 overlap and the eight `pc_0` bits whose supply-doomed seat is already
 documented ([flow/tcl/soc.md](../../flow/tcl/soc.md)); the judge finds those
 eight too, as `OPEN`.  The 96 are new.

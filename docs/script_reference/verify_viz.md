@@ -60,6 +60,24 @@ zones are taken from the session floorplan the NUTS engine placed against,
 so hierarchical bundles' cell-local generation floorplans cannot mask a
 conflict. See `docs/internal/keepout_model_audit.md`.
 
+The `dnuts` stage also audits that every bit-wire is **on its layer's grid**
+(`OFF_GRID`, issue #947): the metal's extent `track_position ± width/2`, read
+against the track pattern in force at the wire's along-midpoint, must begin at
+the low edge of a SIGNAL slot and end at the high edge of one, with no
+non-SIGNAL slot between.  Shields are held to the same rule.  It reads the
+metal's EDGES rather than its centre so that NDR wires are judged correctly: a
+plain bit is a run of one slot, and an NDR bit of `width_slots` k is a run of
+k, whose centre lies between two slot centres whenever k is even.  Whether the
+run has the right number of slots is `NDR_WIDTH`'s question, not this one, so
+a governed bit one slot too narrow is `NDR_WIDTH` and not `OFF_GRID`.  Before
+this audit the grid was consulted when a bit was placed and never again, so a
+bottom-up copy landing in a GROUND slot (#946) reported clean.  Only
+`check_design` runs it; `check_dnuts` called without a routing grid does not.
+Its first corpus run found one design it objects to, and rightly:
+`flow/rv/soc_conv_div.buda` places 33 M6 bits on tracks its DEF never
+declared, 32 of them past the die's right edge, because the span-clear track
+pool ignores a bounded pattern's extent (#956).
+
 The `nuts` and `dnuts` stages also audit **TEG contact** (`TEG_OPEN`): every
 rect of a `teg_mode over` multi-rect block must be touched by the bundle's
 placed metal, and all rects must sit in **one connected component** of that

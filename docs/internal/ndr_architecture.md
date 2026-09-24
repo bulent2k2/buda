@@ -115,7 +115,13 @@ Reading the table:
   centre sits between track centres, which brushes `abstract_pos`
   anchoring, pair-align partnering, and per-bit via crossings.  None are
   correctness walls, but each is a place where "one bit = one slot centre"
-  is baked in and needs a footprint-aware generalization.
+  is baked in and needs a footprint-aware generalization.  (As built, one
+  of those places was the emitter itself: it centred a k-slot wire on the
+  midpoint of its end slots' CENTRES, which is the footprint's centre only
+  when those two slots are equally wide — on a pattern mixing slot widths
+  every governed wire sat (w_hi − w_lo)/4 off its slots.  Found by
+  `check_design`'s `OFF_GRID` audit, which reads the metal's EDGES for
+  exactly this reason, and fixed to the edge midpoint (#947).)
 - **B survives as D's ingredient**: pattern-declared resources get
   *credited*, never *required*.
 

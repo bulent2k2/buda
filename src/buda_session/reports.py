@@ -934,9 +934,14 @@ class ReportsMixin:
                                           self.layers, bid, zone_fp=self.fp)
                 else:
                     num_bits = len(w.input.original_bundle.get_net_names())
+                    # grid = the session grid the bits were placed on: the
+                    # OFF_GRID audit (#947).  Every placement door ends on
+                    # it — a shared cell's thinned reference solve lands
+                    # only on kept slots, which are SIGNAL slots here too.
                     res = buda.check_dnuts(ct, self.detailed_result, topo, check_fp,
                                            self.layers, bid, num_bits,
-                                           zone_fp=self.fp)
+                                           zone_fp=self.fp,
+                                           grid=self.routing_grid)
 
                 violations = list(res.violations)
                 # THRU-block census rows (nuts/dnuts only — check_topo never
@@ -1074,6 +1079,7 @@ class ReportsMixin:
         "LAYER_DIR":    "wrong layer direction",
         "FEEDTHRU_RELAY": "block used as feedthrough relay (segments not wire-joined)",
         "KEEPOUT_CROSS": "wire placed on a keepout",
+        "OFF_GRID":     "wire's metal not on its layer's SIGNAL slot(s)",
         "NET_DRIVER_OPEN": "net endpoint block not attached to the topology",
         "BIT_SHORT":    "different bits (nets) share a track with overlapping spans",
         "ANTENNA":      "dangling metal past its own attachments",
