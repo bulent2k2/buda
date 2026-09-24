@@ -226,3 +226,13 @@ def test_optimize_aspect_never_narrows_the_pe_below_the_accumulator(tmp_path):
     opt = json.loads(_run(d, "--n", "8", "--optimize-aspect", "--json").stdout)
     assert opt["pe"]["w"] >= 140 and opt["acc"]["w"] == 140
     assert all(c["clears"] for c in opt["checks"]), opt["checks"]
+
+
+def test_an_inherited_edge_size_wider_than_the_pe_is_refused_too(tmp_path):
+    """With no acc_cell fragment the accumulator inherits the edge size, which
+    the emitter binds to the PE column exactly the same way (Codex on #957: a
+    100 um PE with a 140 um feed recommended -PEW 100 -EDGEW 140 and the
+    emitter refused it as ACCW 140)."""
+    d = _sizes_dir(tmp_path, [_frag("pe_cell", 100.0, 47.5), _frag("feed_cell", 140.0, 44.2)])
+    r = _run(d, "--n", "8", "--args")
+    assert r.returncode != 0 and "acc_cell inherits" in r.stderr

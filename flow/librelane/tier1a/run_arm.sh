@@ -94,12 +94,18 @@ ll_run() {   # ll_run <log> <librelane args...>
 # and on a non-zero status asks whether the flow COMPLETED (the deferred
 # ending in the log and final/metrics.json on disk); a leg killed before
 # signoff has neither and fails like any other (Codex on #952).
+# A deferred ending is a FAILED row in runtimes.py's convention (`status=failed`,
+# `failed_at`, `failed_on`): its final/metrics.json carries clean aggregate
+# fields, so a row without the status would file a run that failed signoff
+# as a finished experiment (Codex on #957).  ll_final records it in DEFERRED.
+DEFERRED=
 ll_final() {   # ll_final <log> <run_dir> <librelane args...>
     local log=$1 run=$2; shift 2
     if "${LL[@]}" "$@" > "$log" 2>&1; then return 0; fi
     if { tr '\r' '\n' < "$log" | grep -q "deferred errors"; } && [ -f "$run/final/metrics.json" ]; then
-        stamp "top ended on a DEFERRED error (final/ written; the verdict is in the row)"
-        tr '\r' '\n' < "$log" | grep -A3 "deferred errors" | head -6 | cut -c1-200 | sed 's/^/run_arm:   /'
+        DEFERRED=$(tr '\r' '\n' < "$log" | grep -A4 "deferred errors" | grep -vE "deferred errors|encountered:" \
+                   | sed -E 's/[[:space:]]+[a-z_]+\.py:[0-9]+[[:space:]]*$//' | tr -s '[:space:]' ' ' | sed -E 's/^ //; s/ $//')
+        stamp "top ended on a DEFERRED error (final/ written; the row says status=failed): $DEFERRED"
         return 0
     fi
     stamp "LIBRELANE FAILED ($log)"
@@ -212,6 +218,8 @@ fi
 # routing mode's name, which is what the recorded arms are filed under and
 # what a compact re-run must not be confused with (Codex on #952).
 arm=${ARM_LABEL:-$([ "$tag" = h ] && echo H || echo H+B)}
-python3 "$here/runtimes.py" "$d/h/top/runs/$TOPTAG" --set N="$N" --set arm="$arm" --blocks-from "$d/h/top/config.json" | tee "$d/h/log/row_$TOPTAG.txt"
-python3 "$here/runtimes.py" "$d/h/top/runs/$TOPTAG" --set N="$N" --set arm="$arm" --blocks-from "$d/h/top/config.json" --json >> "$d/results.jsonl"
+rowset=(--set N="$N" --set arm="$arm")
+[ -z "$DEFERRED" ] || rowset+=(--set status=failed --set failed_at=deferred-signoff --set "failed_on=$DEFERRED")
+python3 "$here/runtimes.py" "$d/h/top/runs/$TOPTAG" "${rowset[@]}" --blocks-from "$d/h/top/config.json" | tee "$d/h/log/row_$TOPTAG.txt"
+python3 "$here/runtimes.py" "$d/h/top/runs/$TOPTAG" "${rowset[@]}" --blocks-from "$d/h/top/config.json" --json >> "$d/results.jsonl"
 stamp "done"

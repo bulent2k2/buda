@@ -209,23 +209,24 @@ def main(argv=None):
     # which is what the emitter does with ACCW/ACCH left at 0.
     if ACC in sizes:
         accw, acch = (int(math.ceil(v)) for v in sizes[ACC][:2])
-        if accw > pew:
-            # The emitter places the accumulator on its PE's column and the
-            # die is the PE row's envelope, so a wider one overlaps its
-            # neighbour and leaves the die in the last column; the emitter
-            # refuses the pair too (Codex on #957).
-            sys.exit(f"apply_sizes: acc_cell needs {accw} um of width but sits on the PE column "
-                     f"({pew} um): widen the PE (its face or -PEPAD) or the accumulator's rule "
-                     f"cannot be honoured by this emitter")
     else:
         accw, acch = edgew, edgeh
+    if accw > pew:
+        # The emitter places the accumulator on its PE's column and the die
+        # is the PE row's envelope, so a wider one overlaps its neighbour and
+        # leaves the die in the last column; the emitter refuses the pair too
+        # (Codex on #957) -- and an accumulator INHERITING the edge size is
+        # bound the same way, since ACCW left at 0 IS EDGEW there.
+        what = "acc_cell needs" if ACC in sizes else "the edge size (which acc_cell inherits) is"
+        sys.exit(f"apply_sizes: {what} {accw} um of width but the accumulator sits on the PE column "
+                 f"({pew} um): widen the PE (its face or -PEPAD) or narrow the edge cells, or this "
+                 f"emitter cannot honour the rule")
     rule_pew, rule_peh, aspect_note = pew, peh, None
     if a.optimize_aspect:
         d = json.load(open(os.path.join(a.sizes, "pe_cell.json"))).get("derivation", {})
         fn = d.get("face_needs", {})
         got = best_aspect("pe_cell", fn.get("w", 0.0), fn.get("h", 0.0),
-                          a.n, edgew, edgeh, acch=acch,
-                          min_w=accw if ACC in sizes else 0)
+                          a.n, edgew, edgeh, acch=acch, min_w=accw)
         if got is None:
             sys.exit("apply_sizes: no PE size within 600 um clears the "
                      "placer's bar — check harm.cell_area_estimate('pe_cell')")
