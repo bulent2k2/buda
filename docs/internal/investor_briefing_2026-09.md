@@ -3,8 +3,8 @@
 Internal briefing for prospective angel investors, as of 2026-09-20.  The
 tree twin of the published page listed in [artifacts.md](../artifacts.md);
 every number here is read from this repository, its design notes and the
-founder's paper as of commit 63d4e67c (2026-09-18), and the sources are
-listed at the end.  It is written for readers outside chip design: a
+founder's paper as of commit 63d4e67c (2026-09-18) — the compaction rounds
+dated 24 September from PR #957 — and the sources are listed at the end.  It is written for readers outside chip design: a
 glossary at the end explains the terms.
 
 ## In short
@@ -131,8 +131,9 @@ logic needs; the third (0.998 mm², 0.97× the flat die) placed the processing
 units at 69 % utilisation and kept every one-row gap as a lane for the top
 level's repeaters.  The third round passes every check the recorded arms
 pass — manufacturing rules, layout-versus-schematic, antenna — with positive
-timing margins (setup +0.41 ns, hold +0.12 ns) and 59,363 µm of top-level
-wire, 6 % of the flat flow's.  Orange cells are logic gates, blue
+timing margins (setup +0.41 ns, hold +0.12 ns), 79 pins of the blocks' reset
+inputs missing the maximum-slew rule as 78 do in the flat flow, and
+59,363 µm of top-level wire, 6 % of the flat flow's.  Orange cells are logic gates, blue
 flip-flops, green buffers; each black rectangle is a hardened block.
 
 ![Five hardened arrays at one scale: flat, hierarchical without BUDA, hierarchical with BUDA, and the two compaction rounds, the last smaller than the flat die](img/investor_briefing_compaction.png)
@@ -199,8 +200,10 @@ die is 3.8× larger, because building from separate blocks pays for padding
 and wiring channels around each block that the flat flow never needs.  A
 compaction study run since, on 24 September 2026, closed most of that gap:
 with the blocks' margins and the channels between them cut to what the logic
-needs, the H+B die reaches 0.998 mm², 0.97× the flat die, with every signoff
-check clean (the last picture above; the rounds are in
+needs, the H+B die reaches 0.998 mm², 0.97× the flat die, clean on
+manufacturing rules, layout-versus-schematic and antenna, with 79 max-slew
+pins remaining on the blocks' reset inputs — a residual the flat flow carries
+too, 78 on the same check (the last picture above; the rounds are in
 [librelane_hier_flow.md](librelane_hier_flow.md) §7.5).  The table keeps the
 recorded arms it was measured on.  The case for hierarchy is at larger sizes, where flat runs slow down steeply: a
 flat run at ~55 k cells takes 76 min and the next doubling five to six
@@ -399,8 +402,8 @@ notes, not from a wish list.
 2. **The chip-size penalty of hierarchy.**  Building from separate blocks
    pays for padding and routing channels around each block that the flat
    flow never needs: 3.8× the flat die at N = 8 in the recorded arms, 0.97×
-   after the compaction study of 24 September 2026 (block margins, channels,
-   edge blocks and utilisation, in that order of effect).  The cost is
+   after the compaction study of 24 September 2026 (block margins, channels
+   and edge blocks in one round, then utilisation).  The cost is
    reported rather than used as a pass/fail gate.  Closing it is a question about the whole flow as
    much as about BUDA.
 3. **The crossover has not been measured.**  The case for hierarchy is that
@@ -478,7 +481,8 @@ notes, not from a wish list.
 ## What this document does not claim, and what to add
 
 Everything above is read from the repository, its design notes and the
-founder's paper as of 18 September 2026.  Nothing here is a market figure, a
+founder's paper as of 18 September 2026, except the compaction results dated
+24 September, which are in PR #957 to the same repository.  Nothing here is a market figure, a
 revenue figure or a forecast.  Before this goes to an investor, the founder
 should add or confirm:
 
@@ -529,7 +533,9 @@ The chip-design terms used above, in plain words.
 ## Sources
 
 The public repository ([github.com/bulent2k2/buda](https://github.com/bulent2k2/buda),
-Apache 2.0) and its `git log` through commit 63d4e67c;
+Apache 2.0) and its `git log` through commit 63d4e67c, plus PR #957 for the
+compaction rounds of 24 September (`flow/librelane/tier1a/results.jsonl`,
+§7.5 of the flow document);
 [docs/origin/paper.md](../origin/paper.md) and
 [docs/origin/talk_contents.md](../origin/talk_contents.md);
 [librelane_hier_flow.md](librelane_hier_flow.md) (§7 results, §11 open
