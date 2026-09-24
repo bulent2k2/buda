@@ -16,6 +16,8 @@
 #                         re-run keeps the earlier top beside it
 #   TOP_SET="K=V K=V"     JSON values patched into top/config.json after
 #                         harm.sh writes it (`FP_TAPCELL_DIST=5`)
+#   ARM_LABEL=<text>      the `arm` the row is filed under (default H / H+B --
+#                         a variant such as a compact set names its own)
 #   LL_HOME=<dir>         a home OUTSIDE $HOME for librelane's unconditional
 #                         home mount (needs PDK_ROOT outside $HOME too; see
 #                         the LL definition below for why and the copy recipe)
@@ -85,6 +87,34 @@ ll_run() {   # ll_run <log> <librelane args...>
     fi
 }
 
+# The leg that ENDS the flow is different: LibreLane exits non-zero on a
+# DEFERRED error (an LVS count, a hold violation) AFTER final/ is written,
+# and that is a verdict for the row, not an interrupted run -- the compact H
+# top ends on its hold violation every time (7.5).  ll_final runs the leg,
+# and on a non-zero status asks whether the flow COMPLETED (the deferred
+# ending in the log and final/metrics.json on disk); a leg killed before
+# signoff has neither and fails like any other (Codex on #952).
+# A deferred ending is a FAILED row in runtimes.py's convention (`status=failed`,
+# `failed_at`, `failed_on`): its final/metrics.json carries clean aggregate
+# fields, so a row without the status would file a run that failed signoff
+# as a finished experiment (Codex on #957).  ll_final records it in DEFERRED.
+DEFERRED=
+# It runs in THIS shell and cds inside, because `(cd ... && ll_final ...)`
+# would set DEFERRED in a subshell and lose it (Codex on #957).
+ll_final() {   # ll_final <log> <run_dir> <cwd> <librelane args...>
+    local log=$1 run=$2 cwd=$3; shift 3
+    if (cd "$cwd" && "${LL[@]}" "$@") > "$log" 2>&1; then return 0; fi
+    if { tr '\r' '\n' < "$log" | grep -q "deferred errors"; } && [ -f "$run/final/metrics.json" ]; then
+        DEFERRED=$(tr '\r' '\n' < "$log" | grep -A4 "deferred errors" | grep -vE "deferred errors|encountered:" \
+                   | sed -E 's/[[:space:]]+[a-z_]+\.py:[0-9]+[[:space:]]*$//' | tr -s '[:space:]' ' ' | sed -E 's/^ //; s/ $//')
+        stamp "top ended on a DEFERRED error (final/ written; the row says status=failed): $DEFERRED"
+        return 0
+    fi
+    stamp "LIBRELANE FAILED ($log)"
+    tr '\r' '\n' < "$log" | grep -E "ERROR|\[[A-Z]+-[0-9]+\]" | tail -6 | cut -c1-200 | sed 's/^/run_arm:   /'
+    exit 1
+}
+
 TOPTAG=${TOPTAG:-$tag}
 stamp "harm.sh start"
 "$here/harm.sh" "$N" ${pins[@]+"${pins[@]}"} "$@"
@@ -141,21 +171,35 @@ fi
 # 3. the top
 stamp "top start"
 if [ "$tag" = h ]; then
-    (cd "$d/h/top" && ll_run "$d/h/log/top_$TOPTAG.log" --run-tag "$TOPTAG" config.json)
+    ll_final "$d/h/log/top_$TOPTAG.log" "$d/h/top/runs/$TOPTAG" "$d/h/top" --run-tag "$TOPTAG" config.json
 else
     (cd "$d/h/top" && ll_run "$d/h/log/top_${TOPTAG}_a.log" --run-tag "$TOPTAG" \
         --to OpenROAD.DetailedRouting --skip OpenROAD.DetailedRouting config.json)
     stamp "top cut at DetailedRouting; guides start"
+    # ADVISORY tap census on the placement the router is about to be paid
+    # for (tap_census.py): a row fragment with cells and no well tap is the
+    # 978-error LVS verdict of 7.5.  Reported, not gating -- the recorded
+    # H+B arm carries 253 decap-only fragments and passes LVS, and the
+    # census is strict on purpose -- so the log says it before signoff does.
+    # The NEWEST DEF any step has written, not the detailed-placement step's:
+    # CTS, the post-CTS resizer and the antenna repair all add cells after it
+    # (a clock buffer landing in an until-then empty fragment is exactly the
+    # real-cell case), so the census reads the placement the router will
+    # actually see (Codex on #957).
+    pdef=$(ls -t "$d"/h/top/runs/"$TOPTAG"/*/*.def 2>/dev/null | head -1)
+    if [ -n "$pdef" ]; then
+        python3 "$here/tap_census.py" "$pdef" > "$d/h/log/tap_census_$TOPTAG.txt" 2>&1 \
+            && stamp "tap census clean" \
+            || { stamp "tap census: UNTAPPED fragments -- see $d/h/log/tap_census_$TOPTAG.txt"; head -4 "$d/h/log/tap_census_$TOPTAG.txt" | sed 's/^/run_arm:   /'; }
+    fi
     (cd "$here" && TAG="$TOPTAG" T1A_DIR="$t1a" ./guides.sh "$N" > "$d/h/log/guides_$TOPTAG.log" 2>&1)
     ODB=$(ls -t "$d"/h/top/runs/"$TOPTAG"/*/*.odb | head -1)
     (cd "$d/h" && ${LLENV[@]+"${LLENV[@]}"} "$root/flow/librelane/phase0/measure/run_or.sh" top/runs/"$TOPTAG" "$here/guide_route.tcl" \
         ODB="$ODB" GUIDE="$d/h/top/out/buda_bus.guide" OUT="$d/h/top/out" > "$d/h/log/guide_route_$TOPTAG.log" 2>&1)
     grep -q "wrote" "$d/h/log/guide_route_$TOPTAG.log" || { echo "run_arm: guide_route.tcl wrote nothing (see $d/h/log/guide_route_$TOPTAG.log)" >&2; exit 1; }
     stamp "guides in; top resume"
-    # a DEFERRED error (an LVS count) exits non-zero AFTER final/ is written;
-    # that is a verdict for the row, so this leg is allowed to fail
-    (cd "$d/h/top" && ("${LL[@]}" --last-run --from OpenROAD.DetailedRouting \
-        -e odb="$d/h/top/out/guided.odb" config.json > "$d/h/log/top_${TOPTAG}_b.log" 2>&1 || true))
+    ll_final "$d/h/log/top_${TOPTAG}_b.log" "$d/h/top/runs/$TOPTAG" "$d/h/top" --last-run --from OpenROAD.DetailedRouting \
+        -e odb="$d/h/top/out/guided.odb" config.json
 fi
 stamp "top end"
 # Did the top COMPLETE?  Read the leg that ends the flow -- for H+B the
@@ -172,7 +216,12 @@ if ! { tr '\r' '\n' < "$toplog" | grep -q "Flow complete\|deferred errors"; } \
 fi
 
 # 4. the row
-arm=$([ "$tag" = h ] && echo H || echo H+B)
-python3 "$here/runtimes.py" "$d/h/top/runs/$TOPTAG" --set N="$N" --set arm="$arm" --blocks-from "$d/h/top/config.json" | tee "$d/h/log/row_$TOPTAG.txt"
-python3 "$here/runtimes.py" "$d/h/top/runs/$TOPTAG" --set N="$N" --set arm="$arm" --blocks-from "$d/h/top/config.json" --json >> "$d/results.jsonl"
+# ARM_LABEL names a VARIANT's rows (`H+B compact r3`); the default is the
+# routing mode's name, which is what the recorded arms are filed under and
+# what a compact re-run must not be confused with (Codex on #952).
+arm=${ARM_LABEL:-$([ "$tag" = h ] && echo H || echo H+B)}
+rowset=(--set N="$N" --set arm="$arm")
+[ -z "$DEFERRED" ] || rowset+=(--set status=failed --set failed_at=deferred-signoff --set "failed_on=$DEFERRED")
+python3 "$here/runtimes.py" "$d/h/top/runs/$TOPTAG" "${rowset[@]}" --blocks-from "$d/h/top/config.json" | tee "$d/h/log/row_$TOPTAG.txt"
+python3 "$here/runtimes.py" "$d/h/top/runs/$TOPTAG" "${rowset[@]}" --blocks-from "$d/h/top/config.json" --json >> "$d/results.jsonl"
 stamp "done"

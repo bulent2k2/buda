@@ -269,7 +269,12 @@ def grid_pitch(insts, cell, axis):
 
 
 def block_core(w, h):
-    c = pp.SKY130
+    # The block's own margins when `--margins` set them (they are then in its
+    # config too, so the predicted pins and the real floorplan agree), else
+    # LibreLane's sky130 defaults -- 4 rows and 12 sites, 17 % of the compact
+    # PE's height holding no cell (7.5).
+    c = {k: BLOCK_SETTINGS.get(k, pp.SKY130[k]) for k in
+         ("LEFT_MARGIN_MULT", "RIGHT_MARGIN_MULT", "BOTTOM_MARGIN_MULT", "TOP_MARGIN_MULT")}
     return [c["LEFT_MARGIN_MULT"] * pp.SITE_W, c["BOTTOM_MARGIN_MULT"] * pp.SITE_H,
             w - c["RIGHT_MARGIN_MULT"] * pp.SITE_W, h - c["TOP_MARGIN_MULT"] * pp.SITE_H]
 
@@ -594,11 +599,13 @@ def cell_area_estimate(cell):
     return rough * YOSYS_TO_LIBRELANE, "ROUGH: §7.1's Yosys total x %.1f" % YOSYS_TO_LIBRELANE
 
 
-def utilization_advice(cell, w, h):
+def utilization_advice(cell, w, h, density=None):
     """One line per cell: how full its die will be, against BOTH bars the
     placer applies in turn -- `GPL-0301 Utilization exceeds 100%` first, then
     `PL_TARGET_DENSITY_PCT` (GPL-0302) -- and, when either is at risk, the
-    PEPAD to regenerate the whole set with."""
+    PEPAD to regenerate the whole set with.  `density` is the target the
+    block's config will carry (`--density`); judging against the default
+    told a compact set to undo its compaction (Codex on #952)."""
     c = block_core(w, h)
     rows = int(math.floor((c[3] - c[1]) / pp.SITE_H + 1e-9))
     core_area = (c[2] - c[0]) * rows * pp.SITE_H
@@ -606,7 +613,8 @@ def utilization_advice(cell, w, h):
     if area is None:
         return f"{cell}: {w:g} x {h:g}, {rows} rows, {core_area:.0f} um^2 of core"
     util = 100.0 * area / core_area if core_area > 0 else math.inf
-    density = BLOCK_SETTINGS["PL_TARGET_DENSITY_PCT"]
+    if density is None:
+        density = BLOCK_SETTINGS["PL_TARGET_DENSITY_PCT"]
     line = (f"{cell}: {w:g} x {h:g}, {rows} rows = {core_area:.0f} um^2 of core; ~{area:.0f} um^2 of "
             f"cells ({how}) = ~{util:.0f} % utilization")
     if util * ADVICE_MARGIN <= density:
@@ -780,7 +788,7 @@ def write_h(n_dir, out_dir, halo, pins_dir=None, density=None):
             json.dump(cfg, f, indent=4)
             f.write("\n")
         write_predicted_lef(os.path.join(pred_dir, f"{cell}.lef"), cell, w, h, cells[cell][2])
-        advice.append(utilization_advice(cell, w, h))
+        advice.append(utilization_advice(cell, w, h, density))
 
     top = os.path.join(out_dir, "top")
     os.makedirs(os.path.join(top, "src"), exist_ok=True)
@@ -1170,6 +1178,10 @@ def main(argv=None):
     ap.add_argument("--halo", type=float, nargs=2, metavar=("HX", "HY"),
                     default=(pp.SKY130["FP_MACRO_HORIZONTAL_HALO"], pp.SKY130["FP_MACRO_VERTICAL_HALO"]),
                     help="FP_MACRO_HORIZONTAL_HALO / VERTICAL_HALO written to the top and used by the checks")
+    ap.add_argument("--margins", type=int, nargs=2, metavar=("ROWS", "SITES"),
+                    help="the blocks' core margins: ROWS site heights top and bottom, SITES site widths "
+                         "left and right (LibreLane's sky130 defaults are 4 and 12; the blocks have no core "
+                         "ring, so 1 and 2 leave the pins a row to land in and nothing else)")
     ap.add_argument("--density", type=int, metavar="PCT",
                     help=f"PL_TARGET_DENSITY_PCT for every block config (default "
                          f"{BLOCK_SETTINGS['PL_TARGET_DENSITY_PCT']}); the knob a compact "
@@ -1181,6 +1193,12 @@ def main(argv=None):
                          "H+size; without it the blocks keep LibreLane's own pin placement")
     a = ap.parse_args(argv)
     try:
+        if a.margins:
+            rows, sites = a.margins
+            if rows < 1 or sites < 1:
+                ap.error("--margins needs at least one row and one site")
+            BLOCK_SETTINGS.update({"BOTTOM_MARGIN_MULT": rows, "TOP_MARGIN_MULT": rows,
+                                   "LEFT_MARGIN_MULT": sites, "RIGHT_MARGIN_MULT": sites})
         r = write_h(a.n_dir, a.out or os.path.join(a.n_dir, "h"), tuple(a.halo),
                     pins_dir=a.pins, density=a.density)
     except Shape as e:

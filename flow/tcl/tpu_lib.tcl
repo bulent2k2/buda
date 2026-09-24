@@ -87,6 +87,7 @@ namespace eval tpu_vehicle {
         PPX      0      PPY      0
         ROWM    12      ROWGAP   0
         EDGEW    0      EDGEH    0
+        ACCW     0      ACCH     0
         EDGEGAP 48      EDGEGAPX 0
         X0      60      Y0     120
         AW       8
@@ -133,6 +134,13 @@ proc tpu_vehicle::configure {{overrides {}}} {
     }
     if {$P(EDGEW) == 0} { set P(EDGEW) $P(PEW) }
     if {$P(EDGEH) == 0} { set P(EDGEH) $P(PEH) }
+    # The accumulator's own size (0 = the edge size).  acc_cell holds five
+    # times feed/wbuf's logic (2552 against 485 um^2 at N = 8, measured on
+    # the hardened blocks), so one edge size either starves it or leaves
+    # the other two at 14 % utilisation; PE-wide and short it also leaves
+    # no row fragment between accumulators for a well tap to miss.
+    if {$P(ACCW) == 0} { set P(ACCW) $P(EDGEW) }
+    if {$P(ACCH) == 0} { set P(ACCH) $P(EDGEH) }
     if {$P(PPX) == 0}   { set P(PPX)   [expr {$P(PEW) + $P(CHAN)}] }
     # ROWGAP: compact by default, SNAPPED when the caller intends to solve
     # one row and copy it.  Congruent instances must see identical tracks,
@@ -206,16 +214,24 @@ proc tpu_vehicle::configure {{overrides {}}} {
         set P(AX) [expr {$P(X0) + $P(EDGEW) + $P(EDGEGAPX)}]
         set P(AY) [expr {$P(Y0) + $P(EDGEH) + $P(EDGEGAP)}]
         set P(DIEW) [expr {$P(AX) + $P(RW) + $P(X0)}]
-        set P(DIEH) [expr {$P(AY) + $P(N)*$P(RPY) + $P(EDGEGAP) + $P(EDGEH)
-                           + $P(PIPE)*($P(PIPEGAP) + $P(EDGEH)) + $P(Y0)}]
+        set P(DIEH) [expr {$P(AY) + $P(N)*$P(RPY) + $P(EDGEGAP) + $P(ACCH)
+                           + $P(PIPE)*($P(PIPEGAP) + $P(ACCH)) + $P(Y0)}]
     } else {
         set P(AX) $P(X0)
         set P(AY) $P(Y0)
         # The die: the array plus both edges plus the tail, with X0/Y0 of slack.
         set P(DIEW) [expr {$P(X0) + $P(RW) + $P(EDGEW) + $P(EDGEGAPX) + $P(X0)}]
-        set P(DIEH) [expr {$P(Y0) + $P(N)*$P(RPY) + $P(EDGEGAP) + $P(EDGEH)
-                           + ($P(PIPE)+1)*$P(PIPEGAP) + $P(PIPE)*$P(EDGEH)
+        set P(DIEH) [expr {$P(Y0) + $P(N)*$P(RPY) + $P(EDGEGAP) + $P(ACCH)
+                           + ($P(PIPE)+1)*$P(PIPEGAP) + $P(PIPE)*$P(ACCH)
                            + $P(Y0)}]
+    }
+    # An accumulator sits on its PE's column, so its width is bounded by the
+    # column PITCH (else it overlaps its neighbour) and, in the last column,
+    # by the die's right edge -- the REAL bounds, not PEW: with the default
+    # 48 um channel a 120 um accumulator on a 100 um PE fits (Codex on #957).
+    set accmax [expr {min($P(PPX), $P(DIEW) - ($P(AX) + $P(ROWM) + ($P(N)-1)*$P(PPX)))}]
+    if {$P(ACCW) > $accmax} {
+        error "tpu_vehicle: ACCW $P(ACCW) exceeds $accmax -- an accumulator sits on its PE column (pitch $P(PPX)) and the last one must end inside the die; widen PEW or CHAN, or narrow ACCW"
     }
     return [array get P]
 }
@@ -302,7 +318,7 @@ proc tpu_vehicle::build_hierarchy {} {
     buda::add_cell row_cell  $P(RW)    $P(RH)
     buda::add_cell feed_cell $P(EDGEW) $P(EDGEH)
     buda::add_cell wbuf_cell $P(EDGEW) $P(EDGEH)
-    buda::add_cell acc_cell  $P(EDGEW) $P(EDGEH)
+    buda::add_cell acc_cell  $P(ACCW) $P(ACCH)
 
     # the row: N PEs, west to east
     for {set c 0} {$c < $N} {incr c} {
@@ -328,7 +344,7 @@ proc tpu_vehicle::build_hierarchy {} {
         buda::add_inst acc_$c acc_cell - [col_x $c] $accy
     }
     for {set s 0} {$s < $P(PIPE)} {incr s} {
-        set y [expr {$accy + ($s+1)*($P(EDGEH) + $P(PIPEGAP))}]
+        set y [expr {$accy + ($s+1)*($P(ACCH) + $P(PIPEGAP))}]
         for {set c 0} {$c < $N} {incr c} {
             buda::add_inst pipe_${s}_$c acc_cell - [col_x $c] $y
         }
@@ -472,7 +488,7 @@ proc tpu_vehicle::leaf_instances {} {
         lappend out [list acc_$c acc_cell [col_x $c] $accy]
     }
     for {set s 0} {$s < $P(PIPE)} {incr s} {
-        set y [expr {$accy + ($s+1)*($P(EDGEH) + $P(PIPEGAP))}]
+        set y [expr {$accy + ($s+1)*($P(ACCH) + $P(PIPEGAP))}]
         for {set c 0} {$c < $N} {incr c} {
             lappend out [list pipe_${s}_$c acc_cell [col_x $c] $y]
         }
@@ -486,7 +502,7 @@ proc tpu_vehicle::cell_sizes {} {
     return [list [list pe_cell $P(PEW) $P(PEH)] \
                  [list feed_cell $P(EDGEW) $P(EDGEH)] \
                  [list wbuf_cell $P(EDGEW) $P(EDGEH)] \
-                 [list acc_cell $P(EDGEW) $P(EDGEH)]]
+                 [list acc_cell $P(ACCW) $P(ACCH)]]
 }
 
 proc tpu_vehicle::_banner {what} {

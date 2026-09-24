@@ -32,12 +32,11 @@ this is what turns the fragments into the `gen.sh` arguments that do it:
     ./gen.sh 4 $(python3 apply_sizes.py out --n 4 --args)
     ./harm.sh 4
 
-**The emitter has ONE edge size** (`EDGEW`/`EDGEH` govern `feed_cell`,
-`wbuf_cell` and `acc_cell` alike), so the edge knob is the MAX over the
-three — the smallest size that holds all of them.  That is reported, since
-it is where the rule's per-cell answer is coarsened: on the checked-in N=8
-set the rule gives feed and wbuf 44.2 x 44.2 and acc 96.0 x 51.1, so the
-edge cells go out at acc's size and two of them stay larger than they need.
+**The emitter has ONE edge size for feed and wbuf** (`EDGEW`/`EDGEH`), so
+that knob is the MAX over the two — the smallest size that holds both — and
+the accumulator has its own (`ACCW`/`ACCH`, since 7.5's compaction: it holds
+five times feed/wbuf's logic, so one size for all three left two of them at
+14 % utilisation).  Where the max coarsens a per-cell answer it is reported.
 Making them independent is an emitter change, not a sizing one.
 
 The predicted die is computed with the emitter's own arithmetic (below,
@@ -60,11 +59,14 @@ import pdn_phase as pp                       # noqa: E402
 # flow/tcl/tpu_lib.tcl's defaults for everything this does not resize.
 CHAN, ROWM, EDGEGAP, X0, Y0 = 48, 12, 48, 60, 120
 PIPE, PIPEGAP = 2, 48
-EDGE_CELLS = ("feed_cell", "wbuf_cell", "acc_cell")
+EDGE_CELLS = ("feed_cell", "wbuf_cell")     # share EDGEW/EDGEH
+ACC = "acc_cell"                            # its own ACCW/ACCH (0 = the edge size)
 
 
-def die(n, pew, peh, edgew, edgeh, chan=CHAN, rowm=ROWM):
+def die(n, pew, peh, edgew, edgeh, chan=CHAN, rowm=ROWM, acch=None):
     """The emitter's die, transcribed from `tpu_vehicle::configure`.
+    `acch` is the accumulator stack's row height (ACCH); None = EDGEH, the
+    emitter's own default.
 
     PPX = PEW + CHAN; PPY = PEH; ROWGAP = CHAN (the compact default, which
     is what `gen.sh` uses — `-ALIGN 1` snaps it to the track period and is
@@ -73,10 +75,21 @@ def die(n, pew, peh, edgew, edgeh, chan=CHAN, rowm=ROWM):
     rw = 2 * rowm + (n - 1) * ppx + pew
     rh = 2 * rowm + peh
     rpy = rh + chan
+    if acch is None:
+        acch = edgeh
     w = X0 + rw + edgew + EDGEGAP + X0
-    h = (Y0 + n * rpy + EDGEGAP + edgeh
-         + (PIPE + 1) * PIPEGAP + PIPE * edgeh + Y0)
+    h = (Y0 + n * rpy + EDGEGAP + acch
+         + (PIPE + 1) * PIPEGAP + PIPE * acch + Y0)
     return w, h, ppx, ppy
+
+
+def acc_width_bound(n, pew, peh, edgew, edgeh, acch=None):
+    """The widest accumulator the emitter can place: it sits on its PE's
+    column, so the column PITCH bounds it (a wider one overlaps its
+    neighbour) and, in the last column, so does the die's right edge -- the
+    same two bounds `tpu_vehicle::configure` refuses on (Codex on #957)."""
+    w, _h, ppx, _py = die(n, pew, peh, edgew, edgeh, acch=acch)
+    return min(ppx, w - (X0 + ROWM + (n - 1) * ppx))
 
 
 def usable_core(w, h):
@@ -109,7 +122,7 @@ def clears_bar(cell, w, h):
     return util * harm.ADVICE_MARGIN <= bar, util, core
 
 
-def best_aspect(cell, face_w, face_h, n, edgew, edgeh, hi=600):
+def best_aspect(cell, face_w, face_h, n, edgew, edgeh, hi=600, acch=None, min_w=0):
     """The PE shape that minimises the ARRAY's die, subject to BOTH floors.
 
     `emit_block_size` shapes a block by its faces' ratio, which is right for
@@ -121,16 +134,20 @@ def best_aspect(cell, face_w, face_h, n, edgew, edgeh, hi=600):
     what the first cut got wrong (Codex #890: 128 x 67 is 117 % utilised
     and `harm.py` predicts GPL-0301 on it).
 
+    `min_w` is a floor the ARRAY imposes on the width -- the accumulator's,
+    since it sits on the PE column (Codex on #957: the reshaped PE has to be
+    re-checked against it, so the search never goes below it).
+
     Returns (w, h) or None when nothing inside `hi` clears."""
     best = None
-    w0 = max(1, int(math.ceil(face_w)))
+    w0 = max(1, int(math.ceil(face_w)), int(min_w))
     h0 = max(1, int(math.ceil(face_h)))
     for w in range(w0, hi + 1):
         for h in range(h0, hi + 1):
             ok, _u, _c = clears_bar(cell, w, h)
             if not ok:
                 continue
-            dw, dh, _px, _py = die(n, w, h, edgew, edgeh)
+            dw, dh, _px, _py = die(n, w, h, edgew, edgeh, acch=acch)
             if best is None or dw * dh < best[0]:
                 best = (dw * dh, w, h)
             break            # h is monotone in core: the first that fits is best
@@ -177,12 +194,30 @@ def main(argv=None):
     ap.add_argument("--optimize-aspect", action="store_true",
                     help="reshape the PE to minimise the ARRAY's die (same area "
                          "and the same face floors, a different aspect)")
+    ap.add_argument("--margins", type=int, nargs=2, metavar=("ROWS", "SITES"),
+                    help="the blocks' core margins the hardening will use (harm.sh --margins): the "
+                         "placer's bar is judged on THAT core, not on LibreLane's 4-row/12-site default")
+    ap.add_argument("--density", type=int, metavar="PCT",
+                    help="the PL_TARGET_DENSITY_PCT the hardening will use (harm.sh --density), the bar "
+                         "every size here is judged against")
     ap.add_argument("--args", action="store_true", help="print only the gen.sh arguments")
     ap.add_argument("--json", action="store_true", help="print the whole result as JSON")
     a = ap.parse_args(argv)
     if a.n < 2:
         sys.exit("apply_sizes: --n must be at least 2")
 
+    # The bar and the core this judges against are the ones the BLOCKS will be
+    # hardened with, or the advice models a different block from the one
+    # harm.sh writes (Codex on #957: the PE search for the measured area is
+    # 101 x 188 at the default margins and 100 x 158 at 1 row / 2 sites).
+    if a.margins:
+        rows, sites = a.margins
+        if rows < 1 or sites < 1:
+            ap.error("--margins needs at least one row and one site")
+        harm.BLOCK_SETTINGS.update({"BOTTOM_MARGIN_MULT": rows, "TOP_MARGIN_MULT": rows,
+                                    "LEFT_MARGIN_MULT": sites, "RIGHT_MARGIN_MULT": sites})
+    if a.density is not None:
+        harm.BLOCK_SETTINGS["PL_TARGET_DENSITY_PCT"] = a.density
     sizes = read_sizes(a.sizes)
     if "pe_cell" not in sizes:
         sys.exit(f"apply_sizes: no pe_cell fragment in {a.sizes} — the PE sets "
@@ -197,51 +232,87 @@ def main(argv=None):
         edgeh = int(math.ceil(max(h for _c, _w, h in edge)))
     else:
         edgew, edgeh = pew, peh
+    # The accumulator's own knob; without a fragment it takes the edge size,
+    # which is what the emitter does with ACCW/ACCH left at 0.
+    if ACC in sizes:
+        accw, acch = (int(math.ceil(v)) for v in sizes[ACC][:2])
+    else:
+        accw, acch = edgew, edgeh
     rule_pew, rule_peh, aspect_note = pew, peh, None
+    edge_note = ""
     if a.optimize_aspect:
-        d = json.load(open(os.path.join(a.sizes, "pe_cell.json"))).get("derivation", {})
-        fn = d.get("face_needs", {})
-        got = best_aspect("pe_cell", fn.get("w", 0.0), fn.get("h", 0.0),
-                          a.n, edgew, edgeh)
-        if got is None:
-            sys.exit("apply_sizes: no PE size within 600 um clears the "
-                     "placer's bar — check harm.cell_area_estimate('pe_cell')")
-        pew, peh = got
-        aspect_note = (f"PE reshaped {rule_pew} x {rule_peh} -> {pew} x {peh} "
-                       f"to minimise the ARRAY's die, subject to the placer's "
-                       f"bar on its own core")
-    if a.optimize_aspect:
-        # The edge knob has to clear too, or the recipe still cannot harden:
-        # grow it (keeping it one size for all three, as the emitter demands)
-        # to the smallest that holds every edge cell's own core.
+        # The edge knobs have to clear the placer's bar too, or the recipe
+        # still cannot harden: grow each (the feed/wbuf size as one, the
+        # accumulator's on its own) to the smallest that holds its cells'
+        # core -- BEFORE the PE search, which prices the die with them, and
+        # with an accumulator that INHERITS the edge size re-read after the
+        # growth (Codex on #957: the emitter inherits the grown EDGEH, so a
+        # stale copy predicted a die 366 um shorter than the emitted one).
         grown = False
         while any(not clears_bar(c, edgew, edgeh)[0]
                   for c in EDGE_CELLS if c in sizes) and edgeh < 600:
             edgeh += 1
             grown = True
         if grown:
-            aspect_note += (f"; edge grown to {edgew} x {edgeh} for the same "
-                            f"reason")
+            edge_note += f"; edge grown to {edgew} x {edgeh} for the same reason"
+        if ACC in sizes:
+            grown = False
+            while not clears_bar(ACC, accw, acch)[0] and acch < 600:
+                acch += 1
+                grown = True
+            if grown:
+                edge_note += f"; acc grown to {accw} x {acch} for the same reason"
+        else:
+            accw, acch = edgew, edgeh
+        d = json.load(open(os.path.join(a.sizes, "pe_cell.json"))).get("derivation", {})
+        fn = d.get("face_needs", {})
+        got = best_aspect("pe_cell", fn.get("w", 0.0), fn.get("h", 0.0),
+                          a.n, edgew, edgeh, acch=acch, min_w=max(0, accw - CHAN))
+        if got is None:
+            sys.exit("apply_sizes: no PE size within 600 um clears the "
+                     "placer's bar — check harm.cell_area_estimate('pe_cell')")
+        pew, peh = got
+        aspect_note = (f"PE reshaped {rule_pew} x {rule_peh} -> {pew} x {peh} "
+                       f"to minimise the ARRAY's die, subject to the placer's "
+                       f"bar on its own core") + edge_note
+    accmax = acc_width_bound(a.n, pew, peh, edgew, edgeh, acch)
+    if accw > accmax:
+        # The emitter places the accumulator on its PE's column: the column
+        # pitch bounds its width (else it overlaps its neighbour) and so does
+        # the die's right edge in the last column; the emitter refuses the
+        # same pair (Codex on #957) -- an accumulator INHERITING the edge
+        # size is bound the same way, since ACCW left at 0 IS EDGEW there.
+        # Judged AFTER --optimize-aspect, whose search takes accw - CHAN as
+        # its width floor and so can widen the PE to fit it.
+        what = "acc_cell needs" if ACC in sizes else "the edge size (which acc_cell inherits) is"
+        sys.exit(f"apply_sizes: {what} {accw} um of width but the accumulator sits on the PE column, "
+                 f"whose pitch and die margin allow {accmax:g}: widen the PE (its face or -PEPAD) or "
+                 f"narrow the edge cells, or this emitter cannot honour the rule")
     # BOTH paths are checked: a size the placer refuses is not a size, and
     # the rule's own die is measured against the DIE while the placer
     # measures the CORE (Codex #890).
     checks = []
     for cell, (cw, ch) in (("pe_cell", (pew, peh)),) + tuple(
-            (c, (edgew, edgeh)) for c in EDGE_CELLS if c in sizes):
+            (c, (edgew, edgeh)) for c in EDGE_CELLS if c in sizes) + (
+            ((ACC, (accw, acch)),) if ACC in sizes else ()):
         ok, util, core = clears_bar(cell, cw, ch)
         checks.append((cell, cw, ch, ok, util, core))
 
     args = f"-PEW {pew} -PEH {peh} -EDGEW {edgew} -EDGEH {edgeh}"
+    if ACC in sizes:
+        args += f" -ACCW {accw} -ACCH {acch}"
     if a.args:
         print(args)
         return 0
 
-    w, h, ppx, ppy = die(a.n, pew, peh, edgew, edgeh)
+    w, h, ppx, ppy = die(a.n, pew, peh, edgew, edgeh, acch=acch)
     result = {"n": a.n, "gen_args": args, "aspect_note": aspect_note,
               "checks": [{"cell": c, "w": w, "h": h, "clears": ok,
                           "utilization_pct": u, "core_um2": round(cr, 1)}
                          for c, w, h, ok, u, cr in checks],
               "pe": {"w": pew, "h": peh}, "edge": {"w": edgew, "h": edgeh},
+              "acc": {"w": accw, "h": acch},
+              "judged_against": {"margins": a.margins, "density": harm.BLOCK_SETTINGS["PL_TARGET_DENSITY_PCT"]},
               "predicted_die": {"w": w, "h": h, "mm2": round(w * h / 1e6, 4)},
               "pitch": {"x": ppx, "y": ppy}}
 
@@ -256,9 +327,11 @@ def main(argv=None):
         b_edge = [base[c] for c in EDGE_CELLS if c in base]
         be_w = max([e[0] for e in b_edge], default=bw)
         be_h = max([e[1] for e in b_edge], default=bh)
-        ow, oh, _px, _py = die(a.n, bw, bh, be_w, be_h)
+        ba_w, ba_h = base.get(ACC, (be_w, be_h))
+        ow, oh, _px, _py = die(a.n, bw, bh, be_w, be_h, acch=ba_h)
         result["baseline"] = {"pe": {"w": bw, "h": bh},
                               "edge": {"w": be_w, "h": be_h},
+                              "acc": {"w": ba_w, "h": ba_h},
                               "die": {"w": ow, "h": oh,
                                       "mm2": round(ow * oh / 1e6, 4)}}
         result["die_ratio"] = round((w * h) / (ow * oh), 4) if ow * oh else None
@@ -268,16 +341,22 @@ def main(argv=None):
         print()
         return 0
 
-    print(f"apply_sizes: N={a.n}  pe_cell {pew} x {peh}, edge {edgew} x {edgeh}")
+    print(f"apply_sizes: N={a.n}  pe_cell {pew} x {peh}, edge {edgew} x {edgeh}"
+          + (f", acc {accw} x {acch}" if ACC in sizes else ""))
     for cell, (cw, ch, binds, faces) in sorted(sizes.items()):
         b = f"{binds.get('w', '?')}/{binds.get('h', '?')}"
         note = ""
         if cell in EDGE_CELLS and (math.ceil(cw) < edgew or math.ceil(ch) < edgeh):
             note = (f"  <- emitted at the edge size {edgew} x {edgeh}: the "
-                    f"emitter has ONE edge cell size")
+                    f"emitter has ONE edge cell size for feed and wbuf")
         print(f"  {cell:<10} rule {cw:7.1f} x {ch:6.1f}  binds {b}{note}")
     if aspect_note:
         print(f"apply_sizes: {aspect_note}")
+    if a.margins or a.density is not None:
+        print("apply_sizes: judged against " + ", ".join(
+            ([f"margins {a.margins[0]} row(s) / {a.margins[1]} site(s)"] if a.margins else [])
+            + ([f"density {a.density}"] if a.density is not None else []))
+            + " -- harden with the same harm.sh options")
     for cell, cw, ch, ok, util, core in checks:
         if util is None:
             continue

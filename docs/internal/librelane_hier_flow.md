@@ -862,6 +862,63 @@ license the wall times, which were taken under load).
 --extra "H+B compact=…"` draws it from the signoff DEFs; `utilization` with
 the same `--extra`s prints the logic/die row.
 
+**The loop, run to convergence (2026-09-24).**  Three more rounds on the
+H+B arm, each emitted, hardened and signed off from scratch on the round
+before's measurement (blocks per round: `run_arm.sh 8 hb --density D
+--halo HX HY --margins 1 2` with the top's own margins, tap distance and
+displacement limits in `TOP_SET`; the rows are in `results.jsonl` as
+`H+B compact r1..r3`):
+
+| | F | r0 (above) | r1 | r2 | **r3** |
+|---|---|---|---|---|---|
+| die | 1.032 mm² | 1.576 | 1.131 | 0.998 | **0.998** (0.97× F) |
+| logic / die | 43.0 % | 34.1 % | 47.5 % | 53.8 % | 53.8 % |
+| PE / acc / feed utilisation | – | 60 / 73 / 14 % | 60 / 61 / 39 % | 69 / 71 / 48 % | 69 / 71 / 48 % |
+| top wire | 934,831 µm | 171,558 | 75,857 | 76,712 | **59,363** |
+| arm wire | 934,831 | 1,462,062 | 1,347,585 | 1,309,576 | 1,292,227 |
+| setup / hold WNS | −0.550 / +0.091 ns | +0.064 / +0.117 | +0.025 / +0.114 | +0.542 / +0.120 | +0.413 / +0.120 |
+| DRC / KLayout / LVS | 0/0/0 | 0/0/0 | 0/0/0 | 0/0/0 | 0/0/0 |
+| antenna nets / pins | 0 / 0 | 0 / 0 | 2 / 4 | 6 / 21 | **0 / 0** |
+| max-slew pins (tt corner) | 78 | 298 | 810 | 102 | 79 |
+| top-only / arm wall | 4,541 s | 845 / 1,084 | 848 / 1,229 | 701 / 1,029 | 674 / 1,018 |
+
+* **r1** — the levers 7.4's table never priced: the blocks' core margins
+  from LibreLane's 4 rows / 12 sites to 1 row / 2 sites (17 % of the PE's
+  height held no cell), every gap to one row / two tracks, feed and wbuf
+  sized to their 485 µm² of logic (47.84 × 32.64), acc PE-wide and
+  short (`-ACCW/-ACCH`, new).  Two dead ends first, both about where the
+  TOP's own cells live once the gaps are dead: with the die margin inside
+  the 10 µm halo the 192 north-edge output buffers had no row within any
+  displacement (DPL-0036), and the rows added for them were still outside
+  the top's own default 4-row core margin, which ends exactly where the
+  halo does — so the top's margins had to be cut too.  Dropping the
+  y-halo to 2 µm instead left 24 unrepairable PDN channels beside the
+  feed cells (PDN-0178), for the reason r3 found.
+* **r2** — the utilisation trims on r1's measured numbers: PE core 40 → 35
+  rows, acc 14 → 12, feed/wbuf 10 → 8, blocks placed at density 75.  The
+  die goes UNDER the flat arm's.  CTS's leaf clock buffers needed
+  `PL_MAX_DISPLACEMENT_X/Y 1000` to find a row at all, and the reset
+  tree's antenna count grew to 6 nets (met3, worst ratio 1.62): the top's
+  repeaters now sat up to a millimetre from their loads.
+* **r3** — the same set, with the placement y-halo at 0 AND the power
+  grid's own macro halo at 0 (`FP_PDN_VERTICAL_HALO`, default 10 µm; it is
+  a SEPARATE halo, applied by pdngen, and it is what cut the straps out of
+  the rows r1's y-halo-2 attempt had freed).  Every one-row gap between PE
+  rows is then a live full-width service row (harm's plan sees 33
+  fragments, each crossed by a strap pair, against 23): antenna 0, top
+  wire −23 %, at the same die.  That is the converged floorplan.
+
+The residual is the max-slew column: 79 pins, the blocks' `rst` input
+buffers at 1.86 ns against a 0.75 ns limit, driven off one top-level
+reset net.  It is not a compaction cost — the recorded arms carry 26
+(H+B), 385 (H) and F itself 78 on the same check — but a reset-net
+shape every arm shares, and the place to fix it is the RTL (a registered
+reset per row) rather than the floorplan.  A PE's block-level setup
+reads −1.0 to −1.3 ns in every compact round; the top closes positive
+each time, so it is the block's IO-constraint artefact, not a path.
+
+![F, the recorded H and H+B, and rounds 1 and 3 at one scale](img/librelane_n8_compact_rounds.png)
+
 ## 8. Recipes — macOS + Docker, in order
 
 Everything below runs on macOS 15+ (Apple Silicon or Intel) with Docker

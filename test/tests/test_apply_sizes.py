@@ -77,20 +77,21 @@ def test_the_die_arithmetic_reproduces_both_measured_arm_h_dies():
 
 
 def test_the_pe_sets_the_knobs_and_the_edge_takes_the_max(tmp_path):
-    """The emitter has ONE edge size, so the three edge cells go out at the
-    largest — the smallest size that holds all of them — and the cells that
-    are thereby oversized are named."""
+    """The emitter has ONE edge size for feed and wbuf, so those two go out
+    at the larger — the smallest size that holds both — with the oversized
+    one named; the accumulator gets its own -ACCW/-ACCH (7.5's compaction:
+    one size for all three left feed and wbuf at 14 % utilisation)."""
     d = _sizes_dir(tmp_path, [
         _frag("pe_cell", 178.7, 47.5),
         _frag("acc_cell", 96.0, 51.1, binds=("face", "area")),
-        _frag("feed_cell", 44.2, 44.2), _frag("wbuf_cell", 44.2, 44.2)])
+        _frag("feed_cell", 44.2, 44.2), _frag("wbuf_cell", 40.0, 30.5)])
     r = _run(d, "--n", "8")
     assert r.returncode == 0, r.stderr
-    assert "pe_cell 179 x 48, edge 96 x 52" in r.stdout          # rounded UP
-    assert r.stdout.count("emitter has ONE edge cell size") == 2  # feed, wbuf
+    assert "pe_cell 179 x 48, edge 45 x 45, acc 96 x 52" in r.stdout   # rounded UP
+    assert r.stdout.count("emitter has ONE edge cell size") == 1        # wbuf, at feed's size
     assert "acc_cell" in r.stdout and "binds face/area" in r.stdout
     r = _run(d, "--n", "8", "--args")
-    assert r.stdout.strip() == "-PEW 179 -PEH 48 -EDGEW 96 -EDGEH 52"
+    assert r.stdout.strip() == "-PEW 179 -PEH 48 -EDGEW 45 -EDGEH 45 -ACCW 96 -ACCH 52"
 
 
 def test_the_baseline_comparison_reads_the_emitted_lef(tmp_path):
@@ -198,6 +199,93 @@ def test_it_runs_on_the_checked_in_arrays_own_fragments(tmp_path):
     assert r.returncode == 0, r.stderr
     j = json.loads(r.stdout)
     # From the areas size.buda declares (harm.py's own: pe_cell MEASURED at
-    # 5964, the others §7.1's Yosys totals x 1.7).
-    assert j["gen_args"] == "-PEW 221 -PEH 59 -EDGEW 96 -EDGEH 53"
+    # 5964, the others §7.1's Yosys totals x 1.7).  feed/wbuf take their own
+    # 32 x 31 now that the accumulator has -ACCW/-ACCH; before, all three
+    # went out at acc's 96 x 53 (§8 step 3c's figure).
+    assert j["gen_args"] == "-PEW 221 -PEH 59 -EDGEW 32 -EDGEH 31 -ACCW 96 -ACCH 53"
     assert abs(j["baseline"]["die"]["mm2"] - 3.079) < 5e-3      # the PEPAD-24 set
+
+
+def test_an_accumulator_wider_than_the_pe_is_refused(tmp_path):
+    """The emitter places acc_cell on its PE's column and ends the die at the
+    last PE's edge, so a wider accumulator would overlap and leave the die
+    (Codex on #957): refused here, with the remedy, and by the emitter."""
+    d = _sizes_dir(tmp_path, [_frag("pe_cell", 100.0, 47.5), _frag("acc_cell", 160.0, 51.1)])
+    r = _run(d, "--n", "8", "--args")
+    assert r.returncode != 0 and "sits on the PE column, whose pitch and die margin allow 148" in r.stderr
+    # 140 fits: the bound is the 148 um column pitch (PE 100 + channel 48), not the PE
+    (tmp_path / "ok").mkdir()
+    d = _sizes_dir(tmp_path / "ok", [_frag("pe_cell", 100.0, 47.5), _frag("acc_cell", 140.0, 51.1)])
+    assert _run(d, "--n", "8", "--args").stdout.strip().endswith("-ACCW 140 -ACCH 52")
+
+
+def test_optimize_aspect_never_narrows_the_pe_below_the_accumulator(tmp_path):
+    """The reshaped PE is what the accumulator sits on, so the search's width
+    floor is the accumulator's, not the face's alone (Codex on #957: a 221 um
+    rule PE with a 100 um face floor and a 140 um accumulator recommended
+    -PEW 101 -ACCW 160, which the emitter refuses)."""
+    d = _sizes_dir(tmp_path, [
+        _frag("pe_cell", 221, 59, area=5964, util=46.0, face_w=100.0, face_h=34.0),
+        _frag("acc_cell", 160.0, 51.1), _frag("feed_cell", 44.2, 44.2)])
+    opt = json.loads(_run(d, "--n", "8", "--optimize-aspect", "--json").stdout)
+    assert opt["pe"]["w"] + A.CHAN >= 160 and opt["acc"]["w"] == 160
+    assert all(c["clears"] for c in opt["checks"]), opt["checks"]
+
+
+def test_an_inherited_edge_size_wider_than_the_pe_is_refused_too(tmp_path):
+    """With no acc_cell fragment the accumulator inherits the edge size, which
+    the emitter binds to the PE column exactly the same way (Codex on #957: a
+    100 um PE with a 140 um feed recommended -PEW 100 -EDGEW 140 and the
+    emitter refused it as ACCW 140)."""
+    d = _sizes_dir(tmp_path, [_frag("pe_cell", 100.0, 47.5), _frag("feed_cell", 160.0, 44.2)])
+    r = _run(d, "--n", "8", "--args")
+    assert r.returncode != 0 and "acc_cell inherits" in r.stderr
+
+
+def test_optimize_aspect_widens_the_pe_to_the_accumulator_rather_than_refusing(tmp_path):
+    """The width refusal is judged AFTER the aspect search, whose floor is the
+    accumulator's width: a rule PE narrower than its accumulator is a valid
+    input to --optimize-aspect, which widens it (Codex on #957)."""
+    d = _sizes_dir(tmp_path, [
+        _frag("pe_cell", 100.0, 120.0, area=5964, util=46.0, face_w=100.0, face_h=34.0),
+        _frag("acc_cell", 160.0, 51.1), _frag("feed_cell", 44.2, 44.2)])
+    assert _run(d, "--n", "8", "--args").returncode != 0            # the plain path refuses
+    opt = json.loads(_run(d, "--n", "8", "--optimize-aspect", "--json").stdout)
+    assert opt["pe"]["w"] + A.CHAN >= 160 and opt["acc"]["w"] == 160
+
+
+def test_margins_and_density_are_the_hardenings_own(tmp_path):
+    """The bar is judged on the core the BLOCKS will be hardened with (Codex on
+    #957): at 1 row / 2 sites the aspect search lands a smaller PE than at
+    LibreLane's 4 rows / 12 sites, and a size refused at density 50 clears at 75."""
+    d = _sizes_dir(tmp_path, [
+        _frag("pe_cell", 221, 59, area=5964, util=46.0, face_w=100.0, face_h=34.0),
+        _frag("acc_cell", 96.0, 51.1), _frag("feed_cell", 44.2, 44.2)])
+    dflt = json.loads(_run(d, "--n", "8", "--optimize-aspect", "--json").stdout)
+    tight = json.loads(_run(d, "--n", "8", "--optimize-aspect", "--margins", "1", "2", "--json").stdout)
+    assert tight["predicted_die"]["mm2"] < dflt["predicted_die"]["mm2"]
+    assert tight["judged_against"] == {"margins": [1, 2], "density": 50}
+    # 5964 um^2 of cells in a 150 x 110 PE (49 % of its default core, x1.25
+    # advisory margin = 62): refused at density 50, clears at 75
+    (tmp_path / "b").mkdir()
+    d2 = _sizes_dir(tmp_path / "b", [_frag("pe_cell", 150, 110, area=5964, util=46.0)])
+    at50 = json.loads(_run(d2, "--n", "8", "--json").stdout)
+    at75 = json.loads(_run(d2, "--n", "8", "--density", "75", "--json").stdout)
+    pe = lambda r: [c for c in r["checks"] if c["cell"] == "pe_cell"][0]
+    assert not pe(at50)["clears"] and pe(at75)["clears"]
+
+
+def test_an_inherited_accumulator_follows_the_grown_edge(tmp_path):
+    """With no acc_cell fragment the emitter inherits the FINAL edge height, so
+    the model must too: after --optimize-aspect grows EDGEH for the feed cell,
+    the acc height, the search and the predicted die all read the grown value
+    (Codex on #957: a stale copy predicted a die 366 um shorter than emitted)."""
+    d = _sizes_dir(tmp_path, [
+        _frag("pe_cell", 221, 59, area=5964, util=46.0, face_w=128.0, face_h=34.0),
+        _frag("feed_cell", 44.2, 20.0, area=1275, util=46.0)])      # too short for its cells
+    opt = json.loads(_run(d, "--n", "8", "--optimize-aspect", "--json").stdout)
+    assert "edge grown" in opt["aspect_note"] and opt["edge"]["h"] > 20
+    assert opt["acc"] == opt["edge"]
+    w, h, _px, _py = A.die(8, opt["pe"]["w"], opt["pe"]["h"], opt["edge"]["w"], opt["edge"]["h"],
+                           acch=opt["acc"]["h"])
+    assert opt["predicted_die"] == {"w": w, "h": h, "mm2": round(w * h / 1e6, 4)}
