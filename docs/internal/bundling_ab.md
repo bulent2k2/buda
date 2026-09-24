@@ -14,7 +14,10 @@ python3 tools/bundling_ab.py flow/soc_small.buda --json ab.json
 every bundle into one-net parts: every connection becomes its own "bus".
 Floorplan, layer stack, planner settings and repair steps are the flow's
 own text in both runs.  The tool refuses a flow whose bundler it cannot
-reach, or that sets its own cap anywhere in its source tree.  It fails a
+reach — whose FIRST bundler, as the engine runs the flow, is not in its
+own text — or that sets its own cap anywhere in its source tree, in any
+spelling the engine dispatches (upper case, an alias, an alias defined in
+a sourced file).  It fails a
 run whose report records a command error, since the CLI prints `Error:` and
 carries on.
 

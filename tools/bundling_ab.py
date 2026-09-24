@@ -31,9 +31,11 @@ printed the ratio that flatters the idea would be the wrong instrument.
 The variant is written BESIDE the flow, not in a temp directory: every
 relative path in a flow resolves against the script's own directory, so a
 copy anywhere else would run a different design (or none).  It is removed
-afterwards; its flow logs are kept (`<flow_dir>/log/.bundling_ab_*`, where
-the CLI writes every run's detail, and where the counts are read from, since
-the terminal carries one summary line per command) for anyone checking a row.
+afterwards.  Its names are unique per run (`mkstemp`), so two invocations
+on one flow cannot collide; its flow log is kept and its path printed
+(`<flow_dir>/log/.bundling_ab_*_flow.log`, where the CLI writes every run's
+detail, and where the counts are read from, since the terminal carries one
+summary line per command) for anyone checking a row.
 
 A flow with no bundler in its own text is refused — one reached through
 `source` cannot be injected before — and so is a flow that sets
@@ -52,6 +54,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -79,12 +82,6 @@ class Refused(Exception):
     """The flow cannot be measured by this tool as it stands."""
 
 
-def _command(line):
-    """The command word of one `.buda` line, or '' for a blank/comment."""
-    text = strip_inline_comment(line).strip()
-    return text.split()[0] if text else ""
-
-
 def _resolve_source(base_dir, raw):
     """Where `source <raw>` lands from a script in `base_dir` — the engine's
     own rule (`cmd_source`): relative to the sourcing script, with the
@@ -97,57 +94,84 @@ def _resolve_source(base_dir, raw):
     return full
 
 
-def _source_tree(text, base_dir, name, seen=None):
-    """Yield (file, line number, command word) for every line of `text` and,
-    recursively, of every file it `source`s.  A sourced file that cannot be
-    read refuses: a cap declared in it could not be ruled out."""
+def _source_tree(text, base_dir, name, aliases=None, seen=None,
+                 top=True):
+    """Yield (file, line number, command, top-level line index or None) for
+    every line of `text` and, recursively, of every file it `source`s, in
+    the order the engine runs them.
+
+    The command is CANONICAL, the way `BudaSession.do_command` dispatches
+    it: lower-cased, then resolved through the `alias` table as the walk
+    has built it so far — so `SET_MAX_BUNDLE_BITS` and `alias cap
+    set_max_bundle_bits` + `cap 4 for pc_` read as the command they run
+    (Codex P1 on #953).  `alias <name> <target>` stores the target already
+    resolved, like `cmd_alias`, and `unalias` removes names; a real command
+    cannot be aliased away, so no registry lookup is needed to mirror the
+    engine.  A sourced file that cannot be read refuses: a cap declared in
+    it could not be ruled out."""
+    aliases = {} if aliases is None else aliases
     seen = set() if seen is None else seen
-    for n, line in enumerate(text.splitlines(), 1):
-        word = _command(line)
-        yield name, n, word
-        if word != "source":
+    for i, line in enumerate(text.splitlines()):
+        n = i + 1
+        toks = strip_inline_comment(line).split()
+        if not toks:
             continue
-        raw = sole_path_arg(strip_inline_comment(line).strip())
-        path = _resolve_source(base_dir, raw) if raw else ""
-        if not path or not os.path.isfile(path):
-            raise Refused(f"{name}:{n} sources {raw!r}, which cannot be "
-                          f"read, so a bundle-bit cap in it cannot be ruled "
-                          f"out")
-        if path in seen:
-            continue
-        seen.add(path)
-        yield from _source_tree(Path(path).read_text(), os.path.dirname(path),
-                                path, seen)
+        word = toks[0].lower()
+        word = aliases.get(word, word)
+        yield name, n, word, (i if top else None)
+        if word == "alias" and len(toks) >= 3:
+            target = toks[2].lower()
+            aliases[toks[1].lower()] = aliases.get(target, target)
+        elif word == "unalias":
+            for a in toks[1:]:
+                aliases.pop(a.lower(), None)
+        elif word == "source":
+            raw = sole_path_arg(strip_inline_comment(line).strip())
+            path = _resolve_source(base_dir, raw) if raw else ""
+            if not path or not os.path.isfile(path):
+                raise Refused(f"{name}:{n} sources {raw!r}, which cannot "
+                              f"be read, so a bundle-bit cap in it cannot "
+                              f"be ruled out")
+            if path in seen:
+                continue
+            seen.add(path)
+            yield from _source_tree(Path(path).read_text(),
+                                    os.path.dirname(path), path, aliases,
+                                    seen, top=False)
 
 
 def unbundled_text(text, base_dir=None, name="flow"):
     """`text` with INJECTED placed right before its first bundler.
 
-    Raises Refused when there is no bundler to inject before, or when the
-    flow — its own text or any file it sources, when `base_dir` says where
-    those resolve from — already declares a bundle-bit cap."""
+    Raises Refused when the first bundler the flow runs is not in its own
+    text (nothing to inject before), or when the flow — its own text or,
+    when `base_dir` says where those resolve from, any file it sources —
+    already declares a bundle-bit cap."""
     lines = text.splitlines(keepends=True)
-    words = [_command(ln) for ln in lines]
     if base_dir is None:
-        tree = ((name, i + 1, w) for i, w in enumerate(words))
-    else:
-        tree = _source_tree(text, base_dir, name)
-    for where, n, w in tree:
+        # No sourced files can be read; a `source` line refuses.
+        base_dir = os.path.join(os.sep, "nonexistent-bundling-ab")
+    first = None
+    for where, n, w, top_i in _source_tree(text, base_dir, name):
         if w == "set_max_bundle_bits":
             raise Refused(
                 f"{where}:{n} already sets set_max_bundle_bits; its cap, or "
                 f"a scoped rule that outranks the global one for its prefix, "
                 f"would leave part of the design bundled while the table said "
                 f"'one net per bundle'")
-    for i, w in enumerate(words):
-        if w in BUNDLERS:
-            nl = "\n" if not lines[i].endswith("\r\n") else "\r\n"
-            inject = [f"# bundling_ab: every net its own bundle{nl}",
-                      f"{INJECTED}{nl}"]
-            return "".join(lines[:i] + inject + lines[i:])
-    raise Refused(
-        "no run_bundler / run_hier_bundler in the flow's own text; a "
-        "bundler reached through `source` cannot be injected before")
+        if w in BUNDLERS and first is None:
+            first = (where, n, top_i)
+    if first is None:
+        raise Refused("the flow runs no run_bundler / run_hier_bundler")
+    where, n, i = first
+    if i is None:
+        raise Refused(
+            f"the flow's first bundler is at {where}:{n}, reached through "
+            f"`source`; a bundler there cannot be injected before")
+    nl = "\n" if not lines[i].endswith("\r\n") else "\r\n"
+    inject = [f"# bundling_ab: every net its own bundle{nl}",
+              f"{INJECTED}{nl}"]
+    return "".join(lines[:i] + inject + lines[i:])
 
 
 def _sum_stage(commands, words):
@@ -210,12 +234,23 @@ def summarize(report, stdout, log=""):
 
 
 def run_arm(flow, text, tag):
-    """Run `text` as a sibling of `flow`; return (report, stdout, log)."""
+    """Run `text` as a sibling of `flow`; return (report, stdout, log).
+
+    The variant and its report are EXCLUSIVE files this call creates
+    (`mkstemp`), so two invocations on one flow cannot truncate or delete
+    each other's, nor a file that happened to carry a fixed name (Codex P2
+    on #953); only those two are removed afterwards."""
     flow = Path(flow).resolve()
-    variant = flow.with_name(f".bundling_ab_{flow.stem}_{tag}.buda")
+    stem = f".bundling_ab_{flow.stem}_{tag}_"
+    fd, vpath = tempfile.mkstemp(prefix=stem, suffix=".buda", dir=flow.parent)
+    variant = Path(vpath)
+    with os.fdopen(fd, "w") as f:
+        f.write(text)
+    rfd, rpath = tempfile.mkstemp(prefix=stem, suffix=".json",
+                                  dir=flow.parent)
+    os.close(rfd)
+    report_path = Path(rpath)     # kept, empty: the CLI overwrites it
     log_path = variant.parent / "log" / f"{variant.stem}_flow.log"
-    report_path = variant.with_suffix(".json")
-    variant.write_text(text)
     try:
         env = {**os.environ,
                "PYTHONPATH": os.pathsep.join(
@@ -227,7 +262,7 @@ def run_arm(flow, text, tag):
              "--report-json", str(report_path), str(variant)],
             capture_output=True, text=True, env=env)
         wall = time.time() - t0
-        if r.returncode != 0 or not report_path.exists():
+        if r.returncode != 0 or report_path.stat().st_size == 0:
             sys.stderr.write(r.stdout[-2000:] + r.stderr[-1000:])
             raise RuntimeError(f"the {tag} run failed (exit {r.returncode})")
         report = json.loads(report_path.read_text())
@@ -244,6 +279,8 @@ def run_arm(flow, text, tag):
                 f"{', '.join(failed) or 'none'})")
         report["wall_seconds"] = round(wall, 1)
         log = log_path.read_text() if log_path.exists() else ""
+        if log:
+            print(f"[bundling_ab] {tag} flow log: {log_path}", flush=True)
         return report, r.stdout, log
     finally:
         for p in (variant, report_path):

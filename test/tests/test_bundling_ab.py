@@ -192,10 +192,15 @@ def test_flat_candidates_without_a_log_are_unknown_not_one_bundle():
     assert ab.summarize({}, stdout)["candidates"] is None
 
 
-def _fake_run(report):
+def _fake_run(report, log=None):
     def run(argv, **kw):
         path = Path(argv[argv.index("--report-json") + 1])
         path.write_text(ab.json.dumps(report))
+        if log is not None:
+            variant = Path(argv[-1])
+            (variant.parent / "log").mkdir(exist_ok=True)
+            (variant.parent / "log" /
+             f"{variant.stem}_flow.log").write_text(log)
         return ab.subprocess.CompletedProcess(argv, 0, "", "")
     return run
 
@@ -215,10 +220,75 @@ def test_a_run_whose_commands_reported_errors_fails(tmp_path, monkeypatch):
 def test_a_clean_run_returns_its_log(tmp_path, monkeypatch):
     flow = tmp_path / "f.buda"
     flow.write_text("run_bundler STRICT\n")
-    (tmp_path / "log").mkdir()
-    (tmp_path / "log" / ".bundling_ab_f_bundled_flow.log").write_text("LOG")
     monkeypatch.setattr(ab.subprocess, "run", _fake_run(
         {"exit_status": 0, "commands": [
-            {"command": "run_bundler STRICT", "seconds": 0.1, "errors": 0}]}))
+            {"command": "run_bundler STRICT", "seconds": 0.1, "errors": 0}]},
+        log="LOG"))
     report, stdout, log = ab.run_arm(flow, flow.read_text(), "bundled")
     assert log == "LOG" and report["wall_seconds"] >= 0
+
+
+# ── Codex, second round on #953 ───────────────────────────────────────────
+
+@pytest.mark.parametrize("flow", [
+    "SET_MAX_BUNDLE_BITS 4 for pc_\nrun_hier_bundler\n",
+    "alias cap set_max_bundle_bits\ncap 4 for pc_\nrun_hier_bundler\n",
+    # an alias of an alias is stored resolved, as cmd_alias does
+    "alias c1 set_max_bundle_bits\nalias c2 c1\nc2 8\nrun_bundler STRICT\n",
+])
+def test_a_cap_in_any_spelling_the_engine_runs_refuses(flow):
+    with pytest.raises(ab.Refused, match="set_max_bundle_bits"):
+        ab.unbundled_text(flow)
+
+
+def test_an_alias_defined_in_a_sourced_file_is_resolved(tmp_path):
+    (tmp_path / "defs.buda").write_text("alias cap set_max_bundle_bits\n")
+    flow = "source defs.buda\ncap 4 for pc_\nrun_hier_bundler\n"
+    with pytest.raises(ab.Refused, match="flow:2"):
+        ab.unbundled_text(flow, base_dir=str(tmp_path))
+
+
+def test_unalias_is_honoured():
+    flow = ("alias cap set_max_bundle_bits\nunalias cap\n"
+            "cap 4\nrun_bundler STRICT\n")
+    out = ab.unbundled_text(flow)            # `cap` is no command any more
+    assert ab.INJECTED in out
+
+
+def test_an_upper_case_or_aliased_bundler_is_found():
+    for flow, bundler in (("open_bdb x\nRUN_HIER_BUNDLER depth 4\n",
+                           "RUN_HIER_BUNDLER depth 4"),
+                          ("alias hb run_hier_bundler\nhb\n", "hb")):
+        out = ab.unbundled_text(flow).splitlines()
+        assert out.index(ab.INJECTED) == out.index(bundler) - 1
+
+
+def test_a_first_bundler_reached_through_source_refuses(tmp_path):
+    (tmp_path / "b.buda").write_text("run_bundler STRICT\n")
+    flow = "source b.buda\nrun_bundler STRICT\n"
+    with pytest.raises(ab.Refused, match="b.buda:1"):
+        ab.unbundled_text(flow, base_dir=str(tmp_path))
+
+
+def test_each_run_owns_its_files(tmp_path, monkeypatch):
+    """Fixed names let two runs on one flow truncate and delete each
+    other's files, or a stranger's that shared the name."""
+    flow = tmp_path / "f.buda"
+    flow.write_text("run_bundler STRICT\n")
+    bystanders = [tmp_path / ".bundling_ab_f_bundled.buda",
+                  tmp_path / ".bundling_ab_f_bundled.json"]
+    for b in bystanders:
+        b.write_text("NOT OURS")
+    seen = []
+
+    def run(argv, **kw):
+        seen.append(Path(argv[-1]))
+        return _fake_run({"exit_status": 0, "commands": []})(argv, **kw)
+    monkeypatch.setattr(ab.subprocess, "run", run)
+    ab.run_arm(flow, flow.read_text(), "bundled")
+    ab.run_arm(flow, flow.read_text(), "bundled")
+    assert seen[0] != seen[1]
+    assert all(b.read_text() == "NOT OURS" for b in bystanders)
+    assert sorted(p.name for p in tmp_path.iterdir()
+                  if p.is_file()) == sorted(
+        [b.name for b in bystanders] + ["f.buda"])
