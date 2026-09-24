@@ -411,8 +411,9 @@ notes, not from a wish list.
    flow never needs: 3.8× the flat die at N = 8 in the recorded arms, 0.97×
    after the compaction study of 24 September 2026 (block margins, channels
    and edge blocks in one round, then utilisation).  The cost is
-   reported rather than used as a pass/fail gate.  Closing it is a question about the whole flow as
-   much as about BUDA.
+   reported rather than used as a pass/fail gate.  What remains is reproducing the compact result under
+   controlled conditions and keeping it at N = 16, where the blocks' own
+   wiring grows.
 3. **The crossover is measured only provisionally.**  The case for
    hierarchy is that flat runs stop scaling: at ~55 k cells a flat run takes
    76 min, and the next doubling five to six hours.  The next size up
