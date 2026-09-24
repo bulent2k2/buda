@@ -261,10 +261,10 @@ def test_margins_and_density_are_the_hardenings_own(tmp_path):
     tight = json.loads(_run(d, "--n", "8", "--optimize-aspect", "--margins", "1", "2", "--json").stdout)
     assert tight["predicted_die"]["mm2"] < dflt["predicted_die"]["mm2"]
     assert tight["judged_against"] == {"margins": [1, 2], "density": 50}
-    # 5964 um^2 of cells in a 140 x 100 PE (53 % of its default core, x1.25
-    # advisory margin = 66): refused at density 50, clears at 75
+    # 5964 um^2 of cells in a 150 x 110 PE (49 % of its default core, x1.25
+    # advisory margin = 62): refused at density 50, clears at 75
     (tmp_path / "b").mkdir()
-    d2 = _sizes_dir(tmp_path / "b", [_frag("pe_cell", 140, 100, area=5964, util=46.0)])
+    d2 = _sizes_dir(tmp_path / "b", [_frag("pe_cell", 150, 110, area=5964, util=46.0)])
     at50 = json.loads(_run(d2, "--n", "8", "--json").stdout)
     at75 = json.loads(_run(d2, "--n", "8", "--density", "75", "--json").stdout)
     pe = lambda r: [c for c in r["checks"] if c["cell"] == "pe_cell"][0]
