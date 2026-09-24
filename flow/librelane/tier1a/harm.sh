@@ -29,9 +29,17 @@
 # gets an `FP_DEF_TEMPLATE` from BUDA's plan (`pins.sh N` writes n<N>/pins/)
 # and is capped at `RT_MAX_LAYER met3`.  See harm.py's --pins help.
 set -euo pipefail
-N=${1:?usage: harm.sh N [--pins <dir>]   (after gen.sh N)}; shift || true
+N=${1:?usage: harm.sh N [--pins <dir>] [--density PCT] [--halo HX HY]   (after gen.sh N)}; shift || true
 pins=()
-if [ $# -ge 2 ] && [ "$1" = "--pins" ]; then pins=(--pins "$2"); shift 2; fi
+while [ $# -ge 2 ]; do
+    case $1 in
+        --pins)    pins+=(--pins "$2"); shift 2 ;;
+        --density) pins+=(--density "$2"); shift 2 ;;   # PL_TARGET_DENSITY_PCT for the blocks
+        --halo)    [ $# -ge 3 ] || { echo "harm.sh: --halo needs HX HY" >&2; exit 1; }
+                   pins+=(--halo "$2" "$3"); shift 3 ;;  # FP_MACRO_*_HALO, and the PDN plan's fragments
+        *) break ;;
+    esac
+done
 if [ $# -ne 0 ]; then echo "harm.sh: unexpected arguments: $*" >&2; exit 1; fi
 here=$(cd "$(dirname "$0")" && pwd)
 # T1A_DIR overrides where the design lives (the tests use a temp dir), as in gen.sh.

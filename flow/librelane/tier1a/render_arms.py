@@ -188,7 +188,7 @@ class Arm:
     def __init__(self, name, sizes, layers=LAYERS):
         kindof, top, blocks = ARMS[name]
         self.name, self.sizes = name, sizes
-        top = os.path.join(HERE, top)
+        top = top if os.path.isabs(top) else os.path.join(HERE, top)
         if not os.path.exists(top):
             sys.exit(f"render_arms: {name}: no {top} -- run the arm first "
                      "(docs/internal/librelane_hier_flow.md recipe 7)")
@@ -203,7 +203,8 @@ class Arm:
                 continue
             assert o == "N", f"{n}: orientation {o} not handled (every emitted block is N)"
             if c not in cache:
-                bp = os.path.join(HERE, blocks, c, "runs", "h", "final", "def", f"{c}.def")
+                bp = os.path.join(blocks if os.path.isabs(blocks) else os.path.join(HERE, blocks),
+                                  c, "runs", "h", "final", "def", f"{c}.def")
                 bdie, bcomps, _ = parse_def(bp)
                 cache[c] = (bdie, bcomps, routes(bp, keep=layers))
                 self.block_defs[c] = bp
@@ -296,8 +297,8 @@ def draw_placement(ax, arm):
                                lw=0.9, ls=(0, (4, 3)), zorder=4))
     _frame(ax, arm, "#222", 0.6)
     d = arm.die
-    ax.set_title(f"{TITLE[arm.name]}\n{d[2]-d[0]:,.0f} × {d[3]-d[1]:,.0f} µm = "
-                 f"{arm.die_area()/1e6:.3f} mm²\n{n:,} logic cells", fontsize=11, loc="left")
+    ax.set_title(f"{TITLE[arm.name]}\n{d[2]-d[0]:,.0f} × {d[3]-d[1]:,.0f} µm\n"
+                 f"{arm.die_area()/1e6:.3f} mm², {n:,} logic cells", fontsize=10, loc="left")
     return n
 
 
@@ -319,15 +320,18 @@ def side_by_side(arms, draw, legend, out):
     plt = _mpl()
     ws = [a.die[2] - a.die[0] for a in arms]
     hs = [a.die[3] - a.die[1] for a in arms]
-    s = 16.0 / (sum(ws) + 400)
+    gap = 0.02                                        # figure fraction between panels
+    fig_w = 16.5
+    # one um scale for every panel: the panels plus their gaps fill 98 % of the width
+    s = fig_w * (0.98 - gap * (len(arms) - 1)) / sum(w + 40 for w in ws)
     fh = max(hs) * s + 1.8
-    fig = plt.figure(figsize=(16.5, fh))
+    fig = plt.figure(figsize=(fig_w, fh))
     x = 0.01
     for a, w, h in zip(arms, ws, hs):
-        fw = (w + 40) * s / 16.5
+        fw = (w + 40) * s / fig_w
         ax = fig.add_axes([x, 0.6 / fh, fw, (h + 40) * s / fh])
         draw(ax, a)
-        x += fw + 0.02
+        x += fw + gap
     fig.legend(handles=legend, loc="lower left", ncol=len(legend), fontsize=9, frameon=False)
     fig.savefig(out, dpi=200)
     plt.close(fig)
@@ -341,7 +345,16 @@ def main():
     ap.add_argument("--lw", type=float, default=None, help="routing mode: line width (default by density)")
     ap.add_argument("--out", default="arms", help="output prefix")
     ap.add_argument("--arms", default="F,H,H+B")
+    ap.add_argument("--extra", action="append", default=[], metavar="NAME=TOP_DEF=BLOCKS_DIR",
+                    help="an arm outside the tree: its top's DEF and the directory holding "
+                         "<cell>/runs/h/final/def/<cell>.def (BLOCKS_DIR empty = flat); "
+                         "repeatable, appended to --arms")
     a = ap.parse_args()
+    for e in a.extra:
+        name, top, blocks = (e.split("=", 2) + [""])[:3]
+        ARMS[name] = ("hier" if blocks else "flat", top, blocks or None)
+        TITLE.setdefault(name, name)
+        a.arms += "," + name
     from matplotlib.lines import Line2D
     from matplotlib.patches import Patch
     sizes = lef_sizes(find_lef())
