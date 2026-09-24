@@ -4224,24 +4224,37 @@ class HierMixin:
         comps = {c.name: c for c in self.bdb.all_components()}
 
         def rel_tracks(ts, inst_name, refl=False, extent=0.0):
-            # Track pool of ts's window, relative to the instance origin.
-            # For a mirrored sibling (refl) the pool is reflected back into
-            # the REFERENCE frame (rel' = extent - rel, order reversed) so
-            # physically identical tracks compare equal position-by-position.
+            # EVERY track pool DetailedNUTS can seat ts's bits from, relative
+            # to the instance origin: the span-clear pool it prefers AND the
+            # midpoint pool it falls back to when the span-clear one is short
+            # of the bits (`signal_tracks_in` at the span midpoint,
+            # detailed_nuts.cpp).  Comparing the span-clear pool alone let a
+            # window over a LOW-layer keepout compare EMPTY against EMPTY and
+            # read ALIGNED while the bits came from midpoint pools a phase
+            # apart — 96 bit-wires of the SoC's copied cores landed in a
+            # GROUND slot (#946).  For a mirrored sibling (refl) each pool is
+            # reflected back into the REFERENCE frame (rel' = extent - rel,
+            # order reversed) so physically identical tracks compare equal
+            # position-by-position.
             if self.routing_grid is None \
                     or not self.routing_grid.has_layer(ts.layer):
                 return None
             g = self.routing_grid.get_layer_grid(ts.layer)
             lo, hi = sorted((ts.span_lo, ts.span_hi))
-            tracks = g.signal_tracks_in_span(lo, hi,
-                                             ts.interval_lo, ts.interval_hi)
             c = comps[inst_name]
             off = c.y1 if ts.horiz else c.x1
-            rel = [(round(p - off, 6), round(slot.width, 6))
-                   for p, slot in tracks]
-            if refl:
-                rel = [(round(extent - p, 6), w) for p, w in reversed(rel)]
-            return rel
+
+            def norm(tracks):
+                rel = [(round(p - off, 6), round(slot.width, 6))
+                       for p, slot in tracks]
+                if refl:
+                    rel = [(round(extent - p, 6), w)
+                           for p, w in reversed(rel)]
+                return rel
+            return (("span-clear", norm(g.signal_tracks_in_span(
+                        lo, hi, ts.interval_lo, ts.interval_hi))),
+                    ("midpoint", norm(g.signal_tracks_in(
+                        (lo + hi) / 2.0, ts.interval_lo, ts.interval_hi))))
 
         cells = {}
         for cell, tid, iws in self._bottom_up_instance_groups():
@@ -4302,16 +4315,26 @@ class HierMixin:
                         if a is None or b is None:
                             continue
                         n_windows += 1
-                        if len(a) != len(b):
-                            issues.append(
-                                f"L{rts.layer} seg{si}: {len(b)} track(s) "
-                                f"vs {len(a)} at reference")
-                            continue
-                        for (pa, wa), (pb, wb) in zip(a, b):
-                            if abs(pa - pb) > 1e-6 or abs(wa - wb) > 1e-6:
+                        for (kind, pa_), (_, pb_) in zip(a, b):
+                            # The span-clear pool keeps its historical
+                            # wording; the midpoint fallback says which.
+                            tag = "" if kind == "span-clear" else f" {kind}"
+                            if len(pa_) != len(pb_):
                                 issues.append(
-                                    f"L{rts.layer} seg{si}: track at rel "
-                                    f"{pb:+.3f} vs reference {pa:+.3f}")
+                                    f"L{rts.layer} seg{si}{tag}: "
+                                    f"{len(pb_)} track(s) vs {len(pa_)} "
+                                    f"at reference")
+                                break
+                            bad = next(
+                                ((pa, pb) for (pa, wa), (pb, wb)
+                                 in zip(pa_, pb_)
+                                 if abs(pa - pb) > 1e-6
+                                 or abs(wa - wb) > 1e-6), None)
+                            if bad is not None:
+                                issues.append(
+                                    f"L{rts.layer} seg{si}{tag}: track at "
+                                    f"rel {bad[1]:+.3f} vs reference "
+                                    f"{bad[0]:+.3f}")
                                 break
                     if issues:
                         misaligned[inst] = issues

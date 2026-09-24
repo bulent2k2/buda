@@ -466,6 +466,8 @@ checked" are indistinguishable in a table.
 | `converge soc 2 -arms td` (no copies) | 0/0/0 | clean |
 | `converge soc 2 -arms blind` (bottom-up) | 1/8/8 | **104** |
 | `converge soc 4 -arms blind` (bottom-up) | 5/117/117 | **201** |
+| `converge soc 2 -arms blind`, after the #946 fix | 1/8/8 | 8 |
+| `converge soc 4 -arms blind`, after the #946 fix | 5/85/85 | 73 |
 
 The agreements are the point as much as the disagreements: a judge that
 never agrees is measuring itself.
@@ -507,13 +509,40 @@ What is MEASURED, on
   grid (M6 is horizontal and every instance shares y = 112; the M5 deltas
   are multiples of its period).
 
-So the checker's verdict and the placed metal disagree, on a cell the
-aligner had already flagged.  **The mechanism is not established** and is
-deliberately not guessed at here: `rel_tracks` compares each instance's
-pool relative to its own origin, which should see a phase shift, so
-something upstream of the comparison — which windows reach it, or which
-bundles are in the fixed set — is the place to look.  That is a separate
-piece of work; what this page records is the measurement.
+So the checker's verdict and the placed metal disagreed, on a cell the
+aligner had already flagged.
+
+**The mechanism** (found and fixed under #946, 2026-09-24): the core's M3
+segment lies over a LOW-layer keepout, so the SPAN-CLEAR pool
+(`signal_tracks_in_span`) that `check_template_tracks` compared was EMPTY
+at the reference and at every copy — empty against empty reads identical,
+hence `ALIGNED`.  DetailedNUTS does not stop at an empty span-clear pool:
+when it is short of the bits it falls back to the MIDPOINT pool
+(`signal_tracks_in` at the span midpoint, `detailed_nuts.cpp`), and those
+pools are a phase apart (reference relative positions 190.0, 191.5, 193.0 …,
+`quad_0/cl_1/core` 190.5, 192.0 …, 64 tracks against 63).  The reference
+solved on its midpoint pool, and the copy transplanted those positions onto
+instances whose own midpoint pools are elsewhere.  `rel_tracks` did see a
+phase shift wherever it LOOKED; it looked at the one pool that was empty.
+
+The check now compares every pool DetailedNUTS can seat the bits from —
+the span-clear pool and the midpoint fallback — and reports the latter by
+name (`L3 seg0 midpoint: 64 track(s) vs 63 at reference`), so `core_cell`
+reads MISALIGNED and, under `on_mismatch independent`, the three copies are
+solved on their own tracks.  Measured: NQ = 2 goes from 104 judge findings
+to the eight `pc_0` OPENs `check_design` already reports (all 96 OFF_GRID
+gone, the engine's verdict and wirelength unchanged); NQ = 4 goes from 201
+to 73 — OFF_GRID 96 → 0 and NO_METAL 64 → 32, with the remaining 32
+NO_METAL, 37 OPEN and the 4 cross-bundle SHORTs of #948 left standing and
+the engine's own count falling from 117 to 85 unplaced.  `tpu 8` stays
+clean, and the QoR corpus is unchanged (0 better / 0 worse / 56
+unchanged, abstract and detailed WL +0 — no corpus flow has a template
+whose span-clear pool is short).  Pinned by
+`test_tcl_soc_flow.py::test_a_copied_core_lands_on_its_own_signal_tracks`,
+which fails on the pre-fix engine (NQ = 1, 32 OFF_GRID).  A flow under the
+default `on_mismatch stop` that used to copy such a cell now REFUSES DNUTS
+with the report instead — the policy's own meaning, applied to the pool the
+bits actually come from.
 
 Two controls bound it, and both point the same way: the mesh
 (`tpu 8`), whose `-bottomup` snaps the row pitch onto the stack's track
@@ -523,11 +552,12 @@ design or the judge.
 
 **What it means for the published tables**: every "clean" in E1 and E5 —
 6b, 6c and 6d included — is a `check_design` clean, and the bottom-up arms
-of those tables carry this off-grid metal unless the fix changes it.  The
+of those tables carried this off-grid metal (the fix above removes it; the
+rows themselves have not been re-run under it yet).  The
 tables are not withdrawn on that account: the claim they support is about
 the LOOP (does an informed round converge, and in how many rounds), both
 arms are scored the same way, and the 96 wires are present in every arm's
 bottom-up rounds alike.  But a row that reads clean is clean BY THE
-ENGINE'S AUDIT, and until the copy is fixed and the rows re-judged, that is
-what those tables say.  The ladder page's build order put the judge first
+ENGINE'S AUDIT, and until the rows are re-run and re-judged under the fix,
+that is what those tables say.  The ladder page's build order put the judge first
 for exactly this reason.

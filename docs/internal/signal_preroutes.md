@@ -175,8 +175,10 @@ A FIXED wire is only as right as the plan that drew it, so three faults the
 judge (`tools/independent_audit.py`) found and `check_design` did not stop
 being reports and become blockers:
 
-* **#946**: bottom-up copies sitting inside a GROUND slot.  As FIXED metal
-  that is a short to the power grid.
+* **#946** (FIXED 2026-09-24): bottom-up copies sitting inside a GROUND
+  slot.  As FIXED metal that is a short to the power grid.  The check that
+  licensed the copy compared an empty span-clear pool while the bits came
+  from the midpoint fallback; it now compares both.
 * **#947**: `check_design` has no on-grid check.  The writer must not rely
   on an audit that cannot see the fault it would ship.
 * **#948**: two different bundles' nets overlapping on one layer.  As FIXED
