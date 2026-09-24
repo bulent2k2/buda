@@ -819,10 +819,21 @@ void DetailedNUTSEngine::place_by_layer(
                         ns.bundle_id      = bs.bundle_id;
                         ns.seg_idx        = bs.seg_idx;
                         ns.bit_index      = ndr_bit_on_rank(bit_rank);
-                        // A k-slot wire's centre sits mid-footprint (between
-                        // slot centres for even k — the documented off-centre
-                        // wrinkle); width covers the slot extent.
-                        ns.track_position = 0.5 * (lo_t.first + hi_t.first);
+                        // A k-slot wire's centre sits mid-FOOTPRINT (between
+                        // slot centres for even k); width covers the slot
+                        // extent.  Mid-footprint is the midpoint of the run's
+                        // EDGES — lo_t's low edge and hi_t's high edge — not
+                        // of the two slot centres: the two agree only when
+                        // the end slots are equally wide, and on a pattern
+                        // mixing slot widths the centre midpoint put every
+                        // governed wire (w_hi − w_lo)/4 off its slots, metal
+                        // over a space on one side and slot left bare on the
+                        // other (found by the OFF_GRID audit, #947).  Written
+                        // as the old value plus the correction so an
+                        // equal-width run is bit-for-bit what it was.
+                        ns.track_position = 0.5 * (lo_t.first + hi_t.first)
+                                            + 0.25 * (hi_t.second.width
+                                                      - lo_t.second.width);
                         ns.width          = (hi_t.first - lo_t.first)
                                             + 0.5 * (lo_t.second.width
                                                      + hi_t.second.width);

@@ -2081,8 +2081,9 @@ class RipupMixin:
             #      cancel an accepted conservative one.  Only HERE — the
             #      accept contract prices its false positives at zero, which
             #      the unconditional entry/auto heals cannot.
-            for tier_name, tier_kw in (("dead", {}),
-                                       ("cull-risk", {"cull_risk": True})):
+            for tier_name, tier_kw in (("dead", {"seek_host": True}),
+                                       ("cull-risk", {"cull_risk": True,
+                                                      "seek_host": True})):
                 if self._rr_m_primary(metric()) == 0:
                     break
                 cur_end = metric()

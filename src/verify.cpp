@@ -1412,10 +1412,90 @@ ConnResult check_nuts(const ConnTopology& ct, const NUTSResult& nuts,
 
 // ── check_dnuts ───────────────────────────────────────────────────────────────
 
+bool metal_on_signal_run(const TrackPattern& pat, double lo, double hi) {
+    // Edges are compared, not centres: an NDR bit of k slots is centred
+    // BETWEEN slot centres whenever k is even, and a centre rule cannot tell
+    // that wire from one half a slot off (#954).  The run must be unbroken —
+    // a rail between the two edge slots means the "wire" spans a power track.
+    constexpr double eps = 1e-6;
+    const double up = pat.unit_pitch();
+    if (up <= 0.0 || !(hi > lo)) return false;
+    const auto tr = pat.tracks_in_range(lo - up, hi + up);
+    for (size_t i = 0; i < tr.size(); ++i) {
+        const auto& [c_lo, s_lo] = tr[i];
+        if (s_lo.type != "SIGNAL") continue;
+        if (std::fabs((c_lo - s_lo.width / 2.0) - lo) > eps) continue;
+        for (size_t j = i; j < tr.size(); ++j) {
+            const auto& [c, sl] = tr[j];
+            if (sl.type != "SIGNAL") break;   // a rail inside
+            const double edge = c + sl.width / 2.0;
+            if (std::fabs(edge - hi) <= eps) return true;
+            if (edge > hi + eps) break;
+        }
+    }
+    return false;
+}
+
+// OFF_GRID (issue #947): every placed bit-wire and shield of the bundle must
+// be metal the technology has a track for — see metal_on_signal_run.  The
+// pattern is the one in force at the wire's along-midpoint (the point
+// DetailedNUTS's own midpoint pool and tools/independent_audit.py both
+// read), and the perpendicular axis is the LAYER's declared direction, so a
+// wire across its layer's direction reports as LAYER_DIR alone and not as a
+// second fault: its track_position is on the SEGMENT's perpendicular axis, so
+// reading it against the grid's would judge a coordinate on the wrong axis.
+// Such a wire — against the layer stack (the LAYER_DIR pairs, `dir_invalid`)
+// or against the grid's own direction — is skipped.  A layer with no track
+// pattern has no grid to be on and is skipped: DetailedNUTS places nothing
+// there.
+static void detect_off_grid(
+        const std::map<std::pair<int,int>, const NetSegment*>& ns_map,
+        const std::vector<ConnSeg>& segs,
+        const std::set<std::pair<int,int>>& dir_invalid,
+        const RoutingGridStack& grid, int bundle_id, ConnResult& result)
+{
+    const int n = (int)segs.size();
+    for (const auto& [key, nsp] : ns_map) {
+        const auto [si, bit] = key;
+        const NetSegment& ns = *nsp;
+        if (!grid.has_layer(ns.layer)) continue;
+        if (dir_invalid.count({si, ns.layer})) continue;
+        const RoutingGrid& g = grid.get_layer_grid(ns.layer);
+        const bool horiz = g.is_horizontal();
+        if (si >= 0 && si < n && segs[si].horiz != horiz) continue;
+        const double mid = 0.5 * (ns.span_lo + ns.span_hi);
+        const double pos = ns.track_position;
+        const TrackPattern& pat = horiz ? g.effective_pattern_at(mid, pos)
+                                        : g.effective_pattern_at(pos, mid);
+        const double lo = pos - ns.width / 2.0, hi = pos + ns.width / 2.0;
+        if (metal_on_signal_run(pat, lo, hi)) continue;
+        ConnViolation v;
+        v.kind = ViolationKind::OFF_GRID;
+        v.bundle_id = bundle_id; v.seg_idx = si; v.bit_index = bit;
+        std::ostringstream msg;
+        msg << "Seg " << si << (ns.is_shield ? " Shield " : " Bit ") << bit
+            << " on layer M" << ns.layer << ": metal " << lo << ".." << hi
+            << " (track_pos=" << pos << ", width=" << ns.width
+            << ") is not on SIGNAL slot(s) of the M" << ns.layer
+            << " pattern in force there";
+        double best = std::numeric_limits<double>::infinity(), near = pos;
+        for (const auto& [c, sl] : pat.tracks_in_range(
+                 pos - pat.unit_pitch(), pos + pat.unit_pitch()))
+            if (sl.type == "SIGNAL" && std::fabs(c - pos) < best) {
+                best = std::fabs(c - pos); near = c;
+            }
+        if (std::isfinite(best))
+            msg << " (nearest SIGNAL centre " << near << ")";
+        msg << " (dnuts)";
+        v.message = msg.str();
+        result.violations.push_back(std::move(v));
+    }
+}
+
 ConnResult check_dnuts(const ConnTopology& ct, const DetailedNUTSResult& dnuts,
                        const Topology& topo, const Floorplan& fp,
                        const LayerStack& layers, int bundle_id, int num_bits,
-                       const Floorplan* zone_fp)
+                       const Floorplan* zone_fp, const RoutingGridStack* grid)
 {
     ConnResult result;
     const auto& segs = ct.segs();
@@ -1688,6 +1768,10 @@ ConnResult check_dnuts(const ConnTopology& ct, const DetailedNUTSResult& dnuts,
             }
         }
     }
+
+    // 5b. OFF_GRID: the metal must sit on its layer's SIGNAL slots (#947).
+    if (grid)
+        detect_off_grid(ns_map, segs, dir_reported, *grid, bundle_id, result);
 
     // FEEDTHRU_RELAY (structural; see detect_feedthru_relay).
     detect_feedthru_relay(ct.segs(), topo, fp, bundle_id, "dnuts", result);

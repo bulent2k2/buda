@@ -713,7 +713,8 @@ void bind_nuts(py::module_& m) {
         .value("KEEPOUT_CROSS", ViolationKind::KEEPOUT_CROSS)
         .value("ANTENNA",      ViolationKind::ANTENNA)
         .value("TEG_OPEN",     ViolationKind::TEG_OPEN)
-        .value("DISCONNECTED", ViolationKind::DISCONNECTED);
+        .value("DISCONNECTED", ViolationKind::DISCONNECTED)
+        .value("OFF_GRID",     ViolationKind::OFF_GRID);
 
     py::class_<ConnViolation>(m, "ConnViolation")
         .def_readwrite("kind",       &ConnViolation::kind)
@@ -754,8 +755,13 @@ void bind_nuts(py::module_& m) {
           py::arg("ct"), py::arg("nuts"), py::arg("topo"), py::arg("fp"),
           py::arg("layers"), py::arg("bundle_id"),
           py::arg("zone_fp") = nullptr);
+    // grid: the routing grid the bits were placed on — enables the OFF_GRID
+    // audit (issue #947); None = no on-grid audit.
     m.def("check_dnuts", &check_dnuts,
           py::arg("ct"), py::arg("dnuts"), py::arg("topo"), py::arg("fp"),
           py::arg("layers"), py::arg("bundle_id"), py::arg("num_bits"),
-          py::arg("zone_fp") = nullptr);
+          py::arg("zone_fp") = nullptr, py::arg("grid") = nullptr);
+    // The OFF_GRID predicate on one wire's perpendicular extent [lo, hi].
+    m.def("metal_on_signal_run", &metal_on_signal_run,
+          py::arg("pattern"), py::arg("lo"), py::arg("hi"));
 }

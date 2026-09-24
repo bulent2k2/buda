@@ -246,6 +246,14 @@ void RoutingGrid::for_each_signal_track_in_span(
                 if (centre < s_lo) continue;
                 if (hi_closed ? (centre > s_hi) : (centre >= s_hi)) continue;
                 if (slot.type != "SIGNAL") continue;
+                // A BOUNDED pattern enumerates its tracks (a DEF `TRACKS …
+                // DO n`), so a centre past the declared extent is a track the
+                // technology does not have — the clamp tracks_in_range
+                // applies, which this walk skipped (#956: 33 M6 bits of
+                // flow/rv/soc_conv_div seated off the DEF's tracks, 32 of
+                // them past the die edge).
+                if (pat.bounded &&
+                    (centre < pat.bound_lo || centre > pat.bound_hi)) continue;
                 bool blocked = false;
                 for (const auto& gk : keepouts_) {
             const Rect& koz = gk.bbox;
@@ -439,6 +447,12 @@ int RoutingGrid::count_signal_tracks_in(double x, double lo, double hi) const {
         : effective_pattern_at(lo, x);
     const double up = pat.unit_pitch();
     if (up <= 0.0 || pat.slots.empty() || lo > hi) return 0;
+    // tracks_in_range's bounded-pattern clamp, kept in lockstep (#956).
+    if (pat.bounded) {
+        lo = std::max(lo, pat.bound_lo);
+        hi = std::min(hi, pat.bound_hi);
+        if (lo > hi) return 0;
+    }
     int n_start = static_cast<int>(std::floor((lo - pat.origin) / up)) - 1;
     int cnt = 0;
     for (int n = n_start; ; ++n) {
