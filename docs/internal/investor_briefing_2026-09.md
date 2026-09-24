@@ -210,7 +210,11 @@ too, 78 on the same check (the last picture above; the rounds are in
 recorded arms it was measured on.  The case for hierarchy is at larger sizes, where flat runs slow down steeply: a
 flat run at ~55 k cells takes 76 min and the next doubling five to six
 hours.  The study's own success test — beat the flat flow by 2× on run time
-at a size where flat becomes slow — has not yet been measured.  One small
+at a size where flat becomes slow — is met provisionally by the compact run
+of 24 September on its run-time half (1,018 s against the flat flow's
+4,541 s at N = 8: one run, under concurrent load, not yet repeated in a
+controlled one) and not on its size half, since N = 8 is not a size where
+the flat flow is slow.  One small
 timing loss remains: setup slack is 0.021 ns lower than without BUDA before
 the LEF fix, and 0.0185 ns lower after it.  It is real rather than noise —
 an independent repeat of the pre-fix arm reproduced every metric bit for
@@ -408,11 +412,14 @@ notes, not from a wish list.
    and edge blocks in one round, then utilisation).  The cost is
    reported rather than used as a pass/fail gate.  Closing it is a question about the whole flow as
    much as about BUDA.
-3. **The crossover has not been measured.**  The case for hierarchy is that
-   flat runs stop scaling: at ~55 k cells a flat run takes 76 min, and the
-   next doubling five to six hours.  The next size up (N = 16), where H+B is
-   expected to overtake flat, needs a 20 GB machine and hours per run, and
-   has not been run.
+3. **The crossover is measured only provisionally.**  The case for
+   hierarchy is that flat runs stop scaling: at ~55 k cells a flat run takes
+   76 min, and the next doubling five to six hours.  The next size up
+   (N = 16), where H+B is expected to overtake flat, needs a 20 GB machine
+   and hours per run, and has not been run.  The compact run of 24 September
+   beats the flat flow 4.5× on wall time at N = 8 (1,018 against 4,541 s),
+   one run under concurrent load; the controlled rerun, and the size where
+   flat is slow, are still to be done.
 4. **Keeping the levels in step, by default.**  When blocks and the top
    level are planned separately, a change at one level can undo the other,
    so the planning must be repeated until it stops changing (a fixpoint).
