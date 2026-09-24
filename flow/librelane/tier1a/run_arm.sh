@@ -173,7 +173,12 @@ else
     # 978-error LVS verdict of 7.5.  Reported, not gating -- the recorded
     # H+B arm carries 253 decap-only fragments and passes LVS, and the
     # census is strict on purpose -- so the log says it before signoff does.
-    pdef=$(ls -t "$d"/h/top/runs/"$TOPTAG"/*-openroad-detailedplacement/*.def 2>/dev/null | head -1)
+    # The NEWEST DEF any step has written, not the detailed-placement step's:
+    # CTS, the post-CTS resizer and the antenna repair all add cells after it
+    # (a clock buffer landing in an until-then empty fragment is exactly the
+    # real-cell case), so the census reads the placement the router will
+    # actually see (Codex on #957).
+    pdef=$(ls -t "$d"/h/top/runs/"$TOPTAG"/*/*.def 2>/dev/null | head -1)
     if [ -n "$pdef" ]; then
         python3 "$here/tap_census.py" "$pdef" > "$d/h/log/tap_census_$TOPTAG.txt" 2>&1 \
             && stamp "tap census clean" \

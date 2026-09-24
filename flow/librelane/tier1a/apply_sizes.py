@@ -32,12 +32,11 @@ this is what turns the fragments into the `gen.sh` arguments that do it:
     ./gen.sh 4 $(python3 apply_sizes.py out --n 4 --args)
     ./harm.sh 4
 
-**The emitter has ONE edge size** (`EDGEW`/`EDGEH` govern `feed_cell`,
-`wbuf_cell` and `acc_cell` alike), so the edge knob is the MAX over the
-three — the smallest size that holds all of them.  That is reported, since
-it is where the rule's per-cell answer is coarsened: on the checked-in N=8
-set the rule gives feed and wbuf 44.2 x 44.2 and acc 96.0 x 51.1, so the
-edge cells go out at acc's size and two of them stay larger than they need.
+**The emitter has ONE edge size for feed and wbuf** (`EDGEW`/`EDGEH`), so
+that knob is the MAX over the two — the smallest size that holds both — and
+the accumulator has its own (`ACCW`/`ACCH`, since 7.5's compaction: it holds
+five times feed/wbuf's logic, so one size for all three left two of them at
+14 % utilisation).  Where the max coarsens a per-cell answer it is reported.
 Making them independent is an emitter change, not a sizing one.
 
 The predicted die is computed with the emitter's own arithmetic (below,
@@ -60,11 +59,14 @@ import pdn_phase as pp                       # noqa: E402
 # flow/tcl/tpu_lib.tcl's defaults for everything this does not resize.
 CHAN, ROWM, EDGEGAP, X0, Y0 = 48, 12, 48, 60, 120
 PIPE, PIPEGAP = 2, 48
-EDGE_CELLS = ("feed_cell", "wbuf_cell", "acc_cell")
+EDGE_CELLS = ("feed_cell", "wbuf_cell")     # share EDGEW/EDGEH
+ACC = "acc_cell"                            # its own ACCW/ACCH (0 = the edge size)
 
 
-def die(n, pew, peh, edgew, edgeh, chan=CHAN, rowm=ROWM):
+def die(n, pew, peh, edgew, edgeh, chan=CHAN, rowm=ROWM, acch=None):
     """The emitter's die, transcribed from `tpu_vehicle::configure`.
+    `acch` is the accumulator stack's row height (ACCH); None = EDGEH, the
+    emitter's own default.
 
     PPX = PEW + CHAN; PPY = PEH; ROWGAP = CHAN (the compact default, which
     is what `gen.sh` uses — `-ALIGN 1` snaps it to the track period and is
@@ -73,9 +75,11 @@ def die(n, pew, peh, edgew, edgeh, chan=CHAN, rowm=ROWM):
     rw = 2 * rowm + (n - 1) * ppx + pew
     rh = 2 * rowm + peh
     rpy = rh + chan
+    if acch is None:
+        acch = edgeh
     w = X0 + rw + edgew + EDGEGAP + X0
-    h = (Y0 + n * rpy + EDGEGAP + edgeh
-         + (PIPE + 1) * PIPEGAP + PIPE * edgeh + Y0)
+    h = (Y0 + n * rpy + EDGEGAP + acch
+         + (PIPE + 1) * PIPEGAP + PIPE * acch + Y0)
     return w, h, ppx, ppy
 
 
@@ -109,7 +113,7 @@ def clears_bar(cell, w, h):
     return util * harm.ADVICE_MARGIN <= bar, util, core
 
 
-def best_aspect(cell, face_w, face_h, n, edgew, edgeh, hi=600):
+def best_aspect(cell, face_w, face_h, n, edgew, edgeh, hi=600, acch=None):
     """The PE shape that minimises the ARRAY's die, subject to BOTH floors.
 
     `emit_block_size` shapes a block by its faces' ratio, which is right for
@@ -130,7 +134,7 @@ def best_aspect(cell, face_w, face_h, n, edgew, edgeh, hi=600):
             ok, _u, _c = clears_bar(cell, w, h)
             if not ok:
                 continue
-            dw, dh, _px, _py = die(n, w, h, edgew, edgeh)
+            dw, dh, _px, _py = die(n, w, h, edgew, edgeh, acch=acch)
             if best is None or dw * dh < best[0]:
                 best = (dw * dh, w, h)
             break            # h is monotone in core: the first that fits is best
@@ -197,12 +201,18 @@ def main(argv=None):
         edgeh = int(math.ceil(max(h for _c, _w, h in edge)))
     else:
         edgew, edgeh = pew, peh
+    # The accumulator's own knob; without a fragment it takes the edge size,
+    # which is what the emitter does with ACCW/ACCH left at 0.
+    if ACC in sizes:
+        accw, acch = (int(math.ceil(v)) for v in sizes[ACC][:2])
+    else:
+        accw, acch = edgew, edgeh
     rule_pew, rule_peh, aspect_note = pew, peh, None
     if a.optimize_aspect:
         d = json.load(open(os.path.join(a.sizes, "pe_cell.json"))).get("derivation", {})
         fn = d.get("face_needs", {})
         got = best_aspect("pe_cell", fn.get("w", 0.0), fn.get("h", 0.0),
-                          a.n, edgew, edgeh)
+                          a.n, edgew, edgeh, acch=acch)
         if got is None:
             sys.exit("apply_sizes: no PE size within 600 um clears the "
                      "placer's bar — check harm.cell_area_estimate('pe_cell')")
@@ -211,9 +221,9 @@ def main(argv=None):
                        f"to minimise the ARRAY's die, subject to the placer's "
                        f"bar on its own core")
     if a.optimize_aspect:
-        # The edge knob has to clear too, or the recipe still cannot harden:
-        # grow it (keeping it one size for all three, as the emitter demands)
-        # to the smallest that holds every edge cell's own core.
+        # The edge knobs have to clear too, or the recipe still cannot harden:
+        # grow each (the feed/wbuf size as one, the accumulator's on its own)
+        # to the smallest that holds its cells' core.
         grown = False
         while any(not clears_bar(c, edgew, edgeh)[0]
                   for c in EDGE_CELLS if c in sizes) and edgeh < 600:
@@ -222,26 +232,36 @@ def main(argv=None):
         if grown:
             aspect_note += (f"; edge grown to {edgew} x {edgeh} for the same "
                             f"reason")
+        grown = False
+        while ACC in sizes and not clears_bar(ACC, accw, acch)[0] and acch < 600:
+            acch += 1
+            grown = True
+        if grown:
+            aspect_note += f"; acc grown to {accw} x {acch} for the same reason"
     # BOTH paths are checked: a size the placer refuses is not a size, and
     # the rule's own die is measured against the DIE while the placer
     # measures the CORE (Codex #890).
     checks = []
     for cell, (cw, ch) in (("pe_cell", (pew, peh)),) + tuple(
-            (c, (edgew, edgeh)) for c in EDGE_CELLS if c in sizes):
+            (c, (edgew, edgeh)) for c in EDGE_CELLS if c in sizes) + (
+            ((ACC, (accw, acch)),) if ACC in sizes else ()):
         ok, util, core = clears_bar(cell, cw, ch)
         checks.append((cell, cw, ch, ok, util, core))
 
     args = f"-PEW {pew} -PEH {peh} -EDGEW {edgew} -EDGEH {edgeh}"
+    if ACC in sizes:
+        args += f" -ACCW {accw} -ACCH {acch}"
     if a.args:
         print(args)
         return 0
 
-    w, h, ppx, ppy = die(a.n, pew, peh, edgew, edgeh)
+    w, h, ppx, ppy = die(a.n, pew, peh, edgew, edgeh, acch=acch)
     result = {"n": a.n, "gen_args": args, "aspect_note": aspect_note,
               "checks": [{"cell": c, "w": w, "h": h, "clears": ok,
                           "utilization_pct": u, "core_um2": round(cr, 1)}
                          for c, w, h, ok, u, cr in checks],
               "pe": {"w": pew, "h": peh}, "edge": {"w": edgew, "h": edgeh},
+              "acc": {"w": accw, "h": acch},
               "predicted_die": {"w": w, "h": h, "mm2": round(w * h / 1e6, 4)},
               "pitch": {"x": ppx, "y": ppy}}
 
@@ -256,9 +276,11 @@ def main(argv=None):
         b_edge = [base[c] for c in EDGE_CELLS if c in base]
         be_w = max([e[0] for e in b_edge], default=bw)
         be_h = max([e[1] for e in b_edge], default=bh)
-        ow, oh, _px, _py = die(a.n, bw, bh, be_w, be_h)
+        ba_w, ba_h = base.get(ACC, (be_w, be_h))
+        ow, oh, _px, _py = die(a.n, bw, bh, be_w, be_h, acch=ba_h)
         result["baseline"] = {"pe": {"w": bw, "h": bh},
                               "edge": {"w": be_w, "h": be_h},
+                              "acc": {"w": ba_w, "h": ba_h},
                               "die": {"w": ow, "h": oh,
                                       "mm2": round(ow * oh / 1e6, 4)}}
         result["die_ratio"] = round((w * h) / (ow * oh), 4) if ow * oh else None
@@ -268,13 +290,14 @@ def main(argv=None):
         print()
         return 0
 
-    print(f"apply_sizes: N={a.n}  pe_cell {pew} x {peh}, edge {edgew} x {edgeh}")
+    print(f"apply_sizes: N={a.n}  pe_cell {pew} x {peh}, edge {edgew} x {edgeh}"
+          + (f", acc {accw} x {acch}" if ACC in sizes else ""))
     for cell, (cw, ch, binds, faces) in sorted(sizes.items()):
         b = f"{binds.get('w', '?')}/{binds.get('h', '?')}"
         note = ""
         if cell in EDGE_CELLS and (math.ceil(cw) < edgew or math.ceil(ch) < edgeh):
             note = (f"  <- emitted at the edge size {edgew} x {edgeh}: the "
-                    f"emitter has ONE edge cell size")
+                    f"emitter has ONE edge cell size for feed and wbuf")
         print(f"  {cell:<10} rule {cw:7.1f} x {ch:6.1f}  binds {b}{note}")
     if aspect_note:
         print(f"apply_sizes: {aspect_note}")

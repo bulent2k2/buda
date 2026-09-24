@@ -77,20 +77,21 @@ def test_the_die_arithmetic_reproduces_both_measured_arm_h_dies():
 
 
 def test_the_pe_sets_the_knobs_and_the_edge_takes_the_max(tmp_path):
-    """The emitter has ONE edge size, so the three edge cells go out at the
-    largest — the smallest size that holds all of them — and the cells that
-    are thereby oversized are named."""
+    """The emitter has ONE edge size for feed and wbuf, so those two go out
+    at the larger — the smallest size that holds both — with the oversized
+    one named; the accumulator gets its own -ACCW/-ACCH (7.5's compaction:
+    one size for all three left feed and wbuf at 14 % utilisation)."""
     d = _sizes_dir(tmp_path, [
         _frag("pe_cell", 178.7, 47.5),
         _frag("acc_cell", 96.0, 51.1, binds=("face", "area")),
-        _frag("feed_cell", 44.2, 44.2), _frag("wbuf_cell", 44.2, 44.2)])
+        _frag("feed_cell", 44.2, 44.2), _frag("wbuf_cell", 40.0, 30.5)])
     r = _run(d, "--n", "8")
     assert r.returncode == 0, r.stderr
-    assert "pe_cell 179 x 48, edge 96 x 52" in r.stdout          # rounded UP
-    assert r.stdout.count("emitter has ONE edge cell size") == 2  # feed, wbuf
+    assert "pe_cell 179 x 48, edge 45 x 45, acc 96 x 52" in r.stdout   # rounded UP
+    assert r.stdout.count("emitter has ONE edge cell size") == 1        # wbuf, at feed's size
     assert "acc_cell" in r.stdout and "binds face/area" in r.stdout
     r = _run(d, "--n", "8", "--args")
-    assert r.stdout.strip() == "-PEW 179 -PEH 48 -EDGEW 96 -EDGEH 52"
+    assert r.stdout.strip() == "-PEW 179 -PEH 48 -EDGEW 45 -EDGEH 45 -ACCW 96 -ACCH 52"
 
 
 def test_the_baseline_comparison_reads_the_emitted_lef(tmp_path):
@@ -198,6 +199,8 @@ def test_it_runs_on_the_checked_in_arrays_own_fragments(tmp_path):
     assert r.returncode == 0, r.stderr
     j = json.loads(r.stdout)
     # From the areas size.buda declares (harm.py's own: pe_cell MEASURED at
-    # 5964, the others §7.1's Yosys totals x 1.7).
-    assert j["gen_args"] == "-PEW 221 -PEH 59 -EDGEW 96 -EDGEH 53"
+    # 5964, the others §7.1's Yosys totals x 1.7).  feed/wbuf take their own
+    # 32 x 31 now that the accumulator has -ACCW/-ACCH; before, all three
+    # went out at acc's 96 x 53 (§8 step 3c's figure).
+    assert j["gen_args"] == "-PEW 221 -PEH 59 -EDGEW 32 -EDGEH 31 -ACCW 96 -ACCH 53"
     assert abs(j["baseline"]["die"]["mm2"] - 3.079) < 5e-3      # the PEPAD-24 set
