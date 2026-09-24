@@ -1442,18 +1442,27 @@ bool metal_on_signal_run(const TrackPattern& pat, double lo, double hi) {
 // DetailedNUTS's own midpoint pool and tools/independent_audit.py both
 // read), and the perpendicular axis is the LAYER's declared direction, so a
 // wire across its layer's direction reports as LAYER_DIR alone and not as a
-// second fault.  A layer with no track pattern has no grid to be on and is
-// skipped: DetailedNUTS places nothing there.
+// second fault: its track_position is on the SEGMENT's perpendicular axis, so
+// reading it against the grid's would judge a coordinate on the wrong axis.
+// Such a wire — against the layer stack (the LAYER_DIR pairs, `dir_invalid`)
+// or against the grid's own direction — is skipped.  A layer with no track
+// pattern has no grid to be on and is skipped: DetailedNUTS places nothing
+// there.
 static void detect_off_grid(
         const std::map<std::pair<int,int>, const NetSegment*>& ns_map,
+        const std::vector<ConnSeg>& segs,
+        const std::set<std::pair<int,int>>& dir_invalid,
         const RoutingGridStack& grid, int bundle_id, ConnResult& result)
 {
+    const int n = (int)segs.size();
     for (const auto& [key, nsp] : ns_map) {
         const auto [si, bit] = key;
         const NetSegment& ns = *nsp;
         if (!grid.has_layer(ns.layer)) continue;
+        if (dir_invalid.count({si, ns.layer})) continue;
         const RoutingGrid& g = grid.get_layer_grid(ns.layer);
         const bool horiz = g.is_horizontal();
+        if (si >= 0 && si < n && segs[si].horiz != horiz) continue;
         const double mid = 0.5 * (ns.span_lo + ns.span_hi);
         const double pos = ns.track_position;
         const TrackPattern& pat = horiz ? g.effective_pattern_at(mid, pos)
@@ -1761,7 +1770,8 @@ ConnResult check_dnuts(const ConnTopology& ct, const DetailedNUTSResult& dnuts,
     }
 
     // 5b. OFF_GRID: the metal must sit on its layer's SIGNAL slots (#947).
-    if (grid) detect_off_grid(ns_map, *grid, bundle_id, result);
+    if (grid)
+        detect_off_grid(ns_map, segs, dir_reported, *grid, bundle_id, result);
 
     // FEEDTHRU_RELAY (structural; see detect_feedthru_relay).
     detect_feedthru_relay(ct.segs(), topo, fp, bundle_id, "dnuts", result);

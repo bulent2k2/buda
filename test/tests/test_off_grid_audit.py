@@ -219,3 +219,20 @@ def test_a_copy_onto_a_misaligned_sibling_is_off_grid():
     assert "[BottomUp] DNUTS:" in out and "copied" in out, out
     kinds = _by_kind(s)
     assert kinds.get("OFF_GRID", 0) > 0, kinds
+
+
+def test_a_wire_across_its_layer_reports_layer_dir_alone():
+    """Codex P2 on #959: a bit of an H segment moved onto a V layer has its
+    track_position on the SEGMENT's perpendicular axis (a y), and the V
+    layer's grid reads positions as x — so judging it there is a coordinate
+    on the wrong axis.  It is LAYER_DIR, and only LAYER_DIR.  The half-slot
+    move makes it off grid on either reading, so an audit that still judged
+    it would report OFF_GRID too."""
+    s = _session(_STACK, "")
+    segs = list(s.detailed_result.net_segments)
+    target = next(r for r in segs if r.layer == 3)
+    target.layer = 4
+    target.track_position += 1.0
+    assert _put(s, segs)
+    kinds = _by_kind(s)
+    assert "LAYER_DIR" in kinds and "OFF_GRID" not in kinds, kinds
