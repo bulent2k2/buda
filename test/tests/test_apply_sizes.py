@@ -213,3 +213,16 @@ def test_an_accumulator_wider_than_the_pe_is_refused(tmp_path):
     d = _sizes_dir(tmp_path, [_frag("pe_cell", 100.0, 47.5), _frag("acc_cell", 140.0, 51.1)])
     r = _run(d, "--n", "8", "--args")
     assert r.returncode != 0 and "sits on the PE column" in r.stderr
+
+
+def test_optimize_aspect_never_narrows_the_pe_below_the_accumulator(tmp_path):
+    """The reshaped PE is what the accumulator sits on, so the search's width
+    floor is the accumulator's, not the face's alone (Codex on #957: a 221 um
+    rule PE with a 100 um face floor and a 140 um accumulator recommended
+    -PEW 101 -ACCW 140, which the emitter refuses)."""
+    d = _sizes_dir(tmp_path, [
+        _frag("pe_cell", 221, 59, area=5964, util=46.0, face_w=100.0, face_h=34.0),
+        _frag("acc_cell", 140.0, 51.1), _frag("feed_cell", 44.2, 44.2)])
+    opt = json.loads(_run(d, "--n", "8", "--optimize-aspect", "--json").stdout)
+    assert opt["pe"]["w"] >= 140 and opt["acc"]["w"] == 140
+    assert all(c["clears"] for c in opt["checks"]), opt["checks"]

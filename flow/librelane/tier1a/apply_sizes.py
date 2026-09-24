@@ -113,7 +113,7 @@ def clears_bar(cell, w, h):
     return util * harm.ADVICE_MARGIN <= bar, util, core
 
 
-def best_aspect(cell, face_w, face_h, n, edgew, edgeh, hi=600, acch=None):
+def best_aspect(cell, face_w, face_h, n, edgew, edgeh, hi=600, acch=None, min_w=0):
     """The PE shape that minimises the ARRAY's die, subject to BOTH floors.
 
     `emit_block_size` shapes a block by its faces' ratio, which is right for
@@ -125,9 +125,13 @@ def best_aspect(cell, face_w, face_h, n, edgew, edgeh, hi=600, acch=None):
     what the first cut got wrong (Codex #890: 128 x 67 is 117 % utilised
     and `harm.py` predicts GPL-0301 on it).
 
+    `min_w` is a floor the ARRAY imposes on the width -- the accumulator's,
+    since it sits on the PE column (Codex on #957: the reshaped PE has to be
+    re-checked against it, so the search never goes below it).
+
     Returns (w, h) or None when nothing inside `hi` clears."""
     best = None
-    w0 = max(1, int(math.ceil(face_w)))
+    w0 = max(1, int(math.ceil(face_w)), int(min_w))
     h0 = max(1, int(math.ceil(face_h)))
     for w in range(w0, hi + 1):
         for h in range(h0, hi + 1):
@@ -220,7 +224,8 @@ def main(argv=None):
         d = json.load(open(os.path.join(a.sizes, "pe_cell.json"))).get("derivation", {})
         fn = d.get("face_needs", {})
         got = best_aspect("pe_cell", fn.get("w", 0.0), fn.get("h", 0.0),
-                          a.n, edgew, edgeh, acch=acch)
+                          a.n, edgew, edgeh, acch=acch,
+                          min_w=accw if ACC in sizes else 0)
         if got is None:
             sys.exit("apply_sizes: no PE size within 600 um clears the "
                      "placer's bar — check harm.cell_area_estimate('pe_cell')")
