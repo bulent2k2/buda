@@ -146,3 +146,27 @@ def test_the_twin_synthesizes(tmp_path, pw):
     n_dff = sum(int(m.group(1)) for ln in stat.splitlines() if "DFF" in ln
                 for m in [re.search(r"(\d+)", ln)] if m)
     assert n_dff > 0, stat
+
+
+def _lef_sizes(tmp_path):
+    lef = (tmp_path / "tpu.lef").read_text()
+    return {m.group(1): (float(m.group(2)), float(m.group(3)))
+            for m in re.finditer(r"MACRO (\w+).*?SIZE ([\d.]+) BY ([\d.]+)", lef, re.S)}
+
+
+def test_the_accumulator_has_its_own_size_and_the_edge_size_is_its_default(tmp_path):
+    """`-ACCW/-ACCH` size acc_cell alone: it holds five times feed/wbuf's
+    logic (7.5), so one edge size either starves it or leaves the other two
+    near-empty.  Unset, it IS the edge size, so every recorded emit is
+    unchanged; set, feed/wbuf keep theirs and the die grows by the
+    accumulator stack -- PIPE + 1 rows of it."""
+    _emit(tmp_path / "a", 4, "-EDGEIN", 1, "-EDGEW", 60, "-EDGEH", 40)
+    a = _lef_sizes(tmp_path / "a")
+    assert a["acc_cell"] == a["feed_cell"] == a["wbuf_cell"] == (60.0, 40.0)
+    _emit(tmp_path / "b", 4, "-EDGEIN", 1, "-EDGEW", 60, "-EDGEH", 40, "-ACCW", 100, "-ACCH", 52)
+    b = _lef_sizes(tmp_path / "b")
+    assert b["acc_cell"] == (100.0, 52.0) and b["feed_cell"] == b["wbuf_cell"] == (60.0, 40.0)
+    die = lambda p: re.search(r"DIEAREA \( 0 0 \) \( (\d+) (\d+) \)", (p / "tpu.def").read_text()).groups()
+    wa, ha = map(int, die(tmp_path / "a")); wb, hb = map(int, die(tmp_path / "b"))
+    assert wb == wa, "the accumulator's width changes no die width (it sits on the PE pitch)"
+    assert hb - ha == 3 * (52 - 40) * 1000, "PIPE (default 2) + 1 accumulator rows, each ACCH - EDGEH taller"

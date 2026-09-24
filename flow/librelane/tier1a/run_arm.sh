@@ -146,6 +146,17 @@ else
     (cd "$d/h/top" && ll_run "$d/h/log/top_${TOPTAG}_a.log" --run-tag "$TOPTAG" \
         --to OpenROAD.DetailedRouting --skip OpenROAD.DetailedRouting config.json)
     stamp "top cut at DetailedRouting; guides start"
+    # ADVISORY tap census on the placement the router is about to be paid
+    # for (tap_census.py): a row fragment with cells and no well tap is the
+    # 978-error LVS verdict of 7.5.  Reported, not gating -- the recorded
+    # H+B arm carries 253 decap-only fragments and passes LVS, and the
+    # census is strict on purpose -- so the log says it before signoff does.
+    pdef=$(ls -t "$d"/h/top/runs/"$TOPTAG"/*-openroad-detailedplacement/*.def 2>/dev/null | head -1)
+    if [ -n "$pdef" ]; then
+        python3 "$here/tap_census.py" "$pdef" > "$d/h/log/tap_census_$TOPTAG.txt" 2>&1 \
+            && stamp "tap census clean" \
+            || { stamp "tap census: UNTAPPED fragments -- see $d/h/log/tap_census_$TOPTAG.txt"; head -4 "$d/h/log/tap_census_$TOPTAG.txt" | sed 's/^/run_arm:   /'; }
+    fi
     (cd "$here" && TAG="$TOPTAG" T1A_DIR="$t1a" ./guides.sh "$N" > "$d/h/log/guides_$TOPTAG.log" 2>&1)
     ODB=$(ls -t "$d"/h/top/runs/"$TOPTAG"/*/*.odb | head -1)
     (cd "$d/h" && ${LLENV[@]+"${LLENV[@]}"} "$root/flow/librelane/phase0/measure/run_or.sh" top/runs/"$TOPTAG" "$here/guide_route.tcl" \

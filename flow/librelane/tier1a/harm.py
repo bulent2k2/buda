@@ -269,7 +269,12 @@ def grid_pitch(insts, cell, axis):
 
 
 def block_core(w, h):
-    c = pp.SKY130
+    # The block's own margins when `--margins` set them (they are then in its
+    # config too, so the predicted pins and the real floorplan agree), else
+    # LibreLane's sky130 defaults -- 4 rows and 12 sites, 17 % of the compact
+    # PE's height holding no cell (7.5).
+    c = {k: BLOCK_SETTINGS.get(k, pp.SKY130[k]) for k in
+         ("LEFT_MARGIN_MULT", "RIGHT_MARGIN_MULT", "BOTTOM_MARGIN_MULT", "TOP_MARGIN_MULT")}
     return [c["LEFT_MARGIN_MULT"] * pp.SITE_W, c["BOTTOM_MARGIN_MULT"] * pp.SITE_H,
             w - c["RIGHT_MARGIN_MULT"] * pp.SITE_W, h - c["TOP_MARGIN_MULT"] * pp.SITE_H]
 
@@ -1170,6 +1175,10 @@ def main(argv=None):
     ap.add_argument("--halo", type=float, nargs=2, metavar=("HX", "HY"),
                     default=(pp.SKY130["FP_MACRO_HORIZONTAL_HALO"], pp.SKY130["FP_MACRO_VERTICAL_HALO"]),
                     help="FP_MACRO_HORIZONTAL_HALO / VERTICAL_HALO written to the top and used by the checks")
+    ap.add_argument("--margins", type=int, nargs=2, metavar=("ROWS", "SITES"),
+                    help="the blocks' core margins: ROWS site heights top and bottom, SITES site widths "
+                         "left and right (LibreLane's sky130 defaults are 4 and 12; the blocks have no core "
+                         "ring, so 1 and 2 leave the pins a row to land in and nothing else)")
     ap.add_argument("--density", type=int, metavar="PCT",
                     help=f"PL_TARGET_DENSITY_PCT for every block config (default "
                          f"{BLOCK_SETTINGS['PL_TARGET_DENSITY_PCT']}); the knob a compact "
@@ -1181,6 +1190,12 @@ def main(argv=None):
                          "H+size; without it the blocks keep LibreLane's own pin placement")
     a = ap.parse_args(argv)
     try:
+        if a.margins:
+            rows, sites = a.margins
+            if rows < 1 or sites < 1:
+                ap.error("--margins needs at least one row and one site")
+            BLOCK_SETTINGS.update({"BOTTOM_MARGIN_MULT": rows, "TOP_MARGIN_MULT": rows,
+                                   "LEFT_MARGIN_MULT": sites, "RIGHT_MARGIN_MULT": sites})
         r = write_h(a.n_dir, a.out or os.path.join(a.n_dir, "h"), tuple(a.halo),
                     pins_dir=a.pins, density=a.density)
     except Shape as e:
