@@ -1317,3 +1317,53 @@ def test_faces_sizes_a_leaf_for_all_its_pins_and_only_the_leaf_that_needs_it(tmp
     bad = subprocess.run(["tclsh", str(probe), "NQ", "2", "FACES", "3"],
                          capture_output=True, encoding="utf-8", cwd=tmp_path, timeout=60)
     assert bad.returncode != 0 and "FACES" in bad.stdout + bad.stderr
+
+
+def test_every_local_port_sits_inside_the_die_apart(tmp_path):
+    """`soc_local.tcl` puts a port per external bus in a ring round the
+    cell.  When one side's ports need more length than the cell's edge
+    they start a further tier out and the ring grows, rather than being
+    slid past the cell's end -- which placed the io block's last west port
+    beyond the die (Codex P2 on #961).  Every port inside the die, no two
+    top-level blocks overlapping."""
+    import sqlite3
+    bdb = tmp_path / "io.bdb"
+    r = subprocess.run(["tclsh", str(_LOCAL), "io_blk_cell", "-plan", "current",
+                        "-noheal", "-bdb", str(bdb)],
+                       capture_output=True, encoding="utf-8", errors="replace",
+                       cwd=tmp_path, timeout=300)
+    assert r.returncode == 0, r.stdout[-3000:] + r.stderr
+    con = sqlite3.connect(str(bdb))
+    meta = dict(con.execute("SELECT key, value FROM meta WHERE key IN ('die_w','die_h')"))
+    dw, dh = float(meta["die_w"]), float(meta["die_h"])
+    top = list(con.execute("SELECT name, x1, y1, x2, y2 FROM component WHERE parent_id IS NULL"))
+    ports = [b for b in top if b[0].startswith("pt_")]
+    assert len(ports) >= 5, top
+    for name, x1, y1, x2, y2 in top:
+        assert 0 <= x1 and 0 <= y1 and x2 <= dw and y2 <= dh, (name, (x1, y1, x2, y2), (dw, dh))
+    for i, a in enumerate(top):
+        for b in top[i + 1:]:
+            assert not (a[1] < b[3] and b[1] < a[3] and a[2] < b[4] and b[2] < a[4]), (a, b)
+
+
+def test_a_plan_search_matches_resamples_by_a_unique_signature(tmp_path):
+    """`tools/soc_plan_search.py` re-samples a plan at perturbed knobs and
+    must find the SAME arrangement there.  Pairwise child order mapped the
+    cluster's 204 plans onto 156 keys, so some resamples ran another plan
+    (Codex P1 on #961); `enum_plans` names each plan's slicing tree by
+    child TYPE, which is unique and survives a change of sizes.  The grid
+    baseline also drops the knobs the grid packer refuses (Codex P2)."""
+    import sys
+    sys.path.insert(0, str(_ROOT / "tools"))
+    import soc_plan_search as sps
+    knobs = sps.knob_list("-PAD 10 -GAP 4 -M 4 -FACES 4 -PACK slice -FIXSLACK 0.5")
+    base = sps.list_plans("cluster_cell", knobs, 0.5)
+    assert len(base) > 100 and len({p["sig"] for p in base}) == len(base)
+    pert = sps.list_plans("cluster_cell", sps.set_knob(knobs, "PAD", 11), 0.5)
+    by = {p["sig"]: p for p in pert}
+    hit = [p for p in base if p["sig"] in by]
+    assert len(hit) > 0.8 * len(base)
+    g = sps.grid_knobs(sps.knob_list("-PAD 24 -GAP 12 -M 12 -PACK slice -ASPECT 2 -CGAP 4 -FIXSLACK 0.5"))
+    r = subprocess.run(["tclsh", str(_VEHICLE), "8", "-LAYOUT", "compact", *g, "-dry"],
+                       capture_output=True, encoding="utf-8", cwd=tmp_path, timeout=120)
+    assert r.returncode == 0, r.stdout + r.stderr

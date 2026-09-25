@@ -81,6 +81,18 @@ def set_knob(knobs, name, value):
     return out
 
 
+def grid_knobs(knobs):
+    """The same knobs for the GRID packer, whose `configure` refuses the
+    slice-only ones: ASPECT back to 1, CGAP back to -1, no FIX / FIXSLACK."""
+    out = set_knob(set_knob(set_knob(knobs, "PACK", "grid"), "ASPECT", 1), "CGAP", -1)
+    for name in ("FIX", "FIXSLACK"):
+        flag = "-" + name
+        if flag in out:
+            i = out.index(flag)
+            del out[i:i + 2]
+    return out
+
+
 def get_knob(knobs, name, default=None):
     flag = "-" + name
     return knobs[knobs.index(flag) + 1] if flag in knobs else default
@@ -96,20 +108,17 @@ def list_plans(cell, knobs, slack):
         f = ln.split(None, 5)
         if not f or f[0] != "PLAN" or f[1] == "grid":
             continue
-        pos = [tuple(map(int, p.split())) for p in re.findall(r"\{(-?\d+ -?\d+)\}", f[5])]
-        plans.append(dict(k=int(f[1]), w=int(f[2]), h=int(f[3]), area=int(f[4]), pos=pos))
+        rest, _, sig = f[5].partition(" SIG ")
+        pos = [tuple(map(int, p.split())) for p in re.findall(r"\{(-?\d+ -?\d+)\}", rest)]
+        plans.append(dict(k=int(f[1]), w=int(f[2]), h=int(f[3]), area=int(f[4]), pos=pos,
+                          sig=sig.strip()))
+    sigs = [q["sig"] for q in plans]
+    if not all(sigs) or len(set(sigs)) != len(sigs):
+        # the signature is what a resample is matched on, so two plans
+        # sharing one would resample the wrong plan (pairwise child order,
+        # the key this replaced, mapped 204 plans onto 156 keys)
+        sys.exit("soc_plan_search: plan signatures missing or not unique")
     return plans
-
-
-def relation_key(pos):
-    """Which child is left of / below which: the arrangement, not the numbers."""
-    key = []
-    for i in range(len(pos)):
-        for j in range(i + 1, len(pos)):
-            dx = pos[j][0] - pos[i][0]
-            dy = pos[j][1] - pos[i][1]
-            key.append(((dx > 0) - (dx < 0), (dy > 0) - (dy < 0)))
-    return tuple(key)
 
 
 def parse(log):
@@ -139,7 +148,11 @@ def chip(cache, logdir, knobs, fix=None, heal=False, threads=None, timeout=900):
     if not heal:
         args += ["-noheal"]
     pre = ["-j", str(threads)] if threads else []
-    key = " ".join(shlex.quote(a) for a in ["btcl", *pre, "soc.tcl", *args])
+    # the timeout is part of a run's identity: a run cut off at one budget
+    # says nothing about a larger one, so a rerun with a longer
+    # --heal-timeout must run again rather than replay the cached cutoff
+    key = " ".join(shlex.quote(a) for a in ["btcl", *pre, "soc.tcl", *args]) \
+        + f" #timeout={timeout}"
     got = cache.get(key)
     if got is not None:
         return got
@@ -210,13 +223,13 @@ def main():
     maps = [{} for _ in perturbed]
     for i, pl in enumerate(lists):
         for q in pl:
-            maps[i].setdefault(relation_key(q["pos"]), q["k"])
+            maps[i][q["sig"]] = q["k"]
     top = plans[:a.top]
     jobs = []
     for p in top:
         p["samples"] = [p["screen"]]
         for i, pk in enumerate(perturbed):
-            k2 = maps[i].get(relation_key(p["pos"]))
+            k2 = maps[i].get(p["sig"])
             if k2 is not None:
                 jobs.append((p, pk, k2))
     with cf.ThreadPoolExecutor(a.jobs) as ex:
@@ -235,7 +248,7 @@ def main():
     # 3. HEAL the best by mean, and the two baselines
     heals = [("plan %d" % p["k"], kn, fix(p["k"])) for p in top[:a.heal]]
     heals += [("slice choice", set_knob(knobs, "PACK", "slice"), None),
-              ("grid packer", set_knob(knobs, "PACK", "grid"), None)]
+              ("grid packer", grid_knobs(knobs), None)]
     with cf.ThreadPoolExecutor(2) as ex:
         futs = {ex.submit(chip, cache, out / "logs", k, f, True, None, a.heal_timeout): n
                 for n, k, f in heals}

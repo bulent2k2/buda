@@ -153,8 +153,8 @@ if {$list_only} {
     puts "PLAN grid $w $h [expr {$w*$h}] $pos"
     set k 0
     foreach p $plans {
-        lassign $p w h pos
-        puts "PLAN $k $w $h [expr {$w*$h}] $pos"
+        lassign $p w h pos sig
+        puts "PLAN $k $w $h [expr {$w*$h}] $pos SIG $sig"
         incr k
     }
     exit 0
@@ -193,10 +193,44 @@ foreach b $::CAP {
                            $side $dx $dy $out]
 }
 
-# ── the ports: a leaf per external bus, its inner face `RG` off the cell,
-# long enough to host the bus's bits (the face rule), at the projection of
-# the outside endpoint onto its side, slid apart where two collide.
-set D 16 ; set RG 12 ; set R [expr {max($ring, $RG + $D + 8)}]
+# ── the ports: a leaf per external bus, long enough to host the bus's bits
+# (the face rule), at the projection of the outside endpoint onto its side,
+# slid apart where two collide.  A side's ports stay inside the cell's own
+# extent along that side, and ones that do not fit start a further TIER
+# out (inner face RG + t x (D + 4) off the cell), the ring growing to hold
+# them -- so no port leaves the die, and none can meet the next side's
+# ports at a corner (a run slid past the cell's end used to do both).
+set D 16 ; set RG 12
+set tiers {}
+set ntier 1
+foreach side {N S E W} {
+    set horiz [expr {$side in {N S}}]
+    set span [expr {$horiz ? $W : $H}]
+    set onside {}
+    set k 0
+    foreach e $external {
+        lassign $e name bits din pin s dx dy
+        if {$s ne $side} { incr k ; continue }
+        set len [soc_vehicle::_dim $bits]
+        set want [expr {int(round($span/2.0 + ($horiz ? $dx : $dy) - $len/2.0))}]
+        set want [expr {max(0, min($span - $len, $want))}]
+        lappend onside [list $want $len $k]
+        incr k
+    }
+    set t 0 ; set cur 0
+    foreach o [lsort -integer -index 0 $onside] {
+        lassign $o want len k
+        set a [expr {max($want, $cur)}]
+        if {$a + $len > $span && $cur > 0} {
+            incr t ; set cur 0
+            set a [expr {max(0, min($span - $len, $want))}]
+        }
+        lappend tiers [list $side $t $a $len $k]
+        set cur [expr {$a + $len + 4}]
+    }
+    set ntier [expr {max($ntier, $t + 1)}]
+}
+set R [expr {max($ring, $RG + $ntier*($D + 4) + 8)}]
 # Where `u` sits: at the ring's corner (`-at local`), or at the exact spot
 # its representative occupies in the chip (`-at chip`) -- the TRACK PHASE,
 # since the patterns are anchored to the die origin and a seat one track
@@ -209,45 +243,16 @@ if {$at eq "chip"} {
 }
 set DIEW [expr {$OX + $W + $R}] ; set DIEH [expr {$OY + $H + $R}]
 set ports {}
-foreach side {N S E W} {
-    set onside {}
-    set k 0
-    foreach e $external {
-        lassign $e name bits din pin s dx dy
-        if {$s ne $side} { incr k ; continue }
-        set len [soc_vehicle::_dim $bits]
-        set horiz [expr {$side in {N S}}]
-        set span [expr {$horiz ? $W : $H}]
-        set want [expr {int(round($span/2.0 + ($horiz ? $dx : $dy) - $len/2.0))}]
-        set want [expr {max(0, min($span - $len, $want))}]
-        lappend onside [list $want $len $k]
-        incr k
+foreach o $tiers {
+    lassign $o side t a len k
+    set off [expr {$RG + $t*($D + 4)}]
+    switch $side {
+        N { set x [expr {$OX + $a}] ; set y [expr {$OY + $H + $off}] ; set pw $len ; set ph $D }
+        S { set x [expr {$OX + $a}] ; set y [expr {$OY - $off - $D}] ; set pw $len ; set ph $D }
+        E { set x [expr {$OX + $W + $off}] ; set y [expr {$OY + $a}] ; set pw $D ; set ph $len }
+        W { set x [expr {$OX - $off - $D}] ; set y [expr {$OY + $a}] ; set pw $D ; set ph $len }
     }
-    set onside [lsort -integer -index 0 $onside]
-    set at -1000000
-    set placed {}
-    foreach o $onside {
-        lassign $o want len k
-        set a [expr {max($want, $at)}]
-        lappend placed [list $a $len $k]
-        set at [expr {$a + $len + 4}]
-    }
-    # slid past the far end: push the run back from the end
-    set span [expr {$side in {N S} ? $W : $H}]
-    if {[llength $placed] && $at - 4 > $span + 2*$R - $D} {
-        set over [expr {$at - 4 - ($span + 2*$R - $D)}]
-        set placed [lmap o $placed { lassign $o a len k ; list [expr {$a - $over}] $len $k }]
-    }
-    foreach o $placed {
-        lassign $o a len k
-        switch $side {
-            N { set x [expr {$OX + $a}] ; set y [expr {$OY + $H + $RG}] ; set pw $len ; set ph $D }
-            S { set x [expr {$OX + $a}] ; set y [expr {$OY - $RG - $D}] ; set pw $len ; set ph $D }
-            E { set x [expr {$OX + $W + $RG}] ; set y [expr {$OY + $a}] ; set pw $D ; set ph $len }
-            W { set x [expr {$OX - $RG - $D}] ; set y [expr {$OY + $a}] ; set pw $D ; set ph $len }
-        }
-        lappend ports [list pt_$k $x $y $pw $ph]
-    }
+    lappend ports [list pt_$k $x $y $pw $ph]
 }
 
 # ── the run ───────────────────────────────────────────────────────────────

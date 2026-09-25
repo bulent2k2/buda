@@ -478,22 +478,29 @@ The first check falls with area, and at every area plans differ a lot:
 | 15,407,392 | 12 | 544 | 672 |
 | 17,496,352 | 40 | 560 | 1,085 |
 
-(score = unplaced + 16 x overlaps, 192 of 204 parsed.)  Resampling
-separated luck from robustness: plan 60 scored 544 at all three samples,
-while plans 112, 164 and 186 scored 544-564 once and 2,008-4,130 on
-re-sampling.  Then the heal:
+(score = unplaced + 16 x overlaps, 192 of 204 parsed.)  Re-sampled, the
+best screened plans held: plan 60 scored 544 at all three samples, plan
+112 544/568/576, plans 164 and 186 564/568/664 and 560/560/684 -- the
+spread is within a quarter of the score, which is the +-10 % the first
+check was measured to move by.  (This read differently at first: the
+harness matched a plan across perturbations by pairwise child order,
+which maps 204 plans onto 156 keys, so 112, 164 and 186 were re-sampled
+as OTHER plans and appeared to jump to 2,008-4,130.  Codex P1 on #961;
+the harness now matches each plan's slicing tree by child type, unique by
+construction, and the numbers here are the re-run.)  Then the heal:
 
 | candidate | die area | first check | end | detailed WL | s |
 |---|---|---|---|---|---|
-| plan 60 | 15,407,392 | 512u/2o | 480 unplaced | – | 148.5 |
-| plan 61 | 15,407,392 | 558u/4o | 320 unplaced | – | 140.6 |
-| plan 66 | 15,407,392 | 512u/5o | 416 unplaced | – | 190.8 |
-| plan 129 | 16,852,000 | 560u/3o | clean | 1,976,268 | 11.5 |
-| slice packer's own choice | 12,017,872 | 1,745u/53o | 128 unplaced | – | 220.6 |
-| grid packer, FACES 4 | 15,122,896 | 1,285u/45o | clean | 1,486,953 | 88.4 |
+| plan 60 | 15,407,392 | 512u/2o | 480 unplaced | – | 135.2 |
+| plan 112 | 16,852,000 | 512u/2o | 480 unplaced, 8 ovl | – | 77.7 |
+| plan 61 | 15,407,392 | 558u/4o | 320 unplaced | – | 127.2 |
+| plan 66 (first run) | 15,407,392 | 512u/5o | 416 unplaced | – | 190.8 |
+| plan 129 | 16,852,000 | 560u/3o | clean | 1,976,268 | 10.9 |
+| slice packer's own choice | 12,017,872 | 1,745u/53o | 128 unplaced | – | 208.0 |
+| grid packer, FACES 4 | 15,122,896 | 1,285u/45o | clean | 1,486,953 | 84.6 |
 | grid packer, FACES 0 (round 1) | 15,122,896 | 1,131u/84o | clean | 1,728,474 | 12.9 |
 
-* **The first check does not predict the heal.**  The three best first
+* **The first check does not predict the heal.**  The four best first
   checks of the search end 320-480 bits short; the grid, with more than
   twice their first-check failures, heals clean.  Round 3 found that a
   cell routed alone does not predict the chip; this is the chip not
@@ -504,8 +511,8 @@ re-sampling.  Then the heal:
   The sweet spot stays the grid packer at `PAD 10-11 GAP 4`, `FACES 0`:
   0.68x the default die, clean in about 12 s.
 * **`FACES 4` on the grid** heals clean with 14 % less wire (1,486,953
-  against 1,728,474) but takes 88 s where the per-pin rule takes 13 --
-  shorter wire, longer heal, one run each.
+  against 1,728,474) but takes 85-88 s (two runs) where the per-pin rule takes 13 --
+  shorter wire, longer heal.
 
 Regenerate: `tools/soc_plan_search.py --knobs "-PAD 10 -GAP 4 -M 4 -FACES
 4" --out <dir>` (every run cached in `<dir>/runs.json`; a re-run resumes).

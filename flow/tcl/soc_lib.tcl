@@ -1122,8 +1122,12 @@ proc soc_vehicle::_slice_assign {cell idx kids} {
 # since two plans of one shape can differ in everything a router cares
 # about.  Identical children are interchangeable, so plans are deduplicated
 # on the multiset {type, x, y}; each subset keeps only arrangements within
-# `slack` of its own smallest.  Returns {W H pos} per plan (pos: per child,
-# in child order, the offset inside the parent), smallest first.
+# `slack` of its own smallest.  Returns {W H pos sig} per plan (pos: per
+# child, in child order, the offset inside the parent; sig: the slicing
+# tree, children named by TYPE -- e.g. `V(H(core_cell,l1_cell),rtr_cell)`
+# -- which identifies the arrangement: one tree at one set of child shapes
+# is one geometry, and the name survives a change of sizes, so a caller can
+# find the SAME arrangement in a perturbed plan list), smallest first.
 proc soc_vehicle::enum_plans {cell slack} {
     variable P
     variable SZ
@@ -1134,7 +1138,7 @@ proc soc_vehicle::enum_plans {cell slack} {
     set full [expr {(1 << $n) - 1}]
     for {set i 0} {$i < $n} {incr i} {
         lassign $SZ([lindex $cells $i]) w h
-        set E([expr {1 << $i}]) [list [list $w $h [list [list $i 0 0]]]]
+        set E([expr {1 << $i}]) [list [list $w $h [list [list $i 0 0]] [lindex $cells $i]]]
     }
     for {set m 1} {$m <= $full} {incr m} {
         if {[info exists E($m)]} { continue }
@@ -1142,21 +1146,21 @@ proc soc_vehicle::enum_plans {cell slack} {
         for {set a [expr {($m - 1) & $m}]} {$a > 0} {set a [expr {($a - 1) & $m}]} {
             set b [expr {$m ^ $a}]
             foreach la $E($a) {
-                lassign $la wa ha pa
+                lassign $la wa ha pa sa
                 foreach lb $E($b) {
-                    lassign $lb wb hb pb
+                    lassign $lb wb hb pb sb
                     # H: a left of b
                     set w [expr {$wa + $G + $wb}] ; set h [expr {max($ha, $hb)}]
                     set pl {}
                     foreach e $pa { lassign $e i x y ; lappend pl [list $i $x [expr {$y + ($h - $ha)/2}]] }
                     foreach e $pb { lassign $e i x y ; lappend pl [list $i [expr {$x + $wa + $G}] [expr {$y + ($h - $hb)/2}]] }
-                    lappend cand [list $w $h $pl]
+                    lappend cand [list $w $h $pl "H($sa,$sb)"]
                     # V: a below b
                     set w [expr {max($wa, $wb)}] ; set h [expr {$ha + $G + $hb}]
                     set pl {}
                     foreach e $pa { lassign $e i x y ; lappend pl [list $i [expr {$x + ($w - $wa)/2}] $y] }
                     foreach e $pb { lassign $e i x y ; lappend pl [list $i [expr {$x + ($w - $wb)/2}] [expr {$y + $ha + $G}]] }
-                    lappend cand [list $w $h $pl]
+                    lappend cand [list $w $h $pl "V($sa,$sb)"]
                 }
             }
         }
@@ -1168,7 +1172,7 @@ proc soc_vehicle::enum_plans {cell slack} {
         set E($m) {}
         array unset seen
         foreach c $cand {
-            lassign $c w h pl
+            lassign $c w h pl sig
             if {$w*$h > (1.0 + $slack)*$amin} { continue }
             set key [list $w $h [lsort [lmap e $pl {
                 lassign $e i x y ; list [lindex $cells $i] $x $y }]]]
@@ -1179,10 +1183,10 @@ proc soc_vehicle::enum_plans {cell slack} {
     }
     set out {}
     foreach c $E($full) {
-        lassign $c w h pl
+        lassign $c w h pl sig
         set pos [lrepeat $n {}]
         foreach e $pl { lassign $e i x y ; lset pos $i [list [expr {$x + $M}] [expr {$y + $M}]] }
-        lappend out [list [expr {$w + 2*$M}] [expr {$h + 2*$M}] $pos]
+        lappend out [list [expr {$w + 2*$M}] [expr {$h + 2*$M}] $pos $sig]
     }
     return [lsort -integer -command {apply {{a b} {
         expr {[lindex $a 0]*[lindex $a 1] - [lindex $b 0]*[lindex $b 1]}}}} $out]
