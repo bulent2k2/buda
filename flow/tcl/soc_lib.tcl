@@ -108,6 +108,7 @@ namespace eval soc_vehicle {
         PACK    grid    ASPECT   1
         KEEP    12      CGAP    -1
         FACEPAD 10      FIX     {}
+        FACES   0
         FIXSLACK 0.5
     }
 }
@@ -160,6 +161,9 @@ proc soc_vehicle::configure {{overrides {}}} {
     }
     if {![string is integer -strict $P(FACEPAD)] || $P(FACEPAD) < 0} {
         error "soc_vehicle: FACEPAD must be an integer >= 0 (got '$P(FACEPAD)')"
+    }
+    if {$P(FACES) ni {0 2 4}} {
+        error "soc_vehicle: FACES must be 0, 2 or 4 (got '$P(FACES)')"
     }
     if {[catch {dict size $P(FIX)}]} {
         error "soc_vehicle: FIX must be a dict {cell plan ...} (got '$P(FIX)')"
@@ -385,6 +389,31 @@ proc soc_vehicle::configure {{overrides {}}} {
     foreach c [array names LEAF] {
         lassign $LEAF($c) vbits hbits
         set SZ($c) [list [_dim $vbits] [_dim $hbits]]
+    }
+
+    # ── FACES: a leaf's faces hold every PIN, not just its heaviest one.
+    # The rule above sizes a face from the worst single pin, which assumes
+    # each pin gets a face to itself; a leaf with more pins than faces
+    # cannot give it that.  Measured (soc.md, "Round 3"): `regf_cell` has
+    # five (4 x DW + AW) on four faces, the local core run put 64 bits on
+    # one 34-bit face, and `m`, `x` and `dd` -- all ending at `regf` -- were
+    # 854 of the chip's 1,131 first-check bits at PAD 10.  So each leaf's
+    # pins, as `build_buses` actually wires them, are spread over its faces
+    # heaviest-first onto the lightest (a pin stays one place, on one face),
+    # and with FACES 4 every face is sized for the heaviest face that
+    # spread leaves; with FACES 2 only the two N/S faces are (the width),
+    # the E/W pair keeping its per-pin size.  0 is the per-pin rule alone.
+    if {$P(FACES)} {
+        dict for {c load} [_pin_loads] {
+            lassign $SZ($c) w h
+            lassign $load l4 l2
+            if {$P(FACES) == 4} {
+                set d [_dim $l4]
+                set SZ($c) [list [expr {max($w, $d)}] [expr {max($h, $d)}]]
+            } else {
+                set SZ($c) [list [expr {max($w, [_dim $l2])}] $h]
+            }
+        }
     }
 
     # ── PACK slice: every container and every leaf SHAPE chosen together
@@ -642,6 +671,94 @@ proc soc_vehicle::_pack_geom {cells} {
     return [list $tw $th $xs $ys]
 }
 
+# ── the pin loads a leaf's faces must carry ───────────────────────────────
+# Per leaf cell type, {l4 l2}: the heaviest face when the leaf's PINS (bits
+# summed per pin, the way `check_bus_faces` sums them) are spread over four
+# equal faces heaviest-first onto the lightest (l4), and the heaviest of the
+# two N/S faces when the E/W pair keeps its per-pin size and takes what
+# fits first (l2) -- worst over the type's instances.  Read off the SAME
+# `build_buses` the design is wired by, with the engine calls and the face
+# guard caught rather than run: a hand-kept table of who drives what is the
+# twin this vehicle has been bitten by (phantom coefficients, stale
+# citations).  Only leaves whose pins outnumber what the per-pin rule gives
+# them change; at the defaults that is `regf_cell` alone.
+proc soc_vehicle::_pin_loads {} {
+    variable P
+    variable LEAF
+    define_cells 1
+    namespace eval ::buda {}
+    set saved {}
+    foreach p {add_bus bdb_net_mode} {
+        if {[llength [info commands ::buda::$p]]} {
+            rename ::buda::$p ::buda::__pin_loads_$p
+            lappend saved $p
+        }
+    }
+    set ::soc_vehicle::_CAP {}
+    proc ::buda::add_bus {name drv rcv} { lappend ::soc_vehicle::_CAP [list $name $drv $rcv] }
+    proc ::buda::bdb_net_mode args {}
+    rename check_bus_faces __check_bus_faces
+    proc check_bus_faces args {}
+    set err [catch {build_buses} msg opts]
+    rename check_bus_faces ""
+    rename __check_bus_faces check_bus_faces
+    rename ::buda::add_bus "" ; rename ::buda::bdb_net_mode ""
+    foreach p $saved { rename ::buda::__pin_loads_$p ::buda::$p }
+    if {$err} { return -options $opts $msg }
+
+    # bits per pin, per leaf instance
+    array set pin {}
+    foreach b $::soc_vehicle::_CAP {
+        lassign $b name drv rcv
+        regexp {\[(\d+)\]$} $name -> bits
+        foreach end [list $drv $rcv] {
+            if {![info exists pin($end)]} { set pin($end) 0 }
+            incr pin($end) $bits
+        }
+    }
+    array set inst {}
+    foreach end [array names pin] {
+        set path [lindex [split $end .] 0]
+        lappend inst($path) $pin($end)
+    }
+    set out [dict create]
+    foreach path [array names inst] {
+        set c [cell_at $path]
+        if {$c eq "" || ![info exists LEAF($c)]} { continue }
+        lassign $LEAF($c) vb hb
+        set loads [lsort -integer -decreasing $inst($path)]
+        # four equal faces, heaviest pin onto the lightest face
+        set f {0 0 0 0}
+        foreach b $loads {
+            set i [lsearch -exact $f [tcl::mathfunc::min {*}$f]]
+            lset f $i [expr {[lindex $f $i] + $b}]
+        }
+        set l4 [tcl::mathfunc::max {*}$f]
+        # E/W at their per-pin size take what fits, first-fit decreasing;
+        # the rest onto the two N/S faces, heaviest onto the lighter
+        set ew [list 0 0] ; set ns [list 0 0]
+        foreach b $loads {
+            set placed 0
+            for {set i 0} {$i < 2} {incr i} {
+                if {[lindex $ew $i] + $b <= $vb} {
+                    lset ew $i [expr {[lindex $ew $i] + $b}] ; set placed 1 ; break
+                }
+            }
+            if {!$placed} {
+                set i [expr {[lindex $ns 0] <= [lindex $ns 1] ? 0 : 1}]
+                lset ns $i [expr {[lindex $ns $i] + $b}]
+            }
+        }
+        set l2 [tcl::mathfunc::max $hb {*}$ns]
+        if {[dict exists $out $c]} {
+            lassign [dict get $out $c] o4 o2
+            set l4 [expr {max($l4, $o4)}] ; set l2 [expr {max($l2, $o2)}]
+        }
+        dict set out $c [list $l4 $l2]
+    }
+    return $out
+}
+
 # ── PACK slice: slicing floorplans with shape curves ──────────────────────
 # The grid packer above puts children in a ceil(sqrt(n))-column grid whose
 # columns and rows are as wide and tall as their largest member, which is
@@ -697,7 +814,11 @@ proc soc_vehicle::_leaf_shapes {c} {
     variable P
     variable SZ
     variable LEAF
-    lassign $SZ($c) d
+    lassign $SZ($c) d h0
+    if {$h0 != $d} {
+        # already non-square (FACES 2): the declared shape and its rotation
+        return [list [list $d $h0] [list $h0 $d]]
+    }
     lassign $LEAF($c) vb hb
     set floor [expr {int(ceil(max($vb, $hb)*$P(BITPITCH))) + $P(FACEPAD)}]
     set A [expr {$d*$d}]
@@ -1114,18 +1235,26 @@ proc soc_vehicle::declare_stack {} {
 # Every cell type and every container's children -- the definitions,
 # nothing instantiated at the top -- so a design whose top is ONE cell
 # (`soc_local.tcl`) is built from the same walk as the whole SoC.
-proc soc_vehicle::define_cells {} {
+#
+# `record_only` records the structure (KIDS, CELLOF) and neither places nor
+# declares anything, so the buses can be walked before any container has a
+# size (`_pin_loads`).
+proc soc_vehicle::define_cells {{record_only 0}} {
     variable P
     variable SZ
     variable KIDS
     variable CELLOF
+    variable RECORD_ONLY
     array unset KIDS
     array unset CELLOF
+    set RECORD_ONLY $record_only
 
     # every cell type, leaves first
-    foreach c [lsort [array names SZ]] {
-        lassign $SZ($c) w h
-        buda::add_cell $c $w $h
+    if {!$record_only} {
+        foreach c [lsort [array names SZ]] {
+            lassign $SZ($c) w h
+            buda::add_cell $c $w $h
+        }
     }
 
     _fill core_cell    {dec_cell alu_cell mul_cell regf_cell} {dec alu mul regf}
@@ -1192,6 +1321,8 @@ proc soc_vehicle::_fill {parent cells names} {
         lappend KIDS($parent) [list $n $c]
         set CELLOF($parent,$n) $c
     }
+    variable RECORD_ONLY
+    if {[info exists RECORD_ONLY] && $RECORD_ONLY} { return }
     variable PL
     if {[info exists PL($parent)]} {
         # PACK slice: the offsets `_slice_configure` sized the parent from,

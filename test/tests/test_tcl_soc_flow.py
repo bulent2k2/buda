@@ -1276,3 +1276,44 @@ def test_the_local_driver_measures_the_connections_the_netlist_has(tmp_path):
     assert ports == [16, 16, 32, 32], conn
     assert set(m["demand"]) == {"u/dec", "u/alu", "u/mul", "u/regf"}
     assert m["wl"] > 0
+
+
+def test_faces_sizes_a_leaf_for_all_its_pins_and_only_the_leaf_that_needs_it(tmp_path):
+    """The per-pin rule sizes a face from a leaf's heaviest pin, which
+    assumes every pin gets a face to itself; `FACES` spreads a leaf's pins
+    (as `build_buses` wires them) over its faces and sizes the faces for
+    the heaviest one.  At the defaults exactly one leaf has more pin load
+    than that: `regf_cell`, 4 x DW + AW on four faces, whose best spread
+    puts DW + AW = 48 bits on one face.  FACES 4 makes it the square that
+    holds 48 on every face, FACES 2 widens only its N/S pair, and every
+    other leaf is left at its per-pin size -- the derivation reads the
+    real buses, so a leaf it grows is a leaf the netlist overloads."""
+    probe = tmp_path / "faces.tcl"
+    probe.write_text(
+        "source [file join {%s} flow tcl soc_lib.tcl]\n"
+        "soc_vehicle::configure [lrange $argv 0 end]\n"
+        "foreach c [lsort [array names soc_vehicle::LEAF]] "
+        "{ puts \"SZ $c [soc_vehicle::size $c] [soc_vehicle::_dim 48]\" }\n" % _ROOT)
+
+    def sizes(*knobs):
+        r = subprocess.run(["tclsh", str(probe), "NQ", "2", *map(str, knobs)],
+                           capture_output=True, encoding="utf-8", cwd=tmp_path, timeout=60)
+        assert r.returncode == 0, r.stdout + r.stderr
+        out, d48 = {}, None
+        for f in (ln.split() for ln in r.stdout.splitlines()):
+            if f and f[0] == "SZ":
+                out[f[1]] = (int(f[2]), int(f[3]))
+                d48 = int(f[4])
+        return out, d48
+
+    base, d48 = sizes()
+    four, _ = sizes("FACES", 4)
+    two, _ = sizes("FACES", 2)
+    grown4 = {c for c in base if four[c] != base[c]}
+    grown2 = {c for c in base if two[c] != base[c]}
+    assert grown4 == {"regf_cell"} and grown2 == {"regf_cell"}, (grown4, grown2)
+    assert four["regf_cell"] == (d48, d48), four["regf_cell"]
+    assert two["regf_cell"] == (d48, base["regf_cell"][1]), two["regf_cell"]
+    bad = subprocess.run(["tclsh", str(probe), "NQ", "2", "FACES", "3"],
+                         capture_output=True, encoding="utf-8", cwd=tmp_path, timeout=60)
+    assert bad.returncode != 0 and "FACES" in bad.stdout + bad.stderr

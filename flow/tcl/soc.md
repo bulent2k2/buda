@@ -436,14 +436,79 @@ spans 1,084 to 2,281.
   first check (about 25 s each, healing off), several samples per
   candidate, and heal only the survivors.
 * **`regf` is the finding to keep**: a real under-sizing the face rule
-  cannot see, found only by measuring edges.  It is recorded here, NOT
-  changed in the vehicle, because on present evidence it makes the first
-  check better and the endpoint no better.
+  cannot see, found only by measuring edges.  It is now the opt-in knob
+  `-FACES 2|4` (round 4), not the default, because on present evidence it
+  makes the first check better and the endpoint no better.
 
 Regenerate: `btcl flow/tcl/soc_local.tcl cluster_cell -plan <k|grid|current>
 -slack 0.5 -bdb out.bdb -PAD 10 -GAP 4 -M 4 -PACK slice`, then
 `tools/cell_face_demand.py out.bdb`; the chip at a plan is `soc.tcl 8
 -LAYOUT compact -PACK slice -FIXSLACK 0.5 -FIX {cluster_cell <k>} -noheal`.
+
+### Round 4: `regf` resized, and plans scored on the chip (2026-09-25)
+
+**`-FACES 2|4`** sizes a leaf for ALL its pins rather than its heaviest
+one.  Each leaf's pins -- read off the same `build_buses` the design is
+wired by, with the engine calls caught, never from a hand table -- are
+spread over its faces heaviest-first onto the lightest, a pin staying one
+place on one face.  `FACES 4` makes every face hold the heaviest face that
+spread leaves; `FACES 2` widens only the N/S pair and lets E/W keep their
+per-pin size.  At the defaults the derivation grows exactly one leaf,
+`regf_cell`, from 138 to 202 square at PAD 10 (FACES 2: 202 x 138); in the
+grid layout that is free (the core still fits its slot, die unchanged),
+in the slice layout FACES 4 widens the die 7 % and FACES 2 is free.
+Default 0, byte-identical.
+
+**The search** (`tools/soc_plan_search.py`, `FACES 4`, `PACK slice`, `PAD
+10 GAP 4`): all 204 cluster plans within 50 % of the smallest, each routed
+through the whole chip with healing off (about 4.5 s each, four at a
+time); the twelve best re-sampled at PAD 11 and at GAP = M = 5 with the
+same ARRANGEMENT (matched on which child lies left of / below which, since
+a plan's index moves when sizes do); the four best by mean healed in full
+beside the two packers' own choices.
+
+The first check falls with area, and at every area plans differ a lot:
+
+| die area | plans | best first-check score | median |
+|---|---|---|---|
+| 12,017,872 | 4 | 1,354 | 1,447 |
+| 13,829,608 | 12 | 832 | 1,693 |
+| 13,987,792 | 12 | 744 | 2,051 |
+| 14,498,848 | 4 | 656 | 784 |
+| 15,407,392 | 12 | 544 | 672 |
+| 17,496,352 | 40 | 560 | 1,085 |
+
+(score = unplaced + 16 x overlaps, 192 of 204 parsed.)  Resampling
+separated luck from robustness: plan 60 scored 544 at all three samples,
+while plans 112, 164 and 186 scored 544-564 once and 2,008-4,130 on
+re-sampling.  Then the heal:
+
+| candidate | die area | first check | end | detailed WL | s |
+|---|---|---|---|---|---|
+| plan 60 | 15,407,392 | 512u/2o | 480 unplaced | – | 148.5 |
+| plan 61 | 15,407,392 | 558u/4o | 320 unplaced | – | 140.6 |
+| plan 66 | 15,407,392 | 512u/5o | 416 unplaced | – | 190.8 |
+| plan 129 | 16,852,000 | 560u/3o | clean | 1,976,268 | 11.5 |
+| slice packer's own choice | 12,017,872 | 1,745u/53o | 128 unplaced | – | 220.6 |
+| grid packer, FACES 4 | 15,122,896 | 1,285u/45o | clean | 1,486,953 | 88.4 |
+| grid packer, FACES 0 (round 1) | 15,122,896 | 1,131u/84o | clean | 1,728,474 | 12.9 |
+
+* **The first check does not predict the heal.**  The three best first
+  checks of the search end 320-480 bits short; the grid, with more than
+  twice their first-check failures, heals clean.  Round 3 found that a
+  cell routed alone does not predict the chip; this is the chip not
+  predicting itself one step later.  A search scored on the first check
+  optimizes the wrong thing, so an honest score is the HEALED result, at
+  up to five minutes a plan.
+* **No plan beat the grid.**  The one fast clean plan is 11 % larger.
+  The sweet spot stays the grid packer at `PAD 10-11 GAP 4`, `FACES 0`:
+  0.68x the default die, clean in about 12 s.
+* **`FACES 4` on the grid** heals clean with 14 % less wire (1,486,953
+  against 1,728,474) but takes 88 s where the per-pin rule takes 13 --
+  shorter wire, longer heal, one run each.
+
+Regenerate: `tools/soc_plan_search.py --knobs "-PAD 10 -GAP 4 -M 4 -FACES
+4" --out <dir>` (every run cached in `<dir>/runs.json`; a re-run resumes).
 
 ## Every endpoint, every bit, every instance: the face rule read three ways
 
