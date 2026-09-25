@@ -1124,3 +1124,100 @@ def test_compact_ranks_on_the_die_not_on_the_rounded_ratio(tmp_path):
     assert (die["nc"], die["w"], die["h"]) == (4, 23312, 13184), die
     assert die["w"] * die["h"] == 307_345_408 < 307_508_992
     assert die["util"] == 0.892   # the rounded report, unchanged either way
+
+
+# ── PACK slice ────────────────────────────────────────────────────────────
+_PROBE_SLICE = (
+    "namespace eval buda {}\n"
+    "proc buda::set_die {w h} { puts \"DIE $w $h\" }\n"
+    "proc buda::add_cell {c w h} { puts \"CELL $c $w $h\" }\n"
+    "proc buda::add_inst_to_cell {p n c x y} { puts \"KID $p $n $c $x $y\" }\n"
+    "proc buda::add_inst {n c p x y} { puts \"TOP $n $c $x $y\" }\n"
+    "source [file join {%s} flow tcl soc_lib.tcl]\n"
+    "soc_vehicle::configure [lrange $argv 0 end]\n"
+    "foreach c [lsort [array names soc_vehicle::LEAF]] {\n"
+    "    lassign $soc_vehicle::LEAF($c) vb hb\n"
+    "    puts \"LEAF $c [expr {max($vb, $hb)}] [soc_vehicle::_dim [expr {max($vb, $hb)}]]\"\n"
+    "}\n"
+    "soc_vehicle::build_hierarchy\n")
+
+
+def _slice_geom(tmp_path, *knobs):
+    probe = tmp_path / "slice_probe.tcl"
+    probe.write_text(_PROBE_SLICE % _ROOT)
+    r = subprocess.run(["tclsh", str(probe), *map(str, knobs)],
+                       capture_output=True, encoding="utf-8", cwd=tmp_path,
+                       timeout=300)
+    assert r.returncode == 0, r.stdout + r.stderr
+    die, cells, kids, leaves = None, {}, collections.defaultdict(list), {}
+    for f in (ln.split() for ln in r.stdout.splitlines()):
+        if f and f[0] == "DIE":
+            die = (int(f[1]), int(f[2]))
+        elif f and f[0] == "CELL":
+            cells[f[1]] = (int(f[2]), int(f[3]))
+        elif f and f[0] == "KID":
+            kids[f[1]].append((f[3], int(f[4]), int(f[5])))
+        elif f and f[0] == "TOP":
+            kids["-"].append((f[2], int(f[3]), int(f[4])))
+        elif f and f[0] == "LEAF":
+            leaves[f[1]] = (int(f[2]), int(f[3]))
+    return die, cells, kids, leaves
+
+
+def test_a_slice_packing_is_a_legal_floorplan_and_never_worse_than_the_grid(tmp_path):
+    """`PACK slice` chooses every container's packing and every leaf's shape
+    together, so what has to hold is what a placer's output must: each
+    child inside its parent with the margin M, no two siblings closer than
+    their channel, every leaf at least its square's area, the leaf aspect
+    within ASPECT and the container aspect within 2, and every face still
+    hosting its bits plus FACEPAD -- the floor a stretch may not cross,
+    MEASURED (see `_leaf_shapes`).  And the one reason it exists: at the
+    same knobs its die is never larger than the grid packer's."""
+    base = ["NQ", 8, "LAYOUT", "compact", "BITPITCH", 4.0]
+    for pad, gap, aspect, cgap in [(10, 4, 1, -1), (24, 12, 1, 4),
+                                   (48, 8, 4, -1), (24, 4, 3, 16)]:
+        knobs = base + ["PAD", pad, "GAP", gap, "M", gap, "PACK", "slice",
+                        "ASPECT", aspect, "CGAP", cgap]
+        die, cells, kids, leaves = _slice_geom(tmp_path, *knobs)
+        grid_die, *_ = _slice_geom(tmp_path, *(base + ["PAD", pad, "GAP", gap, "M", gap]))
+        tag = (pad, gap, aspect, cgap)
+        assert die[0] * die[1] <= grid_die[0] * grid_die[1], (tag, die, grid_die)
+        for parent, ks in kids.items():
+            pw, ph = die if parent == "-" else cells[parent]
+            ch = gap if parent in ("-",) else (
+                cgap if cgap >= 0 and parent in ("cluster_cell", "quad_cell") else gap)
+            m = 0 if parent == "-" else gap
+            boxes = []
+            for c, x, y in ks:
+                w, h = cells[c]
+                assert m <= x and m <= y and x + w <= pw - m and y + h <= ph - m, \
+                    (tag, parent, c, (x, y, w, h), (pw, ph))
+                boxes.append((x, y, w, h, c))
+            for i, a in enumerate(boxes):
+                for b in boxes[i + 1:]:
+                    apart = (a[0] + a[2] + ch <= b[0] or b[0] + b[2] + ch <= a[0]
+                             or a[1] + a[3] + ch <= b[1] or b[1] + b[3] + ch <= a[1])
+                    assert apart, (tag, parent, a, b)
+            if parent != "-":
+                assert max(pw, ph) <= 2 * min(pw, ph), (tag, parent, pw, ph)
+        for c, (bits, side) in leaves.items():
+            w, h = cells[c]
+            assert w * h >= side * side, (tag, c, w, h, side)
+            assert max(w, h) <= aspect * min(w, h) * 1.02, (tag, c, w, h)
+            assert min(w, h) >= min(side, int(-(-bits * 4.0 // 1)) + 10), (tag, c, w, h)
+
+
+def test_the_grid_packer_is_the_default_and_refuses_the_slice_knobs(tmp_path):
+    """Every recorded table was measured on the grid packer, so it stays the
+    default, and a slice-only knob handed to it is an ERROR rather than a
+    silently ignored word."""
+    die, *_ = _slice_geom(tmp_path, "NQ", 2)
+    assert die == (4208, 2016), die
+    for bad in (["ASPECT", 2], ["CGAP", 8], ["PACK", "tight"], ["ASPECT", 5]):
+        probe = tmp_path / "bad.tcl"
+        probe.write_text("source [file join {%s} flow tcl soc_lib.tcl]\n"
+                         "soc_vehicle::configure [lrange $argv 0 end]\n" % _ROOT)
+        r = subprocess.run(["tclsh", str(probe), "NQ", "2", *map(str, bad)],
+                           capture_output=True, encoding="utf-8", cwd=tmp_path,
+                           timeout=60)
+        assert r.returncode != 0, bad

@@ -196,26 +196,32 @@ faces narrower than the buses that land on them, which is the face rule's
 own failure rather than compaction.  Top-down, the vehicle's own healing
 (`heal_if_dirty`, two rounds); one run per point.
 
-| PAD | GAP = M | die | area vs default | first check | end | detailed WL |
-|---|---|---|---|---|---|---|
-| 24 | 16 | 6256 x 3568 | 1.000 | 80 unplaced | clean | 2,000,920 |
-| 24 | 8 | 5720 x 3272 | 0.838 | 16 unplaced | clean | 1,785,596 |
-| 24 | 4 | 5452 x 3124 | 0.763 | 32 unplaced | clean | 1,632,362 |
-| 12 | 16 | 5968 x 3424 | 0.915 | 1,344 unplaced | clean | 2,173,109 |
-| 12 | 8 | 5432 x 3128 | 0.761 | 1,464 unplaced | clean | 1,926,514 |
-| 12 | 4 | 5164 x 2980 | 0.689 | 1,136 unplaced | clean | 1,717,497 |
-| 10 | 4 | 5116 x 2956 | **0.678** | 1,131 unplaced | clean | 1,728,474 |
-| 8 | 4 | 5068 x 2932 | 0.666 | 1,238 unplaced | 168 unplaced | – |
-| 6 | 4 | 5020 x 2908 | 0.654 | 1,455 unplaced | 232 unplaced | – |
-| 4 | 16 | 5776 x 3328 | 0.861 | 1,240 unplaced | 8 unplaced | – |
-| 4 | 8 | 5240 x 3032 | 0.712 | 1,717 unplaced | 200 unplaced | – |
-| 4 | 4 | 4972 x 2884 | 0.642 | 1,360 unplaced | 200 unplaced | – |
-| 0 | 16 | 5680 x 3280 | 0.835 | 1,224 unplaced | 40 unplaced | – |
-| 0 | 8 | 5144 x 2984 | 0.688 | 1,443 unplaced | 264 unplaced | – |
-| 0 | 4 | 4876 x 2836 | 0.619 | 1,200 unplaced | 488 unplaced | – |
+| PAD | GAP = M | die | area vs default | first check | end | detailed WL | runtime (s) |
+|---|---|---|---|---|---|---|---|
+| 24 | 16 | 6256 x 3568 | 1.000 | 80 unplaced | clean | 2,000,920 | 4.4 |
+| 24 | 8 | 5720 x 3272 | 0.838 | 16 unplaced | clean | 1,785,596 | 3.7 |
+| 24 | 4 | 5452 x 3124 | 0.763 | 32 unplaced | clean | 1,632,362 | 5.7 |
+| 12 | 16 | 5968 x 3424 | 0.915 | 1,344 unplaced | clean | 2,173,109 | 5.1 |
+| 12 | 8 | 5432 x 3128 | 0.761 | 1,464 unplaced | clean | 1,926,514 | 6.2 |
+| 12 | 4 | 5164 x 2980 | 0.689 | 1,136 unplaced | clean | 1,717,497 | 11.5 |
+| 10 | 4 | 5116 x 2956 | **0.678** | 1,131 unplaced | clean | 1,728,474 | 12.9 |
+| 8 | 4 | 5068 x 2932 | 0.666 | 1,238 unplaced | 168 unplaced | (1,414,393) | 192.8 |
+| 6 | 4 | 5020 x 2908 | 0.654 | 1,455 unplaced | 232 unplaced | (1,398,283) | 256.5 |
+| 4 | 16 | 5776 x 3328 | 0.861 | 1,240 unplaced | 8 unplaced | (1,856,805) | 251.7 |
+| 4 | 8 | 5240 x 3032 | 0.712 | 1,717 unplaced | 200 unplaced | (1,611,430) | 195.2 |
+| 4 | 4 | 4972 x 2884 | 0.642 | 1,360 unplaced | 200 unplaced | (1,392,344) | 260.3 |
+| 0 | 16 | 5680 x 3280 | 0.835 | 1,224 unplaced | 40 unplaced | (1,907,641) | 178.7 |
+| 0 | 8 | 5144 x 2984 | 0.688 | 1,443 unplaced | 264 unplaced | (1,585,188) | 96.5 |
+| 0 | 4 | 4876 x 2836 | 0.619 | 1,200 unplaced | 488 unplaced | (1,368,267) | 134.2 |
 
-A failing point's wire is omitted: a stranded bit lays none, so it would
-read as a saving.
+A failing point's wire is in parentheses: a stranded bit lays none, so it
+reads as a saving and is not comparable with a complete route
+(`report_wirelength` says so itself).  Runtime is the whole `btcl` run,
+wall clock, one run per point with the default two worker threads on a
+four-core container, re-measured for this column (every end state
+reproduced): what it prices is the HEALING -- a clean first check routes
+in 4-6 s, a thousand-odd stranded bits heal clean in 11-13 s, and every
+point that does not heal spends three to four minutes failing to.
 
 * **The channel is free to take.**  At the default padding, 16 -> 4 is
   0.76x the area and 18 % less wire, clean, and the FIRST check gets
@@ -236,6 +242,111 @@ Not measured: bottom-up, a second NQ, repeat runs, and the judge
 (`tools/independent_audit.py`) on the endpoints; the sweep's logs are not
 kept.  Every point regenerates as `btcl flow/tcl/soc.tcl 8 -LAYOUT
 compact -PAD <p> -GAP <g> -M <g>`.
+
+### Round 2: squeezing the cluster, and stretching the leaves (2026-09-25)
+
+The grid packer (`_pack_geom`) puts a container's children in a
+ceil(sqrt(n))-column grid sized by its largest members, and at `PAD 10 GAP
+4` that leaves a cluster 55 % leaf — while the sixteen clusters are 87 %
+of the die.  (It is sixteen cores, one per cluster, not thirty-two: the
+32x leaf is `fifo_cell`, two per router.)  `PACK slice` (opt-in; the grid
+stays the default and every table above is byte-identical) packs every
+container as the best SLICING floorplan of its children — Stockmeyer
+shape curves, a Pareto curve per container carried up to the die, which
+`_top_geom` picks — and `ASPECT` lets each leaf take a non-square shape of
+the same area, leaves up to ASPECT:1, containers held to 2:1.  `CGAP`
+splits the channel: `CGAP` between siblings in a cluster or quadrant,
+`GAP` inside the leaf-level containers (core, caches, router, io).
+
+The geometry is cheap (milliseconds to seconds, `-dry`), a route is not
+(10 s clean, minutes healing), so the search BISECTED the routed axes with
+a pass/fail oracle — **clean, in at most 60 s** (5x the grid's 12.9 s) —
+and then CHECKED THE NEIGHBOURS of every candidate, one unit away on each
+axis, because a single probe near the frontier turned out not to be a
+measurement (below).  Top-down, one run per point, the vehicle's own
+healing, two worker threads; `first` is the first `check_design dnuts`.
+
+| packing | PAD | GAP | CGAP | die area | first | end | detailed WL | s |
+|---|---|---|---|---|---|---|---|---|
+| grid | 10 | 4 | – | 15,122,896 | 1,131u | clean | 1,728,474 | 12.9 |
+| grid | 10 | 5 | – | 15,512,719 | 1,328u | clean | 1,920,872 | 10.6 |
+| grid | 11 | 4 | – | 15,255,520 | 1,076u | clean | 1,774,705 | 10.8 |
+| grid | 10 | 3 | – | 14,738,031 | 1,207u | 64u | – | 108.2 |
+| slice | 24 | 4 | = | 12,834,160 | 344u | 10u | – | 423 |
+| slice | 24 | 4 | 16 | 13,302,592 | 599u | 1u | – | 289.9 |
+| slice | 24 | 8 | = | 14,301,376 | 492u | clean | 2,179,216 | 482.7 |
+| slice | 24 | 16 | = | 17,473,792 | 91u | clean | 2,109,010 | 9.0 |
+| slice | 24 | 16 | 4 | 16,936,240 | 202u | clean | 2,124,635 | 12.0 |
+| slice | 24 | 12 | 4 | 15,505,776 | 184u | clean | 2,016,222 | 12.7 |
+| slice | 24 | 11 | 4 | 15,158,020 | 218u | clean | 2,061,633 | 17.5 |
+| slice | 24 | 13 | 4 | 15,857,476 | 219u | clean | 2,082,140 | 17.7 |
+| slice | 23 | 12 | 4 | 15,372,000 | 221u | clean | 2,130,871 | 46.1 |
+| slice | 24 | 8 | 4 | 14,138,416 | 501u | 24u | – | 258.3 |
+| slice | 20 | 12 | 4 | 14,974,128 | 265u | clean | 2,046,353 | 18.6 |
+| slice | 21 | 12 | 4 | 15,106,176 | 265u | 2 ovl | – | 202.8 |
+| slice | 20 | 13 | 4 | 15,319,780 | 262u | timeout | – | 300 |
+| slice | 20 | 11 | 4 | 14,632,420 | 515u | clean | 2,241,934 | 73.0 |
+| slice | 19 | 12 | 4 | 14,842,656 | 207u | clean | 1,895,379 | 232.9 |
+| slice | 18 | 12 | 4 | 14,711,760 | 501u | clean | 2,090,949 | 280.6 |
+| slice | 20 | 16 | 4 | 16,380,400 | 226u | 15 viol | – | 188.1 |
+| slice | 16 | 16 | 4 | 15,833,776 | 706u | 288u | – | 171.7 |
+| slice | 10 | 16 | 4 | 15,031,120 | 1,876u | timeout | – | 300 |
+
+(`=` = CGAP equal to GAP; a timeout is the 300 s cap; failing points'
+wire omitted.)  And the leaf aspect, all at `PAD 24 GAP 12 CGAP 4`
+(15,505,776 square, clean in 12.7 s):
+
+| leaf stretch allowed | die area | first | end |
+|---|---|---|---|
+| any, to 4:1 (containers too) | 13,076,560 | 2,594u | timeout |
+| any, to 3:1 (containers too) | 13,132,332 | 2,254u | 899u |
+| short face >= bits x pitch, containers 2:1 | 15,163,200 | 606u | timeout |
+| short face >= bits x pitch + 10 (`FACEPAD`, kept) | 15,505,776 (= square) | 184u | clean |
+
+* **The whitespace is not waste; it is the routing.**  The slicing packer
+  takes a cluster from 55 % to ~85 % leaf and the die to 0.74x at the same
+  knobs — and none of it routes: at `PAD 24 GAP 4` the grid is clean in
+  5.7 s and the slice heals to 10 unplaced in seven minutes.  The grid's
+  "holes" sit beside `xbar`, the SRAMs and the core, where the local
+  buses need LOW-layer room, and taking them out means buying the room
+  back as channel or padding.  The robust slice frontier is `PAD 24, GAP
+  11-13, CGAP 4` at 15.2-15.9M — no smaller than the grid's `PAD 10 GAP 4`
+  (15.1M) and carrying ~20 % more wire.  Both clean frontiers hold the same
+  6.97M of raw face demand (bits x pitch, squared, over the 219 leaves) on
+  a ~15.1M die: 46 %.  Where the slack goes — holes, padding, channel —
+  barely matters; how much there is, does.
+* **The channel is not free inside a slice packing.**  It is in the grid
+  (round 1), because the holes already carry the local routing.  With
+  them gone, slack INSIDE the leaf-level containers is what the router
+  wants and slack between clusters buys nothing: CGAP 16/32 over GAP 4 made
+  the first check worse, GAP 12 over CGAP 4 made it clean.
+* **Stretching a leaf spends its face, so at the padding floor there is
+  nothing to spend.**  Every leaf is already the square its own bits size;
+  a stretch at constant area narrows a face below the bits the router
+  may land there (it picks the nearest face, not the widest), and
+  unbounded stretches stranded 2,254-2,594 bits.  Even a 1.25:1 stretch of
+  the 32-bit leaves — leaving 8 units of slack on the short face —
+  stranded 606.  With the short face held to `bits x pitch + FACEPAD` (10,
+  the padding floor measured above) aspect changes NOTHING until PAD 32,
+  and at PAD 48 it saves 8 % of a die (17.4M) that is still larger than
+  square leaves at PAD 10-24.  Aspect freedom at constant area does not
+  pay on this vehicle, and the reason is the face rule, not the search.
+* **A single probe near the frontier is not a measurement.**  `PAD 20 GAP
+  12` came back clean in 18.6 s at 14.97M — 1 % under the grid — and every
+  neighbour disagreed: PAD 21 ends on 2 overlaps, GAP 13 times out, GAP 11
+  and PAD 19 heal clean in 73 s and 233 s.  The grid's neighbourhood
+  (PAD 10-11, GAP 4-5) is clean in 10.6-12.9 s every time.  Healing time
+  near the frontier is heavy-tailed in the geometry, so a bisection needs
+  a neighbourhood check at the point it lands on, and the sweet spot is
+  the one whose neighbours agree: **grid, `PAD 10-11 GAP 4`**, 0.68x the
+  default die in ~12 s.
+
+Knobs: `-PACK slice`, `-ASPECT <1..4>` (leaves; needs slice), `-CGAP <n>`,
+`-FACEPAD <n>` (default 10), `-KEEP <n>` (curve points kept per container,
+default 12; 24 finds a 1.8 % smaller die at 5x the geometry time).  A
+point regenerates as `btcl flow/tcl/soc.tcl 8 -LAYOUT compact -PACK slice
+-PAD <p> -GAP <g> -M <g> -CGAP <c>`; `test_a_slice_packing_is_a_legal_floorplan_and_never_worse_than_the_grid`
+holds the geometry.
 
 ## Every endpoint, every bit, every instance: the face rule read three ways
 
