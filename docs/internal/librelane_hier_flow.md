@@ -919,6 +919,30 @@ each time, so it is the block's IO-constraint artefact, not a path.
 
 ![F, the recorded H and H+B, and rounds 1 and 3 at one scale](img/librelane_n8_compact_rounds.png)
 
+**Open experiment: replay the r3 arm's BUDA legs from the tree (recorded
+2026-09-25, not done).**  The compact rounds ran in a session scratch
+directory outside the tree, so neither BUDA leg of the converged r3 arm can
+be replayed from what is checked in.  Two gaps, and they are different in
+kind.  (1) The r3 emit arguments are not recorded: `apply_sizes.py`
+computed them from r2's measured blocks, and §7.5 states the row counts
+(PE core 35, acc 12, feed/wbuf 8, margins 1 row / 2 sites, every gap one
+row or two tracks) but not the widths.  A reconstruction from those counts
+lands on the recorded die to 10 µm² (996.70 × 1000.96 µm against 997,667
+µm², block counts 64/8/8/24 exact), but only `8·PEW + EDGEW` enters the
+width, so the PE/edge split is a choice, not a recovery.  The block-side
+leg (`pins.sh 8`) then runs clean on it in 2.3 s — 152 bundles, 2,944
+bit-wires, 0 overlaps, 0 unplaced, `check_design dnuts` clean — with 85
+bundles committing at planner overflow in the 1.84 µm channel, none of it
+reaching an overlap.  (2) The top-side leg (`guides.sh 8`) needs the
+LibreLane run's manual-macro-placement DEF, the four hardened block LEFs
+and the sky130A tech LEF, none of which the tree holds.  To close it:
+record every round's full `gen.sh` line beside its `results.jsonl` row
+(the gap is that the row names the run directory and not the arguments),
+and keep the three `guides.sh` inputs of the round that matters, after
+which both legs replay as-is and the renders (`tools/render_design.py`
+on `n8/pins.buda`) can be compared with the recorded arm rather than with
+a reconstruction.
+
 ## 8. Recipes — macOS + Docker, in order
 
 Everything below runs on macOS 15+ (Apple Silicon or Intel) with Docker
