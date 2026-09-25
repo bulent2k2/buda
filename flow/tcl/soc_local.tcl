@@ -106,12 +106,15 @@ while {$argi < $argc} {
     }
 }
 # A representative occurrence per container: one in the MIDDLE of the NoC
-# chain with an io pad on it, so its router has every kind of neighbour.
+# chain with an io pad on it, so its router has every kind of neighbour --
+# quadrant 1, or quadrant 0 at NQ 1 where there is no other (resolved after
+# `configure`, which is what knows NQ).
 set defref {
     core_cell quad_1/cl_0/core   l1_cell quad_1/cl_0/l1d   rtr_cell quad_1/cl_0/rtr
     cluster_cell quad_1/cl_0     quad_cell quad_1          l2_cell l2   io_blk_cell io
 }
-if {$ref eq ""} {
+set ref_default [expr {$ref eq ""}]
+if {$ref_default} {
     if {![dict exists $defref $cell]} { error "soc_local.tcl: '$cell' is not a container" }
     set ref [dict get $defref $cell]
 }
@@ -129,6 +132,9 @@ if {$plan ne "current" || $list_only} {
     if {![dict exists $overrides PACK]} { dict set overrides PACK slice }
 }
 soc_vehicle::configure $overrides
+if {$ref_default && [soc_vehicle::get NQ] < 2} {
+    set ref [string map {quad_1 quad_0} $ref]
+}
 
 # The buses and the layout, from a DRY pass: the same `define_cells` and
 # `build_buses` the SoC runs, with the engine calls caught rather than sent.

@@ -1367,3 +1367,28 @@ def test_a_plan_search_matches_resamples_by_a_unique_signature(tmp_path):
     r = subprocess.run(["tclsh", str(_VEHICLE), "8", "-LAYOUT", "compact", *g, "-dry"],
                        capture_output=True, encoding="utf-8", cwd=tmp_path, timeout=120)
     assert r.returncode == 0, r.stdout + r.stderr
+
+
+def test_second_review_round_fixes(tmp_path):
+    """Codex's second round on #961.  (a) FACES 2 widens regf's N/S pair,
+    and the slice search must not rotate that load onto the short faces.
+    (b) A plan missing a perturbed sample is ranked after every complete
+    one and never healed, since its mean is over fewer runs.  (c) The local
+    driver's default reference exists at NQ 1 (there is no quad_1)."""
+    import sys
+    die, cells, kids, leaves = _slice_geom(
+        tmp_path, "NQ", 8, "LAYOUT", "compact", "PAD", 10, "GAP", 4, "M", 4,
+        "PACK", "slice", "FACES", 2)
+    w, h = cells["regf_cell"]
+    assert w > h, cells["regf_cell"]
+    sys.path.insert(0, str(_ROOT / "tools"))
+    import soc_plan_search as sps
+    s = lambda u: dict(unpl=u, ovl=0)
+    top = [dict(k=1, area=10, samples=[s(100)]),                  # incomplete, best score
+           dict(k=2, area=10, samples=[s(300), s(300), s(300)]),
+           dict(k=3, area=10, samples=[s(200), s(250), s(260)])]
+    sps.rank_resampled(top, 3)
+    assert [p["k"] for p in top] == [3, 2, 1] and not top[-1]["complete"]
+    r = subprocess.run(["tclsh", str(_LOCAL), "core_cell", "-list", "-NQ", "1"],
+                       capture_output=True, encoding="utf-8", cwd=tmp_path, timeout=120)
+    assert r.returncode == 0 and "PLAN grid" in r.stdout, r.stdout + r.stderr

@@ -816,8 +816,10 @@ proc soc_vehicle::_leaf_shapes {c} {
     variable LEAF
     lassign $SZ($c) d h0
     if {$h0 != $d} {
-        # already non-square (FACES 2): the declared shape and its rotation
-        return [list [list $d $h0] [list $h0 $d]]
+        # already non-square (FACES 2): the declared shape ONLY -- FACES 2
+        # widens the N/S pair specifically, and a rotation would hand the
+        # load it sized for to the short E/W faces (Codex P1 on #961)
+        return [list [list $d $h0]]
     }
     lassign $LEAF($c) vb hb
     set floor [expr {int(ceil(max($vb, $hb)*$P(BITPITCH))) + $P(FACEPAD)}]

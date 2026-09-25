@@ -18,9 +18,10 @@ perturbation and its healed end state is not.  So this scores on the chip:
               whole segment, a bus's worth of bits);
   2. RESAMPLE the `--top` best screened plans twice more, at PAD+1 and at
               GAP = M + 1 -- the SAME arrangement, found in the perturbed
-              plan list by which child lies left of / below which (an index
-              is not stable: the list is sorted by area and pruned per
-              subset); a plan is ranked by its MEAN;
+              plan list by its slicing tree (an index is not stable: the
+              list is sorted by area and pruned per subset); a plan is
+              ranked by its MEAN over all three, and one the pruning left
+              out of a perturbed list is ranked last and never healed;
   3. HEAL     the `--heal` best by mean routed in full with the vehicle's
               own healing, timed, beside two baselines -- the slice
               packer's own choice (`-FIX` absent) and the grid packer.
@@ -182,6 +183,21 @@ def score(r):
     return r["unpl"] + 16 * r["ovl"]
 
 
+def rank_resampled(top, n_samples):
+    """Rank re-sampled plans in place by their mean score over ALL
+    `n_samples` samples.  A plan the slack pruned from a perturbed list was
+    never tried there, so a mean over fewer samples is not comparable with
+    one over all of them: such a plan is marked incomplete, ranked after
+    every complete one, and never healed (Codex P2 on #961)."""
+    for p in top:
+        sc = [score(r) for r in p["samples"]]
+        p["scores"] = sc
+        p["complete"] = len(sc) == n_samples
+        p["mean"] = sum(sc) / len(sc) if p["complete"] else float("inf")
+    top.sort(key=lambda p: (not p["complete"], p["mean"], p["area"]))
+    return top
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--knobs", required=True)
@@ -236,17 +252,14 @@ def main():
         futs = {ex.submit(chip, cache, out / "logs", pk, fix(k2), False, 1): p for p, pk, k2 in jobs}
         for f in cf.as_completed(futs):
             futs[f]["samples"].append(f.result())
+    rank_resampled(top, 1 + len(perturbed))
     for p in top:
-        sc = [score(r) for r in p["samples"]]
-        p["mean"] = sum(sc) / len(sc)
-        p["scores"] = sc
-    top.sort(key=lambda p: (p["mean"], p["area"]))
-    for p in top:
+        mean = f"mean {p['mean']:.0f}" if p["complete"] else "INCOMPLETE (not healed)"
         print(f"[resample] plan {p['k']:>3} die {p['screen']['die']} scores {p['scores']} "
-              f"mean {p['mean']:.0f}", flush=True)
+              f"{mean}", flush=True)
 
     # 3. HEAL the best by mean, and the two baselines
-    heals = [("plan %d" % p["k"], kn, fix(p["k"])) for p in top[:a.heal]]
+    heals = [("plan %d" % p["k"], kn, fix(p["k"])) for p in top[:a.heal] if p["complete"]]
     heals += [("slice choice", set_knob(knobs, "PACK", "slice"), None),
               ("grid packer", grid_knobs(knobs), None)]
     with cf.ThreadPoolExecutor(2) as ex:
