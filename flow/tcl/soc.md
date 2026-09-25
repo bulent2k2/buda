@@ -348,6 +348,103 @@ point regenerates as `btcl flow/tcl/soc.tcl 8 -LAYOUT compact -PACK slice
 -PAD <p> -GAP <g> -M <g> -CGAP <c>`; `test_a_slice_packing_is_a_legal_floorplan_and_never_worse_than_the_grid`
 holds the geometry.
 
+### Round 3: each cell routed alone, and what it predicts (2026-09-25)
+
+Round 2's slice layouts carried ~20 % more wire than the grid, which
+suggested a packer that weighs connectivity as well as area.  Before
+building one, each container was routed ALONE, to measure what its
+children say to each other and to the world, what that asks of each
+child's edges, and whether a plan's local cost predicts its chip cost.
+
+**The instrument.**  [`soc_local.tcl`](soc_local.tcl) builds a design
+whose top is ONE instance `u` of a cell: its internal buses are the ones
+`build_buses` gives a representative occurrence (`quad_1/cl_0` for the
+cluster -- mid NoC chain, with an io pad), and every external bus ends on
+a port block in a ring round the cell, on the side where its far end sits
+in the chip the same knobs build.  It routes with `soc.tcl`'s own hier
+flow into a file BDB, and [`tools/cell_face_demand.py`](../../tools/cell_face_demand.py)
+reads the stored tables (the judge's rule: no engine import) for bits
+between children, bits per child FACE against the face's capacity at the
+bit pitch, and local wire.  Plans come from `soc_vehicle::enum_plans`
+(every ordered slicing arrangement within a slack of the smallest,
+deduplicated) and are built through the vehicle's `-FIX {<cell> k}` knob,
+so plan k is one geometry locally and in the chip (tested).
+
+**Connections** (netlist facts, not route-dependent):
+
+| cell | internal | external |
+|---|---|---|
+| core | alu-regf 64, alu-dec 32, mul-regf 32 | dec 48 and regf 48, all to the caches |
+| cluster | core-l1i 48, core-l1d 48, l1d-rtr 32 | all 104 bits on `rtr` (NoC W 48, N 56 incl. an 8-bit pad) |
+| rtr | **none** | every bus |
+
+**Edge demand** found the one leaf the face rule under-sizes.  The rule
+sizes a leaf from its heaviest single PIN, which assumes every pin gets a
+face of its own; `regf_cell` has FIVE bus endpoints (4 x 32 + 16) on four
+faces, so the best spread still puts 48 bits on one face -- 192 + PAD
+where the rule gives 128 + PAD -- and the local core run put 64 bits on
+its south face (capacity 34 at `PAD 10`).  Every family stranding in the
+chip at `PAD 10 GAP 4` ends there: `m`, `x` and `dd` are 854 of its 1,131
+first-check bits.  No other leaf is short this way.  Sizing `regf` for
+four faces costs no area in the grid layout (the core still fits its
+slot) and roughly halves the first check below the floor -- but it moves
+no end state the right way:
+
+| PAD (GAP 4, grid) | first check | first, regf four-face | end | end, regf four-face |
+|---|---|---|---|---|
+| 12 | 1,136 | 1,197 | clean, 11.5 s | 32 unplaced |
+| 10 | 1,131 | 1,285 | clean, 12.9 s | clean, 86 s |
+| 8 | 1,238 | 771 | 168 unplaced | 304 unplaced |
+| 4 | 1,360 | 616 | 200 unplaced | 360 unplaced |
+| 0 | 1,200 | 704 | 488 unplaced | 552 unplaced |
+
+(Two runs at a time, so the times are loaded; one run per point.)
+
+**Plans, and whether the local run predicts the chip.**  At `PAD 10 GAP
+4` the cluster has 165 slicing plans within 50 % of its smallest, all
+routed locally in under two minutes; within one shape they differ widely
+(716 x 972: 64 to 176 bits unplaced after healing, the grid's own
+arrangement 112).  Nineteen were then routed in the full chip, healing
+off, and the chip's first check ranged 965 to 2,281 bits -- more than
+the +-10 % that neighbouring geometries differ by, so the plan matters.
+Nothing measured at cluster scope ranks it (Spearman against the chip's
+first check, 19 plans):
+
+| predictor | rho |
+|---|---|
+| local first check | 0.24 (0.75 on the first nine -- chance) |
+| local end state after healing | worse; the best-healing plan is the chip's worst |
+| internal bits x distance between children | -0.22 |
+| external bits x distance to the NoC sides | 0.01 |
+| cluster area | -0.15 |
+
+Two measured reasons.  The context changes what strands: the same
+cluster at the same plan strands `id`, `x`, `l1dd` and its port buses
+alone and `m` and `dd` in the chip; it is not the track phase (moving `u`
+1,676 units to its chip position left the local result bit for bit
+identical), and the ring width does not matter (36 to 400).  And fixing a
+cluster's shape re-lays out every quad and the top, so a plan's chip
+result mixes its own cost with a different global floorplan -- though
+among the seven plans that share one shape and one die the chip still
+spans 1,084 to 2,281.
+
+* **Not built: a packer driven by these proxies.**  None predicts, so a
+  packer optimizing one would optimize noise.
+* **What would decide it** is the chip itself, sampled: the first check
+  is stable to +-10 % under a one-unit perturbation and the healed end
+  state is not, so a plan search has to score candidates on the chip's
+  first check (about 25 s each, healing off), several samples per
+  candidate, and heal only the survivors.
+* **`regf` is the finding to keep**: a real under-sizing the face rule
+  cannot see, found only by measuring edges.  It is recorded here, NOT
+  changed in the vehicle, because on present evidence it makes the first
+  check better and the endpoint no better.
+
+Regenerate: `btcl flow/tcl/soc_local.tcl cluster_cell -plan <k|grid|current>
+-slack 0.5 -bdb out.bdb -PAD 10 -GAP 4 -M 4 -PACK slice`, then
+`tools/cell_face_demand.py out.bdb`; the chip at a plan is `soc.tcl 8
+-LAYOUT compact -PACK slice -FIXSLACK 0.5 -FIX {cluster_cell <k>} -noheal`.
+
 ## Every endpoint, every bit, every instance: the face rule read three ways
 
 The face rule — *a leaf's size is derived from the bits that land on its

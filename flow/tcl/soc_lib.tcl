@@ -107,7 +107,8 @@ namespace eval soc_vehicle {
         LAYOUT  band
         PACK    grid    ASPECT   1
         KEEP    12      CGAP    -1
-        FACEPAD 10
+        FACEPAD 10      FIX     {}
+        FIXSLACK 0.5
     }
 }
 
@@ -159,6 +160,23 @@ proc soc_vehicle::configure {{overrides {}}} {
     }
     if {![string is integer -strict $P(FACEPAD)] || $P(FACEPAD) < 0} {
         error "soc_vehicle: FACEPAD must be an integer >= 0 (got '$P(FACEPAD)')"
+    }
+    if {[catch {dict size $P(FIX)}]} {
+        error "soc_vehicle: FIX must be a dict {cell plan ...} (got '$P(FIX)')"
+    }
+    if {[dict size $P(FIX)] && $P(PACK) ne "slice"} {
+        error "soc_vehicle: FIX needs PACK slice"
+    }
+    dict for {c k} $P(FIX) {
+        if {$c ni {core_cell l1_cell l2_cell rtr_cell io_blk_cell cluster_cell quad_cell}} {
+            error "soc_vehicle: FIX names '$c', which is not a container"
+        }
+        if {$k ne "grid" && !([string is integer -strict $k] && $k >= 0)} {
+            error "soc_vehicle: FIX plan for $c must be an index >= 0 or grid (got '$k')"
+        }
+    }
+    if {![string is double -strict $P(FIXSLACK)] || $P(FIXSLACK) < 0} {
+        error "soc_vehicle: FIXSLACK must be a number >= 0 (got '$P(FIXSLACK)')"
     }
     if {![string is integer -strict $P(KEEP)] || $P(KEEP) < 2} {
         error "soc_vehicle: KEEP must be an integer >= 2 (got '$P(KEEP)')"
@@ -837,6 +855,46 @@ proc soc_vehicle::_gap_in {cell} {
     return $P(GAP)
 }
 
+# A container's curve -- or, when FIX names it, the ONE point its fixed plan
+# gives (`enum_plans` at FIXSLACK, or `grid`), with each container child at
+# its only point if fixed too and at its smallest otherwise.  How a plan is
+# CHOSEN is `soc_local.tcl`'s business (a plan routed alone, priced against
+# the world round it); this only builds the design it names.
+proc soc_vehicle::_curve_of {cell kids opt} {
+    variable P
+    variable SZ
+    set cells [dict get $kids $cell]
+    if {![dict exists $P(FIX) $cell]} { return [_container_curve $cell $cells $opt] }
+    set pick {}
+    foreach c [lsort -unique $cells] {
+        set best ""
+        foreach o [dict get $opt $c] {
+            lassign $o w h
+            if {$best eq "" || $w*$h < [lindex $best 0]*[lindex $best 1]} { set best $o }
+        }
+        dict set pick $c $best
+        set SZ($c) [lrange $best 0 1]
+    }
+    set k [dict get $P(FIX) $cell]
+    if {$k eq "grid"} {
+        set plan [grid_plan $cell]
+    } else {
+        set plans [enum_plans $cell $P(FIXSLACK)]
+        if {$k >= [llength $plans]} {
+            error "soc_vehicle: FIX $cell $k, but it has [llength $plans] plans at FIXSLACK $P(FIXSLACK)"
+        }
+        set plan [lindex $plans $k]
+    }
+    lassign $plan W H pos
+    set pl {}
+    foreach c $cells xy $pos {
+        lassign $xy x y
+        lassign [dict get $pick $c] w h ref
+        lappend pl [list $x $y $w $h $ref]
+    }
+    return [list [list $W $H $pl]]
+}
+
 # A curve as child options {w h index}.
 proc soc_vehicle::_curve_opts {cur} {
     set out {} ; set i 0
@@ -863,7 +921,7 @@ proc soc_vehicle::_slice_configure {} {
     }
     # the containers that do not hold a shared leaf, once
     foreach c {core_cell rtr_cell io_blk_cell} {
-        set cur($c) [_container_curve $c [dict get $kids $c] $opt]
+        set cur($c) [_curve_of $c $kids $opt]
         dict set opt $c [_curve_opts $cur($c)]
     }
     set best "" ; set bestarea ""
@@ -873,7 +931,7 @@ proc soc_vehicle::_slice_configure {} {
             dict set o tag_cell [list $to]
             dict set o sram_cell [list $so]
             foreach c {l1_cell l2_cell cluster_cell quad_cell} {
-                set cur($c) [_container_curve $c [dict get $kids $c] $o]
+                set cur($c) [_curve_of $c $kids $o]
                 dict set o $c [_curve_opts $cur($c)]
             }
             set qi 0
@@ -935,6 +993,89 @@ proc soc_vehicle::_slice_assign {cell idx kids} {
     set PL($cell) [list $cells $pos]
 }
 
+# ── the plans ─────────────────────────────────────────────────────────────
+# Every SLICING arrangement of a container's children at their current
+# shapes: every ORDERED split of every subset, cut H (A left of B) or V (A
+# below B), each subtree centred across its cut -- the tree family
+# `_slice` searches, but kept whole instead of reduced to a Pareto curve,
+# since two plans of one shape can differ in everything a router cares
+# about.  Identical children are interchangeable, so plans are deduplicated
+# on the multiset {type, x, y}; each subset keeps only arrangements within
+# `slack` of its own smallest.  Returns {W H pos} per plan (pos: per child,
+# in child order, the offset inside the parent), smallest first.
+proc soc_vehicle::enum_plans {cell slack} {
+    variable P
+    variable SZ
+    set cells [dict get [_container_cells] $cell]
+    set G [_gap_in $cell]
+    set M $P(M)
+    set n [llength $cells]
+    set full [expr {(1 << $n) - 1}]
+    for {set i 0} {$i < $n} {incr i} {
+        lassign $SZ([lindex $cells $i]) w h
+        set E([expr {1 << $i}]) [list [list $w $h [list [list $i 0 0]]]]
+    }
+    for {set m 1} {$m <= $full} {incr m} {
+        if {[info exists E($m)]} { continue }
+        set cand {}
+        for {set a [expr {($m - 1) & $m}]} {$a > 0} {set a [expr {($a - 1) & $m}]} {
+            set b [expr {$m ^ $a}]
+            foreach la $E($a) {
+                lassign $la wa ha pa
+                foreach lb $E($b) {
+                    lassign $lb wb hb pb
+                    # H: a left of b
+                    set w [expr {$wa + $G + $wb}] ; set h [expr {max($ha, $hb)}]
+                    set pl {}
+                    foreach e $pa { lassign $e i x y ; lappend pl [list $i $x [expr {$y + ($h - $ha)/2}]] }
+                    foreach e $pb { lassign $e i x y ; lappend pl [list $i [expr {$x + $wa + $G}] [expr {$y + ($h - $hb)/2}]] }
+                    lappend cand [list $w $h $pl]
+                    # V: a below b
+                    set w [expr {max($wa, $wb)}] ; set h [expr {$ha + $G + $hb}]
+                    set pl {}
+                    foreach e $pa { lassign $e i x y ; lappend pl [list $i [expr {$x + ($w - $wa)/2}] $y] }
+                    foreach e $pb { lassign $e i x y ; lappend pl [list $i [expr {$x + ($w - $wb)/2}] [expr {$y + $ha + $G}]] }
+                    lappend cand [list $w $h $pl]
+                }
+            }
+        }
+        set amin ""
+        foreach c $cand {
+            set ar [expr {[lindex $c 0]*[lindex $c 1]}]
+            if {$amin eq "" || $ar < $amin} { set amin $ar }
+        }
+        set E($m) {}
+        array unset seen
+        foreach c $cand {
+            lassign $c w h pl
+            if {$w*$h > (1.0 + $slack)*$amin} { continue }
+            set key [list $w $h [lsort [lmap e $pl {
+                lassign $e i x y ; list [lindex $cells $i] $x $y }]]]
+            if {[info exists seen($key)]} { continue }
+            set seen($key) 1
+            lappend E($m) $c
+        }
+    }
+    set out {}
+    foreach c $E($full) {
+        lassign $c w h pl
+        set pos [lrepeat $n {}]
+        foreach e $pl { lassign $e i x y ; lset pos $i [list [expr {$x + $M}] [expr {$y + $M}]] }
+        lappend out [list [expr {$w + 2*$M}] [expr {$h + 2*$M}] $pos]
+    }
+    return [lsort -integer -command {apply {{a b} {
+        expr {[lindex $a 0]*[lindex $a 1] - [lindex $b 0]*[lindex $b 1]}}}} $out]
+}
+
+# The grid packer's own arrangement of the same children, as a plan.
+proc soc_vehicle::grid_plan {cell} {
+    set cells [dict get [_container_cells] $cell]
+    lassign [_pack_geom $cells] w h xs ys
+    set pos {}
+    foreach x $xs y $ys { lappend pos [list $x $y] }
+    return [list $w $h $pos]
+}
+
 proc soc_vehicle::get {k} {
     variable P
     if {![info exists P($k)]} { error "soc_vehicle: no parameter '$k'" }
@@ -970,16 +1111,16 @@ proc soc_vehicle::declare_stack {} {
     buda::set_planner_param healersAhead 1
 }
 
-# ── hierarchy ─────────────────────────────────────────────────────────────
-proc soc_vehicle::build_hierarchy {} {
+# Every cell type and every container's children -- the definitions,
+# nothing instantiated at the top -- so a design whose top is ONE cell
+# (`soc_local.tcl`) is built from the same walk as the whole SoC.
+proc soc_vehicle::define_cells {} {
     variable P
     variable SZ
     variable KIDS
     variable CELLOF
     array unset KIDS
     array unset CELLOF
-
-    buda::set_die $P(DIEW) $P(DIEH)
 
     # every cell type, leaves first
     foreach c [lsort [array names SZ]] {
@@ -1010,6 +1151,13 @@ proc soc_vehicle::build_hierarchy {} {
     set qc [lrepeat $P(NC) cluster_cell] ; set qn {}
     for {set c 0} {$c < $P(NC)} {incr c} { lappend qn cl_$c }
     _fill quad_cell $qc $qn
+}
+
+# ── hierarchy ─────────────────────────────────────────────────────────────
+proc soc_vehicle::build_hierarchy {} {
+    variable P
+    buda::set_die $P(DIEW) $P(DIEH)
+    define_cells
 
     # the top: the quadrants, the l2 and the io block where `_top_geom`
     # put them when `configure` sized the die (one walk, per LAYOUT).

@@ -1221,3 +1221,58 @@ def test_the_grid_packer_is_the_default_and_refuses_the_slice_knobs(tmp_path):
                            capture_output=True, encoding="utf-8", cwd=tmp_path,
                            timeout=60)
         assert r.returncode != 0, bad
+
+
+# ── one cell routed alone (soc_local.tcl) ─────────────────────────────────
+_LOCAL = _ROOT / "flow" / "tcl" / "soc_local.tcl"
+
+
+def test_a_fixed_plan_is_the_one_the_local_driver_lists(tmp_path):
+    """`soc_local.tcl -list` enumerates a container's slicing plans and
+    `-FIX {<cell> k}` builds plan k -- through the SAME path, since a fixed
+    parent takes its children at their smallest shapes and those may be
+    rotated from what the free search picked.  So plan k must be one
+    geometry in the listing and in the configured design, or a plan
+    measured alone is not the plan the chip routes."""
+    knobs = ["-PAD", "10", "-GAP", "4", "-M", "4", "-PACK", "slice"]
+    r = subprocess.run(["tclsh", str(_LOCAL), "cluster_cell", "-list", "-slack", "0.5", *knobs],
+                       capture_output=True, encoding="utf-8", cwd=tmp_path, timeout=120)
+    assert r.returncode == 0, r.stdout + r.stderr
+    plans = {}
+    for ln in r.stdout.splitlines():
+        f = ln.split(None, 5)
+        if f and f[0] == "PLAN":
+            plans[f[1]] = (int(f[2]), int(f[3]),
+                           [tuple(map(int, p.split())) for p in re.findall(r"\{(\d+ \d+)\}", f[5])])
+    assert len(plans) > 50, len(plans)
+    for k in ("0", "7", "48", "grid"):
+        _die, cells, kids, _ = _slice_geom(
+            tmp_path, "NQ", 8, "LAYOUT", "compact", "PAD", 10, "GAP", 4, "M", 4,
+            "PACK", "slice", "FIX", "cluster_cell %s" % k, "FIXSLACK", 0.5)
+        w, h, pos = plans[k]
+        assert cells["cluster_cell"] == (w, h), (k, cells["cluster_cell"], (w, h))
+        assert [(x, y) for _c, x, y in kids["cluster_cell"]] == pos, (k, kids["cluster_cell"], pos)
+
+
+def test_the_local_driver_measures_the_connections_the_netlist_has(tmp_path):
+    """One core routed alone, measured from the STORED tables by
+    `tools/cell_face_demand.py`: the bits between its leaves and to its
+    four ports are netlist facts (`build_buses`), so the reader must find
+    exactly them -- whatever the route did with them."""
+    bdb = tmp_path / "core.bdb"
+    r = subprocess.run(["tclsh", str(_LOCAL), "core_cell", "-plan", "current", "-noheal",
+                        "-bdb", str(bdb), "-PAD", "10", "-GAP", "4", "-M", "4"],
+                       capture_output=True, encoding="utf-8", errors="replace",
+                       cwd=tmp_path, timeout=300)
+    assert r.returncode == 0 and "LOCAL cell=core_cell" in r.stdout, r.stdout[-3000:] + r.stderr
+    import sys
+    sys.path.insert(0, str(_ROOT / "tools"))
+    import cell_face_demand
+    m = cell_face_demand.measure(str(bdb))
+    conn = m["connections"]
+    assert conn["u/alu|u/dec"] == 32 and conn["u/alu|u/regf"] == 64 \
+        and conn["u/mul|u/regf"] == 32, conn
+    ports = sorted(v for k, v in conn.items() if k.startswith("pt_"))
+    assert ports == [16, 16, 32, 32], conn
+    assert set(m["demand"]) == {"u/dec", "u/alu", "u/mul", "u/regf"}
+    assert m["wl"] > 0
