@@ -26,13 +26,19 @@ perturbation and its healed end state is not.  So this scores on the chip:
               own healing, timed, beside two baselines -- the slice
               packer's own choice (`-FIX` absent) and the grid packer.
 
-Every run is cached in DIR/runs.json by its exact command line, so a
-re-run resumes.  Screening runs use one worker thread each and run
+Every run is cached in DIR/runs.json by its exact command line and the
+IMPLEMENTATION it ran on (the commit, the uncommitted diff and the built
+engine), so a re-run of the same code resumes and a re-run after a checkout
+or a rebuild measures again.  A run that exits without a verdict is an
+ERROR, reported as one and not cached; only a run the budget cut off is a
+timeout.  Screening runs use one worker thread each and run
 `--jobs` at a time (the score is a count, not a time); healed runs use the
 default threads, two at a time, and their times are what the table quotes.
 """
 import argparse
 import concurrent.futures as cf
+import functools
+import hashlib
 import json
 import os
 import re
@@ -122,6 +128,24 @@ def list_plans(cell, knobs, slack):
     return plans
 
 
+@functools.lru_cache(maxsize=None)
+def implementation():
+    """A fingerprint of the code a run measures: HEAD, the uncommitted
+    diff (the vehicle, the engine's Python layer and the Tcl bridge are all
+    tracked) and the built extension modules, which are not.  A cached run
+    from another implementation is a measurement of different code, so it
+    is part of a run's identity (Codex P1 on #961)."""
+    h = hashlib.sha256()
+    for cmd in (["git", "rev-parse", "HEAD"], ["git", "diff", "HEAD"],
+                ["git", "status", "--porcelain"]):
+        r = subprocess.run(cmd, cwd=ROOT, capture_output=True)
+        h.update(r.stdout)
+    for so in sorted((ROOT / "build").glob("*.so")):
+        h.update(so.name.encode())
+        h.update(so.read_bytes())
+    return h.hexdigest()[:16]
+
+
 def parse(log):
     t = log
     die = re.search(r"die (\d+)x(\d+)", t)
@@ -136,7 +160,7 @@ def parse(log):
     elif clean:
         out.update(ovl=0, unpl=0, viol=0)
     else:
-        out.update(ovl=None, unpl=None, viol=None, timeout=True)
+        out.update(ovl=None, unpl=None, viol=None)
     if first:
         out.update(first_ovl=int(first.group(1)), first_unpl=int(first.group(2)))
     return out
@@ -153,7 +177,7 @@ def chip(cache, logdir, knobs, fix=None, heal=False, threads=None, timeout=900):
     # says nothing about a larger one, so a rerun with a longer
     # --heal-timeout must run again rather than replay the cached cutoff
     key = " ".join(shlex.quote(a) for a in ["btcl", *pre, "soc.tcl", *args]) \
-        + f" #timeout={timeout}"
+        + f" #timeout={timeout} #impl={implementation()}"
     got = cache.get(key)
     if got is not None:
         return got
@@ -163,17 +187,38 @@ def chip(cache, logdir, knobs, fix=None, heal=False, threads=None, timeout=900):
     pr = subprocess.Popen([str(BTCL), *pre, str(SOC), *args], stdout=subprocess.PIPE,
                           stderr=subprocess.STDOUT, encoding="utf-8", errors="replace",
                           start_new_session=True)
+    timed_out = False
     try:
         log, _ = pr.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
+        timed_out = True
         os.killpg(pr.pid, 9)
         log, _ = pr.communicate()
     secs = round(time.time() - t0, 1)
     (logdir / (tag + ".log")).write_text(log)
-    res = parse(log)
+    res = classify(parse(log), timed_out, pr.returncode)
     res["secs"] = secs
     res["cmd"] = key
+    if res.get("error"):
+        # an engine crash or a refused command is a broken experiment, not a
+        # plan that ran out of budget (Codex P2 on #961): say so, and leave
+        # it uncached so a rerun tries again
+        print(f"[error] exit {pr.returncode} with no verdict: {key}\n"
+              f"        log: {logdir / (tag + '.log')}", flush=True)
+        return res
     cache.put(key, res)
+    return res
+
+
+def classify(res, timed_out, returncode):
+    """A run with no verdict is a TIMEOUT only if the budget cut it off;
+    one that exited by itself without a verdict is an ERROR."""
+    if res["unpl"] is None:
+        if timed_out:
+            res["timeout"] = True
+        else:
+            res["error"] = True
+            res["rc"] = returncode
     return res
 
 
@@ -274,7 +319,7 @@ def main():
         first = (f"{r.get('first_unpl', 0)}u/{r.get('first_ovl', 0)}o"
                  if "first_unpl" in r else "clean")
         end = ("clean" if r["clean"] else "timeout" if r.get("timeout")
-               else f"{r['unpl']}u/{r['ovl']}o/{r['viol']}v")
+               else "ERROR" if r.get("error") else f"{r['unpl']}u/{r['ovl']}o/{r['viol']}v")
         wl = f"{r['wl']:,}" if r["clean"] and r["wl"] else "–"
         print(f"| {n} | {die[0]}x{die[1]} | {die[0]*die[1]:,} | {first} | {end} | {wl} | {r['secs']} |")
     (out / "summary.json").write_text(json.dumps(dict(plans=plans, heals=res), indent=1, default=str))

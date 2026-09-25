@@ -515,7 +515,7 @@ construction, and the numbers here are the re-run.)  Then the heal:
   shorter wire, longer heal.
 
 Regenerate: `tools/soc_plan_search.py --knobs "-PAD 10 -GAP 4 -M 4 -FACES
-4" --out <dir>` (every run cached in `<dir>/runs.json`; a re-run resumes).
+4" --out <dir>` (every run cached in `<dir>/runs.json` under its command line and the code it ran on, so a re-run of the same code resumes and one after a checkout or rebuild measures again; a run that dies without a verdict is reported as an error and not cached).
 
 ## Every endpoint, every bit, every instance: the face rule read three ways
 

@@ -1392,3 +1392,36 @@ def test_second_review_round_fixes(tmp_path):
     r = subprocess.run(["tclsh", str(_LOCAL), "core_cell", "-list", "-NQ", "1"],
                        capture_output=True, encoding="utf-8", cwd=tmp_path, timeout=120)
     assert r.returncode == 0 and "PLAN grid" in r.stdout, r.stdout + r.stderr
+
+
+def test_third_review_round_fixes(tmp_path, monkeypatch):
+    """Codex's third round on #961.  (a) A run that exits by itself with no
+    verdict is an ERROR, not a timeout, and is not cached, so a rerun tries
+    again; only a run the budget cut off is a timeout.  (b) A cached run is
+    keyed on the implementation it measured, so a checkout or a rebuild
+    cannot replay results of other code."""
+    import sys
+    sys.path.insert(0, str(_ROOT / "tools"))
+    import soc_plan_search as sps
+    none = sps.parse("soc.tcl: something went wrong\n")
+    assert sps.classify(dict(none), False, 1).get("error")
+    assert not sps.classify(dict(none), False, 1).get("timeout")
+    assert sps.classify(dict(none), True, -9).get("timeout")
+    assert not sps.classify(sps.parse("soc.tcl: clean -- x\n"), False, 0).get("error")
+    # a stand-in for btcl that dies at once without a verdict
+    fake = tmp_path / "btcl"
+    fake.write_text("#!/bin/sh\necho 'engine crashed'\nexit 3\n")
+    fake.chmod(0o755)
+    monkeypatch.setattr(sps, "BTCL", fake)
+    (tmp_path / "logs").mkdir()
+    cache = sps.Cache(tmp_path / "runs.json")
+    r = sps.chip(cache, tmp_path / "logs", ["-PAD", "10"], timeout=30)
+    assert r.get("error") and r["rc"] == 3 and not r.get("timeout")
+    assert cache.d == {}
+    # the key carries the implementation fingerprint
+    fp = sps.implementation()
+    assert len(fp) == 16
+    fake.write_text("#!/bin/sh\necho 'soc.tcl: clean -- done'\n")
+    r = sps.chip(cache, tmp_path / "logs", ["-PAD", "10"], timeout=30)
+    assert r["clean"] and len(cache.d) == 1
+    assert next(iter(cache.d)).endswith(f"#impl={fp}")
