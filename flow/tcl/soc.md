@@ -186,6 +186,57 @@ five-bundle / one-bundle strandings are named so the census can be read
 against them rather than guessed at.  The default stays `band` for that
 reason and for the tables above it.
 
+## Compaction at NQ = 8, compact layout (measured 2026-09-25)
+
+The briefing's 16-core SoC (`soc.tcl 8 -LAYOUT compact`, 219 leaves, 323
+buses, 8,272 nets) swept over the two levers the generator exposes: `PAD`,
+added to every leaf's face-derived size, and `GAP` = `M`, the channel and
+the margin.  `BITPITCH` stays at the stack's 4.0: lowering it would size
+faces narrower than the buses that land on them, which is the face rule's
+own failure rather than compaction.  Top-down, the vehicle's own healing
+(`heal_if_dirty`, two rounds); one run per point.
+
+| PAD | GAP = M | die | area vs default | first check | end | detailed WL |
+|---|---|---|---|---|---|---|
+| 24 | 16 | 6256 x 3568 | 1.000 | 80 unplaced | clean | 2,000,920 |
+| 24 | 8 | 5720 x 3272 | 0.838 | 16 unplaced | clean | 1,785,596 |
+| 24 | 4 | 5452 x 3124 | 0.763 | 32 unplaced | clean | 1,632,362 |
+| 12 | 16 | 5968 x 3424 | 0.915 | 1,344 unplaced | clean | 2,173,109 |
+| 12 | 8 | 5432 x 3128 | 0.761 | 1,464 unplaced | clean | 1,926,514 |
+| 12 | 4 | 5164 x 2980 | 0.689 | 1,136 unplaced | clean | 1,717,497 |
+| 10 | 4 | 5116 x 2956 | **0.678** | 1,131 unplaced | clean | 1,728,474 |
+| 8 | 4 | 5068 x 2932 | 0.666 | 1,238 unplaced | 168 unplaced | – |
+| 6 | 4 | 5020 x 2908 | 0.654 | 1,455 unplaced | 232 unplaced | – |
+| 4 | 16 | 5776 x 3328 | 0.861 | 1,240 unplaced | 8 unplaced | – |
+| 4 | 8 | 5240 x 3032 | 0.712 | 1,717 unplaced | 200 unplaced | – |
+| 4 | 4 | 4972 x 2884 | 0.642 | 1,360 unplaced | 200 unplaced | – |
+| 0 | 16 | 5680 x 3280 | 0.835 | 1,224 unplaced | 40 unplaced | – |
+| 0 | 8 | 5144 x 2984 | 0.688 | 1,443 unplaced | 264 unplaced | – |
+| 0 | 4 | 4876 x 2836 | 0.619 | 1,200 unplaced | 488 unplaced | – |
+
+A failing point's wire is omitted: a stranded bit lays none, so it would
+read as a saving.
+
+* **The channel is free to take.**  At the default padding, 16 -> 4 is
+  0.76x the area and 18 % less wire, clean, and the FIRST check gets
+  cleaner (80 -> 32 unplaced) — this chapter's channel lesson again: a
+  wider channel buys no routing.
+* **Padding is the binding lever, and its floor is 10.**  At `PAD 10 GAP
+  4` the die is 0.68x the default and the wire 13.6 % shorter, clean; at 8
+  and below no channel heals.  Every point at 12 or less is dirty at the
+  first check by a thousand-odd bits, so what makes these points clean is
+  the healing, not the floorplan — the first check at 24 is two orders of
+  magnitude cleaner.
+* **Area and wire part company below 24.**  `PAD 24 GAP 4` has the least
+  wire of any clean point (1,632,362); `PAD 10 GAP 4` has the smallest die
+  at 5.9 % more wire.  Which one is "compact" is a choice the table
+  prices rather than makes.
+
+Not measured: bottom-up, a second NQ, repeat runs, and the judge
+(`tools/independent_audit.py`) on the endpoints; the sweep's logs are not
+kept.  Every point regenerates as `btcl flow/tcl/soc.tcl 8 -LAYOUT
+compact -PAD <p> -GAP <g> -M <g>`.
+
 ## Every endpoint, every bit, every instance: the face rule read three ways
 
 The face rule — *a leaf's size is derived from the bits that land on its
