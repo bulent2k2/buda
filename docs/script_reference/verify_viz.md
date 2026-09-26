@@ -80,6 +80,31 @@ pool ignored a bounded pattern's extent (#956).  That is fixed; the flow's
 earlier clean verdict had depended on those phantom tracks, and it is clean
 again on real ones.
 
+The `dnuts` stage also audits **shorts** (`BIT_SHORT`): two wires of
+DIFFERENT NETS whose metal overlaps on one layer.  Inside one bundle, that is
+two different bits co-located on one track over an extent — the same-bundle
+track-sharing exemption's blind spot once a fan-in taper gives two segments
+different bit subsets.  Between two bundles (issue #948) it is every pair of
+placed wires from different bundles, judged the way
+`tools/independent_audit.py` judges them: each wire's metal rectangle — its
+span along the layer's direction and `track_position ± width/2` across it —
+overlapping the other's by a positive AREA (wires that only abut, side by side
+or end to end, share no metal), and the two carrying different net NAMES (one
+net on two bundles is one conductor; a wire whose net cannot be named is its
+own net, never lumped with other unknowns).  A cross-bundle short is listed
+once, under the lower bundle id with the other in its locus, e.g.
+
+```
+  Bundle 1: Seg 0<->Bundle 176 Seg 0: 4 bit(s) — different nets' metal overlaps on one layer (a short)
+```
+
+and BOTH bundles count toward the summary's `across N bundle(s)`.  Before
+#948 the audit could not see such a pair at all — it runs bundle by bundle —
+so a `soc.tcl` run could end with seven shorted bits and a verdict reading
+clean.  The healers do not target it (their metric is overlaps and opens), but
+a flow that heals on `buda::query violations`, as `soc.tcl`'s
+`heal_if_dirty` does, now heals on it too.
+
 The `nuts` and `dnuts` stages also audit **TEG contact** (`TEG_OPEN`): every
 rect of a `teg_mode over` multi-rect block must be touched by the bundle's
 placed metal, and all rects must sit in **one connected component** of that

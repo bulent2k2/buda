@@ -428,7 +428,18 @@ every "one round" measured rather than assumed.
    `pc_0` bits `check_design` reports too).  The consequence for the tables
    is stated on the page — every "clean" in E1 and E5 is a `check_design`
    clean, in both arms alike, and the bottom-up rows are owed a re-run
-   under the fix.
+   under the fix.  The judge's SECOND finding was an audit gap rather than
+   a routing fault, and it is closed too (#948): `check_design`'s
+   `BIT_SHORT` compared the bits of ONE bundle, so a short between two
+   bundles' wires — four on the NQ = 4 blind round — was the judge's
+   alone; `check_dnuts_cross_shorts` now takes those pairs with the judge's
+   own predicate, and the two agree exactly wherever both count.  For the
+   tables here that is the #946 caveat one step further: every E1/E5
+   verdict was taken by an audit blind to cross-bundle shorts, so a round
+   recorded clean may carry some (the vehicle's own tables, re-measured
+   under it in [soc.md](../../flow/tcl/soc.md), lost several clean
+   verdicts, default-channel bottom-up at NQ = 4 and 8 among them), and
+   none of these tables has been re-run under it.
 3. **Per-instance per-layer demand query** — read off the top-down plan;
    exposed through `buda::query` so a Tcl driver can branch on it.  **Done**
    (2026-09-15): [`report_layer_demand`](../script_reference/nuts.md#layer-demand-reporting)
