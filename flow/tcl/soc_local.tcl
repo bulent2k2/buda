@@ -245,26 +245,21 @@ foreach side {N S E W} {
     set ntier [expr {max($ntier, $t + 1)}]
 }
 set R [expr {max($ring, $RG + $ntier*($D + 4) + 8)}]
-# Where `u` sits: at the ring's corner (`-at local`), or on the TRACK PHASE
-# its representative has in the chip (`-at chip`), since the patterns are
-# anchored to the die origin and a seat one track short of its bus strands
-# every bit -- plus `-shift dx dy`.  The chip position itself where the ring
-# fits, else the nearest position past the ring that is a whole track
-# period (`track_period`, every layer of that direction) from it: clamping
-# to the ring used to move a representative near the die edge off its phase
-# (quad_1/cl_0 from y 8 to 40 at PAD 10), which is what the option exists
-# to keep.
-proc chip_seat {c R per} {
-    set c [expr {int($c)}]
-    if {$c >= $R} { return $c }
-    return [expr {$c + int(ceil(double($R - $c)/$per))*$per}]
-}
+# Where `u` sits: at the ring's corner, plus `-shift dx dy`.  `-at chip`
+# gives it the TRACK PHASE its representative has in the chip -- the
+# patterns are anchored to the die origin, and a seat one track short of
+# its bus strands every bit -- by moving the TRACKS rather than the seat:
+# every layer's pattern origin is shifted by the seat's offset from the chip
+# position (`declare_stack`), so the cell sees exactly the chip's tracks and
+# the die keeps its size.  Moving the seat instead had to go a whole track
+# period past the ring whenever the chip position lies inside it -- 11,808
+# in x -- which made the local die 12,592 wide around a cell of a chip 868
+# wide; clamping it to the ring before that lost the phase.
 lassign $shift sdx sdy
+set OX [expr {$R + $sdx}] ; set OY [expr {$R + $sdy}]
+set trackshift {0 0}
 if {$at eq "chip"} {
-    set OX [expr {[chip_seat $rx1 $R [soc_vehicle::track_period V]] + $sdx}]
-    set OY [expr {[chip_seat $ry1 $R [soc_vehicle::track_period H]] + $sdy}]
-} else {
-    set OX [expr {$R + $sdx}] ; set OY [expr {$R + $sdy}]
+    set trackshift [list [expr {$OX - int($rx1)}] [expr {$OY - int($ry1)}]]
 }
 set DIEW [expr {$OX + $W + $R}] ; set DIEH [expr {$OY + $H + $R}]
 set ports {}
@@ -282,13 +277,14 @@ foreach o $tiers {
 
 # ── the run ───────────────────────────────────────────────────────────────
 puts "=== soc_local.tcl: $cell as $ref, plan $plan ${W}x${H}, [llength $internal]\
-      internal + [llength $external] external buses ==="
+      internal + [llength $external] external buses, die ${DIEW}x${DIEH},\
+      tracks shifted [join $trackshift ,] ==="
 foreach e $external {
     lassign $e name bits din pin side dx dy out
     puts "EXT $name $bits [expr {$din ? "out" : "in"}] $pin $side $out"
 }
 buda::start
-soc_vehicle::declare_stack
+soc_vehicle::declare_stack {*}$trackshift
 buda::open_bdb [expr {$bdb eq "" ? ":memory:" : $bdb}]
 buda::set_die $DIEW $DIEH
 soc_vehicle::define_cells

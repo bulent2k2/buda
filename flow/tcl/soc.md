@@ -433,14 +433,18 @@ first check, 19 plans):
 
 Two measured reasons.  The context changes what strands: the same
 cluster at the same plan strands `id`, `x`, `l1dd` and its port buses
-alone and `m` and `dd` in the chip.  It is not the track phase: seated
-on the chip's phase in both axes, the local run still strands `id` (43
-bits), `x` (19) and `l1dd` (26) and neither `m` nor `dd`, against 46, 20
-and 25 at the ring corner; the phase moves only the port buses (`nl` 64
-to 96, `nr` 16 to 0; 184 bits against 173 in all).  An earlier cut of
-`-at chip` clamped the seat to the ring in y, keeping only the x phase,
-and read the two as bit for bit identical; that measurement is
-withdrawn.  The ring width does not matter (36 to 400).  The predictor
+alone and `m` and `dd` in the chip.  It is not the track phase: with
+every layer's tracks shifted onto the chip's phase (`-at chip`; the die
+the same size), the local run still strands `id` (43 bits), `x` (19) and
+`l1dd` (26), one bit of `m` and none of `dd`, against 46, 20 and 25 at
+the ring corner; the phase moves mainly the port buses (`nl` 64 to 96,
+`nr` 16 to 0; 185 bits against 173 in all).  Two earlier cuts of
+`-at chip` moved the seat instead: the first clamped it to the ring in y,
+keeping only the x phase, and read the two as bit for bit identical
+(withdrawn); the second moved it a whole track period past the ring,
+which here added 306 to the die's height (184 bits) but for a reference
+near the left edge would have made the die ~15x wider than the chip.
+The ring width does not matter (36 to 400).  The predictor
 table above was measured at the ring corner.  And fixing a
 cluster's shape re-lays out every quad and the top, so a plan's chip
 result mixes its own cost with a different global floorplan -- though

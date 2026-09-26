@@ -1435,8 +1435,7 @@ def test_fourth_review_round_vehicle_fixes(tmp_path):
     cap filters BEFORE the curve is thinned, so KEEP 3 packs, and KEEP 2
     (which divided by zero) is refused.  (c) Under FACES 4 a stretch keeps
     the short face at the face load.  (d) More than 10 children under PACK
-    slice is refused, not left to a 3^n enumeration.  (e) The track period
-    `-at chip` keeps is every layer's pitch LCM per direction."""
+    slice is refused, not left to a 3^n enumeration."""
     script = tmp_path / "chk.tcl"
     script.write_text(f"""
 source {{{_ROOT / 'flow' / 'tcl' / 'soc_lib.tcl'}}}
@@ -1461,7 +1460,6 @@ puts "KEEP2 [catch {{soc_vehicle::configure [dict merge $reset {{KEEP 2}}]}} m] 
 puts "NIO [catch {{soc_vehicle::configure [dict merge $reset {{NIO 12}}]}} m] $m"
 soc_vehicle::configure [dict merge $reset {{NIO 4 FACES 4 ASPECT 2}}]
 puts "REGF $::soc_vehicle::SZ(regf_cell)"
-puts "PERIOD [soc_vehicle::track_period H] [soc_vehicle::track_period V]"
 """)
     r = subprocess.run(["tclsh", str(script)], capture_output=True, encoding="utf-8",
                        cwd=tmp_path, timeout=300)
@@ -1475,7 +1473,6 @@ puts "PERIOD [soc_vehicle::track_period H] [soc_vehicle::track_period V]"
     w, h = map(int, out["REGF"].split())
     # FACES 4 sizes regf's every face for 48 bits: _dim(48) at PAD 10
     assert min(w, h) >= 48 * 4 + 10, out["REGF"]
-    assert out["PERIOD"] == "306 11808"
 
 
 def test_fourth_review_round_driver_fixes(tmp_path, monkeypatch):
@@ -1529,3 +1526,25 @@ def test_fourth_review_round_driver_fixes(tmp_path, monkeypatch):
     assert sps.first_check(dict(unpl=3, first_unpl=40, first_ovl=2)) == "40u/2o"
     k = "btcl soc.tcl 8 -PAD {} " + "-X 1 " * 40 + "-FIX 'cluster_cell 12' -noheal"
     assert sps.log_tag(k.format(10)) != sps.log_tag(k.format(11))
+
+
+def test_at_chip_shifts_the_tracks_not_the_seat(tmp_path):
+    """`soc_local.tcl -at chip` gives the cell the chip's track phase by
+    shifting every layer's pattern origin, not by moving the seat: moving
+    the seat had to go a whole track period (11,808 in x) past the ring for
+    a reference near the chip's left edge, and made the local die 12,592
+    wide around a cell of a chip 868 wide (the review of #961).  The die
+    must be the same in both modes, and the tracks shifted by the seat's
+    offset from the chip position (quad_0/cl_0 sits at 8,8; the seat 60,60)."""
+    dies = {}
+    for at in ("local", "chip"):
+        r = subprocess.run(["tclsh", str(_LOCAL), "cluster_cell", "-NQ", "1", "-PACK", "slice",
+                            "-PAD", "10", "-GAP", "4", "-M", "4", "-at", at, "-noheal"],
+                           capture_output=True, encoding="utf-8", cwd=tmp_path, timeout=900)
+        assert r.returncode == 0, r.stdout[-2000:] + r.stderr[-2000:]
+        m = re.search(r"die (\d+)x(\d+),\s+tracks shifted (-?\d+),(-?\d+)", r.stdout)
+        assert m, r.stdout[:2000]
+        dies[at] = tuple(map(int, m.groups()))
+    assert dies["local"][:2] == dies["chip"][:2]
+    assert dies["local"][2:] == (0, 0) and dies["chip"][2:] == (52, 52)
+    assert dies["chip"][0] < 1000, dies

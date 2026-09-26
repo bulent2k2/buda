@@ -1303,7 +1303,7 @@ proc soc_vehicle::size {c} {
 # measure.  Declared by EVERY session, a resuming one included.
 namespace eval soc_vehicle {
     # {id name dir kind overhead origin slots}: the one statement of the
-    # stack, read by `declare_stack` and by `track_period`
+    # stack, read by `declare_stack`
     variable STACK {
         {2 M2 H {}  55.56 -100 {POWER 2 1 (SIGNAL 1 0.5)x4 GROUND 2 1 (SIGNAL 1 0.5)x4}}
         {3 M3 V {}  55.56    0 {POWER 2 1 (SIGNAL 1 0.5)x4 GROUND 2 1 (SIGNAL 1 0.5)x4}}
@@ -1313,7 +1313,10 @@ namespace eval soc_vehicle {
         {7 M7 V TOP 56.10 -600 {POWER 6 2 (SIGNAL 3 2)x3 GROUND 2 1 (SIGNAL 3 2)x3}}
     }
 }
-proc soc_vehicle::declare_stack {} {
+# `dx dy` shift every V layer's pattern origin by dx and every H layer's by
+# dy: a design seated at an offset from where the chip puts the same cell
+# (`soc_local.tcl -at chip`) then sees the chip's tracks.  0 0 is the SoC.
+proc soc_vehicle::declare_stack {{dx 0} {dy 0}} {
     variable STACK
     foreach l $STACK {
         lassign $l id nm dir kind oh
@@ -1321,38 +1324,13 @@ proc soc_vehicle::declare_stack {} {
     }
     foreach l $STACK {
         lassign $l id nm dir kind oh origin slots
+        set origin [expr {$origin + ($dir eq "V" ? $dx : $dy)}]
         buda::def_track_pattern $id $origin {*}$slots
     }
 
     buda::corner_margin dx 5 dy 5
     buda::set_min_stub_length 2
     buda::set_planner_param healersAhead 1
-}
-
-# The distance along one axis over which EVERY layer running that way
-# repeats its pattern: the LCM of their unit pitches (`H` layers repeat in y,
-# `V` in x).  Two seats that far apart see identical tracks on every layer,
-# which is what "the same track phase" means (H: 306, V: 11,808 here).
-proc soc_vehicle::track_period {dir} {
-    variable STACK
-    set lcm 1
-    foreach l $STACK {
-        lassign $l id nm d kind oh origin slots
-        if {$d ne $dir} { continue }
-        # expand `( ... )xN` groups the way def_track_pattern does, then
-        # add up every slot's width and space
-        while {[regexp {\(([^()]*)\)\s*[xX]\s*(\d+)} $slots all body n]} {
-            set slots [string map [list $all [string repeat " $body " $n]] $slots]
-        }
-        set cur 0.0
-        foreach {type w sp} $slots { set cur [expr {$cur + $w + $sp}] }
-        set p [expr {round($cur)}]
-        if {abs($cur - $p) > 1e-9} { error "soc_vehicle: layer $nm pitch $cur is not whole" }
-        set a $lcm ; set b $p
-        while {$b} { set t [expr {$a % $b}] ; set a $b ; set b $t }
-        set lcm [expr {$lcm / $a * $p}]
-    }
-    return $lcm
 }
 
 # Every cell type and every container's children -- the definitions,
