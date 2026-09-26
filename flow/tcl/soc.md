@@ -205,22 +205,26 @@ own failure rather than compaction.  Top-down, the vehicle's own healing
 | 12 | 8 | 5432 x 3128 | 0.761 | 1,464 unplaced | clean | 1,926,514 | 6.2 |
 | 12 | 4 | 5164 x 2980 | 0.689 | 1,136 unplaced | clean | 1,717,497 | 11.5 |
 | 10 | 4 | 5116 x 2956 | **0.678** | 1,131 unplaced | clean | 1,728,474 | 12.9 |
-| 8 | 4 | 5068 x 2932 | 0.666 | 1,238 unplaced | 168u, 1o, 8b | (1,414,393) | 192.8 |
-| 6 | 4 | 5020 x 2908 | 0.654 | 1,455 unplaced | 232u, 3o, 14b | (1,398,283) | 256.5 |
+| 8 | 4 | 5068 x 2932 | 0.666 | 1,238 unplaced | 168u, 1o, 6b | (1,414,393) | 192.8 |
+| 6 | 4 | 5020 x 2908 | 0.654 | 1,455 unplaced | 232u, 3o, 8b | (1,398,283) | 256.5 |
 | 4 | 16 | 5776 x 3328 | 0.861 | 1,240 unplaced | 8u, 1b | (1,856,805) | 251.7 |
-| 4 | 8 | 5240 x 3032 | 0.712 | 1,717 unplaced | 200u, 3o, 13b | (1,611,430) | 195.2 |
-| 4 | 4 | 4972 x 2884 | 0.642 | 1,360 unplaced | 200u, 2o, 11b | (1,392,344) | 260.3 |
-| 0 | 16 | 5680 x 3280 | 0.835 | 1,224 unplaced | 40u, 7o, 16b | (1,907,641) | 178.7 |
-| 0 | 8 | 5144 x 2984 | 0.688 | 1,443 unplaced | 264u, 3o, 15b | (1,585,188) | 96.5 |
+| 4 | 8 | 5240 x 3032 | 0.712 | 1,717 unplaced | 200u, 3o, 7b | (1,611,430) | 195.2 |
+| 4 | 4 | 4972 x 2884 | 0.642 | 1,360 unplaced | 200u, 2o, 7b | (1,392,344) | 260.3 |
+| 0 | 16 | 5680 x 3280 | 0.835 | 1,224 unplaced | 40u, 7o, 2b | (1,907,641) | 178.7 |
+| 0 | 8 | 5144 x 2984 | 0.688 | 1,443 unplaced | 264u, 3o, 9b | (1,585,188) | 96.5 |
 | 0 | 4 | 4876 x 2836 | 0.619 | 1,200 unplaced | 488u, 16b | (1,368,267) | 134.2 |
 
 In an end column, `u` = unplaced bits after detailed routing, `o` =
-overlaps and `b` = dirty bundles: the distinct bundles holding an
-unplaced bit, an audit violation or an overlap -- the final
-`check_design`'s flagged bundles joined with both bundles of every
-overlapping pair, read from each run's saved route (the runs re-made
-from the tree with `BUDA_BDB_MEMORY_TO`, each reproducing its recorded
-die and end state).  Here and in every table below.
+overlaps and `b` = dirty bundles, the bundles the final `check_design`
+flags (an unplaced bit or another audit violation).  The overlaps are
+the abstract NUTS count -- bus segments sharing a track before bits are
+placed, what `soc.tcl`'s verdict reads -- which `check_design` does not
+report, so they are shown as they are and do not count toward `b`.  Nor
+does a short between bits of two DIFFERENT bundles: `BIT_SHORT` compares
+bits within one bundle only (#948), and the independent judge
+(`tools/independent_audit.py`) finds 7 such shorted bits on the saved
+route of the clean PAD 10 GAP 4 run and 30 on slice PAD 21 GAP 12 CGAP
+4.  Here and in every table below.
 
 A failing point's wire is in parentheses: a stranded bit lays none, so it
 reads as a saving and is not comparable with a complete route
@@ -279,7 +283,7 @@ healing, two worker threads; `first` is the first `check_design dnuts`.
 | grid | 10 | 4 | – | 15,122,896 | 1,131u | clean | 1,728,474 | 12.9 |
 | grid | 10 | 5 | – | 15,512,719 | 1,328u | clean | 1,920,872 | 10.6 |
 | grid | 11 | 4 | – | 15,255,520 | 1,076u | clean | 1,774,705 | 10.8 |
-| grid | 10 | 3 | – | 14,738,031 | 1,207u | 64u, 2o, 4b | – | 108.2 |
+| grid | 10 | 3 | – | 14,738,031 | 1,207u | 64u, 2o, 2b | – | 108.2 |
 | slice | 24 | 4 | = | 12,834,160 | 344u | 10u, 2b | – | 423 |
 | slice | 24 | 4 | 16 | 13,302,592 | 599u | 1u, 1b | – | 289.9 |
 | slice | 24 | 8 | = | 14,301,376 | 492u | clean | 2,179,216 | 482.7 |
@@ -289,15 +293,15 @@ healing, two worker threads; `first` is the first `check_design dnuts`.
 | slice | 24 | 11 | 4 | 15,158,020 | 218u | clean | 2,061,633 | 17.5 |
 | slice | 24 | 13 | 4 | 15,857,476 | 219u | clean | 2,082,140 | 17.7 |
 | slice | 23 | 12 | 4 | 15,372,000 | 221u | clean | 2,130,871 | 46.1 |
-| slice | 24 | 8 | 4 | 14,138,416 | 501u | 24u, 2o, 4b | – | 258.3 |
+| slice | 24 | 8 | 4 | 14,138,416 | 501u | 24u, 2o, 2b | – | 258.3 |
 | slice | 20 | 12 | 4 | 14,974,128 | 265u | clean | 2,046,353 | 18.6 |
-| slice | 21 | 12 | 4 | 15,106,176 | 265u | 2o, 3b | – | 202.8 |
+| slice | 21 | 12 | 4 | 15,106,176 | 265u | 2o, 0b | – | 202.8 |
 | slice | 20 | 13 | 4 | 15,319,780 | 262u | timeout | – | 300 |
 | slice | 20 | 11 | 4 | 14,632,420 | 515u | clean | 2,241,934 | 73.0 |
 | slice | 19 | 12 | 4 | 14,842,656 | 207u | clean | 1,895,379 | 232.9 |
 | slice | 18 | 12 | 4 | 14,711,760 | 501u | clean | 2,090,949 | 280.6 |
 | slice | 20 | 16 | 4 | 16,380,400 | 226u | 15 viol, 1b | – | 188.1 |
-| slice | 16 | 16 | 4 | 15,833,776 | 706u | 288u, 4o, 13b | – | 171.7 |
+| slice | 16 | 16 | 4 | 15,833,776 | 706u | 288u, 4o, 9b | – | 171.7 |
 | slice | 10 | 16 | 4 | 15,031,120 | 1,876u | timeout | – | 300 |
 
 (`=` = CGAP equal to GAP; a timeout is the 300 s cap; failing points'
@@ -307,7 +311,7 @@ wire omitted.)  And the leaf aspect, all at `PAD 24 GAP 12 CGAP 4`
 | leaf stretch allowed | die area | first | end |
 |---|---|---|---|
 | any, to 4:1 (containers too) | 13,076,560 | 2,594u | timeout |
-| any, to 3:1 (containers too) | 13,132,332 | 2,254u | 899u, 39o, >= 29b (the overlaps' bundles not recorded) |
+| any, to 3:1 (containers too) | 13,132,332 | 2,254u | 899u, 39o, 29b |
 | short face >= bits x pitch, containers 2:1 | 15,163,200 | 606u | timeout |
 | short face >= bits x pitch + 10 (`FACEPAD`, kept) | 15,505,776 (= square) | 184u | clean |
 
@@ -405,10 +409,10 @@ no end state the right way:
 
 | PAD (GAP 4, grid) | first check | first, regf four-face | end | end, regf four-face |
 |---|---|---|---|---|
-| 12 | 1,136 | 1,197 | clean, 11.5 s | 32u, 1o, 2b |
+| 12 | 1,136 | 1,197 | clean, 11.5 s | 32u, 1o, 1b |
 | 10 | 1,131 | 1,285 | clean, 12.9 s | clean, 86 s |
-| 8 | 1,238 | 771 | 168u, 1o, 8b | 304u, 11b |
-| 4 | 1,360 | 616 | 200u, 2o, 11b | 360u, 12b |
+| 8 | 1,238 | 771 | 168u, 1o, 6b | 304u, 11b |
+| 4 | 1,360 | 616 | 200u, 2o, 7b | 360u, 12b |
 | 0 | 1,200 | 704 | 488u, 16b | 552u, 18b |
 
 (Two runs at a time, so the times are loaded; one run per point.)
@@ -516,11 +520,11 @@ construction, and the numbers here are the re-run.)  Then the heal:
 | candidate | die area | first check | end | detailed WL | s |
 |---|---|---|---|---|---|
 | plan 60 | 15,407,392 | 512u/2o | 480u, 15b | – | 135.2 |
-| plan 112 | 16,852,000 | 512u/2o | 480u, 8o, 23b | – | 77.7 |
+| plan 112 | 16,852,000 | 512u/2o | 480u, 8o, 15b | – | 77.7 |
 | plan 61 | 15,407,392 | 558u/4o | 320u, 10b | – | 127.2 |
 | plan 66 (first run) | 15,407,392 | 512u/5o | 416u, 13b | – | 190.8 |
 | plan 129 | 16,852,000 | 560u/3o | clean | 1,976,268 | 10.9 |
-| slice packer's own choice | 12,017,872 | 1,745u/53o | 128u, 2o, 9b | – | 208.0 |
+| slice packer's own choice | 12,017,872 | 1,745u/53o | 128u, 2o, 5b | – | 208.0 |
 | grid packer, FACES 4 | 15,122,896 | 1,285u/45o | clean | 1,486,953 | 84.6 |
 | grid packer, FACES 0 (round 1) | 15,122,896 | 1,131u/84o | clean | 1,728,474 | 12.9 |
 
