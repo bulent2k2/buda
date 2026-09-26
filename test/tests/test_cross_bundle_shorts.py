@@ -335,7 +335,28 @@ def test_one_wire_shorting_two_is_counted_as_two(quickstart):
     with contextlib.redirect_stdout(buf):
         s._report_violations_summary([("Bundle 2", v) for v in vs])
     out = buf.getvalue()
-    assert "Seg 3<->Bundle 5 Seg 1: 2 bit pair(s) — different nets'" in out, out
+    assert "Seg 3<->Bundle 5 Seg 1: 2 wire pair(s) — different nets'" in out, out
+    assert "Total: 2 violation(s) in 1 group(s) across 2 bundle(s)" in out, out
+
+
+def test_shield_shorts_are_counted_per_pair_too(quickstart):
+    # A shield's bit_index is its negative ordinal: a wide shield of bundle 2
+    # across two disjoint bits of bundle 5 is two shorts with NO signal bit
+    # on bundle 2's side.  The pair count must not depend on the bit's sign,
+    # or the group reads as one verbatim message and Total 1 (second Codex
+    # P2 on #963).
+    s = quickstart
+    vs = _shorts([_wire(2, 3, -1, 10.0, 0.0, 100.0, width=6.0, shield=True),
+                  _wire(5, 1, 0, 8.5, 50.0, 150.0),
+                  _wire(5, 1, 1, 11.5, 50.0, 150.0)],
+                 bit_nets={5: ["n5_0", "n5_1"]}, shield_nets={2: "GND"})
+    assert len(vs) == 2
+    assert all(v.bit_index < 0 for v in vs)
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        s._report_violations_summary([("Bundle 2", v) for v in vs])
+    out = buf.getvalue()
+    assert "Seg 3<->Bundle 5 Seg 1: 2 wire pair(s) — different nets'" in out, out
     assert "Total: 2 violation(s) in 1 group(s) across 2 bundle(s)" in out, out
 
 
@@ -377,11 +398,11 @@ def test_check_design_and_the_judge_count_the_same_shorts(tmp_path):
     log = (out / f"{stem}.log").read_text(errors="replace")
     # the dnuts-stage audit's short lines: "Bundle a: Seg i<->Bundle b Seg
     # j: N bit(s) — ... (a short)" (cross-bundle) and "Bundle a: Seg
-    # i<->j: N bit(s) — ... (a short)" (inside one bundle); "N bit pair(s)"
-    # when one bit shorts several wires
+    # i<->j: N bit(s) — ... (a short)" (inside one bundle); "N wire
+    # pair(s)" when one wire shorts several or a shield is in the pair
     engine = sum(int(m) for m in re.findall(
-        r"Bundle \d+: Seg \d+<->(?:Bundle \d+ Seg )?\d+: (\d+) bit"
-        r"(?: pair)?\(s\) — different nets' metal overlaps", log))
+        r"Bundle \d+: Seg \d+<->(?:Bundle \d+ Seg )?\d+: (\d+) "
+        r"(?:bit|wire pair)\(s\) — different nets' metal overlaps", log))
     assert judge_shorts > 0, (
         "the vehicle no longer produces a short: the agreement below would "
         "be vacuous — find a vehicle that shorts (see the docstring)")

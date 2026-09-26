@@ -1131,14 +1131,15 @@ class ReportsMixin:
                 groups[key] = g
             if v.bit_index >= 0:
                 g["bits"].add(v.bit_index)
-                # A short is a PAIR of wires, and one wire can short several
-                # (a wide NDR wire across two narrow bits of the other
-                # bundle): counting its distinct bit_index alone collapsed
-                # those into one and under-reported the judge's SHORT count
-                # (Codex P2 on #963).  bit_index2 is the other wire's bit,
-                # set on both halves of BIT_SHORT and -1 on every other kind.
-                if v.kind.name == "BIT_SHORT":
-                    g["pairs"].add((v.bit_index, getattr(v, "bit_index2", -1)))
+            # A short is a PAIR of wires, and one wire can short several (a
+            # wide NDR wire across two narrow bits of the other bundle):
+            # counting its distinct bit_index alone collapsed those into one
+            # and under-reported the judge's SHORT count (Codex P2 on #963).
+            # Recorded whatever the sign — an NDR shield's bit_index is its
+            # NEGATIVE ordinal, and a shield shorts like any wire (second
+            # Codex P2 on #963).  bit_index2 is the other wire's.
+            if v.kind.name == "BIT_SHORT":
+                g["pairs"].add((v.bit_index, getattr(v, "bit_index2", -1)))
 
         def locus(g):
             if g["block"]:
@@ -1165,7 +1166,7 @@ class ReportsMixin:
                 continue
             nbits = len(g["bits"])
             npairs = len(g["pairs"])
-            if nbits == 0:
+            if nbits == 0 and npairs == 0:
                 # Not a per-bit violation (topo/nuts stage) — show it verbatim.
                 print(f"  {g['prefix']}: {g['msg']}")
             else:
@@ -1173,9 +1174,10 @@ class ReportsMixin:
                 loc_part = f"{loc}: " if loc else ""
                 reason = self._CONN_KIND_REASON.get(g["kind"], g["kind"])
                 # Each shorted bit shorts one wire in the usual case, and the
-                # line reads as it always has; when one bit shorts several,
-                # the count is the PAIRS and the unit says so.
-                count = (f"{npairs} bit pair(s)" if npairs > nbits
+                # line reads as it always has; when one wire shorts several,
+                # or a shield (no bit) is in the pair, the count is the PAIRS
+                # and the unit says so.
+                count = (f"{npairs} wire pair(s)" if npairs > nbits
                          else f"{nbits} bit(s)")
                 print(f"  {g['prefix']}: {loc_part}{count} — {reason}")
 
