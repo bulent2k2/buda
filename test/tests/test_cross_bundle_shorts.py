@@ -321,6 +321,24 @@ def test_both_bundles_of_a_short_count_as_dirty(quickstart):
         buf.getvalue(), buf.getvalue()
 
 
+def test_one_wire_shorting_two_is_counted_as_two(quickstart):
+    # A wide wire of bundle 2 across two narrow, mutually disjoint bits of
+    # bundle 5's segment: two violations, one group, and the summary must
+    # say two — it counted distinct bit_index alone and said one (Codex P2
+    # on #963), which is the number the judge-agreement test sums.
+    s = quickstart
+    vs = _shorts([_wire(2, 3, 0, 10.0, 0.0, 100.0, width=6.0),
+                  _wire(5, 1, 0, 8.5, 50.0, 150.0),
+                  _wire(5, 1, 1, 11.5, 50.0, 150.0)])
+    assert len(vs) == 2
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        s._report_violations_summary([("Bundle 2", v) for v in vs])
+    out = buf.getvalue()
+    assert "Seg 3<->Bundle 5 Seg 1: 2 bit pair(s) — different nets'" in out, out
+    assert "Total: 2 violation(s) in 1 group(s) across 2 bundle(s)" in out, out
+
+
 def test_persistence_and_the_audit_name_a_wire_the_same_way(quickstart):
     # `_wire_nets` is the one statement of identity both read; the judge
     # reads what persistence stores, so this is what keeps it and the
@@ -359,10 +377,11 @@ def test_check_design_and_the_judge_count_the_same_shorts(tmp_path):
     log = (out / f"{stem}.log").read_text(errors="replace")
     # the dnuts-stage audit's short lines: "Bundle a: Seg i<->Bundle b Seg
     # j: N bit(s) — ... (a short)" (cross-bundle) and "Bundle a: Seg
-    # i<->j: N bit(s) — ... (a short)" (inside one bundle)
+    # i<->j: N bit(s) — ... (a short)" (inside one bundle); "N bit pair(s)"
+    # when one bit shorts several wires
     engine = sum(int(m) for m in re.findall(
-        r"Bundle \d+: Seg \d+<->(?:Bundle \d+ Seg )?\d+: (\d+) bit\(s\) — "
-        r"different nets' metal overlaps", log))
+        r"Bundle \d+: Seg \d+<->(?:Bundle \d+ Seg )?\d+: (\d+) bit"
+        r"(?: pair)?\(s\) — different nets' metal overlaps", log))
     assert judge_shorts > 0, (
         "the vehicle no longer produces a short: the agreement below would "
         "be vacuous — find a vehicle that shorts (see the docstring)")

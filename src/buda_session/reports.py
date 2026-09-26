@@ -1126,10 +1126,19 @@ class ReportsMixin:
             if g is None:
                 g = {"prefix": prefix, "kind": v.kind.name, "seg_idx": v.seg_idx,
                      "seg_idx2": v.seg_idx2, "block": v.block_name,
-                     "bundle2": bundle2, "bits": set(), "msg": v.message}
+                     "bundle2": bundle2, "bits": set(), "pairs": set(),
+                     "msg": v.message}
                 groups[key] = g
             if v.bit_index >= 0:
                 g["bits"].add(v.bit_index)
+                # A short is a PAIR of wires, and one wire can short several
+                # (a wide NDR wire across two narrow bits of the other
+                # bundle): counting its distinct bit_index alone collapsed
+                # those into one and under-reported the judge's SHORT count
+                # (Codex P2 on #963).  bit_index2 is the other wire's bit,
+                # set on both halves of BIT_SHORT and -1 on every other kind.
+                if v.kind.name == "BIT_SHORT":
+                    g["pairs"].add((v.bit_index, getattr(v, "bit_index2", -1)))
 
         def locus(g):
             if g["block"]:
@@ -1155,6 +1164,7 @@ class ReportsMixin:
             if i >= self._CONN_GROUP_CAP:
                 continue
             nbits = len(g["bits"])
+            npairs = len(g["pairs"])
             if nbits == 0:
                 # Not a per-bit violation (topo/nuts stage) — show it verbatim.
                 print(f"  {g['prefix']}: {g['msg']}")
@@ -1162,13 +1172,19 @@ class ReportsMixin:
                 loc = locus(g)
                 loc_part = f"{loc}: " if loc else ""
                 reason = self._CONN_KIND_REASON.get(g["kind"], g["kind"])
-                print(f"  {g['prefix']}: {loc_part}{nbits} bit(s) — {reason}")
+                # Each shorted bit shorts one wire in the usual case, and the
+                # line reads as it always has; when one bit shorts several,
+                # the count is the PAIRS and the unit says so.
+                count = (f"{npairs} bit pair(s)" if npairs > nbits
+                         else f"{nbits} bit(s)")
+                print(f"  {g['prefix']}: {loc_part}{count} — {reason}")
 
         n_groups = len(groups)
         if n_groups > self._CONN_GROUP_CAP:
             print(f"  ... and {n_groups - self._CONN_GROUP_CAP} more group(s) "
                   f"(use --verbose-conn for full detail).")
-        total = sum(max(1, len(g["bits"])) for g in groups.values())
+        total = sum(max(1, len(g["bits"]), len(g["pairs"]))
+                    for g in groups.values())
         print(f"  Total: {total} violation(s) in {n_groups} group(s) across "
               f"{len(bundles)} bundle(s). Use --verbose-conn for per-bit detail.")
 
