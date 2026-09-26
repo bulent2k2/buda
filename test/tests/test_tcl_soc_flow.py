@@ -1124,3 +1124,427 @@ def test_compact_ranks_on_the_die_not_on_the_rounded_ratio(tmp_path):
     assert (die["nc"], die["w"], die["h"]) == (4, 23312, 13184), die
     assert die["w"] * die["h"] == 307_345_408 < 307_508_992
     assert die["util"] == 0.892   # the rounded report, unchanged either way
+
+
+# ── PACK slice ────────────────────────────────────────────────────────────
+_PROBE_SLICE = (
+    "namespace eval buda {}\n"
+    "proc buda::set_die {w h} { puts \"DIE $w $h\" }\n"
+    "proc buda::add_cell {c w h} { puts \"CELL $c $w $h\" }\n"
+    "proc buda::add_inst_to_cell {p n c x y} { puts \"KID $p $n $c $x $y\" }\n"
+    "proc buda::add_inst {n c p x y} { puts \"TOP $n $c $x $y\" }\n"
+    "source [file join {%s} flow tcl soc_lib.tcl]\n"
+    "soc_vehicle::configure [lrange $argv 0 end]\n"
+    "foreach c [lsort [array names soc_vehicle::LEAF]] {\n"
+    "    lassign $soc_vehicle::LEAF($c) vb hb\n"
+    "    puts \"LEAF $c [expr {max($vb, $hb)}] [soc_vehicle::_dim [expr {max($vb, $hb)}]]\"\n"
+    "}\n"
+    "soc_vehicle::build_hierarchy\n")
+
+
+def _slice_geom(tmp_path, *knobs):
+    probe = tmp_path / "slice_probe.tcl"
+    probe.write_text(_PROBE_SLICE % _ROOT)
+    r = subprocess.run(["tclsh", str(probe), *map(str, knobs)],
+                       capture_output=True, encoding="utf-8", cwd=tmp_path,
+                       timeout=300)
+    assert r.returncode == 0, r.stdout + r.stderr
+    die, cells, kids, leaves = None, {}, collections.defaultdict(list), {}
+    for f in (ln.split() for ln in r.stdout.splitlines()):
+        if f and f[0] == "DIE":
+            die = (int(f[1]), int(f[2]))
+        elif f and f[0] == "CELL":
+            cells[f[1]] = (int(f[2]), int(f[3]))
+        elif f and f[0] == "KID":
+            kids[f[1]].append((f[3], int(f[4]), int(f[5])))
+        elif f and f[0] == "TOP":
+            kids["-"].append((f[2], int(f[3]), int(f[4])))
+        elif f and f[0] == "LEAF":
+            leaves[f[1]] = (int(f[2]), int(f[3]))
+    return die, cells, kids, leaves
+
+
+def test_a_slice_packing_is_a_legal_floorplan_and_never_worse_than_the_grid(tmp_path):
+    """`PACK slice` chooses every container's packing and every leaf's shape
+    together, so what has to hold is what a placer's output must: each
+    child inside its parent with the margin M, no two siblings closer than
+    their channel, every leaf at least its square's area, the leaf aspect
+    within ASPECT and the container aspect within 2, and every face still
+    hosting its bits plus FACEPAD -- the floor a stretch may not cross,
+    MEASURED (see `_leaf_shapes`).  And the one reason it exists: at the
+    same knobs its die is never larger than the grid packer's."""
+    base = ["NQ", 8, "LAYOUT", "compact", "BITPITCH", 4.0]
+    for pad, gap, aspect, cgap in [(10, 4, 1, -1), (24, 12, 1, 4),
+                                   (48, 8, 4, -1), (24, 4, 3, 16)]:
+        knobs = base + ["PAD", pad, "GAP", gap, "M", gap, "PACK", "slice",
+                        "ASPECT", aspect, "CGAP", cgap]
+        die, cells, kids, leaves = _slice_geom(tmp_path, *knobs)
+        grid_die, *_ = _slice_geom(tmp_path, *(base + ["PAD", pad, "GAP", gap, "M", gap]))
+        tag = (pad, gap, aspect, cgap)
+        assert die[0] * die[1] <= grid_die[0] * grid_die[1], (tag, die, grid_die)
+        for parent, ks in kids.items():
+            pw, ph = die if parent == "-" else cells[parent]
+            ch = gap if parent in ("-",) else (
+                cgap if cgap >= 0 and parent in ("cluster_cell", "quad_cell") else gap)
+            m = 0 if parent == "-" else gap
+            boxes = []
+            for c, x, y in ks:
+                w, h = cells[c]
+                assert m <= x and m <= y and x + w <= pw - m and y + h <= ph - m, \
+                    (tag, parent, c, (x, y, w, h), (pw, ph))
+                boxes.append((x, y, w, h, c))
+            for i, a in enumerate(boxes):
+                for b in boxes[i + 1:]:
+                    apart = (a[0] + a[2] + ch <= b[0] or b[0] + b[2] + ch <= a[0]
+                             or a[1] + a[3] + ch <= b[1] or b[1] + b[3] + ch <= a[1])
+                    assert apart, (tag, parent, a, b)
+            if parent != "-":
+                assert max(pw, ph) <= 2 * min(pw, ph), (tag, parent, pw, ph)
+        for c, (bits, side) in leaves.items():
+            w, h = cells[c]
+            assert w * h >= side * side, (tag, c, w, h, side)
+            assert max(w, h) <= aspect * min(w, h) * 1.02, (tag, c, w, h)
+            assert min(w, h) >= min(side, int(-(-bits * 4.0 // 1)) + 10), (tag, c, w, h)
+
+
+def test_the_grid_packer_is_the_default_and_refuses_the_slice_knobs(tmp_path):
+    """Every recorded table was measured on the grid packer, so it stays the
+    default, and a slice-only knob handed to it is an ERROR rather than a
+    silently ignored word."""
+    die, *_ = _slice_geom(tmp_path, "NQ", 2)
+    assert die == (4208, 2016), die
+    for bad in (["ASPECT", 2], ["CGAP", 8], ["PACK", "tight"], ["ASPECT", 5]):
+        probe = tmp_path / "bad.tcl"
+        probe.write_text("source [file join {%s} flow tcl soc_lib.tcl]\n"
+                         "soc_vehicle::configure [lrange $argv 0 end]\n" % _ROOT)
+        r = subprocess.run(["tclsh", str(probe), "NQ", "2", *map(str, bad)],
+                           capture_output=True, encoding="utf-8", cwd=tmp_path,
+                           timeout=60)
+        assert r.returncode != 0, bad
+
+
+# ── one cell routed alone (soc_local.tcl) ─────────────────────────────────
+_LOCAL = _ROOT / "flow" / "tcl" / "soc_local.tcl"
+
+
+def test_a_fixed_plan_is_the_one_the_local_driver_lists(tmp_path):
+    """`soc_local.tcl -list` enumerates a container's slicing plans and
+    `-FIX {<cell> k}` builds plan k -- through the SAME path, since a fixed
+    parent takes its children at their smallest shapes and those may be
+    rotated from what the free search picked.  So plan k must be one
+    geometry in the listing and in the configured design, or a plan
+    measured alone is not the plan the chip routes."""
+    knobs = ["-PAD", "10", "-GAP", "4", "-M", "4", "-PACK", "slice"]
+    r = subprocess.run(["tclsh", str(_LOCAL), "cluster_cell", "-list", "-slack", "0.5", *knobs],
+                       capture_output=True, encoding="utf-8", cwd=tmp_path, timeout=120)
+    assert r.returncode == 0, r.stdout + r.stderr
+    plans = {}
+    for ln in r.stdout.splitlines():
+        f = ln.split(None, 5)
+        if f and f[0] == "PLAN":
+            plans[f[1]] = (int(f[2]), int(f[3]),
+                           [tuple(map(int, p.split())) for p in re.findall(r"\{(\d+ \d+)\}", f[5])])
+    assert len(plans) > 50, len(plans)
+    for k in ("0", "7", "48", "grid"):
+        _die, cells, kids, _ = _slice_geom(
+            tmp_path, "NQ", 8, "LAYOUT", "compact", "PAD", 10, "GAP", 4, "M", 4,
+            "PACK", "slice", "FIX", "cluster_cell %s" % k, "FIXSLACK", 0.5)
+        w, h, pos = plans[k]
+        assert cells["cluster_cell"] == (w, h), (k, cells["cluster_cell"], (w, h))
+        assert [(x, y) for _c, x, y in kids["cluster_cell"]] == pos, (k, kids["cluster_cell"], pos)
+
+
+def test_the_local_driver_measures_the_connections_the_netlist_has(tmp_path):
+    """One core routed alone, measured from the STORED tables by
+    `tools/cell_face_demand.py`: the bits between its leaves and to its
+    four ports are netlist facts (`build_buses`), so the reader must find
+    exactly them -- whatever the route did with them."""
+    bdb = tmp_path / "core.bdb"
+    r = subprocess.run(["tclsh", str(_LOCAL), "core_cell", "-plan", "current", "-noheal",
+                        "-bdb", str(bdb), "-PAD", "10", "-GAP", "4", "-M", "4"],
+                       capture_output=True, encoding="utf-8", errors="replace",
+                       cwd=tmp_path, timeout=300)
+    assert r.returncode == 0 and "LOCAL cell=core_cell" in r.stdout, r.stdout[-3000:] + r.stderr
+    import sys
+    sys.path.insert(0, str(_ROOT / "tools"))
+    import cell_face_demand
+    m = cell_face_demand.measure(str(bdb))
+    conn = m["connections"]
+    assert conn["u/alu|u/dec"] == 32 and conn["u/alu|u/regf"] == 64 \
+        and conn["u/mul|u/regf"] == 32, conn
+    ports = sorted(v for k, v in conn.items() if k.startswith("pt_"))
+    assert ports == [16, 16, 32, 32], conn
+    assert set(m["demand"]) == {"u/dec", "u/alu", "u/mul", "u/regf"}
+    assert m["wl"] > 0
+
+
+def test_faces_sizes_a_leaf_for_all_its_pins_and_only_the_leaf_that_needs_it(tmp_path):
+    """The per-pin rule sizes a face from a leaf's heaviest pin, which
+    assumes every pin gets a face to itself; `FACES` spreads a leaf's pins
+    (as `build_buses` wires them) over its faces and sizes the faces for
+    the heaviest one.  At the defaults exactly one leaf has more pin load
+    than that: `regf_cell`, 4 x DW + AW on four faces, whose best spread
+    puts DW + AW = 48 bits on one face.  FACES 4 makes it the square that
+    holds 48 on every face, FACES 2 widens only its N/S pair, and every
+    other leaf is left at its per-pin size -- the derivation reads the
+    real buses, so a leaf it grows is a leaf the netlist overloads."""
+    probe = tmp_path / "faces.tcl"
+    probe.write_text(
+        "source [file join {%s} flow tcl soc_lib.tcl]\n"
+        "soc_vehicle::configure [lrange $argv 0 end]\n"
+        "foreach c [lsort [array names soc_vehicle::LEAF]] "
+        "{ puts \"SZ $c [soc_vehicle::size $c] [soc_vehicle::_dim 48]\" }\n" % _ROOT)
+
+    def sizes(*knobs):
+        r = subprocess.run(["tclsh", str(probe), "NQ", "2", *map(str, knobs)],
+                           capture_output=True, encoding="utf-8", cwd=tmp_path, timeout=60)
+        assert r.returncode == 0, r.stdout + r.stderr
+        out, d48 = {}, None
+        for f in (ln.split() for ln in r.stdout.splitlines()):
+            if f and f[0] == "SZ":
+                out[f[1]] = (int(f[2]), int(f[3]))
+                d48 = int(f[4])
+        return out, d48
+
+    base, d48 = sizes()
+    four, _ = sizes("FACES", 4)
+    two, _ = sizes("FACES", 2)
+    grown4 = {c for c in base if four[c] != base[c]}
+    grown2 = {c for c in base if two[c] != base[c]}
+    assert grown4 == {"regf_cell"} and grown2 == {"regf_cell"}, (grown4, grown2)
+    assert four["regf_cell"] == (d48, d48), four["regf_cell"]
+    assert two["regf_cell"] == (d48, base["regf_cell"][1]), two["regf_cell"]
+    bad = subprocess.run(["tclsh", str(probe), "NQ", "2", "FACES", "3"],
+                         capture_output=True, encoding="utf-8", cwd=tmp_path, timeout=60)
+    assert bad.returncode != 0 and "FACES" in bad.stdout + bad.stderr
+
+
+def test_every_local_port_sits_inside_the_die_apart(tmp_path):
+    """`soc_local.tcl` puts a port per external bus in a ring round the
+    cell.  When one side's ports need more length than the cell's edge
+    they start a further tier out and the ring grows, rather than being
+    slid past the cell's end -- which placed the io block's last west port
+    beyond the die (Codex P2 on #961).  Every port inside the die, no two
+    top-level blocks overlapping."""
+    import sqlite3
+    bdb = tmp_path / "io.bdb"
+    r = subprocess.run(["tclsh", str(_LOCAL), "io_blk_cell", "-plan", "current",
+                        "-noheal", "-bdb", str(bdb)],
+                       capture_output=True, encoding="utf-8", errors="replace",
+                       cwd=tmp_path, timeout=300)
+    assert r.returncode == 0, r.stdout[-3000:] + r.stderr
+    con = sqlite3.connect(str(bdb))
+    meta = dict(con.execute("SELECT key, value FROM meta WHERE key IN ('die_w','die_h')"))
+    dw, dh = float(meta["die_w"]), float(meta["die_h"])
+    top = list(con.execute("SELECT name, x1, y1, x2, y2 FROM component WHERE parent_id IS NULL"))
+    ports = [b for b in top if b[0].startswith("pt_")]
+    assert len(ports) >= 5, top
+    for name, x1, y1, x2, y2 in top:
+        assert 0 <= x1 and 0 <= y1 and x2 <= dw and y2 <= dh, (name, (x1, y1, x2, y2), (dw, dh))
+    for i, a in enumerate(top):
+        for b in top[i + 1:]:
+            assert not (a[1] < b[3] and b[1] < a[3] and a[2] < b[4] and b[2] < a[4]), (a, b)
+
+
+def test_a_plan_search_matches_resamples_by_a_unique_signature(tmp_path):
+    """`tools/soc_plan_search.py` re-samples a plan at perturbed knobs and
+    must find the SAME arrangement there.  Pairwise child order mapped the
+    cluster's 204 plans onto 156 keys, so some resamples ran another plan
+    (Codex P1 on #961); `enum_plans` names each plan's slicing tree by
+    child TYPE, which is unique and survives a change of sizes.  The grid
+    baseline also drops the knobs the grid packer refuses (Codex P2)."""
+    import sys
+    sys.path.insert(0, str(_ROOT / "tools"))
+    import soc_plan_search as sps
+    knobs = sps.knob_list("-PAD 10 -GAP 4 -M 4 -FACES 4 -PACK slice -FIXSLACK 0.5")
+    base = sps.list_plans("cluster_cell", knobs, 0.5)
+    assert len(base) > 100 and len({p["sig"] for p in base}) == len(base)
+    pert = sps.list_plans("cluster_cell", sps.set_knob(knobs, "PAD", 11), 0.5)
+    by = {p["sig"]: p for p in pert}
+    hit = [p for p in base if p["sig"] in by]
+    assert len(hit) > 0.8 * len(base)
+    g = sps.grid_knobs(sps.knob_list("-PAD 24 -GAP 12 -M 12 -PACK slice -ASPECT 2 -CGAP 4 -FIXSLACK 0.5"))
+    r = subprocess.run(["tclsh", str(_VEHICLE), "8", "-LAYOUT", "compact", *g, "-dry"],
+                       capture_output=True, encoding="utf-8", cwd=tmp_path, timeout=120)
+    assert r.returncode == 0, r.stdout + r.stderr
+
+
+def test_second_review_round_fixes(tmp_path):
+    """Codex's second round on #961.  (a) FACES 2 widens regf's N/S pair,
+    and the slice search must not rotate that load onto the short faces.
+    (b) A plan missing a perturbed sample is ranked after every complete
+    one and never healed, since its mean is over fewer runs.  (c) The local
+    driver's default reference exists at NQ 1 (there is no quad_1)."""
+    import sys
+    die, cells, kids, leaves = _slice_geom(
+        tmp_path, "NQ", 8, "LAYOUT", "compact", "PAD", 10, "GAP", 4, "M", 4,
+        "PACK", "slice", "FACES", 2)
+    w, h = cells["regf_cell"]
+    assert w > h, cells["regf_cell"]
+    sys.path.insert(0, str(_ROOT / "tools"))
+    import soc_plan_search as sps
+    s = lambda u: dict(unpl=u, ovl=0)
+    top = [dict(k=1, area=10, samples=[s(100)]),                  # incomplete, best score
+           dict(k=2, area=10, samples=[s(300), s(300), s(300)]),
+           dict(k=3, area=10, samples=[s(200), s(250), s(260)])]
+    sps.rank_resampled(top, 3)
+    assert [p["k"] for p in top] == [3, 2, 1] and not top[-1]["complete"]
+    r = subprocess.run(["tclsh", str(_LOCAL), "core_cell", "-list", "-NQ", "1"],
+                       capture_output=True, encoding="utf-8", cwd=tmp_path, timeout=120)
+    assert r.returncode == 0 and "PLAN grid" in r.stdout, r.stdout + r.stderr
+
+
+def test_third_review_round_fixes(tmp_path, monkeypatch):
+    """Codex's third round on #961.  (a) A run that exits by itself with no
+    verdict is an ERROR, not a timeout, and is not cached, so a rerun tries
+    again; only a run the budget cut off is a timeout.  (b) A cached run is
+    keyed on the implementation it measured, so a checkout or a rebuild
+    cannot replay results of other code."""
+    import sys
+    sys.path.insert(0, str(_ROOT / "tools"))
+    import soc_plan_search as sps
+    none = sps.parse("soc.tcl: something went wrong\n")
+    assert sps.classify(dict(none), False, 1).get("error")
+    assert not sps.classify(dict(none), False, 1).get("timeout")
+    assert sps.classify(dict(none), True, -9).get("timeout")
+    assert not sps.classify(sps.parse("soc.tcl: clean -- x\n"), False, 0).get("error")
+    # a stand-in for btcl that dies at once without a verdict
+    fake = tmp_path / "btcl"
+    fake.write_text("#!/bin/sh\necho 'engine crashed'\nexit 3\n")
+    fake.chmod(0o755)
+    monkeypatch.setattr(sps, "BTCL", fake)
+    (tmp_path / "logs").mkdir()
+    cache = sps.Cache(tmp_path / "runs.json")
+    r = sps.chip(cache, tmp_path / "logs", ["-PAD", "10"], timeout=30)
+    assert r.get("error") and r["rc"] == 3 and not r.get("timeout")
+    assert cache.d == {}
+    # the key carries the implementation fingerprint
+    fp = sps.implementation()
+    assert len(fp) == 16
+    fake.write_text("#!/bin/sh\necho 'soc.tcl: clean -- done'\n")
+    r = sps.chip(cache, tmp_path / "logs", ["-PAD", "10"], timeout=30)
+    assert r["clean"] and len(cache.d) == 1
+    assert next(iter(cache.d)).endswith(f"#impl={fp}")
+
+
+def test_fourth_review_round_vehicle_fixes(tmp_path):
+    """The Claude Code review of #961, the vehicle half.  (a) Under FIX the
+    shared leaves keep one shape, so every listed plan builds the geometry
+    it is listed with even where leaves may stretch (27 of 29 sampled
+    indices built another at PAD 48 ASPECT 4).  (b) The container aspect
+    cap filters BEFORE the curve is thinned, so KEEP 3 packs, and KEEP 2
+    (which divided by zero) is refused.  (c) Under FACES 4 a stretch keeps
+    the short face at the face load.  (d) More than 10 children under PACK
+    slice is refused, not left to a 3^n enumeration."""
+    script = tmp_path / "chk.tcl"
+    script.write_text(f"""
+source {{{_ROOT / 'flow' / 'tcl' / 'soc_lib.tcl'}}}
+set base {{NQ 8 LAYOUT compact PACK slice PAD 48 GAP 8 M 8 ASPECT 4 FIXSLACK 0.5}}
+soc_vehicle::configure [dict merge $base {{FIX {{cluster_cell 0}}}}]
+set plans [soc_vehicle::enum_plans cluster_cell 0.5]
+set n [llength $plans]
+set bad 0
+foreach k [list 0 6 17 40 [expr {{$n - 1}}]] {{
+    lassign [lindex $plans $k] W H pos
+    soc_vehicle::configure [dict merge $base [list FIX [list cluster_cell $k]]]
+    set got [list {{*}}$::soc_vehicle::SZ(cluster_cell) [lindex $::soc_vehicle::PL(cluster_cell) 1]]
+    if {{$got ne [list $W $H $pos]}} {{ incr bad }}
+}}
+puts "PLANS $n BAD $bad"
+# `configure` keeps every knob an earlier call set, so each call below
+# states the ones the loop above changed
+set reset {{FIX {{}} ASPECT 1 KEEP 12 FIXSLACK 0.5}}
+soc_vehicle::configure [dict merge $reset {{NQ 8 LAYOUT compact PACK slice PAD 10 GAP 4 M 4 KEEP 3}}]
+puts "KEEP3 $::soc_vehicle::TOP(diew)"
+puts "KEEP2 [catch {{soc_vehicle::configure [dict merge $reset {{KEEP 2}}]}} m] $m"
+puts "NIO [catch {{soc_vehicle::configure [dict merge $reset {{NIO 12}}]}} m] $m"
+soc_vehicle::configure [dict merge $reset {{NIO 4 FACES 4 ASPECT 2}}]
+puts "REGF $::soc_vehicle::SZ(regf_cell)"
+""")
+    r = subprocess.run(["tclsh", str(script)], capture_output=True, encoding="utf-8",
+                       cwd=tmp_path, timeout=300)
+    assert r.returncode == 0, r.stdout + r.stderr
+    out = dict(ln.split(" ", 1) for ln in r.stdout.splitlines() if ln)
+    n, bad = out["PLANS"].split()[0], out["PLANS"].split()[2]
+    assert int(n) > 100 and bad == "0", out["PLANS"]
+    assert int(out["KEEP3"]) > 0
+    assert out["KEEP2"].startswith("1 ") and ">= 3" in out["KEEP2"]
+    assert out["NIO"].startswith("1 ") and "at most 10 children" in out["NIO"]
+    w, h = map(int, out["REGF"].split())
+    # FACES 4 sizes regf's every face for 48 bits: _dim(48) at PAD 10
+    assert min(w, h) >= 48 * 4 + 10, out["REGF"]
+
+
+def test_fourth_review_round_driver_fixes(tmp_path, monkeypatch):
+    """The Claude Code review of #961, the drivers' half.  (a) The local
+    driver enumerates at the vehicle's FIXSLACK (0.5) unless told otherwise,
+    so plan k is plan k in `soc.tcl -FIX`, and refuses a -slack that
+    disagrees with -FIXSLACK.  (b) The search's implementation fingerprint
+    does not change when its own output directory appears in the tree.
+    (c) The GAP resample moves M by one from ITS value; (d) the heal table
+    shows no first check for a run that never reached one; (e) log names
+    carry a hash of the whole command."""
+    import sys
+    lst = lambda *a: subprocess.run(["tclsh", str(_LOCAL), "cluster_cell", "-list", *a,
+                                     "-PAD", "10", "-GAP", "4", "-M", "4"],
+                                    capture_output=True, encoding="utf-8", cwd=tmp_path,
+                                    timeout=300)
+    plans = lambda r: [ln for ln in r.stdout.splitlines() if ln.startswith("PLAN ") and "grid" not in ln]
+    r0, r5 = lst(), lst("-slack", "0.5")
+    assert r0.returncode == 0 and r5.returncode == 0, r0.stderr + r5.stderr
+    assert plans(r0) == plans(r5) and len(plans(r0)) > 100
+    bad = lst("-slack", "0.15", "-FIXSLACK", "0.5")
+    assert bad.returncode != 0 and "disagree" in bad.stderr
+    sys.path.insert(0, str(_ROOT / "tools"))
+    import soc_plan_search as sps
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    (repo / "a.txt").write_text("x")
+    subprocess.run(["git", "-C", str(repo), "add", "a.txt"], check=True)
+    subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t",
+                    "commit", "-qm", "a"], check=True)
+    monkeypatch.setattr(sps, "ROOT", repo)
+    out = repo / "plan_search"
+    (out / "logs").mkdir(parents=True)
+    sps.implementation.cache_clear()
+    before = sps.implementation(str(out))
+    (out / "runs.json").write_text("{}")
+    sps.implementation.cache_clear()
+    assert sps.implementation(str(out)) == before
+    (repo / "b.txt").write_text("y")                   # a real source change still counts
+    sps.implementation.cache_clear()
+    assert sps.implementation(str(out)) != before
+    sps.implementation.cache_clear()
+    p = sps.perturbations(sps.knob_list("-PAD 10 -GAP 4 -M 8"))
+    assert sps.get_knob(p[0], "PAD") == "11"
+    assert (sps.get_knob(p[1], "GAP"), sps.get_knob(p[1], "M")) == ("5", "9")
+    p = sps.perturbations(sps.knob_list("-PAD 10 -GAP 4"))
+    assert sps.get_knob(p[1], "M") == "17"
+    assert sps.first_check(dict(unpl=None, error=True)) == "–"
+    assert sps.first_check(dict(unpl=0)) == "clean"
+    assert sps.first_check(dict(unpl=3, first_unpl=40, first_ovl=2)) == "40u/2o"
+    k = "btcl soc.tcl 8 -PAD {} " + "-X 1 " * 40 + "-FIX 'cluster_cell 12' -noheal"
+    assert sps.log_tag(k.format(10)) != sps.log_tag(k.format(11))
+
+
+def test_at_chip_shifts_the_tracks_not_the_seat(tmp_path):
+    """`soc_local.tcl -at chip` gives the cell the chip's track phase by
+    shifting every layer's pattern origin, not by moving the seat: moving
+    the seat had to go a whole track period (11,808 in x) past the ring for
+    a reference near the chip's left edge, and made the local die 12,592
+    wide around a cell of a chip 868 wide (the review of #961).  The die
+    must be the same in both modes, and the tracks shifted by the seat's
+    offset from the chip position (quad_0/cl_0 sits at 8,8; the seat 60,60)."""
+    dies = {}
+    for at in ("local", "chip"):
+        r = subprocess.run(["tclsh", str(_LOCAL), "cluster_cell", "-NQ", "1", "-PACK", "slice",
+                            "-PAD", "10", "-GAP", "4", "-M", "4", "-at", at, "-noheal"],
+                           capture_output=True, encoding="utf-8", cwd=tmp_path, timeout=900)
+        assert r.returncode == 0, r.stdout[-2000:] + r.stderr[-2000:]
+        m = re.search(r"die (\d+)x(\d+),\s+tracks shifted (-?\d+),(-?\d+)", r.stdout)
+        assert m, r.stdout[:2000]
+        dies[at] = tuple(map(int, m.groups()))
+    assert dies["local"][:2] == dies["chip"][:2]
+    assert dies["local"][2:] == (0, 0) and dies["chip"][2:] == (52, 52)
+    assert dies["chip"][0] < 1000, dies
