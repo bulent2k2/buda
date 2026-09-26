@@ -151,6 +151,11 @@ would be silent. Nothing rests on it being right, though:
 ## Measured
 
 Every configuration ends clean — 0 overlaps, 0 unplaced, 0 audit violations.
+Re-measured 2026-09-26 under the cross-bundle short audit (#948, which lets
+`check_design` see a short between two bundles' wires): still clean at every
+row, the wire identical to the unit (N = 4 and 8/16 top-down, N = 8/16/32
+bottom-up) — where the SoC vehicle beside it lost several clean verdicts to
+that audit ([soc.md](soc.md)), the mesh lost none.
 
 | N | PEs | bundles | bit-wires | detailed WL | wall |
 |---|---|---|---|---|---|

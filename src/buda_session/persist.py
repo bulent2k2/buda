@@ -1039,6 +1039,27 @@ class PersistMixin:
                 n += 1
         return n
 
+    def _wire_nets(self):
+        """The net every placed wire carries: `({bundle id: [net name per
+        bit]}, {bundle id: the net its NDR shield wires carry})`.
+
+        ONE statement of wire identity, read by the two places that must
+        agree on it: `_persist_detailed_nuts` stores these names on the
+        `net_segment` rows `tools/independent_audit.py` judges, and
+        `check_design`'s cross-bundle short audit
+        (`check_dnuts_cross_shorts`, issue #948) keys on them — so the judge
+        and the engine audit can never disagree about whether two wires are
+        one net.  A bundle with no active NDR rule gets "GND", which is what
+        a shield row outside every rule has always been persisted as."""
+        bit_nets = {w.input.original_bundle.id:
+                    list(w.input.original_bundle.get_net_names())
+                    for w in self.bundles}
+        shield_nets = {w.input.original_bundle.id:
+                       (w.input.ndr.shield_net if w.input.ndr.active()
+                        else "GND")
+                       for w in self.bundles}
+        return bit_nets, shield_nets
+
     @_batched
     def _persist_detailed_nuts(self):
         """Persist detailed-NUTS per-bit wires + vias (Stage 9, schema v8).
@@ -1072,9 +1093,7 @@ class PersistMixin:
         snap = self.bdb.route_snapshot()
         self.bdb.clear_detailed_routing()
 
-        bid_to_names = {w.input.original_bundle.id:
-                        list(w.input.original_bundle.get_net_names())
-                        for w in self.bundles}
+        bid_to_names, bid_to_shield = self._wire_nets()
         h_layers = set(self.layers.get_layer_ids_by_dir(buda.LayerDir.HORIZONTAL))
 
         def bit_net(bundle_id, bit):
@@ -1083,9 +1102,6 @@ class PersistMixin:
             # persist the last bit's identity onto a shield wire).
             names = bid_to_names.get(bundle_id, [])
             return names[bit] if 0 <= bit < len(names) else ""
-
-        bid_to_shield = {w.input.original_bundle.id: w.input.ndr.shield_net
-                         for w in self.bundles if w.input.ndr.active()}
 
         for ns in self.detailed_result.net_segments:
             r = buda.NetSegRow()

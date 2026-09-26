@@ -12,6 +12,18 @@ btcl flow/tcl/soc.tcl 2 -bydepth "M3 M4 M5" # a cap per intrinsic level
 btcl flow/tcl/soc.tcl 8 -dry                # print the size, build nothing
 ```
 
+> **Read the verdicts on this page with #948 in mind.**  Until 2026-09-26
+> `check_design` could not see a short between two BUNDLES' wires (its
+> `BIT_SHORT` compared the bits of one bundle), so every "clean" measured
+> before then may carry some — and since `heal_if_dirty` reads that audit,
+> a run that stopped after one heal round may now run the second.  The
+> headline tables were re-measured under the fixed audit and say so where
+> they sit: the top-down size table (unchanged), the band/compact layout
+> table, the compaction study's round 1 and round 2 tables and the clean
+> rows of rounds 3 and 4, and the bottom-up gap tables.  Everything else
+> here — the knob studies, the seat analysis, the NQ = 64 bottom-up runs —
+> was not re-run under it.
+
 ## What the corpus was missing, and it is not size
 
 `tpu.tcl` is a **mesh**: one cell tiled N × N, so every leaf is the same cell
@@ -83,11 +95,21 @@ On a uniform-depth vehicle every cell is one level and this collapses to the
 | 64 | 128 | 1675 | 2451 | 69 592 | 16688 × 10304 | 120 s | clean |
 
 Clean at every size measured — **top-down**, which is what this table is.
+Re-measured 2026-09-26 under the cross-bundle short audit (#948, which
+made `check_design` count a short between two bundles' wires): still clean
+at NQ = 1 to 64, the detailed wire identical where this page records it
+(NQ = 64 in 81 s) — the one headline here that audit did not move.
 `-caps` and `-bydepth` are clean where they were measured (NQ = 2, what the
 tests run). **`-bottomup` is not clean at every size and must not be read
 off this table** (Codex P2, #930): at the default channel it is clean at
-NQ = 1/2/4/8 and comes back **dirty at NQ = 16, NQ = 32 and NQ = 64** (8 bits
-of one bundle, the same one, the seat analysed at the end of this page). The
+NQ = 1/2, **dirty at NQ = 4 and 8 since #948** — four shorted bits, bundle
+1's `pn_*` against the L2 bus `l2d_0_*` on M6 (at NQ = 4 the very wires the
+issue was filed on; the judge counts the same four at both sizes and
+nothing else), which `heal_if_dirty`'s second round does not clear (at
+NQ = 1 the same shape appears and the second round does clear it) — and
+**dirty at NQ = 16, NQ = 32 and NQ = 64** (8 bits of one bundle, the same
+one, the seat analysed at the end of this page; not re-measured under
+#948). The
 whole advertised dial has now been run bottom-up; a named channel is measured
 to rescue 16 and 32; for 64 it is **not measured** — the attempt ran 90
 minutes without finishing (see the bottom-up section). The bottom-up section below is the one to read for it, and
@@ -124,7 +146,9 @@ candidate with the highest utilization wins, its aspect ratio held to
 [1/2, 2] so a strip cannot win on area alone.  Chosen rather than asserted,
 because whether the hole or the band is the better home for the pair depends
 on how big the pair is against a quadrant, and the widths decide that.  What
-it picks on the dial, and what routing it gets — top-down, every row clean:
+it picks on the dial, and what routing it gets — top-down, every row clean
+as first measured (two compact rows are not under #948's audit; below the
+table):
 
 | NQ | layout | grid | die | utilization | abstract WL | detailed WL | Δ det WL | wall |
 |---|---|---|---|---|---|---|---|---|
@@ -139,9 +163,22 @@ it picks on the dial, and what routing it gets — top-down, every row clean:
 | 32 | band | 6 × 6, 4 holes + band | 12528 × 7936 | 0.784 | 328 264 | 7 461 648 | | 25.8 s |
 | 32 | compact | 4 × 8 + centred band | 8336 × 10240 | 0.914 | 333 298 | 7 570 868 | +1.5 % | 22.3 s |
 
+**Re-measured 2026-09-26 under the cross-bundle short audit (#948), and
+two compact rows are no longer clean.**  Band is clean at every size with
+the wire above to the unit; compact NQ = 4, 16 and 32 likewise.  Compact
+NQ = 2 and NQ = 8 had shorts between two bundles' wires that the old
+audit could not see, so `heal_if_dirty` stopped after one round and called
+them clean; now it runs the second round, which does not clear them — they
+END with 6 shorted bits at NQ = 2 (bundle 6 against bundle 160) and 1 at
+NQ = 8 (bundle 6 against bundle 577), on 453 702 and 1 869 980 of wire,
+both below the table's one-round figures because the second round's
+`refine_selection` re-selects for wire.  So what follows holds for band at
+every size and for compact at three of the five.
+
 Read it for what it is.  The die shrinks at every size (14 % less area at
-NQ = 32, 24 % at NQ = 8) and the route stays clean at every size, which is
-the claim the variant makes.  The wire is NOT monotone with it: the two small
+NQ = 32, 24 % at NQ = 8) and, as first measured, the route stayed clean at
+every size, which is the claim the variant made (see above for where it
+still does).  The wire is NOT monotone with it: the two small
 sizes route shorter on the compact die and the three larger ones 1.3–1.6 %
 longer — a denser die puts the global buses through less empty channel and
 past more blocks, and which of the two wins is a property of the size, not
@@ -158,7 +195,7 @@ once, Codex P2 on #930).  `-bottomup`, default channel, both layouts:
 
 | NQ | layout | die | endpoint | detailed WL | what stranded |
 |---|---|---|---|---|---|
-| 8 | band | 6288 × 4384 | **clean** | 2 175 864 | — |
+| 8 | band | 6288 × 4384 | ✗ 4 shorted bits (#948; was **clean**) | 2 086 906 | nothing — bundle 1's `pn_*` shorted to `l2d_0_*` on M6, after both heal rounds |
 | 8 | compact | 6256 × 3568 | ✗ 4 ovl / 0 unpl | (2 143 167) | nothing — overlaps only, the fixed-copy residue |
 | 16 | band | 8368 × 5568 | ✗ 3 ovl / 8 unpl | (4 319 399) | `hb-2 seg 0`, 8 bits of `pc_0` — the seat analysed below |
 | 16 | compact | 6256 × 7120 | ✗ 4 ovl / 29 unpl | (4 217 356) | five bundles, 5–7 bits each (114, 379, 417, 493, 607); NO doomed-seat advisory |
@@ -166,7 +203,10 @@ once, Codex P2 on #930).  `-bottomup`, default channel, both layouts:
 | 32 | compact | 8336 × 10240 | ✗ 1 ovl / 32 unpl | (8 329 899) | one 32-bit segment (`bundle 1 seg 2`); NO doomed-seat advisory |
 
 So the compact die is DIRTIER bottom-up at every size measured — dirty at
-NQ = 8 where the band is clean, and stranding 29 / 32 bits at 16 / 32
+NQ = 8 where the band was clean (the band's NQ = 8 row now ends on four
+shorted bits under #948's audit; the compact rows were not re-measured
+under it, so neither side of that comparison is clean any more and the
+compact rows may carry shorts of their own), and stranding 29 / 32 bits at 16 / 32
 against the band's 8 — and it strands DIFFERENT things: the band's
 recurring fault is the one supply-doomed `pc_0` seat, while the compact
 runs report no doomed seat at all and lose bits in bundles the band never
@@ -174,11 +214,13 @@ touches.  A parenthesised wirelength excludes the stranded bits and is not
 comparable to a complete route.  The named channel, the page's measured
 workaround for the fixed copy, does what it does on the band at NQ = 8:
 `compact -bottomup -GAP 24 -M 24` is **clean** at 2 388 211 (+9.8 % over
-the band's clean default) and `-GAP 32 -M 32` clean at 2 704 701; NQ = 16
+the band's default, which was clean when measured) and `-GAP 32 -M 32`
+clean at 2 704 701 — neither re-measured under #948's audit; NQ = 16
 and 32 under a named channel are not measured.
 
 What this licenses is narrow.  Top-down, `compact` is the better die at
-every size and the route is clean everywhere.  Bottom-up, the fixed copy
+every size and the route is clean at three sizes of five (at NQ = 2 and 8 it
+ends on shorts the band does not have, #948).  Bottom-up, the fixed copy
 lands on a tighter die and the residue is larger; whether that is the hole
 the pair sits in (NQ = 8 and 16), the centred band (NQ = 32) or simply the
 gap the compact grid leaves between quadrants is NOT established, and the
@@ -196,64 +238,98 @@ faces narrower than the buses that land on them, which is the face rule's
 own failure rather than compaction.  Top-down, the vehicle's own healing
 (`heal_if_dirty`, two rounds); one run per point.
 
-| PAD | GAP = M | die | area vs default | first check | end | detailed WL | runtime (s) |
-|---|---|---|---|---|---|---|---|
-| 24 | 16 | 6256 x 3568 | 1.000 | 80 unplaced | clean | 2,000,920 | 4.4 |
-| 24 | 8 | 5720 x 3272 | 0.838 | 16 unplaced | clean | 1,785,596 | 3.7 |
-| 24 | 4 | 5452 x 3124 | 0.763 | 32 unplaced | clean | 1,632,362 | 5.7 |
-| 12 | 16 | 5968 x 3424 | 0.915 | 1,344 unplaced | clean | 2,173,109 | 5.1 |
-| 12 | 8 | 5432 x 3128 | 0.761 | 1,464 unplaced | clean | 1,926,514 | 6.2 |
-| 12 | 4 | 5164 x 2980 | 0.689 | 1,136 unplaced | clean | 1,717,497 | 11.5 |
-| 10 | 4 | 5116 x 2956 | **0.678** | 1,131 unplaced | clean | 1,728,474 | 12.9 |
-| 8 | 4 | 5068 x 2932 | 0.666 | 1,238 unplaced | 168u, 1o, 6b | (1,414,393) | 192.8 |
-| 6 | 4 | 5020 x 2908 | 0.654 | 1,455 unplaced | 232u, 3o, 8b | (1,398,283) | 256.5 |
-| 4 | 16 | 5776 x 3328 | 0.861 | 1,240 unplaced | 8u, 1b | (1,856,805) | 251.7 |
-| 4 | 8 | 5240 x 3032 | 0.712 | 1,717 unplaced | 200u, 3o, 7b | (1,611,430) | 195.2 |
-| 4 | 4 | 4972 x 2884 | 0.642 | 1,360 unplaced | 200u, 2o, 7b | (1,392,344) | 260.3 |
-| 0 | 16 | 5680 x 3280 | 0.835 | 1,224 unplaced | 40u, 7o, 2b | (1,907,641) | 178.7 |
-| 0 | 8 | 5144 x 2984 | 0.688 | 1,443 unplaced | 264u, 3o, 9b | (1,585,188) | 96.5 |
-| 0 | 4 | 4876 x 2836 | 0.619 | 1,200 unplaced | 488u, 16b | (1,368,267) | 134.2 |
+| PAD | GAP = M | die | area vs default | first check | rounds | end | detailed WL | runtime (s) |
+|---|---|---|---|---|---|---|---|---|
+| 24 | 16 | 6256 x 3568 | 1.000 | 80 unplaced | 2 | 1s, 2b | 1,869,980 | 38.7 |
+| 24 | 8 | 5720 x 3272 | 0.838 | 16 unplaced | 1 | clean | 1,785,596 | 2.9 |
+| 24 | 4 | 5452 x 3124 | 0.763 | 32 unplaced | 1 | clean | 1,632,362 | 4.4 |
+| 12 | 16 | 5968 x 3424 | 0.915 | 1,344 unplaced | 2 | clean | 1,821,753 | 50.4 |
+| 12 | 8 | 5432 x 3128 | 0.761 | 1,464 unplaced | 2 | clean | 1,610,083 | 57.7 |
+| 12 | 4 | 5164 x 2980 | 0.689 | 1,136 unplaced | 2 | clean | 1,513,827 | 57.9 |
+| 10 | 4 | 5116 x 2956 | **0.678** | 1,131 unplaced | 2 | clean | 1,522,677 | 74.5 |
+| 8 | 4 | 5068 x 2932 | 0.666 | 1,238 unplaced | 2 | 168u, 1o, 6b | (1,414,393) | 155.1 |
+| 6 | 4 | 5020 x 2908 | 0.654 | 1,455 unplaced | 2 | 232u, 3o, 8b | (1,398,283) | 207.2 |
+| 4 | 16 | 5776 x 3328 | 0.861 | 1,240 unplaced | 2 | 8u, 8s, 3b | (1,856,805) | 201.8 |
+| 4 | 8 | 5240 x 3032 | 0.712 | 1,717 unplaced | 2 | 200u, 3o, 7b | (1,611,430) | 157.9 |
+| 4 | 4 | 4972 x 2884 | 0.642 | 1,360 unplaced | 2 | 200u, 2o, 7b | (1,392,344) | 209.7 |
+| 0 | 16 | 5680 x 3280 | 0.835 | 1,224 unplaced | 2 | 40u, 7o, 49s, 8b | (1,907,641) | 143.3 |
+| 0 | 8 | 5144 x 2984 | 0.688 | 1,443 unplaced | 2 | 264u, 3o, 9b | (1,585,188) | 79.3 |
+| 0 | 4 | 4876 x 2836 | 0.619 | 1,200 unplaced | 2 | 488u, 16b | (1,368,267) | 110.8 |
 
 In an end column, `u` = unplaced bits after detailed routing, `o` =
-overlaps and `b` = dirty bundles, the bundles the final `check_design`
-flags (an unplaced bit or another audit violation).  The overlaps are
-the abstract NUTS count -- bus segments sharing a track before bits are
-placed, what `soc.tcl`'s verdict reads -- which `check_design` does not
-report, so they are shown as they are and do not count toward `b`.  Nor
-does a short between bits of two DIFFERENT bundles: `BIT_SHORT` compares
-bits within one bundle only (#948), and the independent judge
-(`tools/independent_audit.py`) finds 7 such shorted bits on the saved
-route of the clean PAD 10 GAP 4 run and 30 on slice PAD 21 GAP 12 CGAP
-4.  Here and in every table below.
+overlaps, `s` = shorted bits and `b` = dirty bundles, the bundles the final
+`check_design` flags (an unplaced bit, a short or another audit violation).
+The overlaps are the abstract NUTS count -- bus segments sharing a track
+before bits are placed, what `soc.tcl`'s verdict reads -- which
+`check_design` does not report, so they are shown as they are and do not
+count toward `b`.  `rounds` is how many of `heal_if_dirty`'s two rounds
+ran.
 
-A failing point's wire is in parentheses: a stranded bit lays none, so it
-reads as a saving and is not comparable with a complete route
-(`report_wirelength` says so itself).  Runtime is the whole `btcl` run,
+**Re-measured 2026-09-26, every row, under the cross-bundle short audit
+(#948).**  This table was first taken with a `check_design` whose
+`BIT_SHORT` compared bits within ONE bundle, so a short between two
+bundles' wires was invisible to it -- and therefore to `heal_if_dirty`,
+which reads `buda::query violations`.  The judge
+(`tools/independent_audit.py`) found 7 such shorted bits on the saved
+route of the clean PAD 10 GAP 4 run and 30 on slice PAD 21 GAP 12 CGAP 4.
+The audit now counts them (`s`, and in `b` BOTH bundles of a short), and
+what that moved is the HEALING, not the placement: every first check
+reproduced exactly, and so did every end state that was already dirty
+(both rounds had run; only the `s` and `b` of PAD 4 GAP 16 and PAD 0 GAP
+16 grow).  Of the seven points that ended clean, two are untouched (PAD 24
+GAP 8 and GAP 4), and five had shorts after round one that the old
+verdict read as clean: four now run the second round and end clean
+(PAD 12 GAP 16/8/4, PAD 10 GAP 4), and the default point, PAD 24 GAP 16,
+runs it and keeps ONE shorted bit (bundle 6 against bundle 577) -- the
+compact layout's default at NQ = 8 no longer routes clean.  The healers do
+not target a short (their metric is overlaps and opens), so the second
+round clears one only incidentally, when its re-selections happen to move
+the wire.  The previous column read 2,000,920 / 2,173,109 / 1,926,514 /
+1,717,497 / 1,728,474 for those five in 4.4-12.9 s.
+
+A failing point's wire is in parentheses when bits stranded: a stranded
+bit lays none, so it reads as a saving and is not comparable with a
+complete route (`report_wirelength` says so itself).  A shorted route lays
+all of its wire and is shown as it is.  Runtime is the whole `btcl` run,
 wall clock, one run per point with the default two worker threads on a
-four-core container, re-measured for this column (every end state
-reproduced): what it prices is the HEALING -- a clean first check routes
-in 4-6 s, a thousand-odd stranded bits heal clean in 11-13 s, and every
-point that does not heal spends three to four minutes failing to.
+four-core container (this re-measurement ran the unchanged dirty rows about
+20 % faster than the first did, so compare within the table, not across
+the two dates): what it prices is the HEALING -- a near-clean first check
+routes in 3-4 s, a thousand-odd stranded bits heal clean in about 9 s when
+the first round leaves nothing behind (PAD 10 GAP 5 and PAD 11 GAP 4, round
+2's table), in 50-75 s when it leaves a short and the second round has to
+run, and every point that does not heal spends 80-210 s failing to.
 
 * **The channel is free to take.**  At the default padding, 16 -> 4 is
-  0.76x the area and 18 % less wire, clean, and the FIRST check gets
-  cleaner (80 -> 32 unplaced) — this chapter's channel lesson again: a
-  wider channel buys no routing.
+  0.76x the area and 12.7 % less wire (the wider point after both rounds),
+  clean in one round where GAP 16 keeps a short after two, and the FIRST
+  check gets cleaner (80 -> 32 unplaced) — this chapter's channel lesson
+  again: a wider channel buys no routing.
 * **Padding is the binding lever, and its floor is 10.**  At `PAD 10 GAP
-  4` the die is 0.68x the default and the wire 13.6 % shorter, clean; at 8
-  and below no channel heals.  Every point at 12 or less is dirty at the
-  first check by a thousand-odd bits, so what makes these points clean is
-  the healing, not the floorplan — the first check at 24 is two orders of
-  magnitude cleaner.
-* **Area and wire part company below 24.**  `PAD 24 GAP 4` has the least
-  wire of any clean point (1,632,362); `PAD 10 GAP 4` has the smallest die
-  at 5.9 % more wire.  Which one is "compact" is a choice the table
-  prices rather than makes.
+  4` the die is 0.68x the default and the wire 18.6 % shorter than the
+  default point's (both after two rounds), clean where the default is not;
+  at 8 and below no channel heals.  Every point at 12 or less is dirty at
+  the first check by a thousand-odd bits, so what makes these points clean
+  is the healing, not the floorplan — the first check at 24 is two orders
+  of magnitude cleaner.
+* **The wire column is mostly the healing's.**  The second round's
+  `refine_selection` re-selects for wire on the measured result (the
+  round's negotiate and ripup find a 0/0 metric and do nothing) and takes
+  12-16 % off wherever it runs — PAD 12 GAP 16/8/4 and PAD 10 GAP 4
+  against their one-round figures, 6.5 % at the default.  So the least
+  wire of any clean point is now PAD 12 GAP 4's 1,513,827, with PAD 10 GAP
+  4 — the smallest die — 0.6 % above it, where the one-round column read
+  "PAD 24 GAP 4 least, PAD 10 GAP 4 at 5.9 % more" and concluded that area
+  and wire part company below 24.  They parted company because the extra
+  round did not run: a one-round point against a two-round one compares
+  the healer, not the floorplan.  Which point is "compact" is still a
+  choice the table prices rather than makes, but not on wire alone.
 
 Not measured: bottom-up, a second NQ, repeat runs, and the judge
-(`tools/independent_audit.py`) on the endpoints; the sweep's logs are not
-kept.  Every point regenerates as `btcl flow/tcl/soc.tcl 8 -LAYOUT
-compact -PAD <p> -GAP <g> -M <g>`.
+(`tools/independent_audit.py`) on the endpoints — except PAD 10 GAP 4's
+two-round endpoint, which it judges CLEAN; the sweep's logs are not kept.
+Every point regenerates as `btcl flow/tcl/soc.tcl 8 -LAYOUT compact -PAD
+<p> -GAP <g> -M <g>`.
 
 ### Round 2: squeezing the cluster, and stretching the leaves (2026-09-25)
 
@@ -272,7 +348,9 @@ splits the channel: `CGAP` between siblings in a cluster or quadrant,
 
 The geometry is cheap (milliseconds to seconds, `-dry`), a route is not
 (10 s clean, minutes healing), so the search BISECTED the routed axes with
-a pass/fail oracle — **clean, in at most 60 s** (5x the grid's 12.9 s) —
+a pass/fail oracle — **clean, in at most 60 s** (5x the grid's 12.9 s; under
+#948's audit the grid's own PAD 10 GAP 4 needs the second heal round and
+74.5 s, so this oracle would now reject it — the bisection predates that) —
 and then CHECKED THE NEIGHBOURS of every candidate, one unit away on each
 axis, because a single probe near the frontier turned out not to be a
 measurement (below).  Top-down, one run per point, the vehicle's own
@@ -280,33 +358,50 @@ healing, two worker threads; `first` is the first `check_design dnuts`.
 
 | packing | PAD | GAP | CGAP | die area | first | end | detailed WL | s |
 |---|---|---|---|---|---|---|---|---|
-| grid | 10 | 4 | – | 15,122,896 | 1,131u | clean | 1,728,474 | 12.9 |
-| grid | 10 | 5 | – | 15,512,719 | 1,328u | clean | 1,920,872 | 10.6 |
-| grid | 11 | 4 | – | 15,255,520 | 1,076u | clean | 1,774,705 | 10.8 |
-| grid | 10 | 3 | – | 14,738,031 | 1,207u | 64u, 2o, 2b | – | 108.2 |
-| slice | 24 | 4 | = | 12,834,160 | 344u | 10u, 2b | – | 423 |
-| slice | 24 | 4 | 16 | 13,302,592 | 599u | 1u, 1b | – | 289.9 |
-| slice | 24 | 8 | = | 14,301,376 | 492u | clean | 2,179,216 | 482.7 |
-| slice | 24 | 16 | = | 17,473,792 | 91u | clean | 2,109,010 | 9.0 |
-| slice | 24 | 16 | 4 | 16,936,240 | 202u | clean | 2,124,635 | 12.0 |
-| slice | 24 | 12 | 4 | 15,505,776 | 184u | clean | 2,016,222 | 12.7 |
-| slice | 24 | 11 | 4 | 15,158,020 | 218u | clean | 2,061,633 | 17.5 |
-| slice | 24 | 13 | 4 | 15,857,476 | 219u | clean | 2,082,140 | 17.7 |
-| slice | 23 | 12 | 4 | 15,372,000 | 221u | clean | 2,130,871 | 46.1 |
-| slice | 24 | 8 | 4 | 14,138,416 | 501u | 24u, 2o, 2b | – | 258.3 |
-| slice | 20 | 12 | 4 | 14,974,128 | 265u | clean | 2,046,353 | 18.6 |
-| slice | 21 | 12 | 4 | 15,106,176 | 265u | 2o, 0b | – | 202.8 |
-| slice | 20 | 13 | 4 | 15,319,780 | 262u | timeout | – | 300 |
-| slice | 20 | 11 | 4 | 14,632,420 | 515u | clean | 2,241,934 | 73.0 |
-| slice | 19 | 12 | 4 | 14,842,656 | 207u | clean | 1,895,379 | 232.9 |
-| slice | 18 | 12 | 4 | 14,711,760 | 501u | clean | 2,090,949 | 280.6 |
-| slice | 20 | 16 | 4 | 16,380,400 | 226u | 15 viol, 1b | – | 188.1 |
-| slice | 16 | 16 | 4 | 15,833,776 | 706u | 288u, 4o, 9b | – | 171.7 |
+| grid | 10 | 4 | – | 15,122,896 | 1,131u | clean (2nd round) | 1,522,677 | 74.5 |
+| grid | 10 | 5 | – | 15,512,719 | 1,328u | clean | 1,920,872 | 8.6 |
+| grid | 11 | 4 | – | 15,255,520 | 1,076u | clean | 1,774,705 | 8.7 |
+| grid | 10 | 3 | – | 14,738,031 | 1,207u | 64u, 2o, 2b | – | 87.6 |
+| slice | 24 | 4 | = | 12,834,160 | 344u | 10u, 52s, 9b | – | 347.2 |
+| slice | 24 | 4 | 16 | 13,302,592 | 599u | 1u, 11s, 3b | – | 240.2 |
+| slice | 24 | 8 | = | 14,301,376 | 492u | 172s, 23b | – | 397.3 |
+| slice | 24 | 16 | = | 17,473,792 | 91u | 9s, 2b | – | 61.6 |
+| slice | 24 | 16 | 4 | 16,936,240 | 202u | 17s, 6b | – | 188.5 |
+| slice | 24 | 12 | 4 | 15,505,776 | 184u | clean | 2,016,222 | 10.1 |
+| slice | 24 | 11 | 4 | 15,158,020 | 218u | clean | 2,061,633 | 13.5 |
+| slice | 24 | 13 | 4 | 15,857,476 | 219u | clean | 2,082,140 | 13.8 |
+| slice | 23 | 12 | 4 | 15,372,000 | 221u | clean | 2,130,871 | 36.5 |
+| slice | 24 | 8 | 4 | 14,138,416 | 501u | 24u, 2o, 157s, 13b | – | 215.8 |
+| slice | 20 | 12 | 4 | 14,974,128 | 265u | 39s, 13b | – | 171.3 |
+| slice | 21 | 12 | 4 | 15,106,176 | 265u | 2o, 30s, 10b | – | 156.8 |
+| slice | 20 | 13 | 4 | 15,319,780 | 262u | 19s, 8b | – | 239.7 |
+| slice | 20 | 11 | 4 | 14,632,420 | 515u | 65s, 25b | – | 162.0 |
+| slice | 19 | 12 | 4 | 14,842,656 | 207u | 1s, 2b | – | 188.4 |
+| slice | 18 | 12 | 4 | 14,711,760 | 501u | 38s, 22b | – | 230.7 |
+| slice | 20 | 16 | 4 | 16,380,400 | 226u | 15 viol, 9s, 5b | – | 154.5 |
+| slice | 16 | 16 | 4 | 15,833,776 | 706u | 288u, 4o, 19s, 13b | – | 136.2 |
 | slice | 10 | 16 | 4 | 15,031,120 | 1,876u | timeout | – | 300 |
+
+**Re-measured 2026-09-26, every row, under #948's audit** (`s` = shorted
+bits, as in round 1).  Every first check reproduced, and so did every end
+state as far as the old audit could see it — what moved is what it could
+not.  Of the fourteen points that ended clean, seven still do: the grid's
+three (PAD 10 GAP 4 now through the second round, 1,522,677 in 74.5 s
+where it read 1,728,474 in 12.9 s) and the slice frontier PAD 24 GAP 11 /
+12 / 13 plus PAD 23 GAP 12, each identical to the unit.  The other seven
+end on shorts: PAD 24 GAP 8 and PAD 19 and 18 on exactly their recorded routes
+(they had already run both rounds, so nothing changed but the verdict),
+PAD 24 GAP 16 (both CGAPs) and PAD 20 GAP 12 / 11 after a second round
+their first no longer ends on.  Every point that was already dirty gains
+shorts too.  `PAD 20 GAP 13`, a timeout at the 300 s cap, finishes inside
+it on this container (239.7 s, which also ran the unchanged rows about 20 %
+faster than the first column did), so its row is an end state rather than
+a timeout — not a change in what it routes.
 
 (`=` = CGAP equal to GAP; a timeout is the 300 s cap; failing points'
 wire omitted.)  And the leaf aspect, all at `PAD 24 GAP 12 CGAP 4`
-(15,505,776 square, clean in 12.7 s):
+(15,505,776 square, clean in 12.7 s — 10.1 s re-measured under #948, the
+only row of the next table that was):
 
 | leaf stretch allowed | die area | first | end |
 |---|---|---|---|
@@ -318,12 +413,16 @@ wire omitted.)  And the leaf aspect, all at `PAD 24 GAP 12 CGAP 4`
 * **The whitespace is not waste; it is the routing.**  The slicing packer
   takes a cluster from 55 % to ~85 % leaf and the die to 0.74x at the same
   knobs — and none of it routes: at `PAD 24 GAP 4` the grid is clean in
-  5.7 s and the slice heals to 10 unplaced in seven minutes.  The grid's
+  5.7 s and the slice heals to 10 unplaced in seven minutes (and 52 shorted
+  bits beside them under #948's audit).  The grid's
   "holes" sit beside `xbar`, the SRAMs and the core, where the local
   buses need LOW-layer room, and taking them out means buying the room
   back as channel or padding.  The robust slice frontier is `PAD 24, GAP
   11-13, CGAP 4` at 15.2-15.9M — no smaller than the grid's `PAD 10 GAP 4`
-  (15.1M) and carrying ~20 % more wire.  Both clean frontiers hold the same
+  (15.1M) and carrying ~20 % more wire (re-measured under #948: the
+  frontier's three points are unchanged and clean, while the grid point's
+  wire fell 12 % with the second round it now runs, so it is 32-37 % more
+  against that).  Both clean frontiers hold the same
   6.97M of raw face demand (bits x pitch, squared, over the 219 leaves) on
   a ~15.1M die: 46 %.  Where the slack goes — holes, padding, channel —
   barely matters; how much there is, does.
@@ -347,11 +446,17 @@ wire omitted.)  And the leaf aspect, all at `PAD 24 GAP 12 CGAP 4`
   12` came back clean in 18.6 s at 14.97M — 1 % under the grid — and every
   neighbour disagreed: PAD 21 ends on 2 overlaps, GAP 13 times out, GAP 11
   and PAD 19 heal clean in 73 s and 233 s.  The grid's neighbourhood
-  (PAD 10-11, GAP 4-5) is clean in 10.6-12.9 s every time.  Healing time
+  (PAD 10-11, GAP 4-5) is clean in 10.6-12.9 s every time.  Under #948's
+  audit it is sharper still: PAD 20 GAP 12 itself ends on 39 shorted bits,
+  GAP 11 on 65, PAD 19 on one and PAD 21 on 30 beside its two overlaps —
+  near 15M only the PAD 24 GAP 11-13 frontier and PAD 23 stay clean —
+  while the grid's neighbourhood is still clean every time, in 8.6-74.5 s
+  (the last being PAD 10 GAP 4, through the second round).  Healing time
   near the frontier is heavy-tailed in the geometry, so a bisection needs
   a neighbourhood check at the point it lands on, and the sweet spot is
   the one whose neighbours agree: **grid, `PAD 10-11 GAP 4`**, 0.68x the
-  default die in ~12 s.
+  default die, clean in ~9 s at PAD 11 and in 75 s at PAD 10 (~12 s for
+  both before #948's audit).
 
 Knobs: `-PACK slice`, `-ASPECT <1..4>` (leaves; needs slice), `-CGAP <n>`,
 `-FACEPAD <n>` (default 10), `-KEEP <n>` (curve points kept per container,
@@ -409,13 +514,16 @@ no end state the right way:
 
 | PAD (GAP 4, grid) | first check | first, regf four-face | end | end, regf four-face |
 |---|---|---|---|---|
-| 12 | 1,136 | 1,197 | clean, 11.5 s | 32u, 1o, 1b |
-| 10 | 1,131 | 1,285 | clean, 12.9 s | clean, 86 s |
+| 12 | 1,136 | 1,197 | clean, 11.5 s → clean, 57.9 s (second round, #948) | 32u, 1o, 1b |
+| 10 | 1,131 | 1,285 | clean, 12.9 s → clean, 74.5 s (second round, #948) | clean, 86 s → clean, 68 s (re-measured) |
 | 8 | 1,238 | 771 | 168u, 1o, 6b | 304u, 11b |
 | 4 | 1,360 | 616 | 200u, 2o, 7b | 360u, 12b |
 | 0 | 1,200 | 704 | 488u, 16b | 552u, 18b |
 
-(Two runs at a time, so the times are loaded; one run per point.)
+(Two runs at a time, so the times are loaded; one run per point.  The
+arrows are the #948 re-measurement — one run at a time, so not loaded; the
+per-pin end states at 8, 4 and 0 reproduced exactly, and the four-face
+ones at 12, 8, 4 and 0 were not re-run.)
 
 **Plans, and whether the local run predicts the chip.**  At `PAD 10 GAP
 4` the cluster has 165 slicing plans within 50 % of its smallest, all
@@ -434,6 +542,10 @@ first check, 19 plans):
 | internal bits x distance between children | -0.22 |
 | external bits x distance to the NoC sides | 0.01 |
 | cluster area | -0.15 |
+
+(The first-check figures do not depend on #948's audit — they are unplaced
+bits with healing off; the local end states after healing were measured
+before it and not re-run.)
 
 Two measured reasons.  The context changes what strands: the same
 cluster at the same plan strands `id`, `x`, `l1dd` and its port buses
@@ -523,10 +635,14 @@ construction, and the numbers here are the re-run.)  Then the heal:
 | plan 112 | 16,852,000 | 512u/2o | 480u, 8o, 15b | – | 77.7 |
 | plan 61 | 15,407,392 | 558u/4o | 320u, 10b | – | 127.2 |
 | plan 66 (first run) | 15,407,392 | 512u/5o | 416u, 13b | – | 190.8 |
-| plan 129 | 16,852,000 | 560u/3o | clean | 1,976,268 | 10.9 |
+| plan 129 | 16,852,000 | 560u/3o | clean | 1,976,268 | 10.9 (re-measured under #948: same, 9.1) |
 | slice packer's own choice | 12,017,872 | 1,745u/53o | 128u, 2o, 5b | – | 208.0 |
-| grid packer, FACES 4 | 15,122,896 | 1,285u/45o | clean | 1,486,953 | 84.6 |
-| grid packer, FACES 0 (round 1) | 15,122,896 | 1,131u/84o | clean | 1,728,474 | 12.9 |
+| grid packer, FACES 4 | 15,122,896 | 1,285u/45o | clean | 1,486,953 | 84.6 (re-measured under #948: same, 67.8) |
+| grid packer, FACES 0 (round 1) | 15,122,896 | 1,131u/84o | clean | 1,728,474 → 1,522,677 | 12.9 → 74.5 (second round, #948) |
+
+(Plans 60, 112, 61 and 66 and the slice packer's own choice were not re-run
+under #948: all end dirty, so both heal rounds ran and only their `b` —
+shorts added — could move.)
 
 * **The first check does not predict the heal.**  The four best first
   checks of the search end 320-480 bits short; the grid, with more than
@@ -537,10 +653,16 @@ construction, and the numbers here are the re-run.)  Then the heal:
   up to five minutes a plan.
 * **No plan beat the grid.**  The one fast clean plan is 11 % larger.
   The sweet spot stays the grid packer at `PAD 10-11 GAP 4`, `FACES 0`:
-  0.68x the default die, clean in about 12 s.
+  0.68x the default die, clean — in about 9 s at `PAD 11`, and at `PAD
+  10`, since #948's audit found a short its first round left behind, in
+  75 s through the second round.
 * **`FACES 4` on the grid** heals clean with 14 % less wire (1,486,953
   against 1,728,474) but takes 85-88 s (two runs) where the per-pin rule takes 13 --
-  shorter wire, longer heal.
+  shorter wire, longer heal.  **Under #948's audit most of that goes**: the
+  per-pin rule now runs the same second round, and the gap closes to 2.3 %
+  (1,486,953 against 1,522,677) at 68 s against 75 s.  The 14 % was
+  largely the second round's `refine_selection`, which the four-face run
+  reached and the per-pin run did not, rather than the face rule.
 
 Regenerate: `tools/soc_plan_search.py --knobs "-PAD 10 -GAP 4 -M 4 -FACES
 4" --out <dir>` (every run cached in `<dir>/runs.json` under its command line and the code it ran on, so a re-run of the same code resumes and one after a checkout or rebuild measures again; a run that dies without a verdict is reported as an error and not cached).
@@ -720,6 +842,22 @@ of both directions on every test run.
 
 ## `-bottomup`: every sizing fix pushed the channel further out
 
+**Re-measured 2026-09-26 under the cross-bundle short audit (#948), and
+the channel story moved again.**  Everything in this section was measured
+by a `check_design` that could not see a short between two bundles' wires.
+Re-run with one that can (each re-measured cell below is marked; the rest
+were not re-run): at the default gap the flag is clean at NQ = 1 and 2 and
+ends on **four shorted bits at NQ = 4 and 8** — bundle 1's `pn_*` against
+the L2 bus `l2d_0_*` on M6, the judge agreeing wire for wire — while every
+wider gap is clean at those two sizes; and the named channel `-GAP 24 -M
+24` that routed NQ = 16 and 32 keeps its exact route and ends on **one
+shorted bit at each**, so at NQ = 16 and 32 the only gap measured clean is
+96.  The shorts are a routing fault of their own (in the one case traced, a
+bit-wire stretched to meet its partner's per-bit track, onto a track
+another bundle's bits hold) that no healer targets, so whether a given gap
+ends clean of them is incidental — the non-monotone shape this section
+keeps finding, from a fault it could not see.
+
 `-bottomup` used to widen the channel behind the caller's back (`GAP 24
 M 24`) to clear two overlaps at NQ = 4, and the sweep that justified it read
 **non-monotone** — 16 ✗, 24 ok, 32 ok, 48 ok, **64 ✗**, 96 ok — written up
@@ -728,13 +866,18 @@ here as evidence that a *fixed* copy turns the channel into a phase lottery.
 Every sizing fault since has pushed that need further out, which is the
 pattern worth recording. The **star faces** took it from NQ = 4 to NQ = 8.
 The **phantom coefficients** — `2*DW` on four cells with nothing behind it —
-took it from NQ = 8 to NQ = 16. At the default channel the flag is now clean
-through NQ = 8, and at NQ = 8 *every* gap is clean:
+took it from NQ = 8 to NQ = 16. At the default channel the flag was then
+clean through NQ = 8, and at NQ = 8 *every* gap was clean — which #948's
+audit takes back for the default gap alone (re-measured, every column):
 
 | GAP = M (NQ = 8, `-bottomup`) | 16 | 24 | 32 | 48 | 64 | 96 |
 |---|---|---|---|---|---|---|
-| result | ok | ok | ok | ok | ok | ok |
-| detailed WL | 2,175,864 | 2,401,550 | 2,595,391 | 3,031,186 | 3,571,607 | 4,329,443 |
+| result | ✗ 4 shorted bits (was ok) | ok, 2 rounds (was 1) | ok | ok | ok | ok |
+| detailed WL | 2,086,906 (was 2,175,864) | 2,304,724 (was 2,401,550) | 2,595,391 | 3,031,186 | 3,571,607 | 4,329,443 |
+
+NQ = 4 reads the same way (re-measured): 16 ✗ 4 shorted bits, and 24 / 32
+/ 48 / 64 / 96 clean at 1,141,285 (after the second round) / 1,306,663 /
+1,536,796 / 1,804,372 / 2,210,154.
 
 Wiring the two **dead instances** (above) did *not* push it further — NQ = 8
 stays clean and NQ = 16 stays dirty at the default channel — which is worth
@@ -750,8 +893,12 @@ rather than as an artefact:
 
 | GAP = M (NQ = 16, `-bottomup`) | 16 | 24 | 32 | 48 | 96 |
 |---|---|---|---|---|---|
-| result | ✗ 3 ovl / 8 unpl | ok | ✗ 8 unpl | ✗ 1 ovl / 8 unpl | ok |
+| result | ✗ 3 ovl / 8 unpl | ✗ 1 shorted bit (#948; was ok) | ✗ 8 unpl | ✗ 1 ovl / 8 unpl | ok |
 | detailed WL | 4,319,399 | 4,648,190 | 5,058,836 | 5,856,977 | 8,621,243 |
+
+(24 and 96 re-measured under #948: 24's route and wire are unchanged and
+it keeps one shorted bit, 96 is clean; the three dirty columns were not
+re-run — they fail either way.)
 
 Re-measuring this one **changed** a row rather than confirming it: GAP 48 was
 clean last revision and fails now, so the working region has shrunk to **two
@@ -771,7 +918,8 @@ first write-up got it wrong (Codex P2, #930). Non-monotonicity rules out
 **not** show that no fixed default exists, and the table above refutes that
 reading directly: **GAP = M = 96 is clean at every size measured** — NQ = 2,
 4, 8, 16, and NQ = 32 (measured since this paragraph was written, so the range
-is wider than it claimed). A conservative built-in value is available.
+is wider than it claimed; re-measured under #948 at all five, clean, the
+wire identical). A conservative built-in value is available.
 
 The argument against building it in is **cost**, which is this page's own
 lesson pointed at the flag:
@@ -783,6 +931,21 @@ lesson pointed at the flag:
 | 8 | 16 (the default) | 2,175,864 | 4,329,443 | **1.99×** |
 | 16 | 24 | 4,648,190 | 8,621,243 | **1.85×** |
 | 32 | 24 | 8,938,821 | 16,671,389 | **1.87×** |
+
+**The same table under #948's audit** (re-measured 2026-09-26):
+
+| NQ | cheapest clean gap | detailed WL | at GAP 96 | ratio |
+|---|---|---|---|---|
+| 2 | 16 (the default) | 591,230 | 1,231,210 | **2.08×** |
+| 4 | 24 | 1,141,285 | 2,210,154 | **1.94×** |
+| 8 | 24 | 2,304,724 | 4,329,443 | **1.88×** |
+| 16 | 96 — 24 ends on a short; 16/32/48 dirty | 8,621,243 | 8,621,243 | 1.00× |
+| 32 | 96 — 24 ends on a short; 16 dirty; 32/48 not run | 16,671,389 | 16,671,389 | 1.00× |
+
+So the argument below now covers three sizes, not five: at NQ = 2, 4 and 8
+a built-in 96 would still cost about twice the cheapest clean gap, and at
+NQ = 16 and 32 no gap below 96 is measured clean, so there the conservative
+value is the only measured clean one and costs nothing against it.
 
 The NQ = 32 row was missing while the sentence below claimed the conclusion
 held at every measured size (Codex P2, #930) — the fifth measurement added a
@@ -802,7 +965,9 @@ the trade the *"a wider channel buys no routing and costs wire
 monotonically"* measurement above refuses, so the flag declines to make it on
 the caller's behalf. A bottom-up run **at NQ = 16 or NQ = 32** names the
 channel itself and measures it: `soc.tcl 16 -bottomup -GAP 24 -M 24` (or
-`32 -bottomup -GAP 24 -M 24`).
+`32 -bottomup -GAP 24 -M 24`) — and under #948's audit both of those end on
+one shorted bit, so "measures it" now means a sweep that includes 96, the
+one gap measured clean at both sizes.
 
 ### What the bottom-up failure actually is
 
@@ -914,19 +1079,22 @@ always naming the symptom. The lever a 7-tracks-for-8-bits seat wants is the
 |---|---|---|---|---|
 | none (default GAP 16) | 3 | 8 | 8 | (4,319,399) |
 | `set_max_bundle_bits 4 for pc_` | 3 | **0** | **0** | 4,284,321 |
-| `-GAP 24 -M 24` | **0** | 0 | 0 | 4,648,190 |
+| `-GAP 24 -M 24` | **0** | 0 | 0 → **1** under #948 (a short) | 4,648,190 |
 | both | 0 | 0 | 0 | 4,762,874 |
 
 | remedy (NQ = 32 `-bottomup`) | ovl | unpl | viol | detailed WL |
 |---|---|---|---|---|
 | none (default GAP 16) | 3 | 8 | 8 | (8,265,153) |
 | `set_max_bundle_bits 4 for pc_` | 3 | **0** | **0** | 8,293,531 |
-| `-GAP 24 -M 24` | **0** | 0 | 0 | 8,938,821 |
+| `-GAP 24 -M 24` | **0** | 0 | 0 → **1** under #948 (a short) | 8,938,821 |
 | `-GAP 96 -M 96` | 0 | 0 | 0 | 16,671,389 |
 
 The NQ = 32 rows exist because a reviewer pointed out that the necessity of a
 channel there had been inferred from the channel alone (Codex P2, #930). They
 are the answer: a **non-channel** remedy clears the stranding at that size too.
+(Under #948's audit the `-GAP 24` rows keep their route and gain one shorted
+bit each and the `-GAP 96` row stays clean, all re-measured; the `none`,
+seat-lever and `both` rows were not re-run.)
 
 **A parenthesised WL excludes stranded bits** and is *not* comparable to a
 complete route — `report_wirelength` prints that caveat on the line above the
@@ -959,7 +1127,8 @@ which is half a comparison — so here is what the dirty endpoint costs at the
 first size measured to come back dirty (NQ = 32 is the second; see above). At
 NQ = 16 the default gap strands
 **8 bits of 19,424 (0.041 %)** with 3 overlaps; `-GAP 24 -M 24` clears it for
-**+7.6 %** wire, and the built-in candidate 96 would cost **+100 %**. So the
+**+7.6 %** wire (and, under #948's audit, leaves one shorted bit), and the
+built-in candidate 96 would cost **+100 %**. So the
 case against a default is not merely that 96 is expensive — it is that the
 caller's own remedy at the affected size costs *about a thirteenth of what the
 default would* (+7.6 % against +100 %), which is exactly why naming it beats
@@ -978,12 +1147,14 @@ document, for the second time in this PR.) Measured, `-bottomup` at NQ = 32:
 
 | GAP = M (NQ = 32, `-bottomup`) | 16 | 24 | 96 |
 |---|---|---|---|
-| result | ✗ 3 ovl / 8 unpl | **clean** | **clean** |
+| result | ✗ 3 ovl / 8 unpl | ✗ 1 shorted bit (#948; was **clean**) | **clean** |
 | detailed WL | — | 8,938,821 | 16,671,389 |
 
 So NQ = 32 behaves like NQ = 16: dirty at the default channel, and the
 caller's own remedy `-GAP 24 -M 24` routes it for **46 % less wire** than the
-conservative 96, which costs **1.87× as much** (8,938,821 against 16,671,389).
+conservative 96, which costs **1.87× as much** (8,938,821 against 16,671,389)
+— a complete route that, under #948's audit, is not a clean one: it ends on
+one shorted bit, exactly as at NQ = 16.
 Stated in both directions because the first version said *"1.87× less wire"*
 (Codex P2, #930) — an invalid construction: a ratio > 1 says how much MORE the
 expensive option costs, and "N× less" has no arithmetic meaning. The two

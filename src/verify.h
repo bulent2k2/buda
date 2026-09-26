@@ -20,6 +20,7 @@
 #include "layering.h"
 #include "nuts.h"
 #include "detailed_nuts.h"
+#include <map>
 #include <set>
 #include <string>
 #include <vector>
@@ -36,13 +37,20 @@ enum class ViolationKind {
     FEEDTHRU_RELAY, // a (single-rect) block is used as a feedthrough relay: two
                   // segments connect to it (BUSTERM) but are not joined by any
                   // wire path, so they rely on the block's internal routing
-    BIT_SHORT,    // two DIFFERENT bits of one bundle (= two different nets)
-                  // share a layer + track with overlapping/touching spans — a
-                  // physical short.  The abstract same-bundle track-sharing
-                  // exemption assumed "per-bit they are the same nets"; the
-                  // tapered fan-in (Topology::seg_bits) makes that
-                  // conditional, so dnuts audits it (predicate lifted from
-                  // tools/show_detailed_shorts.py)
+    BIT_SHORT,    // two wires of DIFFERENT NETS overlap on one layer — a
+                  // physical short.  Enumerated in two halves that partition
+                  // the pairs, because the two were found at different times
+                  // and see different data: check_dnuts takes the pairs
+                  // WITHIN its bundle (two different bits, co-located on one
+                  // track over an extent — the abstract same-bundle
+                  // track-sharing exemption assumed "per-bit they are the
+                  // same nets" and the tapered fan-in (Topology::seg_bits)
+                  // makes that conditional; predicate lifted from
+                  // tools/show_detailed_shorts.py), and
+                  // check_dnuts_cross_shorts takes every pair of wires from
+                  // two DIFFERENT bundles, which no per-bundle audit can see
+                  // (issue #948).  The bundle is how the pairs are
+                  // enumerated, not part of what a short is
     KEEPOUT_CROSS, // a placed wire lies ON a keepout that overlaps its span —
                   // nuts: the bus segment's physical extent [pos ± w/2]
                   // strictly overlaps the zone (the exhausted-window fallback
@@ -111,6 +119,14 @@ struct ConnViolation {
     int           seg_idx    = -1;
     int           seg_idx2   = -1;  // for SEG_OPEN: the other segment
     int           bit_index  = -1;  // -1 for topo/nuts; bit position for dnuts
+    // The OTHER wire of a two-wire violation (BIT_SHORT).  bundle_id2 is set
+    // only when that wire belongs to a different bundle (a cross-bundle
+    // short, check_dnuts_cross_shorts) and is -1 when the pair is inside
+    // bundle_id; seg_idx2 is then the other wire's segment IN bundle_id2.
+    // bit_index2 is the other wire's bit (an NDR shield's negative ordinal
+    // included), -1 where there is no second wire.
+    int           bundle_id2 = -1;
+    int           bit_index2 = -1;
     std::string   block_name;       // for BUSTERM_OPEN / BUSTERM_FACE
     std::string   message;
 };
@@ -204,6 +220,40 @@ ConnResult check_dnuts(const ConnTopology& ct, const DetailedNUTSResult& dnuts,
                        const LayerStack& layers, int bundle_id, int num_bits,
                        const Floorplan* zone_fp = nullptr,
                        const RoutingGridStack* grid = nullptr);
+
+// BIT_SHORT across bundles (issue #948): every pair of placed wires from two
+// DIFFERENT bundles whose metal overlaps on one layer while they carry
+// different nets.  check_dnuts is per bundle — it is handed one bundle id
+// and filters the result to it — so a short between two bundles was outside
+// every audit: a flow could end with two nets' metal on one track and a
+// clean check_design.  This is the other half of BIT_SHORT, run ONCE per
+// design; it takes no same-bundle pair, so the two halves never report one
+// short twice.
+//
+// The metal is the rectangle persistence writes for the wire and
+// tools/independent_audit.py reads back: the span along the LAYER's
+// direction, [track_position +- width/2] across it.  Both wires of a pair
+// are on one layer, so the test is two intervals in layer-local
+// coordinates and no orientation enters into it.  A pair shorts when both
+// intervals overlap by more than 1e-6 — a positive AREA, as the judge
+// counts it: two wires that only abut (side by side at zero spacing, or
+// end to end) share a boundary and no metal.
+//
+// Net identity: `bit_nets[bundle][bit]` names a signal bit's net and
+// `shield_nets[bundle]` the net an NDR shield wire of that bundle carries —
+// the names persistence stores, so the judge and this audit key on the same
+// identity.  Two wires with one name are one net and never short, whichever
+// bundles carry them.  A wire whose name cannot be resolved (no entry, an
+// empty name, a bit outside the list) is NOT folded onto a shared name — it
+// is its own net, identified by (bundle, bit), because identity is what a
+// short is about and collapsing unknowns onto one would hide exactly the
+// fault this looks for.  Unplaced rows are skipped.  Violations come back
+// sorted, one per shorted PAIR, oriented so (bundle_id, seg_idx,
+// bit_index) is the smaller wire; the kind is BIT_SHORT.
+ConnResult check_dnuts_cross_shorts(
+    const DetailedNUTSResult& dnuts,
+    const std::map<int, std::vector<std::string>>& bit_nets,
+    const std::map<int, std::string>& shield_nets);
 
 // The on-grid predicate itself, on one wire: does the metal extent
 // [lo, hi] (perpendicular axis) coincide with the outer edges of a run of

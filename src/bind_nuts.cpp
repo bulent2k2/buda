@@ -475,7 +475,11 @@ void bind_nuts(py::module_& m) {
         .def_readwrite("layer",          &NetSegment::layer)
         .def_readwrite("span_lo",        &NetSegment::span_lo)
         .def_readwrite("span_hi",        &NetSegment::span_hi)
-        .def_readwrite("is_shield",      &NetSegment::is_shield);
+        .def_readwrite("is_shield",      &NetSegment::is_shield)
+        // Always true on an emitted row (unplaced bits are counted, not
+        // materialized); bound so a test can build the row an audit must
+        // skip, as TrackSegment's and PreRoutedSegment's already are.
+        .def_readwrite("placed",         &NetSegment::placed);
 
     py::class_<NetVia>(m, "NetVia")
         .def(py::init<>())
@@ -722,6 +726,8 @@ void bind_nuts(py::module_& m) {
         .def_readwrite("seg_idx",    &ConnViolation::seg_idx)
         .def_readwrite("seg_idx2",   &ConnViolation::seg_idx2)
         .def_readwrite("bit_index",  &ConnViolation::bit_index)
+        .def_readwrite("bundle_id2", &ConnViolation::bundle_id2)
+        .def_readwrite("bit_index2", &ConnViolation::bit_index2)
         .def_readwrite("block_name", &ConnViolation::block_name)
         .def_readwrite("message",    &ConnViolation::message);
 
@@ -761,6 +767,12 @@ void bind_nuts(py::module_& m) {
           py::arg("ct"), py::arg("dnuts"), py::arg("topo"), py::arg("fp"),
           py::arg("layers"), py::arg("bundle_id"), py::arg("num_bits"),
           py::arg("zone_fp") = nullptr, py::arg("grid") = nullptr);
+    // BIT_SHORT across bundles (issue #948), run once per design: pairs of
+    // wires from two DIFFERENT bundles whose metal overlaps on one layer
+    // while they carry different nets.  bit_nets = {bundle id: [net name per
+    // bit]}, shield_nets = {bundle id: its NDR shield wires' net}.
+    m.def("check_dnuts_cross_shorts", &check_dnuts_cross_shorts,
+          py::arg("dnuts"), py::arg("bit_nets"), py::arg("shield_nets"));
     // The OFF_GRID predicate on one wire's perpendicular extent [lo, hi].
     m.def("metal_on_signal_run", &metal_on_signal_run,
           py::arg("pattern"), py::arg("lo"), py::arg("hi"));

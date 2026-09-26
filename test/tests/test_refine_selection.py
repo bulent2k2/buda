@@ -320,22 +320,42 @@ def test_topdown_recipe_heals_most_of_the_residual():
     # assertion would have silently retired every OTHER audit dimension —
     # LAYER_DIR, KEEPOUT_CROSS, NET_DRIVER_OPEN, BIT_SHORT, SEG_OPEN,
     # ANTENNA, DISCONNECTED — none of which #518 touches (review #530).
+    #
+    # The one other thing it may report is the cross-bundle shorts #948 made
+    # visible: this endpoint carries three shorted bit pairs (bundles 33 x 123
+    # on M7 and 35 x 39 on M4 — `tools/independent_audit.py` counts the same
+    # three on a checkpoint of it), which were always there and which no
+    # healer's metric reads (overlaps and opens only).  Accepted as measured
+    # and no further: a fourth, or a short INSIDE a bundle, is a new failure.
+    known_cross_shorts = 3
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
         s.do_command("check_design")
     audit = buf.getvalue()
+
+    def cross_short(ln):
+        return "<->Bundle" in ln and "(a short)" in ln
     offenders = [ln.strip() for ln in audit.splitlines()
-                 if "Bundle" in ln and "unplaced (no track in DetailedNUTS)" not in ln]
+                 if "Bundle" in ln
+                 and "unplaced (no track in DetailedNUTS)" not in ln
+                 and not cross_short(ln)]
     assert not offenders, (
         f"audit reported a violation class #518 does not explain: {offenders}"
     )
-    # Every reported violation must be one of the accepted unplaced bits, so a
-    # new failure mode cannot hide inside the permitted residual.
+    short_bits = sum(int(re.search(r": (\d+) bit\(s\)", ln).group(1))
+                     for ln in audit.splitlines() if cross_short(ln))
+    assert short_bits <= known_cross_shorts, (
+        f"{short_bits} cross-bundle shorted bits, {known_cross_shorts} known"
+        f"\n{audit}")
+    # Every reported violation must be one of the accepted unplaced bits or
+    # known shorts, so a new failure mode cannot hide inside the permitted
+    # residual.
     m = re.search(r"Total: (\d+) violation", audit)
     total = int(m.group(1)) if m else 0
-    assert total == final[0], (
-        f"audit total {total} != unplaced bits {final[0]} — something beyond "
-        f"the accepted residual is being reported\n{audit}"
+    assert total == final[0] + short_bits, (
+        f"audit total {total} != unplaced bits {final[0]} + shorted bits "
+        f"{short_bits} — something beyond the accepted residual is being "
+        f"reported\n{audit}"
     )
 
 
