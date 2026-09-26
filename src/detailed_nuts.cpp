@@ -46,9 +46,12 @@ DetailedNUTSEngine::DetailedNUTSEngine(const RoutingGridStack& stack)
 // reaches the same track via `+dy` / `perp_dim - p`, a DIFFERENT arithmetic
 // path that for non-representable decimal patterns (0.07, 0.095, 0.14 µm …)
 // can land ~1 ulp away.  An exact compare then misses the reservation — a
-// silent cross-bundle track share the same-bundle BIT_SHORT audit never
-// sees.  Plain bucket EQUALITY is not enough either (Codex P1 on #528):
-// rounding each representation independently is boundary-dependent — a
+// cross-bundle track share the same-bundle BIT_SHORT audit never sees (the
+// cross-bundle half, check_dnuts_cross_shorts, does since #948 — by metal
+// overlap, so an ulp cannot hide it — but an audit finding a short is no
+// reason to place one).  Plain bucket EQUALITY is not enough either
+// (Codex P1 on #528): rounding each representation independently is
+// boundary-dependent — a
 // track whose exact centre sits ON a half-quantum boundary (e.g. w=0.010001
 // sp=0.269999, unit 25: enumeration 7.0050004999999995 vs copy 7.0050005)
 // puts the two ulp-close values in ADJACENT buckets.  Hence the ±1-key

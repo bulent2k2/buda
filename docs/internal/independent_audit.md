@@ -475,9 +475,27 @@ checked" are indistinguishable in a table.
 | `converge soc 4 -arms blind` (bottom-up) | 5/117/117 | **201** |
 | `converge soc 2 -arms blind`, after the #946 fix | 1/8/8 | 8 |
 | `converge soc 4 -arms blind`, after the #946 fix | 5/85/85 | 73 |
+| `converge soc 4 -arms blind`, after the #948 fix | 5/85/**89** | 73 |
 
 The agreements are the point as much as the disagreements: a judge that
 never agrees is measuring itself.
+
+**The second finding, closed (#948)**: of that NQ = 4 round's 73, four
+are `SHORT`s — bundle 1's `pn_*` and bundle 176's `l2d_0_*` on one M6
+track — which `check_design` could not report, because its `BIT_SHORT`
+compared the bits of ONE bundle: `check_dnuts` is handed a bundle id and
+filters the detailed result to it, so a pair spanning two bundles was
+outside every call.  `check_dnuts_cross_shorts` now takes those pairs,
+once per design, with this page's own predicate — the stored rectangle,
+a positive-area overlap, the net NAME (read through the one helper
+persistence writes the names with) — so the engine's verdict for that
+round is `5/85/89`: the four shorts beside the 85 unplaced bits, the
+judge unchanged.  Where both could count, they agree exactly: 4 = 4 here,
+7 = 7 on `soc.tcl 8 -LAYOUT compact -PAD 10 -GAP 4 -M 4` (a run that
+ended "clean"; now its first heal round leaves the seven shorts, so
+`heal_if_dirty` runs its second round, which clears them — judge CLEAN),
+and 30 = 30 on the slice packer at `PAD 21 GAP 12 CGAP 4`.
+`test_cross_bundle_shorts.py` pins the agreement on this round.
 
 ## The first finding: a bottom-up copy lands off the grid
 
@@ -546,7 +564,8 @@ solved on their own tracks.  Measured: NQ = 2 goes from 104 judge findings
 to the eight `pc_0` OPENs `check_design` already reports (all 96 OFF_GRID
 gone, the engine's verdict and wirelength unchanged); NQ = 4 goes from 201
 to 73 — OFF_GRID 96 → 0 and NO_METAL 64 → 32, with the remaining 32
-NO_METAL, 37 OPEN and the 4 cross-bundle SHORTs of #948 left standing and
+NO_METAL, 37 OPEN and the 4 cross-bundle SHORTs of #948 left standing (since
+reported by `check_design` too — see the table above) and
 the engine's own count falling from 117 to 85 unplaced.  `tpu 8` stays
 clean, and the QoR corpus is unchanged (0 better / 0 worse / 56
 unchanged, abstract and detailed WL +0).  That corpus result is NOT "no

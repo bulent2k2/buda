@@ -978,6 +978,21 @@ class ReportsMixin:
                         tug_bundles += 1
                         tug_pairs += len(tp)
 
+        # BIT_SHORT across bundles (issue #948).  The loop above hands
+        # check_dnuts ONE bundle at a time, so a short between two bundles is
+        # outside every call it makes — two nets' metal on one track ended in
+        # "Success" here while the judge counted the shorts.  One pass over
+        # the whole detailed result takes exactly those pairs (never a pair
+        # inside one bundle, which check_dnuts already reported), keyed on the
+        # net names persistence writes, so no short is counted twice and the
+        # judge and this audit agree on what "one net" means.
+        if stage == "dnuts":
+            bit_nets, shield_nets = self._wire_nets()
+            for v in buda.check_dnuts_cross_shorts(
+                    self.detailed_result, bit_nets, shield_nets).violations:
+                collected.append((f"Bundle {v.bundle_id}", v))
+                total += 1
+
         self._report_block_contract(contract_missing)
 
         if total == 0:
@@ -1081,7 +1096,7 @@ class ReportsMixin:
         "KEEPOUT_CROSS": "wire placed on a keepout",
         "OFF_GRID":     "wire's metal not on its layer's SIGNAL slot(s)",
         "NET_DRIVER_OPEN": "net endpoint block not attached to the topology",
-        "BIT_SHORT":    "different bits (nets) share a track with overlapping spans",
+        "BIT_SHORT":    "different nets' metal overlaps on one layer (a short)",
         "ANTENNA":      "dangling metal past its own attachments",
         "TEG_OPEN":     "an OVER block's rect touched by no placed metal "
                         "(declared TEG bridge unrealized)",
@@ -1101,12 +1116,17 @@ class ReportsMixin:
         from collections import OrderedDict
         groups = OrderedDict()
         for prefix, v in collected:
-            key = (prefix, v.kind.name, v.seg_idx, v.seg_idx2, v.block_name)
+            # bundle2: the OTHER bundle of a cross-bundle short (#948); -1 for
+            # everything else, including every duck-typed violation, which
+            # has no such field.
+            bundle2 = getattr(v, "bundle_id2", -1)
+            key = (prefix, v.kind.name, v.seg_idx, v.seg_idx2, v.block_name,
+                   bundle2)
             g = groups.get(key)
             if g is None:
                 g = {"prefix": prefix, "kind": v.kind.name, "seg_idx": v.seg_idx,
                      "seg_idx2": v.seg_idx2, "block": v.block_name,
-                     "bits": set(), "msg": v.message}
+                     "bundle2": bundle2, "bits": set(), "msg": v.message}
                 groups[key] = g
             if v.bit_index >= 0:
                 g["bits"].add(v.bit_index)
@@ -1114,6 +1134,9 @@ class ReportsMixin:
         def locus(g):
             if g["block"]:
                 return f"Block '{g['block']}'"
+            if g["bundle2"] >= 0:
+                return (f"Seg {g['seg_idx']}<->Bundle {g['bundle2']} "
+                        f"Seg {g['seg_idx2']}")
             if g["seg_idx"] >= 0 and g["seg_idx2"] >= 0:
                 return f"Seg {g['seg_idx']}<->{g['seg_idx2']}"
             if g["seg_idx"] >= 0:
@@ -1123,6 +1146,12 @@ class ReportsMixin:
         bundles = set()
         for i, g in enumerate(groups.values()):
             bundles.add(g["prefix"])
+            # A short between two bundles makes BOTH dirty: it is listed once
+            # (under the lower bundle id, naming the other in its locus) and
+            # counted once, but the "across N bundle(s)" figure — the one the
+            # QoR corpus reads as viol_bundles — counts both.
+            if g["bundle2"] >= 0:
+                bundles.add(f"Bundle {g['bundle2']}")
             if i >= self._CONN_GROUP_CAP:
                 continue
             nbits = len(g["bits"])

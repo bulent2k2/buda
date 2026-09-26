@@ -1,7 +1,7 @@
 @landed
 # Narrative spec (not pytest-bdd bound — see features/README.md). Executable
-# coverage lives in test_check_design_hbundle.py, test_check_layer_dir.py, and the
-# per-violation verify tests. Engine: verify.h/cpp (check_topo / check_nuts /
+# coverage lives in test_check_design_hbundle.py, test_check_layer_dir.py,
+# test_cross_bundle_shorts.py, and the per-violation verify tests. Engine: verify.h/cpp (check_topo / check_nuts /
 # check_dnuts). This is the readable spec for the design-audit / verify spine.
 Feature: check_design — the design-audit spine (verify at every stage)
   As a chip planner
@@ -57,6 +57,16 @@ Feature: check_design — the design-audit spine (verify at every stage)
     Given two different nets of one bundle sharing a layer+track over an extended span in dnuts
     When I run check_design
     Then a BIT_SHORT violation is reported
+
+  Scenario: two bundles' wires overlapping on one layer are flagged (BIT_SHORT, issue #948)
+    # check_dnuts audits one bundle at a time, so this pair was outside every
+    # call until a design-level pass took the cross-bundle pairs.  Net
+    # identity is the NAME persistence stores, so one net on two bundles is
+    # shared metal and abutting wires are not a short (the judge's rule).
+    Given a wire of one bundle whose metal overlaps a different net's wire of another bundle in dnuts
+    When I run check_design
+    Then a BIT_SHORT violation is reported once, under the lower bundle, naming the other
+    And both bundles count toward the bundles with violations
 
   Scenario: an unplaced bit is flagged (UNPLACED)
     Given a bit with no signal track available after run_detailed_nuts

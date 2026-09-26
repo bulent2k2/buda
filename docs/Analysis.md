@@ -458,6 +458,11 @@ This matters more than a normal audit gap because `BIT_SHORT` is the
 *only* DRC-flavoured check in the tool, and its whole job is
 defence-in-depth against the placer.
 *Fix: share one quantizer between engine and verifier. Small.*
+(The CROSS-bundle half of `BIT_SHORT`, `check_dnuts_cross_shorts`, added
+for issue #948, does not share the defect: it compares metal extents —
+`track ± width/2` — with a 1e-6 tolerance, so two representations of one
+track an ulp apart overlap by a whole wire width.  The same-bundle half in
+`check_dnuts` still buckets as described.)
 
 ### A3. Infeasibility is priced through a user-zeroable knob (verified)
 

@@ -23,6 +23,7 @@
 #include <numeric>
 #include <set>
 #include <sstream>
+#include <tuple>
 
 namespace buda {
 
@@ -1870,6 +1871,7 @@ ConnResult check_dnuts(const ConnTopology& ct, const DetailedNUTSResult& dnuts,
                     v.seg_idx   = a.seg_idx;
                     v.seg_idx2  = b.seg_idx;
                     v.bit_index = a.bit_index;
+                    v.bit_index2 = b.bit_index;
                     std::ostringstream msg;
                     msg << "BIT_SHORT: bit " << a.bit_index << " (seg "
                         << a.seg_idx << ") and bit " << b.bit_index
@@ -1886,6 +1888,164 @@ ConnResult check_dnuts(const ConnTopology& ct, const DetailedNUTSResult& dnuts,
         }
     }
 
+    return result;
+}
+
+// ── BIT_SHORT across bundles (issue #948) ────────────────────────────────────
+
+ConnResult check_dnuts_cross_shorts(
+        const DetailedNUTSResult& dnuts,
+        const std::map<int, std::vector<std::string>>& bit_nets,
+        const std::map<int, std::string>& shield_nets)
+{
+    constexpr double tol = 1e-6;   // tools/independent_audit.py's TOL
+    ConnResult result;
+    const auto& all = dnuts.net_segments;
+
+    // The net a wire carries, or nullptr when it cannot be resolved.
+    auto name_of = [&](const NetSegment& ns) -> const std::string* {
+        if (ns.is_shield) {
+            auto it = shield_nets.find(ns.bundle_id);
+            return (it != shield_nets.end() && !it->second.empty())
+                ? &it->second : nullptr;
+        }
+        auto it = bit_nets.find(ns.bundle_id);
+        if (it == bit_nets.end() || ns.bit_index < 0 ||
+            ns.bit_index >= (int)it->second.size())
+            return nullptr;
+        const std::string& nm = it->second[(size_t)ns.bit_index];
+        return nm.empty() ? nullptr : &nm;
+    };
+    // Identity as an integer, so the inner loop compares ints: one id per
+    // resolved name however many bundles carry it, and one per (bundle, bit)
+    // for a wire with no name — never a shared "unknown" (see verify.h).
+    std::map<std::string, int> id_by_name;
+    std::map<std::pair<int, int>, int> id_by_wire;
+    auto net_id = [&](const NetSegment& ns) -> int {
+        const int next = (int)(id_by_name.size() + id_by_wire.size());
+        if (const std::string* nm = name_of(ns))
+            return id_by_name.emplace(*nm, next).first->second;
+        return id_by_wire.emplace(std::make_pair(ns.bundle_id, ns.bit_index),
+                                  next).first->second;
+    };
+
+    // The metal, in layer-local coordinates: `s` along the layer (the span,
+    // ordered — a placed span may be stored reversed), `p` across it.
+    struct Wire { int idx, net; double s_lo, s_hi, p_lo, p_hi; };
+    std::map<int, std::vector<Wire>> by_layer;
+    for (int i = 0; i < (int)all.size(); ++i) {
+        const NetSegment& ns = all[(size_t)i];
+        if (!ns.placed) continue;
+        const double half = ns.width / 2.0;
+        by_layer[ns.layer].push_back(
+            {i, net_id(ns), std::min(ns.span_lo, ns.span_hi),
+             std::max(ns.span_lo, ns.span_hi),
+             ns.track_position - half, ns.track_position + half});
+    }
+
+    struct Hit { int a, b; double s_lo, s_hi, p_lo, p_hi; };
+    std::vector<Hit> hits;
+    for (const auto& [layer, ws] : by_layer) {
+        // Uniform bins across the layer, as wide as its widest wire, so a
+        // wire lands in at most two and two wires that overlap across the
+        // layer share at least one; within a bin, a sweep along the layer.
+        double size = tol;
+        for (const Wire& w : ws) size = std::max(size, w.p_hi - w.p_lo);
+        std::vector<std::pair<long long, int>> slots;
+        slots.reserve(ws.size() * 2);
+        for (int k = 0; k < (int)ws.size(); ++k) {
+            const long long b0 = (long long)std::floor(ws[(size_t)k].p_lo / size);
+            const long long b1 = (long long)std::floor(ws[(size_t)k].p_hi / size);
+            for (long long b = b0; b <= b1; ++b) slots.push_back({b, k});
+        }
+        std::sort(slots.begin(), slots.end(),
+                  [&](const auto& x, const auto& y) {
+                      if (x.first != y.first) return x.first < y.first;
+                      const Wire& wx = ws[(size_t)x.second];
+                      const Wire& wy = ws[(size_t)y.second];
+                      if (wx.s_lo != wy.s_lo) return wx.s_lo < wy.s_lo;
+                      return x.second < y.second;
+                  });
+        std::set<std::pair<int, int>> seen;   // a pair can share two bins
+        std::vector<int> active;
+        for (size_t lo = 0; lo < slots.size();) {
+            size_t hi = lo;
+            while (hi < slots.size() && slots[hi].first == slots[lo].first)
+                ++hi;
+            active.clear();
+            for (size_t t = lo; t < hi; ++t) {
+                const Wire& w = ws[(size_t)slots[t].second];
+                // Sorted by s_lo: a wire ending before w starts along the
+                // layer can overlap neither w nor anything after it.
+                active.erase(std::remove_if(active.begin(), active.end(),
+                                 [&](int k) {
+                                     return ws[(size_t)k].s_hi - w.s_lo <= tol;
+                                 }),
+                             active.end());
+                for (int k : active) {
+                    const Wire& o = ws[(size_t)k];
+                    if (all[(size_t)o.idx].bundle_id ==
+                        all[(size_t)w.idx].bundle_id)
+                        continue;                  // check_dnuts's half
+                    if (o.net == w.net) continue;  // one net: shared metal
+                    const double s_lo = std::max(o.s_lo, w.s_lo);
+                    const double s_hi = std::min(o.s_hi, w.s_hi);
+                    const double p_lo = std::max(o.p_lo, w.p_lo);
+                    const double p_hi = std::min(o.p_hi, w.p_hi);
+                    if (s_hi - s_lo <= tol || p_hi - p_lo <= tol)
+                        continue;                  // disjoint, or abutting
+                    const int ia = std::min(o.idx, w.idx);
+                    const int ib = std::max(o.idx, w.idx);
+                    if (!seen.insert({ia, ib}).second) continue;
+                    hits.push_back({ia, ib, s_lo, s_hi, p_lo, p_hi});
+                }
+                active.push_back(slots[t].second);
+            }
+            lo = hi;
+        }
+    }
+
+    auto rank = [&](int i) {
+        const NetSegment& ns = all[(size_t)i];
+        return std::make_tuple(ns.bundle_id, ns.seg_idx, ns.bit_index);
+    };
+    for (Hit& h : hits)
+        if (rank(h.b) < rank(h.a)) std::swap(h.a, h.b);
+    std::sort(hits.begin(), hits.end(), [&](const Hit& x, const Hit& y) {
+        if (rank(x.a) != rank(y.a)) return rank(x.a) < rank(y.a);
+        if (rank(x.b) != rank(y.b)) return rank(x.b) < rank(y.b);
+        const int lx = all[(size_t)x.a].layer, ly = all[(size_t)y.a].layer;
+        if (lx != ly) return lx < ly;
+        return x.s_lo < y.s_lo;
+    });
+
+    auto describe = [&](const NetSegment& ns) {
+        std::ostringstream os;
+        os << "bundle " << ns.bundle_id << " seg " << ns.seg_idx;
+        if (ns.is_shield) os << " shield " << -ns.bit_index;
+        else              os << " bit " << ns.bit_index;
+        const std::string* nm = name_of(ns);
+        os << " (" << (nm ? *nm : std::string("net unresolved")) << ")";
+        return os.str();
+    };
+    for (const Hit& h : hits) {
+        const NetSegment& a = all[(size_t)h.a];
+        const NetSegment& b = all[(size_t)h.b];
+        ConnViolation v;
+        v.kind = ViolationKind::BIT_SHORT;
+        v.bundle_id  = a.bundle_id;  v.seg_idx  = a.seg_idx;
+        v.bit_index  = a.bit_index;
+        v.bundle_id2 = b.bundle_id;  v.seg_idx2 = b.seg_idx;
+        v.bit_index2 = b.bit_index;
+        std::ostringstream msg;
+        msg << "BIT_SHORT: " << describe(a) << " and " << describe(b)
+            << " are different nets but their metal overlaps on layer M"
+            << a.layer << " over [" << h.s_lo << ", " << h.s_hi
+            << "] along it and [" << h.p_lo << ", " << h.p_hi
+            << "] across it (cross-bundle) (dnuts)";
+        v.message = msg.str();
+        result.violations.push_back(std::move(v));
+    }
     return result;
 }
 
