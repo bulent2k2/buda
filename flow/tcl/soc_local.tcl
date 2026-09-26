@@ -4,6 +4,7 @@
 #
 #   btcl flow/tcl/soc_local.tcl <cell> [-plan <k>|grid] [-list] \
 #        [-ref <inst>] [-bdb <file>] [-noheal] [-slack <f>] [-ring <r>] \
+#        [-at local|chip] [-shift <dx> <dy>] \
 #        [-NAME value ...]
 #
 # What a slicing plan for a container is worth depends on what its children
@@ -27,7 +28,8 @@
 #
 # `-plan k` picks the k-th slicing plan of the cell's children
 # (`soc_vehicle::enum_plans`: every ordered slicing arrangement within
-# `-slack` of the smallest, deduplicated, smallest first); `-plan grid` is
+# `-slack` of the smallest -- the vehicle's FIXSLACK, 0.5 unless given --
+# deduplicated, smallest first); `-plan grid` is
 # the grid packer's own arrangement, the baseline; `-list` prints the plans
 # and exits without routing.  The routed result lands in `-bdb` (a file,
 # so `tools/cell_face_demand.py` can measure it from the stored bit-wires);
@@ -78,7 +80,7 @@ set list_only 0
 set ref ""
 set bdb ""
 set heal 1
-set slack 0.15
+set slack ""
 set ring 36
 set at local
 set shift {0 0}
@@ -128,24 +130,30 @@ if {$plan ne "current" || $list_only} {
     if {[dict exists $overrides FIX]} { set fix [dict get $overrides FIX] }
     dict set fix $cell $fixspec
     dict set overrides FIX $fix
-    dict set overrides FIXSLACK $slack
+    # `-slack` IS the vehicle's FIXSLACK -- the one number both enumerate
+    # at, so plan k here is plan k in `soc.tcl -FIX` -- and a caller may
+    # spell it either way, but not both differently
+    if {[dict exists $overrides FIXSLACK]} {
+        if {$slack ne "" && $slack != [dict get $overrides FIXSLACK]} {
+            error "soc_local.tcl: -slack $slack and -FIXSLACK [dict get $overrides FIXSLACK] disagree"
+        }
+        set slack [dict get $overrides FIXSLACK]
+    } elseif {$slack ne ""} {
+        dict set overrides FIXSLACK $slack
+    }
     if {![dict exists $overrides PACK]} { dict set overrides PACK slice }
 }
 soc_vehicle::configure $overrides
+if {$slack eq ""} { set slack [soc_vehicle::get FIXSLACK] }
 if {$ref_default && [soc_vehicle::get NQ] < 2} {
     set ref [string map {quad_1 quad_0} $ref]
 }
 
 # The buses and the layout, from a DRY pass: the same `define_cells` and
-# `build_buses` the SoC runs, with the engine calls caught rather than sent.
-namespace eval buda {}
-set ::CAP {}
-foreach p {add_cell add_inst_to_cell bdb_net_mode} { proc buda::$p args {} }
-proc buda::add_bus {name drv rcv} { lappend ::CAP [list $name $drv $rcv] }
-soc_vehicle::define_cells
+# `build_buses` the SoC runs, with the engine calls caught rather than sent
+# (`capture_buses`, the one capture the FACES loads use too).
 set ::soc_vehicle::TOPKIDS {}
-soc_vehicle::build_buses
-foreach p {add_cell add_inst_to_cell bdb_net_mode add_bus} { rename buda::$p "" }
+set ::CAP [soc_vehicle::capture_buses]
 set boxes [soc_vehicle::abs_boxes]
 if {![dict exists $boxes $ref]} { error "soc_local.tcl: no instance '$ref'" }
 if {[lindex [dict get $boxes $ref] 0] ne $cell} {
@@ -237,13 +245,24 @@ foreach side {N S E W} {
     set ntier [expr {max($ntier, $t + 1)}]
 }
 set R [expr {max($ring, $RG + $ntier*($D + 4) + 8)}]
-# Where `u` sits: at the ring's corner (`-at local`), or at the exact spot
-# its representative occupies in the chip (`-at chip`) -- the TRACK PHASE,
-# since the patterns are anchored to the die origin and a seat one track
-# short of its bus strands every bit -- plus `-shift dx dy`.
+# Where `u` sits: at the ring's corner (`-at local`), or on the TRACK PHASE
+# its representative has in the chip (`-at chip`), since the patterns are
+# anchored to the die origin and a seat one track short of its bus strands
+# every bit -- plus `-shift dx dy`.  The chip position itself where the ring
+# fits, else the nearest position past the ring that is a whole track
+# period (`track_period`, every layer of that direction) from it: clamping
+# to the ring used to move a representative near the die edge off its phase
+# (quad_1/cl_0 from y 8 to 40 at PAD 10), which is what the option exists
+# to keep.
+proc chip_seat {c R per} {
+    set c [expr {int($c)}]
+    if {$c >= $R} { return $c }
+    return [expr {$c + int(ceil(double($R - $c)/$per))*$per}]
+}
 lassign $shift sdx sdy
 if {$at eq "chip"} {
-    set OX [expr {max($R, int($rx1)) + $sdx}] ; set OY [expr {max($R, int($ry1)) + $sdy}]
+    set OX [expr {[chip_seat $rx1 $R [soc_vehicle::track_period V]] + $sdx}]
+    set OY [expr {[chip_seat $ry1 $R [soc_vehicle::track_period H]] + $sdy}]
 } else {
     set OX [expr {$R + $sdx}] ; set OY [expr {$R + $sdy}]
 }

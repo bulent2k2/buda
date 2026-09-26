@@ -17,7 +17,7 @@ perturbation and its healed end state is not.  So this scores on the chip:
               check, as score = unplaced + 16 x overlaps (an overlap is a
               whole segment, a bus's worth of bits);
   2. RESAMPLE the `--top` best screened plans twice more, at PAD+1 and at
-              GAP = M + 1 -- the SAME arrangement, found in the perturbed
+              GAP+1 with M+1 -- the SAME arrangement, found in the perturbed
               plan list by its slicing tree (an index is not stable: the
               list is sorted by area and pruned per subset); a plan is
               ranked by its MEAN over all three, and one the pruning left
@@ -129,15 +129,27 @@ def list_plans(cell, knobs, slack):
 
 
 @functools.lru_cache(maxsize=None)
-def implementation():
+def implementation(out=None):
     """A fingerprint of the code a run measures: HEAD, the uncommitted
     diff (the vehicle, the engine's Python layer and the Tcl bridge are all
     tracked) and the built extension modules, which are not.  A cached run
     from another implementation is a measurement of different code, so it
-    is part of a run's identity (Codex P1 on #961)."""
+    is part of a run's identity (Codex P1 on #961).
+
+    `out`, the search's own output directory, is left out of the status:
+    inside the tree it starts showing as untracked the moment its first
+    `runs.json` is written, which changed the fingerprint between the first
+    run and its resume and made the resume miss every cached run."""
     h = hashlib.sha256()
+    spec = []
+    if out is not None:
+        try:
+            rel = Path(out).resolve().relative_to(ROOT)
+            spec = ["--", ".", f":(exclude){rel.as_posix()}"]
+        except ValueError:
+            pass                      # outside the tree: git never lists it
     for cmd in (["git", "rev-parse", "HEAD"], ["git", "diff", "HEAD"],
-                ["git", "status", "--porcelain"]):
+                ["git", "status", "--porcelain", *spec]):
         r = subprocess.run(cmd, cwd=ROOT, capture_output=True)
         h.update(r.stdout)
     for so in sorted((ROOT / "build").glob("*.so")):
@@ -177,11 +189,11 @@ def chip(cache, logdir, knobs, fix=None, heal=False, threads=None, timeout=900):
     # says nothing about a larger one, so a rerun with a longer
     # --heal-timeout must run again rather than replay the cached cutoff
     key = " ".join(shlex.quote(a) for a in ["btcl", *pre, "soc.tcl", *args]) \
-        + f" #timeout={timeout} #impl={implementation()}"
+        + f" #timeout={timeout} #impl={implementation(str(Path(logdir).parent))}"
     got = cache.get(key)
     if got is not None:
         return got
-    tag = re.sub(r"[^A-Za-z0-9._-]+", "_", key)[-150:]
+    tag = log_tag(key)
     t0 = time.time()
     # its own process group, so a timeout takes the engine server with it
     pr = subprocess.Popen([str(BTCL), *pre, str(SOC), *args], stdout=subprocess.PIPE,
@@ -220,6 +232,34 @@ def classify(res, timed_out, returncode):
             res["error"] = True
             res["rc"] = returncode
     return res
+
+
+def perturbations(kn):
+    """The two one-unit neighbours a plan is re-sampled at: PAD + 1, and
+    GAP + 1 with M + 1 -- each knob moved by one from ITS OWN value (the
+    vehicle's default where `--knobs` does not set it), so a search whose
+    M differs from its GAP is not handed an 11-unit margin change."""
+    pad = int(get_knob(kn, "PAD", 24))
+    gap = int(get_knob(kn, "GAP", 16))
+    m = int(get_knob(kn, "M", 16))
+    return [set_knob(kn, "PAD", pad + 1),
+            set_knob(set_knob(kn, "GAP", gap + 1), "M", m + 1)]
+
+
+def first_check(r):
+    """The first check as the heal table shows it: '–' when the run never
+    reached one (an error, or cut off by the budget before it)."""
+    if "first_unpl" in r:
+        return f"{r['first_unpl']}u/{r['first_ovl']}o"
+    return "clean" if r.get("unpl") is not None else "–"
+
+
+def log_tag(key):
+    """A log file name for a run: the tail of the command (which names the
+    plan) plus a hash of the WHOLE key, so two runs whose difference lies
+    before that tail (PAD 10 vs 11 under a long --knobs) cannot share one."""
+    return (re.sub(r"[^A-Za-z0-9._-]+", "_", key)[-120:]
+            + "_" + hashlib.sha256(key.encode()).hexdigest()[:10])
 
 
 def score(r):
@@ -275,11 +315,8 @@ def main():
         r = p["screen"]
         print(f"[screen] plan {p['k']:>3} {p['w']}x{p['h']} die {r['die']} score {score(r)}", flush=True)
 
-    # 2. RESAMPLE at PAD+1 and at GAP = M + 1, the same arrangement
-    pad = int(get_knob(kn, "PAD", 24))
-    gap = int(get_knob(kn, "GAP", 16))
-    perturbed = [set_knob(kn, "PAD", pad + 1),
-                 set_knob(set_knob(kn, "GAP", gap + 1), "M", gap + 1)]
+    # 2. RESAMPLE at PAD+1 and at GAP + 1 and M + 1, the same arrangement
+    perturbed = perturbations(kn)
     lists = [list_plans(a.cell, pk, a.slack) for pk in perturbed]
     maps = [{} for _ in perturbed]
     for i, pl in enumerate(lists):
@@ -316,8 +353,7 @@ def main():
     for n, _k, _f in heals:
         r = res[n]
         die = r["die"] or [0, 0]
-        first = (f"{r.get('first_unpl', 0)}u/{r.get('first_ovl', 0)}o"
-                 if "first_unpl" in r else "clean")
+        first = first_check(r)
         end = ("clean" if r["clean"] else "timeout" if r.get("timeout")
                else "ERROR" if r.get("error") else f"{r['unpl']}u/{r['ovl']}o/{r['viol']}v")
         wl = f"{r['wl']:,}" if r["clean"] and r["wl"] else "–"

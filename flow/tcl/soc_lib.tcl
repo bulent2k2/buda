@@ -182,8 +182,10 @@ proc soc_vehicle::configure {{overrides {}}} {
     if {![string is double -strict $P(FIXSLACK)] || $P(FIXSLACK) < 0} {
         error "soc_vehicle: FIXSLACK must be a number >= 0 (got '$P(FIXSLACK)')"
     }
-    if {![string is integer -strict $P(KEEP)] || $P(KEEP) < 2} {
-        error "soc_vehicle: KEEP must be an integer >= 2 (got '$P(KEEP)')"
+    # 3: the smallest-area point plus two spread along the curve (its ends);
+    # at 2 the spread has one point and nothing to spread it over
+    if {![string is integer -strict $P(KEEP)] || $P(KEEP) < 3} {
+        error "soc_vehicle: KEEP must be an integer >= 3 (got '$P(KEEP)')"
     }
 
     # The MIRROR of that rule, on the PHYSICAL sizing knobs (Codex P2, #930).
@@ -403,11 +405,14 @@ proc soc_vehicle::configure {{overrides {}}} {
     # and with FACES 4 every face is sized for the heaviest face that
     # spread leaves; with FACES 2 only the two N/S faces are (the width),
     # the E/W pair keeping its per-pin size.  0 is the per-pin rule alone.
+    variable FACELOAD
+    array unset FACELOAD
     if {$P(FACES)} {
         dict for {c load} [_pin_loads] {
             lassign $SZ($c) w h
             lassign $load l4 l2
             if {$P(FACES) == 4} {
+                set FACELOAD($c) $l4
                 set d [_dim $l4]
                 set SZ($c) [list [expr {max($w, $d)}] [expr {max($h, $d)}]]
             } else {
@@ -431,14 +436,8 @@ proc soc_vehicle::configure {{overrides {}}} {
     # ── container cells, bottom-up.  Each is a ROW of its children with a
     # margin all round; the row's own size is what the children need, so a
     # bigger DW grows every enclosing cell by construction.
-    set SZ(core_cell)    [_pack {dec_cell alu_cell mul_cell regf_cell}]
-    set SZ(l1_cell)      [_pack [concat tag_cell [lrepeat $P(NBANK)  sram_cell]]]
-    set SZ(l2_cell)      [_pack [concat tag_cell memctl_cell \
-                                       [lrepeat $P(NBANK2) sram_cell]]]
-    set SZ(rtr_cell)     [_pack {fifo_cell xbar_cell fifo_cell}]
-    set SZ(cluster_cell) [_pack {core_cell l1_cell l1_cell rtr_cell}]
-    set SZ(quad_cell)    [_pack [lrepeat $P(NC) cluster_cell]]
-    set SZ(io_blk_cell)  [_pack [concat bridge_cell [lrepeat $P(NIO) io_cell]]]
+    # (`_container_cells` lists children before their parents)
+    dict for {c cells} [_container_cells] { set SZ($c) [_pack $cells] }
 
     # ── the die: the quadrants, the l2 and the io block, placed by ONE
     # walk (`_top_geom`, per LAYOUT) that `build_hierarchy` instantiates
@@ -685,30 +684,9 @@ proc soc_vehicle::_pack_geom {cells} {
 proc soc_vehicle::_pin_loads {} {
     variable P
     variable LEAF
-    define_cells 1
-    namespace eval ::buda {}
-    set saved {}
-    foreach p {add_bus bdb_net_mode} {
-        if {[llength [info commands ::buda::$p]]} {
-            rename ::buda::$p ::buda::__pin_loads_$p
-            lappend saved $p
-        }
-    }
-    set ::soc_vehicle::_CAP {}
-    proc ::buda::add_bus {name drv rcv} { lappend ::soc_vehicle::_CAP [list $name $drv $rcv] }
-    proc ::buda::bdb_net_mode args {}
-    rename check_bus_faces __check_bus_faces
-    proc check_bus_faces args {}
-    set err [catch {build_buses} msg opts]
-    rename check_bus_faces ""
-    rename __check_bus_faces check_bus_faces
-    rename ::buda::add_bus "" ; rename ::buda::bdb_net_mode ""
-    foreach p $saved { rename ::buda::__pin_loads_$p ::buda::$p }
-    if {$err} { return -options $opts $msg }
-
     # bits per pin, per leaf instance
     array set pin {}
-    foreach b $::soc_vehicle::_CAP {
+    foreach b [capture_buses 0] {
         lassign $b name drv rcv
         regexp {\[(\d+)\]$} $name -> bits
         foreach end [list $drv $rcv] {
@@ -759,6 +737,42 @@ proc soc_vehicle::_pin_loads {} {
     return $out
 }
 
+# Every bus `build_buses` wires, as {name drv rcv}, with the engine calls
+# caught rather than sent: the structure recorded (`define_cells 1`), the
+# engine's `add_bus` / `bdb_net_mode` stubbed and restored.  ONE capture for
+# every caller that needs the buses before (or without) a session -- the
+# FACES loads, and `soc_local.tcl`'s split of a cell's buses -- so a new
+# engine call in `build_buses` is stubbed for all of them or none.
+# `check_faces` 0 also skips the face guard, for a caller that runs before
+# the leaves have their final sizes.
+proc soc_vehicle::capture_buses {{check_faces 1}} {
+    define_cells 1
+    namespace eval ::buda {}
+    set saved {}
+    foreach p {add_bus bdb_net_mode} {
+        if {[llength [info commands ::buda::$p]]} {
+            rename ::buda::$p ::buda::__capture_$p
+            lappend saved $p
+        }
+    }
+    set ::soc_vehicle::_CAP {}
+    proc ::buda::add_bus {name drv rcv} { lappend ::soc_vehicle::_CAP [list $name $drv $rcv] }
+    proc ::buda::bdb_net_mode args {}
+    if {!$check_faces} {
+        rename check_bus_faces __check_bus_faces
+        proc check_bus_faces args {}
+    }
+    set err [catch {build_buses} msg opts]
+    if {!$check_faces} {
+        rename check_bus_faces ""
+        rename __check_bus_faces check_bus_faces
+    }
+    rename ::buda::add_bus "" ; rename ::buda::bdb_net_mode ""
+    foreach p $saved { rename ::buda::__capture_$p ::buda::$p }
+    if {$err} { return -options $opts $msg }
+    return $::soc_vehicle::_CAP
+}
+
 # ── PACK slice: slicing floorplans with shape curves ──────────────────────
 # The grid packer above puts children in a ceil(sqrt(n))-column grid whose
 # columns and rows are as wide and tall as their largest member, which is
@@ -770,9 +784,13 @@ proc soc_vehicle::_pin_loads {} {
 # composition), and with `ASPECT` > 1 lets each leaf take a non-square shape
 # of the SAME area, long side at most ASPECT times the short one.
 #
-# What is chosen is the smallest DIE.  Every container keeps its Pareto
-# curve of (w, h) packings, not one point, so a parent can take a child
-# shape that is not the child's own smallest; the one constraint the curves
+# What is chosen is the smallest die THIS SEARCH FINDS: every container
+# keeps its Pareto curve of (w, h) packings, not one point, so a parent can
+# take a child shape that is not the child's own smallest -- but each curve
+# is thinned to KEEP points (every subset's, inside `_slice`, as well as
+# the container's), so it is a heuristic, and a larger KEEP is not
+# guaranteed a smaller die (measured at PAD 48 GAP 8 ASPECT 4: KEEP 8 found
+# 15,922,624 and KEEP 12 16,221,760).  Of the packing constraints, the one the curves
 # cannot carry is that a cell TYPE has ONE shape everywhere it occurs, so a
 # type repeated inside one parent (two `l1_cell`s, four `io_cell`s) is
 # enumerated over its options rather than composed, and the two leaves
@@ -786,16 +804,35 @@ proc soc_vehicle::_pin_loads {} {
 # holds every face to the same), so how far a leaf can stretch GROWS with
 # PAD -- at PAD 24 an `io_cell` (8 bits) reaches 1.5:1 and the 32-bit
 # leaves nothing at all.
-proc soc_vehicle::_container_cells {} {
+#
+# Every container's children, as {name cell} PAIRS, children before their
+# parents: the ONE statement of the structure.  `define_cells` fills the
+# instances from it, the grid packer sizes from it and the slicing packer
+# and the plan enumerator read it through `_container_cells`, so a child
+# added, dropped or reordered moves all four together.
+proc soc_vehicle::_container_kids {} {
     variable P
+    set l1 {{tag tag_cell}}
+    for {set b 0} {$b < $P(NBANK)} {incr b} { lappend l1 [list bank_$b sram_cell] }
+    set l2 {{tag tag_cell} {mc memctl_cell}}
+    for {set b 0} {$b < $P(NBANK2)} {incr b} { lappend l2 [list bank_$b sram_cell] }
+    set io {{bridge bridge_cell}}
+    for {set k 0} {$k < $P(NIO)} {incr k} { lappend io [list p_$k io_cell] }
+    set qd {}
+    for {set c 0} {$c < $P(NC)} {incr c} { lappend qd [list cl_$c cluster_cell] }
     return [list \
-        core_cell    {dec_cell alu_cell mul_cell regf_cell} \
-        l1_cell      [concat tag_cell [lrepeat $P(NBANK) sram_cell]] \
-        l2_cell      [concat tag_cell memctl_cell [lrepeat $P(NBANK2) sram_cell]] \
-        rtr_cell     {fifo_cell xbar_cell fifo_cell} \
-        io_blk_cell  [concat bridge_cell [lrepeat $P(NIO) io_cell]] \
-        cluster_cell {core_cell l1_cell l1_cell rtr_cell} \
-        quad_cell    [lrepeat $P(NC) cluster_cell]]
+        core_cell    {{dec dec_cell} {alu alu_cell} {mul mul_cell} {regf regf_cell}} \
+        l1_cell      $l1 \
+        l2_cell      $l2 \
+        rtr_cell     {{fi_in fifo_cell} {xbar xbar_cell} {fi_out fifo_cell}} \
+        io_blk_cell  $io \
+        cluster_cell {{core core_cell} {l1i l1_cell} {l1d l1_cell} {rtr rtr_cell}} \
+        quad_cell    $qd]
+}
+proc soc_vehicle::_container_cells {} {
+    set out {}
+    dict for {c kids} [_container_kids] { dict set out $c [lmap k $kids {lindex $k 1}] }
+    return $out
 }
 
 # A leaf's candidate shapes {w h}: the face-derived square first, then each
@@ -814,6 +851,7 @@ proc soc_vehicle::_leaf_shapes {c} {
     variable P
     variable SZ
     variable LEAF
+    variable FACELOAD
     lassign $SZ($c) d h0
     if {$h0 != $d} {
         # already non-square (FACES 2): the declared shape ONLY -- FACES 2
@@ -822,7 +860,12 @@ proc soc_vehicle::_leaf_shapes {c} {
         return [list [list $d $h0]]
     }
     lassign $LEAF($c) vb hb
-    set floor [expr {int(ceil(max($vb, $hb)*$P(BITPITCH))) + $P(FACEPAD)}]
+    # the short face hosts the most any face was sized for: the heaviest
+    # pin, or under FACES 4 the heaviest face the pins were spread over --
+    # a stretch must not undo what FACES 4 grew the leaf for
+    set bits [expr {max($vb, $hb)}]
+    if {[info exists FACELOAD($c)]} { set bits [expr {max($bits, $FACELOAD($c))}] }
+    set floor [expr {int(ceil($bits*$P(BITPITCH))) + $P(FACEPAD)}]
     set A [expr {$d*$d}]
     set out [list [list $d $d]]
     foreach k {1.25 1.5 2 2.5 3 4} {
@@ -865,8 +908,13 @@ proc soc_vehicle::_pareto {pts} {
 
 # The Pareto curve of every slicing packing of a child set (no margin).
 # `opts` holds, per child, its options {w h ref}.  Returns points
-# {w h plist}, plist per child (in order) {x y w h ref}.
-proc soc_vehicle::_slice {opts G} {
+# {w h plist}, plist per child (in order) {x y w h ref}.  `fit`, when
+# given, is a command prefix called with {w h} of each packing of the WHOLE
+# set that says whether the parent may take it (the container aspect cap);
+# it filters BEFORE the curve is thinned to KEEP points, since thinning
+# first can keep only packings the cap then rejects (KEEP 3 at PAD 10 GAP 4
+# found no legal rtr_cell while KEEP 4 packed it).
+proc soc_vehicle::_slice {opts G {fit {}}} {
     variable P
     set n [llength $opts]
     set full [expr {(1 << $n) - 1}]
@@ -876,6 +924,7 @@ proc soc_vehicle::_slice {opts G} {
             lassign $o w h ref
             lappend pts [list $w $h leaf $i $ref]
         }
+        if {$n == 1 && [llength $fit]} { set pts [_fits $pts $fit] }
         set F([expr {1 << $i}]) [_pareto $pts]
     }
     for {set m 1} {$m <= $full} {incr m} {
@@ -898,6 +947,7 @@ proc soc_vehicle::_slice {opts G} {
                 incr ia
             }
         }
+        if {$m == $full && [llength $fit]} { set pts [_fits $pts $fit] }
         set F($m) [_pareto $pts]
     }
     set out {}
@@ -905,6 +955,14 @@ proc soc_vehicle::_slice {opts G} {
         set pl [lrepeat $n {}]
         _slice_place F $p 0 0 pl $G
         lappend out [list [lindex $p 0] [lindex $p 1] $pl]
+    }
+    return $out
+}
+
+proc soc_vehicle::_fits {pts fit} {
+    set out {}
+    foreach p $pts {
+        if {[{*}$fit [lindex $p 0] [lindex $p 1]]} { lappend out $p }
     }
     return $out
 }
@@ -951,10 +1009,13 @@ proc soc_vehicle::_container_curve {cell cells opt} {
             if {[dict exists $cb $c]} { lappend opts [list [dict get $cb $c]] } \
                                  else { lappend opts [dict get $opt $c] }
         }
-        foreach p [_slice $opts [_gap_in $cell]] {
+        set fit [list apply {{M cap w h} {
+            set W [expr {$w + 2*$M}] ; set H [expr {$h + 2*$M}]
+            expr {max($W, $H) <= $cap*min($W, $H)}
+        }} $M $cap]
+        foreach p [_slice $opts [_gap_in $cell] $fit] {
             lassign $p w h pl
             set W [expr {$w + 2*$M}] ; set H [expr {$h + 2*$M}]
-            if {max($W, $H) > $cap*min($W, $H)} { continue }
             set pl2 {}
             foreach e $pl {
                 lassign $e x y cw ch ref
@@ -1034,6 +1095,16 @@ proc soc_vehicle::_slice_configure {} {
     array unset PL
     array unset CURVE
     set kids [_container_cells]
+    # `_slice` tries every split of every subset, 3^n for n children, and
+    # counts identical children (io pads, L2 banks) as distinct: 0.1 s at
+    # 9 children, 16 s at 13, a half hour at 17.  Refused rather than left
+    # to hang; the grid packer has no such limit.
+    dict for {c cells} $kids {
+        if {[llength $cells] > 10} {
+            error "soc_vehicle: PACK slice packs at most 10 children per container;\
+                   $c has [llength $cells] (lower NIO / NBANK2, or use PACK grid)"
+        }
+    }
 
     set opt [dict create]
     foreach c {dec_cell alu_cell mul_cell regf_cell fifo_cell xbar_cell
@@ -1046,6 +1117,17 @@ proc soc_vehicle::_slice_configure {} {
     foreach c {core_cell rtr_cell io_blk_cell} {
         set cur($c) [_curve_of $c $kids $opt]
         dict set opt $c [_curve_opts $cur($c)]
+    }
+    # Under FIX the two leaves shared across parents keep their square:
+    # a fixed container's children take their shapes from the tag/sram
+    # choice, which the outer loop below makes per plan (the smallest die
+    # for THAT plan), so with ASPECT > 1 plan k's children -- and so its
+    # geometry -- would differ from the list `enum_plans` printed it in.
+    # One shape each makes a plan index name one geometry.
+    if {[dict size $P(FIX)]} {
+        foreach c {tag_cell sram_cell} {
+            dict set opt $c [lrange [dict get $opt $c] 0 0]
+        }
     }
     set best "" ; set bestarea ""
     foreach to [dict get $opt tag_cell] {
@@ -1219,23 +1301,58 @@ proc soc_vehicle::size {c} {
 # The same six-layer stack tpu_lib declares, for the same reason: a vehicle
 # that also changed the technology would confound the shape it exists to
 # measure.  Declared by EVERY session, a resuming one included.
+namespace eval soc_vehicle {
+    # {id name dir kind overhead origin slots}: the one statement of the
+    # stack, read by `declare_stack` and by `track_period`
+    variable STACK {
+        {2 M2 H {}  55.56 -100 {POWER 2 1 (SIGNAL 1 0.5)x4 GROUND 2 1 (SIGNAL 1 0.5)x4}}
+        {3 M3 V {}  55.56    0 {POWER 2 1 (SIGNAL 1 0.5)x4 GROUND 2 1 (SIGNAL 1 0.5)x4}}
+        {4 M4 H {}  55.56 -200 {POWER 2 1 (SIGNAL 1 0.5)x4 GROUND 2 1 (SIGNAL 1 0.5)x4}}
+        {5 M5 V TOP 50       0 {POWER 3 1 (SIGNAL 2 1)x4 GROUND 3 1 (SIGNAL 2 1)x4}}
+        {6 M6 H TOP 52.94 -400 {POWER 4 1 (SIGNAL 2 1)x4 GROUND 4 1 (SIGNAL 2 1)x4}}
+        {7 M7 V TOP 56.10 -600 {POWER 6 2 (SIGNAL 3 2)x3 GROUND 2 1 (SIGNAL 3 2)x3}}
+    }
+}
 proc soc_vehicle::declare_stack {} {
-    foreach {id nm dir kind oh} {
-        2 M2 H {}  55.56   3 M3 V {}  55.56   4 M4 H {}  55.56
-        5 M5 V TOP 50      6 M6 H TOP 52.94   7 M7 V TOP 56.10
-    } {
+    variable STACK
+    foreach l $STACK {
+        lassign $l id nm dir kind oh
         buda::def_layer $id $nm $dir {*}$kind $oh
     }
-    buda::def_track_pattern 2 -100 POWER 2 1 (SIGNAL 1 0.5)x4 GROUND 2 1 (SIGNAL 1 0.5)x4
-    buda::def_track_pattern 3    0 POWER 2 1 (SIGNAL 1 0.5)x4 GROUND 2 1 (SIGNAL 1 0.5)x4
-    buda::def_track_pattern 4 -200 POWER 2 1 (SIGNAL 1 0.5)x4 GROUND 2 1 (SIGNAL 1 0.5)x4
-    buda::def_track_pattern 5    0 POWER 3 1 (SIGNAL 2 1)x4 GROUND 3 1 (SIGNAL 2 1)x4
-    buda::def_track_pattern 6 -400 POWER 4 1 (SIGNAL 2 1)x4 GROUND 4 1 (SIGNAL 2 1)x4
-    buda::def_track_pattern 7 -600 POWER 6 2 (SIGNAL 3 2)x3 GROUND 2 1 (SIGNAL 3 2)x3
+    foreach l $STACK {
+        lassign $l id nm dir kind oh origin slots
+        buda::def_track_pattern $id $origin {*}$slots
+    }
 
     buda::corner_margin dx 5 dy 5
     buda::set_min_stub_length 2
     buda::set_planner_param healersAhead 1
+}
+
+# The distance along one axis over which EVERY layer running that way
+# repeats its pattern: the LCM of their unit pitches (`H` layers repeat in y,
+# `V` in x).  Two seats that far apart see identical tracks on every layer,
+# which is what "the same track phase" means (H: 306, V: 11,808 here).
+proc soc_vehicle::track_period {dir} {
+    variable STACK
+    set lcm 1
+    foreach l $STACK {
+        lassign $l id nm d kind oh origin slots
+        if {$d ne $dir} { continue }
+        # expand `( ... )xN` groups the way def_track_pattern does, then
+        # add up every slot's width and space
+        while {[regexp {\(([^()]*)\)\s*[xX]\s*(\d+)} $slots all body n]} {
+            set slots [string map [list $all [string repeat " $body " $n]] $slots]
+        }
+        set cur 0.0
+        foreach {type w sp} $slots { set cur [expr {$cur + $w + $sp}] }
+        set p [expr {round($cur)}]
+        if {abs($cur - $p) > 1e-9} { error "soc_vehicle: layer $nm pitch $cur is not whole" }
+        set a $lcm ; set b $p
+        while {$b} { set t [expr {$a % $b}] ; set a $b ; set b $t }
+        set lcm [expr {$lcm / $a * $p}]
+    }
+    return $lcm
 }
 
 # Every cell type and every container's children -- the definitions,
@@ -1263,29 +1380,14 @@ proc soc_vehicle::define_cells {{record_only 0}} {
         }
     }
 
-    _fill core_cell    {dec_cell alu_cell mul_cell regf_cell} {dec alu mul regf}
-    _fill rtr_cell     {fifo_cell xbar_cell fifo_cell}        {fi_in xbar fi_out}
-
-    set l1cells [concat tag_cell [lrepeat $P(NBANK) sram_cell]]
-    set l1names {tag}
-    for {set b 0} {$b < $P(NBANK)} {incr b} { lappend l1names bank_$b }
-    _fill l1_cell $l1cells $l1names
-
-    set l2cells [concat tag_cell memctl_cell [lrepeat $P(NBANK2) sram_cell]]
-    set l2names {tag mc}
-    for {set b 0} {$b < $P(NBANK2)} {incr b} { lappend l2names bank_$b }
-    _fill l2_cell $l2cells $l2names
-
-    set iocells [concat bridge_cell [lrepeat $P(NIO) io_cell]]
-    set ionames {bridge}
-    for {set k 0} {$k < $P(NIO)} {incr k} { lappend ionames p_$k }
-    _fill io_blk_cell $iocells $ionames
-
-    _fill cluster_cell {core_cell l1_cell l1_cell rtr_cell} {core l1i l1d rtr}
-
-    set qc [lrepeat $P(NC) cluster_cell] ; set qn {}
-    for {set c 0} {$c < $P(NC)} {incr c} { lappend qn cl_$c }
-    _fill quad_cell $qc $qn
+    # from the one structure (`_container_kids`), in the historical fill
+    # order: the order instances are declared in is the order of their BDB
+    # rows, which the routed result depends on
+    set K [_container_kids]
+    foreach parent {core_cell rtr_cell l1_cell l2_cell io_blk_cell cluster_cell quad_cell} {
+        set kids [dict get $K $parent]
+        _fill $parent [lmap k $kids {lindex $k 1}] [lmap k $kids {lindex $k 0}]
+    }
 }
 
 # ── hierarchy ─────────────────────────────────────────────────────────────

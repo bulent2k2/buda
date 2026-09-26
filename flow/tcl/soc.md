@@ -343,7 +343,12 @@ wire omitted.)  And the leaf aspect, all at `PAD 24 GAP 12 CGAP 4`
 
 Knobs: `-PACK slice`, `-ASPECT <1..4>` (leaves; needs slice), `-CGAP <n>`,
 `-FACEPAD <n>` (default 10), `-KEEP <n>` (curve points kept per container,
-default 12; 24 finds a 1.8 % smaller die at 5x the geometry time).  A
+default 12, at least 3; 24 finds a 1.8 % smaller die at 5x the geometry
+time, though every curve is thinned so a larger KEEP is not guaranteed a
+smaller die).  PACK slice packs at most 10 children per container (it
+tries every split, 3^n) and refuses more.  Under `-FIX` the two leaves
+shared across parents keep their square, so a plan index names one
+geometry whatever `-ASPECT` allows.  A
 point regenerates as `btcl flow/tcl/soc.tcl 8 -LAYOUT compact -PACK slice
 -PAD <p> -GAP <g> -M <g> -CGAP <c>`; `test_a_slice_packing_is_a_legal_floorplan_and_never_worse_than_the_grid`
 holds the geometry.
@@ -420,9 +425,15 @@ first check, 19 plans):
 
 Two measured reasons.  The context changes what strands: the same
 cluster at the same plan strands `id`, `x`, `l1dd` and its port buses
-alone and `m` and `dd` in the chip; it is not the track phase (moving `u`
-1,676 units to its chip position left the local result bit for bit
-identical), and the ring width does not matter (36 to 400).  And fixing a
+alone and `m` and `dd` in the chip.  It is not the track phase: seated
+on the chip's phase in both axes, the local run still strands `id` (43
+bits), `x` (19) and `l1dd` (26) and neither `m` nor `dd`, against 46, 20
+and 25 at the ring corner; the phase moves only the port buses (`nl` 64
+to 96, `nr` 16 to 0; 184 bits against 173 in all).  An earlier cut of
+`-at chip` clamped the seat to the ring in y, keeping only the x phase,
+and read the two as bit for bit identical; that measurement is
+withdrawn.  The ring width does not matter (36 to 400).  The predictor
+table above was measured at the ring corner.  And fixing a
 cluster's shape re-lays out every quad and the top, so a plan's chip
 result mixes its own cost with a different global floorplan -- though
 among the seven plans that share one shape and one die the chip still
@@ -463,9 +474,10 @@ Default 0, byte-identical.
 10 GAP 4`): all 204 cluster plans within 50 % of the smallest, each routed
 through the whole chip with healing off (about 4.5 s each, four at a
 time); the twelve best re-sampled at PAD 11 and at GAP = M = 5 with the
-same ARRANGEMENT (matched on which child lies left of / below which, since
-a plan's index moves when sizes do); the four best by mean healed in full
-beside the two packers' own choices.
+same ARRANGEMENT (matched on its slicing tree, children named by type --
+`H(V(rtr_cell,core_cell),V(l1_cell,l1_cell))` -- since a plan's index
+moves when sizes do); the four best by mean healed in full beside the two
+packers' own choices.
 
 The first check falls with area, and at every area plans differ a lot:
 

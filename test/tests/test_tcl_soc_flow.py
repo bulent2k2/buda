@@ -1425,3 +1425,107 @@ def test_third_review_round_fixes(tmp_path, monkeypatch):
     r = sps.chip(cache, tmp_path / "logs", ["-PAD", "10"], timeout=30)
     assert r["clean"] and len(cache.d) == 1
     assert next(iter(cache.d)).endswith(f"#impl={fp}")
+
+
+def test_fourth_review_round_vehicle_fixes(tmp_path):
+    """The Claude Code review of #961, the vehicle half.  (a) Under FIX the
+    shared leaves keep one shape, so every listed plan builds the geometry
+    it is listed with even where leaves may stretch (27 of 29 sampled
+    indices built another at PAD 48 ASPECT 4).  (b) The container aspect
+    cap filters BEFORE the curve is thinned, so KEEP 3 packs, and KEEP 2
+    (which divided by zero) is refused.  (c) Under FACES 4 a stretch keeps
+    the short face at the face load.  (d) More than 10 children under PACK
+    slice is refused, not left to a 3^n enumeration.  (e) The track period
+    `-at chip` keeps is every layer's pitch LCM per direction."""
+    script = tmp_path / "chk.tcl"
+    script.write_text(f"""
+source {{{_ROOT / 'flow' / 'tcl' / 'soc_lib.tcl'}}}
+set base {{NQ 8 LAYOUT compact PACK slice PAD 48 GAP 8 M 8 ASPECT 4 FIXSLACK 0.5}}
+soc_vehicle::configure [dict merge $base {{FIX {{cluster_cell 0}}}}]
+set plans [soc_vehicle::enum_plans cluster_cell 0.5]
+set n [llength $plans]
+set bad 0
+foreach k [list 0 6 17 40 [expr {{$n - 1}}]] {{
+    lassign [lindex $plans $k] W H pos
+    soc_vehicle::configure [dict merge $base [list FIX [list cluster_cell $k]]]
+    set got [list {{*}}$::soc_vehicle::SZ(cluster_cell) [lindex $::soc_vehicle::PL(cluster_cell) 1]]
+    if {{$got ne [list $W $H $pos]}} {{ incr bad }}
+}}
+puts "PLANS $n BAD $bad"
+# `configure` keeps every knob an earlier call set, so each call below
+# states the ones the loop above changed
+set reset {{FIX {{}} ASPECT 1 KEEP 12 FIXSLACK 0.5}}
+soc_vehicle::configure [dict merge $reset {{NQ 8 LAYOUT compact PACK slice PAD 10 GAP 4 M 4 KEEP 3}}]
+puts "KEEP3 $::soc_vehicle::TOP(diew)"
+puts "KEEP2 [catch {{soc_vehicle::configure [dict merge $reset {{KEEP 2}}]}} m] $m"
+puts "NIO [catch {{soc_vehicle::configure [dict merge $reset {{NIO 12}}]}} m] $m"
+soc_vehicle::configure [dict merge $reset {{NIO 4 FACES 4 ASPECT 2}}]
+puts "REGF $::soc_vehicle::SZ(regf_cell)"
+puts "PERIOD [soc_vehicle::track_period H] [soc_vehicle::track_period V]"
+""")
+    r = subprocess.run(["tclsh", str(script)], capture_output=True, encoding="utf-8",
+                       cwd=tmp_path, timeout=300)
+    assert r.returncode == 0, r.stdout + r.stderr
+    out = dict(ln.split(" ", 1) for ln in r.stdout.splitlines() if ln)
+    n, bad = out["PLANS"].split()[0], out["PLANS"].split()[2]
+    assert int(n) > 100 and bad == "0", out["PLANS"]
+    assert int(out["KEEP3"]) > 0
+    assert out["KEEP2"].startswith("1 ") and ">= 3" in out["KEEP2"]
+    assert out["NIO"].startswith("1 ") and "at most 10 children" in out["NIO"]
+    w, h = map(int, out["REGF"].split())
+    # FACES 4 sizes regf's every face for 48 bits: _dim(48) at PAD 10
+    assert min(w, h) >= 48 * 4 + 10, out["REGF"]
+    assert out["PERIOD"] == "306 11808"
+
+
+def test_fourth_review_round_driver_fixes(tmp_path, monkeypatch):
+    """The Claude Code review of #961, the drivers' half.  (a) The local
+    driver enumerates at the vehicle's FIXSLACK (0.5) unless told otherwise,
+    so plan k is plan k in `soc.tcl -FIX`, and refuses a -slack that
+    disagrees with -FIXSLACK.  (b) The search's implementation fingerprint
+    does not change when its own output directory appears in the tree.
+    (c) The GAP resample moves M by one from ITS value; (d) the heal table
+    shows no first check for a run that never reached one; (e) log names
+    carry a hash of the whole command."""
+    import sys
+    lst = lambda *a: subprocess.run(["tclsh", str(_LOCAL), "cluster_cell", "-list", *a,
+                                     "-PAD", "10", "-GAP", "4", "-M", "4"],
+                                    capture_output=True, encoding="utf-8", cwd=tmp_path,
+                                    timeout=300)
+    plans = lambda r: [ln for ln in r.stdout.splitlines() if ln.startswith("PLAN ") and "grid" not in ln]
+    r0, r5 = lst(), lst("-slack", "0.5")
+    assert r0.returncode == 0 and r5.returncode == 0, r0.stderr + r5.stderr
+    assert plans(r0) == plans(r5) and len(plans(r0)) > 100
+    bad = lst("-slack", "0.15", "-FIXSLACK", "0.5")
+    assert bad.returncode != 0 and "disagree" in bad.stderr
+    sys.path.insert(0, str(_ROOT / "tools"))
+    import soc_plan_search as sps
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    (repo / "a.txt").write_text("x")
+    subprocess.run(["git", "-C", str(repo), "add", "a.txt"], check=True)
+    subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t",
+                    "commit", "-qm", "a"], check=True)
+    monkeypatch.setattr(sps, "ROOT", repo)
+    out = repo / "plan_search"
+    (out / "logs").mkdir(parents=True)
+    sps.implementation.cache_clear()
+    before = sps.implementation(str(out))
+    (out / "runs.json").write_text("{}")
+    sps.implementation.cache_clear()
+    assert sps.implementation(str(out)) == before
+    (repo / "b.txt").write_text("y")                   # a real source change still counts
+    sps.implementation.cache_clear()
+    assert sps.implementation(str(out)) != before
+    sps.implementation.cache_clear()
+    p = sps.perturbations(sps.knob_list("-PAD 10 -GAP 4 -M 8"))
+    assert sps.get_knob(p[0], "PAD") == "11"
+    assert (sps.get_knob(p[1], "GAP"), sps.get_knob(p[1], "M")) == ("5", "9")
+    p = sps.perturbations(sps.knob_list("-PAD 10 -GAP 4"))
+    assert sps.get_knob(p[1], "M") == "17"
+    assert sps.first_check(dict(unpl=None, error=True)) == "–"
+    assert sps.first_check(dict(unpl=0)) == "clean"
+    assert sps.first_check(dict(unpl=3, first_unpl=40, first_ovl=2)) == "40u/2o"
+    k = "btcl soc.tcl 8 -PAD {} " + "-X 1 " * 40 + "-FIX 'cluster_cell 12' -noheal"
+    assert sps.log_tag(k.format(10)) != sps.log_tag(k.format(11))
