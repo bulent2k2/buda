@@ -121,7 +121,14 @@ int run_dnuts(const std::vector<BusSegment>& bus, const SweepDnutsCtx& dn) {
     DetailedNUTSResult r1 = e1.run(ref_segs, /*emit_vias=*/false);
     std::map<int, int> exp_bits, placed_bits;
     for (const auto& b : ref_segs) exp_bits[b.bundle_id] += b.bit_width;
-    for (const auto& ns : r1.net_segments) placed_bits[ns.bundle_id] += 1;
+    // NDR shield rows are metal, not member bits: exp_bits counts bit_width,
+    // so counting a governed reference's shields here drove extra_unplaced
+    // NEGATIVE by its shields per copy (-6 on flow/ndr_bottom_up.buda, a
+    // clean route), and the sweep read moves as improvements the replay then
+    // refused.  The session's merge skips them (issue #616); this is its
+    // twin.
+    for (const auto& ns : r1.net_segments)
+        if (!ns.is_shield) placed_bits[ns.bundle_id] += 1;
     std::vector<NetSegment> copies;
     int extra_unplaced = 0;
     for (const auto& cs : dn.copy_specs) {

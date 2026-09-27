@@ -328,7 +328,7 @@ per-instance signal-track POOLS, which is strictly stronger than a
 demand comparison (identical pools ⇒ identical NDR seating), and the
 class reports ALIGNED on the vehicle.
 
-**Two shield-counting faults surfaced and were fixed** — the #616 class
+**Three shield-counting faults surfaced and were fixed** — the #616 class
 (shield rows counted as signal bits) in paths that fix never reached:
 
 1. **Copy-path unplaced accounting** (`nutsflow.py`, the bottom-up copy
@@ -352,7 +352,21 @@ class reports ALIGNED on the vehicle.
    [`opens_ndr.md`](opens_ndr.md) for the three constructions that were
    tried and rejected before the forced-layer one.
 
-Both fixes are `is_shield`-conditional, so no-NDR designs are untouched
+3. **The parallel sweep's copy-path accounting** (`run_dnuts` in
+   `trial_sweep.cpp`, 2026-09-27) — fault 1's C++ twin, which the Python
+   fix never reached: the sweep scores a healer move by re-running the
+   bottom-up DNUTS merge itself, and its `placed_bits` counted shield rows
+   too.  On the vehicle it scored a no-op move at **−6 opens** against the
+   session's 0.  On a dirty design any move less than six opens worse than
+   the current state therefore read as an improvement: it was replayed
+   sequentially and, when the replay disagreed, ended in a divergence
+   warning.  The replay verdict still decided, so no route changed; the
+   cost was the replays' time and false warnings.  Now skips `is_shield`
+   rows; pinned by
+   `test_the_parallel_sweep_counts_the_copy_path_honestly` (sweep and
+   sequential trial agree on the vehicle, and fail at −6 without the fix).
+
+All three fixes are `is_shield`-conditional, so no-NDR designs are untouched
 (corpus-guarded); an ungoverned run of the same vehicle is test-pinned.
 
 ### 7.2 R9 typed audit — LANDED (2026-08-08)
