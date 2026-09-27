@@ -22,6 +22,13 @@ on:
   # a green end-to-end pipeline; from here this is an on-demand re-validation
   # vehicle for docs/WINDOWS_REQ.md + docs/WINDOWS_BUILD.md, not a gate.
   workflow_dispatch:
+    inputs:
+      cygwin_probe:
+        description: >-
+          Run .github/scripts/cygwin_configure_probe.sh before the Cygwin
+          build (the configure-hang diagnostic; adds a few minutes)
+        type: boolean
+        default: false
 
 concurrency:
   group: windows-validate-${{ github.ref }}
@@ -290,19 +297,17 @@ jobs:
         run: |
           C:\cygwin64\bin\bash.exe -leo pipefail -c "cd $(cygpath '%CD%') && python3 -m pip install --user -r src/web/requirements.txt && echo WEB DEPS OK || echo 'WEB DEPS UNAVAILABLE (expected: pydantic-core needs Rust; no Cygwin wheels)'"
 
-      - name: Probe the configure (diagnostic)
-        # Runs 40 and 41 hung in the build step's configure, silently, right
-        # after the JCC-erratum status line, for 82 and 30 minutes, and a
-        # `timeout 600` around a traced configure did not end it either (run
-        # 41: no exit status and no trace tail).  So the probe relies on no
-        # signal: it runs each configure in the background with its output
-        # in files, and past a deadline lists the processes (the one CMake
-        # waits on is the answer), kills them by force and prints the
-        # output, whose last trace line is the command in flight.  Three
-        # minimal projects take the Python discovery apart.  Each configure
-        # is handed this step's stdin explicitly, as bin/bb's has it: a
-        # background job in a non-interactive bash reads /dev/null otherwise.
+      - name: Probe the configure (diagnostic, on request)
+        # Opt-in (`cygwin_probe`).  Runs 40 and 41 hung in the build step's
+        # configure, silently, right after the JCC-erratum status line, and a
+        # `timeout 600` around a traced configure did not end it either.  The
+        # probe relies on no signal: each configure runs in the background
+        # with its output in a file, and once that output stops growing the
+        # probe lists the processes, kills them by force and prints the
+        # output, whose last trace line is the command in flight.  What it
+        # found is in the build step's comment and in the script.
         # continue-on-error: its job is to REPORT.
+        if: inputs.cygwin_probe
         shell: cmd
         continue-on-error: true
         timeout-minutes: 30
@@ -312,19 +317,11 @@ jobs:
       - name: The probe's files, if it was cut off
         # The probe prints everything itself; this is for a probe the step
         # cap stopped before it finished (no DONE marker).
-        if: always()
+        if: always() && inputs.cygwin_probe
         shell: cmd
         continue-on-error: true
         run: |
           C:\cygwin64\bin\bash.exe -lc "cd $(cygpath '%CD%') && if test ! -f cyg-probe/DONE; then for f in cyg-probe/*.out; do test -f $f && echo == $f && tail -n 50 $f; done; fi; true"
-
-      - name: Stop if the configure hangs
-        # A configure the probe saw hang would hang here too, and the build
-        # step would spend its whole cap on it; the job log is also read from
-        # its tail, so ending here keeps the probe's report in view.
-        shell: cmd
-        run: |
-          C:\cygwin64\bin\bash.exe -lc "cd $(cygpath '%CD%') && if test -f cyg-probe/HUNG || test ! -f cyg-probe/DONE; then echo a configure hung in the probe, or the probe did not finish:; cat cyg-probe/HUNG; exit 1; fi"
 
       - name: Build with the repo's own wrapper (bin/bb)
         # THE point of this path: the documented-for-Linux command, verbatim —
@@ -335,12 +332,23 @@ jobs:
         # clean — thread-count-independent, run-to-run varying.  The next
         # suspect is -march=native codegen from Cygwin's gcc 14 on modern
         # runner CPUs; pinning the ISA is the discriminating experiment.
+        #
+        # stdin comes from /dev/null.  A step's stdin is a pipe held by the
+        # runner, which is not a Cygwin process, and CMake 4.4's
+        # execute_process hands each child CMake's own stdin.  With that
+        # stdin the configure stopped at its first execute_process after the
+        # compiler checks (CMakeLists.txt's `python3 -c "import pybind11"`)
+        # in runs 40 and 41 and in both of run 43's probe tries, CMake still
+        # running and no child left; run 42's bin/bb got through.  With
+        # stdin from /dev/null the same configure finished in 8 s (run 43)
+        # and every probe configure of run 42 finished.  Nothing in the
+        # build reads stdin, so bin/bb itself is unchanged.
         # Capped: it builds in 6-8 minutes, and run 40's hang took the whole
         # job's 90.
         shell: cmd
         timeout-minutes: 30
         run: |
-          C:\cygwin64\bin\bash.exe -leo pipefail -c "cd $(cygpath '%CD%') && BUDA_ARCH=x86-64-v2 ./bin/bb"
+          C:\cygwin64\bin\bash.exe -leo pipefail -c "cd $(cygpath '%CD%') && BUDA_ARCH=x86-64-v2 ./bin/bb < /dev/null"
 
       - name: Where did the artifacts land?
         # No -e here: `ls a b c` fails when any glob has no match (there is no
@@ -402,11 +410,11 @@ jobs:
         # The job log is read from its tail, and the tier fills it, so the
         # probe's verdict lines (each configure's exit status and time, or
         # the hang) are repeated here.
-        if: always()
+        if: always() && inputs.cygwin_probe
         shell: cmd
         continue-on-error: true
         run: |
-          C:\cygwin64\bin\bash.exe -lc "cd $(cygpath '%CD%') && grep -E '^(===|cmake:|python3:)' probe-report.txt; true"
+          C:\cygwin64\bin\bash.exe -lc "cd $(cygpath '%CD%') && grep -E '^(===|cmake:|python3:|cygwin:)' probe-report.txt; true"
 
   mingw:
     # Fourth path: mingw-w64 — GCC producing NATIVE Windows binaries, driven

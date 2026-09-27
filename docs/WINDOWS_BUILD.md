@@ -284,6 +284,21 @@ Known, measured limitations:
   `cygcheck` does not list it and `import matplotlib` fails — so the tier's
   matplotlib-importing modules will fail to collect, as they did against
   3.9's broken one.  The 3.9 notes that follow are what runs 13–38 measured.
+- **Under a CI runner, give `bin/bb` its stdin from `/dev/null`.**  A GitHub
+  Actions step's stdin is a pipe held by the runner, which is not a Cygwin
+  process, and CMake 4.4's `execute_process` hands each child CMake's own
+  stdin.  With that stdin the configure stopped at its first
+  `execute_process` after the compiler checks (`CMakeLists.txt`'s
+  `python3 -c "import pybind11; ..."`) in five of six tries, runs 40–43,
+  with CMake still waiting and no `python3` among the running processes.
+  With `< /dev/null` the same configure finished both times it was tried
+  (runs 42 and 43; 8 s in run 43).  A minimal project making the same
+  calls finished with the runner's stdin, so the calls alone are not the
+  trigger, and what happens below CMake is not established.  The
+  validation workflow runs `./bin/bb < /dev/null`; nothing in the build
+  reads stdin.  A terminal's stdin has not been measured.  The measurement
+  is `.github/scripts/cygwin_configure_probe.sh`, run by dispatching the
+  workflow with `cygwin_probe` on.
 - **Python was 3.9.16** — then the newest Cygwin shipped, past upstream EOL
   and below the project's 3.13 floor. The tree parses under 3.9 (measured: full
   `ast` sweep), and the one measured *runtime* incompatibility — PEP 604
@@ -457,6 +472,14 @@ that PE ignores).
 
 The module built but exports nothing (the flip side of the previous entry —
 e.g. `--exclude-all-symbols` without an explicit export). Same fix.
+
+### Cygwin: `bin/bb` stops after `-- BUDA JCC-erratum mitigation: ...`
+
+The configure is waiting in its first `execute_process` after the compiler
+checks, `python3 -c "import pybind11; ..."`, which CMake 4.4 starts with
+CMake's own stdin.  Measured under GitHub Actions, where that stdin is a pipe
+held by the runner: five hangs in six tries, none in two with stdin from
+`/dev/null` (section 6).  Run it as `./bin/bb < /dev/null`.
 
 ### Cygwin: `ImportError: No such file or directory` on `import buda`
 
