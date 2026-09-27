@@ -18,8 +18,9 @@ The healers' stage-b metric was (DNUTS opens, NUTS overlaps): a short cost
 a trial nothing.  On bigHalf the healers reach a clean endpoint through a
 state carrying 33 shorts their metric read as 10 opens — so making DNUTS
 avoid or remove shorts closed that path and left the flow dirty.  The
-study knob BUDA_HEAL_SHORTS=1 leaves placement alone and puts the shorts
-into what the healers read instead:
+healer score leaves placement alone and puts the shorts into what the
+healers read instead — ON by default since it measured best, with
+BUDA_HEAL_SHORTS=0 turning it off:
 
   * `_dn_opens` — the one reading of "opens" every stage-b accept uses —
     adds one per short still in the result;
@@ -29,7 +30,7 @@ into what the healers read instead:
   * the parallel sweep's C++ metric counts them too (`count_shorts`), so a
     sweep scores a move exactly as the replay it certifies.
 
-Off, every one of those reads exactly what it read before.
+Off, every one of those reads exactly what it read before the flip.
 """
 import contextlib
 import io
@@ -105,15 +106,25 @@ def _bids(s):
 
 @pytest.fixture
 def off(monkeypatch):
-    monkeypatch.delenv("BUDA_HEAL_SHORTS", raising=False)
+    monkeypatch.setenv("BUDA_HEAL_SHORTS", "0")
 
 
 @pytest.fixture
 def on(monkeypatch):
-    monkeypatch.setenv("BUDA_HEAL_SHORTS", "1")
+    monkeypatch.delenv("BUDA_HEAL_SHORTS", raising=False)   # the default
 
 
-# ── the knob off: every read as before ─────────────────────────────────────
+# ── the default, and the knob off: every read as before the flip ───────────
+
+@pytest.mark.parametrize("value, want", [
+    (None, True), ("1", True), ("", True), ("0", False)])
+def test_the_healer_score_is_on_by_default(monkeypatch, value, want):
+    if value is None:
+        monkeypatch.delenv("BUDA_HEAL_SHORTS", raising=False)
+    else:
+        monkeypatch.setenv("BUDA_HEAL_SHORTS", value)
+    assert ripup_mod.RipupMixin._heal_counts_shorts() is want
+
 
 def test_off_a_short_is_not_an_open(off):
     s = _session()
@@ -177,11 +188,11 @@ def test_the_open_segment_memo_follows_the_knob(monkeypatch):
     s = _session()
     b1, b2 = _bids(s)
     s.detailed_result = _result(s, shorts=[((b1, 0, 3), (b2, 0, 5))])
-    monkeypatch.delenv("BUDA_HEAL_SHORTS", raising=False)
+    monkeypatch.setenv("BUDA_HEAL_SHORTS", "0")
     assert s._open_segments() == []
-    monkeypatch.setenv("BUDA_HEAL_SHORTS", "1")
-    assert len(s._open_segments()) == 2
     monkeypatch.delenv("BUDA_HEAL_SHORTS", raising=False)
+    assert len(s._open_segments()) == 2
+    monkeypatch.setenv("BUDA_HEAL_SHORTS", "0")
     assert s._open_segments() == []
 
 
@@ -209,16 +220,16 @@ def _short_count(s):
 
 
 @pytest.mark.mid
-def test_mix_heals_its_shorts_under_the_knob(monkeypatch):
-    # On main `rnr/mix` ends 0 overlaps / 0 unplaced with 12 cross-bundle
-    # shorts no healer could see (#964's 0 -> 6 dirty bundles).  Counting
-    # them, stage b's negotiate + ripup clear every one.
-    monkeypatch.delenv("BUDA_HEAL_SHORTS", raising=False)
+def test_mix_heals_its_shorts_by_default(monkeypatch):
+    # Before the flip `rnr/mix` ended 0 overlaps / 0 unplaced with 12
+    # cross-bundle shorts no healer could see (#964's 0 -> 6 dirty bundles).
+    # Counting them, stage b's negotiate + ripup clear every one.
+    monkeypatch.setenv("BUDA_HEAL_SHORTS", "0")
     monkeypatch.delenv("BUDA_DNUTS_SHORT_GUARD", raising=False)
     base = _run_flow("flow/rnr/mix.buda")
     assert _short_count(base) == 12
     assert base.detailed_result.num_cross_shorts == 12
-    monkeypatch.setenv("BUDA_HEAL_SHORTS", "1")
+    monkeypatch.delenv("BUDA_HEAL_SHORTS", raising=False)
     s = _run_flow("flow/rnr/mix.buda")
     assert _short_count(s) == 0
     assert list(s.detailed_result.cross_shorts) == []
@@ -231,8 +242,8 @@ def test_parallel_sweep_scores_shorts_like_the_replay(monkeypatch):
     # The sweep's C++ metric must count what the sequential trial counts,
     # or a move that only clears shorts is never replayed (or a replay
     # disagrees): the whole flow, parallel against sequential, must make
-    # the same decisions under the knob.
-    monkeypatch.setenv("BUDA_HEAL_SHORTS", "1")
+    # the same decisions with the healers counting shorts.
+    monkeypatch.delenv("BUDA_HEAL_SHORTS", raising=False)
     monkeypatch.delenv("BUDA_DNUTS_SHORT_GUARD", raising=False)
     monkeypatch.setenv("BUDA_SWEEP_THREADS", "2")
     par = _run_flow("flow/rnr/mix.buda")

@@ -122,9 +122,10 @@ struct SweepDnutsCtx {
     std::string bit_order = "LO_HI";
     int abort_unplaced = -1;              // plain path only (fast-trial bar)
     // Count the cross-bundle shorts DetailedNUTS leaves (its cross_shorts)
-    // in the opens (BUDA_HEAL_SHORTS, issue #962) — what the session's
-    // stage-b metric reads under the same knob, so the sweep scores a move
-    // exactly as the replay it certifies.  false = unplaced bits alone.
+    // in the opens (the healer score, issue #962: on by default,
+    // BUDA_HEAL_SHORTS=0 turns it off) — what the session's stage-b metric
+    // reads under the same setting, so the sweep scores a move exactly as
+    // the replay it certifies.  false = unplaced bits alone.
     bool count_shorts = false;
     // Bottom-up DNUTS copy plan (all empty = plain single-engine path);
     // the session's cached _bottom_up_dnuts_plan, passed through verbatim.

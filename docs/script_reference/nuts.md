@@ -130,11 +130,11 @@ var `BUDA_DNUTS_SHORT_GUARD` turns on two levers, off by default (off is
 byte-identical): `cull` removes the stretched side of each short and counts
 it unplaced, so the healers see an open instead of an unseen short; `reach`
 reserves against the span each segment will reach instead, so the short does
-not happen. `reach,cull` is both. A separate study knob,
-`BUDA_HEAL_SHORTS=1`, leaves placement alone and has the stage-b healers
-(`negotiate_congestion`, `ripup_reroute`, `refine_selection` and the heals
-inside this command) count each short as an open instead; it measured best
-of the three, and none is a default yet. See
+not happen. `reach,cull` is both. The **healer score** leaves placement
+alone and has the stage-b healers (`negotiate_congestion`, `ripup_reroute`,
+`refine_selection` and the heals inside this command) count each short as an
+open instead. It measured best of the three and is **on by default**;
+`BUDA_HEAL_SHORTS=0` turns it off. See
 [Detailed NUTS](../detailed_nuts.md) step 6b.
 
 **Requires:** `run_nuts` must have been called first. At least one `def_track_pattern` must cover the layers used by the NUTS result.
@@ -695,7 +695,7 @@ finisher for whatever negotiation leaves.
 | Run it after… | Stage | Metric driven down |
 |---|---|---|
 | `run_nuts` | a | NUTS abstract track overlaps (`num_overlaps`) |
-| `run_detailed_nuts` | b | DetailedNUTS opens / unplaced bits — lexicographic `(opens, overlaps)`, so clearing opens can't silently trade away abstract packing |
+| `run_detailed_nuts` | b | DetailedNUTS opens / unplaced bits — lexicographic `(opens, overlaps)`, so clearing opens can't silently trade away abstract packing. The opens include each cross-bundle short DetailedNUTS left (the healer score, #962; `BUDA_HEAL_SHORTS=0` turns it off), and a shorted segment is injected like an open one |
 
 **Algorithm (PathFinder-style negotiation):** each round
 

@@ -252,8 +252,9 @@ struct DetailedNUTSResult {
     // The cross-bundle shorts still in net_segments at return: every pair
     // num_cross_shorts counted when the cull is off, and with it on only the
     // pairs neither of whose wires could be removed.  The stage-b healers
-    // read it under BUDA_HEAL_SHORTS (issue #962) — the size as part of their
-    // metric, the wires to find the segments to move.
+    // read it (issue #962; on by default, BUDA_HEAL_SHORTS=0 turns it off) —
+    // the size as part of their metric, the wires to find the segments to
+    // move.
     std::vector<CrossShort> cross_shorts;
     // How many of net_vias are NDR shield BOND straps (R6, opt-in `bond`).
     // Reported by run_detailed_nuts and asserted by the audit; 0 whenever no

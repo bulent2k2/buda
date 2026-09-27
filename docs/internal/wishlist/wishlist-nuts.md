@@ -3,7 +3,7 @@
 Deferred follow-ups for track assignment (`src/nuts.cpp`,
 `src/detailed_nuts.cpp`). Index: [`wishlist.md`](wishlist.md).
 
-## Cross-bundle stretch shorts (#962) — counted in DNUTS; both levers MEASURED, neither a default; the healer score MEASURED best (2026-09-27)
+## Cross-bundle stretch shorts (#962) — counted in DNUTS; both levers MEASURED, neither a default; the healer score MEASURED best and is the DEFAULT (2026-09-27)
 
 **What:** DNUTS reserves a bus's tracks against other bundles over its
 ABSTRACT span, and the span-follow (`adjust_bit_spans`) then moves each bit's
@@ -71,10 +71,11 @@ shorts), so the lever can hold the clean state; the healer cannot reach it.
 The chip flows, already dirty, trade shorts for opens at more than one to
 one: avoiding a short takes a track, and a congested window has none.
 
-**The healer score — BUILT and MEASURED, the best of the three so far
-(2026-09-27).**  Stage b read DNUTS opens and NUTS overlaps, so a short was
-free to a trial.  The study knob `BUDA_HEAL_SHORTS=1` leaves placement alone
-(both levers off) and puts the shorts into what the healers read:
+**The healer score — BUILT, MEASURED best of the three, and the DEFAULT
+(2026-09-27; `BUDA_HEAL_SHORTS=0` turns it off).**  Stage b read DNUTS opens
+and NUTS overlaps, so a short was free to a trial.  The healer score leaves
+placement alone (both levers off) and puts the shorts into what the healers
+read:
 
 * `_dn_opens` (ripup.py) is the one reading of "opens" every stage-b accept
   uses — ripup, negotiate, refine, the warm pre-filter and the three heals
@@ -89,8 +90,8 @@ free to a trial.  The study knob `BUDA_HEAL_SHORTS=1` leaves placement alone
   certifies (pinned by `test_heal_shorts.py`, parallel against sequential on
   `mix`).
 
-Off is byte-identical (56 of 56 comparable flows, abstract and detailed WL
-+0).  On, against main:
+Measured before the flip, as the opt-in knob: off was byte-identical (56 of
+56 comparable flows, abstract and detailed WL +0).  On, against main:
 
 | Flow | main | heal | cull | reach,cull |
 |---|---|---|---|---|
@@ -137,9 +138,13 @@ What it does not do, and the two regressions:
   240 + 6 after four.
 
 **Where to start:**
-* A default flip for `BUDA_HEAL_SHORTS` is the owner's call on the table
-  above: 7 better / 2 worse, the two worse already-dirty negotiate-only chip
-  flows, against two SoC runs going from FAILED to clean.
+* The flip was taken on the table above: 7 better / 2 worse, the two worse
+  already-dirty negotiate-only chip flows, against two SoC runs going from
+  FAILED to clean.  What stays open is those two: negotiate stops at its
+  first rejected iteration (`press` retries — untried here), and charging a
+  shorted window can strand more bits than the shorts it clears.
+* A flow with no stage-b healer keeps its shorts: nothing in
+  `run_detailed_nuts` acts on a short on its own.
 * `reach` is coarse.  It widens a whole bus to its farthest-reaching bit, so
   a bus whose one bit stretches reserves every track.  A per-track extent on
   the placed side (each track's own bit's partner) is exact where the

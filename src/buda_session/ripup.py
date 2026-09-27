@@ -73,17 +73,22 @@ class RipupMixin:
 
     @staticmethod
     def _heal_counts_shorts():
-        """Whether the stage-b healers count cross-bundle SHORTS as opens —
-        the study knob BUDA_HEAL_SHORTS=1 (issue #962).  Their metric read
-        DNUTS opens and NUTS overlaps only, so a short cost a trial nothing:
-        measured on bigHalf, the healers reach a clean endpoint through a
-        state carrying 33 shorts their metric read as 10 opens.  ONE
-        predicate for every stage-b metric (_dn_opens), the open-segment
-        walks the contenders, contention sites and negotiate's injection
-        are derived from, and the parallel sweep's C++ metric, so a sweep
-        cannot score a move differently from the replay it certifies.  Off
-        = every metric and walk exactly as before."""
-        return os.environ.get("BUDA_HEAL_SHORTS") == "1"
+        """Whether the stage-b healers count cross-bundle SHORTS as opens
+        (issue #962) — ON by default; BUDA_HEAL_SHORTS=0 turns it off.  Their
+        metric read DNUTS opens and NUTS overlaps only, so a short cost a
+        trial nothing: measured on bigHalf, the healers reach a clean
+        endpoint through a state carrying 33 shorts their metric read as 10
+        opens.  ONE predicate for every stage-b metric (_dn_opens), the
+        open-segment walks the contenders, contention sites and negotiate's
+        injection are derived from, and the parallel sweep's C++ metric, so
+        a sweep cannot score a move differently from the replay it
+        certifies.  Off = every metric and walk exactly as before the flip.
+
+        Measured before the flip (2026-09-27, corpus against main): 7 better
+        / 2 worse / 47 unchanged, no clean flow going dirty, and the #962
+        bottom-up SoC runs FAILED -> clean; the two worse are negotiate-only
+        chip flows (docs/internal/wishlist/wishlist-nuts.md)."""
+        return os.environ.get("BUDA_HEAL_SHORTS", "1") != "0"
 
     def _dn_opens(self, dr=None):
         """The stage-b OPENS a healer scores a detailed result by (default
