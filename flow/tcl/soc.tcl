@@ -23,6 +23,7 @@
 #   btcl flow/tcl/soc.tcl 32 -LAYOUT compact # the utilization-chosen floorplan
 #   btcl flow/tcl/soc.tcl 2 -caps            # reserve the top pair for the top
 #   btcl flow/tcl/soc.tcl 2 -census          # instances per leaf cell type
+#   btcl flow/tcl/soc.tcl 8 -abstract        # stop at abstract NUTS (+ healing)
 #   btcl flow/tcl/soc.tcl 4 -reserve 1 -noheal -report r.rep   # an E1 blind round
 #   btcl flow/tcl/soc.tcl 4 -derive s.buda   # top-down, write the derived shares
 #   btcl flow/tcl/soc.tcl 4 -bottomup -shares s.buda  # ...and route under them
@@ -63,6 +64,7 @@ set caps 0
 set bydepth ""
 set dry 0
 set census 0
+set abstract 0
 set argi 0
 if {$argc > 0 && [string is integer -strict [lindex $argv 0]]} {
     lappend overrides NQ [lindex $argv 0]
@@ -82,6 +84,7 @@ while {$argi < $argc} {
         }
         -dry      { set dry 1; incr argi }
         -census   { set census 1; incr argi }
+        -abstract { set abstract 1; incr argi }
         default {
             # The E1 hooks (-reserve/-shares/-derive/-derive_cells/-noheal/
             # -report) — converge_lib.tcl, shared with tpu.tcl so the loop
@@ -411,6 +414,21 @@ buda::generate_hier_topologies
 buda::run_planner hier 5
 buda::run_nuts
 buda::check_design nuts
+
+# `-abstract` stops at the abstract stage: bus segments placed on tracks,
+# healed there if dirty (the same two healer rounds, judged on NUTS
+# overlaps and the NUTS-stage audit), no bit ever placed.  A fast screen of
+# a floorplan -- what it says about the detailed route is a measurement,
+# not an assumption (soc.md, "Abstract-only exploration").
+if {$abstract} {
+    set healed 0
+    if {[converge::heal_wanted]} {
+        set healed [soc_vehicle::heal_if_dirty "soc.tcl" nuts]
+    }
+    buda::report_wirelength
+    soc_vehicle::verdict "soc.tcl"
+    return
+}
 
 if {$bottomup} { buda::check_template_tracks on_mismatch independent }
 

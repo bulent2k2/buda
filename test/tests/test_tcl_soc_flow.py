@@ -1548,3 +1548,15 @@ def test_at_chip_shifts_the_tracks_not_the_seat(tmp_path):
     assert dies["local"][:2] == dies["chip"][:2]
     assert dies["local"][2:] == (0, 0) and dies["chip"][2:] == (52, 52)
     assert dies["chip"][0] < 1000, dies
+
+
+def test_abstract_mode_stops_before_dnuts(tmp_path):
+    """`soc.tcl -abstract` runs through abstract NUTS (healing there when
+    NUTS overlaps remain) and never places a bit: no detailed route, and a
+    verdict judged on NUTS overlaps plus the NUTS-stage audit."""
+    r = subprocess.run(["tclsh", str(_VEHICLE), "1", "-abstract"],
+                       capture_output=True, encoding="utf-8", cwd=tmp_path, timeout=600)
+    out = r.stdout + r.stderr
+    assert re.search(r"^soc.tcl: (clean|FAILED) \(abstract\) -- ", out, re.M), out[-2000:]
+    assert "run_detailed_nuts" not in out and "total detailed WL" not in out
+    assert "total abstract WL" in out

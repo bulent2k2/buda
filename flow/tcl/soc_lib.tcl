@@ -1734,20 +1734,37 @@ proc soc_vehicle::banner {what} {
 }
 
 # ── verdict helpers (array_lib's rule: three legs, -1 is dirty) ───────────
-proc soc_vehicle::is_dirty {} {
+# The dirt, as the healing lines print it: overlaps, unplaced bits (only
+# once a detailed route exists) and audit violations.
+proc soc_vehicle::_state {} {
+    set out "[buda::query overlaps] overlaps"
+    if {[buda::query unplaced] >= 0} { append out ", [buda::query unplaced] unplaced" }
+    return "$out, [buda::query violations] audit violations"
+}
+
+# Dirty in the sense the healers can act on.  After DNUTS that is any
+# overlap, unplaced bit or audit violation.  At the abstract stage (`nuts`)
+# it is overlaps only: the stage-a healers' metric is the NUTS overlap
+# count, and what else the NUTS audit reports there -- a bus segment seated
+# on a keepout -- is invisible to them (measured on the sweet spot: two
+# rounds took 2 such seats to 6 and spent 25 s polishing wire), while DNUTS
+# resolves or culls it in the full flow.  The verdict still counts it.
+proc soc_vehicle::is_dirty {{stage dnuts}} {
+    if {$stage eq "nuts"} { return [expr {[buda::query overlaps] > 0}] }
     return [expr {[buda::query overlaps] > 0 || [buda::query unplaced] > 0
                   || [buda::query violations] != 0}]
 }
 
-proc soc_vehicle::heal_if_dirty {who} {
-    if {![soc_vehicle::is_dirty]} { return 0 }
-    puts "$who: dirty ([buda::query overlaps] overlaps,\
-          [buda::query unplaced] unplaced,\
-          [buda::query violations] audit violations) -- healing"
+# `stage` is the audit the healers are judged by: `dnuts` (the full flow),
+# or `nuts` for a flow that stops at the abstract stage (`soc.tcl
+# -abstract`), where the healers work on NUTS overlaps and no bit is placed.
+proc soc_vehicle::heal_if_dirty {who {stage dnuts}} {
+    if {![soc_vehicle::is_dirty $stage]} { return 0 }
+    puts "$who: dirty ([_state]) -- healing"
     buda::negotiate_congestion 10
     buda::ripup_reroute 20
-    buda::check_design dnuts
-    if {![soc_vehicle::is_dirty]} { return 1 }
+    buda::check_design $stage
+    if {![soc_vehicle::is_dirty $stage]} { return 1 }
 
     # A SECOND round, composed the way a stuck endpoint wants it: the
     # healers' metric is lexicographic (opens, overlaps), so they drive the
@@ -1771,13 +1788,12 @@ proc soc_vehicle::heal_if_dirty {who} {
     # still said "needs a channel" after soc.tcl had retracted it).  The
     # measured curves, the seat, and the cheaper seat-scoped remedy all
     # live in soc.tcl beside the removal.
-    puts "$who: still dirty ([buda::query overlaps] overlaps,\
-          [buda::query unplaced] unplaced) -- second round"
+    puts "$who: still dirty ([_state]) -- second round"
     buda::refine_selection
     buda::negotiate_congestion 10
     buda::ripup_reroute 20
     buda::refine_selection
-    buda::check_design dnuts
+    buda::check_design $stage
     return 1
 }
 
@@ -1786,6 +1802,16 @@ proc soc_vehicle::verdict {who} {
     set un [buda::query unplaced]
     set vi [buda::query violations]
     buda::stop
+    if {$un < 0} {
+        # no detailed route (`-abstract`): nothing was placed per bit, so
+        # there is nothing to be unplaced -- say so rather than print -1
+        if {$ov != 0 || $vi != 0} {
+            puts stderr "$who: FAILED (abstract) -- $ov overlaps, $vi audit violations"
+            exit 1
+        }
+        puts "$who: clean (abstract) -- 0 overlaps, 0 audit violations"
+        return 0
+    }
     if {$ov != 0 || $un != 0 || $vi != 0} {
         puts stderr "$who: FAILED -- $ov overlaps, $un unplaced,\
                      $vi audit violations"
