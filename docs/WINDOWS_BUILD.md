@@ -278,8 +278,12 @@ Known, measured limitations:
   found `python3 3.12.12-1` while the install list still asked for the
   `python39-*` stack, so 3.12 had no pip, numpy, matplotlib or tkinter and
   the lane stopped at its first pip step.  The list below installs the
-  `python312-*` twins.  The 3.9 notes that follow are what runs 13–38
-  measured.
+  `python312-*` twins, and run 40 measured what they give: numpy 2.5.2,
+  tkinter and pip 26.2.1 install and import, and the pure-python test deps
+  pip-install (pybind11 3.1.0).  `python312-matplotlib` does not install —
+  `cygcheck` does not list it and `import matplotlib` fails — so the tier's
+  matplotlib-importing modules will fail to collect, as they did against
+  3.9's broken one.  The 3.9 notes that follow are what runs 13–38 measured.
 - **Python was 3.9.16** — then the newest Cygwin shipped, past upstream EOL
   and below the project's 3.13 floor. The tree parses under 3.9 (measured: full
   `ast` sweep), and the one measured *runtime* incompatibility — PEP 604

@@ -33,7 +33,12 @@ jobs:
     # harness measures "does the doc work on VS 2022 / Windows Server 2022";
     # a silent label migration would change the question.
     runs-on: windows-2022
-    timeout-minutes: 60
+    # 90, like the two GCC jobs below: the runners vary by more than 2x.
+    # Run 40's msbuild runner ran 87% of the tier in 55:47 while ninja's ran
+    # all of it in 25:47 -- the process-spawning tests (wrappers, Tcl front
+    # end, flows) were the slow ones -- and a 60-minute cap cancelled a run
+    # that had failed nothing.
+    timeout-minutes: 90
 
     env:
       MPLBACKEND: Agg
@@ -140,7 +145,7 @@ jobs:
 
   msbuild:
     runs-on: windows-2022
-    timeout-minutes: 60
+    timeout-minutes: 90          # see the ninja job: a slow runner, not a hang
 
     env:
       MPLBACKEND: Agg
@@ -247,7 +252,12 @@ jobs:
         # moved `python3` from 3.9 to 3.12 after run 38, and this list still
         # asked for the python39 stack, so 3.12 had no pip, numpy, matplotlib
         # or tkinter and the job stopped at its first pip step (run 39: the
-        # diagnose step listed python3 3.12.12 beside python39-pip).
+        # diagnose step listed python3 3.12.12 beside python39-pip).  Run 40,
+        # with this list: numpy 2.5.2, tkinter and pip 26.2.1 came up for
+        # 3.12, and python312-matplotlib did not (cygcheck does not list it;
+        # `import matplotlib` fails), so the tier's matplotlib-importing
+        # modules will fail to collect, as they did against 3.9's skewed one.
+        # It stays in the list for the day it resolves.
         shell: pwsh
         run: |
           Invoke-WebRequest -Uri https://cygwin.com/setup-x86_64.exe -OutFile setup-x86_64.exe
@@ -280,6 +290,21 @@ jobs:
         run: |
           C:\cygwin64\bin\bash.exe -leo pipefail -c "cd $(cygpath '%CD%') && python3 -m pip install --user -r src/web/requirements.txt && echo WEB DEPS OK || echo 'WEB DEPS UNAVAILABLE (expected: pydantic-core needs Rust; no Cygwin wheels)'"
 
+      - name: Trace the configure (diagnostic)
+        # Run 40 hung in the build step's configure for 82 minutes, silently,
+        # right after the JCC-erratum status line.  What comes next is an
+        # execute_process of `python3 -c "import pybind11; ..."` and then
+        # find_package(pybind11), whose FindPython queries the interpreter --
+        # both first run against Cygwin's Python 3.12 there.  The import runs
+        # here under a timeout, and the real configure under --trace-expand in
+        # a scratch directory, so the log names the command that never
+        # returns.  continue-on-error: its job is to REPORT.
+        shell: cmd
+        continue-on-error: true
+        timeout-minutes: 15
+        run: |
+          C:\cygwin64\bin\bash.exe -lc "cd $(cygpath '%CD%') && timeout 60 python3 -c 'import pybind11; print(pybind11.get_cmake_dir())'; echo import-pybind11 rc=$?; timeout 600 cmake -S . -B build-trace -DBUDA_ARCH=x86-64-v2 --trace-expand > trace.log 2>&1; echo traced-configure rc=$?; tail -n 60 trace.log; true"
+
       - name: Build with the repo's own wrapper (bin/bb)
         # THE point of this path: the documented-for-Linux command, verbatim —
         # except BUDA_ARCH, pinned like the Linux CI (x86-64-v2, ci.md):
@@ -289,7 +314,10 @@ jobs:
         # clean — thread-count-independent, run-to-run varying.  The next
         # suspect is -march=native codegen from Cygwin's gcc 14 on modern
         # runner CPUs; pinning the ISA is the discriminating experiment.
+        # Capped: it builds in 6-8 minutes, and run 40's hang took the whole
+        # job's 90.
         shell: cmd
+        timeout-minutes: 30
         run: |
           C:\cygwin64\bin\bash.exe -leo pipefail -c "cd $(cygpath '%CD%') && BUDA_ARCH=x86-64-v2 ./bin/bb"
 
