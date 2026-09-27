@@ -23,6 +23,14 @@ is deliberate — it keeps the double-based congestion/NUTS math bit-reproducibl
 across FMA-capable CPUs so the golden-placement tests stay exact (see the
 comment in `CMakeLists.txt` and `docs/internal/test/`).
 
+On x86-64 GCC/Clang builds CMake also adds the Intel JCC-erratum mitigation,
+at compile and link: `-Wa,-mbranches-within-32B-boundaries` for GCC, which
+needs **binutils 2.34 or newer** (Ubuntu 20.04 and later), or Clang's
+`-mbranches-within-32B-boundaries`.  It moves code and changes no result.  A
+toolchain with neither builds without it and says so at configure, and
+`-DBUDA_JCC_MITIGATION=OFF` opts out.  Why it is there:
+[internal/jcc_erratum.md](internal/jcc_erratum.md).
+
 ## Required — runtime & tests
 
 | Dependency | pip name | Used by |
@@ -44,6 +52,7 @@ install.
 | **pytest-xdist** | `pytest-xdist` | parallel `bb -m` / `bb -s` (`-n auto --dist loadfile`, ~3× on 4 cores). | Tiers run serially; `bb` prints a hint. See [internal/test/parallelism.md](internal/test/parallelism.md). |
 | **pyobjc (Cocoa)** | `pyobjc-framework-Cocoa` | **macOS only** — names the app in the Dock / menu bar / Cmd-Tab after the design and swaps the Dock icon (`Foundation.NSProcessInfo` / `NSBundle`, `AppKit.NSApplication`). | The GUI still runs; it just shows as `python3`. Every call is guarded. See [internal/macos_app_bundles.md](internal/macos_app_bundles.md). |
 | **setproctitle** | `setproctitle` | sets the process title (`ps`/`top`) to the design name. | No process-title rename; guarded no-op. |
+| **objdump** | *(GNU binutils; already there wherever GCC is)* | `tools/jcc_audit.py`, and the test that the JCC-erratum mitigation reached the built module (`test_jcc_mitigation.py`). | That one test skips. |
 
 ## Bundled (nothing to install)
 

@@ -38,6 +38,55 @@ else()
     endif()
 endif()
 
+# Intel JCC-erratum mitigation (docs/internal/jcc_erratum.md).  On Skylake
+# and the cores derived from it, Cascade Lake among them, a jump that crosses or
+# ends on a 32-byte boundary is kept out of the decoded-instruction cache by
+# the erratum's microcode fix and runs markedly slower.  Which jumps those are
+# is decided by where the LINKER puts the code, so a hot loop's speed follows
+# edits to unrelated files: measured on Cascade Lake, the planner stage of
+# chip_bottomup went from 30.7 s to 37.1 s when PR #966 grew bind_nuts.cpp,
+# with an unchanged hot loop (RoutingGrid::count_signal_tracks_in), and without
+# LTO the gap reversed on identical planner object code.  The assembler pads
+# every jump off those boundaries, which changes no instruction's meaning;
+# with it the two layouts measure 31.8 s and 32.8 s.  Passed at the link as
+# well, since under LTO the machine code is generated there.  x86-64 targets
+# only (a universal or arm64 macOS build skips it); GCC takes the GNU
+# assembler spelling and Clang its own driver flag, and a toolchain with
+# neither (MSVC) builds without it.  -DBUDA_JCC_MITIGATION=OFF opts out.
+option(BUDA_JCC_MITIGATION
+       "Pad x86 jumps off 32-byte boundaries (Intel JCC erratum)" ON)
+set(BUDA_JCC_FLAG_IN_USE "" CACHE INTERNAL "the JCC-mitigation flag applied")
+set(_buda_x86_target FALSE)
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|amd64)$"
+        AND (NOT APPLE OR NOT CMAKE_OSX_ARCHITECTURES
+             OR CMAKE_OSX_ARCHITECTURES STREQUAL "x86_64"))
+    set(_buda_x86_target TRUE)
+endif()
+if(BUDA_JCC_MITIGATION AND NOT MSVC AND _buda_x86_target)
+    include(CheckCXXCompilerFlag)
+    check_cxx_compiler_flag("-Wa,-mbranches-within-32B-boundaries"
+                            BUDA_JCC_GNU_AS)
+    if(BUDA_JCC_GNU_AS)
+        set(BUDA_JCC_FLAG_IN_USE "-Wa,-mbranches-within-32B-boundaries"
+            CACHE INTERNAL "the JCC-mitigation flag applied")
+    else()
+        check_cxx_compiler_flag("-mbranches-within-32B-boundaries"
+                                BUDA_JCC_DRIVER)
+        if(BUDA_JCC_DRIVER)
+            set(BUDA_JCC_FLAG_IN_USE "-mbranches-within-32B-boundaries"
+                CACHE INTERNAL "the JCC-mitigation flag applied")
+        endif()
+    endif()
+endif()
+if(BUDA_JCC_FLAG_IN_USE)
+    add_compile_options(${BUDA_JCC_FLAG_IN_USE})
+    add_link_options(${BUDA_JCC_FLAG_IN_USE})
+    message(STATUS "BUDA JCC-erratum mitigation: ${BUDA_JCC_FLAG_IN_USE}")
+elseif(BUDA_JCC_MITIGATION AND NOT MSVC AND _buda_x86_target)
+    message(STATUS "BUDA JCC-erratum mitigation: no flag for it in this "
+                   "toolchain, built without")
+endif()
+
 # assert()s are cheap correctness guards (e.g. ConnTopology's slide-window
 # invariants) and we keep them ON by default.  This project always optimizes
 # (-O3 above) regardless of build type, so CMAKE_BUILD_TYPE only controls
