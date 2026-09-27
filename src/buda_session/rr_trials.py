@@ -100,7 +100,7 @@ class RRTrialsMixin:
                     deng = buda.DetailedNUTSEngine(self.routing_grid)
                     dres = deng.run(segs, emit_vias=False,
                                     abort_unplaced=self._rr_m_primary(cur))
-                    wm = (dres.num_unplaced, warm.num_overlaps)
+                    wm = (self._dn_opens(dres), warm.num_overlaps)
                 else:
                     wm = warm.num_overlaps
         finally:
@@ -139,7 +139,7 @@ class RRTrialsMixin:
                                               self.layers)
                 deng = buda.DetailedNUTSEngine(self.routing_grid)
                 dres = deng.run(segs, emit_vias=False)
-                warm_m = (dres.num_unplaced, warm.num_overlaps)
+                warm_m = (self._dn_opens(dres), warm.num_overlaps)
             else:
                 warm_m = warm.num_overlaps
         dt = time.perf_counter() - t0

@@ -1578,7 +1578,7 @@ class NutsFlowMixin:
                  and self.detailed_result.num_unplaced <= 0)
                     or trials >= 6):
                 break
-            base = (self.detailed_result.num_unplaced,
+            base = (self._dn_opens(),
                     self.nuts_result.num_overlaps)
             # Candidate set for this round, worst culls first, then bisect.
             ranked = sorted(_culled_by_seg().items(),
@@ -1593,7 +1593,7 @@ class NutsFlowMixin:
                     break
                 self._run_detailed_nuts(bit_order=self._detailed_bit_order)
                 trials += 1
-                cur = (self.detailed_result.num_unplaced,
+                cur = (self._dn_opens(),
                        self.nuts_result.num_overlaps)
                 if cur[0] < base[0] and cur[1] <= base[1]:
                     print(f"[DetailedNUTS] CULL-HEAL: escalated {n} "
@@ -1844,7 +1844,7 @@ class NutsFlowMixin:
         for _ in range(max_rounds):
             if self.detailed_result.num_unplaced <= 0 or trials >= 6:
                 break
-            base = (self.detailed_result.num_unplaced,
+            base = (self._dn_opens(),
                     self.nuts_result.num_overlaps)
             ranked = sorted(_stranded_doomed_top().items(),
                             key=lambda kv: -kv[1])
@@ -1857,7 +1857,7 @@ class NutsFlowMixin:
                     break
                 self._run_detailed_nuts(bit_order=self._detailed_bit_order)
                 trials += 1
-                cur = (self.detailed_result.num_unplaced,
+                cur = (self._dn_opens(),
                        self.nuts_result.num_overlaps)
                 if cur[0] < base[0] and cur[1] <= base[1]:
                     print(f"[DetailedNUTS] RESEAT-HEAL: re-seated {n} "
@@ -1967,12 +1967,12 @@ class NutsFlowMixin:
         def _wl(dr):
             return sum(abs(ns.span_hi - ns.span_lo) for ns in dr.net_segments)
 
-        base = (self.detailed_result.num_unplaced,
+        base = (self._dn_opens(),
                 self.nuts_result.num_overlaps, _wl(self.detailed_result))
         saved = self.detailed_result
         self._run_detailed_nuts(bit_order=self._detailed_bit_order,
                                 pair_align=True)
-        cur = (self.detailed_result.num_unplaced,
+        cur = (self._dn_opens(),
                self.nuts_result.num_overlaps, _wl(self.detailed_result))
         # Componentwise accept: opens/overlaps parity-or-better, WL strictly
         # lower (the pair-align solve is DNUTS-only, so overlaps — an abstract
@@ -2573,6 +2573,23 @@ class NutsFlowMixin:
                                    + r2.num_unplaced)
             merged.num_keepout_bits = (r1.num_keepout_bits
                                        + r2.num_keepout_bits)
+            # The #962 short guard's counts, summed like the keepout cull's.
+            # A reference bit the cull removed is missing from every copy
+            # too; the copies' share is in extra_unplaced above, as for any
+            # other reference bit that did not place.  num_cross_shorts stays
+            # the two solves' own detection count (observation).
+            merged.num_cross_shorts = (r1.num_cross_shorts
+                                       + r2.num_cross_shorts)
+            merged.num_short_bits = r1.num_short_bits + r2.num_short_bits
+            # The shorts the healers read are recounted over the MERGED
+            # route: a short between two reference bundles of one template is
+            # copied into every sibling instance with them, and neither solve
+            # sees those — eng1 has no copies, and eng2 drops a pair of two
+            # fixed bits.  Summing the two solves' lists undercounted exactly
+            # the shorts a template move would fix (Codex P1 on #966).  The
+            # parallel sweep counts the same route the same way.
+            merged.cross_shorts = buda.cross_shorts_in(
+                merged.net_segments, bus_segs)
             # R6 straps are RE-DERIVED over the merged result rather than
             # copied: the pass is idempotent and reads placed shields
             # against the REAL grid, so every occurrence — reference, copy,

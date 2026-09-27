@@ -314,7 +314,7 @@ class NegotiateMixin:
             return
         stage = 'b' if self.detailed_result is not None else 'a'
         if stage == 'b':
-            metric = lambda: (self.detailed_result.num_unplaced,   # noqa: E731
+            metric = lambda: (self._dn_opens(),                    # noqa: E731
                               self.nuts_result.num_overlaps)
         else:
             metric = lambda: self.nuts_result.num_overlaps         # noqa: E731

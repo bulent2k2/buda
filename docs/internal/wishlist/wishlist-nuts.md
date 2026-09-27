@@ -3,6 +3,162 @@
 Deferred follow-ups for track assignment (`src/nuts.cpp`,
 `src/detailed_nuts.cpp`). Index: [`wishlist.md`](wishlist.md).
 
+## Cross-bundle stretch shorts (#962) — counted in DNUTS; both levers MEASURED, neither a default; the healer score MEASURED best and is the DEFAULT (2026-09-27)
+
+**What:** DNUTS reserves a bus's tracks against other bundles over its
+ABSTRACT span, and the span-follow (`adjust_bit_spans`) then moves each bit's
+end to its partner's track, which can lie past that span, on a track another
+bundle holds.  The audit (`check_dnuts_cross_shorts`, #948/#963) reports the
+short after the route is done.  On the 2026-09-26 nightly (#964), 28 of the
+32 bundles the new audit made dirty are this mechanism; the other 4 are
+#965's boundary track.
+
+**Built** ([detailed_nuts.md](../../detailed_nuts.md) step 6b): the engine
+counts the shorts on every run (`num_cross_shorts`) with the audit's own
+predicate, and two levers sit behind the study knob
+`BUDA_DNUTS_SHORT_GUARD`.  `cull` removes the stretched side and counts it
+unplaced.  `reach` reserves against where each segment's bits will reach.
+Off is byte-identical: 56 of 56 comparable corpus flows identical, abstract
+and detailed WL +0.  The engine's count equals the audit's on every flow
+checked (`mix` 12, `tc3a` 1, `mix2_fast_topdown` 5, `mix2_fast_bottomup` 2).
+
+**Measured** (corpus at `origin/main` b34aed6, `-march=x86-64-v2`; triples
+are overlaps / unplaced / dirty bundles):
+
+| Flow | main | cull | reach | reach,cull |
+|---|---|---|---|---|
+| `big_data_test/bigHalf` | 0/0/0 | 0/19/1 | 0/52/1 | 0/52/1 |
+| `big_data_test/tc3a` | 0/0/2 | 0/1/1 | 0/0/0 | 0/0/0 |
+| `rnr/mix` | 0/0/6 | 0/0/0 | 0/0/0 | 0/0/0 |
+| `rnr/mix2` | 0/0/2 | 0/0/0 | 0/0/2 | 0/0/0 |
+| `rnr/mix2_fast_topdown` | 0/0/4 | 0/0/0 | 0/0/2 | 0/0/0 |
+| `rnr/mix2_fast_bottomup` | 0/0/2 | 1/0/0 | 0/0/0 | 0/0/0 |
+| `rnr/mix2_fast_bottomup_shared` | 0/0/2 | 0/0/0 | 1/0/0 | 1/0/0 |
+| `rnr/mix2_fast_on_aligned_sql` | 2/16/3 | 2/16/1 | 7/30/2 | 7/30/2 |
+| `chip/chip_topdown` | 4/134/14 | 4/149/11 | 4/150/11 | 4/161/11 |
+| `chip/chip3_topdown` | 6/260/36 | 6/263/35 | 6/280/36 | 6/280/36 |
+| `chip/chip_stack_topdown` | 22/263/23 | 22/263/21 | 22/271/22 | 22/271/22 |
+| `chip/chip_bottomup` | 56/231/17 | 56/231/17 | 56/247/18 | 56/247/18 |
+| `chip/chip_bottomup_caps` | 56/143/14 | 56/145/13 | 56/143/13 | 56/143/13 |
+| `chip/chip_stack_bottomup` | 99/240/21 | 100/266/22 | 97/254/20 | 97/254/20 |
+| **corpus total** | 285/1365/155 | 287/1431/131 | 289/1505/136 | 289/1516/132 |
+| better / worse / unchanged | — | 7 / 5 / 43 | 6 / 7 / 43 | 7 / 7 / 42 |
+
+The four SoC runs from #962, judged by `tools/independent_audit.py`:
+
+| Run | main | cull | reach (= reach,cull) |
+|---|---|---|---|
+| `converge.tcl soc 4 … -judge` (healerless) | 5/85/89, judge 73 (4 SHORT) | 5/89/89, judge 69 (0 SHORT) | 5/117/117, judge 68 (0 SHORT) |
+| `soc.tcl 8 -LAYOUT compact -PAD 10 -GAP 4 -M 4` | clean, WL 1,522,677 | clean, WL 1,491,681 | clean, WL 1,772,294 |
+| `soc.tcl 4 -bottomup` | FAILED, 4 shorts | FAILED, 4 opens | 1 overlap, judge clean |
+| `soc.tcl 8 -bottomup` | FAILED, 4 shorts | clean, WL +4.2 % | clean, WL +1.6 % |
+
+(The `soc.tcl 8 compact` run is clean on main now: #963's audit sees the
+shorts, so `heal_if_dirty` heals them.  The run the issue quoted predates
+that audit.)
+
+**Why neither is a default.**  Each lever removes the shorts where it acts
+(19–24 fewer dirty bundles corpus-wide), and each strands more bits than it
+removes (+66 to +151 unplaced).  `bigHalf` shows the mechanism for its
+clean-to-dirty regression.  The first DNUTS is identical under every setting
+(52 keepout-culled bits, 0 shorts), and stage-b `ripup_reroute` heals main
+in two moves: bundle 48 topo 4→48 (52 → 10), then 48→45 (10 → 0).  The
+state between them has **33 cross-bundle shorts** that the healer's metric
+does not read, since it counts opens and overlaps.  With either lever on,
+that state reads worse, so the greedy healer never takes the first move.
+`reach` re-solved on main's healed endpoint strands nothing (0 unplaced, 0
+shorts), so the lever can hold the clean state; the healer cannot reach it.
+The chip flows, already dirty, trade shorts for opens at more than one to
+one: avoiding a short takes a track, and a congested window has none.
+
+**The healer score — BUILT, MEASURED best of the three, and the DEFAULT
+(2026-09-27; `BUDA_HEAL_SHORTS=0` turns it off).**  Stage b read DNUTS opens
+and NUTS overlaps, so a short was free to a trial.  The healer score leaves
+placement alone (both levers off) and puts the shorts into what the healers
+read:
+
+* `_dn_opens` (ripup.py) is the one reading of "opens" every stage-b accept
+  uses — ripup, negotiate, refine, the warm pre-filter and the three heals
+  inside `run_detailed_nuts` (cull, re-seat, pair-align) — and adds one per
+  short DNUTS still carries (`DetailedNUTSResult::cross_shorts`, the pairs
+  left after the cull, named by wire).
+* `_open_segments` / `_rr_open_bundles` add each shorted segment, so the
+  shorts' bundles become contenders (after the open ones), their windows
+  contention sites, and negotiate charges them like open windows.
+* The parallel sweep's C++ metric counts them too (`SweepDnutsCtx::
+  count_shorts`), so a sweep scores a move exactly as the replay it
+  certifies (pinned by `test_heal_shorts.py`, parallel against sequential on
+  `mix`).
+* A bottom-up DNUTS result is RECOUNTED over the merged route
+  (`cross_shorts_in`), by the session's merge and the sweep alike: a short
+  between two bundles of one template is copied into every sibling
+  instance, and neither solve sees the copies' pairs (the rest solve drops
+  a pair of two fixed bits), so summing the solves' lists hid exactly the
+  shorts a template move fixes (Codex P1 on #966).
+
+Measured before the flip, as the opt-in knob: off was byte-identical (56 of
+56 comparable flows, abstract and detailed WL +0).  On, against main:
+
+| Flow | main | heal | cull | reach,cull |
+|---|---|---|---|---|
+| `big_data_test/bigHalf` | 0/0/0 | 0/0/0 | 0/19/1 | 0/52/1 |
+| `big_data_test/tc3a` | 0/0/2 | 0/0/2 | 0/1/1 | 0/0/0 |
+| `rnr/mix` | 0/0/6 | 0/0/0 | 0/0/0 | 0/0/0 |
+| `rnr/mix2` | 0/0/2 | 0/0/0 | 0/0/0 | 0/0/0 |
+| `rnr/mix2_fast_topdown` | 0/0/4 | 1/0/0 | 0/0/0 | 0/0/0 |
+| `rnr/mix2_fast_bottomup` | 0/0/2 | 1/0/0 | 1/0/0 | 0/0/0 |
+| `rnr/mix2_fast_bottomup_shared` | 0/0/2 | 0/0/2 | 0/0/0 | 1/0/0 |
+| `rnr/mix2_fast_on_aligned_sql` | 2/16/3 | 2/16/1 | 2/16/1 | 7/30/2 |
+| `chip/chip_topdown` | 4/134/14 | 5/134/11 | 4/149/11 | 4/161/11 |
+| `chip/chip3_topdown` | 6/260/36 | 6/268/35 | 6/263/35 | 6/280/36 |
+| `chip/chip_stack_topdown` | 22/263/23 | 22/263/21 | 22/263/21 | 22/271/22 |
+| `chip/chip_bottomup` | 56/231/17 | 56/231/17 | 56/231/17 | 56/247/18 |
+| `chip/chip_bottomup_caps` | 56/143/14 | 56/143/14 | 56/145/13 | 56/143/13 |
+| `chip/chip_stack_bottomup` | 99/240/21 | 100/260/23 | 100/266/22 | 97/254/20 |
+| **corpus total** | 285/1365/155 | 289/1393/135 | 287/1431/131 | 289/1516/132 |
+| better / worse / unchanged | — | **7 / 2 / 47** | 7 / 5 / 43 | 7 / 7 / 42 |
+
+No clean flow goes dirty — bigHalf stays clean (detailed WL +2.4 %), since
+its middle state now reads 10 + 33 = 43 against 52 and is still taken.
+Detailed WL over the 51 flows whose completeness did not change: +0.05 %.
+The #962 SoC runs: `soc.tcl 4 -bottomup` and `soc.tcl 8 -bottomup`, which
+main ends FAILED on 4 shorts each, come out clean and judge-clean at +5.4 %
+and +4.2 % detailed WL; `soc.tcl 8 -LAYOUT compact …` stays clean at +11.1 %;
+the healerless converge round cannot change (judge 73 either way).
+
+What it does not do, and the two regressions:
+* A flow with no stage-b healer keeps its shorts (`tc3a`), and a shorted
+  bundle against a LOCKED bottom-up copy has one side to move:
+  `mix2_fast_bottomup_shared` spends its ten ripup moves taking stage b from
+  482 to 2 and stops there, bundle 19 against the copy bundle 109.
+* Four flows end one abstract overlap up (`mix2_fast_topdown`,
+  `mix2_fast_bottomup`, `chip_topdown`, `chip_stack_bottomup`): the metric
+  is lexicographic, so a short outranks an overlap.  The detailed route of
+  the two `mix2` flows is audit-clean.
+* `chip3_topdown` (negotiate only): charging the 3 shorted windows clears
+  them and strands 8 more bits — 268 against main's 260 + 3.
+* `chip_stack_bottomup` (negotiate only): its first DNUTS carries no short,
+  main's third negotiate iteration lowers the opens while adding shorts, and
+  counted it is no improvement — negotiate stops at the first rejected
+  iteration, so it ends 260 + 6 after two accepted iterations against main's
+  240 + 6 after four.
+
+**Where to start:**
+* The flip was taken on the table above: 7 better / 2 worse, the two worse
+  already-dirty negotiate-only chip flows, against two SoC runs going from
+  FAILED to clean.  What stays open is those two: negotiate stops at its
+  first rejected iteration (`press` retries — untried here), and charging a
+  shorted window can strand more bits than the shorts it clears.
+* A flow with no stage-b healer keeps its shorts: nothing in
+  `run_detailed_nuts` acts on a short on its own.
+* `reach` is coarse.  It widens a whole bus to its farthest-reaching bit, so
+  a bus whose one bit stretches reserves every track.  A per-track extent on
+  the placed side (each track's own bit's partner) is exact where the
+  partner is placed.  The staircase shape #962 names (every bit stretched by
+  a different amount) still reserves every track, so do not expect much
+  from this alone.
+* #965's boundary track is a separate fault and gives 4 of the 32.
+
 ## A bottom-up COPY can land off the track grid — OPEN (found 2026-09-20)
 
 **What:** on `soc.tcl`'s bottom-up arm, 96 bit-wires land on no M3 signal

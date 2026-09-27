@@ -295,7 +295,7 @@ class RefineMixin:
         # smuggle one in, so they get their own parity component (review
         # #525).
         if stage == 'b':
-            metric = lambda: (self.detailed_result.num_unplaced  # noqa: E731
+            metric = lambda: (self._dn_opens()                   # noqa: E731
                               + self._rr_disconnected_bits(),
                               self.nuts_result.num_overlaps,
                               self.nuts_result.num_violations, wl_now())

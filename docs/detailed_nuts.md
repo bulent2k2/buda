@@ -70,6 +70,9 @@ connected segment at the crossing of their two individually-placed tracks.
 | `net_segments` | list of NetSegment | All placed bit-wires, across all input `BusSegment`s |
 | `net_vias` | list of NetVia | All per-bit layer transitions (step 5 below) |
 | `num_unplaced` | int | Total number of bits that could not be placed (all-or-nothing per bus — see below) |
+| `num_cross_shorts` | int | Cross-bundle shorts left by the span adjustment (step 6b below), counted before any is removed — observation, taken on every run |
+| `num_short_bits` | int | Bits the short cull removed (step 6b, `cull` lever); each is also in `num_unplaced` |
+| `cross_shorts` | list of CrossShort | The cross-bundle shorts still in `net_segments` (step 6b), each by its two wires' `(bundle, seg, bit)` and the shared metal; what the stage-b healers read (the healer score, on by default). A bottom-up merged result recounts it over the whole merged route (`cross_shorts_in`), so a short copied with its template is counted at every copy |
 
 ---
 
@@ -164,6 +167,77 @@ Then two post-passes over the emitted bit-wires:
    of rects within a covered block is widened. **Note:** no flow in the repo
    currently produces an untapped multi-rect pass-through, so this path is
    defensive and unexercised; a fixture for it is wanted.
+
+6b. **Cross-bundle short guard (issue #962).** Placement reserves a bus's
+   tracks against other bundles over its **abstract** span, and step 6 then
+   moves each bit's end to its partner's track — which can lie past that span,
+   on a track another bundle holds. The two abstract spans never met, so
+   neither bus reserved against the other, and the stretched bit shorts the
+   other bundle's wire. `check_design`'s cross-bundle audit
+   (`check_dnuts_cross_shorts`, #948) reports these after the fact.
+
+   The engine now counts them itself, on the final spans (after the keepout
+   cull), into `num_cross_shorts`. It reads the audit's own predicate —
+   `find_cross_bundle_overlaps`, the one statement of "these two wires
+   short" — so the router and the audit cannot disagree about a pair. The
+   engine has no net names, so a signal bit is its own net per (bundle, bit)
+   and a shield is the net its rule names. The bits it placed around (the
+   bottom-up reference bits and their copies, `add_fixed_bits`) are in the
+   sweep too; a pair of two such bits belongs to the solve that placed them.
+
+   Two levers act on the shorts. Both are **off** by default, and off leaves
+   the placement byte-identical (only the count is new). They are seeded at
+   engine construction from `BUDA_DNUTS_SHORT_GUARD` (`reach`, `cull`, or
+   both, separated by `,` `+` or a space), so every engine sees the same
+   setting: the session's, the bottom-up reference and rest solves, and the
+   C++ trial sweep's. `set_short_guard(reach, cull)` overrides it on one
+   engine.
+
+   - **`cull`** removes one wire of each short after step 6 and counts it
+     unplaced (`num_short_bits`, also in `num_unplaced`) — a short becomes an
+     open, which the stage-b healers act on. The wire removed is the one with
+     more of the shared metal outside its own bus's abstract span, the part
+     only step 6 added. A fixed copy and a shield are never removed. On a tie
+     (both wires inside their reserved spans — #965's boundary track), the
+     larger `(bundle, seg, bit)` goes. A removal is followed by another pass
+     of step 6, so a partner of the removed bit retracts to its own via, as
+     after the keepout cull.
+   - **`reach`** prevents the short. The cross-bundle reservation test
+     compares each segment's **reach** instead of its abstract span: the span
+     widened to every junction partner's bit tracks. The partner's tracks are
+     exact when its layer is already placed (layers go in ascending id); when
+     it is not yet placed, its abstract footprint (`abstract_pos ±
+     abstract_width/2`) is the bound. A partner on an earlier layer that
+     placed no bits stretches nothing. Only the cross-bundle test changes;
+     track pools, same-bundle hazards, corridors and NDR credit keep the
+     abstract span. A partner that lands outside its footprint is not
+     caught, which is what `cull` behind it is for.
+
+   **Measured (2026-09-27), neither is a default.** On the QoR corpus each
+   lever removes 19–24 dirty bundles and strands 66–151 more bits (`cull`
+   7 better / 5 worse, `reach` 6 / 7, `reach,cull` 7 / 7). `bigHalf` goes
+   from clean to dirty under each. Its healers reach clean on main through a
+   state with 33 shorts the stage-b metric does not read.
+
+   The result also names the shorts it leaves (`cross_shorts`: each pair by
+   its two wires' `(bundle, seg, bit)` and the shared metal — every counted
+   pair with the cull off, only the ones no side could be removed from with
+   it on). That is what the **healer score** reads: the stage-b healers
+   count each remaining short as an open and treat its segments as open
+   ones, with placement unchanged. It measured best of the three (7 better /
+   2 worse, no clean flow going dirty, both failing #962 bottom-up SoC runs
+   clean) and is **on by default**; `BUDA_HEAL_SHORTS=0` turns it off. The
+   tables, the four #962 SoC runs and what is still open are in
+   [wishlist-nuts.md](internal/wishlist/wishlist-nuts.md).
+
+   On the bottom-up path (reference solve, copies, rest solve) the healers'
+   list is **recounted over the merged route** (`cross_shorts_in`, the same
+   predicate and net identity) rather than summed from the two solves. A
+   short between two bundles of one template is copied with them into every
+   sibling instance, and neither solve sees those copies: the reference
+   solve has none, and the rest solve drops a pair of two fixed bits as not
+   its run's. Summing undercounted exactly the shorts a template move
+   fixes. `num_cross_shorts` stays the two solves' own detection count.
 
 7. **Per-bit via emission (step 5 in the source).** For every connection where
    the two bits sit on **different layers**, one `NetVia` is emitted at the
@@ -291,6 +365,13 @@ Tests live in `test/tests/test_detailed_nuts.py` (15 unit tests) and BDD scenari
 | `test_num_unplaced_when_more_bits_than_signal_tracks` | 6 bits, 4 tracks → all 6 unplaced |
 | `test_two_bus_segments_expanded_independently` | Two buses with non-overlapping intervals |
 | `test_interval_spanning_two_units_yields_eight_signal_tracks` | Tiling across two pattern units |
+
+The cross-bundle short guard (step 6b) has its own file,
+`test/tests/test_dnuts_short_guard.py`. It builds the #962 stretch in
+miniature and checks each part: the count matches the audit's pair, `cull`
+removes the stretched side and never a fixed copy, `reach` reserves against
+a placed partner's bits and against an unplaced partner's footprint, and the
+env seed accepts each spelling and reports an unknown word.
 
 ---
 

@@ -28,8 +28,12 @@ and running it exposed two shield-counting faults in the bottom-up paths
    bits, so a governed segment with bits genuinely stranded could read
    `placed >= need` and skip the escalation it needs.
 
+A third, found later, is regression 1's C++ twin: the parallel sweep's
+copy path (`run_dnuts`, trial_sweep.cpp) counted shield rows the same way,
+so it scored a no-op move on this clean vehicle at -6 opens.
+
 These tests pin the requirement (copies carry shields, counts stay
-honest) and regression 1, which this vehicle reproduces directly.
+honest) and regressions 1 and 3, which this vehicle reproduces directly.
 
 Regression 2 is a by-inspection consistency fix with NO dedicated test:
 its predicate sits behind `wmap`, which excludes `hier.locked` bundles,
@@ -111,6 +115,37 @@ def test_copy_path_unplaced_count_is_honest():
     assert s.detailed_result.num_unplaced == 0
     assert s.detailed_result.num_unplaced >= 0     # never negative
     assert "-" not in out.split("bits unplaced")[0].split()[-1]
+
+
+def test_the_parallel_sweep_counts_the_copy_path_honestly():
+    """Regression 1's twin in the C++ parallel sweep (`run_dnuts`,
+    trial_sweep.cpp), which the Python fix never reached: its copy path
+    counted shield rows as placed bits too, so the sweep scored a no-op
+    move on this CLEAN vehicle at -6 opens.  On a dirty design any move
+    less than six opens worse then read as an improvement, was replayed,
+    and ended in a divergence warning when the replay refused it.  The
+    sweep must score a move exactly as the sequential trial it certifies
+    does."""
+    s, _ = _run_vehicle()
+    stage, metric = s._rr_stage_metric()
+    assert stage == 'b' and metric() == (0, 0)
+    s._rr_t_init()
+    # A no-op move per bundle the healers may move: its own candidate.
+    flat = [(0, w.input.original_bundle.id, w.plan.selected_topology_index,
+             w.plan.selected_topology_index)
+            for w in s.bundles if not w.hier.locked]
+    assert flat
+    with contextlib.redirect_stdout(io.StringIO()):
+        setup = s._rr_sweep_stage_setup(flat, stage, metric, full=True)
+        outcomes = s._rr_sweep_eval(flat, stage, *setup, full=True)
+    for (_ci, bid, _o, t), (prim, sec, _v, _wl, ok) in zip(flat, outcomes):
+        assert ok
+        snap = s._rr_snapshot()
+        with contextlib.redirect_stdout(io.StringIO()):
+            seq = s._rr_trial(s._rr_wrapper(bid), t, stage, metric,
+                              full=True)
+            s._rr_restore(snap, only={bid})
+        assert (prim, sec) == seq == (0, 0), f"bundle {bid}"
 
 
 def test_governed_bottom_up_flow_is_clean():
