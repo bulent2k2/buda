@@ -713,6 +713,58 @@ longer do.  The sweet spot is still clean, in 15 s.
 Regenerate: `btcl flow/tcl/soc.tcl 8 -LAYOUT compact <knobs> -abstract`
 per configuration (the knobs are each table row's).
 
+### Leaves that block only the layers they use (2026-09-27)
+
+Every leaf here used to block all three LOW layers (M2..M4), so a LOW
+wire could never cross a cell: a 152-unit ALU was as solid as the
+536-unit memory controller.  `set_leaf_blockage policy` makes a leaf block
+only the LOW layers of its cell's layer band, and `-leafcap size` grades
+the leaves by their larger side against the face rule -- up to `_dim(DW)`
+(the 152-unit cells and the 56-unit pad) M2 alone, up to `_dim(2*DW)`
+(fifo, tag) M2..M3, memctl every LOW layer.  That grading is an
+ASSUMPTION about what these leaves' own wiring uses, not a property the
+vehicle measures; the run prints the table it applied.
+
+The same 45 configurations, abstract and full, `-leafcap size` against
+the rows above (same engine: without the flag the run is byte-identical):
+
+* **Clean**: 38 of 45 against 22.  Seventeen dirty configurations route
+  clean; one clean one no longer does (PAD 12 GAP 4 ends on 3 overlaps).
+  Every run the judge was asked about agrees (the flat vehicle, NQ 1, and
+  three NQ 8 rows including the smallest).
+* **Die**: the smallest clean die is slice PAD 24 GAP 4 at 12.83 Mu^2
+  (4.98 x 2.58 mm), 15 % under the sweet spot's 15.12 and 12 % under
+  the smallest clean die without the policy (14.63).  Next: slice PAD 24
+  GAP 4 CGAP 16 at 13.30, grid PAD 0 GAP 4 at 13.83.  The sweet spot
+  itself stays clean, in 5.2 s against 15 s.
+* **Runtime**: the full sweep takes 1,340 s against 8,173 s (median
+  10.5 s per run against 155 s) -- the healers have far less to do.  A
+  few clean runs got slower (PAD 24 GAP 4 grid 6 -> 51 s, slice PAD 20
+  GAP 16 CGAP 4 11 -> 50 s).
+* **Wire**: on the 21 configurations clean both ways, detailed WL moves
+  by a median -6.3 % (-18 % to +26 %; the +26 % is grid `FACES 4`).
+* **Abstract correlation got WORSE**, and why is worth stating.  The 7
+  configurations still dirty are not told apart by the abstract result
+  (AUC 0.45 for supply-doomed seats, 0.57 for keepout seats).  Every
+  slicing row now ends its abstract stage on ~19 M3 segments seated over
+  the 280-unit fifo/tag leaves, which block M3 under this grading, and
+  the full flow resolves them every time -- the stage-a healers cannot
+  see a keepout seat, so the abstract verdict carries a fault the
+  detailed stage always repairs.  That is the case for counting keepout
+  and supply-doomed seats in the stage-a metric (the other half of the
+  plan), measured here first.
+
+What the dirty configurations had in common before (E0, over the rows
+above): of 145 bundles dirty at the end of the full flow, 117 were
+supply-doomed seats at the end of the abstract stage and 31 keepout
+seats -- a 32-bit bus on M5 in a window holding 31 signal tracks (81 of
+the final violations) or an M2 segment with none (44).  No configuration
+was abstract-clean and full-dirty under either count; what they lack is
+specificity, since the full flow heals most of them.
+
+Regenerate: `btcl flow/tcl/soc.tcl 8 -LAYOUT compact <knobs> -leafcap size`
+(add `-abstract` for the screen).
+
 ## Every endpoint, every bit, every instance: the face rule read three ways
 
 The face rule — *a leaf's size is derived from the bits that land on its
