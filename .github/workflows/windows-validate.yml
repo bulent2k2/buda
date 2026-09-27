@@ -290,20 +290,39 @@ jobs:
         run: |
           C:\cygwin64\bin\bash.exe -leo pipefail -c "cd $(cygpath '%CD%') && python3 -m pip install --user -r src/web/requirements.txt && echo WEB DEPS OK || echo 'WEB DEPS UNAVAILABLE (expected: pydantic-core needs Rust; no Cygwin wheels)'"
 
-      - name: Trace the configure (diagnostic)
-        # Run 40 hung in the build step's configure for 82 minutes, silently,
-        # right after the JCC-erratum status line.  What comes next is an
-        # execute_process of `python3 -c "import pybind11; ..."` and then
-        # find_package(pybind11), whose FindPython queries the interpreter --
-        # both first run against Cygwin's Python 3.12 there.  The import runs
-        # here under a timeout, and the real configure under --trace-expand in
-        # a scratch directory, so the log names the command that never
-        # returns.  continue-on-error: its job is to REPORT.
+      - name: Probe the configure (diagnostic)
+        # Runs 40 and 41 hung in the build step's configure, silently, right
+        # after the JCC-erratum status line, for 82 and 30 minutes, and a
+        # `timeout 600` around a traced configure did not end it either (run
+        # 41: no exit status and no trace tail).  So the probe relies on no
+        # signal: it runs each configure in the background with its output
+        # in files, and past a deadline lists the processes (the one CMake
+        # waits on is the answer), kills them by force and prints the
+        # output, whose last trace line is the command in flight.  Three
+        # minimal projects take the Python discovery apart.
+        # continue-on-error: its job is to REPORT.
         shell: cmd
         continue-on-error: true
-        timeout-minutes: 15
+        timeout-minutes: 30
         run: |
-          C:\cygwin64\bin\bash.exe -lc "cd $(cygpath '%CD%') && timeout 60 python3 -c 'import pybind11; print(pybind11.get_cmake_dir())'; echo import-pybind11 rc=$?; timeout 600 cmake -S . -B build-trace -DBUDA_ARCH=x86-64-v2 --trace-expand > trace.log 2>&1; echo traced-configure rc=$?; tail -n 60 trace.log; true"
+          C:\cygwin64\bin\bash.exe -lc "cd $(cygpath '%CD%') && bash .github/scripts/cygwin_configure_probe.sh"
+
+      - name: The probe's files, if it was cut off
+        # The probe prints everything itself; this is for a probe the step
+        # cap stopped before it finished (no DONE marker).
+        if: always()
+        shell: cmd
+        continue-on-error: true
+        run: |
+          C:\cygwin64\bin\bash.exe -lc "cd $(cygpath '%CD%') && if test ! -f cyg-probe/DONE; then for f in cyg-probe/*.out; do test -f $f && echo == $f && tail -n 50 $f; done; fi; true"
+
+      - name: Stop if the configure hangs
+        # A configure the probe saw hang would hang here too, and the build
+        # step would spend its whole cap on it; the job log is also read from
+        # its tail, so ending here keeps the probe's report in view.
+        shell: cmd
+        run: |
+          C:\cygwin64\bin\bash.exe -lc "cd $(cygpath '%CD%') && if test -f cyg-probe/HUNG || test ! -f cyg-probe/DONE; then echo a configure hung in the probe, or the probe did not finish:; cat cyg-probe/HUNG; exit 1; fi"
 
       - name: Build with the repo's own wrapper (bin/bb)
         # THE point of this path: the documented-for-Linux command, verbatim —
