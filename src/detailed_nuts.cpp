@@ -18,6 +18,7 @@
 #include "conn_topology.h"
 #include "nuts_geom.h"
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
@@ -49,9 +50,12 @@ DetailedNUTSEngine::DetailedNUTSEngine(const RoutingGridStack& stack)
             if (word == "reach")      short_reach_ = true;
             else if (word == "cull")  short_cull_  = true;
             else if (!word.empty() && word != "off") {
-                static bool warned = false;
-                if (!warned) {
-                    warned = true;
+                // Atomic: the parallel trial sweep constructs engines on its
+                // worker threads, and a plain flag there is a data race
+                // (Codex P2 on #966).  The exchange also keeps it to ONE
+                // line, however many workers read the word at once.
+                static std::atomic<bool> warned{false};
+                if (!warned.exchange(true)) {
                     std::cerr << "[DetailedNUTS] WARNING: BUDA_DNUTS_SHORT_GUARD"
                               << " word '" << word << "' is not reach, cull or"
                               << " off — ignored.\n";
