@@ -23,13 +23,14 @@ is deliberate — it keeps the double-based congestion/NUTS math bit-reproducibl
 across FMA-capable CPUs so the golden-placement tests stay exact (see the
 comment in `CMakeLists.txt` and `docs/internal/test/`).
 
-On x86-64 GCC/Clang builds CMake also adds the Intel JCC-erratum mitigation,
-at compile and link: `-Wa,-mbranches-within-32B-boundaries` for GCC, which
-needs **binutils 2.34 or newer** (Ubuntu 20.04 and later), or Clang's
+On x86-64 GCC/Clang builds (not MSVC, not macOS) CMake also adds the Intel
+JCC-erratum mitigation, probed for the C and the C++ compiler separately:
+`-Wa,-mbranches-within-32B-boundaries` for GCC, which needs **binutils 2.34
+or newer** (the release that added it; Ubuntu 20.04 ships 2.34), or Clang's
 `-mbranches-within-32B-boundaries`.  It moves code and changes no result.  A
-toolchain with neither builds without it and says so at configure, and
-`-DBUDA_JCC_MITIGATION=OFF` opts out.  Why it is there:
-[internal/jcc_erratum.md](internal/jcc_erratum.md).
+toolchain with neither builds without it, the configure line says whether it
+was applied and why not, and `-DBUDA_JCC_MITIGATION=OFF` opts out.  Why it is
+there, and what it costs: [internal/jcc_erratum.md](internal/jcc_erratum.md).
 
 ## Required — runtime & tests
 

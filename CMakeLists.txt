@@ -39,52 +39,83 @@ else()
 endif()
 
 # Intel JCC-erratum mitigation (docs/internal/jcc_erratum.md).  On Skylake
-# and the cores derived from it, Cascade Lake among them, a jump that crosses or
-# ends on a 32-byte boundary is kept out of the decoded-instruction cache by
-# the erratum's microcode fix and runs markedly slower.  Which jumps those are
-# is decided by where the LINKER puts the code, so a hot loop's speed follows
-# edits to unrelated files: measured on Cascade Lake, the planner stage of
-# chip_bottomup went from 30.7 s to 37.1 s when PR #966 grew bind_nuts.cpp,
-# with an unchanged hot loop (RoutingGrid::count_signal_tracks_in), and without
-# LTO the gap reversed on identical planner object code.  The assembler pads
-# every jump off those boundaries, which changes no instruction's meaning;
-# with it the two layouts measure 31.8 s and 32.8 s.  Passed at the link as
-# well, since under LTO the machine code is generated there.  x86-64 targets
-# only (a universal or arm64 macOS build skips it); GCC takes the GNU
-# assembler spelling and Clang its own driver flag, and a toolchain with
-# neither (MSVC) builds without it.  -DBUDA_JCC_MITIGATION=OFF opts out.
+# and the cores derived from it, Cascade Lake among them, the microcode fix
+# for the erratum keeps a jump that crosses or ends on a 32-byte boundary out
+# of the decoded-instruction cache, and it runs markedly slower.  Which jumps
+# land there is decided by the linker, so a hot loop's speed follows edits to
+# unrelated files: on Cascade Lake the planner stage of chip_bottomup went
+# from 30.7 s to 37.1 s across PR #966, which did not touch the planner's
+# code.  With this flag the assembler pads the jumps it can move (conditional
+# jumps, a macro-fused compare-and-jump kept whole, direct unconditional
+# jumps; not indirect jumps, calls or returns) off those boundaries, which
+# changes no instruction's meaning.  The cost and the evidence are on that
+# page.  -DBUDA_JCC_MITIGATION=OFF opts out.
+#
+# GCC takes the GNU assembler spelling (binutils 2.34 or newer), Clang its
+# own driver flag; each language's compiler is probed separately because
+# sqlite3.c is C, and a C compiler need not be the C++ one's kind.  Probed on
+# every configure, since the answer belongs to the toolchain in use now.
+# The two extension modules are linked with LTO, which generates their code
+# at the link, so they get the flag there too (after the targets, below).
+# Not applied:
+#   - MSVC: its switch, /QIntel-jcc-erratum, is untested here;
+#   - macOS: AppleClang's LTO link does not hand the flag to the code
+#     generator, and nothing here can run an Intel Mac to check;
+#   - any target that is not x86-64.
 option(BUDA_JCC_MITIGATION
        "Pad x86 jumps off 32-byte boundaries (Intel JCC erratum)" ON)
-set(BUDA_JCC_FLAG_IN_USE "" CACHE INTERNAL "the JCC-mitigation flag applied")
-set(_buda_x86_target FALSE)
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|amd64)$"
-        AND (NOT APPLE OR NOT CMAKE_OSX_ARCHITECTURES
-             OR CMAKE_OSX_ARCHITECTURES STREQUAL "x86_64"))
-    set(_buda_x86_target TRUE)
-endif()
-if(BUDA_JCC_MITIGATION AND NOT MSVC AND _buda_x86_target)
+set(BUDA_JCC_FLAG_IN_USE "" CACHE INTERNAL "the C++ compiler's JCC flag")
+set(BUDA_JCC_FLAG_C "" CACHE INTERNAL "the C compiler's JCC flag")
+if(NOT BUDA_JCC_MITIGATION)
+    set(_buda_jcc_why "BUDA_JCC_MITIGATION=OFF")
+elseif(MSVC)
+    set(_buda_jcc_why "MSVC (/QIntel-jcc-erratum is untested here)")
+elseif(APPLE)
+    set(_buda_jcc_why "macOS (AppleClang's LTO link drops the flag)")
+elseif(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|amd64)$")
+    set(_buda_jcc_why "not an x86-64 target (${CMAKE_SYSTEM_PROCESSOR})")
+else()
+    include(CheckCCompilerFlag)
     include(CheckCXXCompilerFlag)
-    check_cxx_compiler_flag("-Wa,-mbranches-within-32B-boundaries"
-                            BUDA_JCC_GNU_AS)
-    if(BUDA_JCC_GNU_AS)
-        set(BUDA_JCC_FLAG_IN_USE "-Wa,-mbranches-within-32B-boundaries"
-            CACHE INTERNAL "the JCC-mitigation flag applied")
+    set(_buda_jcc_gnu "-Wa,-mbranches-within-32B-boundaries")
+    set(_buda_jcc_clang "-mbranches-within-32B-boundaries")
+    foreach(_probe BUDA_JCC_CXX_GNU_AS BUDA_JCC_CXX_DRIVER
+                   BUDA_JCC_C_GNU_AS BUDA_JCC_C_DRIVER)
+        unset(${_probe} CACHE)
+    endforeach()
+    check_cxx_compiler_flag("${_buda_jcc_gnu}" BUDA_JCC_CXX_GNU_AS)
+    if(BUDA_JCC_CXX_GNU_AS)
+        set(BUDA_JCC_FLAG_IN_USE "${_buda_jcc_gnu}" CACHE INTERNAL "")
     else()
-        check_cxx_compiler_flag("-mbranches-within-32B-boundaries"
-                                BUDA_JCC_DRIVER)
-        if(BUDA_JCC_DRIVER)
-            set(BUDA_JCC_FLAG_IN_USE "-mbranches-within-32B-boundaries"
-                CACHE INTERNAL "the JCC-mitigation flag applied")
+        check_cxx_compiler_flag("${_buda_jcc_clang}" BUDA_JCC_CXX_DRIVER)
+        if(BUDA_JCC_CXX_DRIVER)
+            set(BUDA_JCC_FLAG_IN_USE "${_buda_jcc_clang}" CACHE INTERNAL "")
         endif()
     endif()
+    check_c_compiler_flag("${_buda_jcc_gnu}" BUDA_JCC_C_GNU_AS)
+    if(BUDA_JCC_C_GNU_AS)
+        set(BUDA_JCC_FLAG_C "${_buda_jcc_gnu}" CACHE INTERNAL "")
+    else()
+        check_c_compiler_flag("${_buda_jcc_clang}" BUDA_JCC_C_DRIVER)
+        if(BUDA_JCC_C_DRIVER)
+            set(BUDA_JCC_FLAG_C "${_buda_jcc_clang}" CACHE INTERNAL "")
+        endif()
+    endif()
+    string(CONCAT _buda_jcc_why "the ${CMAKE_CXX_COMPILER_ID} C++ compiler "
+           "takes neither ${_buda_jcc_gnu} nor ${_buda_jcc_clang}")
 endif()
 if(BUDA_JCC_FLAG_IN_USE)
-    add_compile_options(${BUDA_JCC_FLAG_IN_USE})
-    add_link_options(${BUDA_JCC_FLAG_IN_USE})
-    message(STATUS "BUDA JCC-erratum mitigation: ${BUDA_JCC_FLAG_IN_USE}")
-elseif(BUDA_JCC_MITIGATION AND NOT MSVC AND _buda_x86_target)
-    message(STATUS "BUDA JCC-erratum mitigation: no flag for it in this "
-                   "toolchain, built without")
+    add_compile_options("$<$<COMPILE_LANGUAGE:CXX>:${BUDA_JCC_FLAG_IN_USE}>")
+    if(BUDA_JCC_FLAG_C)
+        add_compile_options("$<$<COMPILE_LANGUAGE:C>:${BUDA_JCC_FLAG_C}>")
+        set(_buda_jcc_c "C: ${BUDA_JCC_FLAG_C}")
+    else()
+        set(_buda_jcc_c "C: none, so sqlite3.c is unpadded")
+    endif()
+    message(STATUS "BUDA JCC-erratum mitigation: ${BUDA_JCC_FLAG_IN_USE} "
+                   "(${_buda_jcc_c})")
+else()
+    message(STATUS "BUDA JCC-erratum mitigation: off, ${_buda_jcc_why}")
 endif()
 
 # assert()s are cheap correctness guards (e.g. ConnTopology's slide-window
@@ -266,6 +297,17 @@ set_target_properties(buda PROPERTIES
     INSTALL_RPATH "${PLATFORM_RPATH}"
     BUILD_RPATH   "${CMAKE_CURRENT_BINARY_DIR}"
 )
+
+# The two extension modules are linked with LTO (pybind11's default; the
+# NO_EXTRAS builds above are not), so their machine code is generated at the
+# link, and the JCC flag (the block near the top of this file) has to be
+# there too: Clang's driver, for one, hands it to LTO code generation only if
+# it is on the link line.
+if(BUDA_JCC_FLAG_IN_USE AND NOT BUDA_PYBIND_EXTRAS)
+    foreach(_mod buda_db buda)
+        target_link_options(${_mod} PRIVATE ${BUDA_JCC_FLAG_IN_USE})
+    endforeach()
+endif()
 
 if(MINGW)
     # Native CPython does not search PATH for an extension's DLL dependencies

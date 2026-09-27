@@ -34,8 +34,10 @@ but the flag leaves them where they are.  So the jumps are counted in two
 groups:
 
   padded   jcc and direct jmp -- the flag must leave none of these on a
-           boundary, and a mitigated build measures a handful: code the
-           assembler never saw, such as the C runtime's startup objects
+           boundary.  A GCC build measures one or none per artifact, in
+           code the assembler never saw (the C runtime's crtbeginS.o); a
+           Clang build a few dozen, because LLVM does not pad a tail call
+           (a `jmp` to another function's entry)
   exposed  indirect jmp (e.g. a switch table's `notrack jmp *%rax`) -- the
            flag cannot move these, so their count is information, not a
            defect

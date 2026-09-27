@@ -18,7 +18,7 @@
 A mitigation flag lost on its way to the code generator changes nothing but
 the speed, and under LTO that code is generated at the LINK, so nothing but
 the built artifacts can show the flag took.  With it on, the jumps it pads are
-almost never left on a 32-byte boundary; without it about 12 % are.
+almost never left on a 32-byte boundary; without it 12-13 % are.
 
 Where the flag must be in force -- CI's pinned runner image -- set
 BUDA_JCC_STRICT=1 and a build that applied no flag FAILS here instead of
@@ -100,6 +100,9 @@ def _artifacts():
     return out
 
 
+# `mid`: it disassembles all three artifacts (~3 s).  CI runs every tier,
+# and there BUDA_JCC_STRICT makes a missing flag a failure.
+@pytest.mark.mid
 def test_the_built_artifacts_carry_the_mitigation():
     strict = os.environ.get("BUDA_JCC_STRICT") == "1"
     if platform.machine().lower() not in ("x86_64", "amd64"):
@@ -127,10 +130,19 @@ def test_the_built_artifacts_carry_the_mitigation():
         c = jcc_audit.audit(path)
         n, bad = c["padded"]
         assert n > 1000, f"{path.name}: the disassembly held almost no jumps"
-        # Measured with the flag: a few dozen at most, all in code the
-        # assembler never saw (the C runtime's startup objects); about 12 %
-        # without it.
-        assert bad <= 0.001 * n, (
+        # GCC's spelling (GNU as) measured 1, 1 and 0, the one being
+        # register_tm_clones in the C runtime's crtbeginS.o, which the build
+        # links in already assembled; 12-13 % of the jumps are on a boundary
+        # without the flag.  The bound is absolute there, so that one
+        # translation unit built without the flag -- a few hundred jumps, a
+        # few dozen of them on a boundary -- still fails.  LLVM does not pad
+        # a tail call (a `jmp` to another function's entry), and a Clang
+        # build measured 55 of 83,730 left in buda, all but one of them
+        # `pop; jmp <f>`; that is still 0.07 % against 12 %.
+        uses_gnu_as = flag.startswith("-Wa,") and (
+            not needs_c or c_flag.startswith("-Wa,"))
+        limit = 8 if uses_gnu_as else 0.002 * n
+        assert bad <= limit, (
             f"{path.name}: {bad} of {n} jcc/direct jmp cross or end on a "
             f"32-byte boundary although CMake applied {flag!r}: the flag did "
             f"not reach the code generator")
