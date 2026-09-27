@@ -273,6 +273,80 @@ def test_a_partner_that_placed_no_bits_stretches_nothing():
     assert _wire(res, 2, 0).track_position == pytest.approx(3.5)
 
 
+# ── the merged bottom-up route ─────────────────────────────────────────────
+
+def _copy(res, dy, bundle_map):
+    """The bottom-up copy of `res`'s wires at an instance `dy` above the
+    reference, re-keyed to the sibling's bundles (offset_net_segment, what
+    stage c does for an upright instance)."""
+    return [buda.offset_net_segment(ns, 0, dy, bundle_map[ns.bundle_id],
+                                    ns.layer == M6)
+            for ns in res.net_segments]
+
+
+def test_a_template_short_is_counted_at_every_copy_of_the_template():
+    # The bottom-up merge in miniature: the reference solve's bundles 1 and
+    # 2 short (the scenario), and the template's copy at another instance
+    # carries the same two wires as bundles 11 and 12.  The rest solve is
+    # handed reference and copy as fixed bits and drops every pair of two
+    # fixed bits — not its run's — so summing the two solves' shorts counted
+    # the reference's and missed the copy's: the healers were blind to
+    # exactly the shorts a template move fixes (Codex P1 on #966).  The
+    # merged route is recounted instead, and has both.
+    segs = _scenario()
+    ref = _run(segs)
+    copy = _copy(ref, 1000, {1: 11, 2: 12})
+    rest_segs = [_seg(3, 0, M6, 500.0, 600.0, 0.0, 14.0, anchor=3.0)]
+    rest = _run(rest_segs, fixed=list(ref.net_segments) + copy)
+    solves = list(ref.cross_shorts) + list(rest.cross_shorts)
+    assert [(c.bundle_a, c.bundle_b) for c in solves] == [(1, 2)]
+    route = list(ref.net_segments) + copy + list(rest.net_segments)
+    merged = buda.cross_shorts_in(route, segs + rest_segs)
+    assert [(c.bundle_a, c.bundle_b) for c in merged] == [(1, 2), (11, 12)]
+    # Named like the solve names its own: the copy's pair is the
+    # reference's, translated.
+    ours, theirs = merged
+    assert (ours.seg_a, ours.bit_a, ours.seg_b, ours.bit_b) == \
+        (theirs.seg_a, theirs.bit_a, theirs.seg_b, theirs.bit_b)
+    assert (theirs.s_lo, theirs.s_hi) == pytest.approx((203.0, 206.5))
+    assert (theirs.p_lo, theirs.p_hi) == pytest.approx((1003.0, 1004.0))
+    # And it is the audit's count of the same route.
+    res = buda.DetailedNUTSResult()
+    res.net_segments = route
+    assert len(_audit(res)) == len(merged)
+
+
+def _shield(bundle, track):
+    ns = buda.NetSegment()
+    ns.bundle_id, ns.seg_idx, ns.bit_index = bundle, 0, -1
+    ns.layer, ns.track_position, ns.width = M6, track, 1.0
+    ns.span_lo, ns.span_hi = 100.0, 300.0
+    ns.is_shield = True
+    return ns
+
+
+def _governed(bundle, shield_net):
+    bs = _seg(bundle, 0, M6, 100.0, 300.0, 0.0, 14.0)
+    spec = buda.NdrSpec()
+    spec.shield_mode, spec.shield_net = 1, shield_net
+    bs.ndr = spec
+    return bs
+
+
+@pytest.mark.parametrize("nets, shorts", [
+    (("GND", "GND"), 0),     # one net: shared shield metal is no short
+    (("GND", "VSS"), 1),     # two names are two nets, as the audit reads
+    (("VDD", "GND"), 1),     # them off the names persistence writes
+])
+def test_the_recount_names_a_shield_by_its_rules_net(nets, shorts):
+    # Two bundles' shields on one track: whether that is a short is a
+    # question of the NETS their rules name, which the recount reads off
+    # the bus segments of the whole route — copies' bundles included.
+    wires = [_shield(1, 3.5), _shield(2, 3.5)]
+    bus = [_governed(1, nets[0]), _governed(2, nets[1])]
+    assert len(buda.cross_shorts_in(wires, bus)) == shorts
+
+
 # ── the env seed ───────────────────────────────────────────────────────────
 
 def _seeded(value):

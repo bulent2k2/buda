@@ -548,6 +548,11 @@ void bind_nuts(py::module_& m) {
         .def("run", &DetailedNUTSEngine::run, py::arg("bus_segments"),
              py::arg("emit_vias") = true, py::arg("abort_unplaced") = -1);
 
+    m.def("cross_shorts_in", &cross_shorts_in,
+          py::arg("net_segments"), py::arg("bus_segments"),
+          "Every cross-bundle short in a whole route (fixed copies included), "
+          "named by wire and in the audit's order, with DetailedNUTS's own "
+          "net identity — the bottom-up merge's recount (issue #962).");
     m.def("offset_net_segment", &offset_net_segment,
           py::arg("ns"), py::arg("dx"), py::arg("dy"),
           py::arg("new_bundle_id"), py::arg("horiz"),

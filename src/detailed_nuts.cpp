@@ -476,6 +476,91 @@ void DetailedNUTSEngine::cull_keepout_crossers(DetailedNUTSResult& result) const
     }
 }
 
+// The shield net each bundle's rule names ("GND" for a bundle with no active
+// rule), keyed by bundle: the identity a shield wire takes below.
+static std::map<int, std::string> shield_nets_of(
+        const std::vector<BusSegment>& bus_segs) {
+    std::map<int, std::string> out;
+    for (const auto& bs : bus_segs)
+        out.emplace(bs.bundle_id,
+                    bs.ndr.active() ? bs.ndr.shield_net : "GND");
+    return out;
+}
+
+// Net identity with no names in hand: a signal bit is its own net per
+// (bundle, bit) — the bundler puts every net in exactly one bundle, so two
+// bundles never carry the same one — and a shield is the net its rule
+// names, so two bundles' GND shields are one net, as the audit reads them
+// off the names persistence writes (_wire_nets).  Only wires [0, n_named)
+// may take their rule's net; a shield past that (a fixed bit whose rule is
+// not in this solve) is its own net, which can only over-count.
+static std::vector<int> engine_net_ids(
+        const std::vector<const NetSegment*>& wires,
+        const std::map<int, std::string>& shield_net_of, size_t n_named) {
+    std::map<std::string, int> id_by_name;
+    std::map<std::pair<int, int>, int> id_by_wire;
+    std::vector<int> net(wires.size());
+    for (size_t i = 0; i < wires.size(); ++i) {
+        const NetSegment& ns = *wires[i];
+        const int next = (int)(id_by_name.size() + id_by_wire.size());
+        auto sn = shield_net_of.end();
+        if (ns.is_shield && i < n_named)
+            sn = shield_net_of.find(ns.bundle_id);
+        net[i] = (sn != shield_net_of.end())
+            ? id_by_name.emplace(sn->second, next).first->second
+            : id_by_wire.emplace(std::make_pair(ns.bundle_id, ns.bit_index),
+                                 next).first->second;
+    }
+    return net;
+}
+
+// A wire's place in the audit's order: (bundle, seg, bit).
+static std::tuple<int, int, int> wire_rank(const NetSegment& ns) {
+    return std::make_tuple(ns.bundle_id, ns.seg_idx, ns.bit_index);
+}
+
+// The audit's order (each pair's smaller (bundle, seg, bit) first, the pairs
+// sorted by it), so nothing downstream depends on the order the sweep met
+// the pairs in.
+static void to_audit_order(std::vector<WireOverlap>& hits,
+                           const std::vector<const NetSegment*>& wires) {
+    auto rank = [&](int i) { return wire_rank(*wires[(size_t)i]); };
+    for (auto& h : hits)
+        if (rank(h.b) < rank(h.a)) std::swap(h.a, h.b);
+    std::sort(hits.begin(), hits.end(),
+              [&](const WireOverlap& x, const WireOverlap& y) {
+                  if (rank(x.a) != rank(y.a)) return rank(x.a) < rank(y.a);
+                  if (rank(x.b) != rank(y.b)) return rank(x.b) < rank(y.b);
+                  return x.s_lo < y.s_lo;
+              });
+}
+
+static CrossShort cross_short_of(const NetSegment& a, const NetSegment& b,
+                                 const WireOverlap& h) {
+    return {a.bundle_id, a.seg_idx, a.bit_index,
+            b.bundle_id, b.seg_idx, b.bit_index,
+            a.layer, h.s_lo, h.s_hi, h.p_lo, h.p_hi};
+}
+
+std::vector<CrossShort> cross_shorts_in(
+        const std::vector<NetSegment>& wires,
+        const std::vector<BusSegment>& bus_segs) {
+    std::vector<const NetSegment*> ptrs;
+    ptrs.reserve(wires.size());
+    for (const auto& ns : wires)
+        if (ns.placed) ptrs.push_back(&ns);
+    const std::vector<int> net =
+        engine_net_ids(ptrs, shield_nets_of(bus_segs), ptrs.size());
+    std::vector<WireOverlap> hits = find_cross_bundle_overlaps(ptrs, net);
+    to_audit_order(hits, ptrs);
+    std::vector<CrossShort> out;
+    out.reserve(hits.size());
+    for (const auto& h : hits)
+        out.push_back(cross_short_of(*ptrs[(size_t)h.a], *ptrs[(size_t)h.b],
+                                     h));
+    return out;
+}
+
 int DetailedNUTSEngine::guard_cross_shorts(
         const std::vector<BusSegment>& bus_segs,
         DetailedNUTSResult& result) const {
@@ -492,33 +577,13 @@ int DetailedNUTSEngine::guard_cross_shorts(
     for (const auto& ns : fixed_bits_) wires.push_back(&ns);
 
     std::map<std::pair<int, int>, const BusSegment*> seg_of;
-    std::map<int, std::string> shield_net_of;
-    for (const auto& bs : bus_segs) {
+    for (const auto& bs : bus_segs)
         seg_of[{bs.bundle_id, bs.seg_idx}] = &bs;
-        shield_net_of.emplace(bs.bundle_id,
-                              bs.ndr.active() ? bs.ndr.shield_net : "GND");
-    }
-    // Net identity with no names in hand: a signal bit is its own net per
-    // (bundle, bit) — the bundler puts every net in exactly one bundle, so
-    // two bundles never carry the same one — and a shield is the net its
-    // rule names, so two bundles' GND shields are one net, as the audit reads
-    // them off the names persistence writes (_wire_nets).  A fixed shield's
-    // rule is not in this run, so it is its own net: that can only
-    // over-count, never remove a wire, because a shield is never culled.
-    std::map<std::string, int> id_by_name;
-    std::map<std::pair<int, int>, int> id_by_wire;
-    std::vector<int> net(wires.size());
-    for (size_t i = 0; i < wires.size(); ++i) {
-        const NetSegment& ns = *wires[i];
-        const int next = (int)(id_by_name.size() + id_by_wire.size());
-        auto sn = shield_net_of.end();
-        if (ns.is_shield && (int)i < n_run)
-            sn = shield_net_of.find(ns.bundle_id);
-        net[i] = (sn != shield_net_of.end())
-            ? id_by_name.emplace(sn->second, next).first->second
-            : id_by_wire.emplace(std::make_pair(ns.bundle_id, ns.bit_index),
-                                 next).first->second;
-    }
+    // A fixed shield's rule is not in this run, so only the run's wires take
+    // their rule's net (engine_net_ids): a fixed shield is its own net, which
+    // can only over-count, never remove a wire, since a shield is never culled.
+    const std::vector<int> net =
+        engine_net_ids(wires, shield_nets_of(bus_segs), (size_t)n_run);
     std::vector<WireOverlap> hits = find_cross_bundle_overlaps(wires, net);
     hits.erase(std::remove_if(hits.begin(), hits.end(),
                               [&](const WireOverlap& h) {
@@ -528,20 +593,10 @@ int DetailedNUTSEngine::guard_cross_shorts(
     result.num_cross_shorts = (int)hits.size();
     if (hits.empty()) return 0;
 
-    // The audit's order (the pair's smaller (bundle, seg, bit) first), so
-    // which wire goes never depends on the order the sweep met the pairs in.
-    auto rank = [&](int i) {
-        const NetSegment& ns = *wires[(size_t)i];
-        return std::make_tuple(ns.bundle_id, ns.seg_idx, ns.bit_index);
-    };
-    for (auto& h : hits)
-        if (rank(h.b) < rank(h.a)) std::swap(h.a, h.b);
-    std::sort(hits.begin(), hits.end(),
-              [&](const WireOverlap& x, const WireOverlap& y) {
-                  if (rank(x.a) != rank(y.a)) return rank(x.a) < rank(y.a);
-                  if (rank(x.b) != rank(y.b)) return rank(x.b) < rank(y.b);
-                  return x.s_lo < y.s_lo;
-              });
+    // The audit's order, so which wire goes never depends on the order the
+    // sweep met the pairs in.
+    to_audit_order(hits, wires);
+    auto rank = [&](int i) { return wire_rank(*wires[(size_t)i]); };
 
     int culled = 0, kept = 0;
     std::vector<char> gone((size_t)n_run, 0);   // run wires the cull removes
@@ -588,12 +643,8 @@ int DetailedNUTSEngine::guard_cross_shorts(
         if ((h.a < n_run && gone[(size_t)h.a]) ||
             (h.b < n_run && gone[(size_t)h.b]))
             continue;
-        const NetSegment& a = *wires[(size_t)h.a];
-        const NetSegment& b = *wires[(size_t)h.b];
         result.cross_shorts.push_back(
-            {a.bundle_id, a.seg_idx, a.bit_index,
-             b.bundle_id, b.seg_idx, b.bit_index,
-             a.layer, h.s_lo, h.s_hi, h.p_lo, h.p_hi});
+            cross_short_of(*wires[(size_t)h.a], *wires[(size_t)h.b], h));
     }
     if (culled > 0) {
         // `wires` points into net_segments: nothing reads it past here.

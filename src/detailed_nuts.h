@@ -251,7 +251,9 @@ struct DetailedNUTSResult {
     int num_short_bits = 0;
     // The cross-bundle shorts still in net_segments at return: every pair
     // num_cross_shorts counted when the cull is off, and with it on only the
-    // pairs neither of whose wires could be removed.  The stage-b healers
+    // pairs neither of whose wires could be removed.  A bottom-up MERGED
+    // result recounts it over the whole merged route (cross_shorts_in),
+    // copies included.  The stage-b healers
     // read it (issue #962; on by default, BUDA_HEAL_SHORTS=0 turns it off) —
     // the size as part of their metric, the wires to find the segments to
     // move.
@@ -307,6 +309,20 @@ struct WireOverlap { int a, b; double s_lo, s_hi, p_lo, p_hi; };
 std::vector<WireOverlap> find_cross_bundle_overlaps(
     const std::vector<const NetSegment*>& wires,
     const std::vector<int>& net);
+
+// Every cross-bundle short in a whole ROUTE — `wires` is all of its placed
+// bit wires, fixed copies included, with no run/fixed distinction — named
+// the way DetailedNUTSEngine names the shorts a solve leaves (the engine's
+// net identity: a bit per (bundle, bit), a shield by its rule's net from
+// `bus_segs`), in the audit's order.  The bottom-up DNUTS path merges a
+// reference solve, its COPIES and the rest solve, and a short between two
+// reference bundles of one template is copied into every sibling instance
+// with them; neither solve sees those (the rest solve drops pairs of two
+// fixed bits), so the merged route is counted here, by the session's merge
+// and the parallel sweep alike (Codex P1 on #966).
+std::vector<CrossShort> cross_shorts_in(
+    const std::vector<NetSegment>& wires,
+    const std::vector<BusSegment>& bus_segs);
 
 // ── R6 shield bonding (opt-in per rule, `bond`) ──────────────────────────
 // Strap every EMITTED shield in `result` to the power grid: a via wherever

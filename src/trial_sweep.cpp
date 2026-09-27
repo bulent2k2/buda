@@ -97,10 +97,11 @@ bool topo_disconnected(const Topology& topo, const Floorplan& fp, int bid) {
 // The _run_detailed_nuts solve path (fast-trial shape: vias OFF; the
 // plain path honors the abort bar, the bottom-up merge path ignores it —
 // partial r1/r2 results cannot be merged meaningfully).  Returns the
-// merged unplaced count, plus the shorts left (the two solves' own, as the
-// session's merge sums them) under count_shorts — the DNUTS values the
-// metric reads.  An aborted solve stops before counting shorts, which
-// cannot matter: its unplaced count alone is already over the bar.
+// merged unplaced count, plus the shorts left in the merged route (as the
+// session's merge recounts them, cross_shorts_in) under count_shorts — the
+// DNUTS values the metric reads.  An aborted solve stops before counting
+// shorts, which cannot matter: its unplaced count alone is already over the
+// bar.
 int run_dnuts(const std::vector<BusSegment>& bus, const SweepDnutsCtx& dn) {
     if (dn.ref_ids.empty() && dn.skip_ids.empty()) {
         DetailedNUTSEngine e(*dn.grid);
@@ -142,10 +143,18 @@ int run_dnuts(const std::vector<BusSegment>& bus, const SweepDnutsCtx& dn) {
     fixed.insert(fixed.end(), copies.begin(), copies.end());
     e2.add_fixed_bits(fixed);
     DetailedNUTSResult r2 = e2.run(rest_segs, /*emit_vias=*/false);
-    return r1.num_unplaced + extra_unplaced + r2.num_unplaced +
-           (dn.count_shorts
-                ? (int)(r1.cross_shorts.size() + r2.cross_shorts.size())
-                : 0);
+    int shorts = 0;
+    if (dn.count_shorts) {
+        // The merged route, as the session's merge recounts it: a short
+        // between two reference bundles is copied into every sibling, and
+        // neither solve counts those (Codex P1 on #966).
+        std::vector<NetSegment> route(r1.net_segments);
+        route.insert(route.end(), copies.begin(), copies.end());
+        route.insert(route.end(), r2.net_segments.begin(),
+                     r2.net_segments.end());
+        shorts = (int)cross_shorts_in(route, bus).size();
+    }
+    return r1.num_unplaced + extra_unplaced + r2.num_unplaced + shorts;
 }
 
 // Realized abstract WL — the refine metric's wl_now(), 1:1: the raw double

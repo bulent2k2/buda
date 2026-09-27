@@ -2576,14 +2576,20 @@ class NutsFlowMixin:
             # The #962 short guard's counts, summed like the keepout cull's.
             # A reference bit the cull removed is missing from every copy
             # too; the copies' share is in extra_unplaced above, as for any
-            # other reference bit that did not place, and the shorts counted
-            # are the two solves' own (eng2 sees each copy, but a pair of two
-            # copies belongs to neither solve).
+            # other reference bit that did not place.  num_cross_shorts stays
+            # the two solves' own detection count (observation).
             merged.num_cross_shorts = (r1.num_cross_shorts
                                        + r2.num_cross_shorts)
             merged.num_short_bits = r1.num_short_bits + r2.num_short_bits
-            merged.cross_shorts = (list(r1.cross_shorts)
-                                   + list(r2.cross_shorts))
+            # The shorts the healers read are recounted over the MERGED
+            # route: a short between two reference bundles of one template is
+            # copied into every sibling instance with them, and neither solve
+            # sees those — eng1 has no copies, and eng2 drops a pair of two
+            # fixed bits.  Summing the two solves' lists undercounted exactly
+            # the shorts a template move would fix (Codex P1 on #966).  The
+            # parallel sweep counts the same route the same way.
+            merged.cross_shorts = buda.cross_shorts_in(
+                merged.net_segments, bus_segs)
             # R6 straps are RE-DERIVED over the merged result rather than
             # copied: the pass is idempotent and reads placed shields
             # against the REAL grid, so every occurrence — reference, copy,

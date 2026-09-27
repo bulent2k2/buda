@@ -196,6 +196,93 @@ def test_the_open_segment_memo_follows_the_knob(monkeypatch):
     assert s._open_segments() == []
 
 
+# ── the bottom-up merge: a template's short, at every copy ─────────────────
+
+def _template_session():
+    """proc_cell — two children and TWO cell-local 4-bit buses, one each
+    way — placed twice on the track pitch, marked bottom-up and routed to
+    NUTS: DNUTS solves the reference instance and copies it to the other."""
+    db = buda.BDB(":memory:")
+    db.add_cell("proc_cell", 420, 200)
+    db.add_cell("pipe_cell", 110, 80)
+    db.add_inst_to_cell("proc_cell", "pa_i", "pipe_cell", 20, 60)
+    db.add_inst_to_cell("proc_cell", "pb_i", "pipe_cell", 155, 60)
+    db.add_inst("proc_i1", "proc_cell", "", 0, 0)
+    db.add_inst("proc_i2", "proc_cell", "", 500, 300)
+    for k in (1, 2):
+        for i in range(4):
+            db.add_net_pins(f"ab{k}_{i}", f"proc_i{k}/pa_i.out",
+                            [f"proc_i{k}/pb_i.in"])
+            db.add_net_pins(f"ba{k}_{i}", f"proc_i{k}/pb_i.out",
+                            [f"proc_i{k}/pa_i.in"])
+    buda.BustermGen(db).derive(1)
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    s.bdb = db
+    cmds = ["def_layer 6 M6 H TOP 50", "def_layer 7 M7 V TOP 50",
+            "def_layer 4 M4 H 50", "def_layer 5 M5 V 50"]
+    cmds += [f"def_track_pattern {lid} 0 SIGNAL 1 1" for lid in (6, 7, 4, 5)]
+    cmds += ["run_hier_bundler", "generate_hier_topologies",
+             "set_bottom_up proc_cell", "run_planner hier", "run_nuts"]
+    with contextlib.redirect_stdout(io.StringIO()):
+        for c in cmds:
+            s.do_command(c)
+    return s
+
+
+def test_the_bottom_up_merge_counts_a_template_short_at_every_copy(
+        monkeypatch):
+    # A short between two bundles of one template is copied with them into
+    # every sibling instance.  The reference solve has no copies and the
+    # rest solve drops a pair of two fixed bits, so the merged result's
+    # shorts — what the healers read — must be counted over the merged
+    # route, or the copy's is missed (Codex P1 on #966).  The route here
+    # routes clean, so the short is PLANTED in the reference solve's
+    # output: one of bundle B's bits laid on bundle A's metal.
+    s = _template_session()
+    ref_ids, copy_specs, skip_ids = s._bottom_up_dnuts_plan()
+    assert len(ref_ids) == 2 and len(skip_ids) == 2
+    real = buda.DetailedNUTSEngine
+    planted = []
+
+    class Planting(real):
+        def run(self, segs, *args, **kwargs):
+            res = real.run(self, segs, *args, **kwargs)
+            if {b.bundle_id for b in segs} != ref_ids:
+                return res
+            wires = list(res.net_segments)
+            a_id, b_id = sorted(ref_ids)
+            # A bit of B moved onto a wire of A's on its own layer, so its
+            # direction (and the copy's transform) is unchanged.
+            for bi, bw in enumerate(wires):
+                if bw.bundle_id != b_id or bw.is_shield:
+                    continue
+                aw = next((w for w in wires if w.bundle_id == a_id
+                           and w.layer == bw.layer and not w.is_shield),
+                          None)
+                if aw is None:
+                    continue
+                bw.track_position = aw.track_position
+                bw.span_lo, bw.span_hi = aw.span_lo, aw.span_hi
+                wires[bi] = bw
+                planted.append((a_id, b_id))
+                break
+            res.net_segments = wires
+            return res
+
+    monkeypatch.setattr(buda, "DetailedNUTSEngine", Planting)
+    with contextlib.redirect_stdout(io.StringIO()):
+        s.do_command("run_detailed_nuts")
+    assert planted, "the reference solve was not seen"
+    got = {(c.bundle_a, c.bundle_b) for c in s.detailed_result.cross_shorts}
+    sib = {ref: sib for ref, sib, *_ in copy_specs}
+    a_id, b_id = planted[0]
+    # Once in the reference, once in the copy — the copy named by the
+    # sibling's own bundles — and exactly what the audit reads.
+    assert got == {(a_id, b_id), tuple(sorted((sib[a_id], sib[b_id])))}
+    assert len(s.detailed_result.cross_shorts) == _short_count(s) == 2
+
+
 # ── a real flow: mix ends on shorts alone, and the knob heals it ───────────
 
 def _run_flow(rel):

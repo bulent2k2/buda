@@ -72,7 +72,7 @@ connected segment at the crossing of their two individually-placed tracks.
 | `num_unplaced` | int | Total number of bits that could not be placed (all-or-nothing per bus — see below) |
 | `num_cross_shorts` | int | Cross-bundle shorts left by the span adjustment (step 6b below), counted before any is removed — observation, taken on every run |
 | `num_short_bits` | int | Bits the short cull removed (step 6b, `cull` lever); each is also in `num_unplaced` |
-| `cross_shorts` | list of CrossShort | The cross-bundle shorts still in `net_segments` (step 6b), each by its two wires' `(bundle, seg, bit)` and the shared metal; what the stage-b healers read (the healer score, on by default) |
+| `cross_shorts` | list of CrossShort | The cross-bundle shorts still in `net_segments` (step 6b), each by its two wires' `(bundle, seg, bit)` and the shared metal; what the stage-b healers read (the healer score, on by default). A bottom-up merged result recounts it over the whole merged route (`cross_shorts_in`), so a short copied with its template is counted at every copy |
 
 ---
 
@@ -229,6 +229,15 @@ Then two post-passes over the emitted bit-wires:
    clean) and is **on by default**; `BUDA_HEAL_SHORTS=0` turns it off. The
    tables, the four #962 SoC runs and what is still open are in
    [wishlist-nuts.md](internal/wishlist/wishlist-nuts.md).
+
+   On the bottom-up path (reference solve, copies, rest solve) the healers'
+   list is **recounted over the merged route** (`cross_shorts_in`, the same
+   predicate and net identity) rather than summed from the two solves. A
+   short between two bundles of one template is copied with them into every
+   sibling instance, and neither solve sees those copies: the reference
+   solve has none, and the rest solve drops a pair of two fixed bits as not
+   its run's. Summing undercounted exactly the shorts a template move
+   fixes. `num_cross_shorts` stays the two solves' own detection count.
 
 7. **Per-bit via emission (step 5 in the source).** For every connection where
    the two bits sit on **different layers**, one `NetVia` is emitted at the

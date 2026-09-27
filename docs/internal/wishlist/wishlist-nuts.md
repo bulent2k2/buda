@@ -89,6 +89,12 @@ read:
   count_shorts`), so a sweep scores a move exactly as the replay it
   certifies (pinned by `test_heal_shorts.py`, parallel against sequential on
   `mix`).
+* A bottom-up DNUTS result is RECOUNTED over the merged route
+  (`cross_shorts_in`), by the session's merge and the sweep alike: a short
+  between two bundles of one template is copied into every sibling
+  instance, and neither solve sees the copies' pairs (the rest solve drops
+  a pair of two fixed bits), so summing the solves' lists hid exactly the
+  shorts a template move fixes (Codex P1 on #966).
 
 Measured before the flip, as the opt-in knob: off was byte-identical (56 of
 56 comparable flows, abstract and detailed WL +0).  On, against main:
