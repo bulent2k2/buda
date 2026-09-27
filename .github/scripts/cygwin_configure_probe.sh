@@ -2,23 +2,26 @@
 # Probe for the Cygwin lane's configure hang (windows-validate.yml; dispatch
 # the workflow with `cygwin_probe` on to run it).
 #
-# What is known (runs 40-44; Cygwin 3.6.10, CMake 4.4.3): a configure can stop
-# for good at CMakeLists.txt's `execute_process(COMMAND python3 -c "import
-# pybind11; ...")`, 8 times in 14 tries, with CMake asleep and no child of it
-# left, not even a zombie.  Every hang was at that call: none at the compiler
-# runs before it, none at FindPython's interpreter runs after it (which name
-# the interpreter by absolute path).  The step's stdin made no difference:
-# run 43 looked as if it did, and in run 44 the configure with stdin from
-# /dev/null hung and the one with the step's stdin did not.
+# What it found (runs 40-45; Cygwin 3.6.10, CMake 4.4.3).  A configure could
+# stop for good at CMakeLists.txt's `execute_process(COMMAND python3 -c
+# "import pybind11; ...")`, CMake asleep and no child of it left, not even a
+# zombie.  The step's stdin made no difference (run 43 looked as if it did;
+# run 44 refuted it).  Run 45's matrix below then showed what does: a program
+# given by NAME, found through PATH, hung 7 times in 12 (`python3` 4 of 6,
+# its output already read; `true` 3 of 6), while the same interpreter by
+# absolute path, the /etc/alternatives symlink or its real file, never did
+# (12 of 12).  And once one child is lost that way, every later one in the
+# same configure is lost too: with a TIMEOUT on the named call, all three real
+# configures went on and stopped at FindPython's next interpreter run, by
+# absolute path.  So CMakeLists.txt now looks python3 up itself and runs it by
+# absolute path; the real configures at the end check that.
 #
-# The matrix below takes that call apart.  Each trial is a fresh minimal
-# project (compiler detection, which came before every hang) that makes ONE
-# execute_process with a TIMEOUT, so a trial that hangs ends by itself and
-# says whether the child's output had arrived.  Variants: `python3` by name
-# (the call itself), the same `python3` by absolute path (on Cygwin a symlink
-# into /etc/alternatives), the interpreter's real file (what FindPython
-# runs), and `true` by name (not Python).  Then the real configure, a few
-# times, with CMakeLists.txt's guard.
+# The matrix: each trial is a fresh minimal project (compiler detection, which
+# came before every hang) that makes ONE execute_process with a TIMEOUT, so a
+# trial that hangs ends by itself and says whether the child's output had
+# arrived.  Variants: `python3` by name, the same `python3` by absolute path
+# (on Cygwin a symlink into /etc/alternatives), the interpreter's real file
+# (what FindPython runs), and `true` by name (not Python).
 #
 # Nothing here relies on a signal being honoured (run 41's `timeout 600`
 # never ended a hung configure): each configure runs in the background with
@@ -160,14 +163,14 @@ for v in name link exe true; do
     echo
 done
 
-# The real configure with CMakeLists.txt's guard (the TIMEOUT on the
-# pybind11 lookup): does it finish, and did the guard have to act?
+# The real configure, which now names the interpreter by absolute path: does
+# it finish, and did the pybind11 lookup's guard have to say anything?
 for n in 1 2 3; do
     rm -rf build-probe
     bounded 600 120 "real-$n" \
         cmake -S . -B build-probe -DBUDA_ARCH=x86-64-v2 --trace-expand
     rc=$?
-    guard=$(grep -a '^-- BUDA: python3' "$out/real-$n.out" | tail -n 1)
+    guard=$(grep -a '^-- BUDA: .*python3' "$out/real-$n.out" | tail -n 1)
     echo "=== real #$n: exit $rc after ${took}s; guard: ${guard:-did not act}"
 done
 

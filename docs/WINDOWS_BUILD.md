@@ -284,22 +284,25 @@ Known, measured limitations:
   `cygcheck` does not list it and `import matplotlib` fails — so the tier's
   matplotlib-importing modules will fail to collect, as they did against
   3.9's broken one.  The 3.9 notes that follow are what runs 13–38 measured.
-- **The configure's pybind11 lookup can hang, and is bounded for that.**
-  `CMakeLists.txt` asks `python3 -c "import pybind11; ..."` where pybind11's
-  CMake files are.  Under the validation workflow (Cygwin 3.6.10,
-  CMake 4.4.3) CMake waited on that one call for good in 8 of 14
-  configures over runs 40–44, asleep with no child left, not even a zombie,
-  while the compiler runs before it and FindPython's interpreter runs after
-  it (by absolute path) never hung.  CMake runs children through libuv,
-  which on Cygwin learns that a child ended from SIGCHLD and `waitpid`, and
-  skips for good a child `waitpid` no longer knows; that would leave exactly
-  this, but it is not established.  Run 43 looked as if the step's stdin
-  caused it; run 44 refuted that, hanging with stdin from `/dev/null` and not
-  with the step's.  The call now carries a `TIMEOUT`, after which CMake keeps
-  the output it has read and goes on, and a result other than 0 is printed
-  as `-- BUDA: python3 -c 'import pybind11' ended with ...`.  The
-  measurement is `.github/scripts/cygwin_configure_probe.sh`, run by
-  dispatching the workflow with `cygwin_probe` on.
+- **CMake 4.4.3 under Cygwin 3.6.10 loses children it starts by name.**
+  An `execute_process` of a program given only by NAME, found through PATH,
+  left CMake waiting for good, the child already gone and not even a zombie,
+  in 18 of 29 tries over validation runs 40–45: `python3` and `true` alike.
+  Started by absolute path, the same interpreter never was, in 12 fresh
+  trials and every FindPython run of a configure that had not already lost
+  one.  After the first loss, though, every later child in that configure is
+  lost too, even by absolute path.  CMake runs children through libuv, which
+  on Cygwin learns that a child ended from SIGCHLD and `waitpid`; where the
+  child is lost is not established.  `CMakeLists.txt` had exactly one such
+  call, its pybind11 lookup (`python3 -c "import pybind11; ..."`), and every
+  configure hang was there; it now looks `python3` up on PATH with
+  `find_program` and runs it by absolute path.  The call also has a
+  `TIMEOUT` and prints a result other than 0
+  (`-- BUDA: <python3> -c 'import pybind11' ended with ...`), which bounds it
+  but cannot save a configure, for the reason above.  Run 43 looked as if the
+  step's stdin caused it; run 44 refuted that.  The measurement is
+  `.github/scripts/cygwin_configure_probe.sh`, run by dispatching the
+  workflow with `cygwin_probe` on.
 - **Python was 3.9.16** — then the newest Cygwin shipped, past upstream EOL
   and below the project's 3.13 floor. The tree parses under 3.9 (measured: full
   `ast` sweep), and the one measured *runtime* incompatibility — PEP 604
@@ -477,11 +480,10 @@ e.g. `--exclude-all-symbols` without an explicit export). Same fix.
 ### Cygwin: `bin/bb` stops after `-- BUDA JCC-erratum mitigation: ...`
 
 The configure is in its first `execute_process` after the compiler checks,
-`python3 -c "import pybind11; ..."`, which has been seen to leave CMake
-waiting for good with python3 already gone (section 6).  That call now ends
-at its `TIMEOUT` and says so (`-- BUDA: python3 -c 'import pybind11' ended
-with 'Process terminated due to timeout' ...`); if a configure still stops
-there, the checkout predates the guard.
+the pybind11 lookup, and CMake has lost that child (section 6): it started
+`python3` by name, which CMake 4.4.3 under Cygwin 3.6.10 does not survive
+about half the time.  The lookup now names the interpreter by absolute path;
+a checkout that still hangs here predates that.
 
 ### Cygwin: `ImportError: No such file or directory` on `import buda`
 
