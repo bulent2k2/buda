@@ -1365,8 +1365,31 @@ def test_readme_prefixes_is_relative_in_tree_and_absolute_out_of_it():
     # outside the checkout: ABSOLUTE, since a relpath between unrelated trees
     # counts `..` to the root and one symlink on the way breaks it
     pre, env = harm.readme_prefixes("/tmp/x/n2", "/tmp/x/n2/h", t1a)
-    assert pre == t1a and env == "T1A_DIR=../.. "
+    assert pre == t1a.replace(os.sep, "/") and env == "T1A_DIR=../.. "
     assert os.path.isabs(pre)
+
+
+def test_readme_prefixes_across_drives_fall_back_to_absolute_slashed_paths(monkeypatch):
+    """Windows path rules, simulated with `ntpath` on any host (review on
+    #969): an arm on another drive than the checkout, or than its set, has
+    no relative spelling at all -- `relpath` raises -- so both values fall
+    back to the absolute path.  Spelled with `/` like every path in the
+    README, since its recipes are bash, which drops an unquoted backslash."""
+    import ntpath
+    import types
+    sys.path.insert(0, str(_T1A))
+    import harm                                      # noqa: E402
+    monkeypatch.setattr(harm, "os", types.SimpleNamespace(path=ntpath, sep="\\"))
+    t1a = r"C:\buda\flow\librelane\tier1a"
+    # the checkout on C:, the arm on D:, the set in the default root
+    assert harm.readme_prefixes(t1a + r"\n2", r"D:\arms\h", t1a) == \
+        ("C:/buda/flow/librelane/tier1a", "")
+    # ...and the set on C: outside tier1a/: it used to raise ValueError
+    assert harm.readme_prefixes(r"C:\sets\n2", r"D:\arms\h", t1a) == \
+        ("C:/buda/flow/librelane/tier1a", "T1A_DIR=C:/sets ")
+    # one drive: relative, and still spelled with `/`
+    assert harm.readme_prefixes(t1a + r"\hb4\n4", t1a + r"\hb4\n4\hs", t1a) == \
+        ("../../..", "T1A_DIR=../.. ")
 
 
 @pytest.mark.skipif(not _HAS_TCLSH, reason="gen.sh emits the set through tclsh")

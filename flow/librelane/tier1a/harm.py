@@ -925,18 +925,24 @@ def readme_prefixes(n_dir, out_dir, t1a=None):
         inside = os.path.commonpath([out, repo]) == repo
     except ValueError:              # Windows: on another drive is outside it
         inside = False
-    # The README's recipes are bash, so a relative path is spelled with `/`
-    # whatever the host's separator is.
+    # The README's recipes are bash, so every path in them -- relative or
+    # absolute -- is spelled with `/` whatever the host's separator is (bash
+    # drops an unquoted backslash, and Git Bash and MSYS take `C:/...`).
     posix = (lambda p: p.replace(os.sep, "/")) if os.sep != "/" else (lambda p: p)
-    prefix = posix(os.path.relpath(t1a, out)) if inside else t1a
+    prefix = posix(os.path.relpath(t1a, out) if inside else t1a)
     # The scripts derive the design root themselves (`${T1A_DIR:-$here}/n$N`),
     # so a set NOT directly under `tier1a/` must say where it is -- else the
     # tool finds the default root's arm, which exists and is hardened, patches
     # it and reports success.  Relative is fine: `notch.sh` absolutises before
     # anything reaches a docker bind source.
     set_root = os.path.dirname(os.path.normpath(os.path.abspath(n_dir)))
-    env = "" if set_root == t1a else "T1A_DIR=%s " % posix(os.path.relpath(set_root, out))
-    return prefix, env
+    if set_root == t1a:
+        return prefix, ""
+    try:
+        root = os.path.relpath(set_root, out)
+    except ValueError:              # Windows: another drive has no relative spelling
+        root = set_root
+    return prefix, "T1A_DIR=%s " % posix(root)
 
 
 def render_readme(n_dir, out_dir, cells, counts, sizes, D, dx, dy, vplan, hplan, advice,
