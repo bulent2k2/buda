@@ -71,7 +71,7 @@ jobs:
           {
             echo '## Runner CPU'
             echo '```'
-            lscpu | grep -E '^(Model name|CPU family|Model|Stepping|CPU\(s\)):'
+            lscpu | grep -E '^\s*(Model name|CPU family|Model|Stepping|CPU\(s\)):'
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
