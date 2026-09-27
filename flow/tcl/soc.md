@@ -667,6 +667,52 @@ shorts added — could move.)
 Regenerate: `tools/soc_plan_search.py --knobs "-PAD 10 -GAP 4 -M 4 -FACES
 4" --out <dir>` (every run cached in `<dir>/runs.json` under its command line and the code it ran on, so a re-run of the same code resumes and one after a checkout or rebuild measures again; a run that dies without a verdict is reported as an error and not cached).
 
+### Abstract-only exploration (2026-09-27)
+
+The 45 re-runnable configurations of the compaction study, swept twice on
+the same code (`main` @ c0041d2): stopped after abstract NUTS and its
+healers (`soc.tcl -abstract`), and through detailed routing as before.
+Published as the [Abstract-Stage SoC Screen](https://claude.ai/artifact/1Y9C92zgApUz9jzqky3hpQ)
+(runtime against die area, both modes on one chart, every run's result
+and command in the hover).
+
+`-abstract` runs bundling, generation, the planner, abstract NUTS and the
+NUTS-stage `check_design`, then the vehicle's healers judged on NUTS
+overlaps, and stops: no bit is placed.  The healers run only while NUTS
+overlaps remain.  What else the NUTS audit reports at that stage is a
+bus segment seated on a keepout, which the stage-a healers' metric cannot
+see; chasing it took the sweet spot's 2 such seats to 6 and spent 25 s
+polishing wire, so the verdict reports it and the flow stops.
+
+* **Speed**: median 3.9 s per run against 155 s, the sweep 879 s against
+  8,173 s.  Four configurations are slow even abstractly (PAD 8 GAP 4
+  206 s, PAD 0 GAP 8 112 s, `regf` four-face 76 s, and slice `FACES 4`
+  cut off at 300 s).
+* **No abstract run is clean.**  44 of 45 end at 0 NUTS overlaps, and
+  every one keeps 2 to 52 segments seated on a keepout, so clean vs dirty
+  at this stage separates nothing.
+* **Prediction** (43 pairs, the two cut-off runs excluded; AUC = the
+  chance a configuration that ends dirty in the full flow scores higher
+  than one that ends clean): keepout seats 0.64, first-check overlaps
+  0.51, first-check audit 0.50, abstract runtime 0.55, abstract wire
+  0.49 -- and die area alone 0.68.  The keepout-seat count is a real
+  signal for the GRID packer (0.89: clean runs at 2-21 seats, dirty at
+  12-29) and none for the slicing packer and the searched plans (0.46).
+
+So the abstract stage is a fast way to rule out floorplans whose buses
+cannot even be seated -- none of these -- and, for grid floorplans, a
+usable ranking; it is not a stand-in for the detailed route.
+
+Six configurations end differently in the full flow than in the rounds
+above, because `main` has moved: shorts between bits of different
+bundles are counted since #962.  PAD 10 GAP 3, slice PAD 20 GAP 13 CGAP
+4 and the stretch-to-bits point now route clean; slice PAD 24 GAP 8
+(9u), PAD 20 GAP 12 CGAP 4 (1 overlap) and PAD 18 GAP 12 CGAP 4 no
+longer do.  The sweet spot is still clean, in 15 s.
+
+Regenerate: `btcl flow/tcl/soc.tcl 8 -LAYOUT compact <knobs> -abstract`
+per configuration (the knobs are each table row's).
+
 ## Every endpoint, every bit, every instance: the face rule read three ways
 
 The face rule — *a leaf's size is derived from the bits that land on its
