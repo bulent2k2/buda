@@ -174,14 +174,21 @@ two runners:
 
 | runner CPU | routes identical | all 57 | chip (7) | the rest, without `ariane133` |
 |---|---|---|---|---|
+| AMD EPYC 9V74 (Zen 4, 25/17/1) | 57 of 57 | 846.5 → 777.7 s, **−8.1 %** (±1.9 %) | **−12.2 %** (±0.6 %) | −2.4 % (`rnr`), +0.6 % (`big_data_test`), +0.2 % (`rv`), −1.3 % (`hbundles`) |
 | Intel Xeon 6973P-C (Granite Rapids, 6/173/1) | 57 of 57 | 656.6 → 677.3 s, +3.2 % (±4.8 %) | +2.1 % (±3.3 %) | −1.4 % (`rnr`), −1.2 % (`big_data_test`), −0.5 % (`rv`), 0.0 % (`hbundles`) |
-| *(second runner: pending)* | | | | |
 
-`ariane133` split its runs again (off 37.5 s and 62.4 s, on 63.6 s and
-64.1 s), which is most of the total's +3.2 %; without it the total is
-+1.1 %.  So where the erratum does not apply the flag's cost is within the
-noise of a shared runner, its most likely size a percent or two on the
-chip flows.
+`ariane133` split its runs on both runners as it does here (off 41.1 s and
+51.6 s, on 53.4 s and 53.1 s on the EPYC; off 37.5 s and 62.4 s on the
+Xeon), which is most of the Xeon's +3.2 %: without it that total is +1.1 %.
+
+So the effect is not only the erratum's.  On the EPYC, which it does not
+affect, every chip flow got faster with the flag, by 8-21 %, with the two
+runs of each arm within a fraction of a second of each other
+(`chip_stack_bottomup` 126.3/126.3 s → 100.1/100.3 s).  Padding branches off
+32-byte boundaries helps this code on that core's front end as well; on the
+Granite Rapids runner the effect is within the noise.  These measure `main`'s
+layout only: the layout before #966, where the flag cost 1.9 % here, was not
+swept on the runners.
 
 ## Not done: the loop itself
 
