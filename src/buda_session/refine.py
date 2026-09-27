@@ -312,7 +312,7 @@ class RefineMixin:
                 return (m[0] <= cur[0] and m[1] <= cur[1]
                         and m[2] <= cur[2] and m[3] < cur[3])
         else:
-            metric = lambda: (self.nuts_result.num_overlaps,  # noqa: E731
+            metric = lambda: (self._stage_a_metric(),  # noqa: E731
                               self.nuts_result.num_violations, wl_now())
 
             def m_str(m):
@@ -341,6 +341,10 @@ class RefineMixin:
         # are frequent and the pool adds nothing).
         use_par = (_ripup_mod._RR_PARALLEL_SWEEP_DEFAULT
                    if use_parallel_sweep is None else use_parallel_sweep)
+        # `set_heal_seats` at stage a: the parallel workers score on NUTS
+        # overlaps alone, blind to the seat faults the metric now carries.
+        if stage == 'a' and self._heal_seats_on():
+            use_par = False
         if use_par:
             n_pool = self._rr_sweep_threads() or (os.cpu_count() or 1)
             use_par = n_pool > 1

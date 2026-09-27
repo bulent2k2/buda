@@ -1085,6 +1085,47 @@ class NutsFlowMixin:
                                self.layers.is_top(seg.layer), bits))
         return doomed
 
+    # ---- seat faults in the stage-a healer score (`set_heal_seats`) --------
+    # The stage-a healers' score is NUTS overlaps.  Two more placements are
+    # faults the detailed stage will pay for and that score cannot see: a
+    # bus segment seated ON a keepout (its window was exhausted, so the
+    # interval-centre fallback committed it over a blockage -- DNUTS culls
+    # every crossing bit) and a supply-doomed seat (its layer holds fewer
+    # signal tracks in the seat than the segment's bits -- every bit
+    # strands).  With the knob on, each such segment counts as one more
+    # overlap, so the healers move it (another candidate, another layer) or
+    # at least never trade one in.  Off by default: byte-identical.
+
+    def _heal_seats_on(self) -> bool:
+        v = getattr(self, '_heal_seats', None)
+        if v is None:
+            v = os.environ.get("BUDA_HEAL_SEATS", "") == "1"
+        return bool(v)
+
+    def _seat_faults(self):
+        """{(bundle_id, seg_idx)} of every segment seated on a keepout or on
+        a supply-doomed seat, locked bottom-up copies excluded (no stage-a
+        move reaches them, and the doomed census already leaves them out).
+        A segment that is both counts once."""
+        if self.nuts_result is None:
+            return set()
+        locked = {w.input.original_bundle.id for w in self.bundles
+                  if w.hier.locked}
+        out = {(b, si) for (b, si) in self.nuts_result.keepout_seats
+               if b not in locked}
+        for seg, _need, _pool, _top, _bits in self._doomed_seats():
+            out.add((seg.bundle_id, seg.seg_idx))
+        return out
+
+    def _stage_a_metric(self) -> int:
+        """The stage-a healer score: NUTS overlaps, plus every seat fault
+        under `set_heal_seats on`.  ONE reading for ripup, negotiate and
+        refine."""
+        m = self.nuts_result.num_overlaps
+        if self._heal_seats_on():
+            m += len(self._seat_faults())
+        return m
+
     def _report_doomed_seats(self) -> int:
         """Report-only census of SUPPLY-DOOMED SEATS (#536 option 1): placed
         segments — any layer, TOP included — whose assigned layer's real
@@ -1140,7 +1181,8 @@ class NutsFlowMixin:
 
     def _escalate_dead_low_segments(self, max_iter: int = 5,
                                     cull_risk: bool = False,
-                                    only=None, seek_host: bool = False) -> int:
+                                    only=None, seek_host: bool = False,
+                                    force: bool = False) -> int:
         """Post-NUTS dead-span escalation (opt-in: `set_dead_span_escalate on`).
 
         After abstract NUTS, a LOW-layer segment whose ACTUAL placed geometry
@@ -1192,6 +1234,12 @@ class NutsFlowMixin:
         basin every later healer climbs from (measured on
         flow/rv/soc_conv_div: on in the run_detailed_nuts cull heal it ended
         at 20 opens).
+
+        `force` (the `set_heal_seats` seat move ONLY, with `only`): move
+        every named LOW segment whatever the admission arithmetic says --
+        a keepout seat is a CROWDING fault (the window had clear tracks,
+        other buses took them), so the dead test does not fire on it, and
+        the caller's measured accept is what judges the move.
         """
         if self.nuts_result is None or self.routing_grid is None:
             return 0
@@ -1310,6 +1358,9 @@ class NutsFlowMixin:
                     seg.interval_lo, seg.interval_hi)
                 if b_lo > b_hi:
                     pass          # bounds exclude the whole interval: 0 pool
+                elif force:
+                    if (seg.bundle_id, seg.seg_idx) in tried:
+                        continue  # moved once in this call: judged by caller
                 elif cull_risk:
                     # The stranding was MEASURED on the layer the segment had
                     # when this call began; once this call has moved it,

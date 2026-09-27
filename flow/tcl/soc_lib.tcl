@@ -1781,7 +1781,11 @@ proc soc_vehicle::banner {what} {
 # once a detailed route exists) and audit violations.
 proc soc_vehicle::_state {} {
     set out "[buda::query overlaps] overlaps"
-    if {[buda::query unplaced] >= 0} { append out ", [buda::query unplaced] unplaced" }
+    if {[buda::query unplaced] >= 0} {
+        append out ", [buda::query unplaced] unplaced"
+    } else {
+        append out ", [buda::query seats] seat faults"
+    }
     return "$out, [buda::query violations] audit violations"
 }
 
@@ -1792,8 +1796,17 @@ proc soc_vehicle::_state {} {
 # on a keepout -- is invisible to them (measured on the sweet spot: two
 # rounds took 2 such seats to 6 and spent 25 s polishing wire), while DNUTS
 # resolves or culls it in the full flow.  The verdict still counts it.
+#
+# `set_heal_seats on` (soc.tcl -healseats) makes those seats -- and the
+# supply-doomed ones -- part of the stage-a score, so there they are dirt
+# the healers can act on.
+namespace eval soc_vehicle { variable HEALSEATS 0 }
 proc soc_vehicle::is_dirty {{stage dnuts}} {
-    if {$stage eq "nuts"} { return [expr {[buda::query overlaps] > 0}] }
+    variable HEALSEATS
+    if {$stage eq "nuts"} {
+        return [expr {[buda::query overlaps] > 0
+                      || ($HEALSEATS && [buda::query seats] > 0)}]
+    }
     return [expr {[buda::query overlaps] > 0 || [buda::query unplaced] > 0
                   || [buda::query violations] != 0}]
 }
@@ -1844,15 +1857,18 @@ proc soc_vehicle::verdict {who} {
     set ov [buda::query overlaps]
     set un [buda::query unplaced]
     set vi [buda::query violations]
+    set se [buda::query seats]
     buda::stop
     if {$un < 0} {
         # no detailed route (`-abstract`): nothing was placed per bit, so
-        # there is nothing to be unplaced -- say so rather than print -1
+        # there is nothing to be unplaced -- say so rather than print -1.
+        # The seat faults (keepout + supply-doomed seats) are reported
+        # beside the verdict; the keepout half is already in the audit.
         if {$ov != 0 || $vi != 0} {
-            puts stderr "$who: FAILED (abstract) -- $ov overlaps, $vi audit violations"
+            puts stderr "$who: FAILED (abstract) -- $ov overlaps, $vi audit violations, $se seat faults"
             exit 1
         }
-        puts "$who: clean (abstract) -- 0 overlaps, 0 audit violations"
+        puts "$who: clean (abstract) -- 0 overlaps, 0 audit violations, $se seat faults"
         return 0
     }
     if {$ov != 0 || $un != 0 || $vi != 0} {

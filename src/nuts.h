@@ -178,6 +178,9 @@ struct NUTSResult {
     // clean NUTS (keepout-model audit).  Counted per segment; report-only
     // (placement behaviour unchanged).
     int num_keepout_conflicts = 0;
+    // Which segments those are, (bundle_id, seg_idx) -- size() equals
+    // num_keepout_conflicts wherever the engine computed both.
+    std::vector<std::pair<int,int>> keepout_seats;
     std::map<int, int> overlaps_per_layer;  // layer_id -> overlap pair count
     // Per-pass seconds of the solve(s) that produced this result (the RR
     // round-3 profiling layer: WHERE inside a trial's full solve the time

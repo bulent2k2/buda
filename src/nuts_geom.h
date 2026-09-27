@@ -139,11 +139,15 @@ inline void keepout_occupied(const std::vector<KeepoutZone>& kozs,
 // window falls back to the interval centre with no metric; this makes that
 // commit loud.  Touching an edge does not count (strict overlap), matching
 // keepout_occupied's span test.
-inline int count_keepout_conflicts(const std::vector<KeepoutZone>& kozs,
-                                   const std::vector<TrackSegment>& segments)
+// The segments count_keepout_conflicts counts, by (bundle_id, seg_idx) --
+// what a healer that treats a keepout seat as a fault needs to know WHICH
+// bundles to move (`set_heal_seats`).  One walk serves both.
+inline std::vector<std::pair<int,int>> keepout_conflict_seats(
+    const std::vector<KeepoutZone>& kozs,
+    const std::vector<TrackSegment>& segments)
 {
-    if (kozs.empty()) return 0;
-    int n = 0;
+    std::vector<std::pair<int,int>> out;
+    if (kozs.empty()) return out;
     for (const auto& ts : segments) {
         if (!ts.placed) continue;
         std::vector<std::pair<double,double>> occ;
@@ -152,10 +156,18 @@ inline int count_keepout_conflicts(const std::vector<KeepoutZone>& kozs,
         const double lo = ts.track_position - h;
         const double hi = ts.track_position + h;
         for (const auto& [k_lo, k_hi] : occ) {
-            if (lo < k_hi && hi > k_lo) { ++n; break; }
+            if (lo < k_hi && hi > k_lo) {
+                out.emplace_back(ts.bundle_id, ts.seg_idx);
+                break;
+            }
         }
     }
-    return n;
+    return out;
+}
+inline int count_keepout_conflicts(const std::vector<KeepoutZone>& kozs,
+                                   const std::vector<TrackSegment>& segments)
+{
+    return (int)keepout_conflict_seats(kozs, segments).size();
 }
 
 // Physical overlap test for two placed segments at their current (adjusted)

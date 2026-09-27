@@ -180,6 +180,7 @@ void bind_nuts(py::module_& m) {
         .def_readwrite("unseatable_trunks",  &NUTSResult::unseatable_trunks)
         .def_readwrite("num_violations",     &NUTSResult::num_violations)
         .def_readwrite("num_keepout_conflicts", &NUTSResult::num_keepout_conflicts)
+        .def_readwrite("keepout_seats",      &NUTSResult::keepout_seats)
         .def_readwrite("num_overlaps",       &NUTSResult::num_overlaps)
         .def_readwrite("overlaps_per_layer", &NUTSResult::overlaps_per_layer)
         // Per-pass solve profile (RR round-3 Phase 0) — observation only.
