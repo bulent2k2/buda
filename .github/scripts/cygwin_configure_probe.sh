@@ -20,6 +20,9 @@
 # exits 0: its job is to report.
 set -u
 cd "$(dirname "$0")/../.." || exit 0
+# A background job in a non-interactive bash reads /dev/null unless it is
+# given stdin explicitly, so fd 3 keeps the stdin bin/bb's configure has.
+exec 3<&0
 out=cyg-probe
 rm -rf "$out" build-probe
 mkdir -p "$out"
@@ -52,7 +55,7 @@ tree_of() {     # $1 and every process below it, deepest first
 }
 
 # bounded <max seconds> <name> <command...>: run it with its output in
-# $out/<name>.out, stdin inherited as bin/bb's configure has it.  It counts
+# $out/<name>.out and the stdin bin/bb's configure has (fd 3).  It counts
 # as hung once that output has not grown for $idle seconds, or at <max>.
 # The configures run with --trace-expand and no --trace-redirect: the trace
 # then goes to stderr, which is unbuffered, so its last line is the command
@@ -62,7 +65,7 @@ bounded() {
     local limit=$1 name=$2 t=0 still=0 size=-1 now pid win p
     shift 2
     echo "=== $name: $*"
-    "$@" > "$out/$name.out" 2>&1 &
+    "$@" <&3 > "$out/$name.out" 2>&1 &
     pid=$!
     while kill -0 "$pid" 2>/dev/null; do
         sleep 2

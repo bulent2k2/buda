@@ -299,13 +299,15 @@ jobs:
         # in files, and past a deadline lists the processes (the one CMake
         # waits on is the answer), kills them by force and prints the
         # output, whose last trace line is the command in flight.  Three
-        # minimal projects take the Python discovery apart.
+        # minimal projects take the Python discovery apart.  Each configure
+        # is handed this step's stdin explicitly, as bin/bb's has it: a
+        # background job in a non-interactive bash reads /dev/null otherwise.
         # continue-on-error: its job is to REPORT.
         shell: cmd
         continue-on-error: true
         timeout-minutes: 30
         run: |
-          C:\cygwin64\bin\bash.exe -lc "cd $(cygpath '%CD%') && bash .github/scripts/cygwin_configure_probe.sh"
+          C:\cygwin64\bin\bash.exe -lc "cd $(cygpath '%CD%') && bash .github/scripts/cygwin_configure_probe.sh | tee probe-report.txt"
 
       - name: The probe's files, if it was cut off
         # The probe prints everything itself; this is for a probe the step
@@ -395,6 +397,16 @@ jobs:
         shell: cmd
         run: |
           C:\cygwin64\bin\bash.exe -leo pipefail -c "cd $(cygpath '%CD%') && PATH=$PWD/build:$PATH PYTHONPATH=build:src:tools python3 src/buda_cli.py --no-viz flow/four_blocks.buda"
+
+      - name: The probe's verdicts, again
+        # The job log is read from its tail, and the tier fills it, so the
+        # probe's verdict lines (each configure's exit status and time, or
+        # the hang) are repeated here.
+        if: always()
+        shell: cmd
+        continue-on-error: true
+        run: |
+          C:\cygwin64\bin\bash.exe -lc "cd $(cygpath '%CD%') && grep -E '^(===|cmake:|python3:)' probe-report.txt; true"
 
   mingw:
     # Fourth path: mingw-w64 — GCC producing NATIVE Windows binaries, driven
