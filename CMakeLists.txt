@@ -198,12 +198,25 @@ if(BUDA_PROFILE AND NOT BUDA_SANITIZE)
     set(BUDA_PYBIND_EXTRAS NO_EXTRAS)
 endif()
 
+# Where pybind11's CMake files are, asked of the `python3` on PATH.  The call
+# is bounded: under Cygwin (Cygwin 3.6.10, CMake 4.4.3; the windows-validate
+# lane, runs 40-44) CMake was seen waiting on it for good, python3 already
+# gone and no child left, in 8 of 14 configures, and every hang was here.  On
+# a TIMEOUT CMake stops waiting and keeps what output it has read, and a
+# result other than 0 is said rather than swallowed with the error text.
 execute_process(
     COMMAND python3 -c "import pybind11; print(pybind11.get_cmake_dir())"
     OUTPUT_VARIABLE PYBIND11_CMAKE_DIR
     OUTPUT_STRIP_TRAILING_WHITESPACE
     ERROR_QUIET
+    RESULT_VARIABLE _buda_pybind11_rc
+    TIMEOUT 60
 )
+if(NOT _buda_pybind11_rc EQUAL 0)
+    message(STATUS "BUDA: python3 -c 'import pybind11' ended with "
+                   "'${_buda_pybind11_rc}' (pybind11's CMake dir: "
+                   "'${PYBIND11_CMAKE_DIR}')")
+endif()
 list(APPEND CMAKE_PREFIX_PATH "${PYBIND11_CMAKE_DIR}")
 set(PYBIND11_FINDPYTHON ON)
 find_package(pybind11 REQUIRED)

@@ -2,28 +2,33 @@
 # Probe for the Cygwin lane's configure hang (windows-validate.yml; dispatch
 # the workflow with `cygwin_probe` on to run it).
 #
-# What it found (run 43): under the Actions runner the configure stops at
-# its first execute_process after the compiler checks -- CMakeLists.txt's
-# `python3 -c "import pybind11; ..."` -- when it inherits the step's stdin,
-# a pipe held by the runner, which is not a Cygwin process.  It hung in both
-# tries, with CMake still running and no child of it left.  With stdin from
-# /dev/null the same configure finished in 8 s, and a minimal project making
-# the same calls finished with the step's stdin.  CMake 4.4's
-# execute_process hands every child CMake's own stdin unless INPUT_FILE is
-# given.  Runs 40 and 41 hung the same way in bin/bb, and run 42's bin/bb
-# did not, so it is likely rather than certain.
+# What is known (runs 40-44; Cygwin 3.6.10, CMake 4.4.3): a configure can stop
+# for good at CMakeLists.txt's `execute_process(COMMAND python3 -c "import
+# pybind11; ...")`, 8 times in 14 tries, with CMake asleep and no child of it
+# left, not even a zombie.  Every hang was at that call: none at the compiler
+# runs before it, none at FindPython's interpreter runs after it (which name
+# the interpreter by absolute path).  The step's stdin made no difference:
+# run 43 looked as if it did, and in run 44 the configure with stdin from
+# /dev/null hung and the one with the step's stdin did not.
 #
-# How it looks: nothing here relies on a signal being honoured (run 41's
-# `timeout 600` never ended a hung configure).  Each configure runs in the
-# background with its output in a file; once that output stops growing, the
-# probe lists every process, kills the tree by force (TerminateProcess) and
-# prints the output, whose last trace line is the command in flight.
+# The matrix below takes that call apart.  Each trial is a fresh minimal
+# project (compiler detection, which came before every hang) that makes ONE
+# execute_process with a TIMEOUT, so a trial that hangs ends by itself and
+# says whether the child's output had arrived.  Variants: `python3` by name
+# (the call itself), the same `python3` by absolute path (on Cygwin a symlink
+# into /etc/alternatives), the interpreter's real file (what FindPython
+# runs), and `true` by name (not Python).  Then the real configure, a few
+# times, with CMakeLists.txt's guard.
+#
+# Nothing here relies on a signal being honoured (run 41's `timeout 600`
+# never ended a hung configure): each configure runs in the background with
+# its output in a file, and once that output stops growing the probe lists
+# every process, kills the tree by force (TerminateProcess) and says so.
 # Always exits 0: its job is to report.
 set -u
 cd "$(dirname "$0")/../.." || exit 0
 # A background job in a non-interactive bash reads /dev/null unless it is
-# given stdin explicitly, so fd 3 keeps the step's stdin for the cases that
-# want it.
+# given stdin explicitly, so fd 3 keeps the step's stdin for the configures.
 exec 3<&0
 out=cyg-probe
 rm -rf "$out" build-probe
@@ -60,29 +65,20 @@ tree_of() {     # $1 and every process below it, deepest first
     echo "$1"
 }
 
-# bounded <max seconds> <name> <stdin> <command...>: run it with the given
-# stdin and its output in $out/<name>.out.  It counts as hung once that
-# output has not grown for $idle seconds, or at <max>.  The configures run
-# with --trace-expand and no --trace-redirect: the trace then goes to
-# stderr, which is unbuffered, so its last line is the command in flight; a
-# trace file may be buffered, and a kill would lose that line.
-idle=120
+# bounded <max seconds> <idle seconds> <name> <command...>: run it with the
+# step's stdin and its output in $out/<name>.out.  It counts as hung once
+# that output has not grown for <idle> seconds, or at <max>.  Sets $took.
 bounded() {
-    local limit=$1 name=$2 input=$3 t=0 still=0 size=-1 now pid win p
+    local limit=$1 idle=$2 name=$3 t=0 still=0 size=-1 now pid win p
     shift 3
-    echo "=== $name (stdin: $input): $*"
-    if [ "$input" = step ]; then
-        "$@" <&3 > "$out/$name.out" 2>&1 &
-    else
-        "$@" < /dev/null > "$out/$name.out" 2>&1 &
-    fi
+    "$@" <&3 > "$out/$name.out" 2>&1 &
     pid=$!
     while kill -0 "$pid" 2>/dev/null; do
-        sleep 2
-        t=$((t + 2))
+        sleep 1
+        t=$((t + 1))
         now=$(wc -c < "$out/$name.out")
         if [ "$now" = "$size" ]; then
-            still=$((still + 2))
+            still=$((still + 1))
         else
             still=0
             size=$now
@@ -91,6 +87,7 @@ bounded() {
             break
         fi
     done
+    took=$t
     if kill -0 "$pid" 2>/dev/null; then
         hung="$hung $name"
         echo "$name" >> "$out/HUNG"     # at once, in case the step is cut off
@@ -98,48 +95,81 @@ bounded() {
              "for ${still}s.  The processes:"
         procs
         echo "=== Windows processes (ps -W), the likely ones:"
-        ps -W 2>/dev/null | grep -iE 'cmake|python|make|gcc|defunct' \
+        ps -W 2>/dev/null | grep -iE 'cmake|python|make|gcc|true|defunct' \
             | grep -v grep
         win=$(cat "/proc/$pid/winpid" 2>/dev/null)
         for p in $(tree_of "$pid"); do kill -9 "$p" 2>/dev/null; done
         [ -n "$win" ] && taskkill /F /T /PID "$win" > /dev/null 2>&1
-        echo "=== $name: killed"     # no wait: nothing here may block
-    else
-        wait "$pid"
-        echo "=== $name: exit $? after ${t}s"
+        echo "--- $name output, last 30 lines:"
+        tail -n 30 "$out/$name.out"
+        return 124                    # no wait: nothing here may block
     fi
-    echo "--- $name output (with the trace), last 50 lines:"
-    tail -n 50 "$out/$name.out"
+    wait "$pid"
+}
+
+# trial <variant> <n> <program> [args...]: a minimal project that makes one
+# execute_process of <program>, bounded by a TIMEOUT, and reports it.
+trial() {
+    local v=$1 n=$2 dir line rc
+    shift 2
+    dir=$out/t-$v-$n
+    mkdir -p "$dir"
+    {
+        echo 'cmake_minimum_required(VERSION 3.15)'
+        echo 'project(p LANGUAGES CXX)'
+        printf 'execute_process(COMMAND'
+        printf ' "%s"' "$@"
+        echo ' OUTPUT_VARIABLE out OUTPUT_STRIP_TRAILING_WHITESPACE'
+        echo '    ERROR_QUIET RESULT_VARIABLE rc TIMEOUT 20)'
+        echo 'message(STATUS "TRIAL rc=[${rc}] out=[${out}]")'
+    } > "$dir/CMakeLists.txt"
+    bounded 180 60 "t-$v-$n" cmake -S "$dir" -B "$dir/b" --trace-expand
+    rc=$?
+    line=$(grep -a '^-- TRIAL ' "$out/t-$v-$n.out" | tail -n 1)
+    echo "=== trial $v #$n: exit $rc after ${took}s: ${line:-no TRIAL line}"
 }
 
 echo "cmake: $(cmake --version | head -n 1)"
 echo "python3: $(command -v python3) -> $(readlink -f "$(command -v python3)")"
 echo "cygwin: $(uname -r)"
+link_py=$(command -v python3)
+real_py=$(readlink -f "$link_py")
+[ -e "$real_py.exe" ] && real_py="$real_py.exe"
+echo "real interpreter file: $real_py"
 
-# The control: bin/bb's configure as the step would run it.
-bounded 600 real step \
-    cmake -S . -B build-probe -DBUDA_ARCH=x86-64-v2 --trace-expand
+pyarg='import pybind11; print(pybind11.get_cmake_dir())'
+for n in 1 2 3 4 5 6; do
+    trial name "$n" python3 -c "$pyarg"
+    trial link "$n" "$link_py" -c "$pyarg"
+    trial exe  "$n" "$real_py" -c "$pyarg"
+    trial true "$n" true
+done
+echo "=== matrix, per variant: TIMEOUT means CMake was still waiting at 20 s"
+for v in name link exe true; do
+    printf '===   %-4s ' "$v"
+    for n in 1 2 3 4 5 6; do
+        line=$(grep -a '^-- TRIAL ' "$out/t-$v-$n.out" 2>/dev/null | tail -n 1)
+        case "$line" in
+        *'rc=[0]'*) printf 'ok ' ;;
+        *timeout*out=\[\]*) printf 'TIMEOUT(no-output) ' ;;
+        *timeout*) printf 'TIMEOUT(output) ' ;;
+        '') printf 'KILLED ' ;;
+        *) printf 'other ' ;;
+        esac
+    done
+    echo
+done
 
-# The workaround the build step uses: the same, with stdin from /dev/null.
-rm -rf build-probe
-bounded 600 nostdin null \
-    cmake -S . -B build-probe -DBUDA_ARCH=x86-64-v2 --trace-expand
-
-# The contrast: the calls that hang, in a project with nothing else in it,
-# with the step's stdin.
-mkdir -p "$out/pybind"
-cat > "$out/pybind/CMakeLists.txt" <<'EOF'
-cmake_minimum_required(VERSION 3.15)
-project(probe LANGUAGES CXX)
-execute_process(COMMAND python3 -c "import pybind11; print(pybind11.get_cmake_dir())"
-    OUTPUT_VARIABLE d OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
-list(APPEND CMAKE_PREFIX_PATH "${d}")
-set(PYBIND11_FINDPYTHON ON)
-find_package(pybind11 REQUIRED)
-message(STATUS "pybind: ${Python_EXECUTABLE} ${PYTHON_MODULE_EXTENSION}")
-EOF
-bounded 300 pybind step \
-    cmake -S "$out/pybind" -B "$out/pybind/b" --trace-expand
+# The real configure with CMakeLists.txt's guard (the TIMEOUT on the
+# pybind11 lookup): does it finish, and did the guard have to act?
+for n in 1 2 3; do
+    rm -rf build-probe
+    bounded 600 120 "real-$n" \
+        cmake -S . -B build-probe -DBUDA_ARCH=x86-64-v2 --trace-expand
+    rc=$?
+    guard=$(grep -a '^-- BUDA: python3' "$out/real-$n.out" | tail -n 1)
+    echo "=== real #$n: exit $rc after ${took}s; guard: ${guard:-did not act}"
+done
 
 echo "=== hung:${hung:- none}"
 rm -rf build-probe

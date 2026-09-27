@@ -303,9 +303,9 @@ jobs:
         # `timeout 600` around a traced configure did not end it either.  The
         # probe relies on no signal: each configure runs in the background
         # with its output in a file, and once that output stops growing the
-        # probe lists the processes, kills them by force and prints the
-        # output, whose last trace line is the command in flight.  What it
-        # found is in the build step's comment and in the script.
+        # probe lists the processes and kills them by force.  It now runs a
+        # trial matrix on the call that hangs and the real configure with its
+        # guard; what it found is in the script's header.
         # continue-on-error: its job is to REPORT.
         if: inputs.cygwin_probe
         shell: cmd
@@ -333,22 +333,18 @@ jobs:
         # suspect is -march=native codegen from Cygwin's gcc 14 on modern
         # runner CPUs; pinning the ISA is the discriminating experiment.
         #
-        # stdin comes from /dev/null.  A step's stdin is a pipe held by the
-        # runner, which is not a Cygwin process, and CMake 4.4's
-        # execute_process hands each child CMake's own stdin.  With that
-        # stdin the configure stopped at its first execute_process after the
-        # compiler checks (CMakeLists.txt's `python3 -c "import pybind11"`)
-        # in runs 40 and 41 and in both of run 43's probe tries, CMake still
-        # running and no child left; run 42's bin/bb got through.  With
-        # stdin from /dev/null the same configure finished in 8 s (run 43)
-        # and every probe configure of run 42 finished.  Nothing in the
-        # build reads stdin, so bin/bb itself is unchanged.
+        # The configure's pybind11 lookup, `python3 -c "import pybind11"`, is
+        # bounded by a TIMEOUT in CMakeLists.txt: in runs 40-44 CMake waited
+        # on that call for good in 8 of 14 configures, with python3 already
+        # gone.  Run 43 looked as if the step's stdin caused it, and a
+        # `< /dev/null` here was the first answer; run 44 hung that way too,
+        # so the redirect is gone.
         # Capped: it builds in 6-8 minutes, and run 40's hang took the whole
         # job's 90.
         shell: cmd
         timeout-minutes: 30
         run: |
-          C:\cygwin64\bin\bash.exe -leo pipefail -c "cd $(cygpath '%CD%') && BUDA_ARCH=x86-64-v2 ./bin/bb < /dev/null"
+          C:\cygwin64\bin\bash.exe -leo pipefail -c "cd $(cygpath '%CD%') && BUDA_ARCH=x86-64-v2 ./bin/bb"
 
       - name: Where did the artifacts land?
         # No -e here: `ls a b c` fails when any glob has no match (there is no
