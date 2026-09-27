@@ -1022,7 +1022,9 @@ def test_results_carry_per_pass_profile():
         s.do_command("run_detailed_nuts")
     assert s.detailed_result is not None
     dps = dict(s.detailed_result.pass_seconds)
-    assert set(dps) == {'place', 'bit_spans', 'keepout_cull',
+    # 'short_guard': the #962 cross-bundle short count, taken on every run
+    # whatever the guard is set to.
+    assert set(dps) == {'place', 'bit_spans', 'keepout_cull', 'short_guard',
                         'pair_misalign', 'vias'}, dps
     assert all(v >= 0.0 for v in dps.values()), dps
 

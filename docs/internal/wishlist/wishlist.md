@@ -78,6 +78,10 @@ priority view** — what's actually open right now, ranked by value/effort — s
   selection basis — rank on measured routability, not the generation-time WL
   estimate (deferred; the planner-side of the BITRUNK/datapath-tree under-selection).
 - **[wishlist-nuts.md](wishlist-nuts.md)** — Abstract & Detailed NUTS.
+  Cross-bundle stretch shorts (#962: DNUTS counts them; the `cull` and
+  `reach` levers are measured and neither is a default, since the greedy
+  healers' clean path on `bigHalf` runs through a state with 33 shorts their
+  metric does not read — open: count shorts in the stage-b healer metric);
   Band-level repack for spread-fit overlap clusters (✅ implemented —
   `nuts_band_repack.md`); PlacedSegmentBase + first-class pre-routes (✅
   implemented — `placed_segment_preroutes.md`); pull-repack test failure (✅

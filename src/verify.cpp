@@ -1898,7 +1898,6 @@ ConnResult check_dnuts_cross_shorts(
         const std::map<int, std::vector<std::string>>& bit_nets,
         const std::map<int, std::string>& shield_nets)
 {
-    constexpr double tol = 1e-6;   // tools/independent_audit.py's TOL
     ConnResult result;
     const auto& all = dnuts.net_segments;
 
@@ -1929,81 +1928,25 @@ ConnResult check_dnuts_cross_shorts(
                                   next).first->second;
     };
 
-    // The metal, in layer-local coordinates: `s` along the layer (the span,
-    // ordered — a placed span may be stored reversed), `p` across it.
-    struct Wire { int idx, net; double s_lo, s_hi, p_lo, p_hi; };
-    std::map<int, std::vector<Wire>> by_layer;
+    // The pairs themselves are find_cross_bundle_overlaps' (detailed_nuts.h),
+    // the one statement of the rule, which DetailedNUTS's post-span-follow
+    // guard reads too (issue #962) — so the router and this audit cannot
+    // disagree about which wires short.  What stays here is the identity:
+    // the names persistence writes, and the ordering and wording below.
+    std::vector<const NetSegment*> placed;
+    std::vector<int> at, net;   // index into `all`, and the net id, per wire
     for (int i = 0; i < (int)all.size(); ++i) {
         const NetSegment& ns = all[(size_t)i];
         if (!ns.placed) continue;
-        const double half = ns.width / 2.0;
-        by_layer[ns.layer].push_back(
-            {i, net_id(ns), std::min(ns.span_lo, ns.span_hi),
-             std::max(ns.span_lo, ns.span_hi),
-             ns.track_position - half, ns.track_position + half});
+        placed.push_back(&ns);
+        at.push_back(i);
+        net.push_back(net_id(ns));
     }
-
     struct Hit { int a, b; double s_lo, s_hi, p_lo, p_hi; };
     std::vector<Hit> hits;
-    for (const auto& [layer, ws] : by_layer) {
-        // Uniform bins across the layer, as wide as its widest wire, so a
-        // wire lands in at most two and two wires that overlap across the
-        // layer share at least one; within a bin, a sweep along the layer.
-        double size = tol;
-        for (const Wire& w : ws) size = std::max(size, w.p_hi - w.p_lo);
-        std::vector<std::pair<long long, int>> slots;
-        slots.reserve(ws.size() * 2);
-        for (int k = 0; k < (int)ws.size(); ++k) {
-            const long long b0 = (long long)std::floor(ws[(size_t)k].p_lo / size);
-            const long long b1 = (long long)std::floor(ws[(size_t)k].p_hi / size);
-            for (long long b = b0; b <= b1; ++b) slots.push_back({b, k});
-        }
-        std::sort(slots.begin(), slots.end(),
-                  [&](const auto& x, const auto& y) {
-                      if (x.first != y.first) return x.first < y.first;
-                      const Wire& wx = ws[(size_t)x.second];
-                      const Wire& wy = ws[(size_t)y.second];
-                      if (wx.s_lo != wy.s_lo) return wx.s_lo < wy.s_lo;
-                      return x.second < y.second;
-                  });
-        std::set<std::pair<int, int>> seen;   // a pair can share two bins
-        std::vector<int> active;
-        for (size_t lo = 0; lo < slots.size();) {
-            size_t hi = lo;
-            while (hi < slots.size() && slots[hi].first == slots[lo].first)
-                ++hi;
-            active.clear();
-            for (size_t t = lo; t < hi; ++t) {
-                const Wire& w = ws[(size_t)slots[t].second];
-                // Sorted by s_lo: a wire ending before w starts along the
-                // layer can overlap neither w nor anything after it.
-                active.erase(std::remove_if(active.begin(), active.end(),
-                                 [&](int k) {
-                                     return ws[(size_t)k].s_hi - w.s_lo <= tol;
-                                 }),
-                             active.end());
-                for (int k : active) {
-                    const Wire& o = ws[(size_t)k];
-                    if (all[(size_t)o.idx].bundle_id ==
-                        all[(size_t)w.idx].bundle_id)
-                        continue;                  // check_dnuts's half
-                    if (o.net == w.net) continue;  // one net: shared metal
-                    const double s_lo = std::max(o.s_lo, w.s_lo);
-                    const double s_hi = std::min(o.s_hi, w.s_hi);
-                    const double p_lo = std::max(o.p_lo, w.p_lo);
-                    const double p_hi = std::min(o.p_hi, w.p_hi);
-                    if (s_hi - s_lo <= tol || p_hi - p_lo <= tol)
-                        continue;                  // disjoint, or abutting
-                    const int ia = std::min(o.idx, w.idx);
-                    const int ib = std::max(o.idx, w.idx);
-                    if (!seen.insert({ia, ib}).second) continue;
-                    hits.push_back({ia, ib, s_lo, s_hi, p_lo, p_hi});
-                }
-                active.push_back(slots[t].second);
-            }
-            lo = hi;
-        }
-    }
+    for (const WireOverlap& o : find_cross_bundle_overlaps(placed, net))
+        hits.push_back({at[(size_t)o.a], at[(size_t)o.b],
+                        o.s_lo, o.s_hi, o.p_lo, o.p_hi});
 
     auto rank = [&](int i) {
         const NetSegment& ns = all[(size_t)i];

@@ -458,6 +458,7 @@ void bind_nuts(py::module_& m) {
             })
         .def_readwrite("passthru_spans",  &BusSegment::passthru_spans)
         .def_readwrite("abstract_pos",    &BusSegment::abstract_pos)
+        .def_readwrite("abstract_width",  &BusSegment::abstract_width)
         .def_readwrite("ndr",             &BusSegment::ndr)
         .def_readwrite("track_lo_bound",  &BusSegment::track_lo_bound)
         .def_readwrite("track_hi_bound",  &BusSegment::track_hi_bound)
@@ -499,6 +500,8 @@ void bind_nuts(py::module_& m) {
         .def_readwrite("num_unplaced", &DetailedNUTSResult::num_unplaced)
         .def_readwrite("n_shield_bond_vias", &DetailedNUTSResult::n_shield_bond_vias)
         .def_readwrite("num_keepout_bits", &DetailedNUTSResult::num_keepout_bits)
+        .def_readwrite("num_cross_shorts", &DetailedNUTSResult::num_cross_shorts)
+        .def_readwrite("num_short_bits",   &DetailedNUTSResult::num_short_bits)
         .def_readwrite("pair_misalign_wl", &DetailedNUTSResult::pair_misalign_wl)
         .def_readwrite("aborted",          &DetailedNUTSResult::aborted)
         // Per-pass profile (RR round-3 Phase 0) — observation only.
@@ -517,6 +520,15 @@ void bind_nuts(py::module_& m) {
              py::arg("on"),
              "Pairwise-overlap seating for this engine (prototype); the "
              "measured-accept alignment heal toggles it per-run.")
+        .def("set_short_guard", &DetailedNUTSEngine::set_short_guard,
+             py::arg("reach"), py::arg("cull"),
+             "Cross-bundle short guard for this engine (issue #962, "
+             "prototype): `reach` reserves against the span each segment "
+             "will reach after the span-follow, `cull` removes the stretched "
+             "side of each short left and counts it unplaced.  Seeded from "
+             "BUDA_DNUTS_SHORT_GUARD at construction.")
+        .def_property_readonly("short_reach", &DetailedNUTSEngine::short_reach)
+        .def_property_readonly("short_cull",  &DetailedNUTSEngine::short_cull)
         .def("run", &DetailedNUTSEngine::run, py::arg("bus_segments"),
              py::arg("emit_vias") = true, py::arg("abort_unplaced") = -1);
 

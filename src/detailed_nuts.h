@@ -108,6 +108,13 @@ struct BusSegment {
 
     // Abstract NUTS track_position used as anchor for Option B ordering; NaN = unset (fallback)
     double      abstract_pos      = std::numeric_limits<double>::quiet_NaN();
+    // The abstract bus footprint's width across the layer (TrackSegment::
+    // width): the bus occupies [abstract_pos - w/2, abstract_pos + w/2] in
+    // stage 4.  Read by the reach-aware reservation (DetailedNUTSEngine::
+    // set_short_guard) as the bound on where this segment's bits land when
+    // a partner must reserve against them before they are placed.  0 =
+    // unknown (a hand-built fixture), which bounds nothing.
+    double      abstract_width    = 0.0;
 
     // Cross-trunk-layer corner resolution: restrict this segment's signal-track
     // choice to [track_lo_bound, track_hi_bound] so it stays on the bounded side
@@ -213,6 +220,20 @@ struct DetailedNUTSResult {
     // (keepout-model audit).  Each is also counted in num_unplaced, so the
     // healing machinery (negotiate/ripup stage b) sees them as opens.
     int num_keepout_bits = 0;
+    // Cross-bundle shorts after the span-follow (issue #962): wire pairs of
+    // two different bundles whose metal overlaps on one layer once every bit
+    // has been stretched to its partner's track, counted BEFORE the short
+    // cull.  The pair is the one check_dnuts_cross_shorts reports — the two
+    // share find_cross_bundle_overlaps — against this run's own wires and
+    // the fixed (bottom-up copy) bits it placed around.  Observation only:
+    // nothing reads it for a decision, whatever the guard is set to.
+    int num_cross_shorts = 0;
+    // Bits the short cull removed (set_short_guard cull): one wire per short,
+    // the side whose shared metal the reservation never covered.  Each is
+    // also counted in num_unplaced, exactly like num_keepout_bits, so a short
+    // becomes an open the stage-b healers act on instead of a violation no
+    // stage of the router can see.
+    int num_short_bits = 0;
     // How many of net_vias are NDR shield BOND straps (R6, opt-in `bond`).
     // Reported by run_detailed_nuts and asserted by the audit; 0 whenever no
     // rule opted in, which is every pre-bonding flow.
@@ -240,6 +261,30 @@ struct DetailedNUTSResult {
     // PARTIAL.  Never set outside an abort-armed run.
     bool aborted = false;
 };
+
+// ── Cross-bundle metal overlap (issues #948, #962) ────────────────────────
+// Two placed wires SHORT when they lie on one layer, belong to two DIFFERENT
+// bundles, carry different nets, and their metal overlaps by a positive
+// area: along the layer (the span, ordered — a placed span may be stored
+// reversed) and across it (track_position ± width/2), each by more than
+// 1e-6, the judge's TOL, so two wires that only abut share no metal.
+//
+// ONE statement of the rule, read by the audit (check_dnuts_cross_shorts,
+// verify.cpp) and by DetailedNUTS's own post-span-follow guard, so the
+// router and the audit cannot disagree about which pairs short.  What "one
+// net" means is the CALLER's: `net[i]` is wire i's identity (parallel to
+// `wires`), because the audit keys on the names persistence writes and the
+// engine, which has no names, on (bundle, bit).  A pair of one bundle is
+// never returned — within a bundle, check_dnuts audits the bit identities.
+// Unplaced wires are the caller's to leave out.
+//
+// Each shorting pair comes back ONCE, a < b (indices into `wires`), with the
+// shared metal in layer-local coordinates: [s_lo, s_hi] along the layer and
+// [p_lo, p_hi] across it.  The order of the pairs is not specified.
+struct WireOverlap { int a, b; double s_lo, s_hi, p_lo, p_hi; };
+std::vector<WireOverlap> find_cross_bundle_overlaps(
+    const std::vector<const NetSegment*>& wires,
+    const std::vector<int>& net);
 
 // ── R6 shield bonding (opt-in per rule, `bond`) ──────────────────────────
 // Strap every EMITTED shield in `result` to the power grid: a via wherever
@@ -296,10 +341,38 @@ public:
     // raw study path); set_pair_align overrides it on this engine.
     void set_pair_align(bool on) { pair_align_ = on; }
 
+    // Cross-bundle short guard (issue #962).  A bit's track is reserved over
+    // its bus's ABSTRACT span, and the span-follow then stretches it to its
+    // partner bit's track — past that span, onto tracks another bundle may
+    // hold.  run() always COUNTS the shorts this leaves
+    // (DetailedNUTSResult::num_cross_shorts); the two levers act on them:
+    //   reach  the cross-bundle reservation compares the span each segment
+    //          will REACH: widened at every junction to the partner's placed
+    //          bit tracks when the partner's layer is already placed (layers
+    //          go in ascending id), else to the partner's abstract footprint.
+    //          Prevents the short where the bound holds.
+    //   cull   after the span-follow, remove the stretched side of every
+    //          short that remains (never a fixed copy, never a shield) and
+    //          count it unplaced — an open the stage-b healers act on.
+    // Both off = byte-identical placement.  The constructor seeds them from
+    // BUDA_DNUTS_SHORT_GUARD ("reach", "cull", or both, separated by ',',
+    // '+' or a space), so every engine — the session's, the bottom-up pair,
+    // the C++ trial sweep's — reads the same setting; this overrides it
+    // here.  Measured, neither is a default: each moves a flow whose healers
+    // reach clean through shorted states (docs/detailed_nuts.md step 6b).
+    void set_short_guard(bool reach, bool cull) {
+        short_reach_ = reach;
+        short_cull_ = cull;
+    }
+    bool short_reach() const { return short_reach_; }
+    bool short_cull() const { return short_cull_; }
+
 private:
     const RoutingGridStack& stack_;
     std::vector<NetSegment> fixed_bits_;
     bool pair_align_ = false;   // constructor seeds it from the env
+    bool short_reach_ = false;  // constructor seeds both from the env
+    bool short_cull_  = false;
 
     // The three stages of run(), in order (each mutates `result` in place):
     // per-layer bit placement in abstract_pos order (Option B), the per-bit
@@ -315,6 +388,12 @@ private:
     // unplaced.  Runs on final spans, so it has zero false positives — the
     // exact complement of the placement-time preferred-pool heuristic.
     void cull_keepout_crossers(DetailedNUTSResult& result) const;
+    // Post-span-follow short guard (issue #962): count the cross-bundle
+    // shorts in the final spans and, with the cull lever on, remove the
+    // stretched side of each.  Returns the number of bits removed (the
+    // caller re-runs the span-follow when it is non-zero).
+    int guard_cross_shorts(const std::vector<BusSegment>& bus_segs,
+                           DetailedNUTSResult& result) const;
     void emit_bit_vias(const std::vector<BusSegment>& bus_segs,
                        DetailedNUTSResult& result) const;
 

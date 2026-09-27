@@ -2573,6 +2573,15 @@ class NutsFlowMixin:
                                    + r2.num_unplaced)
             merged.num_keepout_bits = (r1.num_keepout_bits
                                        + r2.num_keepout_bits)
+            # The #962 short guard's counts, summed like the keepout cull's.
+            # A reference bit the cull removed is missing from every copy
+            # too; the copies' share is in extra_unplaced above, as for any
+            # other reference bit that did not place, and the shorts counted
+            # are the two solves' own (eng2 sees each copy, but a pair of two
+            # copies belongs to neither solve).
+            merged.num_cross_shorts = (r1.num_cross_shorts
+                                       + r2.num_cross_shorts)
+            merged.num_short_bits = r1.num_short_bits + r2.num_short_bits
             # R6 straps are RE-DERIVED over the merged result rather than
             # copied: the pass is idempotent and reads placed shields
             # against the REAL grid, so every occurrence — reference, copy,

@@ -122,6 +122,17 @@ NUTS already enforce. Blocks marked `container` (hierarchy envelopes) are
 excluded from this automatic keepout. The keepouts are installed once per routing
 grid object and are transparent to repeated `run_detailed_nuts` calls.
 
+**Cross-bundle short guard (issue #962, study knob):** a bit is reserved
+against other bundles over its bus's abstract span, then stretched to its
+junction partner's track, which can put it on another bundle's track past
+that span. The engine counts the shorts this leaves on every run. The env
+var `BUDA_DNUTS_SHORT_GUARD` turns on two levers, off by default (off is
+byte-identical): `cull` removes the stretched side of each short and counts
+it unplaced, so the healers see an open instead of an unseen short; `reach`
+reserves against the span each segment will reach instead, so the short does
+not happen. `reach,cull` is both. See
+[Detailed NUTS](../detailed_nuts.md) step 6b.
+
 **Requires:** `run_nuts` must have been called first. At least one `def_track_pattern` must cover the layers used by the NUTS result.
 
 **Example:**
