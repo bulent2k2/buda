@@ -56,6 +56,7 @@ import json
 import math
 import os
 import re
+import shutil
 import subprocess
 import sys
 from collections import defaultdict
@@ -73,10 +74,23 @@ _DROP_PREFIX = ("set_bottom_up", "check_template_tracks")
 _TAIL_START = "run_hier_bundler"
 
 
+def _btcl():
+    """argv prefix that runs `bin/btcl` here: the bash script itself, or on
+    native Windows -- where it cannot be executed and `bash` is the WSL stub
+    -- its PowerShell twin, which honours the same contract."""
+    if sys.platform == "win32":
+        ps = shutil.which("pwsh") or shutil.which("powershell")
+        if ps is None:
+            sys.exit("e2: bin/btcl.ps1 needs PowerShell (pwsh or powershell)")
+        return [ps, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+                os.path.join(_ROOT, "bin", "btcl.ps1")]
+    return [os.path.join(_ROOT, "bin", "btcl")]
+
+
 def record(nq, out_path):
     """`soc.tcl <nq> -bottomup`, recorded at the do_command choke point."""
     env = dict(os.environ, BUDA_RECORD=out_path)
-    r = subprocess.run([os.path.join(_ROOT, "bin", "btcl"), "flow/tcl/soc.tcl",
+    r = subprocess.run([*_btcl(), "flow/tcl/soc.tcl",
                         str(nq), "-bottomup"], cwd=_ROOT, env=env,
                        capture_output=True, text=True, timeout=3600)
     # soc.tcl's exit code is its VERDICT, not its health: a dirty endpoint

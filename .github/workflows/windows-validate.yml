@@ -209,7 +209,7 @@ jobs:
     #
     # EXPERIMENTAL until measured green; known open questions this job is
     # designed to ANSWER rather than assume:
-    #   * which Python Cygwin ships today (3.9 may be too old for the suite);
+    #   * which Python Cygwin ships today (3.12 since run 39; 3.9 before);
     #   * whether numpy/matplotlib exist as Cygwin packages (there are NO pip
     #     wheels for Cygwin — native deps come from setup.exe or not at all);
     #   * whether the web deps are installable (pydantic-core needs Rust:
@@ -223,6 +223,10 @@ jobs:
       # Cygwin bash reads CRLF scripts poorly; belt (autocrlf below) AND
       # suspenders: igncr makes bash ignore stray \r in anything it sources.
       SHELLOPTS: igncr
+      # Not measured yet for Cygwin's 3.12: if it marks its site-packages
+      # externally managed (PEP 668), pip refuses even a --user install.
+      # pip ignores this where nothing is marked.
+      PIP_BREAK_SYSTEM_PACKAGES: '1'
 
     steps:
       - name: Force LF checkout
@@ -238,12 +242,18 @@ jobs:
         # is a CANDIDATE set: the diagnose step below records what actually
         # materialized (this container's proxy cannot reach the Cygwin package
         # inventory, so the runner doubles as the inventory probe).
+        #
+        # The python packages must be the SAME minor as `python3`.  Cygwin
+        # moved `python3` from 3.9 to 3.12 after run 38, and this list still
+        # asked for the python39 stack, so 3.12 had no pip, numpy, matplotlib
+        # or tkinter and the job stopped at its first pip step (run 39: the
+        # diagnose step listed python3 3.12.12 beside python39-pip).
         shell: pwsh
         run: |
           Invoke-WebRequest -Uri https://cygwin.com/setup-x86_64.exe -OutFile setup-x86_64.exe
           .\setup-x86_64.exe -q -O -s https://mirrors.kernel.org/sourceware/cygwin/ `
             -R C:\cygwin64 -l C:\cygpkgs `
-            -P gcc-g++,make,cmake,ninja,git,python3,python3-devel,python39-devel,python39-pip,python39-numpy,python39-tkinter,python39-matplotlib | Out-Null
+            -P gcc-g++,make,cmake,ninja,git,python3,python3-devel,python312-devel,python312-pip,python312-numpy,python312-tkinter,python312-matplotlib | Out-Null
           C:\cygwin64\bin\bash.exe -lc 'uname -a'
 
       - name: Diagnose the Cygwin environment

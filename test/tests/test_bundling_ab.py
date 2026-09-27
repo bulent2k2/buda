@@ -22,6 +22,7 @@ two refusals that stop the table from claiming "one net per bundle" when it
 is not true.  The row reader is pinned against the CLI's real summary lines.
 """
 
+import os
 import sys
 from pathlib import Path
 
@@ -29,6 +30,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools"))
 import bundling_ab as ab  # noqa: E402
+from subprocess_env import buda_env  # noqa: E402
 
 
 FLOW = """\
@@ -437,12 +439,14 @@ def test_every_file_the_flow_writes_is_renamed_into_the_arm(tmp_path):
             "derive_top_plan cells a file out/plan.buda\n"
             "save_bdb\n")
     out = ab.isolate(text, str(tmp_path), "f.buda", arm).text.splitlines()
-    assert out[2] == f'save_bdb "{arm}/0_my snap.bdb.sql"'
-    assert out[3] == (f'emit_guides "{arm}/1_g.json" margin 20 '
-                      f'csv "{arm}/2_g.csv" tcl "{arm}/3_g.tcl"')
-    assert out[4] == (f'EXPORT_GDS "{arm}/4_c.gds" outline 10   '
+    # joined with the platform's separator, as the tool joins them
+    a = lambda name: os.path.join(arm, name)    # noqa: E731
+    assert out[2] == f'save_bdb "{a("0_my snap.bdb.sql")}"'
+    assert out[3] == (f'emit_guides "{a("1_g.json")}" margin 20 '
+                      f'csv "{a("2_g.csv")}" tcl "{a("3_g.tcl")}"')
+    assert out[4] == (f'EXPORT_GDS "{a("4_c.gds")}" outline 10   '
                       f'# upper case runs too')
-    assert out[5] == f'derive_top_plan cells a file "{arm}/5_plan.buda"'
+    assert out[5] == f'derive_top_plan cells a file "{a("5_plan.buda")}"'
     assert out[6] == "save_bdb"          # no path: nothing of the user's
 
 
@@ -451,7 +455,7 @@ def test_an_open_of_a_file_the_arm_wrote_follows_it(tmp_path):
             "open_bdb s.bdb.sql\n")
     iso = ab.isolate(text, str(tmp_path), "f.buda", str(tmp_path / "arm"))
     out = iso.text.splitlines()
-    assert out[3] == f"open_bdb {tmp_path}/arm/0_s.bdb.sql"
+    assert out[3] == f"open_bdb {os.path.join(tmp_path, 'arm', '0_s.bdb.sql')}"
 
 
 def test_a_refusal_comes_before_either_arm_runs(tmp_path, monkeypatch):
@@ -524,8 +528,9 @@ def test_a_flow_that_already_built_its_database_measures_again(
     import hashlib
     flow = _durable_flow(tmp_path)
     root = Path(__file__).resolve().parents[2]
-    env = {**ab.os.environ, "PYTHONPATH": ab.os.pathsep.join(
-        [str(root / "build"), str(root / "src"), str(root / "tools")])}
+    # prepended to the inherited PYTHONPATH, which alone names build\Release
+    # under the Visual Studio generator
+    env = buda_env(root, "build", "src", "tools")
     r = ab.subprocess.run([ab.sys.executable, str(root / "src" / "buda_cli.py"),
                            "--no-viz", str(flow)], capture_output=True,
                           text=True, env=env)
@@ -544,11 +549,11 @@ def test_only_a_database_the_flow_builds_into_starts_empty(tmp_path):
     built = ab.isolate("open_bdb d.bdb\nadd_inst u1 c top 0 0\n"
                        "run_hier_bundler\n", str(tmp_path), "f.buda", arm)
     assert built.copies == [] and "builds into" in built.notes[0]
-    assert built.text.startswith(f"open_bdb {arm}/0_d.bdb\n")
+    assert built.text.startswith(f"open_bdb {os.path.join(arm, '0_d.bdb')}\n")
     # Moving what is already there is editing it: the copy stays.
     moved = ab.isolate("open_bdb d.bdb\nmove_comp u1 5 5\n"
                        "run_hier_bundler\n", str(tmp_path), "f.buda", arm)
-    assert moved.copies == [(str(tmp_path / "d.bdb"), f"{arm}/0_d.bdb")]
+    assert moved.copies == [(str(tmp_path / "d.bdb"), os.path.join(arm, "0_d.bdb"))]
     assert moved.notes == []
     # A builder after a LATER open builds that one, not the first.
     later = ab.isolate("open_bdb d.bdb\nopen_bdb :memory:\n"

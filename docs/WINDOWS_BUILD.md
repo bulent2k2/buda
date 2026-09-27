@@ -264,7 +264,7 @@ Tests and flows then run from any shell, exactly as the Ninja MSVC path
 Windows with a POSIX personality: a real `fcntl`, a real `python3`, and —
 the point of this path — **the repo's own `bin/bb` wrapper just works**, CRLF
 guards aside. Unlike MinGW, binaries are Cygwin-native (`cygbuda_core.dll`,
-`buda.cpython-39-x86_64-cygwin.dll`) and link Cygwin's Python.
+`buda.cpython-<ver>-x86_64-cygwin.dll`) and link Cygwin's Python.
 
 **Measured** (validation runs 13–19): `bin/bb` drives a complete GCC 14
 build (≈ 6–8m), the full extension stack **imports clean** —
@@ -274,8 +274,14 @@ Python 3.9 — and a **`.buda` flow runs end to end** (run 19:
 DetailedNUTS, `check_design` clean at every stage, 0 bits unplaced).
 Known, measured limitations:
 
-- **Python is 3.9.16** — the newest Cygwin ships, past upstream EOL and
-  below the project's 3.13 floor. The tree parses under 3.9 (measured: full
+- **Cygwin's `python3` is 3.12 now; it was 3.9 through run 38.** Run 39
+  found `python3 3.12.12-1` while the install list still asked for the
+  `python39-*` stack, so 3.12 had no pip, numpy, matplotlib or tkinter and
+  the lane stopped at its first pip step.  The list below installs the
+  `python312-*` twins.  The 3.9 notes that follow are what runs 13–38
+  measured.
+- **Python was 3.9.16** — then the newest Cygwin shipped, past upstream EOL
+  and below the project's 3.13 floor. The tree parses under 3.9 (measured: full
   `ast` sweep), and the one measured *runtime* incompatibility — PEP 604
   `X | Y` unions in evaluated annotations, which raise `TypeError` at import
   on 3.9 (run 18) — is fixed with `from __future__ import annotations` in
@@ -309,7 +315,7 @@ packages (GUI picker or command line):
 ```powershell
 .\setup-x86_64.exe -q -s https://mirrors.kernel.org/sourceware/cygwin/ `
   -R C:\cygwin64 -l C:\cygpkgs `
-  -P gcc-g++,make,cmake,ninja,git,python3,python39-devel,python39-pip,python39-numpy,python39-tkinter
+  -P gcc-g++,make,cmake,ninja,git,python3,python3-devel,python312-devel,python312-pip,python312-numpy,python312-tkinter,python312-matplotlib
 ```
 
 ### 6.2 Checkout and environment

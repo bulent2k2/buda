@@ -564,7 +564,11 @@ def main():
         except Exception:  # noqa: BLE001
             pass
 
-    spec = os.path.relpath(module_path, REPO_ROOT) + "::" + func_name
+    try:
+        shown = os.path.relpath(module_path, REPO_ROOT)
+    except ValueError:      # Windows: a test on another drive than the checkout
+        shown = os.path.abspath(module_path)
+    spec = shown + "::" + func_name
 
     # Flow mode wins when the test drove a BudaSession: a full-pipeline flow test
     # also calls generate_candidates *inside* generate_[hier_]topologies, but that

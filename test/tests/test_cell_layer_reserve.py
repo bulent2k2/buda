@@ -51,6 +51,12 @@ _TRACKS = Path(__file__).parents[2] / "flow" / "tracks" / "tracks.buda"
 
 _LINE = "set_cell_layer_reserve top_cell M6 83,86,89,92,100,103,106,109"
 
+# The yield tests below assert exact track counts of a routed design, and
+# MSVC lands a different-but-legal placement (test_nuts_placement_golden.py
+# says why): QoR is gated on Linux, the Windows lanes validate the platform.
+_WIN_QOR_SKIP = ("MSVC placement divergence: exact-count/golden assertions "
+                 "are Linux-gated (measured, windows-validate run 39)")
+
 
 def _session(*extra):
     s = buda_cli.BudaSession()
@@ -1455,6 +1461,7 @@ def _derived_text(s, yield_seat):
             for l in lines if l["positions"]], lines, notes
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason=_WIN_QOR_SKIP)
 def test_the_yield_sees_the_union_of_own_and_inherited_at_every_occurrence():
     """Codex on #940, the two findings that share one cause.  What a
     cell-local solve keeps free is `_effective_reserves` — the cell's OWN
@@ -1508,6 +1515,7 @@ def test_the_yield_sees_the_union_of_own_and_inherited_at_every_occurrence():
     assert byc[("inner", "M6")]["seat_hit"] == 1
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason=_WIN_QOR_SKIP)
 def test_an_out_of_scope_ancestors_corridor_is_blocked_but_not_yielded():
     """Codex on #940: `_report_cell_layer_reserves` removes a held
     reservation only when its cell is IN SCOPE, so an ancestor outside the

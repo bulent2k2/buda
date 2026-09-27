@@ -55,6 +55,7 @@ import os
 
 from buda_script import (quote_arg, sole_path_arg, split_quoted_args,
                          strip_inline_comment)
+from tcl_quote import posix_sep
 
 _REPO = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", ".."))
 _CATALOG = os.path.join(_REPO, "demo", "web", "demos.json")
@@ -115,10 +116,19 @@ def _strip(raw):
 
 def _repath(tok, flow_dir):
     """`tok` rewritten repo-root-relative when it names an existing file
-    relative to `flow_dir`, else None (leave it exactly as written)."""
+    relative to `flow_dir`, else None (leave it exactly as written).
+
+    Spelled with `/` on every platform, as a flow spells its paths; Windows
+    opens that spelling too.  A file on another drive than the checkout has
+    no repo-relative spelling (`relpath` raises), so it keeps its absolute
+    one, which resolves from any working directory all the same."""
     cand = os.path.join(flow_dir, tok)
     if os.path.isfile(cand):
-        return os.path.relpath(os.path.realpath(cand), _REPO)
+        real = os.path.realpath(cand)
+        try:
+            return posix_sep(os.path.relpath(real, _REPO))
+        except ValueError:
+            return posix_sep(real)
     return None
 
 

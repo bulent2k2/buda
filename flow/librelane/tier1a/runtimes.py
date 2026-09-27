@@ -133,10 +133,14 @@ def read_run(run_dir):
 
 
 def parse_block(spec):
-    run_dir, _, count = spec.partition(":")
+    # The drive comes off first: `C:\runs\b1:3` is the directory
+    # `C:\runs\b1` placed 3 times, not the directory `C`.  On POSIX there is
+    # no drive and this is the plain split.
+    drive, rest = os.path.splitdrive(spec)
+    run_dir, _, count = rest.partition(":")
     if count and not count.isdigit():
         raise SystemExit(f"--block {spec}: the instance count after ':' must be an integer")
-    return run_dir, int(count) if count else 1
+    return drive + run_dir, int(count) if count else 1
 
 
 def blocks_from_config(path):

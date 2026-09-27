@@ -40,9 +40,14 @@ from pathlib import Path
 
 import pytest
 
+from tcl_quote import tcl_path
+
 _ROOT = Path(__file__).resolve().parents[2]
 _SOC = _ROOT / "flow" / "tcl" / "soc.tcl"
 _DRIVER = _ROOT / "flow" / "tcl" / "converge.tcl"
+# Quoted for Tcl: a native Windows path read bare loses its separators to
+# backslash substitution (`D:\a\buda` arrives as BEL, backspace, `uda`).
+_LIB_Q = tcl_path(_ROOT / "flow" / "tcl" / "converge_lib.tcl")
 
 pytestmark = [pytest.mark.mid,
               pytest.mark.skipif(shutil.which("tclsh") is None,
@@ -262,12 +267,12 @@ def test_the_lib_reads_a_scope_and_decides_the_blind_sweep(tmp_path):
     none = tmp_path / "none.buda"
     none.write_text("# scope: (none)\n")
     script = f"""
-        source {_ROOT / 'flow' / 'tcl' / 'converge_lib.tcl'}
-        puts [converge::scope_of {hdr}]
-        puts [converge::scope_of {old}]
-        puts "<[converge::scope_of {none}]>"
-        puts [list [converge::scope_empty [converge::scope_of {none}]] \
-                   [converge::scope_empty [converge::scope_of {hdr}]] \
+        source {_LIB_Q}
+        puts [converge::scope_of {tcl_path(hdr)}]
+        puts [converge::scope_of {tcl_path(old)}]
+        puts "<[converge::scope_of {tcl_path(none)}]>"
+        puts [list [converge::scope_empty [converge::scope_of {tcl_path(none)}]] \
+                   [converge::scope_empty [converge::scope_of {tcl_path(hdr)}]] \
                    [converge::scope_empty ""]]
         puts [list [converge::blind_more {{blind td bu}} 0] \
                    [converge::blind_more {{blind td bu}} 1] \
@@ -336,8 +341,8 @@ def test_reservation_efficiency_is_reserved_over_used(tmp_path):
     over_all = sum(int(row[5]) for row in d["demand"] if row[2] in top)
     assert over_all > reserved
     script = f"""
-        source {_ROOT / 'flow' / 'tcl' / 'converge_lib.tcl'}
-        set rep [converge::read_report {rep}]
+        source {_LIB_Q}
+        set rep [converge::read_report {tcl_path(rep)}]
         puts [converge::efficiency $rep $rep]
     """
     tcl = tmp_path / "eff.tcl"
@@ -424,10 +429,10 @@ def test_efficiency_charges_only_the_governed_occurrences(tmp_path):
                    "demand u1 top_cell M6 16 4 40 10\n"
                    "demand u2 top_cell M6 16 6 40 15\n")
     script = f"""
-        source {_ROOT / 'flow' / 'tcl' / 'converge_lib.tcl'}
-        set pol [converge::read_report {pol}]
-        puts [converge::efficiency [converge::read_report {rep}] $pol]
-        puts [converge::efficiency [converge::read_report {old}] $pol]
+        source {_LIB_Q}
+        set pol [converge::read_report {tcl_path(pol)}]
+        puts [converge::efficiency [converge::read_report {tcl_path(rep)}] $pol]
+        puts [converge::efficiency [converge::read_report {tcl_path(old)}] $pol]
     """
     tcl = tmp_path / "eff.tcl"
     tcl.write_text(script)

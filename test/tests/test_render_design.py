@@ -43,6 +43,12 @@ import pytest
 _ROOT = Path(__file__).resolve().parents[2]
 _TOOL = _ROOT / "tools/render_design.py"
 
+# The SoC test pins the flow header's exact counts, and MSVC lands a
+# different-but-legal placement (test_nuts_placement_golden.py says why):
+# QoR is gated on Linux, the Windows lanes validate the platform.
+_WIN_QOR_SKIP = ("MSVC placement divergence: exact-count/golden assertions "
+                 "are Linux-gated (measured, windows-validate run 39)")
+
 
 def _render(tmp_path, flow, **kw):
     prefix = tmp_path / "out"
@@ -71,6 +77,7 @@ def test_flat_flow_renders_all_three_panels(tmp_path):
 
 
 @pytest.mark.mid
+@pytest.mark.skipif(sys.platform == "win32", reason=_WIN_QOR_SKIP)
 def test_hier_flow_numbers_match_the_flows_own_header(tmp_path):
     """The recorded SoC at NQ=8: every level drawn, and the caption numbers
     are the ones its header states (bundles, bit-wires, detailed WL)."""
