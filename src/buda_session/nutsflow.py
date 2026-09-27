@@ -2328,6 +2328,7 @@ class NutsFlowMixin:
         capacity).  Such zones only arise via the Python Floorplan API (the CLI
         requires explicit layers) and def_track_pattern's re-apply skips them,
         so they are installed here on every defined grid, TOP included."""
+        self._sync_leaf_blockage()
         if self.routing_grid is None:
             return
         if getattr(self, '_leaf_keepouts_grid', None) is not self.routing_grid:

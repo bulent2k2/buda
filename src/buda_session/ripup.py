@@ -436,6 +436,7 @@ class RipupMixin:
         deterministic.  Mirrors the `run_planner hier` branch minus _apply_selections
         (pins are already baked onto the wrappers) and minus _expand_hier_bundles."""
         self._reset_doglegs()
+        self._sync_leaf_blockage()
         self.planner = buda.CongestionPlanner(self.fp, self.layers)
         for pname, pval in self._planner_params.items():
             self.planner.set_planner_param(pname, pval)

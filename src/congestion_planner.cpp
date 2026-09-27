@@ -343,9 +343,21 @@ void CongestionPlanner::rebuild_cuts_() {
     // same order: byte-identical).
     blocks_cache_.clear();
     leaf_rects_cache_.clear();
+    blocks_cache_layers_.clear();
+    leaf_rects_layers_.clear();
+    const auto leaf_pol = floorplan_.block_blocked_layers();
+    leaf_policy_ = !leaf_pol.empty();
     for (const auto& b : blocks)
         if (!floorplan_.is_container(b.first)) {
             blocks_cache_.push_back(b);
+            std::vector<int> lids;
+            if (auto pit = leaf_pol.find(b.first); pit != leaf_pol.end()) {
+                lids = pit->second;
+                // An explicit set naming no layer blocks nothing; mark it with
+                // an id no layer has so leaf_blocks_ never matches.
+                if (lids.empty()) lids.push_back(INT_MIN);
+            }
+            if (leaf_policy_) blocks_cache_layers_.push_back(lids);
             // Per-rect twin for low_seg_obstructed (teg_multirect_status.md
             // open 3): a multi-rect block blocks LOW layers per rect (see
             // low_layer_keepouts below — the notch between rects is routable),
@@ -355,6 +367,8 @@ void CongestionPlanner::rebuild_cuts_() {
             auto rects = floorplan_.get_block_rects(b.first);
             if (rects.empty()) leaf_rects_cache_.push_back(b.second);
             else for (const Rect& r : rects) leaf_rects_cache_.push_back(r);
+            if (leaf_policy_)
+                leaf_rects_layers_.resize(leaf_rects_cache_.size(), lids);
         }
     int n_ybands = (int)y_grid_.size() - 1;
     int n_xbands = (int)x_grid_.size() - 1;
@@ -518,11 +532,16 @@ void CongestionPlanner::routed_extent(const Segment& seg, int layer_id,
     hi = is_h ? std::max(seg.start.x, seg.end.x) : std::max(seg.start.y, seg.end.y);
     if (!layers_.is_top(layer_id)) {
         int perp = is_h ? seg.start.y : seg.start.x;
-        for (const auto& [name, r] : blocks_cache_) {
+        for (size_t bi = 0; bi < blocks_cache_.size(); ++bi) {
+            const auto& [name, r] = blocks_cache_[bi];
             // Only true leaf cells clamp a non-TOP segment to their face (the
             // in-cell portion is internal pin access).  Hierarchy containers are
             // transparent (Gap 2) — already filtered out of blocks_cache_.
             (void)name;
+            // A leaf that leaves this LOW layer open (`set_leaf_blockage
+            // policy`) has capacity over it, so nothing needs clamping.
+            if (leaf_policy_ && !leaf_blocks_(blocks_cache_layers_[bi], layer_id))
+                continue;
             int rlo = is_h ? r.x1 : r.y1, rhi = is_h ? r.x2 : r.y2;
             int plo = is_h ? r.y1 : r.x1, phi = is_h ? r.y2 : r.x2;
             if (perp < plo || perp > phi) continue;
@@ -766,7 +785,14 @@ bool CongestionPlanner::low_seg_obstructed(const Segment& seg, int layer_id,
     // the union bbox.  Single-rect designs see the identical rect list.
     const Rect* lo_cell = nullptr;
     const Rect* hi_cell = nullptr;
-    for (const Rect& r : leaf_rects_cache_) {       // leaf blocks only
+    // `set_leaf_blockage policy`: a leaf that leaves this LOW layer open
+    // is not an obstruction on it at all.
+    auto open_here = [&](size_t i) {
+        return leaf_policy_ && !leaf_blocks_(leaf_rects_layers_[i], layer_id);
+    };
+    for (size_t i = 0; i < leaf_rects_cache_.size(); ++i) {   // leaf blocks only
+        if (open_here(i)) continue;
+        const Rect& r = leaf_rects_cache_[i];
         int rlo = is_h ? r.x1 : r.y1, rhi = is_h ? r.x2 : r.y2;
         int plo = is_h ? r.y1 : r.x1, phi = is_h ? r.y2 : r.x2;
         if (perp < plo || perp > phi) continue;
@@ -792,7 +818,9 @@ bool CongestionPlanner::low_seg_obstructed(const Segment& seg, int layer_id,
         return lo_cell && hi_cell && lo_cell != hi_cell;
     }
 
-    for (const Rect& r : leaf_rects_cache_) {       // leaf blocks only
+    for (size_t i = 0; i < leaf_rects_cache_.size(); ++i) {   // leaf blocks only
+        if (open_here(i)) continue;
+        const Rect& r = leaf_rects_cache_[i];
         int rlo = is_h ? r.x1 : r.y1, rhi = is_h ? r.x2 : r.y2;
         int plo = is_h ? r.y1 : r.x1, phi = is_h ? r.y2 : r.x2;
         if (perp < plo || perp > phi) continue;

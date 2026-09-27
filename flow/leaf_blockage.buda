@@ -1,0 +1,34 @@
+# set_leaf_blockage policy -- a leaf blocks only the LOW layers of its band.
+#
+# Three abutting blocks span the die's full height, so a bus from A to C
+# has no way around B: it must cross B's footprint.  The whole stack is LOW
+# (there is no over-the-cell layer), which makes B's blockage the entire
+# question.  Under the default model a leaf blocks every LOW layer and all
+# four bits strand at detailed NUTS; under `policy` B's band says its own
+# wiring lives on M2, so M3..M5 are open over it and the bus routes clean.
+#
+# test/tests/test_leaf_blockage.py runs it both ways (the control strips the
+# two policy lines) and judges the checkpoint with tools/independent_audit.py.
+open_bdb :memory:
+bdb_net_mode on
+def_layer 2 M2 H LOW 10
+def_layer 3 M3 V LOW 10
+def_layer 4 M4 H LOW 10
+def_layer 5 M5 V LOW 10
+def_track_pattern 2 0 SIGNAL 1 1
+def_track_pattern 3 0 SIGNAL 1 1
+def_track_pattern 4 0 SIGNAL 1 1
+def_track_pattern 5 0 SIGNAL 1 1
+add_block A 0 0 40 100
+add_block B 40 0 60 100
+add_block C 60 0 100 100
+set_leaf_blockage policy
+set_cell_layer_cap B M2
+add_bus d[4] A.o C.i
+run_bundler STRICT
+generate_topologies
+run_planner 3
+run_nuts
+run_detailed_nuts
+check_design
+report_wirelength

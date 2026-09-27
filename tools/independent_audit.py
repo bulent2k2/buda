@@ -680,12 +680,28 @@ def read_leaf_keepouts(con, layers):
     1,461 crossings on soc_small alone — over-the-cell routing, legal, and
     the control that says the test can see anything at all.
     """
-    out, notes = defaultdict(list), {"multirect": 0, "unplaced": 0}
+    out, notes = defaultdict(list), {"multirect": 0, "unplaced": 0,
+                                     "policy": 0}
     if layers is None or not _table_exists(con, "component"):
         return out, notes
     low = sorted(lid for lid, l in layers.items() if not l["top"])
     if not low:
         return out, notes
+    # `set_leaf_blockage policy`: a leaf blocks only the LOW layers inside
+    # its cell's band, which the session records per leaf beside the layer
+    # stack (meta 'leaf_blocked_layers').  A leaf not in that row blocks
+    # every LOW layer, as does every leaf when the row is empty.
+    blocked = {}
+    if _table_exists(con, "meta"):
+        row = con.execute("SELECT value FROM meta WHERE"
+                          " key='leaf_blocked_layers'").fetchone()
+        if row and row[0]:
+            for name, lids in _decode(
+                    row[0], "the stored leaf blockage "
+                            "(meta 'leaf_blocked_layers')",
+                    lambda d: (str(d["name"]),
+                               {int(l) for l in d["layers"]})):
+                blocked[name] = lids
     multirect = set()
     if _table_exists(con, "cell_rect"):
         multirect = {r[0] for r in
@@ -704,7 +720,11 @@ def read_leaf_keepouts(con, layers):
             continue
         z = (float(r["x1"]), float(r["y1"]), float(r["x2"]), float(r["y2"]),
              r["name"], "leaf")
-        for lid in low:
+        lids = low
+        if r["name"] in blocked:
+            notes["policy"] += 1
+            lids = [l for l in low if l in blocked[r["name"]]]
+        for lid in lids:
             out[lid].append(z)
     return out, notes
 
@@ -998,6 +1018,7 @@ def audit(path, max_report=8):
             "leaf_cells_blocking": sum(len(z) for z in leaf_zones.values()),
             "leaf_cells_multirect": leaf_notes["multirect"],
             "leaf_cells_unplaced": leaf_notes["unplaced"],
+            "leaf_cells_by_policy": leaf_notes["policy"],
         },
         "examples": examples,
     }
@@ -1032,6 +1053,10 @@ def report(res, quiet=False):
               f"component(s) have a multi-rect footprint — not judged as "
               f"implicit keepouts, since their bbox includes notches the "
               f"design leaves routable")
+    if notes.get("leaf_cells_by_policy"):
+        print(f"[judge] note: {notes['leaf_cells_by_policy']} leaf "
+              f"component(s) block only the LOW layers of their cell band "
+              f"(set_leaf_blockage policy)")
     if not notes["bundle_membership_known"]:
         print("[judge] note: this design records no bundle membership "
               "(`bundle_net` is empty), so a net with NO metal cannot be "

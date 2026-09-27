@@ -1536,6 +1536,49 @@ proc soc_vehicle::leaf_census {} {
     return $n
 }
 
+# Which LOW layers each LEAF's footprint blocks (`set_leaf_blockage
+# policy`).  Every leaf blocking every LOW layer (M2..M4) is the historical
+# model and what a run without `-leafcap` keeps; this says instead that a
+# small leaf's own wiring lives low and leaves the layers above it to the
+# wiring passing over.  `spec` is either an explicit `cell LAYER` list or
+# `size`, which grades each leaf by its larger side against the face rule:
+# up to `_dim(DW)` (the 152-unit cells at the defaults) blocks M2 alone, up
+# to `_dim(2*DW)` (the 280-unit fifo/tag) M2..M3, anything larger every LOW
+# layer.  A MODEL of the leaves, not a fact about them -- the table this
+# prints is what was assumed.  Declared through `set_cell_layer_cap`, which
+# on a leaf states exactly that and nothing else.  Returns the leaf->cap
+# dict applied.
+proc soc_vehicle::leaf_caps {spec} {
+    variable P
+    variable SZ
+    set leaves [lsort -unique [lmap p [leaf_paths] {cell_at $p}]]
+    set caps [dict create]
+    if {$spec eq "size"} {
+        set small [_dim $P(DW)]
+        set mid   [_dim [expr {2*$P(DW)}]]
+        foreach c $leaves {
+            lassign $SZ($c) w h
+            set side [expr {max($w, $h)}]
+            dict set caps $c [expr {$side <= $small ? "M2"
+                                    : ($side <= $mid ? "M3" : "M4")}]
+        }
+    } else {
+        if {[llength $spec] % 2} {
+            error "soc_vehicle: -leafcap wants 'size' or a list of cell LAYER pairs"
+        }
+        foreach {c l} $spec {
+            if {$c ni $leaves} { error "soc_vehicle: -leafcap: '$c' is not a leaf cell" }
+            dict set caps $c $l
+        }
+    }
+    buda::set_leaf_blockage policy
+    dict for {c l} $caps {
+        buda::set_cell_layer_cap $c $l
+        puts "leafcap $c [join $SZ($c) x] blocks M2..$l"
+    }
+    return $caps
+}
+
 proc soc_vehicle::derive_interface {} { buda::derive_busterms 4 }
 
 proc soc_vehicle::load_blocks {} {

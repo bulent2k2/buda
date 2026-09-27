@@ -24,6 +24,7 @@
 #   btcl flow/tcl/soc.tcl 2 -caps            # reserve the top pair for the top
 #   btcl flow/tcl/soc.tcl 2 -census          # instances per leaf cell type
 #   btcl flow/tcl/soc.tcl 8 -abstract        # stop at abstract NUTS (+ healing)
+#   btcl flow/tcl/soc.tcl 8 -leafcap size    # small leaves block only M2 (M2..M3 mid)
 #   btcl flow/tcl/soc.tcl 4 -reserve 1 -noheal -report r.rep   # an E1 blind round
 #   btcl flow/tcl/soc.tcl 4 -derive s.buda   # top-down, write the derived shares
 #   btcl flow/tcl/soc.tcl 4 -bottomup -shares s.buda  # ...and route under them
@@ -65,6 +66,7 @@ set bydepth ""
 set dry 0
 set census 0
 set abstract 0
+set leafcap ""
 set argi 0
 if {$argc > 0 && [string is integer -strict [lindex $argv 0]]} {
     lappend overrides NQ [lindex $argv 0]
@@ -85,6 +87,13 @@ while {$argi < $argc} {
         -dry      { set dry 1; incr argi }
         -census   { set census 1; incr argi }
         -abstract { set abstract 1; incr argi }
+        -leafcap {
+            if {$argi + 1 >= $argc} {
+                error "soc.tcl: -leafcap needs 'size' or {cell LAYER ...}"
+            }
+            set leafcap [lindex $argv [expr {$argi+1}]]
+            incr argi 2
+        }
         default {
             # The E1 hooks (-reserve/-shares/-derive/-derive_cells/-noheal/
             # -report) — converge_lib.tcl, shared with tpu.tcl so the loop
@@ -389,6 +398,9 @@ if {$bottomup} {
 # (2), `cluster_cell` (3) and `quad_cell` (4) take DIFFERENT caps from one
 # declaration.  On a uniform-depth vehicle every cell is one level and the
 # per-level behaviour collapses to the `-caps` case.
+# `-leafcap` says which LOW layers each LEAF's footprint blocks rather
+# than all of them (`soc_vehicle::leaf_caps`).
+if {$leafcap ne ""} { soc_vehicle::leaf_caps $leafcap }
 if {$caps} { buda::reserve_top_layers 2 }
 if {$bydepth ne ""} { buda::set_layer_caps_by_depth {*}$bydepth }
 # The E1 budget, if the driver handed one down: `-reserve N` (the blind

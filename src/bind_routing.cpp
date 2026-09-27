@@ -483,6 +483,13 @@ void bind_routing(py::module_& m) {
         .def("is_container",            &Floorplan::is_container)
         .def("low_layer_keepouts",      &Floorplan::low_layer_keepouts,
              py::arg("low_layer_ids"))
+        .def("set_block_blocked_layers", &Floorplan::set_block_blocked_layers,
+             py::arg("name"), py::arg("layer_ids"))
+        .def("clear_block_blocked_layers", &Floorplan::clear_block_blocked_layers)
+        .def("has_block_blocked_layers", &Floorplan::has_block_blocked_layers)
+        .def("block_blocks_layer",      &Floorplan::block_blocks_layer,
+             py::arg("name"), py::arg("layer_id"))
+        .def("block_blocked_layers",    &Floorplan::block_blocked_layers)
         .def("add_keepout_zone",        &Floorplan::add_keepout_zone,
              py::arg("x1"), py::arg("y1"), py::arg("x2"), py::arg("y2"),
              py::arg("layer_ids"), py::arg("inside_block") = false,

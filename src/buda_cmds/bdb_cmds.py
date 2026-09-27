@@ -1173,6 +1173,54 @@ def _band_missing_dir(session, floor, cap):
     return None
 
 
+def _cell_is_leaf(session, cell):
+    """Whether `cell` is a LEAF — a cell with no child instances, so no
+    interconnect of its own for BUDA to route.  With a BDB open: no component
+    of the cell is a non-leaf and no cell_children edge has it as parent.
+    With no component of that cell (a flat flow, BDB open or not), a
+    floorplan block of that name that is not a container.  Unknown = not a leaf (the stricter band check applies)."""
+    comps = [] if session.bdb is None else \
+        [c for c in session.bdb.all_components() if c.cell == cell]
+    if comps:
+        if any(not c.is_leaf for c in comps):
+            return False
+        if any(p == cell for p, _c in session.bdb.cell_child_edges()):
+            return False
+        fp = getattr(session, "fp", None)
+        return not (fp is not None and any(fp.is_container(c.name)
+                                           for c in comps))
+    # No component of that cell: a flat flow's block (a BDB may still be
+    # open for persistence), whose name is its cell.
+    fp = getattr(session, "fp", None)
+    if fp is None:
+        return False
+    return any(n == cell for n, _r in fp.get_all_blocks()) \
+        and not fp.is_container(cell)
+
+
+def cmd_set_leaf_blockage(session, cmd, args, cmd_line):
+    # set_leaf_blockage low|policy
+    # Which LOW layers a solid leaf cell's footprint blocks.  `low` (the
+    # default) = every LOW layer, the historical model.  `policy` = only the
+    # LOW layers inside the leaf's cell layer band (set_cell_layer_cap /
+    # set_layer_caps_by_depth / reserve_top_layers / the '*' default); a leaf
+    # with no band still blocks every LOW layer, and nothing ever blocks a
+    # TOP one.  A leaf has no interconnect BUDA routes, so for a leaf the
+    # band is exactly the statement of which layers its own wiring uses.
+    # Persisted (meta leaf_blockage); declare it before the first NUTS solve.
+    if len(args) != 1 or args[0].lower() not in ("low", "policy"):
+        print("Error: set_leaf_blockage requires 'low' or 'policy'"); return
+    mode = args[0].lower()
+    session._leaf_blockage = mode
+    session._leaf_blockage_typed = True
+    if session.bdb is not None:
+        session.bdb.meta_set("leaf_blockage", mode)
+    print(f"[LeafBlock] leaf footprints block "
+          + ("every LOW layer" if mode == "low"
+             else "the LOW layers inside their cell layer band"))
+    session._sync_leaf_blockage()
+
+
 def cmd_set_cell_layer_cap(session, cmd, args, cmd_line):
     # set_cell_layer_cap <cell>|* <cap_layer> [-min <floor_layer>]  |  * off
     # Per-cell layer policy, binary band form (docs/internal/hier_layer_caps.md,
@@ -1234,14 +1282,23 @@ def cmd_set_cell_layer_cap(session, cmd, args, cmd_line):
             print(f"Error: set_cell_layer_cap: floor {rest[1]} is above the "
                   f"cap {args[1]} — the band [floor..cap] is empty"); return
     # The band must grant at least one H and one V routing layer, or nothing
-    # in it is routable (a corner no ladder can escape).
-    missing = _band_missing_dir(session, floor, cap)
+    # in it is routable (a corner no ladder can escape).  A LEAF cell is
+    # exempt: it has no interconnect BUDA routes, so its band only says which
+    # layers its footprint blocks (`set_leaf_blockage policy`) — a small leaf
+    # using M2 alone is the ordinary case, not an unroutable policy.
+    missing = None if (cell != "*" and _cell_is_leaf(session, cell)) \
+        else _band_missing_dir(session, floor, cap)
     if missing:
         print(f"Error: set_cell_layer_cap: band grants no {missing} routing "
               f"layer — an unroutable policy"); return
     # Cell must exist when a BDB is open (mirrors set_bottom_up); '*' always ok.
     if cell != "*" and session.bdb is not None:
-        if not any(c.cell == cell for c in session.bdb.all_components()):
+        # A flat flow's block names its own cell (the leaf-blockage case),
+        # even with a BDB open for persistence.
+        flat = getattr(session, "fp", None) is not None and any(
+            n == cell for n, _r in session.fp.get_all_blocks())
+        if not flat and not any(c.cell == cell
+                                for c in session.bdb.all_components()):
             print(f"Error: set_cell_layer_cap: unknown cell '{cell}'"); return
     if not hasattr(session, "_cell_layer_policy") or \
             session._cell_layer_policy is None:
@@ -2134,6 +2191,7 @@ COMMANDS = {
     "save_bdb": cmd_save_bdb,
     "set_bottom_up": cmd_set_bottom_up,
     "set_cell_layer_cap": cmd_set_cell_layer_cap,
+    "set_leaf_blockage": cmd_set_leaf_blockage,
     "set_cell_layer_share": cmd_set_cell_layer_share,
     "set_cell_layer_reserve": cmd_set_cell_layer_reserve,
     "set_reserve_steer": cmd_set_reserve_steer,
