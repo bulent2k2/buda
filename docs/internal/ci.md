@@ -346,6 +346,16 @@ re-sweeps only the head (~10 min). Both sides build **clean**: incremental acros
 a checkout risks a stale object making the two sides incomparable, which is the
 exact fault the job exists to detect.
 
+The job summary opens with the runner's CPU (`lscpu`'s model name, family,
+model and stepping; a VM often masks the name, and the family/model/stepping
+triple is what identifies the core, 6/85/7 being Cascade Lake).  The compare
+ends in a runtime section, and a runtime belongs to the CPU as much as to the
+code: runner CPUs differ from job to job, and on a Skylake-derived Intel core
+the JCC erratum makes the speed of unchanged code follow the linker's layout
+([jcc_erratum.md](jcc_erratum.md)).  A merge-base sweep restored from the
+cache was timed on an earlier runner, so on a second push the runtime rows
+compare two machines, and the line names only the newer one.
+
 ## What CI deliberately does NOT do
 
 Remaining gaps and reasoning in [`opens_ci.md`](opens_ci.md):

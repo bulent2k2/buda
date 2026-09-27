@@ -635,8 +635,59 @@ def _build_arch(root=None):
     return ""
 
 
+def _build_jcc(root=None):
+    """Whether the build being measured has the JCC-erratum mitigation: "on",
+    "off", or '' when that cannot be known.
+
+    From the same cmake cache as `_build_arch`, for the same reason: it
+    answers for the artifact.  A cache WITHOUT the entry is a build
+    configured before BUDA_JCC_MITIGATION existed, which applied no flag, so
+    that reads "off" and not "did not say" -- the comparisons this field is
+    for are exactly the ones that straddle the commit adding it (a `--vs`
+    against an older main, a nightly baseline from before it).  No cache at
+    all is unknowable, and '' is the answer there, as for `arch`.
+    """
+    try:
+        with open(os.path.join(root or _ROOT, "build", "CMakeCache.txt")) as fh:
+            for line in fh:
+                if line.startswith("BUDA_JCC_FLAG_IN_USE:"):
+                    return "on" if line.split("=", 1)[1].strip() else "off"
+    except OSError:
+        return ""
+    return "off"
+
+
+def _cpu(cpuinfo="/proc/cpuinfo"):
+    """This machine's CPU as "<model name> (<family>/<model>/<stepping>)", or
+    '' when it cannot tell (anything but Linux on x86).
+
+    Runtime belongs to the CPU as much as to the code: GitHub's runners
+    differ from job to job, and on a Skylake-derived Intel core the JCC
+    erratum makes the speed of unchanged code follow the linker's layout
+    (docs/internal/jcc_erratum.md).  A VM often masks the model name, which
+    is why the family/model/stepping triple is kept beside it.
+    """
+    info = {}
+    try:
+        with open(cpuinfo) as fh:
+            for line in fh:
+                if not line.strip():
+                    break                   # the first processor is enough
+                key, _, val = line.partition(":")
+                info[key.strip()] = val.strip()
+    except OSError:
+        return ""
+    name = info.get("model name", "")
+    if not name:
+        return ""
+    fms = "/".join(info.get(k, "?") for k in ("cpu family", "model",
+                                               "stepping"))
+    return f"{name} ({fms})"
+
+
 def sweep_meta():
-    """Where this sweep came from: commit, time, ISA, and the CI run if any.
+    """Where this sweep came from: commit, time, ISA, JCC flag, CPU, and the
+    CI run if any.
 
     Best-effort by construction — a field nothing can answer is recorded
     EMPTY rather than omitted, so a reader never has to tell "this sweep did
@@ -646,6 +697,8 @@ def sweep_meta():
         "commit": _rev_parse("HEAD"),
         "written": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "arch": _build_arch(),
+        "jcc": _build_jcc(),
+        "cpu": _cpu(),
         "run": os.environ.get("GITHUB_RUN_NUMBER", ""),
         "run_id": os.environ.get("GITHUB_RUN_ID", ""),
         # Recorded EXPLICITLY, though it is this tool's only value, so that
@@ -709,6 +762,20 @@ def _mismatch_notes(base_meta, mine_meta):
             f"ISA-sensitive, which is why CI pins one — so the rows below "
             f"mix the ISA difference into every delta and cannot be read as "
             f"a code change.  Re-measure both sides at one -march.")
+    if b.get("jcc") and m.get("jcc") and b["jcc"] != m["jcc"]:
+        notes.append(
+            f"NOTE: one sweep's build has the JCC-erratum mitigation and the "
+            f"other's does not (baseline {b['jcc']}, branch {m['jcc']}).  The "
+            f"routes are the same either way, but on a Skylake-derived Intel "
+            f"core the flag moves runtime by several percent, in either "
+            f"direction (docs/internal/jcc_erratum.md), so the runtime rows "
+            f"below carry it in every delta.")
+    if b.get("cpu") and m.get("cpu") and b["cpu"] != m["cpu"]:
+        notes.append(
+            f"NOTE: the two sweeps ran on different CPUs (baseline "
+            f"{b['cpu']}, branch {m['cpu']}).  QoR does not depend on the "
+            f"CPU, but runtime does: the runtime rows below compare two "
+            f"machines, not two builds.")
     if b.get("pins") and m.get("pins") and b["pins"] != m["pins"]:
         which = "baseline" if b["pins"] == "neutralized" else "branch"
         notes.append(
@@ -738,6 +805,10 @@ def describe_baseline(meta, mine_meta=None, age=None):
         bits.append(f"CI run #{meta['run']}")
     if meta.get("arch"):
         bits.append(f"-march={meta['arch']}")
+    if meta.get("jcc"):
+        bits.append(f"JCC mitigation {meta['jcc']}")
+    if meta.get("cpu"):
+        bits.append(meta["cpu"])
     age = _age_days(meta) if age is None else age
     if age is not None:
         bits.append(f"{age} day(s) old")
@@ -1095,6 +1166,9 @@ def cmd_vs(rev, out, jobs, flows=None, build=True):
         "written": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         # The BASELINE's own build, in its worktree — not ours.
         "arch": _build_arch(wt),
+        "jcc": _build_jcc(wt),
+        # Swept just now, on this machine.
+        "cpu": _cpu(),
     })
     if not out:
         print(f"\n[--vs] result JSONs: {base} , {mine}")

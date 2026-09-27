@@ -504,8 +504,8 @@ def test_a_sweep_written_by_out_carries_its_provenance(tmp_path, monkeypatch):
     assert rows == [{"flow": "a.buda"}]
     # Present even when empty: a reader must never have to tell "did not
     # know" from "predates the field".
-    assert set(meta) == {"commit", "written", "arch", "run", "run_id",
-                         "pins"}
+    assert set(meta) == {"commit", "written", "arch", "jcc", "cpu", "run",
+                         "run_id", "pins"}
 
 
 def test_a_pre_provenance_sweep_still_loads(tmp_path):
@@ -651,6 +651,76 @@ def test_no_build_cache_records_an_empty_arch_rather_than_guessing(
     monkeypatch.setattr(qc, "_ROOT", str(tmp_path))
     monkeypatch.setenv("BUDA_ARCH", "x86-64-v2")
     assert qc._build_arch() == ""
+
+
+def test_the_recorded_jcc_setting_is_the_builds(tmp_path, monkeypatch):
+    """From the cmake cache, like the ISA, and for the same reason.
+
+    A cache with NO entry is a build configured before BUDA_JCC_MITIGATION
+    existed, which applied no flag: "off", not "did not say", because the
+    comparisons this field exists for are the ones that straddle the commit
+    adding it.  No cache at all is unknowable.
+    """
+    (tmp_path / "build").mkdir()
+    cache = tmp_path / "build" / "CMakeCache.txt"
+    monkeypatch.setattr(qc, "_ROOT", str(tmp_path))
+    for text, want in (
+            ("BUDA_JCC_FLAG_IN_USE:INTERNAL="
+             "-Wa,-mbranches-within-32B-boundaries\n", "on"),
+            ("BUDA_JCC_FLAG_IN_USE:INTERNAL=\n", "off"),
+            ("BUDA_ARCH:STRING=x86-64-v2\n", "off")):
+        cache.write_text(text)
+        assert qc._build_jcc() == want, text
+    cache.unlink()
+    assert qc._build_jcc() == ""
+
+
+def test_the_cpu_is_read_with_the_triple_a_vm_does_not_mask(tmp_path):
+    info = tmp_path / "cpuinfo"
+    info.write_text("processor\t: 0\nvendor_id\t: GenuineIntel\n"
+                    "cpu family\t: 6\nmodel\t\t: 85\n"
+                    "model name\t: Intel(R) Xeon(R) Processor @ 2.80GHz\n"
+                    "stepping\t: 7\n\nprocessor\t: 1\nmodel\t\t: 99\n")
+    assert qc._cpu(str(info)) == \
+        "Intel(R) Xeon(R) Processor @ 2.80GHz (6/85/7)"
+    assert qc._cpu(str(tmp_path / "absent")) == ""
+
+
+def test_a_sweep_with_the_jcc_flag_against_one_without_says_so(
+        tmp_path, monkeypatch, capsys):
+    """The routes agree; the runtime rows do not measure the code alone."""
+    row = {"flow": "a.buda", "overlaps": 0, "unplaced": 0, "viol_bundles": 0}
+    _compare_exit(tmp_path, monkeypatch,
+                  {"meta": _aged(0, jcc="off"), "rows": [row]},
+                  {"meta": _aged(0, jcc="on"), "rows": [row]})
+    out = capsys.readouterr().out
+    assert "unchanged (of 1 flows)" in out
+    assert "JCC-erratum mitigation" in out and "baseline off" in out
+
+
+def test_two_sweeps_on_different_cpus_say_the_runtime_compares_machines(
+        tmp_path, monkeypatch, capsys):
+    row = {"flow": "a.buda", "overlaps": 0, "unplaced": 0, "viol_bundles": 0}
+    _compare_exit(tmp_path, monkeypatch,
+                  {"meta": _aged(0, cpu="AMD EPYC 7763 (25/1/1)"),
+                   "rows": [row]},
+                  {"meta": _aged(0, cpu="Intel(R) Xeon(R) (6/85/7)"),
+                   "rows": [row]})
+    out = capsys.readouterr().out
+    assert "unchanged (of 1 flows)" in out
+    assert "different CPUs" in out and "AMD EPYC 7763" in out
+
+
+def test_a_jcc_or_cpu_only_one_side_recorded_is_not_a_mismatch(
+        tmp_path, monkeypatch, capsys):
+    """Absent is "did not say", as for the ISA."""
+    row = {"flow": "a.buda", "overlaps": 0, "unplaced": 0, "viol_bundles": 0}
+    _compare_exit(tmp_path, monkeypatch, [row],
+                  {"meta": _aged(0, jcc="on", cpu="X (6/85/7)"),
+                   "rows": [row]})
+    out = capsys.readouterr().out
+    assert "unchanged (of 1 flows)" in out
+    assert "JCC-erratum" not in out and "different CPUs" not in out
 
 
 def test_two_pin_free_sweeps_are_not_called_a_pin_mismatch(

@@ -59,6 +59,22 @@ jobs:
           python -m pip install --upgrade pip
           pip install pybind11 matplotlib
 
+      - name: Record the runner's CPU
+        # The compare below ends in a runtime section, and a runtime belongs to
+        # the CPU as much as to the code.  Runner CPUs differ from job to job,
+        # and on a Skylake-derived Intel core the JCC erratum makes the speed
+        # of unchanged code follow where the linker put it
+        # (docs/internal/jcc_erratum.md), so say which CPU this job ran on.  A
+        # merge-base sweep restored from the cache was timed on an earlier
+        # runner, which this line cannot name.
+        run: |
+          {
+            echo '## Runner CPU'
+            echo '```'
+            lscpu | grep -E '^\s*(Model name|CPU family|Model|Stepping|CPU\(s\)):'
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
       - name: Fetch corpus inputs
         # flow/ariane133/ariane133_heal.buda is the one corpus row whose
         # inputs are FETCHED (digest-pinned, ~12 MB) and gitignored, so a

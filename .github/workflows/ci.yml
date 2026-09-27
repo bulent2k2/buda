@@ -69,6 +69,12 @@ jobs:
       # at THIS job's pinned ISA, which is what makes turning it on honest.
       # Rebaseline deliberately, in the same commit as the change that moves it.
       BUDA_FLOW_QOR_STRICT: '1'
+      # The JCC-erratum mitigation (docs/internal/jcc_erratum.md) must be in
+      # force on this image (GCC 13, binutils 2.42): with this set,
+      # test_jcc_mitigation.py FAILS when CMake applied no flag instead of
+      # skipping, because a flag that silently stops being applied changes
+      # nothing but the speed and no other check would notice.
+      BUDA_JCC_STRICT: '1'
       # Headless: the suite uses matplotlib's Agg backend and needs no Tk or
       # display server (docs/build_test_dependencies.md).
       MPLBACKEND: Agg
