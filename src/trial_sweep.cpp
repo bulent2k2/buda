@@ -97,12 +97,17 @@ bool topo_disconnected(const Topology& topo, const Floorplan& fp, int bid) {
 // The _run_detailed_nuts solve path (fast-trial shape: vias OFF; the
 // plain path honors the abort bar, the bottom-up merge path ignores it —
 // partial r1/r2 results cannot be merged meaningfully).  Returns the
-// merged unplaced count, the only DNUTS value the metric reads.
+// merged unplaced count, plus the shorts left (the two solves' own, as the
+// session's merge sums them) under count_shorts — the DNUTS values the
+// metric reads.  An aborted solve stops before counting shorts, which
+// cannot matter: its unplaced count alone is already over the bar.
 int run_dnuts(const std::vector<BusSegment>& bus, const SweepDnutsCtx& dn) {
     if (dn.ref_ids.empty() && dn.skip_ids.empty()) {
         DetailedNUTSEngine e(*dn.grid);
-        return e.run(bus, /*emit_vias=*/false, dn.abort_unplaced)
-            .num_unplaced;
+        const DetailedNUTSResult r =
+            e.run(bus, /*emit_vias=*/false, dn.abort_unplaced);
+        return r.num_unplaced +
+               (dn.count_shorts ? (int)r.cross_shorts.size() : 0);
     }
     std::vector<BusSegment> ref_segs, rest_segs;
     for (const auto& b : bus) {
@@ -137,7 +142,10 @@ int run_dnuts(const std::vector<BusSegment>& bus, const SweepDnutsCtx& dn) {
     fixed.insert(fixed.end(), copies.begin(), copies.end());
     e2.add_fixed_bits(fixed);
     DetailedNUTSResult r2 = e2.run(rest_segs, /*emit_vias=*/false);
-    return r1.num_unplaced + extra_unplaced + r2.num_unplaced;
+    return r1.num_unplaced + extra_unplaced + r2.num_unplaced +
+           (dn.count_shorts
+                ? (int)(r1.cross_shorts.size() + r2.cross_shorts.size())
+                : 0);
 }
 
 // Realized abstract WL — the refine metric's wl_now(), 1:1: the raw double
@@ -218,7 +226,7 @@ SweepOutcome eval_move(const std::vector<BundleWrapper>& baseline,
     apply_doglegs(b, nr);
     std::vector<BusSegment> bus =
         make_bus_segments(b, nr, fp, dn.bit_order, &layers);
-    int unplaced = run_dnuts(bus, dn);
+    int unplaced = run_dnuts(bus, dn);   // + its shorts under count_shorts
     // The moved bundle's DISCONNECTED term on its FINAL selected candidate
     // (a dogleg adoption above may have replaced the trial candidate —
     // exactly what the sequential metric evaluates).

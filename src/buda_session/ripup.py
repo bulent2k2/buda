@@ -63,13 +63,59 @@ class RipupMixin:
         tuples compare lexicographically, so the loop's `m < cur` works
         unchanged; zero/no-op checks use _rr_m_primary."""
         if self.detailed_result is not None:
-            return 'b', (lambda: (self.detailed_result.num_unplaced
+            return 'b', (lambda: (self._dn_opens()
                                   + self._rr_disconnected_bits(),
                                   self.nuts_result.num_overlaps
                                   if self.nuts_result is not None else 0))
         if self.nuts_result is not None:
             return 'a', (lambda: self.nuts_result.num_overlaps)
         return None, None
+
+    @staticmethod
+    def _heal_counts_shorts():
+        """Whether the stage-b healers count cross-bundle SHORTS as opens —
+        the study knob BUDA_HEAL_SHORTS=1 (issue #962).  Their metric read
+        DNUTS opens and NUTS overlaps only, so a short cost a trial nothing:
+        measured on bigHalf, the healers reach a clean endpoint through a
+        state carrying 33 shorts their metric read as 10 opens.  ONE
+        predicate for every stage-b metric (_dn_opens), the open-segment
+        walks the contenders, contention sites and negotiate's injection
+        are derived from, and the parallel sweep's C++ metric, so a sweep
+        cannot score a move differently from the replay it certifies.  Off
+        = every metric and walk exactly as before."""
+        return os.environ.get("BUDA_HEAL_SHORTS") == "1"
+
+    def _dn_opens(self, dr=None):
+        """The stage-b OPENS a healer scores a detailed result by (default
+        the current one): its unplaced bits, plus, under BUDA_HEAL_SHORTS,
+        one per cross-bundle short it still carries — a short is two nets
+        on one piece of metal, as broken as a bit that never placed, and
+        moving either wire clears it, which is what the short cull charges
+        for it too (one bit per pair).  The one reading of "opens" every
+        stage-b accept uses: ripup, negotiate, refine, the warm pre-filter
+        and the three heals inside run_detailed_nuts."""
+        dr = self.detailed_result if dr is None else dr
+        n = dr.num_unplaced
+        if self._heal_counts_shorts():
+            n += len(dr.cross_shorts)
+        return n
+
+    def _short_segments(self):
+        """{(bundle_id, seg_idx): wires in shorts} over both sides of every
+        cross-bundle short the current detailed result still carries —
+        what BUDA_HEAL_SHORTS adds to the open segments, so the shorts'
+        bundles become contenders and their windows contention sites.
+        Empty with the knob off.  A wire is counted once however many
+        shorts it is in; a fixed copy's side is listed like any other (the
+        walks' consumers skip what they cannot move)."""
+        dr = self.detailed_result
+        if dr is None or not self._heal_counts_shorts():
+            return {}
+        wires = {}
+        for cs in dr.cross_shorts:
+            wires.setdefault((cs.bundle_a, cs.seg_a), set()).add(cs.bit_a)
+            wires.setdefault((cs.bundle_b, cs.seg_b), set()).add(cs.bit_b)
+        return {k: len(v) for k, v in sorted(wires.items())}
 
     def _rr_disconnected_bits(self):
         """Total bits of bundles whose SELECTED topology splits into 2+ separate
@@ -307,6 +353,13 @@ class RipupMixin:
             n_segs = len(cands[sel].segments)
             segs = per_seg.get(bid, {})
             if any(segs.get(si, 0) < exp for si in range(n_segs)):
+                out.append(bid)
+        # Under BUDA_HEAL_SHORTS a shorted bundle is a contender too, after
+        # the open ones (a stage-b open still outranks a short in the scan).
+        listed = set(out)
+        for (bid, _si) in self._short_segments():
+            if bid not in listed:
+                listed.add(bid)
                 out.append(bid)
         return out
 
@@ -1576,8 +1629,11 @@ class RipupMixin:
         dr = self.detailed_result
         if dr is None:
             return []
+        # The knob is part of the key: the list it adds is a function of it,
+        # and a result read once under each setting must not serve the other.
+        shorts_on = self._heal_counts_shorts()
         cache = getattr(self, "_open_seg_cache", None)
-        if cache is not None and cache[0] is dr:
+        if cache is not None and cache[0] is dr and cache[2] == shorts_on:
             return cache[1]
         per_seg = {}
         for ns in self.detailed_result.net_segments:
@@ -1604,7 +1660,29 @@ class RipupMixin:
                 missing = exp - segs.get(si, 0)
                 if missing > 0:
                     out.append((bid, si, missing, exp))
-        self._open_seg_cache = (dr, out)
+        # Under BUDA_HEAL_SHORTS a segment carrying shorted wires is open
+        # for the healers' purposes (its bits are placed and electrically
+        # wrong): merged into its open entry when it has one, appended
+        # otherwise, with the shorted wires as its "missing" bits — what
+        # negotiate charges its window for, the way the short cull would
+        # have turned them into unplaced ones.
+        shorted = self._short_segments()
+        if shorted:
+            at = {(b, s): i for i, (b, s, _m, _e) in enumerate(out)}
+            exp_of = {w.input.original_bundle.id:
+                      len(w.input.original_bundle.get_net_names())
+                      for w in self.bundles}
+            for (bid, si), k in shorted.items():
+                exp = exp_of.get(bid)
+                if not exp:
+                    continue
+                i = at.get((bid, si))
+                if i is not None:
+                    b, s, m, e = out[i]
+                    out[i] = (b, s, min(e, m + k), e)
+                else:
+                    out.append((bid, si, min(exp, k), exp))
+        self._open_seg_cache = (dr, out, shorts_on)
         return out
 
 

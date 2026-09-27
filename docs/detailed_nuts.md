@@ -72,6 +72,7 @@ connected segment at the crossing of their two individually-placed tracks.
 | `num_unplaced` | int | Total number of bits that could not be placed (all-or-nothing per bus — see below) |
 | `num_cross_shorts` | int | Cross-bundle shorts left by the span adjustment (step 6b below), counted before any is removed — observation, taken on every run |
 | `num_short_bits` | int | Bits the short cull removed (step 6b, `cull` lever); each is also in `num_unplaced` |
+| `cross_shorts` | list of CrossShort | The cross-bundle shorts still in `net_segments` (step 6b), each by its two wires' `(bundle, seg, bit)` and the shared metal; what the healers read under `BUDA_HEAL_SHORTS` |
 
 ---
 
@@ -216,8 +217,17 @@ Then two post-passes over the emitted bit-wires:
    lever removes 19–24 dirty bundles and strands 66–151 more bits (`cull`
    7 better / 5 worse, `reach` 6 / 7, `reach,cull` 7 / 7). `bigHalf` goes
    from clean to dirty under each. Its healers reach clean on main through a
-   state with 33 shorts the stage-b metric does not read. The tables, the
-   four #962 SoC runs and where to go next are in
+   state with 33 shorts the stage-b metric does not read.
+
+   The result also names the shorts it leaves (`cross_shorts`: each pair by
+   its two wires' `(bundle, seg, bit)` and the shared metal — every counted
+   pair with the cull off, only the ones no side could be removed from with
+   it on). That is what the **healer score** reads: under
+   `BUDA_HEAL_SHORTS=1` the stage-b healers count each remaining short as
+   an open and treat its segments as open ones, with placement unchanged.
+   It measured best of the three (7 better / 2 worse, no clean flow going
+   dirty, both failing #962 bottom-up SoC runs clean). The tables, the four
+   #962 SoC runs and where to go next are in
    [wishlist-nuts.md](internal/wishlist/wishlist-nuts.md).
 
 7. **Per-bit via emission (step 5 in the source).** For every connection where

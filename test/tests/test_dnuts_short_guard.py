@@ -162,6 +162,19 @@ def test_guard_off_is_placement_identical_to_no_guard_at_all():
     assert key(a) == key(b)
 
 
+def test_the_short_is_named_by_its_wires():
+    # cross_shorts is what the healers act on (BUDA_HEAL_SHORTS): the pair
+    # by (bundle, seg, bit), the smaller first as the audit orders it, and
+    # the shared metal — bundle 1's stretch into bundle 2's [203, 300].
+    res = _run(_scenario())
+    cs, = res.cross_shorts
+    assert (cs.bundle_a, cs.seg_a, cs.bit_a) == (1, 0, 0)
+    assert (cs.bundle_b, cs.seg_b, cs.bit_b) == (2, 0, 0)
+    assert cs.layer == M6
+    assert (cs.s_lo, cs.s_hi) == pytest.approx((203.0, 206.5))
+    assert (cs.p_lo, cs.p_hi) == pytest.approx((3.0, 4.0))
+
+
 # ── cull: remove the stretched side ────────────────────────────────────────
 
 def test_cull_removes_the_stretched_side_and_counts_it_unplaced():
@@ -176,6 +189,9 @@ def test_cull_removes_the_stretched_side_and_counts_it_unplaced():
     assert _wire(res, 2, 0) is not None
     assert _wire(res, 1, 1) is not None     # the stub is not in the short
     assert not _audit(res)
+    # Counted before the cull, gone from what is left: the healers must not
+    # charge a short the cull already charged as an unplaced bit.
+    assert list(res.cross_shorts) == []
 
 
 def test_cull_never_removes_a_fixed_copy():
@@ -192,6 +208,9 @@ def test_cull_never_removes_a_fixed_copy():
     assert res.num_cross_shorts == 1
     assert res.num_short_bits == 1
     assert _wire(res, 1, 0) is None
+    # With the cull off the pair stays, the copy named as its other side.
+    cs, = _run([t1, stub], fixed=[copy]).cross_shorts
+    assert (cs.bundle_a, cs.bundle_b) == (1, 9)
 
 
 def test_a_short_between_two_fixed_bits_is_not_this_runs():

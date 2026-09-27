@@ -544,6 +544,7 @@ int DetailedNUTSEngine::guard_cross_shorts(
               });
 
     int culled = 0, kept = 0;
+    std::vector<char> gone((size_t)n_run, 0);   // run wires the cull removes
     if (short_cull_) {
         // How much of the shared metal lies OUTSIDE the span the wire's own
         // bus reserved — the part only the span-follow added.  The culprit is
@@ -565,7 +566,6 @@ int DetailedNUTSEngine::guard_cross_shorts(
             return std::max(0.0, std::min(h.s_hi, r_lo) - h.s_lo) +
                    std::max(0.0, h.s_hi - std::max(h.s_lo, r_hi));
         };
-        std::vector<char> gone((size_t)n_run, 0);
         for (const auto& h : hits) {
             if ((h.a < n_run && gone[(size_t)h.a]) ||
                 (h.b < n_run && gone[(size_t)h.b]))
@@ -580,17 +580,31 @@ int DetailedNUTSEngine::guard_cross_shorts(
             gone[(size_t)pick] = 1;
             ++culled;
         }
-        if (culled > 0) {
-            // `wires` points into net_segments: nothing reads it past here.
-            std::vector<NetSegment> keep;
-            keep.reserve(result.net_segments.size() - (size_t)culled);
-            for (int i = 0; i < n_run; ++i)
-                if (!gone[(size_t)i])
-                    keep.push_back(std::move(result.net_segments[(size_t)i]));
-            result.net_segments.swap(keep);
-            result.num_unplaced  += culled;
-            result.num_short_bits = culled;
-        }
+    }
+    // The shorts that stay (all of them with the cull off), named by their
+    // wires' (bundle, seg, bit) — taken before the cull below moves
+    // net_segments, which `wires` points into.
+    for (const auto& h : hits) {
+        if ((h.a < n_run && gone[(size_t)h.a]) ||
+            (h.b < n_run && gone[(size_t)h.b]))
+            continue;
+        const NetSegment& a = *wires[(size_t)h.a];
+        const NetSegment& b = *wires[(size_t)h.b];
+        result.cross_shorts.push_back(
+            {a.bundle_id, a.seg_idx, a.bit_index,
+             b.bundle_id, b.seg_idx, b.bit_index,
+             a.layer, h.s_lo, h.s_hi, h.p_lo, h.p_hi});
+    }
+    if (culled > 0) {
+        // `wires` points into net_segments: nothing reads it past here.
+        std::vector<NetSegment> keep;
+        keep.reserve(result.net_segments.size() - (size_t)culled);
+        for (int i = 0; i < n_run; ++i)
+            if (!gone[(size_t)i])
+                keep.push_back(std::move(result.net_segments[(size_t)i]));
+        result.net_segments.swap(keep);
+        result.num_unplaced  += culled;
+        result.num_short_bits = culled;
     }
     // Said only when a lever is on: with both off the count is observation
     // (num_cross_shorts) and the console is what it was — the audit already

@@ -222,7 +222,8 @@ class RRSweepsMixin:
             dn_kwargs.update(grid=self.routing_grid,
                              bit_order=self._detailed_bit_order,
                              abort_unplaced=(-1 if full else
-                                             self._rr_m_primary(metric())))
+                                             self._rr_m_primary(metric())),
+                             count_shorts=self._heal_counts_shorts())
         elif self._sync_reserve_corridors():
             # Stage a needs no DNUTS grid, but the sweep's NUTS engines read
             # the reserve corridors (6b) off it — the sequential trial's

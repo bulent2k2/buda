@@ -210,6 +210,21 @@ struct NetVia {
     double x = 0.0, y = 0.0;  // per-bit crossing (µm)
 };
 
+// One cross-bundle short (issue #962): two wires of two different bundles,
+// carrying different nets, sharing metal on one layer — the pair
+// find_cross_bundle_overlaps returns, named by (bundle, seg, bit) so it
+// outlives the wires' positions in net_segments.  `a` is the smaller
+// (bundle, seg, bit), the audit's order; the shared metal is [s_lo, s_hi]
+// along the layer and [p_lo, p_hi] across it.  Either side may be a fixed
+// bit the run placed around (a bottom-up copy), which is not in the run's
+// own net_segments.
+struct CrossShort {
+    int bundle_a = -1, seg_a = -1, bit_a = 0;
+    int bundle_b = -1, seg_b = -1, bit_b = 0;
+    int layer = 0;
+    double s_lo = 0.0, s_hi = 0.0, p_lo = 0.0, p_hi = 0.0;
+};
+
 struct DetailedNUTSResult {
     std::vector<NetSegment> net_segments;
     std::vector<NetVia>     net_vias;
@@ -234,6 +249,12 @@ struct DetailedNUTSResult {
     // becomes an open the stage-b healers act on instead of a violation no
     // stage of the router can see.
     int num_short_bits = 0;
+    // The cross-bundle shorts still in net_segments at return: every pair
+    // num_cross_shorts counted when the cull is off, and with it on only the
+    // pairs neither of whose wires could be removed.  The stage-b healers
+    // read it under BUDA_HEAL_SHORTS (issue #962) — the size as part of their
+    // metric, the wires to find the segments to move.
+    std::vector<CrossShort> cross_shorts;
     // How many of net_vias are NDR shield BOND straps (R6, opt-in `bond`).
     // Reported by run_detailed_nuts and asserted by the audit; 0 whenever no
     // rule opted in, which is every pre-bonding flow.

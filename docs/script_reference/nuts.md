@@ -130,7 +130,11 @@ var `BUDA_DNUTS_SHORT_GUARD` turns on two levers, off by default (off is
 byte-identical): `cull` removes the stretched side of each short and counts
 it unplaced, so the healers see an open instead of an unseen short; `reach`
 reserves against the span each segment will reach instead, so the short does
-not happen. `reach,cull` is both. See
+not happen. `reach,cull` is both. A separate study knob,
+`BUDA_HEAL_SHORTS=1`, leaves placement alone and has the stage-b healers
+(`negotiate_congestion`, `ripup_reroute`, `refine_selection` and the heals
+inside this command) count each short as an open instead; it measured best
+of the three, and none is a default yet. See
 [Detailed NUTS](../detailed_nuts.md) step 6b.
 
 **Requires:** `run_nuts` must have been called first. At least one `def_track_pattern` must cover the layers used by the NUTS result.

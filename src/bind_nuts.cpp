@@ -493,6 +493,20 @@ void bind_nuts(py::module_& m) {
         .def_readwrite("x",          &NetVia::x)
         .def_readwrite("y",          &NetVia::y);
 
+    py::class_<CrossShort>(m, "CrossShort")
+        .def(py::init<>())
+        .def_readwrite("bundle_a", &CrossShort::bundle_a)
+        .def_readwrite("seg_a",    &CrossShort::seg_a)
+        .def_readwrite("bit_a",    &CrossShort::bit_a)
+        .def_readwrite("bundle_b", &CrossShort::bundle_b)
+        .def_readwrite("seg_b",    &CrossShort::seg_b)
+        .def_readwrite("bit_b",    &CrossShort::bit_b)
+        .def_readwrite("layer",    &CrossShort::layer)
+        .def_readwrite("s_lo",     &CrossShort::s_lo)
+        .def_readwrite("s_hi",     &CrossShort::s_hi)
+        .def_readwrite("p_lo",     &CrossShort::p_lo)
+        .def_readwrite("p_hi",     &CrossShort::p_hi);
+
     py::class_<DetailedNUTSResult>(m, "DetailedNUTSResult")
         .def(py::init<>())
         .def_readwrite("net_segments", &DetailedNUTSResult::net_segments)
@@ -502,6 +516,8 @@ void bind_nuts(py::module_& m) {
         .def_readwrite("num_keepout_bits", &DetailedNUTSResult::num_keepout_bits)
         .def_readwrite("num_cross_shorts", &DetailedNUTSResult::num_cross_shorts)
         .def_readwrite("num_short_bits",   &DetailedNUTSResult::num_short_bits)
+        // readwrite: the bottom-up merge in nutsflow sums the two solves'.
+        .def_readwrite("cross_shorts",     &DetailedNUTSResult::cross_shorts)
         .def_readwrite("pair_misalign_wl", &DetailedNUTSResult::pair_misalign_wl)
         .def_readwrite("aborted",          &DetailedNUTSResult::aborted)
         // Per-pass profile (RR round-3 Phase 0) — observation only.
@@ -622,7 +638,8 @@ void bind_nuts(py::module_& m) {
                                           int, int, int, int>>& copy_specs,
              const std::map<std::pair<int, int>, bool>& horiz_of,
              int n_threads, bool full_trials,
-             const RoutingGridStack* ref_grid, bool nuts_corridors) {
+             const RoutingGridStack* ref_grid, bool nuts_corridors,
+             bool count_shorts) {
               std::vector<SweepMove> mv;
               mv.reserve(moves.size());
               for (const auto& [bid, tidx] : moves)
@@ -634,6 +651,7 @@ void bind_nuts(py::module_& m) {
               dn.nuts_corridors = nuts_corridors;
               dn.bit_order = bit_order;
               dn.abort_unplaced = abort_unplaced;
+              dn.count_shorts = count_shorts;
               dn.ref_ids = ref_ids;
               dn.skip_ids = skip_ids;
               for (const auto& t : copy_specs) {
@@ -671,7 +689,8 @@ void bind_nuts(py::module_& m) {
               int, int, std::string, int, int, int, int, int, int>>{},
           py::arg("horiz_of") = std::map<std::pair<int, int>, bool>{},
           py::arg("n_threads") = 0, py::arg("full_trials") = false,
-          py::arg("ref_grid") = nullptr, py::arg("nuts_corridors") = true);
+          py::arg("ref_grid") = nullptr, py::arg("nuts_corridors") = true,
+          py::arg("count_shorts") = false);
 
     // Batched PARALLEL fixed-context screening (the refine/ripup chunk
     // builds' sequential-screen cost at chip scale): one worker per
