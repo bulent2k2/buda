@@ -273,6 +273,18 @@ jobs:
             -P gcc-g++,make,cmake,ninja,git,python3,python3-devel,python312-devel,python312-pip,python312-numpy,python312-tkinter,python312-matplotlib | Out-Null
           C:\cygwin64\bin\bash.exe -lc 'uname -a'
 
+      - name: Trust the checkout for Cygwin's git
+        # actions/checkout marks the tree safe in Git for Windows's config
+        # only.  Cygwin's git reads its own, and it does not take the Cygwin
+        # user for the checkout's owner, so every git call in the tree failed
+        # with "detected dubious ownership" (run 46: test_doc_links' `git
+        # ls-files` and test_qor_baseline_worktree's `git rev-parse`, 6
+        # tests).  '*' because that test's baseline worktree is outside the
+        # checkout.  The rev-parse fails this step if the trust did not take.
+        shell: cmd
+        run: |
+          C:\cygwin64\bin\bash.exe -lc "cd $(cygpath '%CD%') && git config --global --add safe.directory '*' && stat -c 'checkout owner %%U:%%G' . && echo \"cygwin user $(id -un)\" && git rev-parse --short HEAD"
+
       - name: Diagnose the Cygwin environment
         # The inventory step: which python, which native deps resolved, what
         # pip can do.  continue-on-error — its job is to REPORT.  No -e: run

@@ -60,7 +60,7 @@
 PROJECT_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
 # The child buda_server.py self-bootstraps its own imports, but export the
 # layer too so a `package require`/helper in the flow resolves the same way.
-export PYTHONPATH="$PROJECT_ROOT/build:$PROJECT_ROOT/tools:$PYTHONPATH"
+export PYTHONPATH="$PROJECT_ROOT/build:$PROJECT_ROOT/tools${PYTHONPATH:+:$PYTHONPATH}"
 
 INTERACTIVE=0
 MODE_ARGS=()

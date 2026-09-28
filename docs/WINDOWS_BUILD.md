@@ -357,6 +357,18 @@ shell; to make child bash processes inherit it, set `SHELLOPTS=igncr` in the
 *Windows* environment before bash starts, which is what the validation
 workflow does via its job `env:`.)
 
+An exported `SHELLOPTS` carries more than `igncr`: bash keeps it current, so
+a calling script's `set -euo pipefail` reaches every bash script it starts.
+So the `bin/` wrappers read every optional variable through a default
+(`${PYTHONPATH:+:$PYTHONPATH}`, `${BUDA_TEST_ANCHOR:-}`): in validation run
+46, `bin/btcl` read an unset `PYTHONPATH` under a tier script's inherited
+`set -u` and failed nine tests.
+
+Cygwin's git may not take you for the owner of a checkout that another git
+made (Git for Windows, `actions/checkout`), and then refuses every command in
+it with "detected dubious ownership".  `git config --global --add
+safe.directory <path>` trusts it; the validation workflow trusts `'*'`.
+
 Then the pure-python test deps via pip (those wheels are pure-python, so
 they install fine):
 

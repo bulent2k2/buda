@@ -10,7 +10,7 @@
 #   bin/bfp                        open fp with no file (blank canvas)
 
 PROJECT_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
-export PYTHONPATH="$PROJECT_ROOT/build:$PROJECT_ROOT/tools:$PYTHONPATH"
+export PYTHONPATH="$PROJECT_ROOT/build:$PROJECT_ROOT/tools${PYTHONPATH:+:$PYTHONPATH}"
 
 case "$1" in
   -h|--help)

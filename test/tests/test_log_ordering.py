@@ -94,7 +94,11 @@ def test_cpp_stdout_line_buffered_after_import_buda(tmp_path):
         os.dup2(fd, 1)                      # fd 1 -> regular file (block-buffered by default)
         import buda                         # triggers setvbuf(stdout, _IOLBF)
         try:
-            libc = ctypes.CDLL(None)
+            # Cygwin is POSIX here (bindings.cpp's setvbuf is guarded on
+            # _WIN32 alone), but CDLL(None) there is the executable, which
+            # exports no printf: the C library is cygwin1.dll.
+            libc = ctypes.CDLL("cygwin1.dll" if sys.platform == "cygwin"
+                               else None)
         except OSError:
             sys.stderr.write("SKIP no libc\\n"); sys.exit(0)
         libc.printf(b"CPP_LINE\\n")         # C stdio, NO fflush
