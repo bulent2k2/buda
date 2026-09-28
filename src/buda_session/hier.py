@@ -2027,6 +2027,14 @@ class HierMixin:
             if lb == "policy":
                 print("[LeafBlock] restored: leaf footprints block the "
                       "LOW layers inside their cell layer band")
+        else:
+            # A mode typed in this session governs this BDB too, so it is
+            # written here as well: typed before the open, or before a
+            # switch, it would otherwise live only in the BDB open when it
+            # was typed, and a fresh session reopening this checkpoint would
+            # restore `low` over metal routed under `policy` (Codex P2 on
+            # #970).
+            self.bdb.meta_set("leaf_blockage", self._leaf_blockage)
         bd = getattr(self, "_cell_layer_policy_by_depth", None) or set()
         bd -= dropped
         memo = self.bdb.meta_get("layer_caps_by_depth", "")

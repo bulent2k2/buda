@@ -220,3 +220,23 @@ def test_a_restored_mode_does_not_outlive_its_bdb(tmp_path):
     assert s._leaf_blockage == "policy"
     s.do_command(f"open_bdb {b}")
     assert s._leaf_blockage == "low"
+
+
+def test_a_typed_mode_reaches_every_bdb_it_governs(tmp_path):
+    """Typed before `open_bdb`, or before a switch, the mode is written into
+    each BDB the session opens, so a fresh session reopening the checkpoint
+    restores what the metal was routed under (Codex P2 on #970)."""
+    sys.path.insert(0, str(_ROOT / "tools"))
+    import buda_cli  # noqa: E402
+    a, b = str(tmp_path / "a.bdb"), str(tmp_path / "b.bdb")
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    s.do_command("set_leaf_blockage policy")
+    s.do_command(f"open_bdb {a}")
+    s.do_command(f"open_bdb {b}")
+    for path in (a, b):
+        assert buda.BDB(path).meta_get("leaf_blockage", "") == "policy"
+    r = buda_cli.BudaSession()
+    r.no_viz = True
+    r.do_command(f"open_bdb {b}")
+    assert r._leaf_blockage == "policy"
