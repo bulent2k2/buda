@@ -178,7 +178,16 @@ def test_the_judge_reads_the_leaf_policy(soc_leafcap, tmp_path):
     # An id the stored stack does not declare opens every LOW layer of that
     # leaf if read literally; it is refused instead (Codex P1 on #970).
     unknown = json.dumps([{"name": leaf, "layers": [999]}])
-    for value, want in (("", 1), ('[{"name": "x"}]', 2), (unknown, 2)):
+    # A TOP id is refused too: the session records LOW layers only, and a
+    # row read literally would open every LOW layer of the leaf.
+    con = sqlite3.connect(ck)
+    stack = json.loads(con.execute(
+        "SELECT value FROM meta WHERE key='layer_stack'").fetchone()[0])
+    con.close()
+    top_id = next(l["id"] for l in stack if l["top"])
+    top = json.dumps([{"name": leaf, "layers": [top_id]}])
+    for value, want in (("", 1), ('[{"name": "x"}]', 2), (unknown, 2),
+                        (top, 2)):
         bad = str(tmp_path / f"t{want}.bdb")
         shutil.copy(ck, bad)
         con = sqlite3.connect(bad)

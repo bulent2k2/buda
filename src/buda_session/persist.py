@@ -1760,6 +1760,15 @@ class PersistMixin:
         if ts_list:
             nr = buda.NUTSResult()
             nr.segments = ts_list
+            # The keepout audit run() records is not persisted; redo it on
+            # the restored metal, against the same keepouts, so the seat
+            # count and `set_heal_seats` see a resumed result as they saw
+            # it live (Codex P2 on #970).
+            if self.layers is not None:
+                self._sync_leaf_blockage()
+                nr.keepout_seats = buda.NUTSEngine(
+                    self.fp, self.layers).keepout_seats_of(ts_list)
+                nr.num_keepout_conflicts = len(nr.keepout_seats)
             self.nuts_result = nr             # persisted routing = final, clean
         elif (cap_voided or ndr_voided) and self.nuts_result is not None:
             # Every restored bundle with routing was voided: a nuts_result

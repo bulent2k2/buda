@@ -132,3 +132,38 @@ def test_abstract_verdict_counts_seats_under_healseats(tmp_path, healseats,
                        encoding="utf-8", cwd=tmp_path, timeout=60)
     assert r.returncode == want, r.stdout + r.stderr
     assert ("FAILED (abstract)" in r.stderr) == bool(want), r.stdout + r.stderr
+
+
+def test_a_resumed_checkpoint_keeps_its_keepout_seats(tmp_path):
+    """The keepout audit run_nuts records is not persisted, so load_pipeline
+    redoes it on the restored metal: a resumed session scores the seat the
+    live one did, rather than zero (Codex P2 on #970)."""
+    ck = str(tmp_path / "ck.bdb")
+    lines = [l.strip() for l in _FLOW.read_text().splitlines()]
+    lines = [l for l in lines if l and not l.startswith("#")
+             and l not in _POLICY]
+    setup = [l for l in lines if not l.startswith(("run_", "generate_",
+                                                   "check_", "report_",
+                                                   "add_bus"))]
+    live = _session_at_nuts()
+    want = sorted(tuple(p) for p in live.nuts_result.keepout_seats)
+    assert want
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    with contextlib.redirect_stdout(io.StringIO()):
+        for line in lines:
+            if line.startswith("run_detailed_nuts"):
+                break
+            s.do_command(line.replace("open_bdb :memory:", f"open_bdb {ck}"))
+        s.do_command("save_bdb")
+    r = buda_cli.BudaSession()
+    r.no_viz = True
+    with contextlib.redirect_stdout(io.StringIO()):
+        for line in setup:
+            r.do_command(line.replace("open_bdb :memory:", f"open_bdb {ck}"))
+        r.do_command("load_pipeline")
+    got = sorted(tuple(p) for p in r.nuts_result.keepout_seats)
+    assert got == want
+    assert r.nuts_result.num_keepout_conflicts == len(want)
+    r.do_command("set_heal_seats on")
+    assert r._stage_a_metric() >= len(want)

@@ -433,6 +433,12 @@ public:
                                  const std::vector<BundleWrapper>& bundles,
                                  int target_bid) const;
 
+    // The (bundle_id, seg_idx) of every placed segment seated on one of
+    // low_keepouts() -- the audit run() records as NUTSResult::keepout_seats,
+    // for a result that did not come from run() (a restored checkpoint).
+    std::vector<std::pair<int,int>> keepout_seats_of(
+        const std::vector<TrackSegment>& segments) const;
+
 private:
     friend class LayerSolver;   // placement pass: uses first_fit/preferred_fit/track_pitch_
     const Floorplan& floorplan_;

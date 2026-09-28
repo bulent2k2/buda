@@ -1883,6 +1883,11 @@ std::vector<KeepoutZone> NUTSEngine::low_keepouts() const {
     return floorplan_.low_layer_keepouts(low_ids);
 }
 
+std::vector<std::pair<int,int>> NUTSEngine::keepout_seats_of(
+    const std::vector<TrackSegment>& segments) const {
+    return keepout_conflict_seats(low_keepouts(), segments);
+}
+
 std::vector<KeepoutZone> NUTSEngine::solver_keepouts() const {
     auto kozs = low_keepouts();
     kozs.insert(kozs.end(), fixed_zones_.begin(), fixed_zones_.end());

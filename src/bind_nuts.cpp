@@ -212,6 +212,7 @@ void bind_nuts(py::module_& m) {
         .def(py::init<const Floorplan&, const LayerStack&>(),
              py::keep_alive<1, 2>(), py::keep_alive<1, 3>())
         .def("set_track_pitch",       &NUTSEngine::set_track_pitch)
+        .def("keepout_seats_of",      &NUTSEngine::keepout_seats_of)
         .def("set_skip_tighten",      &NUTSEngine::set_skip_tighten)
         .def("set_skip_doglegs",      &NUTSEngine::set_skip_doglegs)
         .def("set_extra_grid_points", &NUTSEngine::set_extra_grid_points)

@@ -704,7 +704,11 @@ def read_leaf_keepouts(con, layers):
                 # An id the stored stack does not know opens nothing and
                 # closes nothing -- a row naming one is not a statement
                 # about this design, so it is refused rather than read as
-                # "blocks no LOW layer" (Codex P1 on #970).
+                # "blocks no LOW layer" (Codex P1 on #970).  A TOP id is
+                # refused the same way: the session writes the LOW layers
+                # of a leaf's band and nothing else, since no leaf blocks a
+                # TOP layer, so a TOP id in the row is not something this
+                # design's session could have written (Codex P1 on #970).
                 unknown = sorted(l for l in lids if l not in layers)
                 if unknown:
                     raise Unjudgeable(
@@ -712,6 +716,12 @@ def read_leaf_keepouts(con, layers):
                         f"'leaf_blocked_layers') names layer id(s) "
                         f"{unknown} for {name!r}, which the stored layer "
                         f"stack does not declare")
+                top = sorted(l for l in lids if layers[l]["top"])
+                if top:
+                    raise Unjudgeable(
+                        f"the stored leaf blockage (meta "
+                        f"'leaf_blocked_layers') names TOP layer id(s) "
+                        f"{top} for {name!r}; it records LOW layers only")
                 blocked[name] = lids
     multirect = set()
     if _table_exists(con, "cell_rect"):
