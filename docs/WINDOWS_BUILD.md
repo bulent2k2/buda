@@ -15,11 +15,12 @@ Requirements and Windows-specific background: [WINDOWS_REQ.md](WINDOWS_REQ.md).
 `.github/workflows/windows-validate.yml` (windows-2022 runner, VS 2022, MSVC
 19.44, Python 3.13 x64), through all four paths: build, import, fast test
 tier, and a `.buda` flow. Re-validate any time: *Actions → Windows validation
-→ Run workflow*. **All four lanes green on `main`: run 49, 2026-09-28**
-(whole jobs, setup included: Ninja ≈ 30m, VS generator ≈ 41m, MinGW ≈ 36m,
-Cygwin ≈ 53m). Build and tier timings as of run 22: MSVC build ≈ 2m30s,
-MinGW build ≈ 2m, Cygwin `bin/bb` ≈ 9m; fast tier ≈ 46–75s per path on a
-4-core runner, when the tier was about half its current size.
+→ Run workflow*. **All four lanes green on `main`: run 49, 2026-09-28** —
+the `-m "not slow"` tier on MSVC (both generators) and MinGW: **4468 passed,
+71 skipped, 10 deselected, 35 xfailed, 1 xpassed**, identical on all three,
+taking 26m (Ninja), 32m (MinGW) and 37m (VS generator) serially on a 4-core
+runner (whole jobs ≈ 30–41m). Build timings as of run 22: MSVC ≈ 2m30s,
+MinGW ≈ 2m, Cygwin `bin/bb` ≈ 9m.
 
 ## Choosing A Path
 
@@ -183,7 +184,7 @@ of the build (`-march`, `-ffp-contract=off`) with the native CPython, so
 **every pip wheel works** (numpy, matplotlib, the web deps — no package
 availability problem). Measured fully green (first at run 16: build ≈ 2m,
 import clean, fast tier 1819 passed / 5 skipped / 35 xfailed in 46s, flow
-runs; latest green run 49).
+runs; latest green run 49: 4468 passed / 71 skipped / 35 xfailed in 32m).
 
 **First, the misconception, measured:** "the mingw64 that comes with Git for
 Windows" is the *shell*, not the toolchain. Git for Windows ships bash and
@@ -408,9 +409,10 @@ symbol Python actually needs, `PyInit_<mod>`, goes unexported.
 
 ## 7. What To Expect From The Test Tier
 
-Identical across the MSVC and MinGW paths (measured from run 9; latest green
-run 49): the fast tier passes with a handful of **named Windows skips**, each
-marker stating its measured reason:
+Identical across the MSVC and MinGW paths (measured from run 9): the tier
+passes — run 49: **4468 passed, 71 skipped, 10 deselected (`slow`), 35
+xfailed, 1 xpassed** on all three — with a handful of **named Windows
+skips**, each marker stating its measured reason:
 
 - **POSIX-only:** file-mode round-trip (`test_bdb_edit_bus`), the stdout
   line-buffering probe (`test_log_ordering`), `SIGKILL` crash-recovery
@@ -423,6 +425,13 @@ The wrapper tests (`test_buda_wrapper_args` and the other `bin/` wrapper
 tests) do **not** skip: on native Windows `test/tests/wrapper_select.py`
 runs the PowerShell twin (`bin/<name>.ps1`) instead of the bash original.
 If you see *many* failures instead, check `PYTHONUTF8` first (section 2).
+
+Cygwin (run 49) runs the same tier to completion but does not pass it: the
+matplotlib-importing modules fail to collect (`ModuleNotFoundError: No
+module named 'matplotlib'`, e.g. `test_bdb_user_ops`), and further tests
+fail (at least 18 in the last few percent of the progress output alone).
+The step is `continue-on-error` in the workflow, so the lane stays green;
+its summary line was not recorded.
 
 ## 8. Troubleshooting
 

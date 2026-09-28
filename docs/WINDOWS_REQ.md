@@ -12,7 +12,9 @@ Server 2022, Visual Studio 2022 Enterprise, MSVC 19.44, CMake 4.x, Python
 MSYS2 UCRT64 MinGW, and Cygwin64), imports the extensions, runs the fast test
 tier, and executes a `.buda` flow end to end.
 Re-validate any time: *Actions → Windows validation → Run workflow*. Last
-green, all four lanes on `main`: run 49, 2026-09-28.
+green, all four lanes on `main`: run 49, 2026-09-28 (MSVC ×2 and MinGW:
+4468 passed, 71 skipped, 35 xfailed, 1 xpassed on the `-m "not slow"`
+tier).
 
 For the cross-platform dependency reference see
 [build_test_dependencies.md](build_test_dependencies.md); this page is the
