@@ -6,8 +6,8 @@ Configure, build, and test BUDA natively on Windows. Four validated paths:
 |---|---|---|---|---|
 | 1 | **MSVC + Ninja** (§3) | VS 2022, MSVC 19.44 | native 3.13 | **green** — build, import, fast tier, flow |
 | 2 | **MSVC + VS generator** (§4) | VS 2022, MSVC 19.44 | native 3.13 | **green** — build, import, fast tier, flow |
-| 3 | **MinGW-w64** (§5) | MSYS2 UCRT64 GCC | native 3.13 | **green** — build, import, fast tier (1819 passed), flow |
-| 4 | **Cygwin64** (§6) | Cygwin GCC 14 | Cygwin 3.9 | **working, with caveats** — with `BUDA_ARCH=x86-64-v2` (required, §6): build, imports, flow, and 1741 tier tests green (run 22); remaining tier damage is the distro matplotlib skew |
+| 3 | **MinGW-w64** (§5) | MSYS2 UCRT64 GCC | native 3.13 | **green** — build, import, fast tier, flow |
+| 4 | **Cygwin64** (§6) | Cygwin GCC | Cygwin 3.12 | **working, with caveats** — with `BUDA_ARCH=x86-64-v2` (required, §6): build, imports, flow, fast tier (non-blocking); expect its matplotlib-importing modules to fail to collect (no installable matplotlib, §6) |
 
 Requirements and Windows-specific background: [WINDOWS_REQ.md](WINDOWS_REQ.md).
 
@@ -15,9 +15,12 @@ Requirements and Windows-specific background: [WINDOWS_REQ.md](WINDOWS_REQ.md).
 `.github/workflows/windows-validate.yml` (windows-2022 runner, VS 2022, MSVC
 19.44, Python 3.13 x64), through all four paths: build, import, fast test
 tier, and a `.buda` flow. Re-validate any time: *Actions → Windows validation
-→ Run workflow*. **All four lanes green: run 22, 2026-08-07** (MSVC build ≈
-2m30s, MinGW build ≈ 2m, Cygwin `bin/bb` ≈ 9m; fast tier ≈ 46–75s per
-path on a 4-core runner).
+→ Run workflow*. **All four lanes green on `main`: run 49, 2026-09-28** —
+the `-m "not slow"` tier on MSVC (both generators) and MinGW: **4468 passed,
+71 skipped, 10 deselected, 35 xfailed, 1 xpassed**, identical on all three,
+taking 26m (Ninja), 32m (MinGW) and 37m (VS generator) serially on a 4-core
+runner (whole jobs ≈ 30–41m). Build timings as of run 22: MSVC ≈ 2m30s,
+MinGW ≈ 2m, Cygwin `bin/bb` ≈ 9m.
 
 ## Choosing A Path
 
@@ -28,7 +31,7 @@ path on a 4-core runner).
 | **1. MSVC + Ninja** | The reference path: simplest layout (everything in `build\`), fastest edit-build cycle (~2m full build, incremental via Ninja), `pytest` needs no PYTHONPATH, native CPython so **all** wheels work (incl. web deps), stable toolchain (VS releases, not rolling) | Needs a VS developer shell (`vcvars64`); MSVC-only quirks (`WINDOWS_EXPORT_ALL_SYMBOLS`, `/UNDEBUG` warning spam); `BUDA_SANITIZE` hard-errors by design |
 | **2. MSVC + VS generator** | Same toolchain as #1 but **no developer shell needed** (CMake finds MSVC itself); produces a `.sln` — full Visual Studio IDE debugging/profiling | Multi-config `build\Release` layout means PYTHONPATH for *everything*, tests included — this layout produced all three measured subprocess-PYTHONPATH traps (§8); slowest configure (~61s vs ~7s) |
 | **3. MinGW-w64 (MSYS2 UCRT64)** | GCC branch of the build (`-O3 -march=native`, `-ffp-contract=off`) with **native CPython** — all wheels work; artifacts are **self-contained** (objdump-verified: no MSYS2 DLL deps), so they run from any shell; bash-driven workflow closest to Linux muscle memory with native-speed binaries | Two-part setup (MSYS2 + native Python) with the pacman update ritual; **rolling release** — gcc jumped 14→16 between two validation runs; CRT discipline required (UCRT64 flavor only); GDB-style debugging, no VS IDE |
-| **4. Cygwin64** | The Linux instructions *verbatim*: `bin/bb` just works, real `fcntl` (the **only** lane where the floorplanner's inter-process lock actually locks), real POSIX paths/tools; 1741 fast-tier tests pass | **`BUDA_ARCH=x86-64-v2` is required** (`-march=native` codegen segfaults — measured, §6); Python is 3.9 (EOL, below the 3.13 floor); **no pip wheels exist** — distro matplotlib is broken (numpy-2 skew), web deps unbuildable (28 tests permanently skipped); slowest builds (6.5–9m); CRLF guards needed; `build` must be on `PATH` for dlopen |
+| **4. Cygwin64** | The Linux instructions *verbatim*: `bin/bb` just works, real `fcntl` (the **only** lane where the floorplanner's inter-process lock actually locks), real POSIX paths/tools; runs the fast tier | **`BUDA_ARCH=x86-64-v2` is required** (`-march=native` codegen segfaults — measured, §6); Python is 3.12 (within `requires-python >=3.11`, though not the validated native 3.13); **no pip wheels exist** — no installable matplotlib (`python312-matplotlib` does not install), web deps unbuildable (28 tests permanently skipped); slowest builds (6.5–9m); CRLF guards needed; `build` must be on `PATH` for dlopen |
 
 ### Decision criteria
 
@@ -40,7 +43,7 @@ path on a 4-core runner).
 | Need to reproduce a GCC-specific bug (codegen, `-ffp-contract`, warnings) on Windows | **MinGW** (or Cygwin if the POSIX layer matters too) |
 | Want to run the repo's own `bin/` wrappers or need working `fcntl` locking | **Cygwin** — accept the caveat list in §6 |
 | Care about redistributing the built artifacts | **MinGW** (self-contained — the only lane with no runtime prerequisite). MSVC artifacts use the default `/MD` runtime, so targets need the matching **Visual C++ Redistributable** (`msvcp140`/`vcruntime140` — only the UCRT is in-box on Win10+, and CPython's installer ships `vcruntime140` but not the C++ standard library). Cygwin drags its runtime along |
-| Need the GUI tools (floorplanner/viz) | MSVC or MinGW — Cygwin's matplotlib is broken upstream |
+| Need the GUI tools (floorplanner/viz) | MSVC or MinGW — Cygwin has no working matplotlib |
 | Want a toolchain that won't shift under you | MSVC; MSYS2 and Cygwin are rolling releases |
 
 ### Performance — measured vs. not
@@ -179,8 +182,9 @@ python src\buda_cli.py --no-viz flow\four_blocks.buda
 GCC producing **native Windows binaries**, driven from bash — the GCC branch
 of the build (`-march`, `-ffp-contract=off`) with the native CPython, so
 **every pip wheel works** (numpy, matplotlib, the web deps — no package
-availability problem). Measured fully green (run 16): build ≈ 2m, import
-clean, fast tier **1819 passed / 5 skipped / 35 xfailed in 46s**, flow runs.
+availability problem). Measured fully green (first at run 16: build ≈ 2m,
+import clean, fast tier 1819 passed / 5 skipped / 35 xfailed in 46s, flow
+runs; latest green run 49: 4468 passed / 71 skipped / 35 xfailed in 32m).
 
 **First, the misconception, measured:** "the mingw64 that comes with Git for
 Windows" is the *shell*, not the toolchain. Git for Windows ships bash and
@@ -304,8 +308,8 @@ Known, measured limitations:
   `.github/scripts/cygwin_configure_probe.sh`, run by dispatching the
   workflow with `cygwin_probe` on.
 - **Python was 3.9.16** — then the newest Cygwin shipped, past upstream EOL
-  and below the project's 3.13 floor. The tree parses under 3.9 (measured: full
-  `ast` sweep), and the one measured *runtime* incompatibility — PEP 604
+  and below the project's `requires-python >=3.11` floor. The tree parses
+  under 3.9 (measured: full `ast` sweep), and the one measured *runtime* incompatibility — PEP 604
   `X | Y` unions in evaluated annotations, which raise `TypeError` at import
   on 3.9 (run 18) — is fixed with `from __future__ import annotations` in
   every module a repo-wide AST scan finds (four: `buda_session/nutsflow.py`,
@@ -405,14 +409,36 @@ symbol Python actually needs, `PyInit_<mod>`, goes unexported.
 
 ## 7. What To Expect From The Test Tier
 
-Measured on runs 9–16 of the validation, identical across the MSVC and MinGW
-paths: the fast tier passes (~1819 tests, 35 xfailed) with a handful of
-**named POSIX-only skips** — file-mode round-trip (`test_bdb_edit_bus`), the
-stdout line-buffering probe (`test_log_ordering`), `SIGKILL`
-crash-recovery (`test_qor_sweep`), and the `bin/buda` wrapper-arg tests
-(`test_buda_wrapper_args` — native Windows' `bash` is the WSL stub, measured
-run 18; they run under Cygwin); each marker states its measured reason.
+Identical across the MSVC and MinGW paths (measured from run 9): the tier
+passes — run 49: **4468 passed, 71 skipped, 10 deselected (`slow`), 35
+xfailed, 1 xpassed** on all three — with a handful of **named Windows
+skips**, each marker stating its measured reason:
+
+- **POSIX-only:** file-mode round-trip (`test_bdb_edit_bus`), the stdout
+  line-buffering probe (`test_log_ordering`), `SIGKILL` crash-recovery
+  (`test_qor_sweep`).
+- **Linux-gated QoR goldens** (`_WIN_QOR_SKIP`, measured run 25): ten
+  exact-count/golden placement assertions MSVC's placement diverges from,
+  across eight modules — `grep -rn _WIN_QOR_SKIP test/tests` lists them.
+
+The wrapper tests (`test_buda_wrapper_args` and the other `bin/` wrapper
+tests) do **not** skip: on native Windows `test/tests/wrapper_select.py`
+runs the PowerShell twin (`bin/<name>.ps1`) instead of the bash original.
 If you see *many* failures instead, check `PYTHONUTF8` first (section 2).
+
+Cygwin runs the same tier to completion but does not pass it; the step is
+`continue-on-error` in the workflow, so the lane stays green. Run 48 (on
+PR #969's head `0a513a0`) counted **4171 passed, 45 failed, 48 skipped, 38
+errors** in 34m, and every failure and error comes from a package Cygwin
+cannot provide:
+
+- **matplotlib** (37 failed, 38 errors): the errors are modules that fail
+  to collect (`ModuleNotFoundError: No module named 'matplotlib'`, e.g.
+  `test_bdb_user_ops`);
+- **fastapi** (8 failed): the web deps do not build under Cygwin (§6).
+
+Run 49 on `main` showed the same kind of damage (matplotlib collection
+errors, failures in the tier's tail); its summary line was not recorded.
 
 ## 8. Troubleshooting
 

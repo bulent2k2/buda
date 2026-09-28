@@ -2,7 +2,7 @@
 
 Software requirements for building and testing BUDA natively on Windows —
 with MSVC (the reference toolchain), MinGW-w64 (validated alternative), or
-Cygwin (experimental).
+Cygwin (working, with caveats).
 
 **This page is validated, not aspirational.** Every claim marked *measured* was
 executed on a real Windows machine (GitHub `windows-2022` runner: Windows
@@ -12,7 +12,9 @@ Server 2022, Visual Studio 2022 Enterprise, MSVC 19.44, CMake 4.x, Python
 MSYS2 UCRT64 MinGW, and Cygwin64), imports the extensions, runs the fast test
 tier, and executes a `.buda` flow end to end.
 Re-validate any time: *Actions → Windows validation → Run workflow*. Last
-green (MSVC ×2 + MinGW): run 16, 2026-08-07.
+green, all four lanes on `main`: run 49, 2026-09-28 (MSVC ×2 and MinGW:
+4468 passed, 71 skipped, 35 xfailed, 1 xpassed on the `-m "not slow"`
+tier).
 
 For the cross-platform dependency reference see
 [build_test_dependencies.md](build_test_dependencies.md); this page is the
@@ -25,22 +27,23 @@ Windows-specific companion. The build steps live in
 - **One of three toolchains:**
   - *MSVC (reference):* Visual Studio 2022 (Build Tools or full IDE):
     `Desktop development with C++` workload, MSVC v143, a Windows 10/11 SDK.
-  - *MinGW-w64 (validated, measured green run 16):* MSYS2 with the **UCRT64**
-    packages `mingw-w64-ucrt-x86_64-{gcc,cmake,ninja}` — UCRT64 because
+  - *MinGW-w64 (validated, measured green from run 16; latest run 49):*
+    MSYS2 with the **UCRT64** packages `mingw-w64-ucrt-x86_64-{gcc,cmake,ninja}` — UCRT64 because
     modern CPython links the Universal CRT and CRTs must match across the
     extension boundary. MSYS2 is rolling-release (GCC 14 → 16.1.0 between two
     validation runs; both clean). Note **Git for Windows' Git Bash is NOT
     this** — it ships bash/coreutils only, no compiler (measured; a `gcc`
     that appears in Git Bash comes from some other install on PATH).
-  - *Cygwin GCC (experimental):* `gcc-g++,make,cmake,ninja` from Cygwin
-    setup; builds via the repo's own `bin/bb` (measured), full validation in
-    progress. See WINDOWS_BUILD.md §6 for its measured limitations (Python
-    3.9, broken distro matplotlib, no web deps).
+  - *Cygwin GCC (working, with caveats):* `gcc-g++,make,cmake,ninja` from
+    Cygwin setup; builds via the repo's own `bin/bb` with
+    `BUDA_ARCH=x86-64-v2` (required), imports, runs a flow and the fast tier
+    (measured, latest run 49). See WINDOWS_BUILD.md §6 for its measured
+    limitations (Python 3.12 with no installable matplotlib, no web deps).
 - CMake ≥ 3.15 (the project's `cmake_minimum_required`).
 - 64-bit Python. **3.13 is the validated version** for the MSVC and MinGW
-  paths (the *native* CPython in both cases); CI elsewhere runs 3.11; Cygwin
-  ships 3.9.16 (its newest, measured). The interpreter, compiler, and
-  extension must all be x64.
+  paths (the *native* CPython in both cases); CI elsewhere runs 3.11; Cygwin's
+  `python3` is 3.12 (measured from run 39; it was 3.9.16 through run 38).
+  The interpreter, compiler, and extension must all be x64.
 - Git for Windows.
 
 WSL is not the target described here (it simply follows the Linux docs).
@@ -67,7 +70,7 @@ Treat UTF-8 mode as a requirement, not a nicety. The engine's log lines use
 legacy ANSI code page. *Measured:* without it, **87** fast-tier tests fail,
 almost all as
 `UnicodeEncodeError('charmap', "[NUTS] books-vs-metal: ... (worst Δ=373)")`;
-with it, those 87 drop to the 4 genuinely POSIX-only cases listed below.
+with it, those 87 drop to the handful of named Windows skips listed below.
 
 ```powershell
 $env:PYTHONUTF8 = '1'          # current session
@@ -138,19 +141,40 @@ All discovered by the validation runs; each is now handled in-tree.
   degraded mode). **Concurrent floorplanner sessions on one BDB are NOT
   mutually excluded on Windows.** Real locking would use `msvcrt.locking`;
   not implemented.
-- **Known POSIX-only tests** (skip on Windows, with measured reasons in each
-  marker): the file-mode round-trip in `test_bdb_edit_bus`, the stdout
-  line-buffering probe in `test_log_ordering`, and the `SIGKILL` worker-crash
-  recovery in `test_qor_sweep`. Everything else in the fast tier passes,
-  *measured*.
+- **Known Windows skips** (native Windows, i.e. `sys.platform == "win32"`
+  — the MSVC and MinGW lanes, not Cygwin; each marker states its measured
+  reason):
+  - *POSIX-only:* the file-mode round-trip in `test_bdb_edit_bus`, the stdout
+    line-buffering probe in `test_log_ordering`, and the `SIGKILL`
+    worker-crash recovery in `test_qor_sweep`.
+  - *Linux-gated QoR goldens* (`_WIN_QOR_SKIP`, measured run 25): exact-count
+    and golden placement assertions that MSVC's placement diverges from —
+    ten markers (more tests where parametrized) across
+    `test_nuts_placement_golden`, `test_datapath_multi_trunk_qor`,
+    `test_flow_scripts`, `test_refine_selection`, `test_bit_antenna_audit`,
+    `test_cell_layer_reserve`, `test_heal_shorts` and `test_render_design`
+    (`grep -rn _WIN_QOR_SKIP test/tests` lists them). Only the marked tests
+    skip; the rest of each module still runs.
+
+  Everything else in the fast tier passes, *measured*.
 - **Visualization IPC is Unix-only.** `tools/viz_ipc.py` uses `AF_UNIX` under
   `/tmp`; CPython does not expose `AF_UNIX` on Windows. Core build, tests,
   CLI flows and the web backend do not depend on it.
 
 ## The `python3` Lookup, Precisely
 
-`CMakeLists.txt` locates pybind11 by running `python3` — but the failure is
-soft (`ERROR_QUIET`, then `find_package(pybind11)` with `PYBIND11_FINDPYTHON`).
+`CMakeLists.txt` asks the `python3` on PATH where pybind11's CMake files are.
+It finds that interpreter with `find_program` (PATH only, searched afresh at
+every configure) and runs it by absolute path, with a 60s `TIMEOUT`; the
+lookup is scoped under CMP0109 NEW, so only an *executable* `python3` is
+taken, never a readable-but-not-executable stray ahead of the real one. (The
+absolute path avoids the Cygwin lost-child hang measured in runs 40–45,
+WINDOWS_BUILD.md §6; the executable rule avoids a `Permission denied`
+reproduced in review with a `chmod 644` `python3` first on PATH.) The
+failure is still soft: with no `python3` on PATH the lookup is skipped with a
+`-- BUDA: no python3 on PATH ...` status line, and a non-zero result is
+printed rather than swallowed; either way configure falls through to
+`find_package(pybind11)` with `PYBIND11_FINDPYTHON`.
 *Measured:* on an environment whose Python provides a `python3.exe` shim
 (GitHub's setup-python, conda), configure just works — no `-Dpybind11_DIR`
 needed. A python.org installer provides no `python3.exe`, and worse, Windows
