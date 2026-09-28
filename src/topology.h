@@ -670,6 +670,24 @@ public:
     // (absent from low_layer_ids) cross cells freely.  Shared by the planner's
     // band-capacity model and abstract/detailed NUTS so all three agree.
     std::vector<KeepoutZone> low_layer_keepouts(const std::vector<int>& low_layer_ids) const;
+    // Per-leaf LOW-layer blockage (`set_leaf_blockage policy`): by default a
+    // solid leaf cell blocks EVERY LOW layer.  A block given an explicit set
+    // here blocks only those of the LOW layers it names — a small leaf whose
+    // own wiring lives on M2 leaves M3/M4 to the wiring that passes over it.
+    // The set can only OPEN LOW layers, never close a TOP one (the callers
+    // ask about LOW ids only).  Read by low_layer_keepouts and by the
+    // planner's two leaf-geometry predicates, so every stage agrees.  No
+    // explicit set anywhere = the historical model, byte for byte.
+    void set_block_blocked_layers(const std::string& name,
+                                  const std::vector<int>& layer_ids);
+    void clear_block_blocked_layers();
+    bool has_block_blocked_layers(const std::string& name) const {
+        return leaf_blocked_.count(name) > 0;
+    }
+    // Whether the leaf `name` blocks LOW layer `layer_id` (containers: never;
+    // a leaf with no explicit set: always).
+    bool block_blocks_layer(const std::string& name, int layer_id) const;
+    std::map<std::string, std::vector<int>> block_blocked_layers() const;
     // Multi-rect block: stores each rect individually; add_block is called
     // internally with the union bounding box for backward compatibility.
     void add_block_rects(const std::string& name, const std::vector<Rect>& rects,
@@ -780,6 +798,7 @@ private:
     std::map<std::string, Rect>          blocks_;
     std::map<std::string, std::vector<Rect>> block_rects_;  // only for multi-rect blocks
     std::set<std::string>                containers_;       // hierarchy envelopes (not leaf cells)
+    std::map<std::string, std::set<int>> leaf_blocked_;     // explicit per-leaf blocked LOW layers
     std::map<std::string, TegMode>       teg_modes_;
     TegMode                              default_teg_mode_ = TegMode::THRU;
     std::map<std::string, BlockCornerMargin> corner_margins_;

@@ -279,6 +279,7 @@ def cmd_run_planner(session, cmd, args, cmd_line):
             lvl_key = b.level if deep_first else -b.level
             w.hier.priority = lvl_key * 10_000 - len(w.input.candidates)
             w.hier.level    = b.level   # for the per-level planning summary
+        session._sync_leaf_blockage()
         session.planner = buda.CongestionPlanner(session.fp, session.layers)
         for pname, pval in session._planner_params.items():
             session.planner.set_planner_param(pname, pval)
@@ -319,6 +320,7 @@ def cmd_run_planner(session, cmd, args, cmd_line):
         # Re-planning invalidates any adopted dogleg (and its pins): the
         # planner may move neighbors, so cycles are re-detected next NUTS.
         session._reset_doglegs()
+        session._sync_leaf_blockage()
         session.planner = buda.CongestionPlanner(session.fp, session.layers)
         for pname, pval in session._planner_params.items():
             session.planner.set_planner_param(pname, pval)

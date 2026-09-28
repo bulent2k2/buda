@@ -434,6 +434,27 @@ def cmd_set_pair_align_heal(session, cmd, args, cmd_line):
     session._pair_align_heal = (val == "on")
 
 
+def cmd_set_heal_seats(session, cmd, args, cmd_line):
+    # Usage: set_heal_seats [on|off]
+    # Count every bus segment seated ON a keepout (its window exhausted, the
+    # centre fallback committed it over a blockage) and every supply-doomed
+    # seat (fewer signal tracks in the seat than its bits) as one more
+    # overlap in the STAGE-A healer score -- ripup_reroute, negotiate_
+    # congestion and refine_selection after run_nuts -- so the healers move
+    # it: seated bundles become contenders, negotiate charges the seat's
+    # window, and a measured layer move lifts a seated LOW segment first.
+    # Stage b is unchanged (detailed NUTS already counts what those seats
+    # cost).  Off by default = byte-identical; BUDA_HEAL_SEATS=1 for a run.
+    if not args:
+        print(f"heal_seats is {'on' if session._heal_seats_on() else 'off'}")
+        return
+    val = args[0].lower()
+    if val not in ("on", "off"):
+        print(f"Error: set_heal_seats expects on|off, got {args[0]!r}")
+        return
+    session._heal_seats = (val == "on")
+
+
 def cmd_set_placed_endpoints(session, cmd, args, cmd_line):
     # Usage: set_placed_endpoints [on|off]
     # Decide a DNUTS segment's endpoint connections from the PLACED geometry
@@ -476,5 +497,6 @@ COMMANDS = {
     "refine_selection": cmd_refine_selection,
     "run_nuts_on_layer": cmd_run_nuts_on_layer,
     "set_dead_span_escalate": cmd_set_dead_span_escalate,
+    "set_heal_seats": cmd_set_heal_seats,
     "set_pair_align_heal": cmd_set_pair_align_heal,
 }

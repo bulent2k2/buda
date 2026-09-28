@@ -180,6 +180,7 @@ void bind_nuts(py::module_& m) {
         .def_readwrite("unseatable_trunks",  &NUTSResult::unseatable_trunks)
         .def_readwrite("num_violations",     &NUTSResult::num_violations)
         .def_readwrite("num_keepout_conflicts", &NUTSResult::num_keepout_conflicts)
+        .def_readwrite("keepout_seats",      &NUTSResult::keepout_seats)
         .def_readwrite("num_overlaps",       &NUTSResult::num_overlaps)
         .def_readwrite("overlaps_per_layer", &NUTSResult::overlaps_per_layer)
         // Per-pass solve profile (RR round-3 Phase 0) — observation only.
@@ -211,6 +212,7 @@ void bind_nuts(py::module_& m) {
         .def(py::init<const Floorplan&, const LayerStack&>(),
              py::keep_alive<1, 2>(), py::keep_alive<1, 3>())
         .def("set_track_pitch",       &NUTSEngine::set_track_pitch)
+        .def("keepout_seats_of",      &NUTSEngine::keepout_seats_of)
         .def("set_skip_tighten",      &NUTSEngine::set_skip_tighten)
         .def("set_skip_doglegs",      &NUTSEngine::set_skip_doglegs)
         .def("set_extra_grid_points", &NUTSEngine::set_extra_grid_points)

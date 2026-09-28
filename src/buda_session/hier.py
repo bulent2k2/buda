@@ -1741,6 +1741,89 @@ class HierMixin:
         nb.net_receivers     = b.net_receivers
         return nb
 
+    def _leaf_blocked_map(self):
+        """{leaf block name: [LOW layer ids it blocks]} under
+        `set_leaf_blockage policy`, for every leaf whose cell carries a band
+        (explicit, by-depth, or the '*' default); {} otherwise.  A leaf
+        missing from the map blocks every LOW layer (the historical model).
+        The leaf's cell is its BDB component's cell; a flat flow has no
+        cells, so there the block's own name is looked up."""
+        if getattr(self, "_leaf_blockage", "low") != "policy":
+            return {}
+        fp = getattr(self, "fp", None)
+        if fp is None or self.layers is None:
+            return {}
+        pol = getattr(self, "_cell_layer_policy", None) or {}
+        if not pol:
+            return {}
+        low = sorted(int(l) for d in (buda.LayerDir.HORIZONTAL,
+                                      buda.LayerDir.VERTICAL)
+                     for l in self.layers.get_layer_ids_by_dir(d)
+                     if not self.layers.is_top(int(l)))
+        cell_of = {}
+        if self.bdb is not None:
+            cell_of = {c.name: c.cell for c in self.bdb.all_components()}
+        out = {}
+        for name, _r in fp.get_all_blocks():
+            if fp.is_container(name):
+                continue
+            cell = cell_of.get(name, name)
+            band = pol.get(cell, pol.get("*"))
+            if band is None:
+                continue
+            floor, cap = band
+            out[name] = [l for l in low
+                         if (floor < 0 or l >= floor) and l <= cap]
+        return out
+
+    def _sync_leaf_blockage(self):
+        """Push the resolved per-leaf blocked LOW layers onto the session
+        floorplan (`Floorplan::set_block_blocked_layers`), where the planner,
+        abstract and detailed NUTS and check_design all read them through
+        `low_layer_keepouts`.  Idempotent; says what changed.  A change after
+        the routing grid already holds leaf keepouts cannot lift those, so
+        that is a WARNING rather than a silent half-model."""
+        fp = getattr(self, "fp", None)
+        if fp is None:
+            return
+        want = self._leaf_blocked_map()
+        have = {k: sorted(v) for k, v in dict(fp.block_blocked_layers()).items()}
+        if want == have:
+            return
+        fp.clear_block_blocked_layers()
+        for name, lids in want.items():
+            fp.set_block_blocked_layers(name, lids)
+        if getattr(self, "_leaf_keepouts_done", None) and have != want:
+            print("WARNING: leaf blockage changed after the routing grid "
+                  "received its leaf keepouts; the grid keeps the old "
+                  "blockage — declare set_leaf_blockage and the cell bands "
+                  "before the first NUTS solve.")
+        if not want:
+            print("[LeafBlock] every leaf blocks every LOW layer")
+            return
+        names = {i: n for n, i in getattr(self, "_layer_name_map", {}).items()}
+        low = sorted(int(l) for d in (buda.LayerDir.HORIZONTAL,
+                                      buda.LayerDir.VERTICAL)
+                     for l in self.layers.get_layer_ids_by_dir(d)
+                     if not self.layers.is_top(int(l)))
+        by_set = {}
+        for lids in want.values():
+            by_set[tuple(lids)] = by_set.get(tuple(lids), 0) + 1
+        n_leaf = sum(1 for n, _r in fp.get_all_blocks()
+                     if not fp.is_container(n))
+        parts = []
+        for lids, n in sorted(by_set.items(), key=lambda kv: (len(kv[0]), kv[0])):
+            opened = [l for l in low if l not in lids]
+            parts.append(f"{n} block "
+                         + ("nothing" if not lids else
+                            ",".join(names.get(l, str(l)) for l in lids))
+                         + (f" (open: {','.join(names.get(l, str(l)) for l in opened)})"
+                            if opened else ""))
+        rest = n_leaf - len(want)
+        if rest:
+            parts.append(f"{rest} block every LOW layer (no band)")
+        print(f"[LeafBlock] {n_leaf} leaves: " + "; ".join(parts))
+
     def _apply_layer_policies(self, wrappers=None):
         """Resolve per-cell layer policies onto wrapper masks (Phase 1 of
         docs/internal/hier_layer_caps.md).
@@ -1934,6 +2017,24 @@ class HierMixin:
         # and what `set_layer_caps_by_depth off` may clear.  The memo rides in
         # meta; session-typed by-depth entries survive a BDB switch like any
         # other typed entry, restored ones do not (they left `pol` above).
+        if not getattr(self, "_leaf_blockage_typed", False):
+            # A BDB with no (or no valid) setting reads `low`, the default:
+            # the mode belongs to the design like the bands it reinterprets,
+            # so a mode restored from one checkpoint must not carry over to
+            # the next one opened (Codex P1 on #970).
+            lb = self.bdb.meta_get("leaf_blockage", "")
+            self._leaf_blockage = lb if lb in ("low", "policy") else "low"
+            if lb == "policy":
+                print("[LeafBlock] restored: leaf footprints block the "
+                      "LOW layers inside their cell layer band")
+        else:
+            # A mode typed in this session governs this BDB too, so it is
+            # written here as well: typed before the open, or before a
+            # switch, it would otherwise live only in the BDB open when it
+            # was typed, and a fresh session reopening this checkpoint would
+            # restore `low` over metal routed under `policy` (Codex P2 on
+            # #970).
+            self.bdb.meta_set("leaf_blockage", self._leaf_blockage)
         bd = getattr(self, "_cell_layer_policy_by_depth", None) or set()
         bd -= dropped
         memo = self.bdb.meta_get("layer_caps_by_depth", "")

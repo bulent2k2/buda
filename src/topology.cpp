@@ -483,12 +483,40 @@ void Floorplan::set_container(const std::string& name, bool is_container) {
 bool Floorplan::is_container(const std::string& name) const {
     return containers_.count(name) > 0;
 }
+void Floorplan::set_block_blocked_layers(const std::string& name,
+                                         const std::vector<int>& layer_ids) {
+    leaf_blocked_[name] = std::set<int>(layer_ids.begin(), layer_ids.end());
+    ++rev_;
+}
+void Floorplan::clear_block_blocked_layers() {
+    if (leaf_blocked_.empty()) return;
+    leaf_blocked_.clear();
+    ++rev_;
+}
+bool Floorplan::block_blocks_layer(const std::string& name, int layer_id) const {
+    if (containers_.count(name)) return false;
+    auto it = leaf_blocked_.find(name);
+    return it == leaf_blocked_.end() || it->second.count(layer_id) > 0;
+}
+std::map<std::string, std::vector<int>> Floorplan::block_blocked_layers() const {
+    std::map<std::string, std::vector<int>> out;
+    for (const auto& [n, s] : leaf_blocked_) out[n] = std::vector<int>(s.begin(), s.end());
+    return out;
+}
 std::vector<KeepoutZone> Floorplan::low_layer_keepouts(const std::vector<int>& low_layer_ids) const {
     std::vector<KeepoutZone> result = keepouts_;   // user-defined zones first
     if (low_layer_ids.empty()) return result;
-    std::set<int> low_set(low_layer_ids.begin(), low_layer_ids.end());
+    const std::set<int> all_low(low_layer_ids.begin(), low_layer_ids.end());
     for (const auto& [name, r] : blocks_) {
         if (containers_.count(name)) continue;     // containers are transparent to LOW layers
+        // A leaf with an explicit blocked set (`set_leaf_blockage policy`)
+        // blocks only the LOW layers it names; the rest are open over it.
+        std::set<int> low_set = all_low;
+        if (auto pol = leaf_blocked_.find(name); pol != leaf_blocked_.end()) {
+            low_set.clear();
+            for (int lid : all_low) if (pol->second.count(lid)) low_set.insert(lid);
+            if (low_set.empty()) continue;
+        }
         // Multi-rect leaf cells block each rect individually (the notch between
         // rects is routable), matching the per-rect Hanan grid.
         auto it = block_rects_.find(name);

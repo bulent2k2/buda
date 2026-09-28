@@ -343,6 +343,16 @@ def _reserve_audit(s):
         for r in rows)
 
 
+def _seats(s):
+    # The seat faults the stage-a healers score under `set_heal_seats`
+    # (whether or not it is on): bus segments seated on a keepout, plus
+    # supply-doomed seats, each counted once, locked bottom-up copies
+    # excluded.  -1 before run_nuts.
+    if s.nuts_result is None:
+        return "-1"
+    return str(len(s._seat_faults()))
+
+
 def _plan_pins(s):
     # A handed-down top plan's fate (6c): `{entries applied seated of}` —
     # `pin_plan` lines sourced, the ones applied at run_planner, and after
@@ -374,6 +384,7 @@ _QUERIES = {
     "reserves": _reserves,
     "reserve_audit": _reserve_audit,
     "plan_pins": _plan_pins,
+    "seats": _seats,
 }
 # The queries that TAKE arguments.  Every other name is a scalar about the
 # whole session, and a word after it is a typo — `buda::query overlaps M6`

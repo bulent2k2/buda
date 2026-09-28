@@ -68,7 +68,7 @@ class RipupMixin:
                                   self.nuts_result.num_overlaps
                                   if self.nuts_result is not None else 0))
         if self.nuts_result is not None:
-            return 'a', (lambda: self.nuts_result.num_overlaps)
+            return 'a', self._stage_a_metric
         return None, None
 
     @staticmethod
@@ -420,6 +420,11 @@ class RipupMixin:
         if stage == 'b':
             yield from self._rr_open_bundles()
         yield from self._rr_overlap_bundles()
+        # `set_heal_seats`: a bundle seated on a keepout or a doomed seat is
+        # a contender at stage a, after the overlap partners.
+        if stage == 'a' and self._heal_seats_on():
+            for bid, _si in sorted(self._seat_faults()):
+                yield bid
         if self.nuts_result is not None:
             for ji in self.nuts_result.junction_infeasibilities:
                 yield ji.bundle_id
@@ -436,6 +441,7 @@ class RipupMixin:
         deterministic.  Mirrors the `run_planner hier` branch minus _apply_selections
         (pins are already baked onto the wrappers) and minus _expand_hier_bundles."""
         self._reset_doglegs()
+        self._sync_leaf_blockage()
         self.planner = buda.CongestionPlanner(self.fp, self.layers)
         for pname, pval in self._planner_params.items():
             self.planner.set_planner_param(pname, pval)
@@ -1737,11 +1743,19 @@ class RipupMixin:
         use_parallel_sweep = (_RR_PARALLEL_SWEEP_DEFAULT
                               if use_parallel_sweep is None
                               else use_parallel_sweep)
+        # `set_heal_seats` at stage a: the C++ workers and the warm
+        # pre-filter score a move on NUTS overlaps alone, so they could not
+        # see a move that clears a seat fault -- run those trials
+        # sequentially on the session's own metric instead.
+        if stage == 'a' and self._heal_seats_on():
+            use_parallel_sweep = False
+            warm = False
 
         # Fold in the dead-span escalation before the hill-climb (stage b):
         # a dead LOW segment is a guaranteed open no candidate re-pin reaches,
         # so escalate it to TOP first and let ripup heal the fallout.
         n_heal = self._heal_dead_spans(stage)
+        n_heal += self._heal_seat_layers(stage, "ripup_reroute")
 
         m0 = metric()
         # A heal that moved routing may clear the opens but leave (or surface)
@@ -1763,7 +1777,9 @@ class RipupMixin:
             if stage == 'a':
                 self._stage_a_scope_advisory("ripup_reroute")
             return
-        what = "DNUTS opens" if stage == 'b' else "NUTS overlaps"
+        what = ("DNUTS opens" if stage == 'b' else
+                "NUTS overlaps + seat faults" if self._heal_seats_on()
+                else "NUTS overlaps")
         _n_cont0 = len(self._rr_contenders(stage))
         self._decision(
             f"[ripup_reroute] stage {stage} ({what}): "

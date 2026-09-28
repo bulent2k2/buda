@@ -250,6 +250,54 @@ class NegotiateMixin:
                       f"escalation ({n} segment(s)).")
         return n
 
+    def _heal_seat_layers(self, stage, who):
+        """The `set_heal_seats` layer move, folded in before a stage-a
+        hill-climb: a LOW segment seated on a keepout or a doomed seat is
+        moved to another layer (the cheapest same-direction TOP, or the
+        first that can host its seat -- `_escalate_dead_low_segments` with
+        `force` and `seek_host`) and NUTS re-solved; the move is KEPT only
+        when the stage-a score strictly drops, else restored.  The whole set
+        is tried first, then each seat on its own.  A TOP seat has no layer
+        above it, which is what the healer's candidate moves are for.
+        Returns the number of segments moved."""
+        if stage != 'a' or not self._heal_seats_on() \
+                or self.nuts_result is None or self.routing_grid is None:
+            return 0
+        low = sorted((b, si) for (b, si) in self._seat_faults()
+                     if any(ts.bundle_id == b and ts.seg_idx == si
+                            and not self.layers.is_top(ts.layer)
+                            for ts in self.nuts_result.segments))
+        if not low:
+            return 0
+        cur = self._stage_a_metric()
+        moved_total = 0
+
+        def trial(batch):
+            nonlocal cur
+            snap = self._rr_snapshot()
+            with contextlib.redirect_stdout(io.StringIO()):
+                n = self._escalate_dead_low_segments(
+                    only=set(batch), seek_host=True, force=True)
+            new = self._stage_a_metric()
+            if n and new < cur:
+                print(f"[{who}] seat layer move: {n} segment(s) off their "
+                      f"seat, metric {cur}->{new}", flush=True)
+                cur = new
+                return n
+            self._rr_restore(snap)
+            return 0
+
+        n = trial(low)
+        if n:
+            moved_total += n
+        else:
+            for one in low:
+                if one in self._seat_faults():
+                    moved_total += trial([one])
+        if moved_total and self.bdb is not None:
+            self._checkpoint_routing()
+        return moved_total
+
     def _stage_a_scope_advisory(self, who: str):
         """Stage-a healer SCOPE advisory (caps-flow UX, 2026-08-07): the
         stage-a metric is NUTS overlaps ONLY, so a clean stage-a line
@@ -317,11 +365,12 @@ class NegotiateMixin:
             metric = lambda: (self._dn_opens(),                    # noqa: E731
                               self.nuts_result.num_overlaps)
         else:
-            metric = lambda: self.nuts_result.num_overlaps         # noqa: E731
+            metric = self._stage_a_metric
         # Fold in the dead-span escalation before the hill-climb (stage b):
         # clear the guaranteed opens no replan can reach, then let negotiate
         # heal the fallout.
         self._heal_dead_spans(stage)
+        self._heal_seat_layers(stage, "negotiate")
         m0 = metric()
         # Opens-only primary check (NOT the full-metric one ripup uses after a
         # heal): negotiate's stage-b engine injects DNUTS-OPEN segments only —
@@ -335,7 +384,9 @@ class NegotiateMixin:
             if stage == 'a':
                 self._stage_a_scope_advisory("negotiate")
             return
-        what = "DNUTS opens" if stage == 'b' else "NUTS overlaps"
+        what = ("DNUTS opens" if stage == 'b' else
+                "NUTS overlaps + seat faults" if self._heal_seats_on()
+                else "NUTS overlaps")
         print(f"[negotiate] stage {stage} ({what}): start "
               f"metric={self._rr_m_str(m0)}, max_iter={max_iter}", flush=True)
         self._rr_t_init()
@@ -369,6 +420,32 @@ class NegotiateMixin:
                                      od.perp_lo, od.perp_hi, amount))
                     n_sites += 1
                     for bid in (od.bid_a, od.bid_b):
+                        if bid not in affected:
+                            affected.append(bid)
+                # `set_heal_seats`: a segment seated on a keepout or a
+                # doomed seat is a band whose real room fell short of what
+                # the planner promised -- charge its placed window the way
+                # stage b charges an open segment's, so the replan moves it.
+                if self._heal_seats_on():
+                    ts_map = {(ts.bundle_id, ts.seg_idx): ts
+                              for ts in self.nuts_result.segments}
+                    for bid, si in sorted(self._seat_faults()):
+                        ts = ts_map.get((bid, si))
+                        if ts is None:
+                            continue
+                        s_lo = min(ts.span_lo, ts.span_hi)
+                        s_hi = max(ts.span_lo, ts.span_hi)
+                        key = ('seat', ts.layer, round(ts.interval_lo),
+                               round(ts.interval_hi), round(s_lo), round(s_hi))
+                        history[key] = history.get(key, 0) + 1
+                        amount = (ts.interval_hi - ts.interval_lo) \
+                            * history[key]
+                        self.planner.inject_band_demand(
+                            ts.layer, s_lo, s_hi,
+                            ts.interval_lo, ts.interval_hi, amount)
+                        inj_recs.append((ts.layer, s_lo, s_hi, ts.interval_lo,
+                                         ts.interval_hi, amount))
+                        n_sites += 1
                         if bid not in affected:
                             affected.append(bid)
             else:

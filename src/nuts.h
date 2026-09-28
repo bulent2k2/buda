@@ -178,6 +178,9 @@ struct NUTSResult {
     // clean NUTS (keepout-model audit).  Counted per segment; report-only
     // (placement behaviour unchanged).
     int num_keepout_conflicts = 0;
+    // Which segments those are, (bundle_id, seg_idx) -- size() equals
+    // num_keepout_conflicts wherever the engine computed both.
+    std::vector<std::pair<int,int>> keepout_seats;
     std::map<int, int> overlaps_per_layer;  // layer_id -> overlap pair count
     // Per-pass seconds of the solve(s) that produced this result (the RR
     // round-3 profiling layer: WHERE inside a trial's full solve the time
@@ -429,6 +432,12 @@ public:
     NUTSResult rerun_bundle_warm(const NUTSResult& prev,
                                  const std::vector<BundleWrapper>& bundles,
                                  int target_bid) const;
+
+    // The (bundle_id, seg_idx) of every placed segment seated on one of
+    // low_keepouts() -- the audit run() records as NUTSResult::keepout_seats,
+    // for a result that did not come from run() (a restored checkpoint).
+    std::vector<std::pair<int,int>> keepout_seats_of(
+        const std::vector<TrackSegment>& segments) const;
 
 private:
     friend class LayerSolver;   // placement pass: uses first_fit/preferred_fit/track_pitch_

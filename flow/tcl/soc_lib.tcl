@@ -1536,6 +1536,49 @@ proc soc_vehicle::leaf_census {} {
     return $n
 }
 
+# Which LOW layers each LEAF's footprint blocks (`set_leaf_blockage
+# policy`).  Every leaf blocking every LOW layer (M2..M4) is the historical
+# model and what a run without `-leafcap` keeps; this says instead that a
+# small leaf's own wiring lives low and leaves the layers above it to the
+# wiring passing over.  `spec` is either an explicit `cell LAYER` list or
+# `size`, which grades each leaf by its larger side against the face rule:
+# up to `_dim(DW)` (the 152-unit cells at the defaults) blocks M2 alone, up
+# to `_dim(2*DW)` (the 280-unit fifo/tag) M2..M3, anything larger every LOW
+# layer.  A MODEL of the leaves, not a fact about them -- the table this
+# prints is what was assumed.  Declared through `set_cell_layer_cap`, which
+# on a leaf states exactly that and nothing else.  Returns the leaf->cap
+# dict applied.
+proc soc_vehicle::leaf_caps {spec} {
+    variable P
+    variable SZ
+    set leaves [lsort -unique [lmap p [leaf_paths] {cell_at $p}]]
+    set caps [dict create]
+    if {$spec eq "size"} {
+        set small [_dim $P(DW)]
+        set mid   [_dim [expr {2*$P(DW)}]]
+        foreach c $leaves {
+            lassign $SZ($c) w h
+            set side [expr {max($w, $h)}]
+            dict set caps $c [expr {$side <= $small ? "M2"
+                                    : ($side <= $mid ? "M3" : "M4")}]
+        }
+    } else {
+        if {[llength $spec] % 2} {
+            error "soc_vehicle: -leafcap wants 'size' or a list of cell LAYER pairs"
+        }
+        foreach {c l} $spec {
+            if {$c ni $leaves} { error "soc_vehicle: -leafcap: '$c' is not a leaf cell" }
+            dict set caps $c $l
+        }
+    }
+    buda::set_leaf_blockage policy
+    dict for {c l} $caps {
+        buda::set_cell_layer_cap $c $l
+        puts "leafcap $c [join $SZ($c) x] blocks M2..$l"
+    }
+    return $caps
+}
+
 proc soc_vehicle::derive_interface {} { buda::derive_busterms 4 }
 
 proc soc_vehicle::load_blocks {} {
@@ -1734,20 +1777,50 @@ proc soc_vehicle::banner {what} {
 }
 
 # ── verdict helpers (array_lib's rule: three legs, -1 is dirty) ───────────
-proc soc_vehicle::is_dirty {} {
+# The dirt, as the healing lines print it: overlaps, unplaced bits (only
+# once a detailed route exists) and audit violations.
+proc soc_vehicle::_state {} {
+    set out "[buda::query overlaps] overlaps"
+    if {[buda::query unplaced] >= 0} {
+        append out ", [buda::query unplaced] unplaced"
+    } else {
+        append out ", [buda::query seats] seat faults"
+    }
+    return "$out, [buda::query violations] audit violations"
+}
+
+# Dirty in the sense the healers can act on.  After DNUTS that is any
+# overlap, unplaced bit or audit violation.  At the abstract stage (`nuts`)
+# it is overlaps only: the stage-a healers' metric is the NUTS overlap
+# count, and what else the NUTS audit reports there -- a bus segment seated
+# on a keepout -- is invisible to them (measured on the sweet spot: two
+# rounds took 2 such seats to 6 and spent 25 s polishing wire), while DNUTS
+# resolves or culls it in the full flow.  The verdict still counts it.
+#
+# `set_heal_seats on` (soc.tcl -healseats) makes those seats -- and the
+# supply-doomed ones -- part of the stage-a score, so there they are dirt
+# the healers can act on.
+namespace eval soc_vehicle { variable HEALSEATS 0 }
+proc soc_vehicle::is_dirty {{stage dnuts}} {
+    variable HEALSEATS
+    if {$stage eq "nuts"} {
+        return [expr {[buda::query overlaps] > 0
+                      || ($HEALSEATS && [buda::query seats] > 0)}]
+    }
     return [expr {[buda::query overlaps] > 0 || [buda::query unplaced] > 0
                   || [buda::query violations] != 0}]
 }
 
-proc soc_vehicle::heal_if_dirty {who} {
-    if {![soc_vehicle::is_dirty]} { return 0 }
-    puts "$who: dirty ([buda::query overlaps] overlaps,\
-          [buda::query unplaced] unplaced,\
-          [buda::query violations] audit violations) -- healing"
+# `stage` is the audit the healers are judged by: `dnuts` (the full flow),
+# or `nuts` for a flow that stops at the abstract stage (`soc.tcl
+# -abstract`), where the healers work on NUTS overlaps and no bit is placed.
+proc soc_vehicle::heal_if_dirty {who {stage dnuts}} {
+    if {![soc_vehicle::is_dirty $stage]} { return 0 }
+    puts "$who: dirty ([_state]) -- healing"
     buda::negotiate_congestion 10
     buda::ripup_reroute 20
-    buda::check_design dnuts
-    if {![soc_vehicle::is_dirty]} { return 1 }
+    buda::check_design $stage
+    if {![soc_vehicle::is_dirty $stage]} { return 1 }
 
     # A SECOND round, composed the way a stuck endpoint wants it: the
     # healers' metric is lexicographic (opens, overlaps), so they drive the
@@ -1771,13 +1844,12 @@ proc soc_vehicle::heal_if_dirty {who} {
     # still said "needs a channel" after soc.tcl had retracted it).  The
     # measured curves, the seat, and the cheaper seat-scoped remedy all
     # live in soc.tcl beside the removal.
-    puts "$who: still dirty ([buda::query overlaps] overlaps,\
-          [buda::query unplaced] unplaced) -- second round"
+    puts "$who: still dirty ([_state]) -- second round"
     buda::refine_selection
     buda::negotiate_congestion 10
     buda::ripup_reroute 20
     buda::refine_selection
-    buda::check_design dnuts
+    buda::check_design $stage
     return 1
 }
 
@@ -1785,7 +1857,24 @@ proc soc_vehicle::verdict {who} {
     set ov [buda::query overlaps]
     set un [buda::query unplaced]
     set vi [buda::query violations]
+    set se [buda::query seats]
     buda::stop
+    if {$un < 0} {
+        # no detailed route (`-abstract`): nothing was placed per bit, so
+        # there is nothing to be unplaced -- say so rather than print -1.
+        # The seat faults (keepout + supply-doomed seats) are reported
+        # beside the verdict; the keepout half is already in the audit.
+        # Under `-healseats` the doomed half is dirt too: the healers were
+        # told to clear it, and a doomed seat is only an advisory to the
+        # audit, so it can leave both counts at zero (Codex P1 on #970).
+        variable HEALSEATS
+        if {$ov != 0 || $vi != 0 || ($HEALSEATS && $se > 0)} {
+            puts stderr "$who: FAILED (abstract) -- $ov overlaps, $vi audit violations, $se seat faults"
+            exit 1
+        }
+        puts "$who: clean (abstract) -- 0 overlaps, 0 audit violations, $se seat faults"
+        return 0
+    }
     if {$ov != 0 || $un != 0 || $vi != 0} {
         puts stderr "$who: FAILED -- $ov overlaps, $un unplaced,\
                      $vi audit violations"

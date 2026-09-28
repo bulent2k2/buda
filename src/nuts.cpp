@@ -1883,6 +1883,11 @@ std::vector<KeepoutZone> NUTSEngine::low_keepouts() const {
     return floorplan_.low_layer_keepouts(low_ids);
 }
 
+std::vector<std::pair<int,int>> NUTSEngine::keepout_seats_of(
+    const std::vector<TrackSegment>& segments) const {
+    return keepout_conflict_seats(low_keepouts(), segments);
+}
+
 std::vector<KeepoutZone> NUTSEngine::solver_keepouts() const {
     auto kozs = low_keepouts();
     kozs.insert(kozs.end(), fixed_zones_.begin(), fixed_zones_.end());
@@ -3539,8 +3544,9 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
     charge("junctions", t_tail);
     // Keepout conflicts: report-only, so a bus committed onto a keepout by the
     // exhausted-window centre fallback is never silent (keepout-model audit).
-    out.result.num_keepout_conflicts =
-        count_keepout_conflicts(low_keepouts(), out.result.segments);
+    out.result.keepout_seats =
+        keepout_conflict_seats(low_keepouts(), out.result.segments);
+    out.result.num_keepout_conflicts = (int)out.result.keepout_seats.size();
     charge("keepout_audit", t_tail);
     // Track overlaps first: it is the headline health metric, so it stays
     // visible even when a terminal/summary truncates the tail of this line.
@@ -3655,8 +3661,9 @@ NUTSResult NUTSEngine::rerun_layer(
     result.segments.insert(result.segments.end(),
                            fixed_held.begin(), fixed_held.end());
     compute_metrics(result);
-    result.num_keepout_conflicts =
-        count_keepout_conflicts(low_keepouts(), result.segments);
+    result.keepout_seats =
+        keepout_conflict_seats(low_keepouts(), result.segments);
+    result.num_keepout_conflicts = (int)result.keepout_seats.size();
     // Refresh the junction-infeasibility signal from the re-solved state: the
     // copy from prev may hold edges the rerun just fixed (stale) or miss ones
     // it introduced (dropped) — derive, don't inherit.
@@ -3787,8 +3794,9 @@ NUTSResult NUTSEngine::rerun_bundle_warm(
         tighten_pulls(warm.segments, ctx);
     tighten_spans_to_reach(warm.segments, ctx);   // last span mutation before metrics
     compute_metrics(warm);
-    warm.num_keepout_conflicts =
-        count_keepout_conflicts(low_keepouts(), warm.segments);
+    warm.keepout_seats =
+        keepout_conflict_seats(low_keepouts(), warm.segments);
+    warm.num_keepout_conflicts = (int)warm.keepout_seats.size();
     derive_junction_infeasibilities(bundles, warm);
     return warm;
 }

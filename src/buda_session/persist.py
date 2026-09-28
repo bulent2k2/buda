@@ -984,6 +984,20 @@ class PersistMixin:
         rows.sort(key=lambda r: r["id"])
         import json as _json
         self.bdb.meta_set("layer_stack", _json.dumps(rows, sort_keys=True))
+        # Which LOW layers each leaf blocks, when `set_leaf_blockage policy`
+        # made that a per-leaf fact: the judge's leaf rule reads it, and an
+        # empty value means the historical model (every leaf blocks every
+        # LOW layer).
+        blocked = {}
+        fp = getattr(self, "fp", None)
+        if fp is not None:
+            blocked = {k: sorted(int(l) for l in v)
+                       for k, v in dict(fp.block_blocked_layers()).items()}
+        self.bdb.meta_set(
+            "leaf_blocked_layers",
+            _json.dumps([{"name": k, "layers": v}
+                         for k, v in sorted(blocked.items())])
+            if blocked else "")
 
     def _persist_bundle_vias(self, w):
         """Record one symbolic bus-via per layer-transition in a bundle's placed
@@ -1746,6 +1760,15 @@ class PersistMixin:
         if ts_list:
             nr = buda.NUTSResult()
             nr.segments = ts_list
+            # The keepout audit run() records is not persisted; redo it on
+            # the restored metal, against the same keepouts, so the seat
+            # count and `set_heal_seats` see a resumed result as they saw
+            # it live (Codex P2 on #970).
+            if self.layers is not None:
+                self._sync_leaf_blockage()
+                nr.keepout_seats = buda.NUTSEngine(
+                    self.fp, self.layers).keepout_seats_of(ts_list)
+                nr.num_keepout_conflicts = len(nr.keepout_seats)
             self.nuts_result = nr             # persisted routing = final, clean
         elif (cap_voided or ndr_voided) and self.nuts_result is not None:
             # Every restored bundle with routing was voided: a nuts_result

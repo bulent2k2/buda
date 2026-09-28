@@ -667,6 +667,153 @@ shorts added — could move.)
 Regenerate: `tools/soc_plan_search.py --knobs "-PAD 10 -GAP 4 -M 4 -FACES
 4" --out <dir>` (every run cached in `<dir>/runs.json` under its command line and the code it ran on, so a re-run of the same code resumes and one after a checkout or rebuild measures again; a run that dies without a verdict is reported as an error and not cached).
 
+### Abstract-only exploration (2026-09-27)
+
+The 45 re-runnable configurations of the compaction study, swept twice on
+the same code (`main` @ c0041d2): stopped after abstract NUTS and its
+healers (`soc.tcl -abstract`), and through detailed routing as before.
+Published as the [Abstract-Stage SoC Screen](https://claude.ai/artifact/1Y9C92zgApUz9jzqky3hpQ)
+(runtime against die area, both modes on one chart, every run's result
+and command in the hover).
+
+`-abstract` runs bundling, generation, the planner, abstract NUTS and the
+NUTS-stage `check_design`, then the vehicle's healers judged on NUTS
+overlaps, and stops: no bit is placed.  The healers run only while NUTS
+overlaps remain.  What else the NUTS audit reports at that stage is a
+bus segment seated on a keepout, which the stage-a healers' metric cannot
+see; chasing it took the sweet spot's 2 such seats to 6 and spent 25 s
+polishing wire, so the verdict reports it and the flow stops.
+
+* **Speed**: median 3.9 s per run against 155 s, the sweep 879 s against
+  8,173 s.  Four configurations are slow even abstractly (PAD 8 GAP 4
+  206 s, PAD 0 GAP 8 112 s, `regf` four-face 76 s, and slice `FACES 4`
+  cut off at 300 s).
+* **No abstract run is clean.**  44 of 45 end at 0 NUTS overlaps, and
+  every one keeps 2 to 52 segments seated on a keepout, so clean vs dirty
+  at this stage separates nothing.
+* **Prediction** (43 pairs, the two cut-off runs excluded; AUC = the
+  chance a configuration that ends dirty in the full flow scores higher
+  than one that ends clean): keepout seats 0.64, first-check overlaps
+  0.51, first-check audit 0.50, abstract runtime 0.55, abstract wire
+  0.49 -- and die area alone 0.68.  The keepout-seat count is a real
+  signal for the GRID packer (0.89: clean runs at 2-21 seats, dirty at
+  12-29) and none for the slicing packer and the searched plans (0.46).
+
+So the abstract stage is a fast way to rule out floorplans whose buses
+cannot even be seated -- none of these -- and, for grid floorplans, a
+usable ranking; it is not a stand-in for the detailed route.
+
+Six configurations end differently in the full flow than in the rounds
+above, because `main` has moved: shorts between bits of different
+bundles are counted since #962.  PAD 10 GAP 3, slice PAD 20 GAP 13 CGAP
+4 and the stretch-to-bits point now route clean; slice PAD 24 GAP 8
+(9u), PAD 20 GAP 12 CGAP 4 (1 overlap) and PAD 18 GAP 12 CGAP 4 no
+longer do.  The sweet spot is still clean, in 15 s.
+
+Regenerate: `btcl flow/tcl/soc.tcl 8 -LAYOUT compact <knobs> -abstract`
+per configuration (the knobs are each table row's).
+
+### Leaves that block only the layers they use (2026-09-27)
+
+Every leaf here used to block all three LOW layers (M2..M4), so a LOW
+wire could never cross a cell: a 152-unit ALU was as solid as the
+536-unit memory controller.  `set_leaf_blockage policy` makes a leaf block
+only the LOW layers of its cell's layer band, and `-leafcap size` grades
+the leaves by their larger side against the face rule -- up to `_dim(DW)`
+(the 152-unit cells and the 56-unit pad) M2 alone, up to `_dim(2*DW)`
+(fifo, tag) M2..M3, memctl every LOW layer.  That grading is an
+ASSUMPTION about what these leaves' own wiring uses, not a property the
+vehicle measures; the run prints the table it applied.
+
+The same 45 configurations, abstract and full, `-leafcap size` against
+the rows above (same engine: without the flag the run is byte-identical):
+
+* **Clean**: 38 of 45 against 22.  Seventeen dirty configurations route
+  clean; one clean one no longer does (PAD 12 GAP 4 ends on 3 overlaps).
+  Every run the judge was asked about agrees (the flat vehicle, NQ 1, and
+  three NQ 8 rows including the smallest).
+* **Die**: the smallest clean die is slice PAD 24 GAP 4 at 12.83 Mu^2
+  (4.98 x 2.58 mm), 15 % under the sweet spot's 15.12 and 12 % under
+  the smallest clean die without the policy (14.63).  Next: slice PAD 24
+  GAP 4 CGAP 16 at 13.30, grid PAD 0 GAP 4 at 13.83.  The sweet spot
+  itself stays clean, in 5.2 s against 15 s.
+* **Runtime**: the full sweep takes 1,340 s against 8,173 s (median
+  10.5 s per run against 155 s) -- the healers have far less to do.  A
+  few clean runs got slower (PAD 24 GAP 4 grid 6 -> 51 s, slice PAD 20
+  GAP 16 CGAP 4 11 -> 50 s).
+* **Wire**: on the 21 configurations clean both ways, detailed WL moves
+  by a median -6.3 % (-18 % to +26 %; the +26 % is grid `FACES 4`).
+* **Abstract correlation got WORSE**, and why is worth stating.  The 7
+  configurations still dirty are not told apart by the abstract result
+  (AUC 0.45 for supply-doomed seats, 0.57 for keepout seats).  Every
+  slicing row now ends its abstract stage on ~19 M3 segments seated over
+  the 280-unit fifo/tag leaves, which block M3 under this grading, and
+  the full flow resolves them every time -- the stage-a healers cannot
+  see a keepout seat, so the abstract verdict carries a fault the
+  detailed stage always repairs.  That is the case for counting keepout
+  and supply-doomed seats in the stage-a metric (the other half of the
+  plan), measured here first.
+
+What the dirty configurations had in common before (E0, over the rows
+above): of 145 bundles dirty at the end of the full flow, 117 were
+supply-doomed seats at the end of the abstract stage and 31 keepout
+seats -- a 32-bit bus on M5 in a window holding 31 signal tracks (81 of
+the final violations) or an M2 segment with none (44).  No configuration
+was abstract-clean and full-dirty under either count; what they lack is
+specificity, since the full flow heals most of them.
+
+Regenerate: `btcl flow/tcl/soc.tcl 8 -LAYOUT compact <knobs> -leafcap size`
+(add `-abstract` for the screen).
+
+### Seats in the stage-a score (2026-09-28)
+
+`set_heal_seats on` (`soc.tcl -healseats`) counts every bus segment seated
+on a keepout and every supply-doomed seat as one more overlap in the
+stage-a healer score, gives the healers the moves to match (seated bundles
+as contenders, negotiate charging the seat's window, a measured layer move
+first) and, in the full flow, heals at the abstract stage before DNUTS.
+The same 45 configurations, four arms, abstract and full each (the
+abstract and full columns of the first two are the sweeps above):
+
+| arm | abstract clean | abstract s (median / sum) | full clean | full s (median / sum) | verdicts agree |
+|---|---|---|---|---|---|
+| baseline | 0 | 3.9 / 879 | 22 | 155 / 8,173 | 22 of 44 |
+| `-leafcap size` | 5 | 3.0 / 141 | 38 | 10.5 / 1,340 | 12 of 45 |
+| `-healseats` | 17 | 192 / 7,626 | 24 | 262 / 12,687 | 30 of 39 |
+| both | 42 | 6.0 / 1,121 | 41 | 7.7 / 1,766 | **41 of 44** |
+
+("Agree" = the abstract verdict equals the full one, cut-off runs left
+out; the abstract verdict counts the keepout half of the seats through the
+audit, and under `-healseats` the doomed half too -- the first cut of this
+table read the verdict line, which let five `-healseats` runs ending on
+15-16 doomed seats read clean (22 of 45, agreeing on 25 of 39); the verdict
+now fails them (Codex P1 on #970), and the combined arm had none.)
+
+* **Seats alone cost the screen its speed.**  With every leaf blocking all
+  three LOW layers the seats are many and hard to clear: 15 of 45 abstract
+  runs hit the 300 s limit, the median is 192 s against 3.9 s, and the full
+  flow gains two clean configurations for 55 % more time.  The stage-a
+  trials run sequentially under the knob (the parallel sweep scores
+  overlaps alone), which is part of that.
+* **Both together is the combination.**  The abstract verdict predicts the
+  full one on 41 of 44 configurations: two abstract-clean runs end dirty
+  (grid PAD 4 GAP 16, 4 unplaced bits; grid PAD 4 GAP 8, 10) and one
+  abstract-dirty run (slice PAD 10 GAP 16 CGAP 4, one seat left) routes
+  clean.  The full flow reaches 41 clean against the leaf policy's 38
+  (grid PAD 12 GAP 4, grid PAD 6 GAP 4, grid PAD 0 GAP 8 and slice PAD 10
+  GAP 16 CGAP 4 gained, grid PAD 4 GAP 16 lost) at the same wire (median -0.1 %, -9 % to +11 %
+  on the 37 clean both ways; -7.0 % against the baseline on its 22), and
+  the smallest clean die is unchanged at 12.83 Mu^2.
+* **The screen is no longer much faster than the flow it screens.**  With
+  the abstract stage healed clean, DNUTS inherits a placement it has little
+  to repair, so the full flow's median is 7.7 s against the abstract
+  stage's 6.0 s.  The abstract stage bought its 40x when the detailed
+  healers had the most to do; that is exactly what the two changes took
+  away.
+
+Regenerate: `btcl flow/tcl/soc.tcl 8 -LAYOUT compact <knobs> -healseats
+-leafcap size` (add `-abstract` for the screen).
+
 ## Every endpoint, every bit, every instance: the face rule read three ways
 
 The face rule — *a leaf's size is derived from the bits that land on its

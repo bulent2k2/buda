@@ -15,6 +15,7 @@
  */
 
 #pragma once
+#include <algorithm>
 #include <climits>
 #include <cstdint>
 #include <functional>
@@ -859,6 +860,17 @@ private:
     // capacity carving — while a single-rect block contributes its one rect,
     // in blocks_cache_'s order, so single-rect designs judge identically.
     std::vector<Rect> leaf_rects_cache_;
+    // `set_leaf_blockage policy`: the LOW layers each cached leaf blocks,
+    // parallel to blocks_cache_ / leaf_rects_cache_ (empty = every LOW
+    // layer, the historical model).  Filled only when some leaf carries an
+    // explicit set (leaf_policy_), so the unpolicied path does no lookup.
+    bool leaf_policy_ = false;
+    std::vector<std::vector<int>> blocks_cache_layers_;
+    std::vector<std::vector<int>> leaf_rects_layers_;
+    static bool leaf_blocks_(const std::vector<int>& lids, int layer_id) {
+        return lids.empty()
+            || std::find(lids.begin(), lids.end(), layer_id) != lids.end();
+    }
 
     // Tunable cost coefficients.
     double kCong_             = 1.0;
