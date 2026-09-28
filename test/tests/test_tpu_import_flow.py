@@ -32,6 +32,9 @@ from pathlib import Path
 
 import pytest
 
+from tcl_quote import tcl_path
+from wrapper_select import wrapper_command, wrapper_missing_reason
+
 _ROOT = Path(__file__).resolve().parents[2]
 _FLOW = _ROOT / "flow" / "tpu"
 _TCL = _ROOT / "flow" / "tcl" / "tpu.tcl"
@@ -78,8 +81,13 @@ def _sandbox(tmp_path):
 
 
 def _run_buda(tmp_path):
+    # bin/buda is a bash script, which native Windows cannot execute; the
+    # platform's launcher (the .ps1 twin there) runs the same contract.
+    cmd = wrapper_command(_ROOT, "buda")
+    if cmd is None:
+        pytest.skip(wrapper_missing_reason("buda"))
     flow = _sandbox(tmp_path) / "tpu.buda"
-    r = subprocess.run([str(_ROOT / "bin" / "buda"), str(flow)],
+    r = subprocess.run([*cmd, str(flow)],
                        capture_output=True, encoding="utf-8",
                        errors="replace", cwd=tmp_path, timeout=900)
     assert r.returncode == 0, r.stdout + r.stderr
@@ -164,9 +172,12 @@ def test_the_derived_containers_match_the_tcl_cell(tmp_path):
              if re.fullmatch(r"row_\d+", c.name)}
     assert len(boxes) == _N, sorted(boxes)
 
+    # The path is quoted for Tcl: read bare, a Windows path loses its
+    # separators to backslash substitution, `source` fails, and tclsh
+    # reading a script from stdin still exits 0 with nothing printed.
     r = subprocess.run(
         ["tclsh"], input=(
-            f"source [file join {_ROOT} flow tcl tpu_lib.tcl]\n"
+            f"source {tcl_path(_ROOT / 'flow' / 'tcl' / 'tpu_lib.tcl')}\n"
             f"tpu_vehicle::configure {{N {_N}}}\n"
             "puts \"[tpu_vehicle::get RW] [tpu_vehicle::get RH]\"\n"),
         capture_output=True, encoding="utf-8", timeout=60)

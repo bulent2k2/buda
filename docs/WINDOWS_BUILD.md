@@ -264,7 +264,7 @@ Tests and flows then run from any shell, exactly as the Ninja MSVC path
 Windows with a POSIX personality: a real `fcntl`, a real `python3`, and —
 the point of this path — **the repo's own `bin/bb` wrapper just works**, CRLF
 guards aside. Unlike MinGW, binaries are Cygwin-native (`cygbuda_core.dll`,
-`buda.cpython-39-x86_64-cygwin.dll`) and link Cygwin's Python.
+`buda.cpython-<ver>-x86_64-cygwin.dll`) and link Cygwin's Python.
 
 **Measured** (validation runs 13–19): `bin/bb` drives a complete GCC 14
 build (≈ 6–8m), the full extension stack **imports clean** —
@@ -274,8 +274,37 @@ Python 3.9 — and a **`.buda` flow runs end to end** (run 19:
 DetailedNUTS, `check_design` clean at every stage, 0 bits unplaced).
 Known, measured limitations:
 
-- **Python is 3.9.16** — the newest Cygwin ships, past upstream EOL and
-  below the project's 3.13 floor. The tree parses under 3.9 (measured: full
+- **Cygwin's `python3` is 3.12 now; it was 3.9 through run 38.** Run 39
+  found `python3 3.12.12-1` while the install list still asked for the
+  `python39-*` stack, so 3.12 had no pip, numpy, matplotlib or tkinter and
+  the lane stopped at its first pip step.  The list below installs the
+  `python312-*` twins, and run 40 measured what they give: numpy 2.5.2,
+  tkinter and pip 26.2.1 install and import, and the pure-python test deps
+  pip-install (pybind11 3.1.0).  `python312-matplotlib` does not install —
+  `cygcheck` does not list it and `import matplotlib` fails — so the tier's
+  matplotlib-importing modules will fail to collect, as they did against
+  3.9's broken one.  The 3.9 notes that follow are what runs 13–38 measured.
+- **CMake 4.4.3 under Cygwin 3.6.10 loses children it starts by name.**
+  An `execute_process` of a program given only by NAME, found through PATH,
+  left CMake waiting for good, the child already gone and not even a zombie,
+  in 18 of 29 tries over validation runs 40–45: `python3` and `true` alike.
+  Started by absolute path, the same interpreter never was, in 12 fresh
+  trials and every FindPython run of a configure that had not already lost
+  one.  After the first loss, though, every later child in that configure is
+  lost too, even by absolute path.  CMake runs children through libuv, which
+  on Cygwin learns that a child ended from SIGCHLD and `waitpid`; where the
+  child is lost is not established.  `CMakeLists.txt` had exactly one such
+  call, its pybind11 lookup (`python3 -c "import pybind11; ..."`), and every
+  configure hang was there; it now looks `python3` up on PATH with
+  `find_program` and runs it by absolute path.  The call also has a
+  `TIMEOUT` and prints a result other than 0
+  (`-- BUDA: <python3> -c 'import pybind11' ended with ...`), which bounds it
+  but cannot save a configure, for the reason above.  Run 43 looked as if the
+  step's stdin caused it; run 44 refuted that.  The measurement is
+  `.github/scripts/cygwin_configure_probe.sh`, run by dispatching the
+  workflow with `cygwin_probe` on.
+- **Python was 3.9.16** — then the newest Cygwin shipped, past upstream EOL
+  and below the project's 3.13 floor. The tree parses under 3.9 (measured: full
   `ast` sweep), and the one measured *runtime* incompatibility — PEP 604
   `X | Y` unions in evaluated annotations, which raise `TypeError` at import
   on 3.9 (run 18) — is fixed with `from __future__ import annotations` in
@@ -309,7 +338,7 @@ packages (GUI picker or command line):
 ```powershell
 .\setup-x86_64.exe -q -s https://mirrors.kernel.org/sourceware/cygwin/ `
   -R C:\cygwin64 -l C:\cygpkgs `
-  -P gcc-g++,make,cmake,ninja,git,python3,python39-devel,python39-pip,python39-numpy,python39-tkinter
+  -P gcc-g++,make,cmake,ninja,git,python3,python3-devel,python312-devel,python312-pip,python312-numpy,python312-tkinter,python312-matplotlib
 ```
 
 ### 6.2 Checkout and environment
@@ -327,6 +356,18 @@ fails with `readonly variable`. `set -o igncr` enables it for the current
 shell; to make child bash processes inherit it, set `SHELLOPTS=igncr` in the
 *Windows* environment before bash starts, which is what the validation
 workflow does via its job `env:`.)
+
+An exported `SHELLOPTS` carries more than `igncr`: bash keeps it current, so
+a calling script's `set -euo pipefail` reaches every bash script it starts.
+So the `bin/` wrappers read every optional variable and argument through a
+default (`${PYTHONPATH:+:$PYTHONPATH}`, `${BUDA_TEST_ANCHOR:-}`, `${1:-}`):
+in validation run 46, `bin/btcl` read an unset `PYTHONPATH` under a tier
+script's inherited `set -u` and failed nine tests.
+
+Cygwin's git may not take you for the owner of a checkout that another git
+made (Git for Windows, `actions/checkout`), and then refuses every command in
+it with "detected dubious ownership".  `git config --global --add
+safe.directory <path>` trusts it; the validation workflow trusts `'*'`.
 
 Then the pure-python test deps via pip (those wheels are pure-python, so
 they install fine):
@@ -447,6 +488,14 @@ that PE ignores).
 
 The module built but exports nothing (the flip side of the previous entry —
 e.g. `--exclude-all-symbols` without an explicit export). Same fix.
+
+### Cygwin: `bin/bb` stops after `-- BUDA JCC-erratum mitigation: ...`
+
+The configure is in its first `execute_process` after the compiler checks,
+the pybind11 lookup, and CMake has lost that child (section 6): it started
+`python3` by name, which CMake 4.4.3 under Cygwin 3.6.10 does not survive
+about half the time.  The lookup now names the interpreter by absolute path;
+a checkout that still hangs here predates that.
 
 ### Cygwin: `ImportError: No such file or directory` on `import buda`
 

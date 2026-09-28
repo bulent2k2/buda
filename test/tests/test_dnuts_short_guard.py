@@ -37,7 +37,6 @@ stub, whose bit lands on x = 206.5; bundle 2's H trunk spans [203, 300] on
 the same tracks.  The spans do not meet, both trunks want track 3.5, and
 bundle 1's bit is stretched to 206.5 — through bundle 2's first 3.5 units.
 """
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -45,6 +44,7 @@ from pathlib import Path
 import pytest
 
 import buda
+from subprocess_env import buda_env
 
 _ROOT = Path(__file__).resolve().parents[2]
 
@@ -353,13 +353,13 @@ def _seeded(value):
     code = ("import buda\n"
             "e = buda.DetailedNUTSEngine(buda.RoutingGridStack())\n"
             "print(int(e.short_reach), int(e.short_cull))\n")
-    env = dict(os.environ)
+    # Prepended, not replaced: under the Visual Studio generator the module
+    # is in build\Release, which only the inherited PYTHONPATH names.
+    env = buda_env(_ROOT, "build", "src")
     if value is None:
         env.pop("BUDA_DNUTS_SHORT_GUARD", None)
     else:
         env["BUDA_DNUTS_SHORT_GUARD"] = value
-    env["PYTHONPATH"] = os.pathsep.join(
-        [str(_ROOT / "build"), str(_ROOT / "src")])
     out = subprocess.run([sys.executable, "-c", code], env=env,
                          capture_output=True, text=True, check=True)
     return out.stdout.split(), out.stderr

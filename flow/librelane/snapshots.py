@@ -448,8 +448,12 @@ def main(argv=None):
                      total, located))
 
     idx = os.path.join(out, "index.md")
+    try:
+        shown = os.path.relpath(run_dir, os.getcwd())
+    except ValueError:          # Windows: another drive has no relative spelling
+        shown = os.path.abspath(run_dir)
     with open(idx, "w") as f:
-        f.write(f"# Stage snapshots — `{os.path.relpath(run_dir, os.getcwd())}`\n\n")
+        f.write(f"# Stage snapshots — `{shown}`\n\n")
         f.write("Rendered from the DEFs the run already wrote; nothing was re-run.\n\n")
         f.write("| # | stage | what to look for | placed | render | BDB |\n"
                 "|---|---|---|---|---|---|\n")

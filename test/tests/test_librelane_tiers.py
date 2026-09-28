@@ -36,7 +36,16 @@ _T1A = _ROOT / "flow" / "librelane" / "tier1a"
 
 pytestmark = pytest.mark.mid
 
+# The tier scripts (gen.sh, harm.sh, pins.sh, notch.sh) are bash.  On native
+# Windows `bash` on PATH is the WSL stub, which prints "Windows Subsystem for
+# Linux has no installed distributions" and runs nothing (wrapper_select.py
+# says the same for bin/), so a test that runs one cannot run there.
+_NEEDS_BASH = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="runs a bash tier script; native Windows' bash is the WSL stub")
 
+
+@_NEEDS_BASH
 def test_gen_sh_emits_a_complete_flat_design_at_n(tmp_path):
     r = subprocess.run(["bash", str(_T1A / "gen.sh"), "2"], env={**__import__("os").environ,
                        "T1A_DIR": str(tmp_path)}, capture_output=True, text=True, timeout=600)
@@ -186,6 +195,7 @@ def _lef_sizes(path):
 
 @pytest.mark.skipif(not _HAS_TCLSH, reason="gen.sh emits the set through tclsh")
 @pytest.mark.parametrize("n", [2, 4])
+@_NEEDS_BASH
 def test_harm_sh_writes_the_h_arm_from_the_emitted_set(tmp_path, n):
     """harm.sh N: one block directory per leaf cell on a die exactly its LEF
     SIZE, a top whose MACROS map EVERY DEF component -- `row_0/pe_0` as the
@@ -304,6 +314,7 @@ def test_harm_sh_writes_the_h_arm_from_the_emitted_set(tmp_path, n):
 
 
 @pytest.mark.skipif(not _HAS_TCLSH, reason="gen.sh emits the set through tclsh")
+@_NEEDS_BASH
 def test_a_failing_dry_run_warns_and_still_writes_the_arm(tmp_path, monkeypatch, capsys):
     """`pdn_phase.py`'s verdict must not GATE the arm.
 
@@ -354,6 +365,7 @@ def test_pdn_phase_says_it_is_advisory_wherever_it_is_read(tmp_path):
 
 
 @pytest.mark.skipif(not _HAS_TCLSH, reason="gen.sh emits the set through tclsh")
+@_NEEDS_BASH
 def test_harm_sh_fails_loudly_on_the_shape_it_did_not_expect(tmp_path):
     env = {**os.environ, "T1A_DIR": str(tmp_path)}
     r = subprocess.run(["bash", str(_T1A / "harm.sh"), "2"], env=env, capture_output=True, text=True)
@@ -757,6 +769,7 @@ def test_strap_enumeration_is_pdngens_own_loop():
 
 
 @pytest.mark.skipif(not _HAS_TCLSH, reason="gen.sh emits the set through gen.sh/tclsh")
+@_NEEDS_BASH
 def test_harm_sh_measures_the_die_fit_shift_from_the_dies_own_origin(tmp_path):
     """The shift is the smallest translation putting every macro halo inside
     the die, and "inside" is measured from the DIE's origin, not from zero: a
@@ -843,6 +856,7 @@ def test_runtimes_blocks_from_the_top_config(tmp_path):
 
 # ── arm H+B: pins.sh, harm.sh --pins ──────────────────────────────────────
 @pytest.mark.skipif(not _HAS_TCLSH, reason="gen.sh emits the set through tclsh")
+@_NEEDS_BASH
 def test_pins_sh_writes_one_template_per_leaf_cell_and_harm_consumes_it(tmp_path):
     """`pins.sh N` routes the emitted array and writes one FP_DEF_TEMPLATE
     per leaf CELL TYPE -- a template, not a per-instance file, because the
@@ -911,6 +925,7 @@ def test_pins_sh_writes_one_template_per_leaf_cell_and_harm_consumes_it(tmp_path
 
 
 @pytest.mark.skipif(not _HAS_TCLSH, reason="gen.sh emits the set through tclsh")
+@_NEEDS_BASH
 def test_without_pins_the_h_arm_is_byte_identical_and_a_gap_is_refused(tmp_path):
     """The H+B option must not move arm H: the same command without
     `--pins` writes exactly what it wrote before the option existed, key
@@ -1350,11 +1365,35 @@ def test_readme_prefixes_is_relative_in_tree_and_absolute_out_of_it():
     # outside the checkout: ABSOLUTE, since a relpath between unrelated trees
     # counts `..` to the root and one symlink on the way breaks it
     pre, env = harm.readme_prefixes("/tmp/x/n2", "/tmp/x/n2/h", t1a)
-    assert pre == t1a and env == "T1A_DIR=../.. "
+    assert pre == t1a.replace(os.sep, "/") and env == "T1A_DIR=../.. "
     assert os.path.isabs(pre)
 
 
+def test_readme_prefixes_across_drives_fall_back_to_absolute_slashed_paths(monkeypatch):
+    """Windows path rules, simulated with `ntpath` on any host (review on
+    #969): an arm on another drive than the checkout, or than its set, has
+    no relative spelling at all -- `relpath` raises -- so both values fall
+    back to the absolute path.  Spelled with `/` like every path in the
+    README, since its recipes are bash, which drops an unquoted backslash."""
+    import ntpath
+    import types
+    sys.path.insert(0, str(_T1A))
+    import harm                                      # noqa: E402
+    monkeypatch.setattr(harm, "os", types.SimpleNamespace(path=ntpath, sep="\\"))
+    t1a = r"C:\buda\flow\librelane\tier1a"
+    # the checkout on C:, the arm on D:, the set in the default root
+    assert harm.readme_prefixes(t1a + r"\n2", r"D:\arms\h", t1a) == \
+        ("C:/buda/flow/librelane/tier1a", "")
+    # ...and the set on C: outside tier1a/: it used to raise ValueError
+    assert harm.readme_prefixes(r"C:\sets\n2", r"D:\arms\h", t1a) == \
+        ("C:/buda/flow/librelane/tier1a", "T1A_DIR=C:/sets ")
+    # one drive: relative, and still spelled with `/`
+    assert harm.readme_prefixes(t1a + r"\hb4\n4", t1a + r"\hb4\n4\hs", t1a) == \
+        ("../../..", "T1A_DIR=../.. ")
+
+
 @pytest.mark.skipif(not _HAS_TCLSH, reason="gen.sh emits the set through tclsh")
+@_NEEDS_BASH
 def test_an_arm_outside_h_tells_you_its_own_notch_command(tmp_path):
     """`harm.py --out` can put an arm anywhere, and the study does it: `n2/hs`
     and `hb4/n4/hs` are H+size arms beside their H+B twin in ONE emitted set.
@@ -1392,6 +1431,7 @@ def test_an_arm_outside_h_tells_you_its_own_notch_command(tmp_path):
             _assert_readme_paths_resolve(out, readme)
 
 
+@_NEEDS_BASH
 def test_notch_sh_refuses_an_unhardened_cell_and_clears_the_stale_patch(tmp_path):
     """`notch.sh N` closes #896's abstraction notch per cell, and the whole
     point of moving it out of the hand recipe (#907) is that it cannot be
@@ -1472,6 +1512,7 @@ def test_notch_sh_refuses_an_unhardened_cell_and_clears_the_stale_patch(tmp_path
     assert r.returncode == 1 and "--arm ''" in r.stderr and "names no arm" in r.stderr
 
 
+@_NEEDS_BASH
 def test_notch_sh_refuses_an_empty_layer_list_instead_of_renaming_the_deliverables(tmp_path):
     """`--layers ''` (or a comma-only value) ran ZERO passes, and the moves
     at the end of the cell then renamed the cell's OWN hardened `.gds` and

@@ -1408,6 +1408,11 @@ def test_third_review_round_fixes(tmp_path, monkeypatch):
     assert not sps.classify(dict(none), False, 1).get("timeout")
     assert sps.classify(dict(none), True, -9).get("timeout")
     assert not sps.classify(sps.parse("soc.tcl: clean -- x\n"), False, 0).get("error")
+    if sys.platform == "win32":
+        # The tool runs bin/btcl, a bash script, in a process group of its
+        # own; native Windows runs neither, nor the shell stand-in below.
+        pytest.skip("the stand-in for bin/btcl is a POSIX shell script; the "
+                    "classification above still ran")
     # a stand-in for btcl that dies at once without a verdict
     fake = tmp_path / "btcl"
     fake.write_text("#!/bin/sh\necho 'engine crashed'\nexit 3\n")

@@ -60,7 +60,7 @@ anchor_args() {
 # detected script arg, then one anchored arg per line — and exit.  Lets the
 # arg-handling logic above be unit-tested on Linux CI, where the Darwin
 # branch itself cannot run.
-if [ -n "$BUDA_TEST_ANCHOR" ]; then
+if [ -n "${BUDA_TEST_ANCHOR:-}" ]; then
   scan_script_arg "$@"
   echo "SCRIPT_ARG=$SCRIPT_ARG"
   anchor_args "$@"
@@ -81,7 +81,7 @@ fi
 # fall through to the direct launch so the pipe/file is honored rather than
 # `open --stdout "$TTY"` shoving output back at the terminal. Opt out with
 # BUDA_NO_APP=1.
-if [ "$(uname)" = "Darwin" ] && [ -z "$BUDA_NO_APP" ] \
+if [ "$(uname)" = "Darwin" ] && [ -z "${BUDA_NO_APP:-}" ] \
    && [ -t 0 ] && [ -t 1 ] && [ -t 2 ] \
    && open --help 2>&1 | grep -q -- '--stdout'; then
   # First non-option arg is the script; skip the reroute for --no-viz batch runs
@@ -113,7 +113,7 @@ if [ "$(uname)" = "Darwin" ] && [ -z "$BUDA_NO_APP" ] \
 #!/bin/bash
 cd $LAUNCH_CWD || { echo "buda: launch directory is gone" >&2; exit 1; }
 root=$LAUNCH_ROOT
-export PYTHONPATH="\$root/build:\$root/tools:\$PYTHONPATH"
+export PYTHONPATH="\$root/build:\$root/tools\${PYTHONPATH:+:\$PYTHONPATH}"
 exec /usr/bin/env python3 "\$root/src/buda_cli.py" "\$@"
 LAUNCH
     chmod +x "$CELL_APP/Contents/MacOS/$CELL"
@@ -150,7 +150,7 @@ PLIST
 fi
 
 # Add build and tools directories to PYTHONPATH
-export PYTHONPATH="$BUILD_DIR:$PROJECT_ROOT/tools:$PYTHONPATH"
+export PYTHONPATH="$BUILD_DIR:$PROJECT_ROOT/tools${PYTHONPATH:+:$PYTHONPATH}"
 
 # Run the buda_cli.py script, passing all arguments
 python3 "$PROJECT_ROOT/src/buda_cli.py" "$@"

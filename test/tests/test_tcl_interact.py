@@ -39,6 +39,7 @@ _DRIVER = _ROOT / "tools" / "buda_interact.tcl"
 # platform actually runs: the -b/-r/-s forwarding is wrapper code, and the
 # .ps1 twin's copy was only hand-validated until these went through
 # wrapper_select (validated here under BUDA_WRAPPER_PS=1 with pwsh).
+from tcl_quote import tcl_path
 from wrapper_select import wrapper_command, wrapper_missing_reason
 _BTCL_CMD = wrapper_command(_ROOT, "btcl")
 
@@ -102,7 +103,11 @@ def _run(cmd, tmp_path, stdin="done\n"):
 
 
 def _tcl_lit(s):
-    """`s` as a Tcl literal — braced, none of the cases carrying braces."""
+    """`s` as a Tcl literal — braced, none of the cases carrying braces.
+
+    For the synthetic lines and roots the probes build; a real path of this
+    checkout goes through `tcl_path`, since on Windows it carries backslashes.
+    """
     assert "{" not in s and "}" not in s and "\\" not in s, s
     return "{" + s + "}"
 
@@ -466,7 +471,7 @@ def test_require_file_is_pruned_per_path_not_per_statement(tmp_path):
              "def_layer 4 M4 H TOP 30"]
     probe = tmp_path / "probe.tcl"
     probe.write_text(
-        "source " + _tcl_lit(str(_ROOT / "tools" / "buda.tcl")) + "\n"
+        "source " + tcl_path(_ROOT / "tools" / "buda.tcl") + "\n"
         + "\n".join(body) + "\n"
         + "set held [list " + " ".join(_tcl_lit(l) for l in held) + "]\n"
         + "set setup [list " + " ".join(_tcl_lit(l) for l in setup) + "]\n"
@@ -496,7 +501,7 @@ def test_require_file_is_pruned_per_path_not_per_statement(tmp_path):
 
     # nothing held (a FLAT resume) leaves every statement alone
     probe.write_text(
-        "source " + _tcl_lit(str(_ROOT / "tools" / "buda.tcl")) + "\n"
+        "source " + tcl_path(_ROOT / "tools" / "buda.tcl") + "\n"
         + "\n".join(body) + "\n"
         + "set setup [list " + " ".join(_tcl_lit(l) for l in setup) + "]\n"
         + "lassign [_prune_requires $setup {}] out notes\n"
@@ -543,7 +548,7 @@ def test_a_differently_spelled_required_path_is_rooted_not_guessed(tmp_path):
              "def_layer 4 M4 H TOP 30"]
 
     def probe(root, with_origins=True):
-        lines = ["source " + _tcl_lit(str(_ROOT / "tools" / "buda.tcl"))]
+        lines = ["source " + tcl_path(_ROOT / "tools" / "buda.tcl")]
         lines += body
         lines.append("set ::origin_of [dict create]")
         if with_origins:
@@ -609,7 +614,7 @@ def test_pruning_agrees_with_the_engine_and_keeps_the_sourced_root(tmp_path):
     setup = ["require_file a.def HINT",           # (a): HINT is a PATH
              "require_file a.def b.lef hint see fetch.py",   # (b): mixed
              "import_lef_tech b.lef"]
-    lines = ["source " + _tcl_lit(str(_ROOT / "tools" / "buda.tcl"))] + body
+    lines = ["source " + tcl_path(_ROOT / "tools" / "buda.tcl")] + body
     lines.append("set ::origin_of [dict create]")
     for l in held + setup:
         lines.append("dict set ::origin_of " + _tcl_lit(l) + " " + _tcl_lit(sub))

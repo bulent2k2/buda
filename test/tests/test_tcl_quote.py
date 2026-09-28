@@ -82,7 +82,12 @@ def test_a_real_posix_path_with_a_backslash_in_it_still_opens(tmp_path):
     if os.sep == "\\":
         pytest.skip("a backslash is a separator here, so no such filename")
     d = tmp_path / "back\\slash"
-    d.mkdir()
+    try:
+        d.mkdir()
+    except FileNotFoundError:
+        # Cygwin: os.sep is "/", but its path layer still reads a backslash
+        # as a separator, so this asked for back/slash under no "back".
+        pytest.skip("a backslash is a separator here too, so no such filename")
     (d / "it.tcl").write_text('puts OPENED\n')
     r = subprocess.run(["tclsh"], input="source %s\n" % tcl_path(d / "it.tcl"),
                        capture_output=True, encoding="utf-8", timeout=60)

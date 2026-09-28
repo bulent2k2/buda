@@ -60,7 +60,7 @@
 PROJECT_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
 # The child buda_server.py self-bootstraps its own imports, but export the
 # layer too so a `package require`/helper in the flow resolves the same way.
-export PYTHONPATH="$PROJECT_ROOT/build:$PROJECT_ROOT/tools:$PYTHONPATH"
+export PYTHONPATH="$PROJECT_ROOT/build:$PROJECT_ROOT/tools${PYTHONPATH:+:$PYTHONPATH}"
 
 INTERACTIVE=0
 MODE_ARGS=()
@@ -140,7 +140,7 @@ fi
 # is refused rather than half-worked: it runs its own buda::start and can
 # source tools/buda_prompt.tcl itself (as flow/tcl/design.tcl does).
 if [ "$INTERACTIVE" = 1 ]; then
-  case "$1" in
+  case "${1:-}" in
     *.buda) exec tclsh "$PROJECT_ROOT/tools/buda_interact.tcl" ${MODE_ARGS[@]+"${MODE_ARGS[@]}"} "$@" ;;
     # The engine's own `source` suffix rule, at the launcher seam:
     # `btcl -r resume_flat` means resume_flat.buda when that file exists
@@ -149,7 +149,7 @@ if [ "$INTERACTIVE" = 1 ]; then
     # beside `foo.buda` sailed through and the driver ran `foo` — the
     # suffixless file — as the flow (Codex #805 P1); with it, that shape
     # keeps the refusal below and the user names the one they mean.
-    *)      if [ -n "$1" ] && [ ! -f "$1" ] && [ -f "$1.buda" ]; then
+    *)      if [ -n "${1:-}" ] && [ ! -f "$1" ] && [ -f "$1.buda" ]; then
               exec tclsh "$PROJECT_ROOT/tools/buda_interact.tcl" ${MODE_ARGS[@]+"${MODE_ARGS[@]}"} "$@"
             fi
             echo "btcl: -i/-b/-r take a .buda flow (a Tcl flow can source" \
@@ -166,7 +166,7 @@ fi
 # flow/big_data_test/bigHalf.buda) — a message about a file the user never
 # typed, from a command they did not know had run.  Neither names the actual
 # mistake, and both arrive after tclsh has already executed part of the flow.
-case "$1" in
+case "${1:-}" in
   *.buda)
     echo "btcl: '$1' is a BUDA flow -- this wrapper runs TCL scripts" >&2
     echo "btcl: to run a .buda flow:" >&2

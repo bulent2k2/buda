@@ -183,6 +183,12 @@ def test_mounts_makes_a_run_tree_outside_home_visible(tmp_path):
     assert bad == ["/x.def"] and args == ["-v", f"{home}:{home}"]
 
 
+# The renderer hands a Linux container POSIX paths.  A native Windows path
+# has no spelling there -- its drive colon is `-v`'s own separator -- and
+# the property below is stated over `/`-rooted arguments, which a Windows
+# run never produces (windows-validate run 39: an empty list).
+@pytest.mark.skipif(sys.platform == "win32",
+                    reason="mounts POSIX paths into a Linux container")
 def test_every_path_render_passes_is_inside_a_mount_even_through_a_symlink(tmp_path, monkeypatch):
     """The mount set and the arguments must be ONE spelling of each path.
 

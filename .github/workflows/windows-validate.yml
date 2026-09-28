@@ -22,6 +22,13 @@ on:
   # a green end-to-end pipeline; from here this is an on-demand re-validation
   # vehicle for docs/WINDOWS_REQ.md + docs/WINDOWS_BUILD.md, not a gate.
   workflow_dispatch:
+    inputs:
+      cygwin_probe:
+        description: >-
+          Run .github/scripts/cygwin_configure_probe.sh before the Cygwin
+          build (the configure-hang diagnostic; adds a few minutes)
+        type: boolean
+        default: false
 
 concurrency:
   group: windows-validate-${{ github.ref }}
@@ -33,7 +40,12 @@ jobs:
     # harness measures "does the doc work on VS 2022 / Windows Server 2022";
     # a silent label migration would change the question.
     runs-on: windows-2022
-    timeout-minutes: 60
+    # 90, like the two GCC jobs below: the runners vary by more than 2x.
+    # Run 40's msbuild runner ran 87% of the tier in 55:47 while ninja's ran
+    # all of it in 25:47 -- the process-spawning tests (wrappers, Tcl front
+    # end, flows) were the slow ones -- and a 60-minute cap cancelled a run
+    # that had failed nothing.
+    timeout-minutes: 90
 
     env:
       MPLBACKEND: Agg
@@ -140,7 +152,7 @@ jobs:
 
   msbuild:
     runs-on: windows-2022
-    timeout-minutes: 60
+    timeout-minutes: 90          # see the ninja job: a slow runner, not a hang
 
     env:
       MPLBACKEND: Agg
@@ -209,7 +221,7 @@ jobs:
     #
     # EXPERIMENTAL until measured green; known open questions this job is
     # designed to ANSWER rather than assume:
-    #   * which Python Cygwin ships today (3.9 may be too old for the suite);
+    #   * which Python Cygwin ships today (3.12 since run 39; 3.9 before);
     #   * whether numpy/matplotlib exist as Cygwin packages (there are NO pip
     #     wheels for Cygwin — native deps come from setup.exe or not at all);
     #   * whether the web deps are installable (pydantic-core needs Rust:
@@ -223,6 +235,10 @@ jobs:
       # Cygwin bash reads CRLF scripts poorly; belt (autocrlf below) AND
       # suspenders: igncr makes bash ignore stray \r in anything it sources.
       SHELLOPTS: igncr
+      # Not measured yet for Cygwin's 3.12: if it marks its site-packages
+      # externally managed (PEP 668), pip refuses even a --user install.
+      # pip ignores this where nothing is marked.
+      PIP_BREAK_SYSTEM_PACKAGES: '1'
 
     steps:
       - name: Force LF checkout
@@ -238,13 +254,36 @@ jobs:
         # is a CANDIDATE set: the diagnose step below records what actually
         # materialized (this container's proxy cannot reach the Cygwin package
         # inventory, so the runner doubles as the inventory probe).
+        #
+        # The python packages must be the SAME minor as `python3`.  Cygwin
+        # moved `python3` from 3.9 to 3.12 after run 38, and this list still
+        # asked for the python39 stack, so 3.12 had no pip, numpy, matplotlib
+        # or tkinter and the job stopped at its first pip step (run 39: the
+        # diagnose step listed python3 3.12.12 beside python39-pip).  Run 40,
+        # with this list: numpy 2.5.2, tkinter and pip 26.2.1 came up for
+        # 3.12, and python312-matplotlib did not (cygcheck does not list it;
+        # `import matplotlib` fails), so the tier's matplotlib-importing
+        # modules will fail to collect, as they did against 3.9's skewed one.
+        # It stays in the list for the day it resolves.
         shell: pwsh
         run: |
           Invoke-WebRequest -Uri https://cygwin.com/setup-x86_64.exe -OutFile setup-x86_64.exe
           .\setup-x86_64.exe -q -O -s https://mirrors.kernel.org/sourceware/cygwin/ `
             -R C:\cygwin64 -l C:\cygpkgs `
-            -P gcc-g++,make,cmake,ninja,git,python3,python3-devel,python39-devel,python39-pip,python39-numpy,python39-tkinter,python39-matplotlib | Out-Null
+            -P gcc-g++,make,cmake,ninja,git,python3,python3-devel,python312-devel,python312-pip,python312-numpy,python312-tkinter,python312-matplotlib | Out-Null
           C:\cygwin64\bin\bash.exe -lc 'uname -a'
+
+      - name: Trust the checkout for Cygwin's git
+        # actions/checkout marks the tree safe in Git for Windows's config
+        # only.  Cygwin's git reads its own, and it does not take the Cygwin
+        # user for the checkout's owner, so every git call in the tree failed
+        # with "detected dubious ownership" (run 46: test_doc_links' `git
+        # ls-files` and test_qor_baseline_worktree's `git rev-parse`, 6
+        # tests).  '*' because that test's baseline worktree is outside the
+        # checkout.  The rev-parse fails this step if the trust did not take.
+        shell: cmd
+        run: |
+          C:\cygwin64\bin\bash.exe -lc "cd $(cygpath '%CD%') && git config --global --add safe.directory '*' && stat -c 'checkout owner %%U:%%G' . && echo \"cygwin user $(id -un)\" && git rev-parse --short HEAD"
 
       - name: Diagnose the Cygwin environment
         # The inventory step: which python, which native deps resolved, what
@@ -270,6 +309,32 @@ jobs:
         run: |
           C:\cygwin64\bin\bash.exe -leo pipefail -c "cd $(cygpath '%CD%') && python3 -m pip install --user -r src/web/requirements.txt && echo WEB DEPS OK || echo 'WEB DEPS UNAVAILABLE (expected: pydantic-core needs Rust; no Cygwin wheels)'"
 
+      - name: Probe the configure (diagnostic, on request)
+        # Opt-in (`cygwin_probe`).  Runs 40 and 41 hung in the build step's
+        # configure, silently, right after the JCC-erratum status line, and a
+        # `timeout 600` around a traced configure did not end it either.  The
+        # probe relies on no signal: each configure runs in the background
+        # with its output in a file, and once that output stops growing the
+        # probe lists the processes and kills them by force.  It runs a trial
+        # matrix on the kind of call that hung and then the real configure;
+        # what it found is in the script's header.
+        # continue-on-error: its job is to REPORT.
+        if: inputs.cygwin_probe
+        shell: cmd
+        continue-on-error: true
+        timeout-minutes: 30
+        run: |
+          C:\cygwin64\bin\bash.exe -lc "cd $(cygpath '%CD%') && bash .github/scripts/cygwin_configure_probe.sh | tee probe-report.txt"
+
+      - name: The probe's files, if it was cut off
+        # The probe prints everything itself; this is for a probe the step
+        # cap stopped before it finished (no DONE marker).
+        if: always() && inputs.cygwin_probe
+        shell: cmd
+        continue-on-error: true
+        run: |
+          C:\cygwin64\bin\bash.exe -lc "cd $(cygpath '%CD%') && if test ! -f cyg-probe/DONE; then for f in cyg-probe/*.out; do test -f $f && echo == $f && tail -n 50 $f; done; fi; true"
+
       - name: Build with the repo's own wrapper (bin/bb)
         # THE point of this path: the documented-for-Linux command, verbatim —
         # except BUDA_ARCH, pinned like the Linux CI (x86-64-v2, ci.md):
@@ -279,7 +344,18 @@ jobs:
         # clean — thread-count-independent, run-to-run varying.  The next
         # suspect is -march=native codegen from Cygwin's gcc 14 on modern
         # runner CPUs; pinning the ISA is the discriminating experiment.
+        #
+        # Runs 40-45 hung in the configure, at its pybind11 lookup: CMake
+        # 4.4.3 under Cygwin 3.6.10 lost a child it had started by NAME
+        # (found through PATH) in 18 of 29 tries, and every later child in
+        # that configure with it, while by absolute path it lost none.
+        # CMakeLists.txt now looks python3 up itself and runs it by absolute
+        # path.  (Run 43 looked as if the step's stdin caused it, and a
+        # `< /dev/null` here was the first answer; run 44 refuted that.)
+        # Capped: it builds in 6-8 minutes, and run 40's hang took the whole
+        # job's 90.
         shell: cmd
+        timeout-minutes: 30
         run: |
           C:\cygwin64\bin\bash.exe -leo pipefail -c "cd $(cygpath '%CD%') && BUDA_ARCH=x86-64-v2 ./bin/bb"
 
@@ -338,6 +414,16 @@ jobs:
         shell: cmd
         run: |
           C:\cygwin64\bin\bash.exe -leo pipefail -c "cd $(cygpath '%CD%') && PATH=$PWD/build:$PATH PYTHONPATH=build:src:tools python3 src/buda_cli.py --no-viz flow/four_blocks.buda"
+
+      - name: The probe's verdicts, again
+        # The job log is read from its tail, and the tier fills it, so the
+        # probe's verdict lines (each configure's exit status and time, or
+        # the hang) are repeated here.
+        if: always() && inputs.cygwin_probe
+        shell: cmd
+        continue-on-error: true
+        run: |
+          C:\cygwin64\bin\bash.exe -lc "cd $(cygpath '%CD%') && grep -E '^(===|cmake:|python3:|cygwin:)' probe-report.txt; true"
 
   mingw:
     # Fourth path: mingw-w64 — GCC producing NATIVE Windows binaries, driven

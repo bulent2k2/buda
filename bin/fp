@@ -7,7 +7,7 @@ PROJECT_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
 BUILD_DIR="$PROJECT_ROOT/build"
 
 # Handle help before importing the GUI (which needs tkinter / a display).
-if [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
+if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
   cat <<'EOF'
 Usage: fp [file.bdb]
 
@@ -32,10 +32,10 @@ fi
 # (like bin/buda builds its per-cell bundle on the fly) — no manual step per
 # clone. If the build fails, fall through to the direct in-terminal launch.
 APP="$PROJECT_ROOT/bin/Floorplanner.app"
-if [ "$(uname)" = "Darwin" ] && [ -z "$BUDA_NO_APP" ]; then
+if [ "$(uname)" = "Darwin" ] && [ -z "${BUDA_NO_APP:-}" ]; then
   [ -d "$APP" ] || python3 "$PROJECT_ROOT/tools/make_macos_apps.py" >/dev/null 2>&1
 fi
-if [ "$(uname)" = "Darwin" ] && [ -z "$BUDA_NO_APP" ] && [ -d "$APP" ]; then
+if [ "$(uname)" = "Darwin" ] && [ -z "${BUDA_NO_APP:-}" ] && [ -d "$APP" ]; then
   # `open` launches from a different cwd, so anchor every relative path arg to
   # THIS cwd; absolute paths and options pass through.
   ARGS=()
@@ -54,7 +54,7 @@ if [ "$(uname)" = "Darwin" ] && [ -z "$BUDA_NO_APP" ] && [ -d "$APP" ]; then
 fi
 
 # Add build and tools directories to PYTHONPATH
-export PYTHONPATH="$BUILD_DIR:$PROJECT_ROOT/tools:$PYTHONPATH"
+export PYTHONPATH="$BUILD_DIR:$PROJECT_ROOT/tools${PYTHONPATH:+:$PYTHONPATH}"
 
 # Run the floorplanner prototype, passing all arguments
 python3 "$PROJECT_ROOT/tools/bdb_floorplanner.py" "$@"

@@ -31,6 +31,8 @@ from pathlib import Path
 
 import pytest
 
+from tcl_quote import tcl_path
+
 _ROOT = Path(__file__).resolve().parents[2]
 _VEHICLE = _ROOT / "flow" / "tcl" / "tpu.tcl"
 
@@ -154,7 +156,9 @@ def _row_gap_for_align(tmp_path):
     than restated here — a second copy of the arithmetic would drift."""
     r = subprocess.run(
         ["tclsh", "-c"], capture_output=True, encoding="utf-8", input="")
-    script = (f'source [file join {_ROOT} flow tcl tpu_lib.tcl]\n'
+    # Quoted: a bare Windows path loses its separators to Tcl's backslash
+    # substitution.
+    script = (f'source {tcl_path(_ROOT / "flow" / "tcl" / "tpu_lib.tcl")}\n'
               'tpu_vehicle::configure {N 4 ALIGN 1}\n'
               'puts [tpu_vehicle::get ROWGAP]\n')
     p = tmp_path / "gap.tcl"

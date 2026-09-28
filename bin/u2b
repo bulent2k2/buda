@@ -22,7 +22,7 @@ PROJECT_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
 # Handle help before treating the first arg as a test name (otherwise `-h` would
 # be forwarded to unit2buda.py and the wrapper would then try to route a
 # nonexistent /tmp/u2b_-h.buda).
-if [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
+if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
     cat <<'EOF'
 Usage: u2b <test_name> [unit2buda opts]
 
@@ -46,7 +46,7 @@ EOF
     exit 0
 fi
 
-if [ -z "$1" ]; then
+if [ -z "${1:-}" ]; then
     echo "Usage: u2b <test_name> [unit2buda opts]   (e.g. u2b test_column_datapath_hvh --case 2)" >&2
     exit 1
 fi

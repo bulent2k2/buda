@@ -569,10 +569,14 @@ def run_arm(flow, text, tag, iso=None):
     report_path = Path(rpath)     # kept, empty: the CLI overwrites it
     log_path = variant.parent / "log" / f"{variant.stem}_flow.log"
     try:
+        # This checkout's directories go FIRST, and the inherited value is
+        # kept after them: under the Visual Studio generator the module is
+        # in build\Release, which only the caller's PYTHONPATH names.
+        inherited = os.environ.get("PYTHONPATH", "")
         env = {**os.environ,
                "PYTHONPATH": os.pathsep.join(
                    [str(ROOT / "build"), str(ROOT / "src"),
-                    str(ROOT / "tools")])}
+                    str(ROOT / "tools")] + ([inherited] if inherited else []))}
         for k in ("BUDA_BDB_MEMORY_TO", "BUDA_BDB_MATERIALIZE_TO"):
             # A redirect left in the caller's shell names ONE file, which
             # the second arm would find already written.
