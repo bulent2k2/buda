@@ -359,10 +359,10 @@ workflow does via its job `env:`.)
 
 An exported `SHELLOPTS` carries more than `igncr`: bash keeps it current, so
 a calling script's `set -euo pipefail` reaches every bash script it starts.
-So the `bin/` wrappers read every optional variable through a default
-(`${PYTHONPATH:+:$PYTHONPATH}`, `${BUDA_TEST_ANCHOR:-}`): in validation run
-46, `bin/btcl` read an unset `PYTHONPATH` under a tier script's inherited
-`set -u` and failed nine tests.
+So the `bin/` wrappers read every optional variable and argument through a
+default (`${PYTHONPATH:+:$PYTHONPATH}`, `${BUDA_TEST_ANCHOR:-}`, `${1:-}`):
+in validation run 46, `bin/btcl` read an unset `PYTHONPATH` under a tier
+script's inherited `set -u` and failed nine tests.
 
 Cygwin's git may not take you for the owner of a checkout that another git
 made (Git for Windows, `actions/checkout`), and then refuses every command in

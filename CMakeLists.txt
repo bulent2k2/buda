@@ -211,10 +211,21 @@ endif()
 # which fails as softly as before (docs/WINDOWS_BUILD.md: pass -Dpybind11_DIR
 # then).  Searched afresh at every configure, as the name was, so a PATH that
 # has changed since (another venv) is followed rather than a cached answer.
+# And only a file the child could RUN: under the 3.15 minimum CMP0109 is
+# unset, so find_program takes the first READABLE python3 where execvp skips
+# one that is not executable (a stray `chmod 644` copy ahead of the real
+# interpreter was picked, and the call failed with "Permission denied").
+# Scoped to this lookup; CMake before 3.19 has no CMP0109 and keeps the old
+# rule.
 unset(BUDA_PYTHON3 CACHE)
+cmake_policy(PUSH)
+if(POLICY CMP0109)
+    cmake_policy(SET CMP0109 NEW)
+endif()
 find_program(BUDA_PYTHON3 python3
     NO_PACKAGE_ROOT_PATH NO_CMAKE_PATH NO_CMAKE_ENVIRONMENT_PATH
     NO_CMAKE_SYSTEM_PATH)
+cmake_policy(POP)
 if(BUDA_PYTHON3)
     execute_process(
         COMMAND "${BUDA_PYTHON3}" -c

@@ -7,7 +7,7 @@ PROJECT_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
 BUILD_DIR="$PROJECT_ROOT/build"
 
 # Handle help before importing the GUI (which needs tkinter / a display).
-if [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
+if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
   cat <<'EOF'
 Usage: viz [file.def [file.lef]] [--ipc <name>]
        viz [file.bdb] [--ipc <name>]
