@@ -30,7 +30,7 @@ MinGW build ≈ 2m, Cygwin `bin/bb` ≈ 9m; fast tier ≈ 46–75s per path on a
 | **1. MSVC + Ninja** | The reference path: simplest layout (everything in `build\`), fastest edit-build cycle (~2m full build, incremental via Ninja), `pytest` needs no PYTHONPATH, native CPython so **all** wheels work (incl. web deps), stable toolchain (VS releases, not rolling) | Needs a VS developer shell (`vcvars64`); MSVC-only quirks (`WINDOWS_EXPORT_ALL_SYMBOLS`, `/UNDEBUG` warning spam); `BUDA_SANITIZE` hard-errors by design |
 | **2. MSVC + VS generator** | Same toolchain as #1 but **no developer shell needed** (CMake finds MSVC itself); produces a `.sln` — full Visual Studio IDE debugging/profiling | Multi-config `build\Release` layout means PYTHONPATH for *everything*, tests included — this layout produced all three measured subprocess-PYTHONPATH traps (§8); slowest configure (~61s vs ~7s) |
 | **3. MinGW-w64 (MSYS2 UCRT64)** | GCC branch of the build (`-O3 -march=native`, `-ffp-contract=off`) with **native CPython** — all wheels work; artifacts are **self-contained** (objdump-verified: no MSYS2 DLL deps), so they run from any shell; bash-driven workflow closest to Linux muscle memory with native-speed binaries | Two-part setup (MSYS2 + native Python) with the pacman update ritual; **rolling release** — gcc jumped 14→16 between two validation runs; CRT discipline required (UCRT64 flavor only); GDB-style debugging, no VS IDE |
-| **4. Cygwin64** | The Linux instructions *verbatim*: `bin/bb` just works, real `fcntl` (the **only** lane where the floorplanner's inter-process lock actually locks), real POSIX paths/tools; runs the fast tier | **`BUDA_ARCH=x86-64-v2` is required** (`-march=native` codegen segfaults — measured, §6); Python is 3.12 (below the 3.13 floor); **no pip wheels exist** — no installable matplotlib (`python312-matplotlib` does not install), web deps unbuildable (28 tests permanently skipped); slowest builds (6.5–9m); CRLF guards needed; `build` must be on `PATH` for dlopen |
+| **4. Cygwin64** | The Linux instructions *verbatim*: `bin/bb` just works, real `fcntl` (the **only** lane where the floorplanner's inter-process lock actually locks), real POSIX paths/tools; runs the fast tier | **`BUDA_ARCH=x86-64-v2` is required** (`-march=native` codegen segfaults — measured, §6); Python is 3.12 (within `requires-python >=3.11`, though not the validated native 3.13); **no pip wheels exist** — no installable matplotlib (`python312-matplotlib` does not install), web deps unbuildable (28 tests permanently skipped); slowest builds (6.5–9m); CRLF guards needed; `build` must be on `PATH` for dlopen |
 
 ### Decision criteria
 
@@ -307,8 +307,8 @@ Known, measured limitations:
   `.github/scripts/cygwin_configure_probe.sh`, run by dispatching the
   workflow with `cygwin_probe` on.
 - **Python was 3.9.16** — then the newest Cygwin shipped, past upstream EOL
-  and below the project's 3.13 floor. The tree parses under 3.9 (measured: full
-  `ast` sweep), and the one measured *runtime* incompatibility — PEP 604
+  and below the project's `requires-python >=3.11` floor. The tree parses
+  under 3.9 (measured: full `ast` sweep), and the one measured *runtime* incompatibility — PEP 604
   `X | Y` unions in evaluated annotations, which raise `TypeError` at import
   on 3.9 (run 18) — is fixed with `from __future__ import annotations` in
   every module a repo-wide AST scan finds (four: `buda_session/nutsflow.py`,
