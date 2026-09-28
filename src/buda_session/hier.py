@@ -2018,12 +2018,15 @@ class HierMixin:
         # meta; session-typed by-depth entries survive a BDB switch like any
         # other typed entry, restored ones do not (they left `pol` above).
         if not getattr(self, "_leaf_blockage_typed", False):
+            # A BDB with no (or no valid) setting reads `low`, the default:
+            # the mode belongs to the design like the bands it reinterprets,
+            # so a mode restored from one checkpoint must not carry over to
+            # the next one opened (Codex P1 on #970).
             lb = self.bdb.meta_get("leaf_blockage", "")
-            if lb in ("low", "policy"):
-                self._leaf_blockage = lb
-                if lb == "policy":
-                    print("[LeafBlock] restored: leaf footprints block the "
-                          "LOW layers inside their cell layer band")
+            self._leaf_blockage = lb if lb in ("low", "policy") else "low"
+            if lb == "policy":
+                print("[LeafBlock] restored: leaf footprints block the "
+                      "LOW layers inside their cell layer band")
         bd = getattr(self, "_cell_layer_policy_by_depth", None) or set()
         bd -= dropped
         memo = self.bdb.meta_get("layer_caps_by_depth", "")

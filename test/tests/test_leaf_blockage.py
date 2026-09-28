@@ -21,6 +21,7 @@ interconnect BUDA routes, so its band is exactly the statement of which
 layers its own wiring uses.  The planner, abstract and detailed NUTS,
 `check_design` and the judge all read the same per-leaf fact.
 """
+import json
 import os
 import re
 import shutil
@@ -169,7 +170,15 @@ def test_the_judge_reads_the_leaf_policy(soc_leafcap, tmp_path):
     assert code == 0, jout
     assert re.search(r"\d+ leaf component\(s\) block only the LOW layers",
                      jout), jout
-    for value, want in (("", 1), ('[{"name": "x"}]', 2)):
+    con = sqlite3.connect(ck)
+    stored = con.execute("SELECT value FROM meta WHERE"
+                         " key='leaf_blocked_layers'").fetchone()[0]
+    con.close()
+    leaf = json.loads(stored)[0]["name"]
+    # An id the stored stack does not declare opens every LOW layer of that
+    # leaf if read literally; it is refused instead (Codex P1 on #970).
+    unknown = json.dumps([{"name": leaf, "layers": [999]}])
+    for value, want in (("", 1), ('[{"name": "x"}]', 2), (unknown, 2)):
         bad = str(tmp_path / f"t{want}.bdb")
         shutil.copy(ck, bad)
         con = sqlite3.connect(bad)
@@ -183,3 +192,22 @@ def test_the_judge_reads_the_leaf_policy(soc_leafcap, tmp_path):
             assert "KEEPOUT" in jout and "lies over the leaf cell" in jout, jout
         else:
             assert "leaf blockage" in jout, jout
+
+
+def test_a_restored_mode_does_not_outlive_its_bdb(tmp_path):
+    """Opening a checkpoint that stored `policy` and then one that stores
+    nothing returns the session to `low`: the mode is a fact about the
+    design it was read from (Codex P1 on #970)."""
+    sys.path.insert(0, str(_ROOT / "tools"))
+    import buda_cli  # noqa: E402
+    a, b = str(tmp_path / "a.bdb"), str(tmp_path / "b.bdb")
+    db = buda.BDB(a)
+    db.meta_set("leaf_blockage", "policy")
+    del db
+    buda.BDB(b)
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    s.do_command(f"open_bdb {a}")
+    assert s._leaf_blockage == "policy"
+    s.do_command(f"open_bdb {b}")
+    assert s._leaf_blockage == "low"

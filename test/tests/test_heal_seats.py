@@ -107,3 +107,28 @@ def test_soc_abstract_heals_its_seats():
     assert "NUTS overlaps + seat faults" in after, after[-3000:]
     assert re.search(r"^soc.tcl: clean \(abstract\) -- 0 overlaps, 0 audit "
                      r"violations, 0 seat faults", after, re.M), after[-2000:]
+
+
+@pytest.mark.parametrize("healseats,seats,want", [
+    (0, 0, 0), (0, 16, 0), (1, 0, 0), (1, 16, 1)])
+def test_abstract_verdict_counts_seats_under_healseats(tmp_path, healseats,
+                                                       seats, want):
+    """A supply-doomed seat is only an advisory to the audit, so it can end
+    the abstract stage with zero overlaps and zero violations.  Under
+    `-healseats` the healers were told to clear it, so the verdict must
+    fail on it rather than print `clean` (Codex P1 on #970)."""
+    probe = tmp_path / "v.tcl"
+    probe.write_text(
+        "namespace eval buda {}\n"
+        "proc buda::stop args {}\n"
+        "proc buda::query {what} {\n"
+        "    switch $what { unplaced { return -1 } seats { return %d }"
+        " default { return 0 } }\n"
+        "}\n"
+        "source [file join {%s} flow tcl soc_lib.tcl]\n"
+        "set soc_vehicle::HEALSEATS %d\n"
+        "soc_vehicle::verdict soc.tcl\n" % (seats, _ROOT, healseats))
+    r = subprocess.run(["tclsh", str(probe)], capture_output=True,
+                       encoding="utf-8", cwd=tmp_path, timeout=60)
+    assert r.returncode == want, r.stdout + r.stderr
+    assert ("FAILED (abstract)" in r.stderr) == bool(want), r.stdout + r.stderr

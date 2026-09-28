@@ -779,12 +779,15 @@ abstract and full columns of the first two are the sweeps above):
 |---|---|---|---|---|---|
 | baseline | 0 | 3.9 / 879 | 22 | 155 / 8,173 | 22 of 44 |
 | `-leafcap size` | 5 | 3.0 / 141 | 38 | 10.5 / 1,340 | 12 of 45 |
-| `-healseats` | 22 | 192 / 7,626 | 24 | 262 / 12,687 | 25 of 39 |
+| `-healseats` | 17 | 192 / 7,626 | 24 | 262 / 12,687 | 30 of 39 |
 | both | 42 | 6.0 / 1,121 | 41 | 7.7 / 1,766 | **41 of 44** |
 
 ("Agree" = the abstract verdict equals the full one, cut-off runs left
 out; the abstract verdict counts the keepout half of the seats through the
-audit, and the doomed half is printed beside it.)
+audit, and under `-healseats` the doomed half too -- the first cut of this
+table read the verdict line, which let five `-healseats` runs ending on
+15-16 doomed seats read clean (22 of 45, agreeing on 25 of 39); the verdict
+now fails them (Codex P1 on #970), and the combined arm had none.)
 
 * **Seats alone cost the screen its speed.**  With every leaf blocking all
   three LOW layers the seats are many and hard to clear: 15 of 45 abstract

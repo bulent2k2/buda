@@ -701,6 +701,17 @@ def read_leaf_keepouts(con, layers):
                             "(meta 'leaf_blocked_layers')",
                     lambda d: (str(d["name"]),
                                {int(l) for l in d["layers"]})):
+                # An id the stored stack does not know opens nothing and
+                # closes nothing -- a row naming one is not a statement
+                # about this design, so it is refused rather than read as
+                # "blocks no LOW layer" (Codex P1 on #970).
+                unknown = sorted(l for l in lids if l not in layers)
+                if unknown:
+                    raise Unjudgeable(
+                        f"the stored leaf blockage (meta "
+                        f"'leaf_blocked_layers') names layer id(s) "
+                        f"{unknown} for {name!r}, which the stored layer "
+                        f"stack does not declare")
                 blocked[name] = lids
     multirect = set()
     if _table_exists(con, "cell_rect"):

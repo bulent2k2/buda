@@ -1864,7 +1864,11 @@ proc soc_vehicle::verdict {who} {
         # there is nothing to be unplaced -- say so rather than print -1.
         # The seat faults (keepout + supply-doomed seats) are reported
         # beside the verdict; the keepout half is already in the audit.
-        if {$ov != 0 || $vi != 0} {
+        # Under `-healseats` the doomed half is dirt too: the healers were
+        # told to clear it, and a doomed seat is only an advisory to the
+        # audit, so it can leave both counts at zero (Codex P1 on #970).
+        variable HEALSEATS
+        if {$ov != 0 || $vi != 0 || ($HEALSEATS && $se > 0)} {
             puts stderr "$who: FAILED (abstract) -- $ov overlaps, $vi audit violations, $se seat faults"
             exit 1
         }
