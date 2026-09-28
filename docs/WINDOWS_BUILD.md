@@ -426,12 +426,19 @@ tests) do **not** skip: on native Windows `test/tests/wrapper_select.py`
 runs the PowerShell twin (`bin/<name>.ps1`) instead of the bash original.
 If you see *many* failures instead, check `PYTHONUTF8` first (section 2).
 
-Cygwin (run 49) runs the same tier to completion but does not pass it: the
-matplotlib-importing modules fail to collect (`ModuleNotFoundError: No
-module named 'matplotlib'`, e.g. `test_bdb_user_ops`), and further tests
-fail (at least 18 in the last few percent of the progress output alone).
-The step is `continue-on-error` in the workflow, so the lane stays green;
-its summary line was not recorded.
+Cygwin runs the same tier to completion but does not pass it; the step is
+`continue-on-error` in the workflow, so the lane stays green. Run 48 (on
+PR #969's head `0a513a0`) counted **4171 passed, 45 failed, 48 skipped, 38
+errors** in 34m, and every failure and error comes from a package Cygwin
+cannot provide:
+
+- **matplotlib** (37 failed, 38 errors): the errors are modules that fail
+  to collect (`ModuleNotFoundError: No module named 'matplotlib'`, e.g.
+  `test_bdb_user_ops`);
+- **fastapi** (8 failed): the web deps do not build under Cygwin (§6).
+
+Run 49 on `main` showed the same kind of damage (matplotlib collection
+errors, failures in the tier's tail); its summary line was not recorded.
 
 ## 8. Troubleshooting
 
