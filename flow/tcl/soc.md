@@ -765,6 +765,52 @@ specificity, since the full flow heals most of them.
 Regenerate: `btcl flow/tcl/soc.tcl 8 -LAYOUT compact <knobs> -leafcap size`
 (add `-abstract` for the screen).
 
+### Seats in the stage-a score (2026-09-28)
+
+`set_heal_seats on` (`soc.tcl -healseats`) counts every bus segment seated
+on a keepout and every supply-doomed seat as one more overlap in the
+stage-a healer score, gives the healers the moves to match (seated bundles
+as contenders, negotiate charging the seat's window, a measured layer move
+first) and, in the full flow, heals at the abstract stage before DNUTS.
+The same 45 configurations, four arms, abstract and full each (the
+abstract and full columns of the first two are the sweeps above):
+
+| arm | abstract clean | abstract s (median / sum) | full clean | full s (median / sum) | verdicts agree |
+|---|---|---|---|---|---|
+| baseline | 0 | 3.9 / 879 | 22 | 155 / 8,173 | 22 of 44 |
+| `-leafcap size` | 5 | 3.0 / 141 | 38 | 10.5 / 1,340 | 12 of 45 |
+| `-healseats` | 22 | 192 / 7,626 | 24 | 262 / 12,687 | 25 of 39 |
+| both | 42 | 6.0 / 1,121 | 41 | 7.7 / 1,766 | **41 of 44** |
+
+("Agree" = the abstract verdict equals the full one, cut-off runs left
+out; the abstract verdict counts the keepout half of the seats through the
+audit, and the doomed half is printed beside it.)
+
+* **Seats alone cost the screen its speed.**  With every leaf blocking all
+  three LOW layers the seats are many and hard to clear: 15 of 45 abstract
+  runs hit the 300 s limit, the median is 192 s against 3.9 s, and the full
+  flow gains two clean configurations for 55 % more time.  The stage-a
+  trials run sequentially under the knob (the parallel sweep scores
+  overlaps alone), which is part of that.
+* **Both together is the combination.**  The abstract verdict predicts the
+  full one on 41 of 44 configurations: two abstract-clean runs end dirty
+  (grid PAD 4 GAP 16, 4 unplaced bits; grid PAD 4 GAP 8, 10) and one
+  abstract-dirty run (slice PAD 10 GAP 16 CGAP 4, one seat left) routes
+  clean.  The full flow reaches 41 clean against the leaf policy's 38
+  (grid PAD 12 GAP 4, grid PAD 6 GAP 4, grid PAD 0 GAP 8 and slice PAD 10
+  GAP 16 CGAP 4 gained, grid PAD 4 GAP 16 lost) at the same wire (median -0.1 %, -9 % to +11 %
+  on the 37 clean both ways; -7.0 % against the baseline on its 22), and
+  the smallest clean die is unchanged at 12.83 Mu^2.
+* **The screen is no longer much faster than the flow it screens.**  With
+  the abstract stage healed clean, DNUTS inherits a placement it has little
+  to repair, so the full flow's median is 7.7 s against the abstract
+  stage's 6.0 s.  The abstract stage bought its 40x when the detailed
+  healers had the most to do; that is exactly what the two changes took
+  away.
+
+Regenerate: `btcl flow/tcl/soc.tcl 8 -LAYOUT compact <knobs> -healseats
+-leafcap size` (add `-abstract` for the screen).
+
 ## Every endpoint, every bit, every instance: the face rule read three ways
 
 The face rule — *a leaf's size is derived from the bits that land on its
