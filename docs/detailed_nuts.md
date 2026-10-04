@@ -213,6 +213,29 @@ Then two post-passes over the emitted bit-wires:
      abstract span. A partner that lands outside its footprint is not
      caught, which is what `cull` behind it is for.
 
+     The reach is **per bit** (2026-10): a bit's span-follow ends at ITS
+     partner's same-bit track, so each assignment stores a reach per track and
+     a later segment (a) reserves a track only when that track's bit reaches
+     its abstract span, then (b) after picking, tests each chosen bit's own
+     reach against every other bundle's per-track reach on the same track and
+     re-picks without the offenders (up to four rounds; a pool that runs dry
+     keeps the last pick, and `cull` removes what still shorts).  The earlier
+     envelope form reserved every track of a segment against any neighbour its
+     envelope met, which dropped whole 32-bit segments to avoid 2-3 shorted
+     bits.
+
+     **Measured, still not a default** (57-flow corpus, QoR triple; 4 sweeps on
+     one build): `reach` 7 better / 3 worse (`bigHalf` 0/0/0 -> 0/52/1,
+     `mix2_fast_bottomup_shared` 0/0/2 -> 4/60/7), `cull` 3 / 4, `reach,cull`
+     6 / 4; wirelength moves < 0.01 %.  On `soc.tcl 8 -LAYOUT compact -PAD 10
+     -GAP 4 -M 4 -noheal` the judge's 20 shorts become 0 only by dropping seven
+     whole M5 segments (envelope form) or ~18 bits (`cull`): the competing
+     bundle holds the tracks inside the follow range, so the stretched bit has
+     nowhere to go.  A **re-seat** lever (remove the culprit's track from its
+     pool and re-solve) was built and measured: it DIVERGES (20 -> 27 -> 45
+     shorts), because moving one track shifts the whole window onto tracks
+     the neighbours also reach; removed.
+
    **Measured (2026-09-27), neither is a default.** On the QoR corpus each
    lever removes 19–24 dirty bundles and strands 66–151 more bits (`cull`
    7 better / 5 worse, `reach` 6 / 7, `reach,cull` 7 / 7). `bigHalf` goes

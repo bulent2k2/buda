@@ -406,32 +406,12 @@ public:
     bool short_reach() const { return short_reach_; }
     bool short_cull() const { return short_cull_; }
 
-    // Third lever (reseat): RE-SEAT the stretched side of a short.  After the
-    // span-follow, each cross-bundle short's culprit wire (the one with more
-    // of the shared metal outside its own bus's reserved span) has its track
-    // removed from THAT segment's pool and the solve is re-run, up to a few
-    // rounds; a round is kept only when unplaced + shorts strictly drop, so
-    // it can never leave a design worse than the plain solve.  Exact where
-    // `reach` is a bound: only a short that actually happened costs a track.
-    // Seeded from the word "reseat" of BUDA_DNUTS_SHORT_GUARD.
-    void set_short_reseat(bool on) { short_reseat_ = on; }
-    bool short_reseat() const { return short_reseat_; }
-
 private:
     const RoutingGridStack& stack_;
     std::vector<NetSegment> fixed_bits_;
     bool pair_align_ = false;   // constructor seeds it from the env
     bool short_reach_ = false;  // constructor seeds both from the env
     bool short_cull_  = false;
-    bool short_reseat_ = false;
-
-    // Tracks a segment must not use: (bundle, seg, track_key).  Filled by the
-    // reseat loop from the shorts of the previous round.
-    using TrackAvoid = std::set<std::tuple<int, int, long long>>;
-    DetailedNUTSResult run_pass(const std::vector<BusSegment>& bus_segs,
-                                bool emit_vias, int abort_unplaced,
-                                const TrackAvoid* avoid,
-                                bool allow_cull) const;
 
     // The three stages of run(), in order (each mutates `result` in place):
     // per-layer bit placement in abstract_pos order (Option B), the per-bit
@@ -439,8 +419,7 @@ private:
     // and the per-bit via fan-out of the bundle-level symbolic bus-vias.
     void place_by_layer(const std::vector<BusSegment>& bus_segs,
                         DetailedNUTSResult& result,
-                        int abort_unplaced = -1,
-                        const TrackAvoid* avoid = nullptr) const;
+                        int abort_unplaced = -1) const;
     void adjust_bit_spans(const std::vector<BusSegment>& bus_segs,
                           DetailedNUTSResult& result) const;
     // Post-placement keepout cull (keepout-model audit): remove every bit
@@ -453,8 +432,7 @@ private:
     // stretched side of each.  Returns the number of bits removed (the
     // caller re-runs the span-follow when it is non-zero).
     int guard_cross_shorts(const std::vector<BusSegment>& bus_segs,
-                           DetailedNUTSResult& result,
-                           bool allow_cull = true) const;
+                           DetailedNUTSResult& result) const;
     void emit_bit_vias(const std::vector<BusSegment>& bus_segs,
                        DetailedNUTSResult& result) const;
 

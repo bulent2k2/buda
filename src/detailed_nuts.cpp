@@ -49,7 +49,6 @@ DetailedNUTSEngine::DetailedNUTSEngine(const RoutingGridStack& stack)
         auto take = [&]() {
             if (word == "reach")      short_reach_ = true;
             else if (word == "cull")  short_cull_  = true;
-            else if (word == "reseat") short_reseat_ = true;
             else if (!word.empty() && word != "off") {
                 // Atomic: the parallel trial sweep constructs engines on its
                 // worker threads, and a plain flag there is a data race
@@ -58,7 +57,7 @@ DetailedNUTSEngine::DetailedNUTSEngine(const RoutingGridStack& stack)
                 static std::atomic<bool> warned{false};
                 if (!warned.exchange(true)) {
                     std::cerr << "[DetailedNUTS] WARNING: BUDA_DNUTS_SHORT_GUARD"
-                              << " word '" << word << "' is not reach, cull, reseat or"
+                              << " word '" << word << "' is not reach, cull or"
                               << " off — ignored.\n";
                 }
             }
@@ -343,9 +342,9 @@ static void compute_pair_misalign(const std::vector<BusSegment>& bus_segs,
     result.pair_misalign_wl = total;
 }
 
-DetailedNUTSResult DetailedNUTSEngine::run_pass(
+DetailedNUTSResult DetailedNUTSEngine::run(
         const std::vector<BusSegment>& bus_segs, bool emit_vias,
-        int abort_unplaced, const TrackAvoid* avoid, bool allow_cull) const {
+        int abort_unplaced) const {
     // Per-pass profiling (RR round-3 Phase 0) — observation only.
     using pclock = std::chrono::steady_clock;
     DetailedNUTSResult result;
@@ -356,7 +355,7 @@ DetailedNUTSResult DetailedNUTSEngine::run_pass(
             std::chrono::duration<double>(t1 - t0).count();
         t0 = t1;
     };
-    place_by_layer(bus_segs, result, abort_unplaced, avoid);
+    place_by_layer(bus_segs, result, abort_unplaced);
     charge("place");
     if (result.aborted)
         return result;   // certain rejection: metric already decided (see .h)
@@ -418,7 +417,7 @@ DetailedNUTSResult DetailedNUTSEngine::run_pass(
     // stale-end rule retracts it only on a run that sees the partner gone.
     // That re-run can only shorten, so it cannot create a short.  Its own
     // bucket, charged inside the branch, like the keepout re-adjustment's.
-    const int short_culled = guard_cross_shorts(bus_segs, result, allow_cull);
+    const int short_culled = guard_cross_shorts(bus_segs, result);
     charge("short_guard");
     if (short_culled > 0) {
         adjust_bit_spans(bus_segs, result);
@@ -442,86 +441,6 @@ DetailedNUTSResult DetailedNUTSEngine::run_pass(
     }
     charge("vias");
     return result;
-}
-
-// The wire of a short the reseat lever moves: the one with more of the shared
-// metal outside its own bus's reserved span (what only the span-follow
-// added); equal -> the larger (bundle, seg, bit), as the cull picks.  A fixed
-// copy (not in the run's net_segments) or a shield is never chosen.
-static void reseat_culprits(const std::vector<BusSegment>& bus_segs,
-                            const DetailedNUTSResult& r,
-                            std::set<std::tuple<int, int, long long>>& avoid) {
-    std::map<std::tuple<int, int, int>, const NetSegment*> wire;
-    for (const auto& ns : r.net_segments)
-        if (!ns.is_shield) wire[{ns.bundle_id, ns.seg_idx, ns.bit_index}] = &ns;
-    std::map<std::pair<int, int>, const BusSegment*> seg_of;
-    for (const auto& bs : bus_segs) seg_of[{bs.bundle_id, bs.seg_idx}] = &bs;
-    for (const auto& s : r.cross_shorts) {
-        auto wa = wire.find({s.bundle_a, s.seg_a, s.bit_a});
-        auto wb = wire.find({s.bundle_b, s.seg_b, s.bit_b});
-        auto outside = [&](decltype(wa) w) -> double {
-            if (w == wire.end()) return -1.0;
-            auto it = seg_of.find({w->second->bundle_id, w->second->seg_idx});
-            if (it == seg_of.end()) return 0.0;
-            const double r_lo = std::min(it->second->span_lo, it->second->span_hi);
-            const double r_hi = std::max(it->second->span_lo, it->second->span_hi);
-            return std::max(0.0, std::min(s.s_hi, r_lo) - s.s_lo) +
-                   std::max(0.0, s.s_hi - std::max(s.s_lo, r_hi));
-        };
-        const double oa = outside(wa), ob = outside(wb);
-        const NetSegment* pick;
-        if (oa < 0 && ob < 0) continue;
-        else if (oa < 0) pick = wb->second;
-        else if (ob < 0) pick = wa->second;
-        else if (oa != ob) pick = (oa > ob) ? wa->second : wb->second;
-        else pick = (std::make_tuple(s.bundle_a, s.seg_a, s.bit_a) >
-                     std::make_tuple(s.bundle_b, s.seg_b, s.bit_b))
-                    ? wa->second : wb->second;
-        avoid.insert(std::make_tuple(pick->bundle_id, pick->seg_idx,
-                                     track_key(pick->track_position)));
-    }
-}
-
-DetailedNUTSResult DetailedNUTSEngine::run(
-        const std::vector<BusSegment>& bus_segs, bool emit_vias,
-        int abort_unplaced) const {
-    if (!short_reseat_)
-        return run_pass(bus_segs, emit_vias, abort_unplaced, nullptr, true);
-    // Reseat lever: solve without the cull so every short is visible, then
-    // re-seat the culprits' tracks and re-solve while unplaced + shorts
-    // strictly drop.  Whatever shorts survive the loop meet the cull (when
-    // it is on) in a final pass under the avoid set found.
-    auto cost = [](const DetailedNUTSResult& r) {
-        return r.num_unplaced + (int)r.cross_shorts.size();
-    };
-    DetailedNUTSResult best =
-        run_pass(bus_segs, emit_vias, abort_unplaced, nullptr, false);
-    TrackAvoid avoid, best_avoid;
-    // The search walks forward from the LAST round (a re-seat can move a
-    // short elsewhere before it removes it) but keeps the cheapest state seen.
-    DetailedNUTSResult cur;
-    bool have_cur = false;
-    constexpr int kRounds = 6;
-    for (int round = 0; round < kRounds && !best.aborted; ++round) {
-        const DetailedNUTSResult& from = have_cur ? cur : best;
-        if (from.cross_shorts.empty()) break;
-        const size_t before = avoid.size();
-        reseat_culprits(bus_segs, from, avoid);
-        if (avoid.size() == before) break;
-        DetailedNUTSResult t =
-            run_pass(bus_segs, emit_vias, abort_unplaced, &avoid, false);
-        if (std::getenv("BUDA_RESEAT_TRACE")) std::cerr << "[reseat] round " << round << " avoid " << avoid.size() << " cost " << cost(best) << " -> " << cost(t) << "\n";
-        if (t.aborted) break;
-        if (cost(t) < cost(best)) { best = t; best_avoid = avoid; }
-        // Stop once a round makes things clearly worse.
-        if (cost(t) > cost(best) + 8) break;
-        cur = std::move(t);
-        have_cur = true;
-    }
-    if (short_cull_ && !best.aborted && !best.cross_shorts.empty())
-        return run_pass(bus_segs, emit_vias, abort_unplaced,
-                        best_avoid.empty() ? nullptr : &best_avoid, true);
-    return best;
 }
 
 void DetailedNUTSEngine::cull_keepout_crossers(DetailedNUTSResult& result) const {
@@ -648,7 +567,7 @@ std::vector<CrossShort> cross_shorts_in(
 
 int DetailedNUTSEngine::guard_cross_shorts(
         const std::vector<BusSegment>& bus_segs,
-        DetailedNUTSResult& result, bool allow_cull) const {
+        DetailedNUTSResult& result) const {
     // This run's wires first, then the fixed bits it placed around (the
     // bottom-up reference bits and their copies).  A short against a copy is
     // this run's to see — the copy was reserved against, over its final span
@@ -685,7 +604,7 @@ int DetailedNUTSEngine::guard_cross_shorts(
 
     int culled = 0, kept = 0;
     std::vector<char> gone((size_t)n_run, 0);   // run wires the cull removes
-    if (short_cull_ && allow_cull) {
+    if (short_cull_) {
         // How much of the shared metal lies OUTSIDE the span the wire's own
         // bus reserved — the part only the span-follow added.  The culprit is
         // the wire with more of it: its reservation never covered the metal
@@ -746,11 +665,11 @@ int DetailedNUTSEngine::guard_cross_shorts(
     // (num_cross_shorts) and the console is what it was — the audit already
     // names every short at check_design, and a line from every trial solve
     // of a healer would bury it.
-    if ((short_cull_ && allow_cull) || short_reach_) {
+    if ((short_cull_) || short_reach_) {
         std::cout << "[DetailedNUTS] WARNING: " << result.num_cross_shorts
                   << " cross-bundle short(s) in the final bit spans — two "
                   << "bundles' wires share metal on one layer (issue #962)";
-        if (short_cull_ && allow_cull) {
+        if (short_cull_) {
             std::cout << "; " << culled << " bit(s) removed (counted unplaced)";
             if (kept > 0)
                 std::cout << ", " << kept << " kept (no side may be removed: "
@@ -763,8 +682,7 @@ int DetailedNUTSEngine::guard_cross_shorts(
 
 void DetailedNUTSEngine::place_by_layer(
         const std::vector<BusSegment>& bus_segs,
-        DetailedNUTSResult& result, int abort_unplaced,
-        const TrackAvoid* avoid) const {
+        DetailedNUTSResult& result, int abort_unplaced) const {
     // PROTOTYPE (opt-in, BUDA_DNUTS_PAIR_ALIGN): pairwise-overlap seating.
     // Two same-net stubs that straddle a trunk (u3/l3 in the seat repro)
     // align — share one x-track, one via — only when the FIRST-placed one's
@@ -1082,16 +1000,6 @@ void DetailedNUTSEngine::place_by_layer(
             // junction partner's per-bit track, so wires reach up to about
             // one bus extent past the abstract span endpoint.
             std::set<long long> reserved;   // track_key identities
-            // Reseat lever: tracks a previous round's short ruled out for
-            // THIS segment (see DetailedNUTSEngine::run).
-            if (avoid && !avoid->empty())
-                for (auto it = avoid->lower_bound(std::make_tuple(
-                         bs.bundle_id, bs.seg_idx,
-                         std::numeric_limits<long long>::min()));
-                     it != avoid->end() &&
-                     std::get<0>(*it) == bs.bundle_id &&
-                     std::get<1>(*it) == bs.seg_idx; ++it)
-                    reserved.insert(std::get<2>(*it));
             std::vector<const LayerAssignment*> hazards;
             // Normalized extent of this segment's span: make_bus_segments
             // deliberately preserves reversed NUTS spans (span_lo > span_hi,
