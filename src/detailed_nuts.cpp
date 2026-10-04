@@ -49,6 +49,7 @@ DetailedNUTSEngine::DetailedNUTSEngine(const RoutingGridStack& stack)
         auto take = [&]() {
             if (word == "reach")      short_reach_ = true;
             else if (word == "cull")  short_cull_  = true;
+            else if (word == "reseat") short_reseat_ = true;
             else if (!word.empty() && word != "off") {
                 // Atomic: the parallel trial sweep constructs engines on its
                 // worker threads, and a plain flag there is a data race
@@ -57,7 +58,7 @@ DetailedNUTSEngine::DetailedNUTSEngine(const RoutingGridStack& stack)
                 static std::atomic<bool> warned{false};
                 if (!warned.exchange(true)) {
                     std::cerr << "[DetailedNUTS] WARNING: BUDA_DNUTS_SHORT_GUARD"
-                              << " word '" << word << "' is not reach, cull or"
+                              << " word '" << word << "' is not reach, cull, reseat or"
                               << " off — ignored.\n";
                 }
             }
@@ -342,9 +343,9 @@ static void compute_pair_misalign(const std::vector<BusSegment>& bus_segs,
     result.pair_misalign_wl = total;
 }
 
-DetailedNUTSResult DetailedNUTSEngine::run(
+DetailedNUTSResult DetailedNUTSEngine::run_pass(
         const std::vector<BusSegment>& bus_segs, bool emit_vias,
-        int abort_unplaced) const {
+        int abort_unplaced, const TrackAvoid* avoid, bool allow_cull) const {
     // Per-pass profiling (RR round-3 Phase 0) — observation only.
     using pclock = std::chrono::steady_clock;
     DetailedNUTSResult result;
@@ -355,7 +356,7 @@ DetailedNUTSResult DetailedNUTSEngine::run(
             std::chrono::duration<double>(t1 - t0).count();
         t0 = t1;
     };
-    place_by_layer(bus_segs, result, abort_unplaced);
+    place_by_layer(bus_segs, result, abort_unplaced, avoid);
     charge("place");
     if (result.aborted)
         return result;   // certain rejection: metric already decided (see .h)
@@ -417,7 +418,7 @@ DetailedNUTSResult DetailedNUTSEngine::run(
     // stale-end rule retracts it only on a run that sees the partner gone.
     // That re-run can only shorten, so it cannot create a short.  Its own
     // bucket, charged inside the branch, like the keepout re-adjustment's.
-    const int short_culled = guard_cross_shorts(bus_segs, result);
+    const int short_culled = guard_cross_shorts(bus_segs, result, allow_cull);
     charge("short_guard");
     if (short_culled > 0) {
         adjust_bit_spans(bus_segs, result);
@@ -441,6 +442,86 @@ DetailedNUTSResult DetailedNUTSEngine::run(
     }
     charge("vias");
     return result;
+}
+
+// The wire of a short the reseat lever moves: the one with more of the shared
+// metal outside its own bus's reserved span (what only the span-follow
+// added); equal -> the larger (bundle, seg, bit), as the cull picks.  A fixed
+// copy (not in the run's net_segments) or a shield is never chosen.
+static void reseat_culprits(const std::vector<BusSegment>& bus_segs,
+                            const DetailedNUTSResult& r,
+                            std::set<std::tuple<int, int, long long>>& avoid) {
+    std::map<std::tuple<int, int, int>, const NetSegment*> wire;
+    for (const auto& ns : r.net_segments)
+        if (!ns.is_shield) wire[{ns.bundle_id, ns.seg_idx, ns.bit_index}] = &ns;
+    std::map<std::pair<int, int>, const BusSegment*> seg_of;
+    for (const auto& bs : bus_segs) seg_of[{bs.bundle_id, bs.seg_idx}] = &bs;
+    for (const auto& s : r.cross_shorts) {
+        auto wa = wire.find({s.bundle_a, s.seg_a, s.bit_a});
+        auto wb = wire.find({s.bundle_b, s.seg_b, s.bit_b});
+        auto outside = [&](decltype(wa) w) -> double {
+            if (w == wire.end()) return -1.0;
+            auto it = seg_of.find({w->second->bundle_id, w->second->seg_idx});
+            if (it == seg_of.end()) return 0.0;
+            const double r_lo = std::min(it->second->span_lo, it->second->span_hi);
+            const double r_hi = std::max(it->second->span_lo, it->second->span_hi);
+            return std::max(0.0, std::min(s.s_hi, r_lo) - s.s_lo) +
+                   std::max(0.0, s.s_hi - std::max(s.s_lo, r_hi));
+        };
+        const double oa = outside(wa), ob = outside(wb);
+        const NetSegment* pick;
+        if (oa < 0 && ob < 0) continue;
+        else if (oa < 0) pick = wb->second;
+        else if (ob < 0) pick = wa->second;
+        else if (oa != ob) pick = (oa > ob) ? wa->second : wb->second;
+        else pick = (std::make_tuple(s.bundle_a, s.seg_a, s.bit_a) >
+                     std::make_tuple(s.bundle_b, s.seg_b, s.bit_b))
+                    ? wa->second : wb->second;
+        avoid.insert(std::make_tuple(pick->bundle_id, pick->seg_idx,
+                                     track_key(pick->track_position)));
+    }
+}
+
+DetailedNUTSResult DetailedNUTSEngine::run(
+        const std::vector<BusSegment>& bus_segs, bool emit_vias,
+        int abort_unplaced) const {
+    if (!short_reseat_)
+        return run_pass(bus_segs, emit_vias, abort_unplaced, nullptr, true);
+    // Reseat lever: solve without the cull so every short is visible, then
+    // re-seat the culprits' tracks and re-solve while unplaced + shorts
+    // strictly drop.  Whatever shorts survive the loop meet the cull (when
+    // it is on) in a final pass under the avoid set found.
+    auto cost = [](const DetailedNUTSResult& r) {
+        return r.num_unplaced + (int)r.cross_shorts.size();
+    };
+    DetailedNUTSResult best =
+        run_pass(bus_segs, emit_vias, abort_unplaced, nullptr, false);
+    TrackAvoid avoid, best_avoid;
+    // The search walks forward from the LAST round (a re-seat can move a
+    // short elsewhere before it removes it) but keeps the cheapest state seen.
+    DetailedNUTSResult cur;
+    bool have_cur = false;
+    constexpr int kRounds = 6;
+    for (int round = 0; round < kRounds && !best.aborted; ++round) {
+        const DetailedNUTSResult& from = have_cur ? cur : best;
+        if (from.cross_shorts.empty()) break;
+        const size_t before = avoid.size();
+        reseat_culprits(bus_segs, from, avoid);
+        if (avoid.size() == before) break;
+        DetailedNUTSResult t =
+            run_pass(bus_segs, emit_vias, abort_unplaced, &avoid, false);
+        if (std::getenv("BUDA_RESEAT_TRACE")) std::cerr << "[reseat] round " << round << " avoid " << avoid.size() << " cost " << cost(best) << " -> " << cost(t) << "\n";
+        if (t.aborted) break;
+        if (cost(t) < cost(best)) { best = t; best_avoid = avoid; }
+        // Stop once a round makes things clearly worse.
+        if (cost(t) > cost(best) + 8) break;
+        cur = std::move(t);
+        have_cur = true;
+    }
+    if (short_cull_ && !best.aborted && !best.cross_shorts.empty())
+        return run_pass(bus_segs, emit_vias, abort_unplaced,
+                        best_avoid.empty() ? nullptr : &best_avoid, true);
+    return best;
 }
 
 void DetailedNUTSEngine::cull_keepout_crossers(DetailedNUTSResult& result) const {
@@ -567,7 +648,7 @@ std::vector<CrossShort> cross_shorts_in(
 
 int DetailedNUTSEngine::guard_cross_shorts(
         const std::vector<BusSegment>& bus_segs,
-        DetailedNUTSResult& result) const {
+        DetailedNUTSResult& result, bool allow_cull) const {
     // This run's wires first, then the fixed bits it placed around (the
     // bottom-up reference bits and their copies).  A short against a copy is
     // this run's to see — the copy was reserved against, over its final span
@@ -604,7 +685,7 @@ int DetailedNUTSEngine::guard_cross_shorts(
 
     int culled = 0, kept = 0;
     std::vector<char> gone((size_t)n_run, 0);   // run wires the cull removes
-    if (short_cull_) {
+    if (short_cull_ && allow_cull) {
         // How much of the shared metal lies OUTSIDE the span the wire's own
         // bus reserved — the part only the span-follow added.  The culprit is
         // the wire with more of it: its reservation never covered the metal
@@ -665,11 +746,11 @@ int DetailedNUTSEngine::guard_cross_shorts(
     // (num_cross_shorts) and the console is what it was — the audit already
     // names every short at check_design, and a line from every trial solve
     // of a healer would bury it.
-    if (short_cull_ || short_reach_) {
+    if ((short_cull_ && allow_cull) || short_reach_) {
         std::cout << "[DetailedNUTS] WARNING: " << result.num_cross_shorts
                   << " cross-bundle short(s) in the final bit spans — two "
                   << "bundles' wires share metal on one layer (issue #962)";
-        if (short_cull_) {
+        if (short_cull_ && allow_cull) {
             std::cout << "; " << culled << " bit(s) removed (counted unplaced)";
             if (kept > 0)
                 std::cout << ", " << kept << " kept (no side may be removed: "
@@ -682,7 +763,8 @@ int DetailedNUTSEngine::guard_cross_shorts(
 
 void DetailedNUTSEngine::place_by_layer(
         const std::vector<BusSegment>& bus_segs,
-        DetailedNUTSResult& result, int abort_unplaced) const {
+        DetailedNUTSResult& result, int abort_unplaced,
+        const TrackAvoid* avoid) const {
     // PROTOTYPE (opt-in, BUDA_DNUTS_PAIR_ALIGN): pairwise-overlap seating.
     // Two same-net stubs that straddle a trunk (u3/l3 in the seat repro)
     // align — share one x-track, one via — only when the FIRST-placed one's
@@ -736,34 +818,47 @@ void DetailedNUTSEngine::place_by_layer(
     // credits) keeps the abstract one.  Off = none of this runs.
     const bool kReach = short_reach_;
     std::map<std::pair<int, int>, const BusSegment*> reach_seg;
-    std::map<std::pair<int, int>, std::pair<double, double>> placed_env;
-    size_t env_upto = 0;   // result.net_segments folded into placed_env
+    // Bits placed so far: (bundle, seg) -> global bit -> track.  A bit's
+    // span-follow reaches ITS partner's same-bit track, so reach is per bit.
+    std::map<std::pair<int, int>, std::map<int, double>> placed_bits;
+    size_t env_upto = 0;   // result.net_segments folded into placed_bits
     if (kReach)
         for (const auto& b : bus_segs)
             reach_seg[{b.bundle_id, b.seg_idx}] = &b;
-    auto reach_of = [&](const BusSegment& bs, int layer, double lo,
-                        double hi) -> std::pair<double, double> {
+    auto fold_placed = [&]() {
         for (; env_upto < result.net_segments.size(); ++env_upto) {
             const NetSegment& ns = result.net_segments[env_upto];
             if (ns.is_shield) continue;          // a shield has no partner
-            auto [it, fresh] = placed_env.try_emplace(
-                {ns.bundle_id, ns.seg_idx}, ns.track_position,
-                ns.track_position);
-            if (!fresh) {
-                it->second.first  = std::min(it->second.first,
-                                             ns.track_position);
-                it->second.second = std::max(it->second.second,
-                                             ns.track_position);
-            }
+            placed_bits[{ns.bundle_id, ns.seg_idx}][ns.bit_index] =
+                ns.track_position;
         }
+    };
+    // Reach of ONE bit (bit < 0: the whole segment's envelope): the span
+    // widened to the partner's same-bit track when the partner is placed (a
+    // partner that placed no such bit stretches nothing), or to the
+    // partner's abstract footprint when its layer is not placed yet — a
+    // bound the cull behind this lever catches the misses of.
+    auto reach_bit = [&](const BusSegment& bs, int layer, int bit, double lo,
+                         double hi) -> std::pair<double, double> {
+        fold_placed();
         for (const auto& conn : bs.connections) {
             auto ps = reach_seg.find({bs.bundle_id, conn.seg_idx});
             if (ps == reach_seg.end()) continue;
             const BusSegment& p = *ps->second;
-            auto pe = placed_env.find({p.bundle_id, p.seg_idx});
-            if (pe != placed_env.end()) {
-                lo = std::min(lo, pe->second.first);
-                hi = std::max(hi, pe->second.second);
+            auto pe = placed_bits.find({p.bundle_id, p.seg_idx});
+            if (pe != placed_bits.end()) {
+                if (bit < 0) {
+                    for (const auto& [b2, t] : pe->second) {
+                        lo = std::min(lo, t);
+                        hi = std::max(hi, t);
+                    }
+                } else {
+                    auto bt = pe->second.find(bit);
+                    if (bt != pe->second.end()) {
+                        lo = std::min(lo, bt->second);
+                        hi = std::max(hi, bt->second);
+                    }
+                }
                 continue;
             }
             if (p.layer < layer || !stack_.has_layer(p.layer)) continue;
@@ -773,6 +868,10 @@ void DetailedNUTSEngine::place_by_layer(
             hi = std::max(hi, p.abstract_pos + p.abstract_width / 2.0);
         }
         return {lo, hi};
+    };
+    auto reach_of = [&](const BusSegment& bs, int layer, double lo,
+                        double hi) -> std::pair<double, double> {
+        return reach_bit(bs, layer, -1, lo, hi);
     };
     // ------------------------------------------------------------------ //
     // 1. Group segment indices by layer; sort each layer by abstract_pos. //
@@ -822,6 +921,9 @@ void DetailedNUTSEngine::place_by_layer(
             std::vector<double> track_positions;
             std::vector<int>    bits_on_track;
             double reach_lo = 0.0, reach_hi = 0.0;
+            // Per-track reach (parallel to track_positions) under the reach
+            // lever; empty = every track reaches [reach_lo, reach_hi].
+            std::vector<double> t_lo, t_hi;
         };
         std::vector<LayerAssignment> layer_assigns;
 
@@ -980,6 +1082,16 @@ void DetailedNUTSEngine::place_by_layer(
             // junction partner's per-bit track, so wires reach up to about
             // one bus extent past the abstract span endpoint.
             std::set<long long> reserved;   // track_key identities
+            // Reseat lever: tracks a previous round's short ruled out for
+            // THIS segment (see DetailedNUTSEngine::run).
+            if (avoid && !avoid->empty())
+                for (auto it = avoid->lower_bound(std::make_tuple(
+                         bs.bundle_id, bs.seg_idx,
+                         std::numeric_limits<long long>::min()));
+                     it != avoid->end() &&
+                     std::get<0>(*it) == bs.bundle_id &&
+                     std::get<1>(*it) == bs.seg_idx; ++it)
+                    reserved.insert(std::get<2>(*it));
             std::vector<const LayerAssignment*> hazards;
             // Normalized extent of this segment's span: make_bus_segments
             // deliberately preserves reversed NUTS spans (span_lo > span_hi,
@@ -1025,10 +1137,22 @@ void DetailedNUTSEngine::place_by_layer(
                 // the test is the one this was before the lever existed.
                 const double o_lo = asgn.reach_lo;
                 const double o_hi = asgn.reach_hi;
-                bool span_ov = o_lo < r_hi && o_hi > r_lo;
                 bool itvl_ov = asgn.interval_lo < bs.interval_hi &&
                                asgn.interval_hi > bs.interval_lo;
-                if (span_ov && itvl_ov)
+                if (!itvl_ov) continue;
+                if (kReach && !asgn.t_lo.empty()) {
+                    // Per-track: a track is reserved when ITS bit's reach
+                    // meets this segment's abstract span; the chosen tracks
+                    // are verified against this segment's own per-bit reach
+                    // after the pick (below).
+                    for (size_t j = 0; j < asgn.track_positions.size(); ++j)
+                        if (asgn.t_lo[j] < bs_hi && asgn.t_hi[j] > bs_lo)
+                            reserved.insert(track_key(asgn.track_positions[j]));
+                    continue;
+                }
+                bool span_ov = o_lo < (kReach ? bs_hi : r_hi) &&
+                               o_hi > (kReach ? bs_lo : r_lo);
+                if (span_ov)
                     for (double p : asgn.track_positions)
                         reserved.insert(track_key(p));
             }
@@ -1508,6 +1632,53 @@ void DetailedNUTSEngine::place_by_layer(
                 continue;
             }
 
+            // Reach lever, exact half: with the tracks picked, each bit's
+            // own reach is known (its partner's same-bit track), so test it
+            // against every other bundle's per-track reach on the SAME track
+            // and reserve the tracks that would short, then re-pick.  A few
+            // rounds; if the pool runs dry the last good pick stands and the
+            // cull (when on) removes whatever shorts.
+            auto bit_reaches = [&](const std::vector<int>& picks) {
+                std::vector<std::pair<double, double>> out;
+                out.reserve(picks.size());
+                for (int i = 0; i < (int)picks.size(); ++i)
+                    out.push_back(reach_bit(bs, layer, bit_on_rank(i),
+                                            bs_lo, bs_hi));
+                return out;
+            };
+            if (kReach && !bs.ndr.active()) {
+                std::set<long long> resv_r = reserved;
+                for (int round = 0; round < 4; ++round) {
+                    const auto br = bit_reaches(chosen_indices);
+                    std::set<long long> bad;
+                    for (size_t i = 0; i < chosen_indices.size(); ++i) {
+                        const long long tk = track_key(
+                            signal_tracks[chosen_indices[i]].first);
+                        for (const auto& asgn : layer_assigns) {
+                            if (asgn.bundle_id == bs.bundle_id) continue;
+                            if (asgn.t_lo.empty() && asgn.reach_hi <= asgn.reach_lo)
+                                continue;
+                            for (size_t j = 0; j < asgn.track_positions.size(); ++j) {
+                                if (!track_key_near(
+                                        track_key(asgn.track_positions[j]), tk))
+                                    continue;
+                                const double a_lo = asgn.t_lo.empty()
+                                    ? asgn.reach_lo : asgn.t_lo[j];
+                                const double a_hi = asgn.t_lo.empty()
+                                    ? asgn.reach_hi : asgn.t_hi[j];
+                                if (a_lo < br[i].second && a_hi > br[i].first)
+                                    bad.insert(tk);
+                            }
+                        }
+                    }
+                    if (bad.empty()) break;
+                    resv_r.insert(bad.begin(), bad.end());
+                    auto again = choose(resv_r);
+                    if (again.empty()) break;       // keep the last pick
+                    chosen_indices = std::move(again);
+                }
+            }
+
             // conflicted(): does any pick land a DIFFERENT bit (net) of this
             // bundle on a track a span-interacting sibling already holds — the
             // BIT_SHORT hazard.  Hoisted here (was local to the conflict
@@ -1667,10 +1838,20 @@ void DetailedNUTSEngine::place_by_layer(
                 assigned.push_back(signal_tracks[chosen_indices[i]].first);
                 assigned_bits.push_back(bit_on_rank(i));
             }
+            std::vector<double> t_lo, t_hi;
+            if (kReach) {
+                // assigned[] is ascending-track; rank i carries bit_on_rank(i).
+                for (int i = 0; i < bw; ++i) {
+                    const auto rb = reach_bit(bs, layer, bit_on_rank(i),
+                                              bs_lo, bs_hi);
+                    t_lo.push_back(rb.first);
+                    t_hi.push_back(rb.second);
+                }
+            }
             layer_assigns.push_back({bs.bundle_id, bs.span_lo, bs.span_hi,
                                      bs.interval_lo, bs.interval_hi,
                                      std::move(assigned), std::move(assigned_bits),
-                                     r_lo, r_hi});
+                                     r_lo, r_hi, std::move(t_lo), std::move(t_hi)});
         }
     }
 }
