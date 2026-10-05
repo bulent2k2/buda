@@ -48,9 +48,13 @@ Wirelength moves < 0.01 %.  Regressions under `reach`: `bigHalf` 0/0/0 ->
   under the old envelope `reach`).
 * `reseat` diverged: 20 -> 27 -> 45 shorts, because moving one track shifts
   the whole window onto tracks the neighbours also reach.
-* The converge repro's shorts have one wire stretched and one inside; `reach`
-  cannot see them because the partner sits on a layer not yet placed and lands
-  outside its abstract footprint.
+* The converge repro's shorts have one wire stretched and one inside.
+  `reach` sees them (20 of the segment's 32 picked tracks conflict) but the
+  window holds exactly 32 tracks for 32 bits, so there is no re-pick.  The 20
+  is conservative: the stretched wire's partner is on a layer not placed yet,
+  so the bound is its whole abstract footprint, while the true stretch hits 4
+  bits.  (Corrected: this file first said the partner lands outside its
+  footprint; it lands inside, the footprint is just wide.)
 * The two mix2 recipes carried 3 and 2 shorts when #948 landed.  They judge
   clean now, with or without a lever (the healers' score reads shorts since
   #962), so both tests' `known_cross_shorts` bounds are 0.
@@ -66,3 +70,17 @@ opens by default (`BUDA_HEAL_SHORTS`).  The full `soc.tcl 8 compact PAD 10 GAP
 
 No lever becomes a default.  A real fix is at the abstract level: two buses
 whose stretched extents will meet should not be seated on the same track.
+
+## Footprint measurement (2026-10-05)
+
+For each short, the stretched wire's partner bit against the partner's
+abstract footprint (`bus_segment` position +/- width / 2), from the
+checkpoints' tables:
+
+| repro | shorts | stretched wire's partner bit |
+|---|---|---|
+| `soc.tcl 8 compact -noheal` | 20 | outside the footprint in all 20 (18 also have the other wire stretched, partner inside) |
+| `converge.tcl soc 4` blind round | 4 | inside the footprint in all 4 (footprint 218 wide, stretch 105) |
+
+So keeping bits inside the abstract footprint would address the soc repro and
+not the converge one.

@@ -239,10 +239,15 @@ Then two post-passes over the emitted bit-wires:
      **Other repros** (judge on checkpoints, 2026-10): `converge.tcl soc 4
      -arms blind -maxreserve 0 -informed 0 -judge` has 4 shorts (bundle 1
      `pn_*` x bundle 176 `l2d_0_*`, M6), each with ONE wire stretched past
-     its reserved span and the other inside it; `reach` leaves all 4 (the
-     stretched wire's partner is on a layer not placed yet and lands outside
-     its abstract footprint, which the bound cannot see), `cull` turns them
-     into 4 unplaced bits (85 -> 89).  The two mix2 recipes
+     its reserved span and the other inside it.  `reach` SEES them (traced:
+     20 of bundle 1 seg 0's 32 picked tracks conflict) but the window holds
+     exactly 32 tracks for 32 bits, so there is no re-pick and the shorts
+     stay; the 20 is conservative, since the stretched wire's partner is on
+     a layer not placed yet and the bound is its whole abstract footprint
+     (x 851..1069), against a true reach of 105 units for 4 bits.  `cull`
+     turns the 4 into unplaced bits (85 -> 89).  (An earlier version of this
+     note said the partner lands OUTSIDE its footprint; measured, it lands
+     inside: the footprint is simply wide.)  The two mix2 recipes
      (`test_topdown_recipe_heals_most_of_the_residual`,
      `test_mix2_release_heals_bundle166_end_to_end`) now judge CLEAN with every
      lever setting INCLUDING none — the 3 and 2 shorts their comments recorded
