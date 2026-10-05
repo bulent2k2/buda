@@ -84,3 +84,21 @@ checkpoints' tables:
 
 So keeping bits inside the abstract footprint would address the soc repro and
 not the converge one.
+
+## Footprint lever, tried and dropped (2026-10-05)
+
+Proposal 1 was a `foot` lever: seat a segment's bits inside its own abstract
+footprint (`abstract_pos` +/- `abstract_width` / 2) whenever that footprint
+holds enough free tracks, else the whole pool.  On `soc.tcl 8 compact -noheal`
+it moved 5 of the 451 bits that sit outside their footprint and left the
+judge's 20 shorts and 1131 unplaced bits unchanged.  Why: the footprint is not
+short of ranking but of tracks.  Bundle 434 seg 1 (32 bits on M4, footprint
+y 768..840, i.e. 32 x 2.25) lands two bits at 768 and 769.5 and the other 30
+at 910..975, because five sibling bundles (434..444, the same abstract
+position 804, disjoint along-spans) already hold the tracks between.  A strict
+form (leave the bits unplaced when the footprint is full) is `cull` by another
+name.  The lever was removed; the shorts of that checkpoint come from the
+abstract plan stacking six 72-unit segments at one perpendicular position
+(the 84 abstract overlaps of a `-noheal` round), which DetailedNUTS then
+resolves by pushing bits out of the footprint.  A fix there belongs to the
+abstract stage and the healers that read its overlaps.
