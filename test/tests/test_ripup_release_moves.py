@@ -248,7 +248,7 @@ def test_mix2_release_heals_bundle166_end_to_end():
     # `tools/independent_audit.py`, counts the same two on a checkpoint of
     # it), which were always there, sit nowhere near the released instance,
     # and no healer's metric reads.  Accepted as measured and no further.
-    known_cross_shorts = 2
+    known_cross_shorts = 0
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
         s.do_command("check_design")

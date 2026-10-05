@@ -236,6 +236,19 @@ Then two post-passes over the emitted bit-wires:
      shorts), because moving one track shifts the whole window onto tracks
      the neighbours also reach; removed.
 
+     **Other repros** (judge on checkpoints, 2026-10): `converge.tcl soc 4
+     -arms blind -maxreserve 0 -informed 0 -judge` has 4 shorts (bundle 1
+     `pn_*` x bundle 176 `l2d_0_*`, M6), each with ONE wire stretched past
+     its reserved span and the other inside it; `reach` leaves all 4 (the
+     stretched wire's partner is on a layer not placed yet and lands outside
+     its abstract footprint, which the bound cannot see), `cull` turns them
+     into 4 unplaced bits (85 -> 89).  The two mix2 recipes
+     (`test_topdown_recipe_heals_most_of_the_residual`,
+     `test_mix2_release_heals_bundle166_end_to_end`) now judge CLEAN with every
+     lever setting INCLUDING none — the 3 and 2 shorts their comments recorded
+     went away once the healers' score began to read shorts (#962), so both
+     tests' `known_cross_shorts` bounds are 0.
+
    **Measured (2026-09-27), neither is a default.** On the QoR corpus each
    lever removes 19–24 dirty bundles and strands 66–151 more bits (`cull`
    7 better / 5 worse, `reach` 6 / 7, `reach,cull` 7 / 7). `bigHalf` goes
