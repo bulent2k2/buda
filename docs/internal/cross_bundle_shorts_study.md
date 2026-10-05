@@ -91,14 +91,48 @@ Proposal 1 was a `foot` lever: seat a segment's bits inside its own abstract
 footprint (`abstract_pos` +/- `abstract_width` / 2) whenever that footprint
 holds enough free tracks, else the whole pool.  On `soc.tcl 8 compact -noheal`
 it moved 5 of the 451 bits that sit outside their footprint and left the
-judge's 20 shorts and 1131 unplaced bits unchanged.  Why: the footprint is not
-short of ranking but of tracks.  Bundle 434 seg 1 (32 bits on M4, footprint
-y 768..840, i.e. 32 x 2.25) lands two bits at 768 and 769.5 and the other 30
-at 910..975, because five sibling bundles (434..444, the same abstract
-position 804, disjoint along-spans) already hold the tracks between.  A strict
-form (leave the bits unplaced when the footprint is full) is `cull` by another
-name.  The lever was removed; the shorts of that checkpoint come from the
-abstract plan stacking six 72-unit segments at one perpendicular position
-(the 84 abstract overlaps of a `-noheal` round), which DetailedNUTS then
-resolves by pushing bits out of the footprint.  A fix there belongs to the
-abstract stage and the healers that read its overlaps.
+judge's 20 shorts and 1131 unplaced bits unchanged; it was removed.
+
+Why the footprint is not enough, from a trace of the pool (not a guess):
+
+* A width-model shortfall is not the cause: counting signal tracks inside each
+  placed segment's footprint from the pattern, 390 of 391 segments hold at
+  least their bits.
+* Bundle 434 seg 1 (32 bits, M4, footprint y 768..840) is seated ON a keepout,
+  `(80,770)-(218,908)`: abstract NUTS had said so ("placed ON a keepout, window
+  exhausted") and DetailedNUTS keeps its bits off the keepout, so 30 of them
+  land at 910..975.  (An earlier version of this section blamed five sibling
+  bundles at the same abstract position; their spans are disjoint, 213..355,
+  1061..1203, ..., and they hold nothing of each other's.)
+* The shorts in this checkpoint are of another kind.  Bundle 446 seg 1 (M4)
+  gets 28 of its 32 bits inside the footprint and 3 at y = 1063.5, 1203 and
+  1345.5, because the tracks at 1401..1417.5 are held by bundle 392's M4 trunk
+  (spans overlap on x 213..291), whose own bits had spilled the same way.  The
+  3 far bits make 446 seg 2's M5 bits stretch 380 units, onto tracks 392 seg 0
+  holds.  The M4 channel is packed with no slack, so one spill cascades.
+
+## Abstract-level experiment: inter-bus gap (2026-10-05)
+
+`set_track_pitch` is the existing slack between buses at the abstract stage
+(default 1.0).  `soc.tcl 8 -LAYOUT compact -PAD 10 -GAP 4 -M 4` with it set
+before `run_planner` (a throwaway copy of `soc.tcl`, not checked in), first
+round, `-noheal`:
+
+| pitch | abstract overlaps | unplaced | judge SHORT | detailed WL |
+|---|---|---|---|---|
+| default | 84 | 1131 | 20 | 1,212,134 |
+| auto | 19 | 329 | 48 | 1,631,392 |
+| 4.5 | 15 | 352 | 8 | 1,538,397 |
+| 9 | 11 | 208 | 0 | 1,590,261 |
+
+Full flow with healing (judge CLEAN in every row, `soc.tcl`'s own verdict in
+brackets): default 1,692,110 detailed WL [clean]; 4.5: 1,597,600 (-5.6 %) and
+9: 1,589,216 (-6.1 %) [each ends on 1 abstract overlap, FAILED by `soc.tcl`'s
+rule, 0 audit violations]; 18: 1,836,338 (+8.5 %) [9 overlaps].  Abstract WL
+78,488 / 75,572 / 75,093 / 84,228.
+
+So slack at the abstract stage removes the shorts of the first round (at 9)
+and 90 % of its unplaced bits, and the healed route is shorter, but the effect
+is not monotone (`auto` has more shorts than the default, 18 costs wire), the
+flows end on a residual overlap that the default flow does not, and it is one
+design at one size.  Not a recommendation to change a default.
