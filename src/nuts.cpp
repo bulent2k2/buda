@@ -758,6 +758,17 @@ static void prune_unreachable_partner_windows(
     }
 }
 
+// Junction reach (study lever, off by default; BUDA_NUTS_JUNCTION_REACH=1): a
+// segment that meets a perpendicular partner must reach every partner BIT,
+// and the bits spread over the partner's whole width, so the abstract span
+// that ends at the partner's CENTRE under-states the metal by half the
+// partner's width.  With the lever on the span end is the partner's far edge,
+// and the overlap checks, the healers and DetailedNUTS's reservations see it.
+static bool junction_reach_on() {
+    static const bool on = [] { bool o = std::getenv("BUDA_NUTS_JUNCTION_REACH") != nullptr; if (o) std::cout << "[NUTS] junction reach ON\n"; return o; }();
+    return on;
+}
+
 static void do_span_adjustments(
     const std::vector<TrackSegment*>&                               layer_segs,
     const std::map<std::pair<int,int>, std::vector<SpanAdjConn>>&   rev_conn_map,
@@ -783,8 +794,10 @@ static void do_span_adjustments(
             if (jt == ts_ptr_map.end()) continue;
             TrackSegment* other = jt->second;
             if (only_unplaced && other->placed) continue;
+            const double jr = junction_reach_on()
+                ? (sc.lo_end ? -0.5 * ts->width : 0.5 * ts->width) : 0.0;
             adj_map[{sc.src_bid, sc.src_si}].push_back(
-                {ts->track_position, sc.lo_end, sc.is_endpoint, ts->is_jog});
+                {ts->track_position + jr, sc.lo_end, sc.is_endpoint, ts->is_jog});
         }
     }
 
@@ -859,6 +872,10 @@ static void do_span_adjustments(
                 auto pj = ts_ptr_map.find({sc.src_bid, sc.src_si});
                 if (pj == ts_ptr_map.end() || !pj->second->placed) continue;
                 cover(pj->second->track_position);
+                if (junction_reach_on()) {
+                    cover(pj->second->track_position - 0.5 * pj->second->width);
+                    cover(pj->second->track_position + 0.5 * pj->second->width);
+                }
             }
         } else {
             for (const auto& req : reqs) cover(req.center);   // no partner map: old behavior
@@ -1066,8 +1083,9 @@ static void tighten_spans_to_reach(std::vector<TrackSegment>& segments,
             for (const auto& sc : it->second) {
                 auto pj = ptr.find({sc.src_bid, sc.src_si});
                 if (pj == ptr.end()) continue;
-                rmin = std::min(rmin, pj->second->track_position);
-                rmax = std::max(rmax, pj->second->track_position);
+                const double jh = junction_reach_on() ? 0.5 * pj->second->width : 0.0;
+                rmin = std::min(rmin, pj->second->track_position - jh);
+                rmax = std::max(rmax, pj->second->track_position + jh);
             }
         for (double fc : ts.busterm_faces) {
             rmin = std::min(rmin, fc);
