@@ -163,3 +163,28 @@ at 9) and 1 % (C).  It does not make the flow end cleaner by `soc.tcl`'s rule
 (A ends on 1 overlap where the default ends clean; B fails with or without it),
 and 12 is worse than no gap on A.  Healing time on A is not measured fairly.
 No change to a default is supported.
+
+### Pitch sweep re-run serially, with healing time and first-round shorts (2026-10-06)
+
+Same flows, one at a time (the parallel timings above are void).  First-round
+shorts are the shorted bits `check_design` lists in the first audit, before any
+heal; the judge reads CLEAN on the final route of every row.
+
+| design | pitch | first round: ovl / unplaced / shorted bits | final | detailed WL | time |
+|---|---|---|---|---|---|
+| A `soc 8 compact` | default | 84 / 1131 / 20 | clean | 1,692,110 | 24 s |
+| | 3 | 19 / 329 / 48 | 1 overlap | 1,602,582 | 136 s |
+| | 6 | 15 / 352 / 8 | 1 overlap | 1,597,844 | 188 s |
+| | 9 | 11 / 208 / 0 | 1 overlap | 1,589,216 | 221 s |
+| B `soc 4 compact` | default | 58 / 640 / 9 | 2 overlaps | 738,742 | 35 s |
+| | 6 | 2 / 144 / 18 | 3 overlaps | 739,516 | 30 s |
+| | 9 | 6 / 162 / 23 | 3 overlaps | 731,657 | 31 s |
+| C `soc 8` | default | 2 / 40 / 0 | clean | 1,968,672 | 14 s |
+| | 9 | 1 / 32 / 0 | clean | 1,950,146 | 15 s |
+
+A gap does not remove the shorts: on B it raises the first round's shorted bits
+from 9 to 18 and 23, and on A the count is not monotone (48, 8, 0).  On A it
+makes the healing 6 to 9 times slower for a 5 to 6 % shorter route, and ends
+on a residual overlap; on B and C the time is unchanged.  The first round's
+overlaps and unplaced bits drop everywhere a gap is set; the shorts do not
+follow them.  So the gap is not a short fix.
