@@ -188,3 +188,23 @@ makes the healing 6 to 9 times slower for a 5 to 6 % shorter route, and ends
 on a residual overlap; on B and C the time is unchanged.  The first round's
 overlaps and unplaced bits drop everywhere a gap is set; the shorts do not
 follow them.  So the gap is not a short fix.
+
+### `run_planner hier 5 signal_tracks` (2026-10-06)
+
+`soc.tcl` plans with `run_planner hier 5` (band capacity in layout width).  With
+`signal_tracks` (capacity in discrete signal tracks) on the same three
+designs, run serially, default pitch; baselines are the serial rows above:
+
+| design | planner | first round: ovl / unplaced / shorted bits | final | detailed WL | time |
+|---|---|---|---|---|---|
+| A `soc 8 compact` | default | 84 / 1131 / 20 | clean | 1,692,110 | 24 s |
+| | `signal_tracks` | 42 / 1455 / 54 | 1 overlap | 1,550,523 | 172 s |
+| B `soc 4 compact` | default | 58 / 640 / 9 | 2 overlaps | 738,742 | 35 s |
+| | `signal_tracks` | 11 / 338 / 27 | clean | 865,115 | 12 s |
+| C `soc 8` | default | 2 / 40 / 0 | clean | 1,968,672 | 14 s |
+| | `signal_tracks` | 3 / 48 / 0 | clean | 1,979,198 | 18 s |
+
+The judge reads CLEAN on every final route.  The effect points in different
+directions on each design: wire -8.4 % with a 7x slower heal on A, +17 % wire
+with a faster, clean heal on B, nothing on C; first-round shorts rise on A
+(20 to 54) and B (9 to 27).  Not a fix for the shorts, and not a default.
