@@ -136,3 +136,30 @@ and 90 % of its unplaced bits, and the healed route is shorter, but the effect
 is not monotone (`auto` has more shorts than the default, 18 costs wire), the
 flows end on a residual overlap that the default flow does not, and it is one
 design at one size.  Not a recommendation to change a default.
+
+### Pitch sweep over three designs (2026-10-06)
+
+Full flow, `set_track_pitch` set before `run_planner` via a throwaway copy of
+`soc.tcl`.  The judge reads CLEAN on every row.  Times are NOT comparable with
+the default run: three flows shared four cores, and only the default of A was
+timed alone (25 s).
+
+| design | pitch | first round (ovl / unplaced) | final (`soc.tcl`) | detailed WL | time |
+|---|---|---|---|---|---|
+| A: `soc 8 compact PAD 10 GAP 4 M 4` | default | 84 / 1131 | clean | 1,692,110 | 25 s alone |
+| | 3 | 19 / 329 | 1 overlap, FAILED | 1,602,582 | 222 s |
+| | 6 | 15 / 352 | 1 overlap, FAILED | 1,597,844 | 301 s |
+| | 9 | 11 / 208 | 1 overlap, FAILED | 1,589,216 | 354 s |
+| | 12 | 29 / 1224 | 12 overlaps, FAILED | 1,777,593 | 225 s |
+| B: `soc 4 compact PAD 10 GAP 4 M 4` | default | 58 / 640 | 2 overlaps, FAILED | 738,742 | 57 s |
+| | 6 | 2 / 144 | 3 overlaps, FAILED | 739,516 | 46 s |
+| | 9 | 6 / 162 | 3 overlaps, FAILED | 731,657 | 49 s |
+| C: `soc 8` (defaults) | default | 2 / 40 | clean | 1,968,672 | 22 s |
+| | 9 | 1 / 32 | clean | 1,950,146 | 19 s |
+
+Reading: a gap of 3 to 9 cuts the first round's unplaced bits by 60 to 80 %
+on A and B and a little on C, and the detailed WL by 5.6 % (A), 1 % (B,
+at 9) and 1 % (C).  It does not make the flow end cleaner by `soc.tcl`'s rule
+(A ends on 1 overlap where the default ends clean; B fails with or without it),
+and 12 is worse than no gap on A.  Healing time on A is not measured fairly.
+No change to a default is supported.
