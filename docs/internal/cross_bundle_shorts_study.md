@@ -106,10 +106,13 @@ Why the footprint is not enough, from a trace of the pool (not a guess):
   1061..1203, ..., and they hold nothing of each other's.)
 * The shorts in this checkpoint are of another kind.  Bundle 446 seg 1 (M4)
   gets 28 of its 32 bits inside the footprint and 3 at y = 1063.5, 1203 and
-  1345.5, because the tracks at 1401..1417.5 are held by bundle 392's M4 trunk
-  (spans overlap on x 213..291), whose own bits had spilled the same way.  The
-  3 far bits make 446 seg 2's M5 bits stretch 380 units, onto tracks 392 seg 0
-  holds.  The M4 channel is packed with no slack, so one spill cascades.
+  1345.5.  Its footprint (y 1410..1482) overlaps bundle 392's M4 footprint
+  (y 1346..1418) by 8 units over the same x span in the ABSTRACT plan, which is
+  one of the 84 abstract overlaps of this unhealed round; the tracks DNUTS then
+  finds taken are the ones that overlap makes contested.  The 3 far bits make
+  446 seg 2's M5 bits stretch 380 units, onto tracks 392 seg 0 holds.  (An
+  earlier draft called this a cascade of spills in a packed channel; the
+  measurement below says the root is the abstract overlap itself.)
 
 ## Abstract-level experiment: inter-bus gap (2026-10-05)
 
@@ -208,3 +211,31 @@ The judge reads CLEAN on every final route.  The effect points in different
 directions on each design: wire -8.4 % with a 7x slower heal on A, +17 % wire
 with a faster, clean heal on B, nothing on C; first-round shorts rise on A
 (20 to 54) and B (9 to 27).  Not a fix for the shorts, and not a default.
+
+## What the first-round shorts are made of (2026-10-06)
+
+Each short pair, classified from the checkpoint tables (`bus_segment`,
+`bus_via`, `net_segment`, the layer stack and the leaf footprints, read with
+the judge's own readers): which wire is stretched past its abstract span, which
+partner bit it followed, and why that partner bit sits outside the partner's
+footprint.  Pairs counted with real metal overlap (track distance below the
+sum of half widths), which reproduces the judge's and `check_design`'s counts.
+
+| checkpoint (first round, healers off) | short pairs | partner bit displaced because |
+|---|---|---|
+| `soc 8 compact` | 20 | all 20: the partner segment's abstract footprint overlaps another bundle's footprint in the plan |
+| `soc 4 compact` | 9 | all 9: the same |
+| `soc 8` defaults | 0 | |
+| `soc 8 compact`, pitch auto | 48 | all 48: the partner is seated over a leaf-cell keepout |
+| `soc 8 compact`, pitch 4.5 | 8 | all 8: the same |
+| `converge soc 4` blind round | 4 | none: the partner bit is INSIDE a wide footprint |
+
+So in the default first round every short traces to an overlap that abstract
+NUTS already counts, which is why the healers, which read that count, end the
+default flows without them.  With a gap set, the abstract overlaps shrink and
+the shorts that remain are keepout-seated partners instead.  The converge
+shorts are neither.  Limits: the soc family only, five checkpoints, one
+heuristic for "overlaps another footprint" (any other bundle's rectangle on the
+same layer with positive along and across overlap), and the 'why' of the
+converge case is the stretch inside a wide footprint, not a displaced bit.
+Corpus flows were not classified: the corpus run does not keep checkpoints.  The classifier is `tools/experiment/short_causes.py`.
