@@ -70,7 +70,7 @@ class Pdk:
     sram_bit_area: float = 0.05
     sram_periph: float = 1.3
     pad: int = 24
-    facepad: int = 10
+    facepad: int = -1          # -1 = 2 x pad; the light face's floor
     reticle_w: float = 0.0        # microns; 0 = none stated
     reticle_h: float = 0.0
     rules: list = field(default_factory=list)
@@ -203,7 +203,16 @@ def face_bits_pair(loads) -> tuple:
     return faces[0][0], light
 
 
-def face_pair(loads, bit_pitch: float, pad: int) -> tuple:
+def light_floor(pad: int, facepad: int = -1) -> int:
+    """The floor the LIGHT face keeps whatever its bundles ask: the PDK's
+    `facepad` when it states one, else two pads (room for a pad at each
+    end of a face no bus lands on).  Codex P2 on #973: `facepad` was
+    parsed and documented and read by nothing, the floor hard-coded to
+    `2 * pad` in two places."""
+    return int(facepad) if facepad is not None and facepad >= 0 else 2 * int(pad)
+
+
+def face_pair(loads, bit_pitch: float, pad: int, facepad: int = -1) -> tuple:
     """(heavy, light): the two floors a block's sides must meet when its
     BUNDLE loads — bits grouped by the far endpoint they go to and the
     direction they go in, which is what the bundler lands on one face —
@@ -217,7 +226,7 @@ def face_pair(loads, bit_pitch: float, pad: int) -> tuple:
     hb, lb = face_bits_pair(loads)
     heavy = int(math.ceil(hb * bit_pitch)) + int(pad)
     light = int(math.ceil(lb * bit_pitch)) + int(pad)
-    return heavy, max(light, 2 * int(pad))
+    return heavy, max(light, light_floor(pad, facepad))
 
 
 @dataclass
@@ -242,21 +251,25 @@ def size_leaf(pdk: Pdk | None, cell: str, loads, bit_pitch: float | None = None,
     bp = float(bit_pitch if bit_pitch is not None else
                (pdk.bit_pitch if pdk else 4.0))
     pd = int(pad if pad is not None else (pdk.pad if pdk else 24))
+    fp = light_floor(pd, pdk.facepad if pdk else -1)
     loads = list(loads)
     if faces is not None:
         # the heavy/light face bits already taken (the max over a cell's
         # instances, whose loads group differently at each occurrence)
         heavy = int(math.ceil(faces[0] * bp)) + pd
-        light = max(int(math.ceil(faces[1] * bp)) + pd, 2 * pd)
+        light = max(int(math.ceil(faces[1] * bp)) + pd, fp)
     else:
-        heavy, light = face_pair(loads, bp, pd)
+        heavy, light = face_pair(loads, bp, pd, fp)
     floor = heavy
     rule = pdk.rule_for(cell) if pdk else None
     if rule is None:
         return LeafSize(cell, heavy, light, floor, 0, "face", "")
     if rule.kind == "macro":
-        w = max(int(math.ceil(rule.w)), heavy)
-        h = max(int(math.ceil(rule.h)), light)
+        # a stated size is in microns like every PDK length (the logic and
+        # sram areas scale by unit_um^2 below); Codex P1 on #973: it was
+        # taken as layout units, 1000x short under `unit_um 1000`
+        w = max(int(math.ceil(rule.w * pdk.unit_um)), heavy)
+        h = max(int(math.ceil(rule.h * pdk.unit_um)), light)
         return LeafSize(cell, w, h, floor, 0, "macro", rule.glob)
     if rule.kind == "sram":
         area = rule.bits * pdk.sram_bit_area * pdk.sram_periph

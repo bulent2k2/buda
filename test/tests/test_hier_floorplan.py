@@ -173,3 +173,27 @@ def test_padded_dims_takes_the_cheaper_orientation():
     assert hf.padded_dims(100, 40, (300, 50)) == (300, 50)
     assert hf.padded_dims(40, 100, (300, 50)) == (50, 300)
     assert hf.padded_dims(400, 60, (300, 50)) == (400, 60)
+
+
+def test_a_macro_size_is_in_microns_and_scales_with_unit_um():
+    """A `macro w h` rule states microns like every PDK length; the logic
+    and sram areas scale by unit_um^2 and the macro's sides must scale by
+    unit_um (Codex P1 on #973: they were taken as layout units, 1000x
+    short under `unit_um 1000`)."""
+    pdk = hf.parse_pdk("unit_um 1000\nleaf phy_* macro w 180 h 120\n")
+    ls = hf.size_leaf(pdk, "phy_0", [], faces=(0, 0))
+    assert (ls.w, ls.h, ls.binding) == (180000, 120000, "macro")
+    pdk1 = hf.parse_pdk("unit_um 1\nleaf phy_* macro w 180 h 120\n")
+    assert hf.size_leaf(pdk1, "phy_0", [], faces=(0, 0)).w == 180
+
+
+def test_facepad_is_the_light_face_floor_and_defaults_to_two_pads():
+    """The PDK's `facepad` floors the LIGHT face whatever its bundles ask;
+    unstated it is two pads, which is what every measured floorplan used
+    (Codex P2 on #973: the value was parsed and read by nothing)."""
+    assert hf.face_pair([32, 32, 0, 0], 4.0, 24)[1] == 48          # 2 x pad
+    assert hf.face_pair([32, 32, 0, 0], 4.0, 24, 100)[1] == 100   # stated
+    assert hf.face_pair([32, 32, 8, 8], 4.0, 24, 10)[1] == 56     # bits win
+    pdk = hf.parse_pdk("pad 1\nfacepad 100\nleaf * logic gates_per_bit 1 gates_fixed 1\n")
+    assert hf.size_leaf(pdk, "x", [], faces=(8, 0)).h >= 100
+    assert hf.size_leaf(hf.parse_pdk("pad 1\n"), "x", [], faces=(8, 0)).h == 2

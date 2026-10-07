@@ -187,3 +187,25 @@ hnet::emit_verilog {{{v}}}
     assert mods[-1] == "soc", mods
     db = buda.BDB(":memory:")
     assert db.import_verilog(str(v)).top_module == "soc"
+
+
+def test_a_net_naming_two_of_the_cells_own_ports_is_refused(tmp_path):
+    """Structural Verilog joins two ports of one module only through an
+    `assign`, which import_verilog does not read, so such a net would
+    import with its second port silently unconnected (Codex P2 on #973):
+    `hnet::net` refuses it at declaration."""
+    hnet = _ROOT / "flow" / "tcl" / "hnet.tcl"
+    script = tmp_path / "t.tcl"
+    script.write_text(f"""
+source {{{hnet}}}
+hnet::cell leaf
+hnet::port leaf p 4 input
+hnet::cell soc
+hnet::port soc a 4 input
+hnet::port soc b 4 output
+hnet::inst soc u0 leaf
+hnet::net soc .a .b u0.p
+""")
+    r = subprocess.run(["tclsh", str(script)], capture_output=True, encoding="utf-8",
+                       cwd=tmp_path, timeout=60)
+    assert r.returncode != 0 and "names 2 of its own ports" in r.stderr, r.stdout + r.stderr

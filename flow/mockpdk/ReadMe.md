@@ -32,7 +32,7 @@ util           0.65    # standard-cell utilisation inside a logic block
 sram_bit_area  0.12    # um^2 per SRAM bit, array only
 sram_periph    1.5     # array-to-macro multiplier
 pad            24      # face slack on every face-derived dimension
-facepad        10      # the floor a face keeps when a leaf is shaped non-square
+facepad        48      # the floor the light face keeps whatever its bundles ask (2 x pad when unstated)
 ```
 
 and the leaf rules, first glob to match a cell's name wins (`*` last):

@@ -25,7 +25,7 @@
 #   sram_bit_area    um^2 per SRAM bit, array only
 #   sram_periph      array-to-macro multiplier (decoders, sense amps, I/O)
 #   pad              face slack added to every face-derived dimension
-#   facepad          the floor a face keeps when a leaf is shaped non-square
+#   facepad          the floor the LIGHT face keeps whatever its bundles ask (2 x pad when unstated)
 #   reticle_w/h      the reticle limit in microns -- the largest die the
 #                    mock lithography prints in one field (a 26 x 33 mm
 #                    field, the industry's), the ceiling a die's size is
@@ -55,7 +55,7 @@ util           0.65
 sram_bit_area  0.12
 sram_periph    1.5
 pad            24
-facepad        10
+facepad        48      # = 2 x pad: what a face no bus lands on keeps (a pad at each end)
 reticle_w      26000
 reticle_h      33000
 

@@ -124,11 +124,21 @@ proc hnet::net {cell args} {
     _cell_or_die $cell
     if {[llength $args] < 2} { error "hnet: net in $cell needs >= 2 endpoints" }
     set w ""
+    set own {}
     foreach ep $args {
         set ew [_endpoint_width $cell $ep]
         if {$w eq ""} { set w $ew } elseif {$ew != $w} {
             error "hnet: net in $cell: '$ep' is $ew bits, the first endpoint '[lindex $args 0]' $w"
         }
+        if {[lindex [split $ep .] 0] eq ""} { lappend own $ep }
+    }
+    # A net may name ONE of the cell's own ports: in the structural Verilog
+    # this emits, a net touching an own port IS that port, and two ports on
+    # one net could only be joined by an `assign`, which import_verilog
+    # does not read -- the second port would be silently unconnected on
+    # import (Codex P2 on #973).  Refused here, where the author sees it.
+    if {[llength $own] > 1} {
+        error "hnet: net in $cell names [llength $own] of its own ports ([join $own {, }]); a net may name one own port (join two ports through an instance, not a net)"
     }
     lappend NETS($cell) $args
 }
