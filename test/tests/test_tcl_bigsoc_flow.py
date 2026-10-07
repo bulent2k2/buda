@@ -127,3 +127,33 @@ def test_the_engine_places_the_array_too_when_asked(tmp_path):
 def test_an_unknown_knob_is_an_error(tmp_path):
     r = _run(tmp_path, 2, "-NOPE", 3, "-dry")
     assert r.returncode != 0 and "unknown parameter 'NOPE'" in r.stdout + r.stderr
+
+
+def test_a_checkpoint_renders_with_the_overlaps_the_run_reported(tmp_path):
+    """`-save FILE` leaves the checkpoint the pipeline wrote through; a
+    session reopening it with the floorplan projected and
+    `load_pipeline expanded` holds the placed bus segments but no audit
+    of them — `compute_nuts_metrics` recounts, and the count is the run's."""
+    import contextlib
+    import io
+    import buda_cli
+    ck = tmp_path / "ck.bdb"
+    r = _run(tmp_path, *_TINY, "-abstract", "-save", ck)
+    out = r.stdout + r.stderr
+    m = re.search(r"abstract audit -- (\d+) overlaps", out)
+    assert m and ck.exists(), out
+    want = int(m.group(1))
+    s = buda_cli.BudaSession()
+    sink = io.StringIO()
+    with contextlib.redirect_stdout(sink):
+        for line in (f"source {_ROOT / 'flow' / 'mockpdk' / 'stack.buda'}",
+                     f"open_bdb {ck}", "derive_busterms 5",
+                     "add_blocks_from_bdb 0", "add_blocks_from_bdb 1 skip",
+                     "add_blocks_from_bdb 2 skip", "add_blocks_from_bdb 3 skip",
+                     "add_blocks_from_bdb 4 skip", "load_pipeline expanded"):
+            s.run_command(line)
+    assert s.nuts_result is not None and s.nuts_result.segments
+    assert s.nuts_result.num_overlaps == 0 and not s.nuts_result.overlap_details
+    buda.compute_nuts_metrics(s.nuts_result)
+    assert s.nuts_result.num_overlaps == want
+    assert len(s.nuts_result.overlap_details) == want

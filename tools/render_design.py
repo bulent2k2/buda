@@ -80,6 +80,7 @@ for _p in (os.path.join(_ROOT, "src"), os.path.join(_ROOT, "build")):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
+import buda                                           # noqa: E402
 import buda_cli                                       # noqa: E402
 try:
     from viz_common import _LAYER_COLOR as LAYER_COLOR  # the viewer's palette
@@ -293,6 +294,14 @@ def draw_nuts(ax, s, names, highlight_overlaps=True):
                     lw=1.1, alpha=0.85, zorder=5, solid_capstyle="butt")
     n_ovl = 0
     if highlight_overlaps:
+        # A result RESTORED from a checkpoint (load_pipeline) carries the
+        # placement and no audit of it: recount with the solver's own
+        # predicate before drawing, so a checkpoint's picture shows the
+        # same overlaps the run reported.
+        if (not getattr(s.nuts_result, "overlap_details", None)
+                and getattr(s.nuts_result, "num_overlaps", 0) == 0
+                and hasattr(buda, "compute_nuts_metrics")):
+            buda.compute_nuts_metrics(s.nuts_result)
         segs = {(g.bundle_id, g.seg_idx): g for g in s.nuts_result.segments}
         from matplotlib.patches import Rectangle
         for d in getattr(s.nuts_result, "overlap_details", []):
@@ -390,6 +399,10 @@ def render(flow, prefix, title=None, dpi=150, label_depth=1):
         # sharing a track are one wire, and an unplaced segment is no wire.
         _, _, awl, abs_unplaced = s._wirelength_by_bundle(s.nuts_result.segments)
         awl = round(awl)
+        if (not getattr(s.nuts_result, "overlap_details", None)
+                and s.nuts_result.num_overlaps == 0
+                and hasattr(buda, "compute_nuts_metrics")):
+            buda.compute_nuts_metrics(s.nuts_result)   # a restored result: recount
         n_ovl = s.nuts_result.num_overlaps
         fig, ax = _new_fig(bounds, die, f"{title} — NUTS: abstract bus tracks "
                                         f"({n_bund} bundles, {n_ovl} overlap(s))")

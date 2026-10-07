@@ -296,5 +296,8 @@ for {set round 1} {$round <= $iterate} {incr round} {
     set gap [expr {int(ceil($gap * $widen_f))}]
     buda::stop
 }
-if {$save ne ":memory:"} { buda::save_bdb }
+# A file-backed BDB is written THROUGH as the pipeline runs (bundles,
+# candidates, the plan, the placed segments), so `-save FILE` needs no
+# save step: the file is the checkpoint, and a render or a judge reads it
+# with `open_bdb FILE` + `load_pipeline`.
 if {$abstract} { bigsoc::verdict_abstract "bigsoc.tcl" } else { bigsoc::verdict "bigsoc.tcl" }
