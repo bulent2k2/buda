@@ -167,28 +167,33 @@ PDK, `wl 0.25`:
 | first audit | 781 violations in 32 bundles (0 supply-doomed seats) |
 | one healer round | 36 violations in 6 bundles |
 
-The SoC at NQ = 2 (118 leaves, 415 buses, 9256 bits; `bigsoc.tcl 2`):
+The SoC at NQ = 2 (126 leaves at five levels of cells, 447 buses, 10,024
+bits; `bigsoc.tcl 2`, the NPU by the array rule):
 
-| arm | floorplan | first audit | after the vehicle's two healer rounds |
+| arm | floorplan | first audit (ovl / unplaced) | after the vehicle's two healer rounds |
 |---|---|---|---|
-| one round | die 3147 × 3316, 87 % | 32 ovl / 672 unplaced | 8 ovl / 124 unplaced |
-| `-iterate 3` (gap 16 → 24 → 36, starved cells × 1.25 per round) | die 4805 × 4668, 75 % | 26 / 603 | **0 ovl / 19 unplaced** |
-| `-bottomup` (`set_bottom_up *`, `align_bottom_up`, `on_mismatch independent`) | the one-round floorplan; 2 of 3 movable instances nudged, every nested template reported off its parent's phase | 36 / 630 | 19 ovl / 315 unplaced; 1104 reference bits solved once and 600 copied to 27 sibling instances |
+| one round | die 4839 × 2434, 81 % | 9 / 209 | 0 ovl / 38 unplaced (41 s) |
+| `-iterate 3` (gap 16 → 24 → 36, starved cells × 1.25 per round) | die 4759 × 3572, 84 % | 4 / 149 (round 3) | **clean — 0 / 0 / 0** (14 s for the three rounds) |
+| `-bottomup` (`set_bottom_up *`, `align_bottom_up`, `on_mismatch independent`) | the one-round floorplan | 16 / 430 | 1 ovl / 113 unplaced (2 min) |
 
 Read honestly: the loop's levers are blunt — the healerless first audits
-of the three rounds (672, 803, 603) barely move, and the demand rule grows
-eleven cell types — and what the endpoint shows is that a wider channel
-gives the HEALERS room.  Which is the SoC vehicle's own lesson about
-channels, measured here from the other side: a channel is a workaround the
-caller names, not the cause.  The 19 bits left are one 24-bit psum output
-of the NPU's last row and one peripheral link into a crossbar.
+of the three rounds (209, 230, 149) barely move, and the demand rule
+grows six cell types (every small block the NPU's and the routers' buses
+cross) — and what the endpoint shows is a wider channel giving the
+HEALERS the room to finish, which is the SoC vehicle's own lesson about
+channels measured from the other side: a channel is a workaround the
+caller names, not the cause.  Before the L0 and with the engine placing
+the array too (`-npu auto`, the first cut), the same arms ended 8 / 124
+and 0 / 19 — a different design, so not a comparison, recorded because
+that is the number the first commit carries.
 
-The large dial, `bigsoc.tcl 4 -NC 4 -N 8 -NL3 4 -NMC 4 -NIO 8` (370 leaves,
-1,407 buses, 30,664 bits, 512 bundles): die 6064 × 6804 at 63 % (the
-14 top-level blocks clustered), first audit 143 ovl / 1343 unplaced,
-26 / 390 after the two healer rounds, 4 m 31 s wall on four cores.  The
-dirt scales with the design (about 1.3 % of the bits stranded at the end
-at either size), which says the residual is a class, not a size.
+The large dial, `bigsoc.tcl 4 -NC 4 -N 8 -NL3 4 -NMC 4 -NIO 8`, was
+measured on the first cut (no L0, the engine placing the array: 370
+leaves, 1,407 buses, 512 bundles): die 6064 × 6804 at 63 %, first audit
+143 ovl / 1343 unplaced, 26 / 390 after the two healer rounds, 4 m 31 s
+wall on four cores — about 1.3 % of the bits stranded at the end at
+either size, the residual a class and not a size.  The reticle dial of
+the current design is in §4b.
 
 Runtime at NQ = 2: 40–52 s wall for the whole chain, the floorplan 3–7 s
 of it.  The smallest dial (34 leaves) runs in 7 s.

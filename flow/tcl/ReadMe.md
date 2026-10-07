@@ -270,19 +270,19 @@ and is NOT clean:
 
 | run | floorplan | first audit (ovl / unplaced) | endpoint |
 |---|---|---|---|
-| `2` | die 3147 x 3316, 87 % util, 3 s | 32 / 672 | 8 / 124 after two healer rounds |
-| `2 -iterate 3` | die 4805 x 4668, 75 % | 26 / 603 (round 3) | **0 / 19** |
-| `2 -bottomup` | the same floorplan, `align_bottom_up` nudging 2 of 3 movable instances; every nested template reported MISALIGNED and solved `independent` | 36 / 630 | 19 / 315; 1104 reference bits solved once, 600 copied to 27 instances |
-| `4 -NC 4 -N 8 -NL3 4 -NMC 4 -NIO 8` (370 leaves, 1,407 buses, 512 bundles) | die 6064 x 6804, 63 %, the 14 top blocks clustered | 143 / 1343 | 26 / 390 after two healer rounds, 4 m 31 s wall |
+| `2` | die 4839 x 2434, 81 % util, 3 s | 9 / 209 | 0 / 38 after two healer rounds, 41 s |
+| `2 -iterate 3` | die 4759 x 3572, 84 % | 4 / 149 (round 3) | **clean, 0 / 0 / 0**, 14 s for the three rounds |
+| `2 -bottomup` | the same floorplan, every template solved once and copied, the nested ones reported MISALIGNED and solved `independent` | 16 / 430 | 1 / 113, 2 min |
+| `4 -NC 4 -N 8 -NL3 4 -NMC 4 -NIO 8` (first cut: no L0, the engine placing the array) | die 6064 x 6804, 63 % | 143 / 1343 | 26 / 390 after two healer rounds, 4 m 31 s wall |
 
 `-iterate K` is the top-down half of the loop: each round re-floorplans
 with every cell the previous route filled past `-demand` percent on a TOP
 layer (`buda::query demand`) grown by `-grow` and the channel widened by
 `-widen`, routed healerless to judge the floorplan rather than the
 healers; the last round heals.  The levers are blunt — the three rounds'
-first audits are 672, 803, 603 — and what the endpoint shows is a wider
-channel giving the healers room, which is the SoC vehicle's channel
-lesson read from the other side.  The bottom-up arm says something about
+first audits are 209, 230, 149 — and what the endpoint shows is a wider
+channel giving the healers the room to finish, which is the SoC
+vehicle's channel lesson read from the other side.  The bottom-up arm says something about
 the STACK: with V pitches 18/32/41 the x track period is 11,808 units, so
 a diverse 2-D packing cannot be phase-aligned by translation (every
 nested template is reported off its parent's phase), as `soc.tcl`
