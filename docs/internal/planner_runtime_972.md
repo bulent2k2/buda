@@ -231,8 +231,27 @@ convenient.
   84.5 s with A + one scoring thread, no code beyond A.  The whole
   `-abstract` run then takes 13.7 min on this box, so the stages AFTER the
   planner, which the issue's run never reached (`run_nuts`, `check_design
-  nuts` on 5,804 bundles / 22 M bands), are the next thing to time — a
-  per-command replay is in progress as this is written.
+  nuts` on 5,804 bundles / 22 M bands), are the next thing to profile.
+  The recorded trace replayed through `bin/buda --threads 1
+  --report-json` (so NUTS's per-layer pool is ONE thread here too; the
+  planner's 111 s against the Tcl run's 84.5 s is the CLI's flow-log
+  capture of 6,105 `[Planner]` lines):
+
+  | command | seconds |
+  |---|---|
+  | `auto_floorplan` | 19.4 |
+  | `run_hier_bundler depth 5` | 5.4 |
+  | `generate_hier_topologies` | 42.4 |
+  | `run_planner hier 5` | 111.0 |
+  | `run_nuts` | **513.9** |
+  | `check_design nuts` | 32.2 |
+  | `report_wirelength` | 9.4 |
+  | whole run | 738.3 |
+
+  So once the planner is fixed, abstract NUTS is the reticle dial's
+  bottleneck (1,036 overlaps / 28 interval violations at the audit), and it
+  deserves the same per-phase timer treatment before anything is
+  concluded about it — this run also serialised its per-layer pool.
 * NQ=8 / NQ=16 re-measured: 6.2 s / 9.3 s against 47.2 s / 247.6 s.
 * QoR corpus `--vs main` 0 better / 0 worse, abstract and detailed WL +0,
   for A (and C when built); B is covered by the existing thread-count
