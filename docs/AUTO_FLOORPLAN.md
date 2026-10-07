@@ -248,57 +248,62 @@ the engine's own `overlap_details`, the pairs `num_overlaps` counts; two
 colours no layer uses, since the first cut drew them red and M5 is red —
 so the dirt of an abstract route is where the eye goes first.
 
-**Measured (2026-10-07).**  The probe at NQ = 4 gives a 5740 × 8220 die
-(0.055 of the reticle), so the dial goes to **NQ = 62** — 5,868 instances,
-4,238 leaves, 15,069 buses, 375,496 bits, five levels — and
-`auto_floorplan` places it in 4.5 s: 72 top-level blocks by `cluster(9)`,
-die **22000 × 22276** at 0.786 utilization, placement audit clean.  That is
-**0.57 of the reticle's area, not the 0.85 asked for**: the probe scales
-NQ by area assuming the die grows linearly with the quadrant count, and the
-packing at 72 top blocks leaves more channel than at 14 (`cluster(8)` at
-NQ = 4, 0.673), so the fill lands short and a second probe at the result
-would be the fix (not built: one probe is the mechanism, and the miss is
-the measurement of it).  The picture is
+**Measured (2026-10-07, on the wired design — see §3 for what the
+repair of the vehicle's cache wiring moved; the first measurement, at
+NQ = 62 with a quarter of the cache buses dangling, read a 22000 × 22276
+die at 0.57 of the reticle and 1,036 / 119 / 147).**  The probe at
+NQ = 4 gives a 7376 × 5568 die (0.048 of the reticle), so the dial goes
+to **NQ = 71** — 6,696 instances, 4,832 leaves, 15,578 buses, 390,360
+bits, five levels — and `auto_floorplan` places it: 81 top-level blocks
+by `cluster(11)`, die **31504 × 17824** at 0.749 utilization, placement
+audit clean.  That is 0.654 of the reticle's AREA and **over the reticle's
+width** (31,504 against 26,000), which the flow says in so many words: the
+probe scales NQ by area assuming the die grows with the quadrant count
+and says nothing about its SHAPE, and the clustering packer's 81 blocks
+come out 1.77 : 1 where the reticle is 1 : 1.27 — so the second probe this
+paragraph has asked for since the first measurement would now have two
+things to correct, the fill and the aspect (`auto_floorplan aspect <f>`
+exists; the dial does not pass it).  Not built: one probe is the
+mechanism, and the miss is the measurement of it.  The picture is
 [`reticle_fp.png`](internal/img/bigsoc_reticle_fp.png).
 
-**The route** (re-measured 2026-10-07 after #974, `btcl -j 1` — one
-scoring thread — on 4 CPUs; the first measurement, 77 min wall of which
-`run_planner hier` 65, is issue #972's): `run_hier_bundler depth 5`
-(5,804 hbundles — D0 155, D1 633, D2 1544, D3 2976, D4 496) and
-`generate_hier_topologies` (40,045 candidates) take about 70 s together,
-**`run_planner hier` 82 s** (121 rip-ups, 176 bundles committed with
-overflow, a refine pass moving 180 — the same decisions line for line,
-which is what #974 measured and this run confirms), and abstract NUTS
-places the 7,637 bus segments to **1,036 overlapping pairs, 119 audit
-violations and 147 seat faults** at 2,834,330 units of abstract wire,
-unchanged; the whole `-abstract` run is **16.2 min wall** (972 s, run
-twice: 973.7 s with a rebuild sharing the box for its first two minutes,
-972.3 s alone), the balance abstract NUTS, its audit and the checkpoint
-writes (`-save`), with `run_nuts` the longest stage now — 514 s in
-#974's single-thread replay of the same trace
-([planner_runtime_972.md](internal/planner_runtime_972.md)).  The dirt is
-the top level's: 108 of the 155 D0 bundles committed with overflow (max
-761 units over a band's capacity) against 4 of 2,976 at D3 — the
-cluster(9) packing of 72 top blocks leaves channels the L3 ring, the
-memory and the NPU links cannot share, which is what the picture shows
+**The route** (`btcl -j 1` — one scoring thread — on 4 CPUs, after
+#974): `run_hier_bundler depth 5` (6,614 hbundles — D0 173, D1 705,
+D2 1760, D3 3408, D4 568; 23,072 nets in no bundle, the one-pin ports a
+shared cell declares, `l3_cell`'s NPU link on every slice but `l3_0`) and
+`generate_hier_topologies` take about 80 s together, **`run_planner hier`
+136 s** (154 rip-ups, 482 STRICT failures ranking 1.09 M committed plans
+in 23 s, the ladder 25 s, the refine pass 34 s; 20.6 ms per bundle
+against 14 ms on the under-wired NQ = 62 design — the wired top is
+harder: 141 of the 173 D0 bundles commit with overflow, max 1,062 units
+over a band's capacity, and 134 of 705 at D1), and abstract NUTS places
+the bus segments to **1,488 overlapping pairs, 111 audit violations and
+702 seat faults** at 3,633,658 units of abstract wire; the whole
+`-abstract` run is **19.6 min wall** (1,174 s), the balance abstract NUTS,
+its audit and the checkpoint writes (`-save`).  The dirt is the top
+level's, as before and more so: the cluster packing of 81 top blocks
+leaves channels the L3 ring, the memory and the NPU links cannot share,
+which is what the picture shows
 ([`bigsoc_reticle_nuts.png`](internal/img/bigsoc_reticle_nuts.png): the
 yellow is where two buses hold one track).  No healer ran (`-abstract`);
-with the planner at 82 s the healers are the next thing to try at this
-size, each round paying NUTS's eight minutes.  The planner time was two
+with the planner at two minutes the healers are the next thing to try at
+this size, each round paying NUTS's ten minutes.  The planner time was two
 faults, not one (#974, `docs/internal/planner_runtime_972.md`): every
-`plan_bundle` call re-summed every band of every cut (22 million on this
-grid, 2015 × 1848 Hanan lines over six layers) — FIXED, the total is kept
-beside the bands — and every call re-allocates and zeroes each scoring
-worker's whole-grid overlay, which is OPEN and is why one scoring thread
-beats four at every size here: NQ = 8 / 16 / 62 plan in 4.3 s / 8.7 s /
-82 s at `-j 1` against 16.4 s / 135 s / unfinished at `-j 4` (the shipped
-code before #974: 77 s / 270 s / 3,900 s), for 944 / 1,664 / 5,804
-bundles, every audit identical across all of it.  The smaller dials of the
-same design for comparison, at `-j 1`: NQ = 16 (1,636 instances, 1,202
-leaves, 3,971 buses; die 11752 × 11740 at 0.726) reads 194 overlaps, 35
-audit violations, 143 seat faults at the abstract audit in 72 s wall
-(194 s at `-j 4`); NQ = 8 (900 instances, 2,283 buses; die 11236 × 7120 at
-0.670) 112 / 24 / 82 in 25 s (36 s).  The NQ = 16 abstract route with its overlaps highlighted is
+`plan_bundle` call re-summed every band of every cut (22.6 million on
+this grid, 2359 × 1596 Hanan lines over six layers) — FIXED, the total is
+kept beside the bands — and every call re-allocates and zeroes each
+scoring worker's whole-grid overlay, which is OPEN and is why one scoring
+thread beats four at every size here: NQ = 8 / 16 plan in 4.3 s / 11.9 s
+at `-j 1` against 13.8 s / 137 s at `-j 4` (the shipped code before #974,
+on the under-wired design: 77 s / 270 s, and 65 min unfinished-then-
+finished at NQ = 62), for 944 / 1,664 bundles, every audit identical
+across the thread counts.  The smaller dials of the same design for
+comparison, at `-j 1`: NQ = 16 (1,636 instances, 1,202 leaves, 3,971
+buses; die 11752 × 11740 at 0.726) reads 194 overlaps, 35 audit
+violations, 143 seat faults at the abstract audit in 72 s wall (194 s at
+`-j 4`); NQ = 8 (900 instances, 2,283 buses; die 11236 × 7120 at 0.670)
+112 / 24 / 82 in 25 s (36 s).  The NQ = 16 abstract route with its
+overlaps highlighted is
 [`bigsoc_nq16_nuts.png`](internal/img/bigsoc_nq16_nuts.png),
 its floorplan [`bigsoc_nq16_fp.png`](internal/img/bigsoc_nq16_fp.png).
 

@@ -264,8 +264,9 @@ accumulators south on their columns, the tail below, a DMA under it) and
 hands it to `auto_floorplan` as `fixed pe_cell,row_cell,npu_cell`; `-npu
 auto` lets the engine place it, for the comparison.  `-reticle` sizes the
 dial to the PDK's stated reticle (26 × 33 mm) from one probe floorplan
-(measured: the probe lands the die at 0.57 of the reticle against the 0.85
-asked, since the top packing's channel grows with the block count —
+(measured: the probe scales NQ by AREA and says nothing about shape, so
+on the wired design it lands a 31504 x 17824 die at 0.654 of the
+reticle's area and over its 26,000 width, which the flow says —
 docs/AUTO_FLOORPLAN.md §4b); `-abstract` stops at abstract NUTS, the
 fast screen, and `tools/render_design.py` draws that stage with every
 overlapping pair highlighted (`docs/internal/img/bigsoc_nq16_nuts.png`).
@@ -289,7 +290,7 @@ and are not kept:
 | `4 -NC 4 -N 8 -NL3 4 -NMC 4 -NIO 8` (first cut: no L0, the engine placing the array) | die 6064 x 6804, 63 % | 143 / 1343 | 26 / 390 after two healer rounds, 4 m 31 s wall |
 | `8 -NC 4 -N 8 -NL3 4 -NMC 4 -NIO 16 -abstract` | die 11236 x 7120 (900 instances, 674 leaves, 2,283 buses), 67 % | abstract audit 112 ovl / 24 viol / 82 seat faults | 25 s at `-j 1`, the planner 4.3 s (36 s / 13.8 s at `-j 4`; 77 s before #974) |
 | `16 -NC 4 -N 8 -NL3 4 -NMC 4 -NIO 16 -abstract` | die 11752 x 11740 (1636 instances, 1202 leaves, 3,971 buses), 73 % | abstract audit 194 / 35 / 143 | 72 s at `-j 1`, the planner 11.9 s (194 s / 137 s at `-j 4`; 270 s before #974) |
-| `4 -NC 4 -N 8 -NL3 4 -NMC 4 -NIO 16 -reticle -abstract` (NQ = 62 after the probe) | die 22000 x 22276 (5868 instances, 4238 leaves, 15,069 buses), 0.786 util, 0.57 of the reticle, 4.5 s | abstract audit 1036 ovl / 119 viol / 147 seat faults over 5,804 bundles (108 of the 155 top-level bundles committed with overflow) | **16.2 min at `-j 1`, the planner 82 s** (re-measured after #974; the first run took 77 min, 65 of them the planner — issue #972, still open for the scoring workers, which is why one thread beats four here); the floorplan is `docs/internal/img/bigsoc_reticle_fp.png`, the route `bigsoc_reticle_nuts.png` |
+| `4 -NC 4 -N 8 -NL3 4 -NMC 4 -NIO 16 -reticle -abstract` (NQ = 71 after the probe) | die 31504 x 17824 (6696 instances, 4832 leaves, 15,578 buses), 0.749 util, 0.654 of the reticle's area and OVER its width (31,504 against 26,000 — the probe scales by area and says nothing about shape, said by the flow) | abstract audit 1488 ovl / 111 viol / 702 seat faults over 6,614 bundles (141 of the 173 top-level bundles committed with overflow) | **19.6 min at `-j 1`, the planner 136 s** (after #974; the under-wired NQ = 62 design took 77 min with 65 of them the planner — issue #972, still open for the scoring workers, which is why one thread beats four here); the floorplan is `docs/internal/img/bigsoc_reticle_fp.png`, the route `bigsoc_reticle_nuts.png` |
 
 `-iterate K` is the top-down half of the loop: each round re-floorplans
 with every cell the previous route filled past `-demand` percent on a TOP
