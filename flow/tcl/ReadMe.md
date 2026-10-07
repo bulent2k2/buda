@@ -280,7 +280,7 @@ and is NOT clean:
 | `4 -NC 4 -N 8 -NL3 4 -NMC 4 -NIO 8` (first cut: no L0, the engine placing the array) | die 6064 x 6804, 63 % | 143 / 1343 | 26 / 390 after two healer rounds, 4 m 31 s wall |
 | `8 -NC 4 -N 8 -NL3 4 -NMC 4 -NIO 16 -abstract` | die 11008 x 8298 (900 instances, 674 leaves), 61 % | abstract audit 104 ovl / 28 viol / 30 seat faults | 67 s, the planner 77 s of a replay under load |
 | `16 -NC 4 -N 8 -NL3 4 -NMC 4 -NIO 16 -abstract` | die 12248 x 11740 (1636 instances, 1202 leaves), 73 % | abstract audit 99 / 55 / 58 | 4.5 min, the planner 270 s |
-| `4 -NC 4 -N 8 -NL3 4 -NMC 4 -NIO 16 -reticle -abstract` (NQ = 62 after the probe) | die 22000 x 22276 (5868 instances, 4238 leaves, 15,069 buses), 0.786 util, 0.57 of the reticle, 4.5 s | **not reached**: `run_planner hier` runs > 25 min on its 5,804 bundles and does not finish — issue #972 | the floorplan is `docs/internal/img/bigsoc_reticle_fp.png` |
+| `4 -NC 4 -N 8 -NL3 4 -NMC 4 -NIO 16 -reticle -abstract` (NQ = 62 after the probe) | die 22000 x 22276 (5868 instances, 4238 leaves, 15,069 buses), 0.786 util, 0.57 of the reticle, 4.5 s | abstract audit 1036 ovl / 119 viol / 147 seat faults over 5,804 bundles (108 of the 155 top-level bundles committed with overflow) | 77 min, **65 of them the planner** — issue #972; the floorplan is `docs/internal/img/bigsoc_reticle_fp.png`, the route `bigsoc_reticle_nuts.png` |
 
 `-iterate K` is the top-down half of the loop: each round re-floorplans
 with every cell the previous route filled past `-demand` percent on a TOP

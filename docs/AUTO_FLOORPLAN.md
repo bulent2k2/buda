@@ -247,21 +247,31 @@ would be the fix (not built: one probe is the mechanism, and the miss is
 the measurement of it).  The picture is
 [`reticle_fp.png`](internal/img/bigsoc_reticle_fp.png).
 
-**The route is NOT measured at this size**: `run_hier_bundler depth 5`
-(5,804 hbundles — D0 155, D1 633, D2 1544, D3 2976, D4 496) and
+**The route, measured once (77 min wall on 4 CPUs)**: `run_hier_bundler
+depth 5` (5,804 hbundles — D0 155, D1 633, D2 1544, D3 2976, D4 496) and
 `generate_hier_topologies` (40,045 candidates) take about 70 s together,
-and `run_planner hier` then runs for **more than 25 minutes without
-finishing**, twice.  The cause is in the planner, not the design: every
+**`run_planner hier` takes 65 minutes** (121 rip-ups, 176 bundles committed
+with overflow, a refine pass moving 180), and abstract NUTS places the
+7,637 bus segments to **1,036 overlapping pairs, 119 audit violations and
+147 seat faults** at 2,834,330 units of abstract wire.  The dirt is the
+top level's: 108 of the 155 D0 bundles committed with overflow (max 761
+units over a band's capacity) against 4 of 2,976 at D3 — the cluster(9)
+packing of 72 top blocks leaves channels the L3 ring, the memory and the
+NPU links cannot share, which is what the picture shows
+([`bigsoc_reticle_nuts.png`](internal/img/bigsoc_reticle_nuts.png): the
+yellow is where two buses hold one track).  No healer ran (`-abstract`),
+and at this size none would finish in an afternoon under the planner as
+it is.  The planner time is in the planner, not the design: every
 `plan_bundle` call re-sums every band of every cut (22 million on this
-grid, 2012 × 1844 Hanan lines over six layers), so the planner's cost is
-bundles × grid — issue #972 has the repro, the scaling (NQ = 2 / 8 / 16:
-1.4 s / 77 s / 270 s for 174 / 944 / 1,664 bundles) and where to start.
-Until it is fixed, the biggest size the abstract screen finishes at is
-**NQ = 16** (1,636 instances, 1,202 leaves, 4,347 buses; die 12248 × 11740
-at 0.727): 99 overlaps, 55 audit violations, 58 seat faults at the
-abstract audit, 4.5 min end to end; NQ = 8 (900 instances, 2,483 buses)
-reads 104 / 28 / 30 in 67 s.  The NQ = 16 abstract route with its overlaps
-highlighted is [`bigsoc_nq16_nuts.png`](internal/img/bigsoc_nq16_nuts.png),
+grid, 2012 × 1844 Hanan lines over six layers), so its cost is bundles ×
+grid — issue #972 has the repro, the scaling (NQ = 2 / 8 / 16 / 62: 1.4 s
+/ 77 s / 270 s / 3,900 s for 174 / 944 / 1,664 / 5,804 bundles) and where
+to start.  The smaller dials of the same design for comparison: NQ = 16
+(1,636 instances, 1,202 leaves, 4,347 buses; die 12248 × 11740 at 0.727)
+reads 99 overlaps, 55 audit violations, 58 seat faults at the abstract
+audit in 4.5 min; NQ = 8 (900 instances, 2,483 buses) 104 / 28 / 30 in
+67 s.  The NQ = 16 abstract route with its overlaps highlighted is
+[`bigsoc_nq16_nuts.png`](internal/img/bigsoc_nq16_nuts.png),
 its floorplan [`bigsoc_nq16_fp.png`](internal/img/bigsoc_nq16_fp.png).
 
 ## 5. What it is not, and what comes next
