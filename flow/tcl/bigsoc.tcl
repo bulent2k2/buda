@@ -189,11 +189,16 @@ proc bigsoc::round {vfile save pdk fpopts grows gap bottomup caps heal {npu arra
     }
     if {$caps} { buda::reserve_top_layers 2 }
 
-    # the hier flow, soc.tcl's: the deepest leaf is four levels down
-    buda::derive_busterms 4
+    # the hier flow, soc.tcl's one level deeper: the deepest leaf (an L0
+    # bank, soc/quad/cl/core/l0/bank) is at component depth 4, so every
+    # depth 0..4 is projected and the busterms and the bundler go to 5 —
+    # measured, not assumed: at 4 the L0's two buses per core audited
+    # `invalid busterm face` at every core (416 of 601 violations at
+    # NQ = 2), their leaves never having become blocks.
+    buda::derive_busterms 5
     buda::add_blocks_from_bdb 0
-    foreach d {1 2 3} { buda::add_blocks_from_bdb $d skip }
-    buda::run_hier_bundler depth 4
+    foreach d {1 2 3 4} { buda::add_blocks_from_bdb $d skip }
+    buda::run_hier_bundler depth 5
     set nb [buda::query bundles]
     if {$nb == 0} { error "bigsoc.tcl: nothing bundled" }
     puts "bigsoc.tcl: $nb bundles"
