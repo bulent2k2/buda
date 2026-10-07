@@ -1041,29 +1041,26 @@ int BDB::infer_pin_dirs_from_cell_pins() {
 // Absolute pin position is derived from cell_pin relative coords when available,
 // otherwise defaults to the component's centroid.
 // Also auto-registers the port on the cell type (INSERT OR IGNORE in cell_pin).
+static void bdb_pin_abs(sqlite3* db, const std::string& cell, const std::string& pin_name,
+                        const std::string& o, double x1, double y1, double x2, double y2,
+                        double& px, double& py);
+
 void BDB::_add_pin_by_path(int net_id, const std::string& inst_path,
                             const std::string& pin_name, const std::string& dir) {
-    Stmt q(_db, "SELECT id, cell, x1, y1, x2, y2 FROM component WHERE name=?");
+    Stmt q(_db, "SELECT id, cell, x1, y1, x2, y2, COALESCE(orient,'N') FROM component WHERE name=?");
     sqlite3_bind_text(q, 1, inst_path.c_str(), -1, SQLITE_TRANSIENT);
     if (sqlite3_step(q) != SQLITE_ROW) return;  // component not in DB; skip silently
     int comp_id = sqlite3_column_int(q, 0);
     std::string cell_name = (const char*)sqlite3_column_text(q, 1);
     double x1 = sqlite3_column_double(q, 2), y1 = sqlite3_column_double(q, 3);
     double x2 = sqlite3_column_double(q, 4), y2 = sqlite3_column_double(q, 5);
+    std::string orient = (const char*)sqlite3_column_text(q, 6);
 
-    // Derive absolute pin position from cell_pin offset when available.
-    double px = (x1 + x2) / 2.0, py = (y1 + y2) / 2.0;
-    if (!cell_name.empty()) {
-        Stmt cp(_db, "SELECT px, py FROM cell_pin WHERE cell=? AND pin_name=?");
-        sqlite3_bind_text(cp, 1, cell_name.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text(cp, 2, pin_name.c_str(),  -1, SQLITE_TRANSIENT);
-        if (sqlite3_step(cp) == SQLITE_ROW) {
-            double rx = sqlite3_column_double(cp, 0);
-            double ry = sqlite3_column_double(cp, 1);
-            if (rx >= 0) px = x1 + rx;
-            if (ry >= 0) py = y1 + ry;
-        }
-    }
+    // Absolute pin position: the cell_pin offset through the instance's
+    // orientation when the cell declares one, the box centre otherwise --
+    // the one rule the box setters reposition by (bdb_pin_abs).
+    double px, py;
+    bdb_pin_abs(_db, cell_name, pin_name, orient, x1, y1, x2, y2, px, py);
 
     // Insert instance-level pin (idempotent).
     Stmt ins(_db,
@@ -3442,33 +3439,84 @@ void BDB::set_comp_is_leaf(const std::string& name, bool is_leaf) {
 // stays unknown.  Without this a set_comp_bbox left pin.px/py at the old
 // placement and compute_hpwl() summed stale coordinates (the C6-08 fault
 // move_comp was cured of, reached again through the box setters).
+//
+// The position is the cell_pin offset read through the INSTANCE's orientation
+// over the cell's w x h box (the `orient_map` table of topology.cpp /
+// src/orient_rect.py: swap axes, reflect x, reflect y), so an `S` instance's
+// local (2, 3) lands near its box's upper-right and an `E` instance's inside
+// its swapped box -- applied as an `N` instance's, the offset put the pin at
+// (x1 + 2, y1 + 3) whatever the token said (Codex P2 on #973, round 5).
+// ONE rule for the creation site (_add_pin_by_path) and the box setters, so
+// the two cannot disagree; an `N` instance reads exactly as before.
+static void bdb_orient_pin(const std::string& o, double rx, double ry,
+                           double cw, double ch, double& dx, double& dy) {
+    bool s = false, fx = false, fy = false;
+    if      (o == "S")  { fx = true; fy = true; }
+    else if (o == "FN") { fy = true; }
+    else if (o == "FS") { fx = true; }
+    else if (o == "W")  { s = true; fx = true; }
+    else if (o == "E")  { s = true; fy = true; }
+    else if (o == "FW") { s = true; }
+    else if (o == "FE") { s = true; fx = true; fy = true; }
+    double x = rx, y = ry, bw = cw, bh = ch;
+    if (s) { std::swap(x, y); std::swap(bw, bh); }
+    if (fx) x = bw - x;
+    if (fy) y = bh - y;
+    dx = x; dy = y;
+}
+
+// Where _add_pin_by_path puts a pin of `cell` on an instance with box
+// (x1,y1)-(x2,y2) and orientation `o`: the oriented cell_pin offset when the
+// cell declares one (a negative coordinate = none), the box centre otherwise.
+static void bdb_pin_abs(sqlite3* db, const std::string& cell, const std::string& pin_name,
+                        const std::string& o, double x1, double y1, double x2, double y2,
+                        double& px, double& py) {
+    px = (x1 + x2) / 2.0; py = (y1 + y2) / 2.0;
+    if (cell.empty()) return;
+    Stmt cp(db, "SELECT cp.px, cp.py, c.width, c.height FROM cell_pin cp "
+                "JOIN cell c ON c.name = cp.cell WHERE cp.cell=? AND cp.pin_name=?");
+    sqlite3_bind_text(cp, 1, cell.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(cp, 2, pin_name.c_str(), -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(cp) != SQLITE_ROW) return;
+    double rx = sqlite3_column_double(cp, 0), ry = sqlite3_column_double(cp, 1);
+    double cw = sqlite3_column_double(cp, 2), ch = sqlite3_column_double(cp, 3);
+    if (rx < 0 || ry < 0) {
+        // one axis declared: keep the N-rule half, the centre for the other
+        if (rx >= 0) px = x1 + rx;
+        if (ry >= 0) py = y1 + ry;
+        return;
+    }
+    double dx, dy;
+    bdb_orient_pin(o, rx, ry, cw, ch, dx, dy);
+    px = x1 + dx; py = y1 + dy;
+}
+
 static void _reposition_pins_in_box(sqlite3* db, const std::string& name,
                                     double x1, double y1, double x2, double y2) {
-    Stmt u(db, R"(
-        UPDATE pin
-        SET px = CASE WHEN (SELECT cp.px FROM cell_pin cp JOIN component c
-                              ON cp.cell = c.cell
-                             WHERE c.id = pin.comp_id AND cp.pin_name = pin.pin_name) >= 0
-                      THEN ?1 + (SELECT cp.px FROM cell_pin cp JOIN component c
-                                   ON cp.cell = c.cell
-                                  WHERE c.id = pin.comp_id AND cp.pin_name = pin.pin_name)
-                      ELSE (?1 + ?3) / 2.0 END,
-            py = CASE WHEN (SELECT cp.py FROM cell_pin cp JOIN component c
-                              ON cp.cell = c.cell
-                             WHERE c.id = pin.comp_id AND cp.pin_name = pin.pin_name) >= 0
-                      THEN ?2 + (SELECT cp.py FROM cell_pin cp JOIN component c
-                                   ON cp.cell = c.cell
-                                  WHERE c.id = pin.comp_id AND cp.pin_name = pin.pin_name)
-                      ELSE (?2 + ?4) / 2.0 END
-        WHERE comp_id = (SELECT id FROM component WHERE name = ?5)
-          AND px >= 0 AND py >= 0)");
-    sqlite3_bind_double(u, 1, x1);
-    sqlite3_bind_double(u, 2, y1);
-    sqlite3_bind_double(u, 3, x2);
-    sqlite3_bind_double(u, 4, y2);
-    sqlite3_bind_text  (u, 5, name.c_str(), -1, SQLITE_TRANSIENT);
-    if (sqlite3_step(u) != SQLITE_DONE)
-        throw std::runtime_error("set_comp_bbox: pin update failed for " + name);
+    Stmt q(db, "SELECT id, cell, COALESCE(orient,'N') FROM component WHERE name=?");
+    sqlite3_bind_text(q, 1, name.c_str(), -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(q) != SQLITE_ROW) return;
+    int comp_id = sqlite3_column_int(q, 0);
+    std::string cell = sqlite3_column_text(q, 1) ? (const char*)sqlite3_column_text(q, 1) : "";
+    std::string o = (const char*)sqlite3_column_text(q, 2);
+    std::vector<std::pair<int,std::string>> pins;   // (pin rowid, pin_name)
+    {
+        Stmt p(db, "SELECT rowid, pin_name FROM pin WHERE comp_id=? AND px >= 0 AND py >= 0");
+        sqlite3_bind_int(p, 1, comp_id);
+        while (sqlite3_step(p) == SQLITE_ROW)
+            pins.emplace_back(sqlite3_column_int(p, 0), (const char*)sqlite3_column_text(p, 1));
+    }
+    Stmt u(db, "UPDATE pin SET px=?, py=? WHERE rowid=?");
+    for (const auto& [rid, pn] : pins) {
+        double px, py;
+        bdb_pin_abs(db, cell, pn, o, x1, y1, x2, y2, px, py);
+        sqlite3_reset(u);
+        sqlite3_bind_double(u, 1, px);
+        sqlite3_bind_double(u, 2, py);
+        sqlite3_bind_int   (u, 3, rid);
+        if (sqlite3_step(u) != SQLITE_DONE)
+            throw std::runtime_error("set_comp_bbox: pin update failed for " + name);
+    }
 }
 
 void BDB::set_comp_bbox(const std::string& name,
@@ -3559,6 +3607,7 @@ int BDB::derive_container_bboxes(double margin,
     auto comps = all_components();
     std::unordered_map<int, std::vector<int>> kids;   // parent id -> child ids
     std::unordered_map<int, size_t> index;
+    std::vector<std::tuple<std::string,double,double,double,double>> boxes;
     for (size_t i = 0; i < comps.size(); ++i) {
         index[comps[i].id] = i;
         if (comps[i].parent_id >= 0) kids[comps[i].parent_id].push_back(comps[i].id);
@@ -3597,7 +3646,9 @@ int BDB::derive_container_bboxes(double margin,
             continue;
         }
         x1 -= margin; y1 -= margin; x2 += margin; y2 += margin;
-        set_comp_bbox(c.name, x1, y1, x2, y2);
+        // Batched below: set_comp_bbox recomputes every net's HPWL per call,
+        // which made this O(containers x nets) (Codex P2 on #973, round 5).
+        boxes.emplace_back(c.name, x1, y1, x2, y2);
         c.x1 = x1; c.y1 = y1; c.x2 = x2; c.y2 = y2;   // visible to its parent
         // A container is not a leaf, whatever the netlist reader guessed:
         // it has children, and the routing model treats a leaf footprint as
@@ -3605,6 +3656,7 @@ int BDB::derive_container_bboxes(double margin,
         set_comp_is_leaf(c.name, false);
         ++placed;
     }
+    if (!boxes.empty()) set_comp_bboxes(boxes);   // one write, one HPWL recompute
 
     // Write the derived size back to the CELL definition (opens item 3).
     // A merge-created container cell carries width=height=0 — neither input

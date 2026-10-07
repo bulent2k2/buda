@@ -268,6 +268,28 @@ hnet::net soc u0.p u1.p u0.p
     assert r.returncode != 0 and "names 'u0.p' twice" in r.stderr, r.stderr
 
 
+def test_an_indirect_hierarchy_cycle_is_refused(tmp_path):
+    """`hnet::inst` refused only a direct self-instance; A containing B and
+    B containing A was accepted, and `hnet::level` then recursed to Tcl's
+    nesting limit while the emitter would elaborate forever (Codex P2 on
+    #973, round 5).  The edge is refused where it would close the cycle."""
+    hnet = _ROOT / "flow" / "tcl" / "hnet.tcl"
+    script = tmp_path / "t.tcl"
+    script.write_text(f"""
+source {{{hnet}}}
+hnet::cell a
+hnet::cell b
+hnet::cell c
+hnet::inst a u_b b
+hnet::inst b u_c c
+hnet::inst c u_a a
+""")
+    r = subprocess.run(["tclsh", str(script)], capture_output=True, encoding="utf-8",
+                       cwd=tmp_path, timeout=60)
+    assert r.returncode != 0
+    assert "c cannot contain a: a already contains c (through b), a cycle" in r.stderr, r.stderr
+
+
 def test_a_cell_instantiating_the_top_is_omitted_so_the_top_imports_as_the_top(tmp_path):
     """Putting the declared top LAST is not enough when a library cell
     INSTANTIATES it — a wrapper or harness nobody instantiates — because

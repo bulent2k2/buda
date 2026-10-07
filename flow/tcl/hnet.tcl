@@ -109,6 +109,24 @@ proc hnet::inst {cell inst child} {
     _cell_or_die $cell
     _cell_or_die $child
     if {$child eq $cell} { error "hnet: $cell cannot contain itself" }
+    # ... nor contain a cell that already contains it, however indirectly:
+    # a cycle made hnet::level recurse until Tcl's nesting limit and the
+    # emitter elaborate forever (Codex P2 on #973, round 5).  Walk the
+    # child's subtree for the parent before the edge goes in.
+    set stack [list $child]
+    set seen [dict create]
+    while {[llength $stack]} {
+        set c [lindex $stack end]; set stack [lrange $stack 0 end-1]
+        if {[dict exists $seen $c]} { continue }
+        dict set seen $c 1
+        foreach i $INSTS($c) {
+            set k [lindex $i 1]
+            if {$k eq $cell} {
+                error "hnet: $cell cannot contain $child: $child already contains $cell (through $c), a cycle"
+            }
+            lappend stack $k
+        }
+    }
     foreach i $INSTS($cell) {
         if {[lindex $i 0] eq $inst} { error "hnet: instance $cell/$inst declared twice" }
     }

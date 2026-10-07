@@ -235,6 +235,21 @@ def test_a_rewritten_box_carries_its_positioned_pins():
     db.set_comp_bbox("u", 0, 0, 20, 20)
     u = {p.pin_name: (p.px, p.py) for p in db.pins_by_comp(comps["u"].id)}
     assert u["a"] == (2, 3), u
+    # an ORIENTED instance reads the offset through its token over the cell's
+    # box (Codex P2 on #973, round 5): a 10 x 20 cell with pin (2, 3) --
+    # S puts it at (w - 2, h - 3), E in the swapped 20 x 10 box at (3, w - 2)
+    # -- and creation (add_net_pins) and the setter agree on it
+    db.add_cell("r", 10, 20)
+    db.add_cell_pin("r", "a", "INPUT", 2, 3)
+    db.add_comp("s", "r", "", 0, 0, 10, 20, True, "S")
+    db.add_comp("e", "r", "", 100, 100, 120, 110, True, "E")
+    db.add_net_pins("m", "s.a", ["e.a"])
+    ids = {c.name: c.id for c in db.all_components()}
+    assert {p.pin_name: (p.px, p.py) for p in db.pins_by_comp(ids["s"])}["a"] == (8, 17)
+    assert {p.pin_name: (p.px, p.py) for p in db.pins_by_comp(ids["e"])}["a"] == (103, 108)
+    db.set_comp_bboxes([("s", 30, 30, 40, 50), ("e", 200, 200, 220, 210)])
+    assert {p.pin_name: (p.px, p.py) for p in db.pins_by_comp(ids["s"])}["a"] == (38, 47)
+    assert {p.pin_name: (p.px, p.py) for p in db.pins_by_comp(ids["e"])}["a"] == (203, 208)
     # a pin without a position (the Verilog-import case) is left unknown
     s, _ = _session(f"import_verilog {_TPU_V}")
     cid = {c.name: c for c in s.bdb.all_components()}["row_0/pe_0"].id
