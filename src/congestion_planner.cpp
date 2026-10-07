@@ -15,6 +15,7 @@
  */
 
 #include "congestion_planner.h"
+#include "topology_analysis.h"
 #include "conn_topology.h"
 #include <iostream>
 #include <algorithm>
@@ -2130,10 +2131,17 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
     const auto t_ll0 = prof ? std::chrono::steady_clock::now()
                             : std::chrono::steady_clock::time_point{};
     std::map<int,double> layer_load;
-    for (const auto& c : cuts_) {
-        double u = 0.0;
-        for (int b = 0; b < c.num_bands(); ++b) u += c.usage(b);
-        layer_load[c.layer_id] += u;
+    if (std::getenv("BUDA_LAYERLOAD_SCAN")) {
+        // The historical full scan (study control for #972).
+        for (const auto& c : cuts_) {
+            double u = 0.0;
+            for (int b = 0; b < c.num_bands(); ++b) u += c.usage(b);
+            layer_load[c.layer_id] += u;
+        }
+    } else {
+        // O(cuts): each cut keeps its band total current (GlobalCut::
+        // add_usage), so the per-layer load is a sum over cuts, not bands.
+        for (const auto& c : cuts_) layer_load[c.layer_id] += c.total_usage();
     }
     if (prof) {
         prof_layerload_us_ += (long long)std::chrono::duration_cast<
@@ -2374,6 +2382,31 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
     // pre-injection hook of the bottom-up negotiate price translation).
     extend_grid_for(bundles);
 
+    // [PlanProf] phase timers (BUDA_REPLAN_PROF=1; see the header).
+    const bool kOtProf = replan_prof_on();
+    using ot_clock_ = std::chrono::steady_clock;
+    auto ot_now = [&]() { return kOtProf ? ot_clock_::now() : ot_clock_::time_point{}; };
+    auto ot_us  = [&](ot_clock_::time_point t0) {
+        return (long long)std::chrono::duration_cast<std::chrono::microseconds>(
+                   ot_clock_::now() - t0).count();
+    };
+    const auto t_ot_run = ot_now();
+    // Every [PlanProf] field describes THIS run (Codex P2 on #974): the
+    // phase accumulators reset here, and the pb_cum counters — cumulative
+    // for the [ReplanProf] line, which keeps that meaning — are printed as
+    // the delta since this entry.  A planner is re-run on the same instance
+    // by the explorer's re-plan and the healers.
+    long long pb0_calls = 0, pb0_cands = 0, pb0_ll = 0, pb0_sc = 0;
+    if (kOtProf) {
+        analysis_cache_reset_counters();   // planner-only counts
+        prof_ot_reserve_us_ = prof_ot_strict_us_ = prof_ot_rank_us_ = 0;
+        prof_ot_ladder_us_ = prof_ot_fallback_us_ = prof_ot_commit_us_ = 0;
+        prof_ot_refine_us_ = prof_ot_strict_fail_ = prof_ot_ranked_ = 0;
+        prof_ot_ladder_plans_ = prof_ot_ripups_ = prof_ot_refine_plans_ = 0;
+        pb0_calls = prof_plan_calls_;   pb0_cands = prof_cands_;
+        pb0_ll    = prof_layerload_us_; pb0_sc    = prof_scoring_us_;
+    }
+
     // Resolve the span reference for non-TOP penalty scaling: unset means
     // 25% of the larger Hanan grid extent — segments longer than that pay
     // the full base_cost_non_top_, shorter ones proportionally less.
@@ -2501,9 +2534,13 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
     // every cell-local turn, so it saw the full parked set (issue #516:
     // one D1 bundle, 100 candidate-less D2 wrappers, overflow 346 -> 19.25
     // once the phantom is gone, with NUTS/DNUTS clean either way).
-    for (int idx : order)
-        if (!bundles[idx].input.candidates.empty())
-            apply_reservation(bundles[idx], +1.0);
+    {
+        const auto t0 = ot_now();
+        for (int idx : order)
+            if (!bundles[idx].input.candidates.empty())
+                apply_reservation(bundles[idx], +1.0);
+        if (kOtProf) prof_ot_reserve_us_ += ot_us(t0);
+    }
 
     std::vector<BundleAssignment> assignments;
     assignments.reserve(bundles.size());
@@ -2533,7 +2570,11 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
         if (bw.input.candidates.empty()) continue;
         // Release this bundle's own reservation: its demand is now planned
         // for real.
-        apply_reservation(bw, -1.0);
+        {
+            const auto t0 = ot_now();
+            apply_reservation(bw, -1.0);
+            if (kOtProf) prof_ot_reserve_us_ += ot_us(t0);
+        }
 
         // (1) Overflow is a hard constraint: first look for a candidate that
         //     is both slide-feasible and overflow-free.  A detour only loses
@@ -2542,7 +2583,9 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
         //     On failure, `contended` holds the (cut,band) pairs whose
         //     overflow disqualified candidates — the bands rip-up must relieve.
         std::set<std::pair<int,int>> contended;
+        const auto t_strict = ot_now();
         PlanResult plan = plan_bundle(bw, PlanMode::STRICT, &contended);
+        if (kOtProf) prof_ot_strict_us_ += ot_us(t_strict);
         bool already_committed = false;
         int  stage = 0;   // STRICT
 
@@ -2556,6 +2599,8 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
         //     Accept only if BOTH bundles end up overflow-free; otherwise
         //     restore the victim exactly and try the next one.
         if (!plan.found) {
+            const auto t_rank = ot_now();
+            if (kOtProf) { ++prof_ot_strict_fail_; prof_ot_ranked_ += (long long)committed.size(); }
             std::vector<std::pair<double,int>> ranked;   // (overlap, committed idx)
             for (int k = 0; k < (int)committed.size(); ++k) {
                 // A locked (bottom-up) wrapper is never a rip-up victim:
@@ -2571,15 +2616,20 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
                           if (a.first != b.first) return a.first > b.first;
                           return a.second > b.second;
                       });
+            if (kOtProf) prof_ot_rank_us_ += ot_us(t_rank);
+            const auto t_ladder = ot_now();
             for (const auto& [ovl, k] : ranked) {
                 auto& cp = committed[k];
                 auto& pw = bundles[cp.bundle_idx];
                 commit_plan(pw, cp.plan, -1.0);             // rip up victim
                 PlanResult mine = plan_bundle(bw, PlanMode::STRICT);
+                if (kOtProf) ++prof_ot_ladder_plans_;
                 if (mine.found) {
                     commit_plan(bw, mine);
                     PlanResult theirs = plan_bundle(pw, PlanMode::STRICT);
+                    if (kOtProf) ++prof_ot_ladder_plans_;
                     if (theirs.found) {
+                        if (kOtProf) ++prof_ot_ripups_;
                         commit_plan(pw, theirs);
                         // Patch the victim's per-level layer mix (audit C3-02):
                         // the refine pass patches layer_hist on every accepted
@@ -2610,6 +2660,7 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
                 }
                 commit_plan(pw, cp.plan);                   // restore victim
             }
+            if (kOtProf) prof_ot_ladder_us_ += ot_us(t_ladder);
         }
 
         // (3) Overflow is unavoidable even after rip-up: fall back to soft
@@ -2633,6 +2684,7 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
                           + std::to_string((int)std::lround(s * 100)) + "%";
             pol_note += "]";
         }
+        const auto t_fb = ot_now();
         if (!plan.found) {
             plan = plan_bundle(bw, PlanMode::ALLOW_OVERFLOW);
             if (plan.found) {
@@ -2678,6 +2730,7 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
         //     with no wire anywhere that every later stage then had nothing to
         //     say about (`run_nuts` warns generically without naming it, and
         //     `check_design` had no bundle to audit, so it printed Success).
+        if (kOtProf) prof_ot_fallback_us_ += ot_us(t_fb);
         if (!plan.found) {
             std::cout << "[Planner] WARNING: Bundle "
                       << bw.input.original_bundle.id
@@ -2689,11 +2742,13 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
 
         // Commit the winning topology's per-segment choices to the cut state
         // (the rip-up path already did).
+        const auto t_commit = ot_now();
         if (!already_committed) commit_plan(bw, plan);
 
         committed.push_back({idx, (int)assignments.size(), plan});
         assignments.push_back(make_assignment(bw, plan));
         log_choice(bw, plan, bw.input.topology_pinned ? " [pinned]" : "");
+        if (kOtProf) prof_ot_commit_us_ += ot_us(t_commit);
 
         LevelStats& ls = level_stats[bw.hier.level];
         ls.n += 1;
@@ -2725,6 +2780,7 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
     // are never revisited.  The per-level summary's layer mix is patched on
     // every accepted change; the stage counts keep describing the pass-1
     // ladder.
+    const auto t_refine = ot_now();
     if (refine_passes_ > 0) {
         std::vector<int> ref_order(committed.size());
         std::iota(ref_order.begin(), ref_order.end(), 0);
@@ -2767,6 +2823,7 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
                 bw.input.topology_pinned        = false;
                 bw.plan.selected_topology_index = old_sel;
                 PlanResult np = plan_bundle(bw, PlanMode::STRICT);
+                if (kOtProf) prof_ot_refine_plans_ += 2;
                 bool adopt = np.found &&
                              (!keep.found || np.score + 1e-9 < keep.score);
                 if (!adopt) {
@@ -2789,6 +2846,34 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
         for (auto& [lvl, ls] : level_stats)
             for (auto it = ls.layer_hist.begin(); it != ls.layer_hist.end();)
                 it = (it->second <= 0) ? ls.layer_hist.erase(it) : std::next(it);
+    }
+    if (kOtProf) {
+        prof_ot_refine_us_ += ot_us(t_refine);
+        // stderr: the flow log captures stdout and would swallow it.
+        size_t nbands = 0;
+        for (const auto& c : cuts_) nbands += (size_t)c.num_bands();
+        std::cerr << "[PlanProf] bundles=" << bundles.size()
+                  << " committed=" << committed.size()
+                  << " cuts=" << cuts_.size() << " bands=" << nbands
+                  << " grid=" << x_grid_.size() << "x" << y_grid_.size()
+                  << " leaves=" << blocks_cache_.size()
+                  << " total=" << ot_us(t_ot_run) / 1000.0 << "ms"
+                  << " reserve=" << prof_ot_reserve_us_ / 1000.0 << "ms"
+                  << " strict=" << prof_ot_strict_us_ / 1000.0 << "ms"
+                  << " rank=" << prof_ot_rank_us_ / 1000.0 << "ms(fails="
+                  << prof_ot_strict_fail_ << " scored=" << prof_ot_ranked_ << ")"
+                  << " ladder=" << prof_ot_ladder_us_ / 1000.0 << "ms(plans="
+                  << prof_ot_ladder_plans_ << " ripups=" << prof_ot_ripups_ << ")"
+                  << " fallback=" << prof_ot_fallback_us_ / 1000.0 << "ms"
+                  << " commit=" << prof_ot_commit_us_ / 1000.0 << "ms"
+                  << " refine=" << prof_ot_refine_us_ / 1000.0 << "ms(plans="
+                  << prof_ot_refine_plans_ << ")"
+                  << " pb[calls=" << (prof_plan_calls_ - pb0_calls)
+                  << " cands=" << (prof_cands_ - pb0_cands)
+                  << " layerload=" << (prof_layerload_us_ - pb0_ll) / 1000.0
+                  << "ms scoring=" << (prof_scoring_us_ - pb0_sc) / 1000.0 << "ms]"
+                  << " analysis[computes=" << analysis_cache_counters().first
+                  << " hits=" << analysis_cache_counters().second << "]\n";
     }
 
     // Per-level planning summary — printed when the set spans hierarchy
