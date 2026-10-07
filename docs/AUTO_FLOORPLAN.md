@@ -140,7 +140,15 @@ ports-only module is a block, which is what `import_def_lef` +
 Options: `pdk <file>` `util <f>` `gap <n>` `margin <n>` `top_margin <n>`
 `place auto|slice|grid|sa` `seed <n>` `keep <n>` `wl <f>` `snap <px> <py>`
 `bitpitch <f>` `pad <n>` `aspect <f>` `grow <cell>=<f>,...`
-`cols <cell>=<n>,...` `sa_iter <n>`.  `snap` puts every origin on a track
+`cols <cell>=<n>,...` `sa_iter <n>` `fixed <cell>,...`.  **`fixed`** keeps
+a cell exactly as the BDB holds it (size from `resize_cell`, children from
+`add_inst_to_cell`) and stamps it like any template: a systolic array is
+not a job for a placer, and `bigsoc.tcl` writes its NPU by `tpu_lib.tcl`'s
+own array rule — PEs at a pitch along a row, rows stacked, feeders west,
+weight buffers north, accumulators south on their columns, the tail below,
+a DMA under the tail — and fixes `pe_cell`, `row_cell` and `npu_cell`
+while the engine places everything around the array (`-npu auto` lets the
+engine place it too, for the comparison).  `snap` puts every origin on a track
 period (sizes, gaps and margins rounded up to it) so every instance of a
 cell sees the same track phase wherever its parent puts it — the
 `-bottomup` row-pitch snap of `tpu_lib.tcl`, as a rule.  `grow` scales a
@@ -194,6 +202,27 @@ which is what `soc.tcl` recorded for the same stack — and the misaligned
 instances are solved individually, which is the `independent` policy's
 meaning.  `auto_floorplan snap <px> <py>` is the rule that would align
 them, at that period's cost in die.
+
+## 4b. The reticle-limit chip
+
+`flow/mockpdk/mock.pdk` states the mock lithography's reticle
+(`reticle_w 26000`, `reticle_h 33000` µm — the industry's 26 × 33 mm
+field), and `bigsoc.tcl -reticle` sizes the dial to it: one probe
+floorplan at the given NQ, then NQ scaled so the die fills `-fill` (0.85)
+of the reticle's area, re-floorplanned and measured against it.  The
+design it runs is the deep one — soc / quad / cluster / core / l0 / bank,
+five levels of cells above the standard cells — with an L0 inside every
+core, L1i/L1d per cluster, an L2 per quadrant, L3 slices at the top, and
+the NPU by the array rule.  `-abstract` stops at abstract NUTS (bus
+segments on tracks, the NUTS-stage audit, no bit placed): the fast screen
+of a floorplan, and the picture the overlap highlight is for.
+
+`tools/render_design.py` draws the abstract stage with every OVERLAPPING
+pair's two segments in red and their overlap rectangle filled — the
+engine's own `overlap_details`, the pairs `num_overlaps` counts — so the
+dirt of an abstract route is where the eye goes first.
+
+The reticle dial's own numbers (NQ = 62 at NC = 4, N = 8: 4,238 leaves, 15,069 buses, 375,496 bits) are recorded below as soon as the run that produces them finishes; until then this section states the mechanism only.
 
 ## 5. What it is not, and what comes next
 

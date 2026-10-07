@@ -21,7 +21,7 @@ from ._options import reject_unknown_options
 
 _OPTS = ("pdk", "util", "gap", "margin", "top_margin", "place", "seed",
          "keep", "wl", "snap", "bitpitch", "pad", "aspect", "grow", "cols",
-         "sa_iter")
+         "sa_iter", "fixed")
 _PLACE = ("auto", "slice", "grid", "sa")
 
 
@@ -52,11 +52,11 @@ def cmd_auto_floorplan(session, cmd, args, cmd_line):
     #        [top_margin <n>] [place auto|slice|grid|sa] [seed <n>]
     #        [keep <n>] [wl <f>] [snap <px> <py>] [bitpitch <f>] [pad <n>]
     #        [aspect <f>] [grow <cell>=<f>,...] [cols <cell>=<n>,...]
-    #        [sa_iter <n>]
+    #        [sa_iter <n>] [fixed <cell>,...]
     kw = dict(pdk_path=None, gap=16, margin=16, place="auto", seed=1,
               keep=5, wl_weight=0.5, snap=(1, 1), bit_pitch=None, pad=None,
               aspect_cap=2.0, grow=None, cols=None, sa_iter=0,
-              top_margin=None, util=None)
+              top_margin=None, util=None, fixed=())
     i = 0
     keys = []
     while i < len(args):
@@ -103,6 +103,9 @@ def cmd_auto_floorplan(session, cmd, args, cmd_line):
             if d is None:
                 return
             kw["cols"] = d
+        elif k == "fixed":
+            # cells whose size and template offsets the BDB already holds
+            kw["fixed"] = tuple(c.strip() for c in v.split(",") if c.strip())
         else:
             try:
                 fv = float(v)

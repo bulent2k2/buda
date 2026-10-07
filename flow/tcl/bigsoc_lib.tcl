@@ -31,7 +31,8 @@
 #   soc
 #   |- quad_<q>  x NQ                          quad_cell
 #   |   |- cl_<c>  x NC                        cluster_cell
-#   |   |   |- core: dec alu mul regf          core_cell      (leaves at depth 3)
+#   |   |   |- core: dec alu mul regf          core_cell
+#   |   |   |   `- l0: tag l0bank_<b> x NB0    l0_cell        <- LEVEL-0 cache, in the core (leaves at depth 4)
 #   |   |   |- l1i, l1d: tag + bank_<b> x NB   l1_cell
 #   |   |   `- rtr: fi_in xbar fi_out          rtr_cell
 #   |   `- l2: tag ctl bank_<b> x NB2          l2_cell        <- LEVEL-2 cache, per quadrant
@@ -52,7 +53,7 @@
 #
 # Knobs (`configure`, every one `-NAME value` on the command line):
 #   NQ NC            quadrants, clusters per quadrant        (the dial)
-#   NB NB2 NB3       banks per L1 / L2 / L3 slice
+#   NB0 NB NB2 NB3   banks per L0 (inside the core) / L1 / L2 / L3 slice
 #   NL3 NMC          L3 slices, memory controllers (NMC <= NL3)
 #   N PIPE           the TPU's N x N array and tail depth
 #   NIO              peripherals
@@ -66,7 +67,7 @@ source [file join $_bigsoc_dir hnet.tcl]
 namespace eval bigsoc {
     variable P
     array set P {
-        NQ 2   NC 2   NB 2   NB2 4   NB3 4   NL3 2   NMC 2
+        NQ 2   NC 2   NB0 1  NB 2   NB2 4   NB3 4   NL3 2   NMC 2
         N 4    PIPE 1 NIO 4
         DW 32  AW 16  IW 32  CW 8
         TAW 8  PW 24  WW 8
@@ -121,12 +122,17 @@ proc bigsoc::build {} {
     hnet::cell sram_cell
     hnet::port sram_cell a_in $AW input
     hnet::port sram_cell out $DW output
+    hnet::cell l0bank_cell
+    hnet::port l0bank_cell a_in $AW input
+    hnet::port l0bank_cell out $DW output
     hnet::cell tag_cell
     hnet::port tag_cell a_in $AW input
     hnet::port tag_cell b_out $AW output
     hnet::port tag_cell d_in $DW input
     hnet::port tag_cell d_out $DW output
     hnet::port tag_cell out $DW output
+    hnet::port tag_cell m_a_out $AW output
+    hnet::port tag_cell m_d_in $DW input
     hnet::cell xbar_cell
     hnet::port xbar_cell in $DW input
     hnet::port xbar_cell q_in $DW input
@@ -197,20 +203,41 @@ proc bigsoc::build {} {
         hnet::port dma_cell p_in_$c $PW input
     }
 
-    # ── core: soc_lib's four buses, the cache ports out
+    # ── L0: a tag and NB0 banks INSIDE the core -- the register file reads
+    # it, its misses go out through the core's ports to the L1.  A fifth
+    # level of cells above the standard cells (soc / quad / cluster / core /
+    # l0 / bank).
+    hnet::cell l0_cell
+    foreach {nm w d} [list a_in $AW input d_out $DW output m_a_out $AW output m_d_in $DW input] {
+        hnet::port l0_cell $nm $w $d
+    }
+    hnet::inst l0_cell tag tag_cell
+    hnet::net l0_cell .a_in tag.a_in
+    hnet::net l0_cell .d_out tag.d_out
+    hnet::net l0_cell .m_a_out tag.m_a_out
+    hnet::net l0_cell .m_d_in tag.m_d_in
+    for {set b 0} {$b < $P(NB0)} {incr b} {
+        hnet::inst l0_cell bank_$b l0bank_cell
+        hnet::net l0_cell tag.b_out bank_$b.a_in
+        hnet::net l0_cell bank_$b.out tag.d_in
+    }
+
+    # ── core: soc_lib's four buses, the L0, the cache ports out
     hnet::cell core_cell
     foreach {nm w d} [list ia_out $AW output da_out $AW output i_in $IW input d_in $DW input] {
         hnet::port core_cell $nm $w $d
     }
-    foreach {i c} {dec dec_cell alu alu_cell mul mul_cell regf regf_cell} { hnet::inst core_cell $i $c }
+    foreach {i c} {dec dec_cell alu alu_cell mul mul_cell regf regf_cell l0 l0_cell} { hnet::inst core_cell $i $c }
     hnet::net core_cell dec.out alu.i_in
     hnet::net core_cell mul.out regf.m_in
     hnet::net core_cell regf.out alu.r_in
     hnet::net core_cell alu.out regf.a_in
     hnet::net core_cell .ia_out dec.a_out
-    hnet::net core_cell .da_out regf.a_out
     hnet::net core_cell .i_in dec.i_in
-    hnet::net core_cell .d_in regf.d_in
+    hnet::net core_cell regf.a_out l0.a_in
+    hnet::net core_cell l0.d_out regf.d_in
+    hnet::net core_cell .da_out l0.m_a_out
+    hnet::net core_cell .d_in l0.m_d_in
 
     # ── L1: a tag and NB banks, every bank addressed by the tag and read
     # back through it (never straight to the core: soc_lib's star)
@@ -427,6 +454,53 @@ proc bigsoc::build {} {
     hnet::top soc
 }
 
+# ── the NPU's geometry, by the ARRAY rule the repository already has ─────
+# A systolic array is not a job for a placer: `tpu_lib.tcl` places it by
+# rule (PEs at a pitch along a row, rows stacked, feeders west, weight
+# buffers north, accumulators south on their columns, the tail below), and
+# that rule is reused here VERBATIM -- `tpu_vehicle::configure` sizes the
+# blocks from the same widths and `leaf_instances` walks the same
+# placement -- written into the BDB as FIXED templates (`resize_cell` +
+# `add_inst_to_cell`) that `auto_floorplan fixed ...` stamps untouched,
+# while everything around the array is placed by the engine.  The DMA
+# (not in tpu_lib) sits below the tail, as wide as the array.
+proc bigsoc::npu_fixed_templates {} {
+    variable P
+    set dir [file dirname [file normalize [info script]]]
+    if {![llength [info procs ::tpu_vehicle::configure]]} {
+        uplevel #0 [list source [file join $dir tpu_lib.tcl]]
+    }
+    tpu_vehicle::configure [list N $P(N) AW $P(TAW) PW $P(PW) WW $P(WW) PIPE $P(PIPE) EDGEIN 1 X0 24 Y0 24]
+    array set T [tpu_vehicle::configure]
+    foreach cs [tpu_vehicle::cell_sizes] {
+        lassign $cs cell w h
+        buda::resize_cell $cell $w $h
+    }
+    # the row: N PEs west to east
+    buda::resize_cell row_cell $T(RW) $T(RH)
+    for {set c 0} {$c < $T(N)} {incr c} {
+        buda::add_inst_to_cell row_cell pe_$c pe_cell [expr {$T(ROWM) + $c*$T(PPX)}] $T(ROWM)
+    }
+    # the array with its edges and tail, every instance where tpu_lib puts
+    # it; the DMA below the tail.  tpu_lib's DIEH budgets the tail; the
+    # cell is that plus the DMA.
+    set dmah [expr {$T(ACCH) + 2*$T(PEPAD)}]
+    set W $T(DIEW)
+    set H [expr {$T(DIEH) + $dmah + $T(PIPEGAP)}]
+    buda::resize_cell dma_cell [expr {$W - 2*$T(X0)}] $dmah
+    buda::resize_cell npu_cell $W $H
+    foreach inst [tpu_vehicle::leaf_instances] {
+        lassign $inst name cell x y
+        if {[string match "row_*/pe_*" $name]} { continue }
+        buda::add_inst_to_cell npu_cell $name $cell $x $y
+    }
+    for {set r 0} {$r < $T(N)} {incr r} {
+        buda::add_inst_to_cell npu_cell row_$r row_cell $T(AX) [expr {$T(AY) + $r*$T(RPY)}]
+    }
+    buda::add_inst_to_cell npu_cell dma dma_cell $T(X0) [expr {$T(DIEH) + $T(PIPEGAP)}]
+    return [list pe_cell feed_cell wbuf_cell acc_cell dma_cell row_cell npu_cell]
+}
+
 proc bigsoc::banner {what} {
     variable P
     array set c [hnet::census]
@@ -468,6 +542,18 @@ proc bigsoc::heal_if_dirty {who} {
     buda::refine_selection
     buda::check_design dnuts
     return 1
+}
+proc bigsoc::verdict_abstract {who} {
+    set ov [buda::query overlaps]
+    set vi [buda::query violations]
+    set se [buda::query seats]
+    buda::stop
+    if {$ov != 0 || $vi != 0} {
+        puts stderr "$who: FAILED (abstract) -- $ov overlaps, $vi audit violations, $se seat faults"
+        exit 1
+    }
+    puts "$who: clean (abstract) -- 0 overlaps, 0 audit violations, $se seat faults"
+    return 0
 }
 proc bigsoc::verdict {who} {
     set ov [buda::query overlaps]

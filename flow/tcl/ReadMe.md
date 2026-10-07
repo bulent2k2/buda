@@ -239,20 +239,31 @@ from its pins and [the mock PDK](../mockpdk/ReadMe.md)'s area model, packs
 every container, stamps every instance and sets the die.  Then
 `soc.tcl`'s hier flow runs on it.
 
-The shape, a level deeper than `soc.tcl` on the cache side and with the
-mesh folded in:
+The shape, two levels deeper than `soc.tcl` on the cache side (an L0 inside
+every core, an L3 at the top) and with the mesh folded in — five levels of
+cells above the standard cells (soc / quad / cluster / core / l0 / bank):
 
 ```
 soc
-|- quad_<q> x NQ: cl_<c> x NC (core + l1i/l1d + rtr), l2 (tag ctl bank x NB2)   <- L2 per quadrant
+|- quad_<q> x NQ: cl_<c> x NC (core (dec alu mul regf + l0) + l1i/l1d + rtr),
+|                 l2 (tag ctl bank x NB2)                                     <- L0 per core, L1 per cluster, L2 per quadrant
 |- l3_<s> x NL3: tag ctl bank x NB3                                             <- L3 slices, a ring
 |- mem_<m> x NMC: memctl + phy
 |- npu: row_<r> x N (pe x N), feed, wbuf, acc, pipe, dma                        <- the TPU
 `- io: bridge + p_<k> x NIO
 ```
 
-The dial: NQ=2 is 118 leaves / 415 buses / 9,256 bits; `8 -NC 4 -N 16
--NL3 4 -NMC 4 -NIO 16` is 834 leaves / 3,587 buses / 71,816 bits.
+The NPU is NOT placed by the engine: a systolic array is not a job for a
+placer, so the vehicle writes it by `tpu_lib.tcl`'s own array rule (PEs
+at a pitch along a row, rows stacked, feeders west, weight buffers north,
+accumulators south on their columns, the tail below, a DMA under it) and
+hands it to `auto_floorplan` as `fixed pe_cell,row_cell,npu_cell`; `-npu
+auto` lets the engine place it, for the comparison.  `-reticle` sizes the
+dial to the PDK's stated reticle (26 × 33 mm) from one probe floorplan;
+`-abstract` stops at abstract NUTS, the fast screen.
+
+The dial: NQ=2 is 126 leaves / 447 buses / 10,024 bits; `8 -NC 4 -N 16
+-NL3 4 -NMC 4 -NIO 16` is 898 leaves.
 
 **Measured (2026-10-07), the honest state** — the first floorplan ROUTES
 and is NOT clean:

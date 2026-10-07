@@ -266,14 +266,19 @@ def draw_keepouts(ax, s):
     return n
 
 
-def _layer_legend(ax, names, used):
+def _layer_legend(ax, names, used, extra=()):
     hs = [Line2D([0], [0], color=LAYER_COLOR.get(l, "#000"), lw=3,
                  label=f"{names.get(l, 'L%d' % l)} ({'H' if h else 'V'})")
           for l, h in sorted(used.items())]
-    _side_legend(ax, hs, "layer")
+    _side_legend(ax, hs + list(extra), "layer")
 
 
-def draw_nuts(ax, s, names):
+def draw_nuts(ax, s, names, highlight_overlaps=True):
+    """One line per placed bus segment in its layer's colour; the segments
+    of every OVERLAPPING pair (the engine's own `overlap_details`, the
+    pairs `num_overlaps` counts) drawn again on top in red, their overlap
+    rectangle filled, so the dirt of an abstract route is where the eye
+    goes first.  Returns the number of overlap pairs drawn."""
     used = {}
     for g in s.nuts_result.segments:
         if getattr(g, "placed", True) is False:
@@ -286,7 +291,43 @@ def draw_nuts(ax, s, names):
         else:
             ax.plot([g.track_position] * 2, [g.span_lo, g.span_hi], color=c,
                     lw=1.1, alpha=0.85, zorder=5, solid_capstyle="butt")
-    _layer_legend(ax, names, used)
+    n_ovl = 0
+    if highlight_overlaps:
+        segs = {(g.bundle_id, g.seg_idx): g for g in s.nuts_result.segments}
+        from matplotlib.patches import Rectangle
+        for d in getattr(s.nuts_result, "overlap_details", []):
+            n_ovl += 1
+            for key in ((d.bid_a, d.seg_a), (d.bid_b, d.seg_b)):
+                g = segs.get(key)
+                if g is None:
+                    continue
+                if g.horiz:
+                    ax.plot([g.span_lo, g.span_hi], [g.track_position] * 2,
+                            color="#d62728", lw=2.6, alpha=0.95, zorder=8,
+                            solid_capstyle="butt")
+                else:
+                    ax.plot([g.track_position] * 2, [g.span_lo, g.span_hi],
+                            color="#d62728", lw=2.6, alpha=0.95, zorder=8,
+                            solid_capstyle="butt")
+            # the overlap rectangle itself: routing direction x perpendicular
+            ga = segs.get((d.bid_a, d.seg_a))
+            horiz = ga.horiz if ga is not None else True
+            if horiz:
+                x0, y0 = d.span_lo, d.perp_lo
+                w, h = d.span_hi - d.span_lo, d.perp_hi - d.perp_lo
+            else:
+                x0, y0 = d.perp_lo, d.span_lo
+                w, h = d.perp_hi - d.perp_lo, d.span_hi - d.span_lo
+            pad = 6.0
+            ax.add_patch(Rectangle((x0 - pad, y0 - pad), w + 2 * pad, h + 2 * pad,
+                                   facecolor="#d62728", edgecolor="#7f0000",
+                                   alpha=0.45, lw=0.8, zorder=9))
+    extra = []
+    if n_ovl:
+        extra.append(Line2D([0], [0], color="#d62728", lw=2.6,
+                            label=f"overlapping ({n_ovl} pair(s))"))
+    _layer_legend(ax, names, used, extra)
+    return n_ovl
 
 
 def draw_dnuts(ax, s, names, signal, shields):
@@ -349,7 +390,9 @@ def render(flow, prefix, title=None, dpi=150, label_depth=1):
         # sharing a track are one wire, and an unplaced segment is no wire.
         _, _, awl, abs_unplaced = s._wirelength_by_bundle(s.nuts_result.segments)
         awl = round(awl)
-        fig, ax = _new_fig(bounds, die, f"{title} — NUTS: abstract bus tracks ({n_bund} bundles)")
+        n_ovl = s.nuts_result.num_overlaps
+        fig, ax = _new_fig(bounds, die, f"{title} — NUTS: abstract bus tracks "
+                                        f"({n_bund} bundles, {n_ovl} overlap(s))")
         draw_blocks_faint(ax, cs)
         n_keep = draw_keepouts(ax, s)
         draw_nuts(ax, s, names)

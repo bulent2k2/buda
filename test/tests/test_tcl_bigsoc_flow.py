@@ -57,15 +57,16 @@ def test_the_census_counts_the_design_not_a_model_of_it(tmp_path):
                   r"(\d+) buses, (\d+) bits", r.stdout)
     assert m, r.stdout
     cells, insts, leaves, buses, bits = map(int, m.groups())
-    assert cells == 33
+    assert cells == 35
     # NQ=2 NC=2 NB=2 NB2=4 NB3=4 NL3=2 NMC=2 N=4 PIPE=1 NIO=4:
     # per cluster 4 + 2*(1+NB) + 3 = 13 leaves x 4 clusters = 52;
     # an L2 per quadrant 2 + NB2 = 6 x 2; an L3 slice 2 + NB3 = 6 x 2;
     # mem 2 x 2; the NPU N*N + 3N + PIPE*N + 1 = 33; io 1 + NIO = 5
-    assert leaves == 52 + 12 + 12 + 4 + 33 + 5 == 118
+    # ... plus an L0 (tag + NB0 banks = 2) in each of the 4 cores
+    assert leaves == 52 + 8 + 12 + 12 + 4 + 33 + 5 == 126
     assert insts > leaves and buses > 400 and bits > 9000
     big = _run(tmp_path, 8, "-NC", 4, "-N", 16, "-NL3", 4, "-NMC", 4, "-NIO", 16, "-dry")
-    assert "834 leaf instances" in big.stdout, big.stdout
+    assert "898 leaf instances" in big.stdout, big.stdout
 
 
 def test_the_emitted_verilog_imports_with_every_template_intact(tmp_path):
@@ -73,7 +74,7 @@ def test_the_emitted_verilog_imports_with_every_template_intact(tmp_path):
     r = _run(tmp_path, 2, "-emit", v)
     assert r.returncode == 0, r.stdout + r.stderr
     text = v.read_text()
-    assert text.count("\nmodule ") + text.startswith("module ") == 33
+    assert text.count("\nmodule ") + text.startswith("module ") == 35
     # an unconnected port is omitted, never written `.port()`
     assert ".p_in_0()" not in text and "()" not in text.replace("soc ()", "")
     db = buda.BDB(":memory:")
@@ -95,6 +96,9 @@ def test_the_smallest_dial_runs_end_to_end_and_the_healers_find_room(tmp_path):
     r = _run(tmp_path, *_TINY)
     out = r.stdout + r.stderr
     assert "=== auto_floorplan" in out and "placement audit: clean" in out, out
+    # the NPU is placed by tpu_lib.tcl's own array rule, not the engine
+    assert re.search(r"npu_cell\s+\d+\s+\d+\s+\d+\s+\d+x\d+\s+fixed", out), out
+    assert re.search(r"pe_cell\s+\d+\s+\d+\s+\d+\s+152x56\s+fixed", out), out
     first = re.search(r"first audit -- (\d+) overlaps, (\d+) unplaced", out)
     final = re.search(r"(?:FAILED|clean) -- (\d+) overlaps, (\d+) unplaced", out)
     assert first and final, out
@@ -104,6 +108,20 @@ def test_the_smallest_dial_runs_end_to_end_and_the_healers_find_room(tmp_path):
     assert (r.returncode == 0) == ("clean --" in out)
     assert e_ovl + e_unpl <= f_ovl + f_unpl
     assert e_unpl < f_unpl
+
+
+def test_the_abstract_screen_stops_before_any_bit_is_placed(tmp_path):
+    r = _run(tmp_path, *_TINY, "-abstract")
+    out = r.stdout + r.stderr
+    assert "abstract audit --" in out and "first audit" not in out, out
+    assert ("clean (abstract)" in out) == (r.returncode == 0)
+
+
+def test_the_engine_places_the_array_too_when_asked(tmp_path):
+    r = _run(tmp_path, *_TINY, "-abstract", "-npu", "auto")
+    out = r.stdout + r.stderr
+    assert "abstract audit --" in out, out
+    assert not re.search(r"npu_cell\s+\d+\s+\d+\s+\d+\s+\d+x\d+\s+fixed", out)
 
 
 def test_an_unknown_knob_is_an_error(tmp_path):

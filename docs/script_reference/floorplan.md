@@ -17,7 +17,7 @@ auto_floorplan [pdk <file>] [gap <n>] [margin <n>] [top_margin <n>]
                [place auto|slice|grid|sa] [wl <f>] [snap <px> <py>]
                [grow <cell>=<f>,...] [cols <cell>=<n>,...]
                [seed <n>] [keep <n>] [pad <n>] [bitpitch <f>] [aspect <f>]
-               [util <f>] [sa_iter <n>]
+               [util <f>] [sa_iter <n>] [fixed <cell>,...]
 ```
 
 Size and place the whole cell tree of the open BDB — every leaf, every
@@ -41,6 +41,7 @@ used otherwise.
 | `pad <n>` / `bitpitch <f>` | the PDK's (24 / 4.0) | the face rule's slack and per-bit pitch |
 | `aspect <f>` | 2.0 | a container's aspect cap — a preference, taken within 15 % of the best cost, yielding to what its faces ask |
 | `util <f>` | the PDK's | the standard-cell utilisation the logic area is sized at |
+| `fixed <cell>,...` | none | cells whose geometry the BDB ALREADY holds — the size from the `cell` table (`resize_cell`), the children's offsets from the `cell_children` template rows (`add_inst_to_cell`) — kept untouched and stamped at every instance like any other template.  A placement the caller computed by a rule of its own: a systolic array is not a job for a placer, so `bigsoc.tcl` writes the NPU by `tpu_lib.tcl`'s own array rule and fixes it.  Refused when a fixed cell has no size or a child no offset |
 
 Prints a table — per cell its level, instance count, children, size, how
 it was sized (`face` / `area` / `macro` for a leaf with the face bits and

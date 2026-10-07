@@ -60,6 +60,17 @@
 #   -demand P       the demand threshold (default 80)
 #   -grow F         the per-round growth of a starved cell (default 1.25)
 #   -widen F        the per-round channel factor (default 1.5)
+#   -reticle        size the dial to the PDK's reticle: one probe floorplan
+#                   at the given NQ, then NQ scaled so the die fills the
+#                   reticle (`reticle_w/h` in mock.pdk) at -fill of its
+#                   area, re-floorplanned and reported against it
+#   -fill F         the reticle fill the dial aims at (default 0.85)
+#   -abstract       stop at abstract NUTS (bus segments on tracks, the
+#                   NUTS-stage audit, no bit placed) -- a fast screen of a
+#                   floorplan, soc.tcl's `-abstract`
+#   -npu auto|array the NPU's placement: `array` (default) = tpu_lib.tcl's
+#                   own rule written as fixed templates the engine keeps;
+#                   `auto` = the engine places the array like any cell
 # ============================================================
 
 set repo [file dirname [file dirname [file dirname [file normalize [info script]]]]]
@@ -76,6 +87,10 @@ set fpopts {}
 set save :memory:
 set caps 0
 set iterate 1
+set reticle 0
+set fill 0.85
+set abstract 0
+set npu array
 set demand_pct 80
 set grow_f 1.25
 set widen_f 1.5
@@ -89,9 +104,11 @@ while {$argi < $argc} {
     switch -- $opt {
         -dry      { set dry 1; incr argi }
         -bottomup { set bottomup 1; incr argi }
+        -reticle  { set reticle 1; incr argi }
+        -abstract { set abstract 1; incr argi }
         -noheal   { set heal 0; incr argi }
         -caps     { set caps 1; incr argi }
-        -emit - -pdk - -fp - -save - -iterate - -demand - -grow - -widen {
+        -emit - -pdk - -fp - -save - -iterate - -demand - -grow - -widen - -fill - -npu {
             if {$argi + 1 >= $argc} { error "bigsoc.tcl: $opt needs a value" }
             set v [lindex $argv [expr {$argi+1}]]
             switch -- $opt {
@@ -103,6 +120,8 @@ while {$argi < $argc} {
                 -demand  { set demand_pct $v }
                 -grow    { set grow_f $v }
                 -widen   { set widen_f $v }
+                -fill    { set fill $v }
+                -npu     { set npu $v }
             }
             incr argi 2
         }
@@ -117,6 +136,7 @@ while {$argi < $argc} {
     }
 }
 
+if {$npu ni {auto array}} { error "bigsoc.tcl: -npu wants auto or array" }
 bigsoc::configure $overrides
 bigsoc::build
 puts [bigsoc::banner "bigsoc.tcl"]
@@ -142,7 +162,7 @@ bigsoc::emit $vfile
 # round's growth and channel, the hier flow, the audit.  Returns the
 # demand rows of the routed result (for the next round to read) with the
 # verdict; the session is left open for the caller to finish.
-proc bigsoc::round {vfile save pdk fpopts grows gap bottomup caps heal} {
+proc bigsoc::round {vfile save pdk fpopts grows gap bottomup caps heal {npu array} {abstract 0} {probe 0}} {
     set repo [file dirname [file dirname [file dirname [file normalize [info script]]]]]
     buda::start
     buda::source [file join $repo flow mockpdk stack.buda]
@@ -157,7 +177,11 @@ proc bigsoc::round {vfile save pdk fpopts grows gap bottomup caps heal} {
     if {[dict size $grows]} {
         lappend opts grow [join [lmap {c f} $grows {format %s=%s $c $f}] ,]
     }
+    if {$npu eq "array"} {
+        lappend opts fixed [join [bigsoc::npu_fixed_templates] ,]
+    }
     buda::auto_floorplan {*}$opts {*}$fpopts
+    if {$probe} { return [buda::query die] }
 
     if {$bottomup} {
         buda::set_bottom_up *
@@ -179,6 +203,11 @@ proc bigsoc::round {vfile save pdk fpopts grows gap bottomup caps heal} {
     buda::run_planner hier 5
     buda::run_nuts
     buda::check_design nuts
+    if {$abstract} {
+        puts "bigsoc.tcl: abstract audit -- [buda::query overlaps] overlaps, [buda::query violations] audit violations, [buda::query seats] seat faults"
+        buda::report_wirelength
+        return [buda::query demand]
+    }
     if {$bottomup} { buda::check_template_tracks on_mismatch independent }
     buda::run_detailed_nuts
     buda::check_design dnuts
@@ -187,6 +216,23 @@ proc bigsoc::round {vfile save pdk fpopts grows gap bottomup caps heal} {
     if {$heal} { set healed [bigsoc::heal_if_dirty "bigsoc.tcl"] }
     buda::report_wirelength
     return [buda::query demand]
+}
+
+# The reticle the PDK states, in layout units: {w h}.
+proc bigsoc::reticle {pdk} {
+    set f [open $pdk r]
+    set w 0; set h 0; set u 1.0
+    while {[gets $f line] >= 0} {
+        set t [regexp -all -inline {\S+} [lindex [split $line #] 0]]
+        switch -- [lindex $t 0] {
+            reticle_w { set w [lindex $t 1] }
+            reticle_h { set h [lindex $t 1] }
+            unit_um   { set u [lindex $t 1] }
+        }
+    }
+    close $f
+    if {$w <= 0 || $h <= 0} { error "bigsoc.tcl: $pdk states no reticle (reticle_w/h)" }
+    return [list [expr {int($w * $u)}] [expr {int($h * $u)}]]
 }
 
 # The starved cells of a routed result: every cell one of whose instances
@@ -200,6 +246,25 @@ proc bigsoc::starved {rows pct} {
     return [lsort [dict keys $out]]
 }
 
+# -reticle: one probe floorplan, then the dial scaled to the reticle.  The
+# die grows about linearly with NQ (a quadrant is one more block of the
+# same size), so one probe says how many fill it; the result is
+# re-floorplanned and measured against the reticle rather than assumed.
+if {$reticle} {
+    set die [bigsoc::round $vfile :memory: $pdk $fpopts [dict create] 16 0 0 0 $npu 0 1]
+    buda::stop
+    lassign $die dw dh
+    lassign [bigsoc::reticle $pdk] rw rh
+    set s [expr {$fill * $rw * $rh / ($dw * $dh)}]
+    set nq0 [bigsoc::get NQ]
+    set nq [expr {max(1, int(round($nq0 * $s)))}]
+    puts "bigsoc.tcl: reticle $rw x $rh; probe NQ=$nq0 gives die ${dw}x${dh} ([format %.3f [expr {double($dw)*$dh/($rw*$rh)}]] of the reticle) -> NQ=$nq for a fill of $fill"
+    bigsoc::configure [list NQ $nq]
+    bigsoc::build
+    puts [bigsoc::banner "bigsoc.tcl"]
+    bigsoc::emit $vfile
+}
+
 set grows [dict create]
 set gap 16
 for {set round 1} {$round <= $iterate} {incr round} {
@@ -208,7 +273,12 @@ for {set round 1} {$round <= $iterate} {incr round} {
         puts "=== bigsoc.tcl: round $round of $iterate -- gap $gap, grown: [expr {[dict size $grows] ? $grows : {none}}] ==="
     }
     set rows [bigsoc::round $vfile $save $pdk $fpopts $grows $gap $bottomup $caps \
-                  [expr {$heal && $last}]]
+                  [expr {$heal && $last}] $npu $abstract]
+    if {$reticle} {
+        lassign [buda::query die] dw dh
+        lassign [bigsoc::reticle $pdk] rw rh
+        puts "bigsoc.tcl: die ${dw}x${dh} = [format %.3f [expr {double($dw)*$dh/($rw*$rh)}]] of the reticle ${rw}x${rh}[expr {$dw > $rw || $dh > $rh ? " -- OVER THE RETICLE" : ""}]"
+    }
     if {$last || ![bigsoc::is_dirty]} {
         if {!$last} { puts "bigsoc.tcl: round $round is clean -- stopping early" }
         break
@@ -222,4 +292,4 @@ for {set round 1} {$round <= $iterate} {incr round} {
     buda::stop
 }
 if {$save ne ":memory:"} { buda::save_bdb }
-bigsoc::verdict "bigsoc.tcl"
+if {$abstract} { bigsoc::verdict_abstract "bigsoc.tcl" } else { bigsoc::verdict "bigsoc.tcl" }

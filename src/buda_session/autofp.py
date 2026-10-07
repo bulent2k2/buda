@@ -79,7 +79,7 @@ class AutoFloorplanMixin:
                         seed=1, keep=5, wl_weight=0.5, snap=(1, 1),
                         bit_pitch=None, pad=None, aspect_cap=2.0,
                         grow=None, cols=None, sa_iter=0, top_margin=None,
-                        util=None):
+                        util=None, fixed=()):
         """Size and place the whole cell tree of the open BDB.  Returns the
         report dict (`cells`, `die`, `issues`) or None after printing an
         error.  See the module docstring for the rules."""
@@ -102,6 +102,7 @@ class AutoFloorplanMixin:
                 pdk.util = util
         grow = dict(grow or {})
         cols = dict(cols or {})
+        fixed = set(fixed or ())
         if top_margin is None:
             top_margin = margin
 
@@ -293,6 +294,50 @@ class AutoFloorplanMixin:
                 bp = max(top)      # the coarsest TOP layer is what a bus lands on
         pd = pad if pad is not None else (pdk.pad if pdk else 24)
 
+        # FIXED cells keep the geometry the BDB already holds — the cell's
+        # size from the `cell` table and its children's offsets from the
+        # `cell_children` template rows (what `resize_cell` +
+        # `add_inst_to_cell` declare) — so a placement the author computed
+        # by a rule of its own (a systolic array's rows, feeders and tail,
+        # `tpu_lib.tcl`'s) survives the pass untouched and is stamped like
+        # every other template.  Every instance's children must be in the
+        # rows, and every size positive; said otherwise.
+        cell_size = {r.name: (r.width, r.height) for r in self.bdb.all_cells()}
+        fixed_pos = {}
+        if fixed:
+            trows = {}
+            for cell in fixed:
+                if cell not in template:
+                    print(f"Error: auto_floorplan: fixed cell '{cell}' is not "
+                          f"in the design")
+                    return None
+                w, h = cell_size.get(cell, (0.0, 0.0))
+                if w <= 0 or h <= 0:
+                    print(f"Error: auto_floorplan: fixed cell '{cell}' has no "
+                          f"size (resize_cell first)")
+                    return None
+                if template[cell]:
+                    try:
+                        rows_ = self.bdb.cell_children_of(cell)
+                    except AttributeError:
+                        rows_ = None
+                    if rows_ is None:
+                        rows_ = self._cell_children_rows(cell)
+                    have = {nm: (x, y) for nm, _cc, x, y in rows_}
+                    missing = [nm for nm, _cc in template[cell] if nm not in have]
+                    if missing:
+                        print(f"Error: auto_floorplan: fixed cell '{cell}' has "
+                              f"no template offset for "
+                              f"{', '.join(missing[:6])}"
+                              f"{', …' if len(missing) > 6 else ''} "
+                              f"(add_inst_to_cell first)")
+                        return None
+                    fixed_pos[cell] = {nm: (int(round(have[nm][0])),
+                                            int(round(have[nm][1])))
+                                       for nm, _cc in template[cell]}
+                trows[cell] = (int(round(w)), int(round(h)))
+            cell_size.update(trows)
+
         size = {}
         rows = {}
         tpos = {}
@@ -300,6 +345,41 @@ class AutoFloorplanMixin:
             ch = template[cell]
             f = float(grow.get(cell, 1.0))
             fb = face_bits.get(cell, (0, 0))
+            if cell in fixed:
+                size[cell] = cell_size[cell]
+                if ch:
+                    tpos[cell] = fixed_pos[cell]
+                    items = [(nm, size[cc][0], size[cc][1]) for nm, cc in ch]
+                    pk = hf.Packing(size[cell][0], size[cell][1],
+                                    fixed_pos[cell], "fixed")
+                    resolve_ports(cell, ref[cell], pk)
+                    bad = [nm for nm, cc in ch
+                           if fixed_pos[cell][nm][0] + size[cc][0] > size[cell][0]
+                           or fixed_pos[cell][nm][1] + size[cc][1] > size[cell][1]]
+                    if bad:
+                        print(f"[AutoFP] WARNING: fixed cell '{cell}': "
+                              f"{', '.join(bad[:4])} reach outside the cell")
+                    r_ = ref[cell]
+                    children = {k.id: local[k.id] for k in kids.get(r_.id, [])}
+                    nets = nets_among(children)
+                    rows[cell] = dict(cell=cell, level=memo[cell],
+                                      kind="container",
+                                      n_inst=len(insts.get(cell, [])),
+                                      n_kids=len(ch), w=size[cell][0],
+                                      h=size[cell][1], how="fixed",
+                                      note=f"faces {fb[0]}/{fb[1]} bits",
+                                      util=hf.utilization(pk, items),
+                                      hpwl=hf.packing_hpwl(pk, items, nets),
+                                      bits=port_bits.get(cell, {}))
+                else:
+                    rows[cell] = dict(cell=cell, level=1, kind="leaf",
+                                      n_inst=len(insts.get(cell, [])),
+                                      n_kids=0, w=size[cell][0],
+                                      h=size[cell][1], how="fixed",
+                                      note=f"faces {fb[0]}/{fb[1]} bits",
+                                      util=None, hpwl=None,
+                                      bits=port_bits.get(cell, {}))
+                continue
             if not ch:
                 ls = hf.size_leaf(pdk, cell, [], bp, pd,
                                   total_bits=sum(port_bits.get(cell, {}).values()),
@@ -353,8 +433,12 @@ class AutoFloorplanMixin:
 
         # ── write it: cell sizes, template rows, every instance's box.
         for cell, (w, h) in size.items():
+            if cell in fixed:
+                continue
             self.bdb.resize_cell(cell, float(w), float(h))
         for cell, ch in template.items():
+            if cell in fixed or cell not in tpos:
+                continue
             for nm, cc in ch:
                 x, y = tpos[cell][nm]
                 self.bdb.add_inst_to_cell(cell, nm, cc, float(x), float(y))
@@ -390,6 +474,31 @@ class AutoFloorplanMixin:
                    bit_pitch=bp, pad=pd)
         self._autofp_last = out
         return out
+
+    def _cell_children_rows(self, cell):
+        """[(inst_name, child_cell, x, y)] of a cell's template rows.  The
+        BDB binds the parent/child EDGES only, so the rows are read through
+        a scratch copy with sqlite3 — a read, never a write."""
+        import os
+        import sqlite3
+        import tempfile
+        fd, path = tempfile.mkstemp(suffix=".bdb")
+        os.close(fd)
+        try:
+            self.bdb.save_copy(path)
+            con = sqlite3.connect(path)
+            try:
+                cur = con.execute("SELECT inst_name, child_cell, x, y FROM "
+                                  "cell_children WHERE parent_cell=? "
+                                  "ORDER BY inst_name", (cell,))
+                return [(r[0], r[1], float(r[2]), float(r[3])) for r in cur]
+            finally:
+                con.close()
+        finally:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
 
     # ── one container's packing ───────────────────────────────────────────
 

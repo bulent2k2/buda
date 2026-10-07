@@ -177,3 +177,33 @@ def test_grow_and_snap_reach_the_result(tpu):
     assert rows["pe_cell"]["w"] >= 1.5 * base["w"] - 18
     for c in s.bdb.all_components():
         assert c.x1 % 18 == 0 and c.y1 % 32 == 0, c.name
+
+
+def test_fixed_cells_keep_the_geometry_the_bdb_holds():
+    """`fixed <cell>,...`: a cell placed by a rule of the caller's (the
+    repository's own systolic-array rule, `tpu_lib.tcl`) keeps its size
+    and its children's offsets, stamped at every instance like any other
+    template, while the rest is placed by the engine."""
+    s, _ = _session(f"import_verilog {_TPU_V}")
+    # tpu_lib.tcl's row: PEs 152 x 56 on a 200 pitch, margin 12
+    _run(s, "resize_cell pe_cell 152 56")
+    _run(s, "resize_cell row_cell 1576 80")
+    for c in range(8):
+        _run(s, f"add_inst_to_cell row_cell pe_{c} pe_cell {12 + 200 * c} 12")
+    out = _run(s, f"auto_floorplan pdk {_PDK} fixed pe_cell,row_cell")
+    assert "placement audit: clean" in out
+    rows = s._autofp_last["cells"]
+    assert rows["pe_cell"]["how"] == "fixed" and (rows["pe_cell"]["w"], rows["pe_cell"]["h"]) == (152, 56)
+    assert rows["row_cell"]["how"] == "fixed" and rows["row_cell"]["w"] == 1576
+    comps = {c.name: c for c in s.bdb.all_components()}
+    for r in range(8):
+        row = comps[f"row_{r}"]
+        for c in range(8):
+            pe = comps[f"row_{r}/pe_{c}"]
+            assert (pe.x1 - row.x1, pe.y1 - row.y1) == (12 + 200 * c, 12), pe.name
+            assert (pe.x2 - pe.x1, pe.y2 - pe.y1) == (152, 56)
+    # a fixed cell with no size, or a child with no offset, is refused
+    s2, _ = _session(f"import_verilog {_TPU_V}")
+    assert "has no size" in _run(s2, "auto_floorplan fixed pe_cell")
+    _run(s2, "resize_cell row_cell 1576 80")
+    assert "no template offset" in _run(s2, "auto_floorplan fixed row_cell")

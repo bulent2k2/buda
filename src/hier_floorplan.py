@@ -71,6 +71,8 @@ class Pdk:
     sram_periph: float = 1.3
     pad: int = 24
     facepad: int = 10
+    reticle_w: float = 0.0        # microns; 0 = none stated
+    reticle_h: float = 0.0
     rules: list = field(default_factory=list)
     path: str = ""
 
@@ -84,7 +86,7 @@ class Pdk:
 _SCALARS = {
     "unit_um": float, "bit_pitch": float, "stdcell_area": float,
     "util": float, "sram_bit_area": float, "sram_periph": float,
-    "pad": int, "facepad": int,
+    "pad": int, "facepad": int, "reticle_w": float, "reticle_h": float,
 }
 
 

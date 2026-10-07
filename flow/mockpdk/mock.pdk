@@ -26,6 +26,10 @@
 #   sram_periph      array-to-macro multiplier (decoders, sense amps, I/O)
 #   pad              face slack added to every face-derived dimension
 #   facepad          the floor a face keeps when a leaf is shaped non-square
+#   reticle_w/h      the reticle limit in microns -- the largest die the
+#                    mock lithography prints in one field (a 26 x 33 mm
+#                    field, the industry's), the ceiling a die's size is
+#                    measured against (`bigsoc.tcl -reticle`)
 #
 # LEAF RULES, first glob that matches a cell's name wins (`*` last):
 #
@@ -52,8 +56,11 @@ sram_bit_area  0.12
 sram_periph    1.5
 pad            24
 facepad        10
+reticle_w      26000
+reticle_h      33000
 
 # memories: a bank is 32 KB (2^18 bits), a tag array an eighth of one
+leaf l0bank_*  sram  bits 16384
 leaf bank_*    sram  bits 262144
 leaf sram_*    sram  bits 262144
 leaf l2bank_*  sram  bits 524288
