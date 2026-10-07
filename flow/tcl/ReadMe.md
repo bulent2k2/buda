@@ -282,9 +282,9 @@ and is NOT clean:
 | `2 -iterate 3` | die 4759 x 3572, 84 % | 4 / 149 (round 3) | **clean, 0 / 0 / 0**, 14 s for the three rounds |
 | `2 -bottomup` | the same floorplan, every template solved once and copied, the nested ones reported MISALIGNED and solved `independent` | 16 / 430 | 1 / 113, 2 min |
 | `4 -NC 4 -N 8 -NL3 4 -NMC 4 -NIO 8` (first cut: no L0, the engine placing the array) | die 6064 x 6804, 63 % | 143 / 1343 | 26 / 390 after two healer rounds, 4 m 31 s wall |
-| `8 -NC 4 -N 8 -NL3 4 -NMC 4 -NIO 16 -abstract` | die 11008 x 8298 (900 instances, 674 leaves), 61 % | abstract audit 104 ovl / 28 viol / 30 seat faults | 67 s, the planner 77 s of a replay under load |
-| `16 -NC 4 -N 8 -NL3 4 -NMC 4 -NIO 16 -abstract` | die 12248 x 11740 (1636 instances, 1202 leaves), 73 % | abstract audit 99 / 55 / 58 | 4.5 min, the planner 270 s |
-| `4 -NC 4 -N 8 -NL3 4 -NMC 4 -NIO 16 -reticle -abstract` (NQ = 62 after the probe) | die 22000 x 22276 (5868 instances, 4238 leaves, 15,069 buses), 0.786 util, 0.57 of the reticle, 4.5 s | abstract audit 1036 ovl / 119 viol / 147 seat faults over 5,804 bundles (108 of the 155 top-level bundles committed with overflow) | 77 min, **65 of them the planner** — issue #972; the floorplan is `docs/internal/img/bigsoc_reticle_fp.png`, the route `bigsoc_reticle_nuts.png` |
+| `8 -NC 4 -N 8 -NL3 4 -NMC 4 -NIO 16 -abstract` | die 11008 x 8298 (900 instances, 674 leaves), 61 % | abstract audit 104 ovl / 28 viol / 30 seat faults | 25 s at `-j 1`, the planner 4.3 s (37 s / 16.4 s at `-j 4`; 77 s before #974) |
+| `16 -NC 4 -N 8 -NL3 4 -NMC 4 -NIO 16 -abstract` | die 12248 x 11740 (1636 instances, 1202 leaves), 73 % | abstract audit 99 / 55 / 58 | 60 s at `-j 1`, the planner 8.7 s (184 s / 135 s at `-j 4`; 270 s before #974) |
+| `4 -NC 4 -N 8 -NL3 4 -NMC 4 -NIO 16 -reticle -abstract` (NQ = 62 after the probe) | die 22000 x 22276 (5868 instances, 4238 leaves, 15,069 buses), 0.786 util, 0.57 of the reticle, 4.5 s | abstract audit 1036 ovl / 119 viol / 147 seat faults over 5,804 bundles (108 of the 155 top-level bundles committed with overflow) | **16.2 min at `-j 1`, the planner 82 s** (re-measured after #974; the first run took 77 min, 65 of them the planner — issue #972, still open for the scoring workers, which is why one thread beats four here); the floorplan is `docs/internal/img/bigsoc_reticle_fp.png`, the route `bigsoc_reticle_nuts.png` |
 
 `-iterate K` is the top-down half of the loop: each round re-floorplans
 with every cell the previous route filled past `-demand` percent on a TOP
