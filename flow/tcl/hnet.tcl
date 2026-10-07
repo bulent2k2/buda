@@ -140,6 +140,21 @@ proc hnet::net {cell args} {
     if {[llength $own] > 1} {
         error "hnet: net in $cell names [llength $own] of its own ports ([join $own {, }]); a net may name one own port (join two ports through an instance, not a net)"
     }
+    # An endpoint is on ONE net.  The emitter maps each child pin to the
+    # net that names it, so a pin named by two nets would be connected to
+    # the one written last and the other net would import with that pin
+    # silently missing (Codex P1 on #973, round 4); an own port named by
+    # two nets would alias them.  Refused here, naming both nets.
+    set seen [dict create]
+    foreach ep $args {
+        if {[dict exists $seen $ep]} { error "hnet: net in $cell names '$ep' twice" }
+        dict set seen $ep 1
+        foreach other $NETS($cell) {
+            if {$ep in $other} {
+                error "hnet: net in $cell: '$ep' is already on net {$other}; an endpoint is on one net (route it through an instance to join two)"
+            }
+        }
+    }
     lappend NETS($cell) $args
 }
 
@@ -316,7 +331,13 @@ proc hnet::emit_verilog {path {banner ""}} {
             continue
         }
         # wires: one per net that touches no own port; a net touching an
-        # own port IS that port (the first own-port endpoint names it)
+        # own port IS that port (the first own-port endpoint names it).  A
+        # generated name must be FRESH in the module's namespace -- a port
+        # or an instance called `w0` would otherwise be aliased to an
+        # unrelated internal net on import (Codex P1 on #973, round 4).
+        set used [dict create]
+        foreach p $PORTS($c) { dict set used [lindex $p 0] 1 }
+        foreach i $INSTS($c) { dict set used [lindex $i 0] 1 }
         set wire_of [dict create]
         set k 0
         foreach n $NETS($c) {
@@ -326,7 +347,9 @@ proc hnet::emit_verilog {path {banner ""}} {
                 if {$inst eq ""} { set own $port; break }
             }
             if {$own eq ""} {
+                while {[dict exists $used "w${k}"]} { incr k }
                 set own "w${k}"
+                dict set used $own 1
                 incr k
                 set w [_endpoint_width $c [lindex $n 0]]
                 set decl "  wire"

@@ -216,11 +216,20 @@ proc bigsoc::build {} {
     hnet::net l0_cell .d_out tag.d_out
     hnet::net l0_cell .m_a_out tag.m_a_out
     hnet::net l0_cell .m_d_in tag.m_d_in
+    # ONE net each way: the tag's b_out fans out to every bank and every
+    # bank's out converges on its d_in (a pin is on one net -- a net per
+    # bank named the same pin NB0 times, and the emitter connected the pin
+    # to the LAST one, leaving the other banks' nets dangling; hnet
+    # refuses that now, Codex P1 on #973, round 4).
+    set fan  [list tag.b_out]
+    set star [list tag.d_in]
     for {set b 0} {$b < $P(NB0)} {incr b} {
         hnet::inst l0_cell bank_$b l0bank_cell
-        hnet::net l0_cell tag.b_out bank_$b.a_in
-        hnet::net l0_cell bank_$b.out tag.d_in
+        lappend fan  bank_$b.a_in
+        lappend star bank_$b.out
     }
+    hnet::net l0_cell {*}$fan
+    hnet::net l0_cell {*}$star
 
     # ── core: soc_lib's four buses, the L0, the cache ports out
     hnet::cell core_cell
@@ -247,11 +256,20 @@ proc bigsoc::build {} {
     hnet::net l1_cell .a_in tag.a_in
     hnet::net l1_cell .d_out tag.d_out
     hnet::net l1_cell .out tag.out
+    # ONE net each way: the tag's b_out fans out to every bank and every
+    # bank's out converges on its d_in (a pin is on one net -- a net per
+    # bank named the same pin NB times, and the emitter connected the pin
+    # to the LAST one, leaving the other banks' nets dangling; hnet
+    # refuses that now, Codex P1 on #973, round 4).
+    set fan  [list tag.b_out]
+    set star [list tag.d_in]
     for {set b 0} {$b < $P(NB)} {incr b} {
         hnet::inst l1_cell bank_$b sram_cell
-        hnet::net l1_cell tag.b_out bank_$b.a_in
-        hnet::net l1_cell bank_$b.out tag.d_in
+        lappend fan  bank_$b.a_in
+        lappend star bank_$b.out
     }
+    hnet::net l1_cell {*}$fan
+    hnet::net l1_cell {*}$star
 
     # ── router: inbound fifo -> crossbar -> outbound fifo
     hnet::cell rtr_cell
@@ -296,11 +314,20 @@ proc bigsoc::build {} {
     hnet::net l2_cell .up_in ctl.up_in
     hnet::net l2_cell ctl.a_out tag.a_in
     hnet::net l2_cell tag.d_out ctl.t_in
+    # ONE net each way: the ctl's b_out fans out to every bank and every
+    # bank's out converges on its d_in (a pin is on one net -- a net per
+    # bank named the same pin NB2 times, and the emitter connected the pin
+    # to the LAST one, leaving the other banks' nets dangling; hnet
+    # refuses that now, Codex P1 on #973, round 4).
+    set fan  [list ctl.b_out]
+    set star [list ctl.d_in]
     for {set b 0} {$b < $P(NB2)} {incr b} {
         hnet::inst l2_cell bank_$b l2bank_cell
-        hnet::net l2_cell ctl.b_out bank_$b.a_in
-        hnet::net l2_cell bank_$b.out ctl.d_in
+        lappend fan  bank_$b.a_in
+        lappend star bank_$b.out
     }
+    hnet::net l2_cell {*}$fan
+    hnet::net l2_cell {*}$star
 
     # ── quadrant: NC clusters chained, the chain's head into the L2
     hnet::cell quad_cell
@@ -339,11 +366,20 @@ proc bigsoc::build {} {
     }
     hnet::net l3_cell ctl.a_out tag.a_in
     hnet::net l3_cell tag.d_out ctl.t_in
+    # ONE net each way: the ctl's b_out fans out to every bank and every
+    # bank's out converges on its d_in (a pin is on one net -- a net per
+    # bank named the same pin NB3 times, and the emitter connected the pin
+    # to the LAST one, leaving the other banks' nets dangling; hnet
+    # refuses that now, Codex P1 on #973, round 4).
+    set fan  [list ctl.b_out]
+    set star [list ctl.d_in]
     for {set b 0} {$b < $P(NB3)} {incr b} {
         hnet::inst l3_cell bank_$b l3bank_cell
-        hnet::net l3_cell ctl.b_out bank_$b.a_in
-        hnet::net l3_cell bank_$b.out ctl.d_in
+        lappend fan  bank_$b.a_in
+        lappend star bank_$b.out
     }
+    hnet::net l3_cell {*}$fan
+    hnet::net l3_cell {*}$star
 
     # ── memory controller + PHY
     hnet::cell mem_cell

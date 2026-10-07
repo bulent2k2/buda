@@ -403,7 +403,8 @@ class AutoFloorplanMixin:
             ext = {local[k.id]: ext_bits.get(k.id, 0)
                    for k in kids.get(r.id, [])}
             g, m = int(round(gap * f)), int(round(margin * f))
-            floors = hf.face_pair([fb[0], fb[0], fb[1], fb[1]], bp, pd)
+            floors = hf.face_pair([fb[0], fb[0], fb[1], fb[1]], bp, pd,
+                                  pdk.facepad if pdk else -1)
             packing = self._pack_children(cell, items, nets, g, m, place,
                                           seed, keep, wl_weight, snap,
                                           aspect_cap, cols.get(cell, 0),

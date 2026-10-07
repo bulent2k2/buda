@@ -189,6 +189,85 @@ hnet::emit_verilog {{{v}}}
     assert db.import_verilog(str(v)).top_module == "soc"
 
 
+def test_a_generated_wire_name_is_fresh_in_the_modules_namespace(tmp_path):
+    """A net touching no own port gets a generated wire name; a port (or an
+    instance) already called `w0` would alias an unrelated internal net to
+    it on import (Codex P1 on #973, round 4).  The generated name skips
+    every port and instance name, and the imported design keeps the two
+    nets apart."""
+    hnet = _ROOT / "flow" / "tcl" / "hnet.tcl"
+    v = tmp_path / "t.v"
+    script = tmp_path / "t.tcl"
+    script.write_text(f"""
+source {{{hnet}}}
+hnet::cell leaf
+hnet::port leaf a 4 input
+hnet::port leaf q 4 output
+hnet::cell soc
+hnet::port soc w0 4 input
+hnet::inst soc w1 leaf
+hnet::inst soc u1 leaf
+hnet::net soc .w0 w1.a
+hnet::net soc w1.q u1.a
+hnet::top soc
+hnet::emit_verilog {{{v}}}
+""")
+    r = subprocess.run(["tclsh", str(script)], capture_output=True, encoding="utf-8",
+                       cwd=tmp_path, timeout=60)
+    assert r.returncode == 0, r.stdout + r.stderr
+    text = v.read_text()
+    wires = re.findall(r"^\s*wire(?: \[[^\]]*\])? (\w+);", text, re.M)
+    assert wires == ["w2"], wires              # not w0 (the port), not w1 (the instance)
+    db = buda.BDB(":memory:")
+    db.import_verilog(str(v))
+    nets = {re.sub(r"\[\d+\]$", "", n.name) for n in db.all_nets()}   # bit nets -> bus names
+    assert nets == {"w0", "w2"}, nets                                   # not w1, the instance
+    comps = {c.name: c.id for c in db.all_components()}
+    by_net = {}
+    for cid in comps.values():
+        for p in db.pins_by_comp(cid):
+            by_net.setdefault(p.net_id, set()).add(re.sub(r"\[\d+\]$", "", p.pin_name))
+    # per bit: the port's net reaches w1.a only; the internal net joins w1.q to u1.a
+    assert sorted(sorted(v) for v in by_net.values()) == [["a"]] * 4 + [["a", "q"]] * 4, by_net
+
+
+def test_an_endpoint_on_two_nets_is_refused(tmp_path):
+    """The emitter connects a child pin to the net that names it, so a pin
+    named by two nets would be wired to the one written last and the other
+    net would import with that pin silently missing (Codex P1 on #973,
+    round 4): `hnet::net` refuses the reuse at declaration, naming the net
+    the endpoint is already on."""
+    hnet = _ROOT / "flow" / "tcl" / "hnet.tcl"
+    script = tmp_path / "t.tcl"
+    script.write_text(f"""
+source {{{hnet}}}
+hnet::cell leaf
+hnet::port leaf p 4 input
+hnet::cell soc
+hnet::port soc a 4 input
+hnet::port soc b 4 input
+hnet::inst soc u0 leaf
+hnet::net soc .a u0.p
+hnet::net soc .b u0.p
+""")
+    r = subprocess.run(["tclsh", str(script)], capture_output=True, encoding="utf-8",
+                       cwd=tmp_path, timeout=60)
+    assert r.returncode != 0
+    assert "'u0.p' is already on net {.a u0.p}" in r.stderr, r.stderr
+    script.write_text(f"""
+source {{{hnet}}}
+hnet::cell leaf
+hnet::port leaf p 4 input
+hnet::cell soc
+hnet::inst soc u0 leaf
+hnet::inst soc u1 leaf
+hnet::net soc u0.p u1.p u0.p
+""")
+    r = subprocess.run(["tclsh", str(script)], capture_output=True, encoding="utf-8",
+                       cwd=tmp_path, timeout=60)
+    assert r.returncode != 0 and "names 'u0.p' twice" in r.stderr, r.stderr
+
+
 def test_a_cell_instantiating_the_top_is_omitted_so_the_top_imports_as_the_top(tmp_path):
     """Putting the declared top LAST is not enough when a library cell
     INSTANTIATES it — a wrapper or harness nobody instantiates — because

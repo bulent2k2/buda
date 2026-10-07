@@ -276,3 +276,40 @@ def test_a_rotated_instance_is_placed_upright_and_its_token_says_so():
         s.bdb.set_comp_orients([("b0", "FS"), ("nobody", "N")])
     assert {c.name: c.orient for c in s.bdb.all_components()}["b0"] == "N"
 
+
+def test_the_facepad_floor_reaches_containers_too(tmp_path):
+    """`facepad` floors the LIGHT face of a leaf; a container's own faces
+    are floored by the same rule, so a PDK stating `pad 1; facepad 100`
+    cannot leave a container with a two-unit light side while its leaves
+    obey the floor (Codex P2 on #973, round 4).  Fixed 10 x 10 leaves keep
+    the children small enough for the floor to be what decides."""
+    v = tmp_path / "t.v"
+    v.write_text("""
+module leaf(input [7:0] a, output [7:0] q);
+endmodule
+module box(input [7:0] x, output [7:0] y);
+  wire [7:0] m;
+  leaf l0(.a(x), .q(m));
+  leaf l1(.a(m), .q(y));
+endmodule
+module top(input [7:0] i, output [7:0] o);
+  box b0(.x(i), .y(o));
+  box b1(.x(o), .y(i));
+endmodule
+""")
+    with_floor = tmp_path / "f.pdk"
+    with_floor.write_text("pad 1\nfacepad 100\nleaf * logic gates_per_bit 1 gates_fixed 1\n")
+    no_floor = tmp_path / "n.pdk"
+    no_floor.write_text("pad 1\nleaf * logic gates_per_bit 1 gates_fixed 1\n")
+    sizes = {}
+    for pdk in (no_floor, with_floor):
+        s, _ = _session(f"import_verilog {v}")
+        _run(s, "resize_cell leaf 10 10")
+        _run(s, f"auto_floorplan pdk {pdk} fixed leaf")
+        r = s._autofp_last["cells"]["box"]
+        sizes[pdk.name] = (r["w"], r["h"])
+    # the heavy side is the children's and does not move; the light side
+    # is what the floor lifts (68 -> 100 here)
+    n, f = sizes["n.pdk"], sizes["f.pdk"]
+    assert n[0] == f[0] and n[1] < 100 <= f[1], sizes
+
