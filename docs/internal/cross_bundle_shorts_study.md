@@ -239,3 +239,38 @@ heuristic for "overlaps another footprint" (any other bundle's rectangle on the
 same layer with positive along and across overlap), and the 'why' of the
 converge case is the stretch inside a wide footprint, not a displaced bit.
 Corpus flows were not classified: the corpus run does not keep checkpoints.  The classifier is `tools/experiment/short_causes.py`.
+
+## The converge shorts, and a lever for them: junction reach (2026-10-07)
+
+Cause.  `converge soc 4`'s four shorts come from a stub that meets a wide
+perpendicular partner.  Bundle 1 seg 0 (M6) meets seg 1 (M7, 32 bits spread
+over 218 units, x 851..1069).  Abstract NUTS ends the stub's span at the
+partner's CENTRE (`do_span_adjustments` and `tighten_spans_to_reach` in
+`src/nuts.cpp` both use the partner's `track_position`), but each stub bit must
+reach ITS partner bit, and those lie across the whole partner width: the low
+bits run 105 units past the span's end and over bundle 176's wires.  The
+abstract plan therefore under-states a junction's metal by half the partner's
+width, wherever the partner is wide.
+
+Lever.  `BUDA_NUTS_JUNCTION_REACH=1` ends the span at the partner's far edge in
+both places (off by default; unset is byte-identical).
+
+| measurement | default | junction reach |
+|---|---|---|
+| `converge soc 4` blind round: judge SHORT / unplaced / abstract overlaps | 4 / 85 / 5 | 0 / 117 / 7 |
+| A `soc 8 compact`, first round shorted bits | 20 | 2 |
+| B `soc 4 compact`, first round shorted bits | 9 | 2 |
+| C `soc 8`, first round shorted bits | 0 | 0 |
+| A / B / C final result (`soc.tcl`) | clean / 2 overlaps / clean | clean / 2 overlaps / clean |
+| A / B / C detailed WL | 1,692,110 / 738,742 / 1,968,672 | 1,706,394 / 739,028 / 1,968,672 |
+| A / B / C time | 24 / 35 / 14 s | 18 / 28 / 11 s |
+
+Judge CLEAN on every final route.  Corpus (57 flows, QoR triple): 6 better,
+5 worse, 45 unchanged; abstract WL +6.7 % (the spans are longer by
+construction), detailed WL +0.01 %, sweep time -9 %.  Worse: both bottom-up
+mix2 rows (`mix2_fast_bottomup_caps` 2/0/0 -> 11/72/11, `..._shared` 0/0/2 ->
+4/80/10) and three chip bottom-up rows by a few overlaps or bits.  So it removes
+the shorts it targets where the first round is the whole story, and costs
+bits on bottom-up designs, where a template's copied span is longer.  Not a
+default; the bottom-up regression wants its own look before it could be one.
+Fast tier: 3271 passed.
