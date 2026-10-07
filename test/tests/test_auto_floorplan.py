@@ -207,3 +207,38 @@ def test_fixed_cells_keep_the_geometry_the_bdb_holds():
     assert "has no size" in _run(s2, "auto_floorplan fixed pe_cell")
     _run(s2, "resize_cell row_cell 1576 80")
     assert "no template offset" in _run(s2, "auto_floorplan fixed row_cell")
+
+
+def test_a_rewritten_box_carries_its_positioned_pins():
+    """A pin with an ABSOLUTE position follows the box the setters rewrite
+    (`set_comp_bbox`, the batch `set_comp_bboxes` auto_floorplan uses),
+    where `_add_pin_by_path` would put it against the new box: the
+    cell_pin offset when the cell declares one, the box centre otherwise
+    — and a pin with NO position stays unknown.  The box setters used to
+    leave `pin.px/py` at the old placement, so `compute_hpwl()` summed
+    stale coordinates (Codex P2 on #973)."""
+    db = buda.BDB(":memory:")
+    db.add_cell("c", 10, 10)
+    db.add_cell_pin("c", "a", "INPUT", 2, 3)      # an offset the cell declares
+    db.add_cell_pin("c", "b", "OUTPUT")           # none: the centre
+    db.add_inst("u", "c", "", 0, 0)
+    db.add_inst("v", "c", "", 100, 100)
+    db.add_net_pins("n", "v.b", ["u.a"])
+    comps = {c.name: c for c in db.all_components()}
+    before = {(p.pin_name): (p.px, p.py) for p in db.pins_by_comp(comps["u"].id)}
+    assert before["a"] == (2, 3)
+    db.set_comp_bboxes([("u", 40, 60, 50, 70), ("v", 200, 200, 230, 240)])
+    u = {p.pin_name: (p.px, p.py) for p in db.pins_by_comp(comps["u"].id)}
+    v = {p.pin_name: (p.px, p.py) for p in db.pins_by_comp(comps["v"].id)}
+    assert u["a"] == (42, 63), u
+    assert v["b"] == (215, 220), v
+    db.set_comp_bbox("u", 0, 0, 20, 20)
+    u = {p.pin_name: (p.px, p.py) for p in db.pins_by_comp(comps["u"].id)}
+    assert u["a"] == (2, 3), u
+    # a pin without a position (the Verilog-import case) is left unknown
+    s, _ = _session(f"import_verilog {_TPU_V}")
+    cid = {c.name: c for c in s.bdb.all_components()}["row_0/pe_0"].id
+    pins = s.bdb.pins_by_comp(cid)
+    assert pins and all(p.px < 0 and p.py < 0 for p in pins)
+    s.bdb.set_comp_bboxes([("row_0/pe_0", 40, 60, 50, 70)])
+    assert all(p.px < 0 and p.py < 0 for p in s.bdb.pins_by_comp(cid))

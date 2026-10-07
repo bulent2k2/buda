@@ -157,3 +157,33 @@ def test_a_checkpoint_renders_with_the_overlaps_the_run_reported(tmp_path):
     buda.compute_nuts_metrics(s.nuts_result)
     assert s.nuts_result.num_overlaps == want
     assert len(s.nuts_result.overlap_details) == want
+
+
+def test_the_emitted_top_module_is_last_whatever_the_library_declares_after_it(tmp_path):
+    """`import_verilog` takes the LAST module nobody instantiates as the
+    top, so the emitter must put the declared top last EXPLICITLY: a
+    library cell declared after `hnet::top` and instantiated nowhere used
+    to come out after it and be read as the design (Codex P1 on #973)."""
+    hnet = _ROOT / "flow" / "tcl" / "hnet.tcl"
+    v = tmp_path / "t.v"
+    script = tmp_path / "t.tcl"
+    script.write_text(f"""
+source {{{hnet}}}
+hnet::cell leaf
+hnet::port leaf a 4 input
+hnet::cell soc
+hnet::port soc x 4 input
+hnet::inst soc u0 leaf
+hnet::net soc .x u0.a
+hnet::top soc
+hnet::cell unused_after_top
+hnet::port unused_after_top q 1 output
+hnet::emit_verilog {{{v}}}
+""")
+    r = subprocess.run(["tclsh", str(script)], capture_output=True, encoding="utf-8",
+                       cwd=tmp_path, timeout=60)
+    assert r.returncode == 0, r.stdout + r.stderr
+    mods = re.findall(r"^module (\w+)", v.read_text(), re.M)
+    assert mods[-1] == "soc", mods
+    db = buda.BDB(":memory:")
+    assert db.import_verilog(str(v)).top_module == "soc"

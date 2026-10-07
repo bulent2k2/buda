@@ -261,10 +261,16 @@ proc hnet::emit_verilog {path {banner ""}} {
     if {$banner ne ""} { puts $f $banner }
     puts $f "// structural, every instance written out (hnet.tcl): the form import_verilog reads."
     puts $f ""
-    # leaves first, then containers, the top last (a reader takes the last
-    # module nobody instantiates as the top; BUDA does)
+    # leaves first, then containers, the top LAST -- explicitly, not by
+    # the order's accident: a reader takes the last module nobody
+    # instantiates as the top (BUDA does), and a library cell declared
+    # after the top and instantiated nowhere would otherwise be emitted
+    # after it and be read as the design (Codex P1 on #973).
     set order {}
-    foreach c [lreverse [_topo_order]] { lappend order $c }
+    foreach c [lreverse [_topo_order]] {
+        if {$c ne $TOP} { lappend order $c }
+    }
+    lappend order $TOP
     foreach c $order {
         set pnames [lmap p $PORTS($c) {lindex $p 0}]
         puts $f "module $c ([join $pnames ", "]);"

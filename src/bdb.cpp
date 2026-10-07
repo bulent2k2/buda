@@ -3435,6 +3435,42 @@ void BDB::set_comp_is_leaf(const std::string& name, bool is_leaf) {
     sqlite3_step(u);
 }
 
+// A component's POSITIONED pins follow its box when the box is rewritten in
+// place: each pin goes where _add_pin_by_path would put it against the new
+// box -- the cell_pin offset when the cell declares one, the box centre
+// otherwise.  A pin with no position (px/py < 0, the Verilog-import case)
+// stays unknown.  Without this a set_comp_bbox left pin.px/py at the old
+// placement and compute_hpwl() summed stale coordinates (the C6-08 fault
+// move_comp was cured of, reached again through the box setters).
+static void _reposition_pins_in_box(sqlite3* db, const std::string& name,
+                                    double x1, double y1, double x2, double y2) {
+    Stmt u(db, R"(
+        UPDATE pin
+        SET px = CASE WHEN (SELECT cp.px FROM cell_pin cp JOIN component c
+                              ON cp.cell = c.cell
+                             WHERE c.id = pin.comp_id AND cp.pin_name = pin.pin_name) >= 0
+                      THEN ?1 + (SELECT cp.px FROM cell_pin cp JOIN component c
+                                   ON cp.cell = c.cell
+                                  WHERE c.id = pin.comp_id AND cp.pin_name = pin.pin_name)
+                      ELSE (?1 + ?3) / 2.0 END,
+            py = CASE WHEN (SELECT cp.py FROM cell_pin cp JOIN component c
+                              ON cp.cell = c.cell
+                             WHERE c.id = pin.comp_id AND cp.pin_name = pin.pin_name) >= 0
+                      THEN ?2 + (SELECT cp.py FROM cell_pin cp JOIN component c
+                                   ON cp.cell = c.cell
+                                  WHERE c.id = pin.comp_id AND cp.pin_name = pin.pin_name)
+                      ELSE (?2 + ?4) / 2.0 END
+        WHERE comp_id = (SELECT id FROM component WHERE name = ?5)
+          AND px >= 0 AND py >= 0)");
+    sqlite3_bind_double(u, 1, x1);
+    sqlite3_bind_double(u, 2, y1);
+    sqlite3_bind_double(u, 3, x2);
+    sqlite3_bind_double(u, 4, y2);
+    sqlite3_bind_text  (u, 5, name.c_str(), -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(u) != SQLITE_DONE)
+        throw std::runtime_error("set_comp_bbox: pin update failed for " + name);
+}
+
 void BDB::set_comp_bbox(const std::string& name,
                         double x1, double y1, double x2, double y2) {
     Stmt q(_db, "SELECT id FROM component WHERE name=?");
@@ -3448,6 +3484,7 @@ void BDB::set_comp_bbox(const std::string& name,
     sqlite3_bind_double(u, 4, y2);
     sqlite3_bind_text  (u, 5, name.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_step(u);
+    _reposition_pins_in_box(_db, name, x1, y1, x2, y2);
     compute_hpwl();
 }
 
@@ -3475,6 +3512,9 @@ void BDB::set_comp_bboxes(
             sqlite3_bind_text  (u, 5, std::get<0>(b).c_str(), -1, SQLITE_TRANSIENT);
             sqlite3_step(u);
         }
+        for (const auto& b : boxes)
+            _reposition_pins_in_box(_db, std::get<0>(b), std::get<1>(b),
+                                    std::get<2>(b), std::get<3>(b), std::get<4>(b));
     }
     _exec("COMMIT");
     compute_hpwl();

@@ -32,7 +32,7 @@ used otherwise.
 | `pdk <file>` | none | the area model ([flow/mockpdk/mock.pdk](../../flow/mockpdk/mock.pdk)); without it the face rule alone sizes every leaf, said in the report |
 | `gap <n>` / `margin <n>` / `top_margin <n>` | 16 / 16 / = margin | the channel between siblings, the margin inside a container, the die's margin |
 | `place` | `auto` | `auto` = `slice` (a slicing beam for ≤ 8 children, connectivity clustering into groups of ≤ 8 beyond); `grid` = the `soc_lib.tcl` grid with the best column count; `sa` = the Floorplanner's C++ annealer from the grid's start, legalized and aligned, kept only when it scores lower |
-| `wl <f>` | 0.25 | the weight of the nets' wirelength against area in the packing cost (units: bits × a block side) |
+| `wl <f>` | 0.5 | the weight of the nets' wirelength against area in the packing cost (units: bits × a block side); the TPU netlist measures better at 0.25, the SoC vehicle at 0.5 — docs/AUTO_FLOORPLAN.md §3 has both |
 | `snap <px> <py>` | 1 1 | every origin on a multiple of the track period per axis, so every instance of a cell sees the same track phase (sizes, gaps, margins rounded up; children low-aligned) |
 | `grow <cell>=<f>,...` | none | scale a leaf's size, or a container's gap and margin — the next round's hand-down of what the route measured |
 | `cols <cell>=<n>,...` | none | force a container's grid column count (`<top>` for the die) |
