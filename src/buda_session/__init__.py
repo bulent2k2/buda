@@ -32,11 +32,12 @@ from .refine import RefineMixin
 from .rr_trials import RRTrialsMixin
 from .rr_sweeps import RRSweepsMixin
 from .advisory import AdvisoryMixin
+from .autofp import AutoFloorplanMixin
 
 MIXINS = (PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
           ReportsMixin, RipupMixin, RRStateMixin,
           NegotiateMixin, RefineMixin, RRTrialsMixin, RRSweepsMixin,
-          AdvisoryMixin)
+          AdvisoryMixin, AutoFloorplanMixin)
 
 _owner = {}
 for _m in MIXINS:

@@ -3451,6 +3451,35 @@ void BDB::set_comp_bbox(const std::string& name,
     compute_hpwl();
 }
 
+void BDB::set_comp_bboxes(
+        const std::vector<std::tuple<std::string,double,double,double,double>>& boxes) {
+    // Validate every name first so a bad list changes nothing.
+    {
+        Stmt q(_db, "SELECT 1 FROM component WHERE name=?");
+        for (const auto& b : boxes) {
+            sqlite3_reset(q);
+            sqlite3_bind_text(q, 1, std::get<0>(b).c_str(), -1, SQLITE_TRANSIENT);
+            if (sqlite3_step(q) != SQLITE_ROW)
+                throw std::runtime_error("set_comp_bboxes: not found: " + std::get<0>(b));
+        }
+    }
+    _exec("BEGIN");
+    {
+        Stmt u(_db, "UPDATE component SET x1=?, y1=?, x2=?, y2=? WHERE name=?");
+        for (const auto& b : boxes) {
+            sqlite3_reset(u);
+            sqlite3_bind_double(u, 1, std::get<1>(b));
+            sqlite3_bind_double(u, 2, std::get<2>(b));
+            sqlite3_bind_double(u, 3, std::get<3>(b));
+            sqlite3_bind_double(u, 4, std::get<4>(b));
+            sqlite3_bind_text  (u, 5, std::get<0>(b).c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_step(u);
+        }
+    }
+    _exec("COMMIT");
+    compute_hpwl();
+}
+
 int BDB::derive_container_bboxes(double margin,
                                  std::vector<std::string>* unresolved) {
     // Deepest-FIRST, so a container of containers is resolved from children

@@ -1,0 +1,33 @@
+# ============================================================
+# flow/mockpdk/stack.buda — the mock PDK's metal stack, as BUDA declares it.
+#
+# A MOCK process: there is no PDK in this repository, and a hierarchical
+# floorplan has to be sized against SOMETHING before any block is designed.
+# This stack is the six-layer one every Tcl vehicle declares (`tpu_lib.tcl`,
+# `soc_lib.tcl`, `flow/tracks/tracks.buda`) so a design floorplanned from
+# the mock PDK routes on the same tracks every recorded table was measured
+# on; what the mock PDK ADDS is the area model beside it (`mock.pdk`) and a
+# tech-LEF twin of this stack (`mock.tech.lef`) for the import path, with
+# a test pinning that the two agree on every layer's direction and pitch.
+#
+# The unit is the LAYOUT UNIT (1 unit = 1 um nominal, `mock.pdk` says so);
+# on the TOP layers (M5..M7) one bit of a bus costs 4 units of face --
+# the per-bit channel of the M5 pattern: 32 units of period over 8 SIGNAL
+# slots -- which is the `bit_pitch` the area model's face rule reads.
+# ============================================================
+def_layer 2 M2 H     55.56
+def_layer 3 M3 V     55.56
+def_layer 4 M4 H     55.56
+def_layer 5 M5 V TOP 50
+def_layer 6 M6 H TOP 52.94
+def_layer 7 M7 V TOP 56.10
+
+def_track_pattern 2 -100  POWER 2 1  (SIGNAL 1 0.5)x4  GROUND 2 1  (SIGNAL 1 0.5)x4
+def_track_pattern 3    0  POWER 2 1  (SIGNAL 1 0.5)x4  GROUND 2 1  (SIGNAL 1 0.5)x4
+def_track_pattern 4 -200  POWER 2 1  (SIGNAL 1 0.5)x4  GROUND 2 1  (SIGNAL 1 0.5)x4
+def_track_pattern 5    0  POWER 3 1  (SIGNAL 2 1)x4  GROUND 3 1  (SIGNAL 2 1)x4
+def_track_pattern 6 -400  POWER 4 1  (SIGNAL 2 1)x4  GROUND 4 1  (SIGNAL 2 1)x4
+def_track_pattern 7 -600  POWER 6 2  (SIGNAL 3 2)x3  GROUND 2 1  (SIGNAL 3 2)x3
+
+corner_margin dx 5 dy 5
+set_min_stub_length 2

@@ -802,6 +802,13 @@ public:
     void set_comp_is_leaf(const std::string& name, bool is_leaf);
     void set_comp_bbox(const std::string& name,
                        double x1, double y1, double x2, double y2);
+    // The same, for MANY instances in one transaction with ONE HPWL
+    // recompute at the end: `auto_floorplan` stamps every instance of a
+    // design (thousands on the SoC vehicles), and set_comp_bbox recomputes
+    // every net's HPWL per call.  Each entry is (name, x1, y1, x2, y2); an
+    // unknown name throws before anything is written.
+    void set_comp_bboxes(
+        const std::vector<std::tuple<std::string,double,double,double,double>>& boxes);
     // Give every UNPLACED container the bounding box of its placed
     // descendants, grown by `margin` on each side.  Returns how many were
     // placed; `unresolved` (if given) collects the containers left unplaced
