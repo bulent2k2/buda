@@ -92,12 +92,15 @@ half-perimeter wirelength of the nets among the children in units of bits
 × a block side (default 0.5).  The weight is a vehicle's choice, measured
 both ways: on the TPU's own netlist `wl 0.25` keeps the row a line where
 0.5 lets the activation chain's wirelength tip it into a column, so §4
-measures the TPU at 0.25 — and on the SoC vehicle at NQ = 2 the default
-0.5 is the better one (healed endpoint 0 / 38 against 0 / 78 at 0.25,
-first audit 209 against 338 unplaced; bottom-up 16 / 430 against
-33 / 708), with 0.25 reaching `-iterate 3`'s clean round HEALERLESS at
-round 3 where 0.5 needs the healers (both end clean).  Three things are
-in that cost that a plain packer does not see:
+measures the TPU at 0.25 — and on the SoC vehicle at NQ = 2 (the wired
+design, §3's table) the default 0.5 is the better one on two arms of
+three: healed endpoint 0 / 6 against 5 / 70 at 0.25 (first audit 528
+against 763 unplaced; the 0.25 floorplan is a squarer 2924 × 3036 at
+92 %), bottom-up 12 / 115 against 27 / 444 — while 0.25 is the one that
+reaches `-iterate 3` CLEAN (0 / 0 / 0 in 15 s; 0.5 ends that loop at
+0 / 24), stated in both directions because a default picked on one arm is
+a guess about the others.  Three things are in that cost that a plain
+packer does not see:
 
 * *the container's own faces*: the bits crossing its boundary floor its
   sides the way a leaf's do, judged on the padded shape, so a row of PEs
