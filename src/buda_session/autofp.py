@@ -444,6 +444,15 @@ class AutoFloorplanMixin:
                 self.bdb.add_inst_to_cell(cell, nm, cc, float(x), float(y))
         boxes = []
         n_leaf = 0
+        # Every stamped instance is UPRIGHT: a cell is placed once and its
+        # children's offsets are the template's, so the box written here
+        # is the cell's own w x h at the instance's origin, which is the
+        # geometry of an `N` instance.  A rotated token left on the row
+        # (`E`/`W`/`FE`/`FW` from a DEF import -- resize_cell swaps those
+        # instances' sides) would then describe a box this write has just
+        # replaced (Codex P2 on #973), so the token is reset with the box,
+        # and how many turned is said.
+        turned = [c.name for c in comps if (c.orient or "N") != "N"]
 
         def stamp(c, x, y):
             w, h = size[c.cell]
@@ -456,6 +465,13 @@ class AutoFloorplanMixin:
             x, y = top.pos[c.name]
             stamp(c, x, y)
         self.bdb.set_comp_bboxes(boxes)
+        stamped = {b[0] for b in boxes}
+        turned = [nm for nm in turned if nm in stamped]
+        if turned:
+            self.bdb.set_comp_orients([(nm, "N") for nm in turned])
+            print(f"[auto_floorplan] {len(turned)} rotated instance(s) placed "
+                  f"upright (orient reset to N): {', '.join(turned[:6])}"
+                  + (" ..." if len(turned) > 6 else ""))
         for c in comps:
             if not kids.get(c.id) and not c.is_leaf:
                 self.bdb.set_comp_is_leaf(c.name, True)

@@ -233,7 +233,11 @@ Every other vehicle here DRAWS its floorplan in Tcl from the bus widths.
 This one starts where a chip team starts — a netlist and a PDK, no
 coordinate anywhere — and lets the engine make the first floorplan.  The
 design is authored with [`hnet.tcl`](hnet.tcl) (cells, ports, instances,
-nets), emitted as structural Verilog with every template intact,
+nets), emitted as structural Verilog with every template intact — the
+cells reachable from the declared top and no other, the top last, since
+`import_verilog` takes the last module nobody instantiates as the top
+and a library wrapper that instantiates the top would otherwise be read
+as the design; what the emitter leaves out it says —
 read back with `import_verilog`, and `auto_floorplan` sizes every leaf
 from its pins and [the mock PDK](../mockpdk/ReadMe.md)'s area model, packs
 every container, stamps every instance and sets the die.  Then

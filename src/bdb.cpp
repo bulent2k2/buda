@@ -3520,6 +3520,36 @@ void BDB::set_comp_bboxes(
     compute_hpwl();
 }
 
+void BDB::set_comp_orients(
+        const std::vector<std::pair<std::string,std::string>>& orients) {
+    static const char* kTok[] = {"N","S","E","W","FN","FS","FE","FW"};
+    {
+        Stmt q(_db, "SELECT 1 FROM component WHERE name=?");
+        for (const auto& [name, o] : orients) {
+            bool ok = false;
+            for (const char* t : kTok) if (o == t) { ok = true; break; }
+            if (!ok)
+                throw std::runtime_error("set_comp_orients: '" + o +
+                    "' is not an orientation (N S E W FN FS FE FW) for " + name);
+            sqlite3_reset(q);
+            sqlite3_bind_text(q, 1, name.c_str(), -1, SQLITE_TRANSIENT);
+            if (sqlite3_step(q) != SQLITE_ROW)
+                throw std::runtime_error("set_comp_orients: not found: " + name);
+        }
+    }
+    _exec("BEGIN");
+    {
+        Stmt u(_db, "UPDATE component SET orient=? WHERE name=?");
+        for (const auto& [name, o] : orients) {
+            sqlite3_reset(u);
+            sqlite3_bind_text(u, 1, o.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(u, 2, name.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_step(u);
+        }
+    }
+    _exec("COMMIT");
+}
+
 int BDB::derive_container_bboxes(double margin,
                                  std::vector<std::string>* unresolved) {
     // Deepest-FIRST, so a container of containers is resolved from children

@@ -189,6 +189,45 @@ hnet::emit_verilog {{{v}}}
     assert db.import_verilog(str(v)).top_module == "soc"
 
 
+def test_a_cell_instantiating_the_top_is_omitted_so_the_top_imports_as_the_top(tmp_path):
+    """Putting the declared top LAST is not enough when a library cell
+    INSTANTIATES it — a wrapper or harness nobody instantiates — because
+    the reader excludes every instantiated module and would take the
+    wrapper (Codex P1 on #973, round 3).  The emitter writes only the cells
+    reachable from the top, says what it left out, and the file imports
+    with the declared top as its top."""
+    hnet = _ROOT / "flow" / "tcl" / "hnet.tcl"
+    v = tmp_path / "t.v"
+    script = tmp_path / "t.tcl"
+    script.write_text(f"""
+source {{{hnet}}}
+hnet::cell leaf
+hnet::port leaf a 4 input
+hnet::cell soc
+hnet::port soc x 4 input
+hnet::inst soc u0 leaf
+hnet::net soc .x u0.a
+hnet::cell wrapper
+hnet::port wrapper y 4 input
+hnet::inst wrapper dut soc
+hnet::net wrapper .y dut.x
+hnet::cell spare
+hnet::port spare q 1 output
+hnet::top soc
+hnet::emit_verilog {{{v}}}
+""")
+    r = subprocess.run(["tclsh", str(script)], capture_output=True, encoding="utf-8",
+                       cwd=tmp_path, timeout=60)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "2 cell(s) not reachable from top 'soc' omitted" in r.stdout, r.stdout
+    assert "wrapper" in r.stdout and "spare" in r.stdout
+    mods = re.findall(r"^module (\w+)", v.read_text(), re.M)
+    assert mods == ["leaf", "soc"], mods
+    db = buda.BDB(":memory:")
+    assert db.import_verilog(str(v)).top_module == "soc"
+    assert {c.name for c in db.all_components()} == {"u0"}
+
+
 def test_a_net_naming_two_of_the_cells_own_ports_is_refused(tmp_path):
     """Structural Verilog joins two ports of one module only through an
     `assign`, which import_verilog does not read, so such a net would

@@ -809,6 +809,13 @@ public:
     // unknown name throws before anything is written.
     void set_comp_bboxes(
         const std::vector<std::tuple<std::string,double,double,double,double>>& boxes);
+    // Set instances' orientation tokens in one transaction (name, orient),
+    // without touching their boxes: for a writer that has just written
+    // UPRIGHT geometry over a rotated instance (`auto_floorplan`), so the
+    // row's token describes the box beside it.  An unknown name or a token
+    // outside the eight orientations throws before anything is written.
+    void set_comp_orients(
+        const std::vector<std::pair<std::string,std::string>>& orients);
     // Give every UNPLACED container the bounding box of its placed
     // descendants, grown by `margin` on each side.  Returns how many were
     // placed; `unresolved` (if given) collects the containers left unplaced

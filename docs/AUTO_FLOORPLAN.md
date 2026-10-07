@@ -139,9 +139,14 @@ the annealer a lever.  The `FloorplannerEngine` audits every result
 **Then it writes.**  Cell sizes, the `cell_children` template rows (so the
 Floorplanner GUI and `add_inst` read the same offsets), every instance's
 box in one batched write (`BDB::set_comp_bboxes` — one HPWL recompute
-instead of one per instance), childless components marked leaf (a
-ports-only module is a block, which is what `import_def_lef` +
-`import_verilog` conclude for the same module), the die.
+instead of one per instance; a box is the cell's own w × h at the
+instance's origin, so every stamped instance is UPRIGHT and a rotated
+token a DEF import left on the row is reset to `N` with the box, the
+count said — the geometry written is an `N` instance's, and a token
+describing a box the write replaced would be a lie), childless components
+marked leaf (a ports-only module is a block, which is what
+`import_def_lef` + `import_verilog` conclude for the same module), the
+die.
 
 Options: `pdk <file>` `util <f>` `gap <n>` `margin <n>` `top_margin <n>`
 `place auto|slice|grid|sa` `seed <n>` `keep <n>` `wl <f>` `snap <px> <py>`

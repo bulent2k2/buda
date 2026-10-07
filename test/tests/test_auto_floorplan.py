@@ -242,3 +242,37 @@ def test_a_rewritten_box_carries_its_positioned_pins():
     assert pins and all(p.px < 0 and p.py < 0 for p in pins)
     s.bdb.set_comp_bboxes([("row_0/pe_0", 40, 60, 50, 70)])
     assert all(p.px < 0 and p.py < 0 for p in s.bdb.pins_by_comp(cid))
+
+
+def test_a_rotated_instance_is_placed_upright_and_its_token_says_so():
+    """auto_floorplan writes every stamped box as the cell's own w x h at the
+    instance's origin — an `N` instance's geometry — so an `E`/`W` token left
+    on the row (a DEF import; `resize_cell` swaps those instances' sides)
+    would describe a box the write just replaced (Codex P2 on #973).  The
+    token is reset with the box and the count is said."""
+    s, _ = _session()
+    for line in ("set_die 1000 1000", "add_cell leaf 40 20",
+                 "add_cell_pin leaf a INPUT 0 10", "add_cell_pin leaf q OUTPUT 40 10",
+                 "add_inst b0 leaf - 0 0", "add_inst b1 leaf - 300 0",
+                 "add_inst b2 leaf - 600 0",
+                 "rotate_comp b1 90"):
+        _run(s, line)
+    s.bdb.add_net_pins("n", "b0.q", ["b1.a", "b2.a"])
+    before = {c.name: c for c in s.bdb.all_components()}
+    assert before["b1"].orient in ("E", "W")
+    assert (before["b1"].x2 - before["b1"].x1, before["b1"].y2 - before["b1"].y1) == (20, 40)
+    out = _run(s, "auto_floorplan")
+    assert "1 rotated instance(s) placed upright" in out and "b1" in out
+    after = {c.name: c for c in s.bdb.all_components()}
+    cell = {c.name: c for c in s.bdb.all_cells()}["leaf"]
+    for nm in ("b0", "b1", "b2"):
+        c = after[nm]
+        assert c.orient == "N", (nm, c.orient)
+        assert (c.x2 - c.x1, c.y2 - c.y1) == (cell.width, cell.height), nm
+    # the setter itself: an unknown token or name writes nothing
+    with pytest.raises(RuntimeError, match="not an orientation"):
+        s.bdb.set_comp_orients([("b0", "NE")])
+    with pytest.raises(RuntimeError, match="not found"):
+        s.bdb.set_comp_orients([("b0", "FS"), ("nobody", "N")])
+    assert {c.name: c.orient for c in s.bdb.all_components()}["b0"] == "N"
+

@@ -276,11 +276,32 @@ proc hnet::emit_verilog {path {banner ""}} {
     # instantiates as the top (BUDA does), and a library cell declared
     # after the top and instantiated nowhere would otherwise be emitted
     # after it and be read as the design (Codex P1 on #973).
+    # ... and ONLY the cells reachable from the top (Codex P1 on #973,
+    # round 3): a library cell that INSTANTIATES the top -- a wrapper, a
+    # test harness -- is itself instantiated nowhere, so with it in the file
+    # the reader's rule picks it over the declared top however the modules
+    # are ordered, while hnet::census / hnet::instances describe the top's
+    # design.  Emitting the top's own subtree makes the file and the model
+    # agree; what was left out is said.
+    set reach [dict create $TOP 1]
+    set stack [list $TOP]
+    while {[llength $stack]} {
+        set c [lindex $stack end]; set stack [lrange $stack 0 end-1]
+        foreach i $INSTS($c) {
+            set k [lindex $i 1]
+            if {![dict exists $reach $k]} { dict set reach $k 1; lappend stack $k }
+        }
+    }
     set order {}
+    set omitted {}
     foreach c [lreverse [_topo_order]] {
-        if {$c ne $TOP} { lappend order $c }
+        if {$c eq $TOP} { continue }
+        if {[dict exists $reach $c]} { lappend order $c } else { lappend omitted $c }
     }
     lappend order $TOP
+    if {[llength $omitted]} {
+        puts "hnet: [llength $omitted] cell(s) not reachable from top '$TOP' omitted from $path: [join $omitted {, }]"
+    }
     foreach c $order {
         set pnames [lmap p $PORTS($c) {lindex $p 0}]
         puts $f "module $c ([join $pnames ", "]);"
