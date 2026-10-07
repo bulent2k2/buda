@@ -2391,7 +2391,21 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
                    ot_clock_::now() - t0).count();
     };
     const auto t_ot_run = ot_now();
-    if (kOtProf) analysis_cache_reset_counters();   // planner-only counts
+    // Every [PlanProf] field describes THIS run (Codex P2 on #974): the
+    // phase accumulators reset here, and the pb_cum counters — cumulative
+    // for the [ReplanProf] line, which keeps that meaning — are printed as
+    // the delta since this entry.  A planner is re-run on the same instance
+    // by the explorer's re-plan and the healers.
+    long long pb0_calls = 0, pb0_cands = 0, pb0_ll = 0, pb0_sc = 0;
+    if (kOtProf) {
+        analysis_cache_reset_counters();   // planner-only counts
+        prof_ot_reserve_us_ = prof_ot_strict_us_ = prof_ot_rank_us_ = 0;
+        prof_ot_ladder_us_ = prof_ot_fallback_us_ = prof_ot_commit_us_ = 0;
+        prof_ot_refine_us_ = prof_ot_strict_fail_ = prof_ot_ranked_ = 0;
+        prof_ot_ladder_plans_ = prof_ot_ripups_ = prof_ot_refine_plans_ = 0;
+        pb0_calls = prof_plan_calls_;   pb0_cands = prof_cands_;
+        pb0_ll    = prof_layerload_us_; pb0_sc    = prof_scoring_us_;
+    }
 
     // Resolve the span reference for non-TOP penalty scaling: unset means
     // 25% of the larger Hanan grid extent — segments longer than that pay
@@ -2854,10 +2868,10 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
                   << " commit=" << prof_ot_commit_us_ / 1000.0 << "ms"
                   << " refine=" << prof_ot_refine_us_ / 1000.0 << "ms(plans="
                   << prof_ot_refine_plans_ << ")"
-                  << " pb_cum[calls=" << prof_plan_calls_
-                  << " cands=" << prof_cands_
-                  << " layerload=" << prof_layerload_us_ / 1000.0
-                  << "ms scoring=" << prof_scoring_us_ / 1000.0 << "ms]"
+                  << " pb[calls=" << (prof_plan_calls_ - pb0_calls)
+                  << " cands=" << (prof_cands_ - pb0_cands)
+                  << " layerload=" << (prof_layerload_us_ - pb0_ll) / 1000.0
+                  << "ms scoring=" << (prof_scoring_us_ - pb0_sc) / 1000.0 << "ms]"
                   << " analysis[computes=" << analysis_cache_counters().first
                   << " hits=" << analysis_cache_counters().second << "]\n";
     }
