@@ -274,12 +274,20 @@ def _layer_legend(ax, names, used, extra=()):
     _side_legend(ax, hs + list(extra), "layer")
 
 
+# The overlap highlight: colours no routing layer in the viewer's palette
+# uses (LAYER_COLOR runs grey/orange/blue/red/green/purple).
+OVL_LINE = "#000000"
+OVL_FILL = "#ffd400"
+
+
 def draw_nuts(ax, s, names, highlight_overlaps=True):
     """One line per placed bus segment in its layer's colour; the segments
     of every OVERLAPPING pair (the engine's own `overlap_details`, the
-    pairs `num_overlaps` counts) drawn again on top in red, their overlap
-    rectangle filled, so the dirt of an abstract route is where the eye
-    goes first.  Returns the number of overlap pairs drawn."""
+    pairs `num_overlaps` counts) drawn again on top in BLACK, their overlap
+    rectangle filled YELLOW — two colours no layer in the palette uses (M5
+    is red, so a red highlight read as more M5 on the first picture) — so
+    the dirt of an abstract route is where the eye goes first.  Returns the
+    number of overlap pairs drawn."""
     used = {}
     for g in s.nuts_result.segments:
         if getattr(g, "placed", True) is False:
@@ -312,11 +320,11 @@ def draw_nuts(ax, s, names, highlight_overlaps=True):
                     continue
                 if g.horiz:
                     ax.plot([g.span_lo, g.span_hi], [g.track_position] * 2,
-                            color="#d62728", lw=2.6, alpha=0.95, zorder=8,
+                            color=OVL_LINE, lw=2.2, alpha=0.95, zorder=8,
                             solid_capstyle="butt")
                 else:
                     ax.plot([g.track_position] * 2, [g.span_lo, g.span_hi],
-                            color="#d62728", lw=2.6, alpha=0.95, zorder=8,
+                            color=OVL_LINE, lw=2.2, alpha=0.95, zorder=8,
                             solid_capstyle="butt")
             # the overlap rectangle itself: routing direction x perpendicular
             ga = segs.get((d.bid_a, d.seg_a))
@@ -329,12 +337,14 @@ def draw_nuts(ax, s, names, highlight_overlaps=True):
                 w, h = d.perp_hi - d.perp_lo, d.span_hi - d.span_lo
             pad = 6.0
             ax.add_patch(Rectangle((x0 - pad, y0 - pad), w + 2 * pad, h + 2 * pad,
-                                   facecolor="#d62728", edgecolor="#7f0000",
-                                   alpha=0.45, lw=0.8, zorder=9))
+                                   facecolor=OVL_FILL, edgecolor=OVL_LINE,
+                                   alpha=0.9, lw=0.8, zorder=9))
     extra = []
     if n_ovl:
-        extra.append(Line2D([0], [0], color="#d62728", lw=2.6,
-                            label=f"overlapping ({n_ovl} pair(s))"))
+        extra.append(Line2D([0], [0], color=OVL_LINE, lw=2.2,
+                            label=f"overlapping segments ({n_ovl} pair(s))"))
+        extra.append(Patch(facecolor=OVL_FILL, edgecolor=OVL_LINE,
+                           label="their overlap"))
     _layer_legend(ax, names, used, extra)
     return n_ovl
 

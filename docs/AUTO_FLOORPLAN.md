@@ -223,11 +223,40 @@ segments on tracks, the NUTS-stage audit, no bit placed): the fast screen
 of a floorplan, and the picture the overlap highlight is for.
 
 `tools/render_design.py` draws the abstract stage with every OVERLAPPING
-pair's two segments in red and their overlap rectangle filled — the
-engine's own `overlap_details`, the pairs `num_overlaps` counts — so the
-dirt of an abstract route is where the eye goes first.
+pair's two segments in black and their overlap rectangle filled yellow —
+the engine's own `overlap_details`, the pairs `num_overlaps` counts; two
+colours no layer uses, since the first cut drew them red and M5 is red —
+so the dirt of an abstract route is where the eye goes first.
 
-The reticle dial's own numbers (NQ = 62 at NC = 4, N = 8: 4,238 leaves, 15,069 buses, 375,496 bits) are recorded below as soon as the run that produces them finishes; until then this section states the mechanism only.
+**Measured (2026-10-07).**  The probe at NQ = 4 gives a 5740 × 8220 die
+(0.055 of the reticle), so the dial goes to **NQ = 62** — 5,868 instances,
+4,238 leaves, 15,069 buses, 375,496 bits, five levels — and
+`auto_floorplan` places it in 4.5 s: 72 top-level blocks by `cluster(9)`,
+die **22000 × 22276** at 0.786 utilization, placement audit clean.  That is
+**0.57 of the reticle's area, not the 0.85 asked for**: the probe scales
+NQ by area assuming the die grows linearly with the quadrant count, and the
+packing at 72 top blocks leaves more channel than at 14 (`cluster(8)` at
+NQ = 4, 0.673), so the fill lands short and a second probe at the result
+would be the fix (not built: one probe is the mechanism, and the miss is
+the measurement of it).  The picture is
+[`reticle_fp.png`](internal/img/bigsoc_reticle_fp.png).
+
+**The route is NOT measured at this size**: `run_hier_bundler depth 5`
+(5,804 hbundles — D0 155, D1 633, D2 1544, D3 2976, D4 496) and
+`generate_hier_topologies` (40,045 candidates) take about 70 s together,
+and `run_planner hier` then runs for **more than 25 minutes without
+finishing**, twice.  The cause is in the planner, not the design: every
+`plan_bundle` call re-sums every band of every cut (22 million on this
+grid, 2012 × 1844 Hanan lines over six layers), so the planner's cost is
+bundles × grid — issue #972 has the repro, the scaling (NQ = 2 / 8 / 16:
+1.4 s / 77 s / 270 s for 174 / 944 / 1,664 bundles) and where to start.
+Until it is fixed, the biggest size the abstract screen finishes at is
+**NQ = 16** (1,636 instances, 1,202 leaves, 4,347 buses; die 12248 × 11740
+at 0.727): 99 overlaps, 55 audit violations, 58 seat faults at the
+abstract audit, 4.5 min end to end; NQ = 8 (900 instances, 2,483 buses)
+reads 104 / 28 / 30 in 67 s.  The NQ = 16 abstract route with its overlaps
+highlighted is [`bigsoc_nq16_nuts.png`](internal/img/bigsoc_nq16_nuts.png),
+its floorplan [`bigsoc_nq16_fp.png`](internal/img/bigsoc_nq16_fp.png).
 
 ## 5. What it is not, and what comes next
 

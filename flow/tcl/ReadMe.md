@@ -259,8 +259,12 @@ at a pitch along a row, rows stacked, feeders west, weight buffers north,
 accumulators south on their columns, the tail below, a DMA under it) and
 hands it to `auto_floorplan` as `fixed pe_cell,row_cell,npu_cell`; `-npu
 auto` lets the engine place it, for the comparison.  `-reticle` sizes the
-dial to the PDK's stated reticle (26 × 33 mm) from one probe floorplan;
-`-abstract` stops at abstract NUTS, the fast screen.
+dial to the PDK's stated reticle (26 × 33 mm) from one probe floorplan
+(measured: the probe lands the die at 0.57 of the reticle against the 0.85
+asked, since the top packing's channel grows with the block count —
+docs/AUTO_FLOORPLAN.md §4b); `-abstract` stops at abstract NUTS, the
+fast screen, and `tools/render_design.py` draws that stage with every
+overlapping pair highlighted (`docs/internal/img/bigsoc_nq16_nuts.png`).
 
 The dial: NQ=2 is 126 leaves / 447 buses / 10,024 bits; `8 -NC 4 -N 16
 -NL3 4 -NMC 4 -NIO 16` is 898 leaves.
@@ -274,6 +278,9 @@ and is NOT clean:
 | `2 -iterate 3` | die 4759 x 3572, 84 % | 4 / 149 (round 3) | **clean, 0 / 0 / 0**, 14 s for the three rounds |
 | `2 -bottomup` | the same floorplan, every template solved once and copied, the nested ones reported MISALIGNED and solved `independent` | 16 / 430 | 1 / 113, 2 min |
 | `4 -NC 4 -N 8 -NL3 4 -NMC 4 -NIO 8` (first cut: no L0, the engine placing the array) | die 6064 x 6804, 63 % | 143 / 1343 | 26 / 390 after two healer rounds, 4 m 31 s wall |
+| `8 -NC 4 -N 8 -NL3 4 -NMC 4 -NIO 16 -abstract` | die 11008 x 8298 (900 instances, 674 leaves), 61 % | abstract audit 104 ovl / 28 viol / 30 seat faults | 67 s, the planner 77 s of a replay under load |
+| `16 -NC 4 -N 8 -NL3 4 -NMC 4 -NIO 16 -abstract` | die 12248 x 11740 (1636 instances, 1202 leaves), 73 % | abstract audit 99 / 55 / 58 | 4.5 min, the planner 270 s |
+| `4 -NC 4 -N 8 -NL3 4 -NMC 4 -NIO 16 -reticle -abstract` (NQ = 62 after the probe) | die 22000 x 22276 (5868 instances, 4238 leaves, 15,069 buses), 0.786 util, 0.57 of the reticle, 4.5 s | **not reached**: `run_planner hier` runs > 25 min on its 5,804 bundles and does not finish — issue #972 | the floorplan is `docs/internal/img/bigsoc_reticle_fp.png` |
 
 `-iterate K` is the top-down half of the loop: each round re-floorplans
 with every cell the previous route filled past `-demand` percent on a TOP
