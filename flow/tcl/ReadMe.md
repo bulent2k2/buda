@@ -270,20 +270,25 @@ docs/AUTO_FLOORPLAN.md §4b); `-abstract` stops at abstract NUTS, the
 fast screen, and `tools/render_design.py` draws that stage with every
 overlapping pair highlighted (`docs/internal/img/bigsoc_nq16_nuts.png`).
 
-The dial: NQ=2 is 126 leaves / 447 buses / 10,024 bits; `8 -NC 4 -N 16
+The dial: NQ=2 is 126 leaves / 407 buses / 9,064 bits; `8 -NC 4 -N 16
 -NL3 4 -NMC 4 -NIO 16` is 898 leaves.
 
 **Measured (2026-10-07), the honest state** — the first floorplan ROUTES
-and is NOT clean:
+and is NOT clean.  Re-measured the same day after the vehicle's wiring
+was repaired (every cache named its tag's `b_out` on one net per bank, so
+only the LAST bank was wired and the other banks' nets were dangling in
+the emitted Verilog — Codex on #973, now refused by `hnet::net`); the
+earlier tables routed a design with a quarter of its cache buses missing
+and are not kept:
 
 | run | floorplan | first audit (ovl / unplaced) | endpoint |
 |---|---|---|---|
-| `2` | die 4839 x 2434, 81 % util, 3 s | 9 / 209 | 0 / 38 after two healer rounds, 41 s |
-| `2 -iterate 3` | die 4759 x 3572, 84 % | 4 / 149 (round 3) | **clean, 0 / 0 / 0**, 14 s for the three rounds |
-| `2 -bottomup` | the same floorplan, every template solved once and copied, the nested ones reported MISALIGNED and solved `independent` | 16 / 430 | 1 / 113, 2 min |
+| `2` | die 4508 x 2434, 82 % util, 3 s | 16 / 528 | **0 / 6** after two healer rounds, 69 s |
+| `2 -iterate 3` | die 4508 x 2434 -> 4940 x 2754 -> 4104 x 4168, 88 % | 11 / 302 (round 3) | 0 / 24, 59 s for the three rounds |
+| `2 -bottomup` | the same floorplan, every template solved once and copied, the nested ones reported MISALIGNED and solved `independent` | 8 / 607 | 12 / 115, 114 s |
 | `4 -NC 4 -N 8 -NL3 4 -NMC 4 -NIO 8` (first cut: no L0, the engine placing the array) | die 6064 x 6804, 63 % | 143 / 1343 | 26 / 390 after two healer rounds, 4 m 31 s wall |
-| `8 -NC 4 -N 8 -NL3 4 -NMC 4 -NIO 16 -abstract` | die 11008 x 8298 (900 instances, 674 leaves), 61 % | abstract audit 104 ovl / 28 viol / 30 seat faults | 25 s at `-j 1`, the planner 4.3 s (37 s / 16.4 s at `-j 4`; 77 s before #974) |
-| `16 -NC 4 -N 8 -NL3 4 -NMC 4 -NIO 16 -abstract` | die 12248 x 11740 (1636 instances, 1202 leaves), 73 % | abstract audit 99 / 55 / 58 | 60 s at `-j 1`, the planner 8.7 s (184 s / 135 s at `-j 4`; 270 s before #974) |
+| `8 -NC 4 -N 8 -NL3 4 -NMC 4 -NIO 16 -abstract` | die 11236 x 7120 (900 instances, 674 leaves, 2,283 buses), 67 % | abstract audit 112 ovl / 24 viol / 82 seat faults | 25 s at `-j 1`, the planner 4.3 s (36 s / 13.8 s at `-j 4`; 77 s before #974) |
+| `16 -NC 4 -N 8 -NL3 4 -NMC 4 -NIO 16 -abstract` | die 11752 x 11740 (1636 instances, 1202 leaves, 3,971 buses), 73 % | abstract audit 194 / 35 / 143 | 72 s at `-j 1`, the planner 11.9 s (194 s / 137 s at `-j 4`; 270 s before #974) |
 | `4 -NC 4 -N 8 -NL3 4 -NMC 4 -NIO 16 -reticle -abstract` (NQ = 62 after the probe) | die 22000 x 22276 (5868 instances, 4238 leaves, 15,069 buses), 0.786 util, 0.57 of the reticle, 4.5 s | abstract audit 1036 ovl / 119 viol / 147 seat faults over 5,804 bundles (108 of the 155 top-level bundles committed with overflow) | **16.2 min at `-j 1`, the planner 82 s** (re-measured after #974; the first run took 77 min, 65 of them the planner — issue #972, still open for the scoring workers, which is why one thread beats four here); the floorplan is `docs/internal/img/bigsoc_reticle_fp.png`, the route `bigsoc_reticle_nuts.png` |
 
 `-iterate K` is the top-down half of the loop: each round re-floorplans
@@ -291,9 +296,11 @@ with every cell the previous route filled past `-demand` percent on a TOP
 layer (`buda::query demand`) grown by `-grow` and the channel widened by
 `-widen`, routed healerless to judge the floorplan rather than the
 healers; the last round heals.  The levers are blunt — the three rounds'
-first audits are 209, 230, 149 — and what the endpoint shows is a wider
-channel giving the healers the room to finish, which is the SoC
-vehicle's channel lesson read from the other side.  The bottom-up arm says something about
+first audits are 528, 441, 302 — and the endpoint (0 / 24) is worse than
+one round's (0 / 6): on the wired design a wider channel is not what the
+healers were short of (on the under-wired one the loop ended clean where
+one round ended 0 / 38, a reading of the missing buses rather than of
+channels).  The bottom-up arm says something about
 the STACK: with V pitches 18/32/41 the x track period is 11,808 units, so
 a diverse 2-D packing cannot be phase-aligned by translation (every
 nested template is reported off its parent's phase), as `soc.tcl`

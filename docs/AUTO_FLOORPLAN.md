@@ -178,22 +178,31 @@ PDK, `wl 0.25`:
 | first audit | 781 violations in 32 bundles (0 supply-doomed seats) |
 | one healer round | 36 violations in 6 bundles |
 
-The SoC at NQ = 2 (126 leaves at five levels of cells, 447 buses, 10,024
-bits; `bigsoc.tcl 2`, the NPU by the array rule):
+The SoC at NQ = 2 (126 leaves at five levels of cells, 407 buses, 9,064
+bits; `bigsoc.tcl 2`, the NPU by the array rule).  Re-measured 2026-10-07
+after the vehicle's wiring was repaired: every cache had named its tag's
+`b_out` on one net PER BANK, and the emitter connected a pin to the last
+net that named it, so only the last bank was wired and the other banks'
+nets were dangling (Codex on #973; `hnet::net` refuses the shape now).
+The tables before that read 447 buses, first audit 9 / 209, healed
+0 / 38, `-iterate 3` clean, bottom-up 1 / 113 — a design with a quarter
+of its cache buses missing, kept here only as what the repair moved:
 
 | arm | floorplan | first audit (ovl / unplaced) | after the vehicle's two healer rounds |
 |---|---|---|---|
-| one round | die 4839 × 2434, 81 % | 9 / 209 | 0 ovl / 38 unplaced (41 s) |
-| `-iterate 3` (gap 16 → 24 → 36, starved cells × 1.25 per round) | die 4759 × 3572, 84 % | 4 / 149 (round 3) | **clean — 0 / 0 / 0** (14 s for the three rounds) |
-| `-bottomup` (`set_bottom_up *`, `align_bottom_up`, `on_mismatch independent`) | the one-round floorplan | 16 / 430 | 1 ovl / 113 unplaced (2 min) |
+| one round | die 4508 × 2434, 82 % | 16 / 528 | **0 ovl / 6 unplaced** (69 s) |
+| `-iterate 3` (gap 16 → 24 → 36, starved cells × 1.25 per round) | die 4508 × 2434 → 4940 × 2754 → 4104 × 4168, 88 % | 11 / 302 (round 3) | 0 ovl / 24 unplaced (59 s for the three rounds) |
+| `-bottomup` (`set_bottom_up *`, `align_bottom_up`, `on_mismatch independent`) | the one-round floorplan | 8 / 607 | 12 ovl / 115 unplaced (114 s) |
 
 Read honestly: the loop's levers are blunt — the healerless first audits
-of the three rounds (209, 230, 149) barely move, and the demand rule
-grows six cell types (every small block the NPU's and the routers' buses
-cross) — and what the endpoint shows is a wider channel giving the
-HEALERS the room to finish, which is the SoC vehicle's own lesson about
-channels measured from the other side: a channel is a workaround the
-caller names, not the cause.  Before the L0 and with the engine placing
+of the three rounds (528, 441, 302) move by a fifth per round while the
+demand rule grows ten cell types by the third (every small block the
+NPU's and the routers' buses cross) — and the endpoint it reaches
+(0 / 24) is WORSE than the one-round arm's (0 / 6), so on the wired
+design a wider channel is not what the healers were short of; on the
+under-wired design the same loop ended clean where one round ended
+0 / 38, which read as a channel lesson and was a measurement of the
+missing buses.  Before the L0 and with the engine placing
 the array too (`-npu auto`, the first cut), the same arms ended 8 / 124
 and 0 / 19 — a different design, so not a comparison, recorded because
 that is the number the first commit carries.
@@ -286,10 +295,10 @@ beats four at every size here: NQ = 8 / 16 / 62 plan in 4.3 s / 8.7 s /
 code before #974: 77 s / 270 s / 3,900 s), for 944 / 1,664 / 5,804
 bundles, every audit identical across all of it.  The smaller dials of the
 same design for comparison, at `-j 1`: NQ = 16 (1,636 instances, 1,202
-leaves, 4,347 buses; die 12248 × 11740 at 0.727) reads 99 overlaps, 55
-audit violations, 58 seat faults at the abstract audit in 60 s wall
-(184 s at `-j 4`); NQ = 8 (900 instances, 2,483 buses) 104 / 28 / 30 in
-25 s (37 s).  The NQ = 16 abstract route with its overlaps highlighted is
+leaves, 3,971 buses; die 11752 × 11740 at 0.726) reads 194 overlaps, 35
+audit violations, 143 seat faults at the abstract audit in 72 s wall
+(194 s at `-j 4`); NQ = 8 (900 instances, 2,283 buses; die 11236 × 7120 at
+0.670) 112 / 24 / 82 in 25 s (36 s).  The NQ = 16 abstract route with its overlaps highlighted is
 [`bigsoc_nq16_nuts.png`](internal/img/bigsoc_nq16_nuts.png),
 its floorplan [`bigsoc_nq16_fp.png`](internal/img/bigsoc_nq16_fp.png).
 
