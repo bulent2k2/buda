@@ -465,7 +465,10 @@ class AutoFloorplanMixin:
         for c in roots:
             x, y = top.pos[c.name]
             stamp(c, x, y)
-        self.bdb.set_comp_bboxes(boxes)
+        # the token FIRST, then the boxes: a pin's position is read
+        # through the token, so the boxes are written under the one that
+        # describes them (the setter re-derives the pins too, so either
+        # order is consistent; this one does it once)
         stamped = {b[0] for b in boxes}
         turned = [nm for nm in turned if nm in stamped]
         if turned:
@@ -473,6 +476,7 @@ class AutoFloorplanMixin:
             print(f"[auto_floorplan] {len(turned)} rotated instance(s) placed "
                   f"upright (orient reset to N): {', '.join(turned[:6])}"
                   + (" ..." if len(turned) > 6 else ""))
+        self.bdb.set_comp_bboxes(boxes)
         for c in comps:
             if not kids.get(c.id) and not c.is_leaf:
                 self.bdb.set_comp_is_leaf(c.name, True)

@@ -155,6 +155,8 @@ def test_options_are_validated_loudly():
     assert "place must be one of" in _run(s, "auto_floorplan place random")
     assert "snap wants" in _run(s, "auto_floorplan snap 18")
     assert "wants <cell>=<value>" in _run(s, "auto_floorplan grow pe_cell")
+    assert "grow values must be positive (got pe_cell=0.0)" in _run(s, "auto_floorplan grow pe_cell=0")
+    assert "must be positive" in _run(s, "auto_floorplan grow pe_cell=1.5,row_cell=-2")
 
 
 def test_a_cell_that_is_not_a_template_is_refused():
@@ -284,6 +286,21 @@ def test_a_rotated_instance_is_placed_upright_and_its_token_says_so():
         c = after[nm]
         assert c.orient == "N", (nm, c.orient)
         assert (c.x2 - c.x1, c.y2 - c.y1) == (cell.width, cell.height), nm
+        # and the pins read through the N token over the written box
+        # (Codex P2 on #973, round 6: the boxes were written under the old
+        # token and the token reset after, leaving the pins transformed)
+        pins = {p.pin_name: (p.px, p.py) for p in s.bdb.pins_by_comp(c.id)}
+        want = {"a": (c.x1, c.y1 + 10), "q": (c.x1 + 40, c.y1 + 10)}
+        assert pins and all(pins[k] == want[k] for k in pins), (nm, pins)
+    # the orient setter alone re-derives the pins through the new token
+    c = after["b0"]                                   # carries q only
+    s.bdb.set_comp_orients([("b0", "S")])
+    pins = {p.pin_name: (p.px, p.py) for p in s.bdb.pins_by_comp(c.id)}
+    # S: (w - 40, h - 10) over the cell's size AS SIZED by auto_floorplan
+    assert pins == {"q": (c.x1 + cell.width - 40, c.y1 + cell.height - 10)}, pins
+    s.bdb.set_comp_orients([("b0", "N")])
+    pins = {p.pin_name: (p.px, p.py) for p in s.bdb.pins_by_comp(c.id)}
+    assert pins == {"q": (c.x1 + 40, c.y1 + 10)}, pins
     # the setter itself: an unknown token or name writes nothing
     with pytest.raises(RuntimeError, match="not an orientation"):
         s.bdb.set_comp_orients([("b0", "NE")])

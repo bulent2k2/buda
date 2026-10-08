@@ -43,6 +43,7 @@ def test_the_mock_pdk_parses_and_matches_first_glob_wins():
     ("leaf x macro w 10", "needs w and h"),
     ("leaf x logic aspect 0.5", "aspect must be >= 1"),
     ("util 0", "must be positive"),
+    ("util 65", r"fraction in \(0, 1\]"),
 ])
 def test_a_malformed_pdk_is_refused_loudly(bad, why):
     with pytest.raises(ValueError, match=why):

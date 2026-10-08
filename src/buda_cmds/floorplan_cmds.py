@@ -97,6 +97,13 @@ def cmd_auto_floorplan(session, cmd, args, cmd_line):
             d = _kv_list(cmd, k, v, float)
             if d is None:
                 return
+            # a multiplier: zero writes a 0 x 0 cell and a negative one an
+            # inverted box (Codex P2 on #973, round 6)
+            bad = [f"{c}={f}" for c, f in d.items() if not f > 0]
+            if bad:
+                print(f"Error: {cmd}: grow values must be positive "
+                      f"(got {', '.join(bad)})")
+                return
             kw["grow"] = d
         elif k == "cols":
             d = _kv_list(cmd, k, v, int)

@@ -113,6 +113,12 @@ def parse_pdk(text: str, path: str = "") -> Pdk:
             if v < 0 or (key in ("bit_pitch", "stdcell_area", "util",
                                  "unit_um") and v <= 0):
                 raise ValueError(f"{where}: `{key}` must be positive")
+            if key == "util" and v > 1:
+                # the same range the command-line override enforces: a
+                # percentage spelling (`util 65`) divided every logic area
+                # by 65 and sized the blocks to nothing (Codex P2 on #973)
+                raise ValueError(f"{where}: `util` is a fraction in (0, 1], "
+                                 f"got {toks[1]}")
             setattr(pdk, key, v)
             continue
         if key != "leaf":

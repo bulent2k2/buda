@@ -3594,8 +3594,23 @@ void BDB::set_comp_orients(
             sqlite3_bind_text(u, 2, name.c_str(), -1, SQLITE_TRANSIENT);
             sqlite3_step(u);
         }
+        // A pin's position reads through the token (bdb_pin_abs), so the
+        // positioned pins follow the token over the row's current box, and
+        // the HPWL with them (Codex P2 on #973, round 6: auto_floorplan
+        // wrote the boxes under the old token and reset it after).
+        Stmt q(_db, "SELECT x1, y1, x2, y2 FROM component WHERE name=?");
+        for (const auto& [name, o] : orients) {
+            sqlite3_reset(q);
+            sqlite3_bind_text(q, 1, name.c_str(), -1, SQLITE_TRANSIENT);
+            if (sqlite3_step(q) != SQLITE_ROW) continue;
+            _reposition_pins_in_box(_db, name, sqlite3_column_double(q, 0),
+                                    sqlite3_column_double(q, 1),
+                                    sqlite3_column_double(q, 2),
+                                    sqlite3_column_double(q, 3));
+        }
     }
     _exec("COMMIT");
+    compute_hpwl();
 }
 
 int BDB::derive_container_bboxes(double margin,
