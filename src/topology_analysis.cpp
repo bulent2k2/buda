@@ -321,8 +321,11 @@ void derive_conn_segs(const Topology& topo, const Floorplan& fp,
 
 void derive_slide_ranges(const Topology& topo, const Floorplan& fp,
                          std::vector<ConnSeg>& segs) {
-    std::map<std::string, Rect> bmap;
-    for (auto& [name, rect] : fp.get_all_blocks()) bmap[name] = rect;
+    // Look blocks up IN the floorplan (issue #972): building a private
+    // string-keyed copy of every block per call was ~90 % of analyze()'s
+    // cost on a 1,600-block design, two copies per candidate, and the
+    // planner analyzes every candidate once per wrapper.  Same lookups,
+    // same values -- byte-identical.
 
     // ── Pass 1 ──
     for (auto& cs : segs) {
@@ -333,9 +336,8 @@ void derive_slide_ranges(const Topology& topo, const Floorplan& fp,
             // name checked against a different floorplan); skip its constraint
             // rather than throwing — mirrors the graceful misses in the other
             // Floorplan accessors (get_block_rects/bounds/corner_margin).
-            auto bm_it = bmap.find(conn.block_name);
-            if (bm_it == bmap.end()) continue;
-            Rect face_rect = bm_it->second;
+            if (!fp.has_block(conn.block_name)) continue;
+            Rect face_rect = fp.get_block_bounds(conn.block_name);
             BlockCornerMargin cm = fp.get_block_corner_margin(conn.block_name);
             {
                 const auto rects = fp.get_block_rects(conn.block_name);
@@ -713,8 +715,6 @@ void tighten_passthrough(const Topology& topo, const Floorplan& fp,
 void pin_relay_taps(const Topology& topo, const Floorplan& fp,
                     std::vector<ConnSeg>& segs) {
     (void)topo;
-    std::map<std::string, Rect> bmap;
-    for (auto& [name, rect] : fp.get_all_blocks()) bmap[name] = rect;
 
     int n = (int)segs.size();
     for (int i = 0; i < n; ++i) {
@@ -724,9 +724,8 @@ void pin_relay_taps(const Topology& topo, const Floorplan& fp,
             int f = bc.face_coord;
             // The busterm sits at one of cs's along endpoints (see check_topo).
             if (f != cs.along_lo && f != cs.along_hi) continue;
-            auto bm_it = bmap.find(bc.block_name);
-            if (bm_it == bmap.end()) continue;            // block not in this floorplan
-            const Rect& bb = bm_it->second;
+            if (!fp.has_block(bc.block_name)) continue;   // block not in this floorplan
+            const Rect bb = fp.get_block_bounds(bc.block_name);
             // OTC window = the cell footprint in the connector's perp direction.
             for (const auto& sc : cs.conns) {
                 if (sc.kind != SegConn::SEG || !sc.is_endpoint) continue;

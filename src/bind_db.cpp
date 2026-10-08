@@ -718,6 +718,9 @@ void bind_db(py::module_& m) {
         .def("set_comp_bbox",   &BDB::set_comp_bbox,
              py::arg("name"), py::arg("x1"), py::arg("y1"),
              py::arg("x2"), py::arg("y2"))
+        // Many boxes, one transaction, one HPWL recompute (auto_floorplan).
+        .def("set_comp_bboxes", &BDB::set_comp_bboxes, py::arg("boxes"))
+        .def("set_comp_orients", &BDB::set_comp_orients, py::arg("orients"))
         // Returns (n_placed, [names left unplaced]) — the caller reports
         // both, because a container nothing could place is a hole in the
         // routing interface and must not pass silently.

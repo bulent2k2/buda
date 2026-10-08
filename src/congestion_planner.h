@@ -57,10 +57,23 @@ struct GlobalCut {
     void init_bands(int n, const std::function<double(int)>& cap_fn) {
         band_cap_.resize(n);
         band_usage_.assign(n, 0.0);
+        total_usage_ = 0.0;
         for (int b = 0; b < n; ++b) band_cap_[b] = cap_fn(b);
     }
-    void reset_usage() { std::fill(band_usage_.begin(), band_usage_.end(), 0.0); }
-    void add_usage(int b, double delta) { band_usage_[b] += delta; }
+    void reset_usage() {
+        std::fill(band_usage_.begin(), band_usage_.end(), 0.0);
+        total_usage_ = 0.0;
+    }
+    void add_usage(int b, double delta) {
+        band_usage_[b] += delta;
+        total_usage_   += delta;
+    }
+    // Running sum of band_usage_ (issue #972): plan_bundle's per-layer load
+    // for the kBalance tie-breaker used to re-sum every band of every cut on
+    // every call — O(grid) per bundle, the planner's largest single cost at
+    // scale.  Every usage write goes through add_usage/reset_usage/init_bands,
+    // so the total is maintained at the chokepoint instead.
+    double total_usage() const { return total_usage_; }
 
     // Signal-track count per FULL band, precomputed once in SIGNAL_TRACKS mode so
     // usable_band_cap can skip the per-call pattern walk when the slide window does
@@ -75,6 +88,7 @@ struct GlobalCut {
 private:
     std::vector<double> band_cap_;    // capacity per perpendicular Hanan band
     std::vector<double> band_usage_;  // accumulated demand per band
+    double total_usage_ = 0.0;        // sum of band_usage_, maintained
     std::vector<int>    band_sig_ntrk_;  // cached full-band SIGNAL-track count (track mode)
 };
 
@@ -1047,6 +1061,20 @@ private:
     long long prof_scoring_us_   = 0;
     long long prof_plan_calls_   = 0;
     long long prof_cands_        = 0;
+    // optimize_topologies phase accumulators ([PlanProf], same env gate):
+    // where a whole planner run's wall time goes, per phase.
+    long long prof_ot_reserve_us_  = 0;   // apply_reservation park + release
+    long long prof_ot_strict_us_   = 0;   // the first STRICT plan_bundle per bundle
+    long long prof_ot_rank_us_     = 0;   // rip-up victim ranking (plan_band_overlap)
+    long long prof_ot_ladder_us_   = 0;   // rip-up trials (commit/uncommit + plans)
+    long long prof_ot_fallback_us_ = 0;   // ALLOW_OVERFLOW / BEST_EFFORT plans
+    long long prof_ot_commit_us_   = 0;   // commit_plan + assignment + log
+    long long prof_ot_refine_us_   = 0;   // refine passes
+    long long prof_ot_strict_fail_ = 0;   // STRICT found nothing (ladder entered)
+    long long prof_ot_ranked_      = 0;   // committed bundles scored by the ranking
+    long long prof_ot_ladder_plans_= 0;   // plan_bundle calls inside the ladder
+    long long prof_ot_ripups_      = 0;   // accepted rip-ups
+    long long prof_ot_refine_plans_= 0;   // plan_bundle calls inside refine
 };
 
 } // namespace buda

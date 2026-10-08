@@ -604,6 +604,17 @@ void bind_nuts(py::module_& m) {
     // find_overlaps recounts with overlap_delta_vs; these two hooks let the
     // test suite pin the identity  delta == count(after) − count(before)
     // on arbitrary segment sets (test_overlap_delta.py).
+    // Recompute a NUTSResult's metrics (overlap count, per-layer counts,
+    // overlap DETAILS, violations) from its placed segments — what a result
+    // RESTORED by load_pipeline lacks, since the BDB persists the placement
+    // and not the audit of it; the renderer and the judge of a checkpoint
+    // read the same predicate the solver counted with.
+    m.def("compute_nuts_metrics",
+          [](NUTSResult& r) { compute_metrics(r); },
+          py::arg("result"),
+          "Recompute num_overlaps / overlaps_per_layer / overlap_details / "
+          "num_violations from result.segments (a restored result holds none)");
+
     m.def("_find_overlap_count",
           [](const std::vector<TrackSegment>& segs) {
               return find_overlaps(segs).size();
