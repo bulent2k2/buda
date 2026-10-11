@@ -49,6 +49,66 @@ proper (single-thread profile below), and the next quadratic term waiting
 at the reticle dial is the rip-up VICTIM RANKING (item 3 of the issue):
 3.3 s at NQ=32 for 160 STRICT failures × ~1,000 committed bundles.
 
+## Landed 2026-10-11: E (victim index) and C (merged refine probe)
+
+Both are in `src/congestion_planner.cpp`, decision-identical by construction
+and measured (every `[Planner]` line and the whole flow log but the runtime
+numbers identical at NQ=8, 16 and 32 against a build of the merge base
+`b1eeceba`; `test_planner_rank_index.py` pins it on `flow/soc_small.buda`,
+where both paths run — 3 rip-ups, 33 refined bundles — and fails under a
+mutation of either: dropping one indexed candidate, or shifting the merged
+`keep` score by one).  Single scoring thread (`-j 1`), the shipped flat
+recordings replayed through `bin/buda`; `[PlanProf]` seconds.
+
+| dial | planner total | rank (fails, plans scored) | refine (plans) | commit |
+|---|---|---|---|---|
+| NQ=8  base | 4.38 | 0.169 (49, 17,088) | 1.27 (1,888) | 0.051 |
+| NQ=8  E+C  | 3.72 | 0.027 (49, 300) | 1.12 (944) | 0.067 |
+| NQ=16 base | 11.57 | 0.888 (107, 68,661) | 3.21 (3,328) | 0.115 |
+| NQ=16 E+C  | 9.62 | 0.094 (107, 560) | 3.06 (1,664) | 0.136 |
+| NQ=32 base | 35.07 | 5.14 (247, 258,283) | 7.79 (6,208) | 0.271 |
+| NQ=32 E+C  | 29.63 | 0.617 (247, 1,817) | 7.53 (3,104) | 0.371 |
+
+**E does what the estimate said.**  The ranking used to score every
+committed plan on every STRICT failure (258,283 `plan_band_overlap` calls
+at NQ=32); the band → bundle index (`band_index_`, the inverse of
+`charge_log_`, maintained in `commit_plan` in lockstep with the log) names
+the 7 or so plans per failure that hold a charge on a contended band
+(1,817 in all; 300 and 560 at NQ=8 and 16), and only those are scored —
+6.3x, 9.4x and 8.3x on the phase at NQ=8, 16 and 32,
+with the growth as fails × committed gone.  The VALUE each candidate is
+sorted by is still `plan_band_overlap`, so the sort sees the same pairs: a
+plan's bands at commit time are the bands a re-derivation sees at rank
+time under the geometric spread modes (`band_span_charge` 1 and 2), which
+is the condition `band_index_exact_()` states; the greedy modes (3–5,
+which read live occupancy) and the legacy mode 0 (no log) keep the full
+scan, as does `BUDA_RANK_SCAN=1` for a study.  Its cost is the index
+maintenance in `commit_plan`: the commit phase +0.02–0.10 s per dial, a
+small fraction of what the rank phase returns.  Extrapolated to the NQ=71
+reticle dial's 23.1 s rank phase: 2–3 s.
+
+**C was over-estimated, and the measurement is the correction.**  The
+estimate read "two full `plan_bundle` sweeps per revisit" and expected
+half the refine time; the pinned `keep` probe is a sweep over ONE
+candidate, so what the merge removes is one call's fixed cost and one
+candidate's scoring per revisit, not half the work: refine −12 % at NQ=8,
+−5 % at NQ=16, −3 % at NQ=32 (plans halved in every row, 1,888 → 944 and
+so on).  Its worth at the reticle dial is a second or two, not the 17 s
+estimated.  Kept because it is free and exact: `plan_bundle` fills an
+optional `probe_out` with the result a call pinned to `probe_topo` would
+return, read off the same reduction (`score_candidate_` never reads the
+pin flag, and every candidate is scored from the same read-only base
+state); a GROUP pin or a `best_topo` outside the pool keeps the two calls,
+and `BUDA_REFINE_TWO_CALLS=1` keeps them for a study.
+
+The whole-planner numbers (−15 %, −17 %, −16 %) carry the usual caveat of
+this box: the STRICT phase, whose work did not change, read −13 % to
+−15 % between the two builds too, so the phase deltas above are the
+measurement and the totals are indicative.  With E and C in, the ranked
+list below stands with D, F and B (the worker overlay) as the remaining
+planner levers; abstract NUTS is the bigger term at NQ ≥ 32 (88 s against
+the planner's 39 s wall at NQ=32 here).
+
 ## Method
 
 * `BUDA_REPLAN_PROF=1` already timed `plan_bundle`'s `layer_load` and
@@ -181,7 +241,9 @@ landing is `tools/qor_corpus.py --vs main` (not run in this session).
   Decision-identical by construction (the thread count never changes a
   decision; corpus-verified already).
 
-**C. Halve the refine pass.**  Each revisit runs TWO full `plan_bundle`
+**C. Halve the refine pass — LANDED 2026-10-11, see above; the "two FULL
+sweeps" premise was wrong (the pinned probe scores one candidate), so it
+bought 3–12 % of refine, not half.**  Each revisit runs TWO `plan_bundle`
 sweeps against the same ripped-up state — a `keep` probe pinned to the old
 candidate and the unrestricted `np` sweep — and the old candidate's score
 inside the `np` sweep IS the `keep` score (same state, same candidate,
@@ -198,7 +260,8 @@ by perp-start with a prefix max of perp-end, like `prune_unreachable_partner_win
 contains this perp" in O(log n + hits).  Same answers, same order if the
 hits are visited in cache order.  Expected ~15–20 % of scoring.
 
-**E. Rip-up ranking from a band → occupant index.**  `charge_log_` already
+**E. Rip-up ranking from a band → occupant index — LANDED 2026-10-11, see
+above (8.3x on the phase at NQ=32).**  `charge_log_` already
 records, per (bundle, seg), every (cut, band, amount) charged; an inverted
 index (cut, band) → bundles lets the ranking sum `plan_band_overlap` over
 only the bundles that load a contended band instead of every committed

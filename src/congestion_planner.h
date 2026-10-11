@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <functional>
 #include <map>
+#include <unordered_map>
 #include <optional>
 #include <set>
 #include <tuple>
@@ -612,9 +613,20 @@ private:
     // costs_out (optional): when non-null, records a CandidateCost per scored
     // candidate (with per-segment breakdown) — the read-only source for the
     // debug cost view.  Null (the default) is byte-identical to before.
+    // probe_out / probe_topo (optional): fills *probe_out with the result the
+    // SAME call would return if it were pinned to candidate probe_topo alone
+    // (found = that candidate scored feasible; score, layers and perps are the
+    // candidate's own) — read off the one sweep rather than paid for with a
+    // second plan_bundle call.  Exact by construction: every candidate is
+    // scored from the same read-only base state, and score_candidate_ never
+    // reads the pin flag, so the pinned probe's one evaluation and the sweep's
+    // evaluation of the same index are the same arithmetic (the refine pass's
+    // `keep` probe, lever C of #972).  probe_topo not among the candidates
+    // scored leaves *probe_out untouched (caller falls back to the two calls).
     PlanResult plan_bundle(const BundleWrapper& bw, PlanMode mode,
                            std::set<std::pair<int,int>>* contended = nullptr,
-                           std::vector<CandidateCost>* costs_out = nullptr);
+                           std::vector<CandidateCost>* costs_out = nullptr,
+                           PlanResult* probe_out = nullptr, int probe_topo = -1);
     // Diagnosis for a bundle that reached the end of the escalation ladder
     // with nothing committed: names the routing direction its layer mask
     // starved, or "" when the mask is not the cause.  See the definition.
@@ -1049,6 +1061,24 @@ private:
     // inverse and needs no record.  Cleared whenever the cut state is rebuilt
     // or its usage reset, since the indices and the baseline both move.
     std::map<std::pair<int, int>, std::vector<std::tuple<int, int, double>>> charge_log_;
+    // The inverse of charge_log_: (cut, band) -> {bundle id -> number of that
+    // bundle's segments charged there}.  Maintained in lockstep with the log
+    // (same insert, same erase), so it names exactly the bundles whose
+    // standing charge touches a band — which is what the rip-up victim
+    // ranking asks of EVERY committed plan with a full re-derivation
+    // (plan_band_overlap over the whole committed set, 23 s of the NQ=71
+    // planner, #972 lever E).  Under the GEOMETRIC spread modes (1, 2) a
+    // plan's bands are a pure function of (segment, layer, perp, width), so
+    // the log's band set at commit time IS the set a re-derivation sees at
+    // rank time, and reading candidates off this index then scoring only
+    // those with plan_band_overlap is decision-identical; the greedy modes
+    // (3-5) read live occupancy and the legacy mode keeps no log, so the
+    // ranking keeps its full scan there (`band_index_exact_()`).
+    std::unordered_map<unsigned long long, std::map<int, int>> band_index_;
+    bool band_index_exact_() const { return band_span_charge_ == 1 || band_span_charge_ == 2; }
+    static unsigned long long band_key_(int ci, int b) {
+        return ((unsigned long long)(unsigned)ci << 32) | (unsigned long long)(unsigned)b;
+    }
     // One-shot guard for the above-TOP config-smell warning.
     bool   warned_above_top_ = false;
     // BUDA_REPLAN_PROF instrumentation accumulators (B1): time inside

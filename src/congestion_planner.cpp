@@ -329,6 +329,7 @@ void CongestionPlanner::rebuild_cuts_() {
     // Cut indices and band indices both move here, so any recorded charge
     // distribution is stale — drop it rather than replay it onto new bands.
     charge_log_.clear();
+    band_index_.clear();
     cuts_.clear();
     // Injected-demand records key cuts by index; a rebuild reorders/resizes
     // cuts_, so the records are meaningless afterward (audit C3-03).  Drop
@@ -2057,7 +2058,8 @@ int CongestionPlanner::resolved_plan_threads_(int ncand) const {
 CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
         const BundleWrapper& bw, PlanMode mode,
         std::set<std::pair<int,int>>* contended,
-        std::vector<CandidateCost>* costs_out) {
+        std::vector<CandidateCost>* costs_out,
+        PlanResult* probe_out, int probe_topo) {
     PlanResult res;
     if (bw.input.candidates.empty()) return res;
 
@@ -2219,6 +2221,20 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
             cc.segs       = std::move(cs.seg_costs);
             costs_out->push_back(std::move(cc));
         }
+        if (probe_out && ci == probe_topo) {
+            // The result a call pinned to this one candidate would return:
+            // its reduction sees exactly this CandScore and nothing else.
+            PlanResult& pr = *probe_out;
+            pr = PlanResult{};
+            pr.best_topo = ci;
+            if (!cs.infeasible && !cs.share_refused) {
+                pr.found      = true;
+                pr.score      = cs.score;
+                pr.overflow   = cs.overflow;
+                pr.seg_layers = cs.seg_layers;
+                pr.seg_perp   = cs.seg_perp;
+            }
+        }
         if (cs.infeasible || cs.share_refused) continue;
 
         bool is_better = false;
@@ -2286,8 +2302,15 @@ void CongestionPlanner::commit_plan(const BundleWrapper& bw, const PlanResult& p
         if (sign < 0.0) {
             auto it = charge_log_.find(key);
             if (it != charge_log_.end()) {
-                for (const auto& [ci, b, amt] : it->second)
+                for (const auto& [ci, b, amt] : it->second) {
                     cuts_[ci].add_usage(b, -amt);
+                    auto bi = band_index_.find(band_key_(ci, b));
+                    if (bi != band_index_.end()) {
+                        auto bb = bi->second.find(key.first);
+                        if (bb != bi->second.end() && --bb->second <= 0) bi->second.erase(bb);
+                        if (bi->second.empty()) band_index_.erase(bi);
+                    }
+                }
                 charge_log_.erase(it);
                 continue;
             }
@@ -2301,7 +2324,11 @@ void CongestionPlanner::commit_plan(const BundleWrapper& bw, const PlanResult& p
             cuts_[ci].add_usage(b, amt);
             rec.emplace_back(ci, b, amt);
         });
-        if (sign > 0.0) charge_log_[key] = std::move(rec);
+        if (sign > 0.0) {
+            for (const auto& [ci, b, amt] : rec)
+                band_index_[band_key_(ci, b)][key.first] += 1;
+            charge_log_[key] = std::move(rec);
+        }
     }
 }
 
@@ -2600,16 +2627,47 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
         //     restore the victim exactly and try the next one.
         if (!plan.found) {
             const auto t_rank = ot_now();
-            if (kOtProf) { ++prof_ot_strict_fail_; prof_ot_ranked_ += (long long)committed.size(); }
+            if (kOtProf) ++prof_ot_strict_fail_;
             std::vector<std::pair<double,int>> ranked;   // (overlap, committed idx)
-            for (int k = 0; k < (int)committed.size(); ++k) {
+            // Which committed plans can have a non-zero overlap?  Exactly
+            // those with a standing charge on a contended band — read off
+            // band_index_ where the spread is geometric (#972 lever E), so
+            // only the bundles actually holding those bands pay for a
+            // plan_band_overlap; the VALUE still comes from the same
+            // re-derivation and the sort reads the same (overlap, k) pairs,
+            // so the victim order is byte-identical to the full scan.  The
+            // full scan stays for the modes whose charge is not a function
+            // of geometry alone (see band_index_exact_).
+            auto rank_one = [&](int k) {
                 // A locked (bottom-up) wrapper is never a rip-up victim:
                 // its plan is a template copy shared by every sibling
                 // instance and must not be moved unilaterally.
-                if (bundles[committed[k].bundle_idx].hier.locked) continue;
+                if (bundles[committed[k].bundle_idx].hier.locked) return;
                 double ovl = plan_band_overlap(bundles[committed[k].bundle_idx],
                                                committed[k].plan, contended);
                 if (ovl > 0.0) ranked.push_back({ovl, k});
+            };
+            if (band_index_exact_() && !std::getenv("BUDA_RANK_SCAN")) {
+                std::unordered_map<int, std::vector<int>> k_of_id;
+                for (int k = 0; k < (int)committed.size(); ++k)
+                    k_of_id[bundles[committed[k].bundle_idx].input.original_bundle.id].push_back(k);
+                std::vector<int> cand_k;
+                for (const auto& cb : contended) {
+                    auto bi = band_index_.find(band_key_(cb.first, cb.second));
+                    if (bi == band_index_.end()) continue;
+                    for (const auto& [bid, cnt] : bi->second) {
+                        auto it = k_of_id.find(bid);
+                        if (it == k_of_id.end()) continue;
+                        cand_k.insert(cand_k.end(), it->second.begin(), it->second.end());
+                    }
+                }
+                std::sort(cand_k.begin(), cand_k.end());
+                cand_k.erase(std::unique(cand_k.begin(), cand_k.end()), cand_k.end());
+                if (kOtProf) prof_ot_ranked_ += (long long)cand_k.size();
+                for (int k : cand_k) rank_one(k);
+            } else {
+                if (kOtProf) prof_ot_ranked_ += (long long)committed.size();
+                for (int k = 0; k < (int)committed.size(); ++k) rank_one(k);
             }
             std::sort(ranked.begin(), ranked.end(),
                       [](const std::pair<double,int>& a, const std::pair<double,int>& b) {
@@ -2816,14 +2874,33 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
                 // search).  If the old topology is no longer STRICT-feasible
                 // (it was committed at the overflow/best-effort stages), any
                 // found replan is an improvement by definition.
-                int  old_sel = bw.plan.selected_topology_index;
-                bw.input.topology_pinned        = true;
-                bw.plan.selected_topology_index = cp.plan.best_topo;
-                PlanResult keep = plan_bundle(bw, PlanMode::STRICT);
-                bw.input.topology_pinned        = false;
-                bw.plan.selected_topology_index = old_sel;
-                PlanResult np = plan_bundle(bw, PlanMode::STRICT);
-                if (kOtProf) prof_ot_refine_plans_ += 2;
+                // The pinned probe scores ONE candidate the unrestricted
+                // sweep scores too, from the same ripped-up state, so its
+                // result is read off that sweep (#972 lever C: half the
+                // refine pass's plan_bundle calls, identical verdicts).  A
+                // GROUP pin would make the "pinned" probe a sweep over the
+                // group's members instead, and a best_topo outside the pool
+                // would make it the full sweep, so those keep the two calls.
+                PlanResult keep, np;
+                const bool merged_probe =
+                    bw.input.pinned_group.empty() &&
+                    cp.plan.best_topo >= 0 &&
+                    cp.plan.best_topo < (int)bw.input.candidates.size() &&
+                    !std::getenv("BUDA_REFINE_TWO_CALLS");
+                if (merged_probe) {
+                    np = plan_bundle(bw, PlanMode::STRICT, nullptr, nullptr,
+                                     &keep, cp.plan.best_topo);
+                    if (kOtProf) prof_ot_refine_plans_ += 1;
+                } else {
+                    int  old_sel = bw.plan.selected_topology_index;
+                    bw.input.topology_pinned        = true;
+                    bw.plan.selected_topology_index = cp.plan.best_topo;
+                    keep = plan_bundle(bw, PlanMode::STRICT);
+                    bw.input.topology_pinned        = false;
+                    bw.plan.selected_topology_index = old_sel;
+                    np = plan_bundle(bw, PlanMode::STRICT);
+                    if (kOtProf) prof_ot_refine_plans_ += 2;
+                }
                 bool adopt = np.found &&
                              (!keep.found || np.score + 1e-9 < keep.score);
                 if (!adopt) {
@@ -2932,6 +3009,7 @@ void CongestionPlanner::recharge_committed_(
     // Usage is back to zero, so every recorded distribution describes a charge
     // that no longer exists; the loop below re-records as it re-commits.
     charge_log_.clear();
+    band_index_.clear();
     share_used_.clear();      // the share books rebuild with the re-commits
     for (const auto& bw : bundles) {
         if (&bw == exclude || !has_committed_plan_(bw)) continue;
