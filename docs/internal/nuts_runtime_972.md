@@ -102,7 +102,7 @@ solve pays for the dead LOW seats the escalation then removes.
 |---|---|---|---|---|---|
 | NQ=16 | 8.8 → 4.0 s | 1.3 → 0.89 s | 3.6 → 2.65 s | 3.7 → 0.24 s | identical |
 | NQ=32 | 77.1 → 48.8 s | 30.7 → 25.5 s (corner 20.2) | 19.1 → 16.3 s (re-solves 12.7; iterations moved 1,308 then 14) | 20.9 → 0.48 s | identical |
-| NQ=62 | 400 → 292 s | 79.8 → 69.0 s (repair 29.3, corner 25.4, fixpoint 12.0) | 251 → 220 s (three re-solves, 201 s, for 330, 23 and 1 moved segments) | 66.7 → 0.9 s | engine lines identical (full log: see below) |
+| NQ=62 | 400 → 292 s | 79.8 → 69.0 s (repair 29.3, corner 25.4, fixpoint 12.0) | 251 → 220 s (three re-solves, 201 s, for 330, 23 and 1 moved segments) | 66.7 → 0.9 s | identical (7,297 lines) |
 
 ## Options, ranked
 
@@ -151,5 +151,7 @@ the `fixpoint` bucket.
 ## Not verified
 
 * The QoR corpus (`tools/qor_corpus.py --vs main`) was not run on the
-  prototypes; the NUTS-log diff at NQ=16/32/62 and the fast tier are what
+  prototypes; the per-layer NUTS-log diff at NQ=16, 32 and 62 (the NQ=62
+  pair measured on the pre-change and the prototype build in the same
+  session, 343 s against 292 s) and the fast tier (3307 passed) are what
   this session checked.
