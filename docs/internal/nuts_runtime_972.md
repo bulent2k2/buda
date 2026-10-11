@@ -89,7 +89,14 @@ solve pays for the dead LOW seats the escalation then removes.
 
 * **Persist in one pass** (`persist.py`): the per-bundle segment map is
   built once for every bundle; `w.input.candidates` (a COPY of every
-  candidate Topology per access) is read once per bundle.
+  candidate Topology per access) is read once per bundle.  The same
+  per-bundle copy was found and fixed in parallel by #976 (the planner
+  write-up's "Abstract NUTS: the time is persistence" section, with its
+  own measurement: NQ=16 16.4 → 11.0 s, NQ=32 95.0 → 68.7 s in-process),
+  which landed on `main` while this branch was open; the merged code is
+  #976's map (one read of `nuts_result.segments`, grouped by bundle) plus
+  this branch's single read of the candidate pool.  The table below was
+  measured with this branch's form of the map, which does the same work.
 * **Escalation scan memoized** (`nutsflow.py`): the pool size, the
   selected candidate's member bits and the admission needs are pure per
   (bundle, segment, layer) inside one call and were re-read — with the

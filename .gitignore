@@ -24,6 +24,9 @@
 **/*.bdb.sql.trace
 **/*.sqbpro
 **/build/
+# The profiling build CMakeLists.txt's own recipe creates beside it
+# (`cmake -B build-prof -DBUDA_PROFILE=ON`): a build product like build/.
+build-prof/
 **/__pycache__/
 **/*~
 .DS_Store

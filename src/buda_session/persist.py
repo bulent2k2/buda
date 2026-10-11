@@ -885,7 +885,15 @@ class PersistMixin:
         if not referenced <= persisted:
             self._persist_planner_output()
         self.bdb.clear_bus_routing()
-        for ts in self.nuts_result.segments:
+        # ONE copy of the placed segments: `nuts_result.segments` is a
+        # by-value pybind field, so every read of it materialises the whole
+        # vector as a Python list.  The via pass used to read it once PER
+        # BUNDLE to pick out that bundle's segments — bundles x segments
+        # copies, a third of `run_nuts` at the bigsoc NQ=16 dial (#972's
+        # NUTS half) — so the per-bundle map is built here in one pass and
+        # handed down.
+        segs = list(self.nuts_result.segments)
+        for ts in segs:
             r = buda.BusSegRow()
             r.id = str(ts.bundle_id)
             r.seg_idx = ts.seg_idx
@@ -909,18 +917,14 @@ class PersistMixin:
             r.track_lo_bound = ts.track_lo_bound
             r.track_hi_bound = ts.track_hi_bound
             self.bdb.add_bus_segment(r)
+        by_bid = {}
+        for ts in segs:
+            by_bid.setdefault(ts.bundle_id, {})[ts.seg_idx] = ts
         n_via = 0
-        # One pass over the placed segments for EVERY bundle (#972 follow-up):
-        # _persist_bundle_vias used to rebuild its per-bundle map by scanning
-        # the whole result per bundle — O(bundles x segments) pybind
-        # conversions, 24 % of run_nuts at NQ = 32 on bigsoc.
-        seg_by_bundle = {}
-        for ts in self.nuts_result.segments:
-            seg_by_bundle.setdefault(ts.bundle_id, {})[ts.seg_idx] = ts
         for w in self.bundles:
             n_via += self._persist_bundle_vias(
-                w, seg_by_bundle.get(w.input.original_bundle.id, {}))
-        n_seg = len(self.nuts_result.segments)
+                w, by_bid.get(w.input.original_bundle.id, {}))
+        n_seg = len(segs)
         self._persist_route_snapshot(n_seg, n_via, "abstract_nuts")
         return (n_seg, n_via)
 
@@ -1013,6 +1017,10 @@ class PersistMixin:
         connection model), so it covers both shared-endpoint bends AND T-junctions
         where a stub lands on a trunk's interior (multi-terminal topologies). The
         via's position is the PLACED junction (from the segments' track positions).
+
+        `ts_map` is this bundle's placed segments by seg_idx; `_persist_nuts`
+        builds every bundle's in one pass over the result (see there), and a
+        caller without one gets it derived here as before.
         """
         sel = w.plan.selected_topology_index
         # ONE read of the candidate pool: the `candidates` property returns a

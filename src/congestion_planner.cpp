@@ -28,6 +28,11 @@
 #include <atomic>
 #include <thread>
 #include <chrono>
+#include <condition_variable>
+#include <deque>
+#include <exception>
+#include <memory>
+#include <mutex>
 
 namespace buda {
 
@@ -141,6 +146,105 @@ thread_local CongestionPlanner::CandOverlay* CongestionPlanner::t_cand_overlay_ 
 // Process-wide cut-grid generation source (rebuild_cuts_ stamps cuts_gen_).
 static std::atomic<uint64_t> g_cuts_generation{0};
 
+namespace {
+// How many times a scoring overlay was (re)sized to a grid — one per thread
+// per grid generation when the threads persist, one per WORKER PER CALL when
+// they do not (#972 finding 2: fresh std::threads per plan_bundle re-created
+// their thread_local overlay, 45-266 MB each, on every call).  Read by
+// `plan_overlay_inits()` so a test can tell the two apart.
+std::atomic<long long> g_overlay_inits{0};
+
+// The persistent scoring pool (#972 lever B1).  plan_bundle used to spawn
+// n-1 std::threads per call; a thread's `thread_overlay_()` is thread_local,
+// so every worker paid the O(bands) `assign` on every call and the 4-thread
+// planner was slower than the 1-thread one (NQ=16: 137 s against 9 s).  The
+// workers here live for the process, so each one's overlay is sized once per
+// grid generation exactly as the main thread's always was.  Process-wide
+// rather than planner-owned because planners are COPIED (the trial sweep
+// makes one per worker) and a copy must not carry a thread pool; the sweep's
+// copies plan single-threaded (`set_plan_threads(1)`), so a nested run never
+// happens, and a concurrent run from another thread is still correct — each
+// job is one closure whose caller waits for the jobs it dispatched.
+//
+// run(n_extra, fn): hand fn to n_extra pool threads (growing the pool to
+// that many), run fn on the calling thread too, then wait for every
+// dispatched job to finish — jobs no thread has picked up by then are
+// withdrawn, since the caller's own loop has drained the shared work.  The
+// threads are detached and the pool is never destroyed (a static with
+// joinable threads cannot be torn down safely at exit).
+class ScoringPool {
+    struct Run {
+        const std::function<void()>* fn = nullptr;
+        int pending = 0;                 // dispatched and not yet finished (under mu_)
+        std::exception_ptr err;          // first worker exception (under mu_)
+    };
+public:
+    static ScoringPool& instance() {
+        static ScoringPool* p = new ScoringPool();
+        return *p;
+    }
+    size_t size() {
+        std::lock_guard<std::mutex> lk(mu_);
+        return n_threads_;
+    }
+    void run(int n_extra, const std::function<void()>& fn) {
+        auto r = std::make_shared<Run>();
+        r->fn = &fn;
+        {
+            std::lock_guard<std::mutex> lk(mu_);
+            while ((int)n_threads_ < n_extra) {
+                std::thread([this] { worker_(); }).detach();
+                ++n_threads_;
+            }
+            for (int i = 0; i < n_extra; ++i) queue_.push_back(r);
+            r->pending = n_extra;
+        }
+        cv_.notify_all();
+        std::exception_ptr own;
+        try { fn(); } catch (...) { own = std::current_exception(); }
+        std::exception_ptr err;
+        {
+            std::unique_lock<std::mutex> lk(mu_);
+            for (auto it = queue_.begin(); it != queue_.end();) {
+                if (*it == r) { --r->pending; it = queue_.erase(it); }
+                else ++it;
+            }
+            done_cv_.wait(lk, [&] { return r->pending == 0; });
+            err = r->err;
+        }
+        if (own) std::rethrow_exception(own);
+        if (err) std::rethrow_exception(err);
+    }
+private:
+    void worker_() {
+        for (;;) {
+            std::shared_ptr<Run> r;
+            {
+                std::unique_lock<std::mutex> lk(mu_);
+                cv_.wait(lk, [&] { return !queue_.empty(); });
+                r = queue_.front();
+                queue_.pop_front();
+            }
+            std::exception_ptr e;
+            try { (*r->fn)(); } catch (...) { e = std::current_exception(); }
+            {
+                std::lock_guard<std::mutex> lk(mu_);
+                if (e && !r->err) r->err = e;
+                --r->pending;
+            }
+            done_cv_.notify_all();
+        }
+    }
+    std::mutex mu_;
+    std::condition_variable cv_, done_cv_;
+    std::deque<std::shared_ptr<Run>> queue_;
+    size_t n_threads_ = 0;
+};
+}  // namespace
+
+long long plan_overlay_inits() { return g_overlay_inits.load(); }
+long long plan_scoring_pool_threads() { return (long long)ScoringPool::instance().size(); }
+
 CongestionPlanner::CandOverlay& CongestionPlanner::thread_overlay_() const {
     static thread_local CandOverlay ov;
     const size_t n = band_base_.empty() ? 0 : band_base_.back();
@@ -149,6 +253,7 @@ CongestionPlanner::CandOverlay& CongestionPlanner::thread_overlay_() const {
         ov.stamp.assign(n, 0);
         ov.epoch = 0;
         ov.gen   = cuts_gen_;
+        g_overlay_inits.fetch_add(1);
     }
     return ov;
 }
@@ -329,6 +434,7 @@ void CongestionPlanner::rebuild_cuts_() {
     // Cut indices and band indices both move here, so any recorded charge
     // distribution is stale — drop it rather than replay it onto new bands.
     charge_log_.clear();
+    band_index_.clear();
     cuts_.clear();
     // Injected-demand records key cuts by index; a rebuild reorders/resizes
     // cuts_, so the records are meaningless afterward (audit C3-03).  Drop
@@ -2057,7 +2163,8 @@ int CongestionPlanner::resolved_plan_threads_(int ncand) const {
 CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
         const BundleWrapper& bw, PlanMode mode,
         std::set<std::pair<int,int>>* contended,
-        std::vector<CandidateCost>* costs_out) {
+        std::vector<CandidateCost>* costs_out,
+        PlanResult* probe_out, int probe_topo) {
     PlanResult res;
     if (bw.input.candidates.empty()) return res;
 
@@ -2181,16 +2288,15 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
     const int n_threads = resolved_plan_threads_((int)cand_indices.size());
     if (n_threads > 1) {
         std::atomic<size_t> next{0};
-        auto worker = [&]() {
+        std::function<void()> worker = [&]() {
             CandOverlay& ov = thread_overlay_();   // persistent per thread
             for (size_t k; (k = next.fetch_add(1)) < cand_indices.size(); )
                 scores[k] = score_candidate_(bw, cand_indices[k], mode, ctx, ov);
         };
-        std::vector<std::thread> pool;
-        pool.reserve(n_threads - 1);
-        for (int t = 1; t < n_threads; ++t) pool.emplace_back(worker);
-        worker();
-        for (auto& th : pool) th.join();
+        // Persistent pool threads (#972 lever B1): their overlays survive
+        // across calls, so a worker's `thread_overlay_()` above is the same
+        // zero-setup lookup the main thread's always was.
+        ScoringPool::instance().run(n_threads - 1, worker);
     } else {
         CandOverlay& ov = thread_overlay_();       // persistent per thread
         for (size_t k = 0; k < cand_indices.size(); ++k)
@@ -2218,6 +2324,20 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
             cc.feasible   = !cs.infeasible;
             cc.segs       = std::move(cs.seg_costs);
             costs_out->push_back(std::move(cc));
+        }
+        if (probe_out && ci == probe_topo) {
+            // The result a call pinned to this one candidate would return:
+            // its reduction sees exactly this CandScore and nothing else.
+            PlanResult& pr = *probe_out;
+            pr = PlanResult{};
+            pr.best_topo = ci;
+            if (!cs.infeasible && !cs.share_refused) {
+                pr.found      = true;
+                pr.score      = cs.score;
+                pr.overflow   = cs.overflow;
+                pr.seg_layers = cs.seg_layers;
+                pr.seg_perp   = cs.seg_perp;
+            }
         }
         if (cs.infeasible || cs.share_refused) continue;
 
@@ -2286,8 +2406,15 @@ void CongestionPlanner::commit_plan(const BundleWrapper& bw, const PlanResult& p
         if (sign < 0.0) {
             auto it = charge_log_.find(key);
             if (it != charge_log_.end()) {
-                for (const auto& [ci, b, amt] : it->second)
+                for (const auto& [ci, b, amt] : it->second) {
                     cuts_[ci].add_usage(b, -amt);
+                    auto bi = band_index_.find(band_key_(ci, b));
+                    if (bi != band_index_.end()) {
+                        auto bb = bi->second.find(key.first);
+                        if (bb != bi->second.end() && --bb->second <= 0) bi->second.erase(bb);
+                        if (bi->second.empty()) band_index_.erase(bi);
+                    }
+                }
                 charge_log_.erase(it);
                 continue;
             }
@@ -2301,7 +2428,11 @@ void CongestionPlanner::commit_plan(const BundleWrapper& bw, const PlanResult& p
             cuts_[ci].add_usage(b, amt);
             rec.emplace_back(ci, b, amt);
         });
-        if (sign > 0.0) charge_log_[key] = std::move(rec);
+        if (sign > 0.0) {
+            for (const auto& [ci, b, amt] : rec)
+                band_index_[band_key_(ci, b)][key.first] += 1;
+            charge_log_[key] = std::move(rec);
+        }
     }
 }
 
@@ -2600,16 +2731,47 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
         //     restore the victim exactly and try the next one.
         if (!plan.found) {
             const auto t_rank = ot_now();
-            if (kOtProf) { ++prof_ot_strict_fail_; prof_ot_ranked_ += (long long)committed.size(); }
+            if (kOtProf) ++prof_ot_strict_fail_;
             std::vector<std::pair<double,int>> ranked;   // (overlap, committed idx)
-            for (int k = 0; k < (int)committed.size(); ++k) {
+            // Which committed plans can have a non-zero overlap?  Exactly
+            // those with a standing charge on a contended band — read off
+            // band_index_ where the spread is geometric (#972 lever E), so
+            // only the bundles actually holding those bands pay for a
+            // plan_band_overlap; the VALUE still comes from the same
+            // re-derivation and the sort reads the same (overlap, k) pairs,
+            // so the victim order is byte-identical to the full scan.  The
+            // full scan stays for the modes whose charge is not a function
+            // of geometry alone (see band_index_exact_).
+            auto rank_one = [&](int k) {
                 // A locked (bottom-up) wrapper is never a rip-up victim:
                 // its plan is a template copy shared by every sibling
                 // instance and must not be moved unilaterally.
-                if (bundles[committed[k].bundle_idx].hier.locked) continue;
+                if (bundles[committed[k].bundle_idx].hier.locked) return;
                 double ovl = plan_band_overlap(bundles[committed[k].bundle_idx],
                                                committed[k].plan, contended);
                 if (ovl > 0.0) ranked.push_back({ovl, k});
+            };
+            if (band_index_exact_() && !std::getenv("BUDA_RANK_SCAN")) {
+                std::unordered_map<int, std::vector<int>> k_of_id;
+                for (int k = 0; k < (int)committed.size(); ++k)
+                    k_of_id[bundles[committed[k].bundle_idx].input.original_bundle.id].push_back(k);
+                std::vector<int> cand_k;
+                for (const auto& cb : contended) {
+                    auto bi = band_index_.find(band_key_(cb.first, cb.second));
+                    if (bi == band_index_.end()) continue;
+                    for (const auto& [bid, cnt] : bi->second) {
+                        auto it = k_of_id.find(bid);
+                        if (it == k_of_id.end()) continue;
+                        cand_k.insert(cand_k.end(), it->second.begin(), it->second.end());
+                    }
+                }
+                std::sort(cand_k.begin(), cand_k.end());
+                cand_k.erase(std::unique(cand_k.begin(), cand_k.end()), cand_k.end());
+                if (kOtProf) prof_ot_ranked_ += (long long)cand_k.size();
+                for (int k : cand_k) rank_one(k);
+            } else {
+                if (kOtProf) prof_ot_ranked_ += (long long)committed.size();
+                for (int k = 0; k < (int)committed.size(); ++k) rank_one(k);
             }
             std::sort(ranked.begin(), ranked.end(),
                       [](const std::pair<double,int>& a, const std::pair<double,int>& b) {
@@ -2816,14 +2978,33 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
                 // search).  If the old topology is no longer STRICT-feasible
                 // (it was committed at the overflow/best-effort stages), any
                 // found replan is an improvement by definition.
-                int  old_sel = bw.plan.selected_topology_index;
-                bw.input.topology_pinned        = true;
-                bw.plan.selected_topology_index = cp.plan.best_topo;
-                PlanResult keep = plan_bundle(bw, PlanMode::STRICT);
-                bw.input.topology_pinned        = false;
-                bw.plan.selected_topology_index = old_sel;
-                PlanResult np = plan_bundle(bw, PlanMode::STRICT);
-                if (kOtProf) prof_ot_refine_plans_ += 2;
+                // The pinned probe scores ONE candidate the unrestricted
+                // sweep scores too, from the same ripped-up state, so its
+                // result is read off that sweep (#972 lever C: half the
+                // refine pass's plan_bundle calls, identical verdicts).  A
+                // GROUP pin would make the "pinned" probe a sweep over the
+                // group's members instead, and a best_topo outside the pool
+                // would make it the full sweep, so those keep the two calls.
+                PlanResult keep, np;
+                const bool merged_probe =
+                    bw.input.pinned_group.empty() &&
+                    cp.plan.best_topo >= 0 &&
+                    cp.plan.best_topo < (int)bw.input.candidates.size() &&
+                    !std::getenv("BUDA_REFINE_TWO_CALLS");
+                if (merged_probe) {
+                    np = plan_bundle(bw, PlanMode::STRICT, nullptr, nullptr,
+                                     &keep, cp.plan.best_topo);
+                    if (kOtProf) prof_ot_refine_plans_ += 1;
+                } else {
+                    int  old_sel = bw.plan.selected_topology_index;
+                    bw.input.topology_pinned        = true;
+                    bw.plan.selected_topology_index = cp.plan.best_topo;
+                    keep = plan_bundle(bw, PlanMode::STRICT);
+                    bw.input.topology_pinned        = false;
+                    bw.plan.selected_topology_index = old_sel;
+                    np = plan_bundle(bw, PlanMode::STRICT);
+                    if (kOtProf) prof_ot_refine_plans_ += 2;
+                }
                 bool adopt = np.found &&
                              (!keep.found || np.score + 1e-9 < keep.score);
                 if (!adopt) {
@@ -2932,6 +3113,7 @@ void CongestionPlanner::recharge_committed_(
     // Usage is back to zero, so every recorded distribution describes a charge
     // that no longer exists; the loop below re-records as it re-commits.
     charge_log_.clear();
+    band_index_.clear();
     share_used_.clear();      // the share books rebuild with the re-commits
     for (const auto& bw : bundles) {
         if (&bw == exclude || !has_committed_plan_(bw)) continue;
