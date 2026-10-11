@@ -54,6 +54,8 @@ RAW = re.compile(r"\bget_block_(rects|bounds)\(")
 def _code_lines(path):
     """Source lines with comments dropped (a comment may name the raw reader)."""
     for n, line in enumerate(path.read_text().splitlines(), 1):
+        if "raw-store: resolver" in line:      # the resolvers' own reads
+            continue
         code = re.sub(r"//.*|#.*", "", line)
         yield n, code
 

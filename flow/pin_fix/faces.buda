@@ -1,0 +1,52 @@
+# fix_pin PR 1b — which face a bus may land on.
+#
+# Four identical macros, each fed by a 4-bit bus from a block on its west:
+#
+#   row 1  FREE    no fix          the bus lands mid-face on the near (west) face
+#   row 2  WEST    fix_pin west    same face, but now it is the ONLY face
+#   row 3  NORTH   fix_pin north   the bus must come over the top and land on the
+#                                  north face (an L/Z, longer than the free one)
+#   row 4  EAST    fix_pin east    the wrap-around pin: the bus has to reach the far
+#                                  face, so it crosses OVER the macro on an upper
+#                                  layer (the body still blocks the lower stack)
+#
+# The viewer draws each admissible landing as a thick green line on the face.
+#
+# Run:   bin/buda flow/pin_fix/faces.buda          (viewer)
+#        bin/buda --no-viz flow/pin_fix/faces.buda (headless)
+# Expect: check_design Success at both stages; 'dump_pin_fixes' lists the strips.
+
+add_block FREE_SRC   0    0 100 200
+add_block FREE       400  0 600 200
+add_block WEST_SRC   0  400 100 600
+add_block WEST       400 400 600 600
+add_block NORTH_SRC  0  800 100 1000
+add_block NORTH      400 800 600 1000
+add_block EAST_SRC   0 1200 100 1400
+add_block EAST       400 1200 600 1400
+
+def_layer 4 M4 H TOP 0
+def_layer 5 M5 V TOP 0
+def_track_pattern 4 0 (SIGNAL 2 2)x60
+def_track_pattern 5 0 (SIGNAL 2 2)x60
+
+fix_pin WEST  west
+fix_pin NORTH north
+fix_pin EAST  east
+dump_pin_fixes
+
+add_bus free[4]  FREE_SRC.tx  FREE.rx
+add_bus west[4]  WEST_SRC.tx  WEST.rx
+add_bus north[4] NORTH_SRC.tx NORTH.rx
+add_bus east[4]  EAST_SRC.tx  EAST.rx
+
+run_bundler STRICT
+generate_topologies
+dump_topologies --conn
+run_planner
+run_nuts
+check_design
+run_detailed_nuts
+check_design
+report_wl
+visualize

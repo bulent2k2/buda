@@ -162,24 +162,12 @@ EditVerdict edit_add_stub(Topology& topo, const Floorplan& fp,
         return fail("unknown block '" + block + "'");
     const Segment& j = topo.segments[to_seg];
     const bool j_horiz = seg_is_horiz(j);
-    const Rect bb = fp.landing_bounds(block);
 
     // Seed the tap exactly like the generators do: margin-inset bbox +
     // full extent + multi-rect (margin-inset per rect, open 9) + TEG.
     // Built BEFORE the geometry because the geometry now reads it: the tap
     // face is chosen from the same rect view generation's best_rect reads.
-    Busterm bt;
-    bt.block_name = block;
-    BlockCornerMargin cm = fp.get_block_corner_margin(block);
-    bt.bbox      = bb.shrink(cm.dx, cm.dy);
-    bt.orig_bbox = bb;
-    {
-        auto phys = fp.landing_rects(block);
-        bt.rects  = shrink_rects(phys, cm);
-        if ((cm.dx != 0 || cm.dy != 0) && !phys.empty())
-            bt.orig_rects = std::move(phys);   // both face spellings (P2)
-    }
-    bt.teg_mode  = fp.get_block_teg_mode(block);
+    Busterm bt = fp.landing_busterm(block);
 
     // The stub is perpendicular to the target: its along-position must fall in
     // the overlap of the tapped RECT's extent and the target's span on the

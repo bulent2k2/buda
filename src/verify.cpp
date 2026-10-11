@@ -87,6 +87,30 @@ static bool perp_in_block_face(double pos, bool horiz,
     return false;
 }
 
+// A tap on a FIXED-pin block is a landing only on the ONE tagged edge of an
+// admitted strip, at a perpendicular position inside that strip's window.  The
+// generator seeds a stub's tap on the facing edge of a rect and cannot know a
+// strip's tag, so an east-only pin reached by a vertical stub is a tap on the
+// strip's SIDE — a stub ending beside the pin, not at it.  Unfixed blocks are
+// always admitted.
+static bool tap_face_admitted(const Floorplan& fp, const std::string& block,
+                              bool horiz, int face_coord, int perp)
+{
+    if (!fp.has_pin_fix(block)) return true;
+    for (const Rect& r : fp.landing_rects(block)) {
+        if (horiz) {
+            if (perp < r.y1 || perp > r.y2) continue;
+            if ((r.face == FACE_E && face_coord == r.x2) ||
+                (r.face == FACE_W && face_coord == r.x1)) return true;
+        } else {
+            if (perp < r.x1 || perp > r.x2) continue;
+            if ((r.face == FACE_N && face_coord == r.y2) ||
+                (r.face == FACE_S && face_coord == r.y1)) return true;
+        }
+    }
+    return false;
+}
+
 // True when segment `cs` at perpendicular position `perp` passes through rect `r`.
 // "Passes through" means: perp is inside r's perp-face range, AND the along span
 // overlaps r's along range.
@@ -340,7 +364,7 @@ SegAttachment seg_attachment(const ConnSeg& cs, const Topology& topo,
     // an edge-graze or corner-touch is over-the-edge metal, not an attachment,
     // so it must not rescue a one-attachment segment from the antenna verdict.
     for (const auto& bname : topo.connected_block_names) {
-        auto rects = fp.landing_rects(bname);
+        auto rects = fp.passthrough_rects(bname);
         if (rects.empty()) rects.push_back(fp.landing_bounds(bname));
         bool crosses = false;
         for (const Rect& r : rects)
@@ -464,7 +488,7 @@ static void detect_bit_antennas(const std::vector<ConnSeg>& segs,
         // point on the wire, and admitting one would manufacture reach the
         // same way crediting a whole tapped block did.
         for (const auto& bname : topo.connected_block_names) {
-            auto rects = fp.landing_rects(bname);
+            auto rects = fp.passthrough_rects(bname);
             if (rects.empty()) rects.push_back(fp.landing_bounds(bname));
             for (const Rect& r : rects) {
                 const double p_lo = cs.horiz ? (double)r.y1 : (double)r.x1;
@@ -633,7 +657,7 @@ static void detect_antennas(const std::vector<ConnSeg>& segs,
         if (std::isnan(A) || A == F) continue;   // no piece: count rule's business
         const double plo = std::min(F, A), phi = std::max(F, A);
         // The piece must lie inside the tapped block (rect-aware) at cs's perp.
-        auto rects = fp.landing_rects(tap->block_name);
+        auto rects = fp.passthrough_rects(tap->block_name);
         if (rects.empty()) rects.push_back(fp.landing_bounds(tap->block_name));
         bool inside = false;
         for (const Rect& r : rects) {
@@ -709,7 +733,7 @@ static void detect_antennas(const std::vector<ConnSeg>& segs,
             if (!covered_without_piece(tap->block_name, rects)) return true;
             for (const auto& bname : topo.connected_block_names) {
                 if (bname == tap->block_name) continue;
-                auto brs = fp.landing_rects(bname);
+                auto brs = fp.passthrough_rects(bname);
                 if (brs.empty()) brs.push_back(fp.landing_bounds(bname));
                 bool touches = false;
                 for (const Rect& r : brs) {
@@ -1092,7 +1116,9 @@ ConnResult check_topo(const ConnTopology& ct, const Topology& topo,
                                               conn.block_name, fp,
                                               (double)cs.along_lo,
                                               (double)cs.along_hi);
-            if (!at_endpoint || !face_ok) {
+            const bool fix_ok = tap_face_admitted(fp, conn.block_name, cs.horiz,
+                                                  conn.face_coord, cs.perp_pos);
+            if (!at_endpoint || !face_ok || !fix_ok) {
                 ConnViolation v;
                 v.kind = ViolationKind::BUSTERM_FACE;
                 v.bundle_id = bundle_id; v.seg_idx = i;
@@ -1105,6 +1131,10 @@ ConnResult check_topo(const ConnTopology& ct, const Topology& topo,
                         << cs.along_lo << "," << cs.along_hi << "]";
                 if (!face_ok)
                     msg << "; perp_pos=" << cs.perp_pos << " outside block face";
+                if (!fix_ok)
+                    msg << "; not an admitted landing of the block's fixed pin "
+                        << "(fix_pin): face_coord=" << conn.face_coord
+                        << " perp_pos=" << cs.perp_pos;
                 v.message = msg.str();
                 result.violations.push_back(std::move(v));
             }
@@ -1121,7 +1151,7 @@ ConnResult check_topo(const ConnTopology& ct, const Topology& topo,
 
     for (const auto& bname : topo.connected_block_names) {
         if (explicitly_connected.count(bname)) continue;
-        auto rects = fp.landing_rects(bname);
+        auto rects = fp.passthrough_rects(bname);
         if (rects.empty()) rects.push_back(fp.landing_bounds(bname));
         bool covered = false;
         for (const auto& cs : segs) {
@@ -1305,7 +1335,7 @@ ConnResult check_nuts(const ConnTopology& ct, const NUTSResult& nuts,
 
     for (const auto& bname : topo.connected_block_names) {
         if (explicitly_connected.count(bname)) continue;
-        auto rects = fp.landing_rects(bname);
+        auto rects = fp.passthrough_rects(bname);
         if (rects.empty()) rects.push_back(fp.landing_bounds(bname));
         bool covered = false;
         for (const auto& ts : nuts.segments) {
@@ -1669,7 +1699,7 @@ ConnResult check_dnuts(const ConnTopology& ct, const DetailedNUTSResult& dnuts,
 
     for (const auto& bname : topo.connected_block_names) {
         if (explicitly_connected.count(bname)) continue;
-        auto rects = fp.landing_rects(bname);
+        auto rects = fp.passthrough_rects(bname);
         if (rects.empty()) rects.push_back(fp.landing_bounds(bname));
 
         // Which bits actually route THROUGH this pass-through block?  A tapered

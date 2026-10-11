@@ -425,6 +425,9 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
         # a block the flow declared routable-through.  Each entry is
         # (block_names_or_None, layer_ids_or_None, val); None = wildcard.
         self._feedthru_decls = []
+        # Fixed-pin declarations (fix_pin): {block name: fix dict}, replayed onto
+        # derived hier floorplans by _apply_fp_session_settings like feedthru.
+        self._pin_fixes = {}
         # Bundling permissions per net-name prefix (set_bundling) and the
         # optional bundle bit bound (set_max_bundle_bits) — consumed by
         # run_bundler's generalized/COMBINED path and its split pass.

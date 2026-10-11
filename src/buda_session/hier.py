@@ -1166,6 +1166,12 @@ class HierMixin:
                 for n in blocks:
                     for lid in layers:
                         fp.set_feedthru_block_layer(n, lid, val)
+        # Fixed pins: matched by the name THIS frame knows (a full component
+        # path in depth/cross-level frames, the child's local name in a
+        # cell-local one), like the block-scoped feedthru rules above.
+        for name, fx in (getattr(self, "_pin_fixes", None) or {}).items():
+            fp.set_pin_fix(name, fx["faces"], fx["rect"], fx["has_window"],
+                           fx["lo"], fx["hi"])
         return fp
 
     def _build_cell_local_floorplan(self, parent_comp_name):

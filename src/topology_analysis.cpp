@@ -565,7 +565,7 @@ void tighten_passthrough(const Topology& topo, const Floorplan& fp,
     auto rects_of_block = [&](const std::string& bname) {
         auto it = over_untapped.find(bname);
         if (it != over_untapped.end()) return it->second;
-        auto rects = fp.landing_rects(bname);
+        auto rects = fp.passthrough_rects(bname);
         if (rects.empty()) rects.push_back(fp.landing_bounds(bname));
         return rects;
     };
