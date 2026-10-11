@@ -513,6 +513,19 @@ void bind_routing(py::module_& m) {
             for (const auto& r : rects) out.emplace_back(r.x1, r.y1, r.x2, r.y2);
             return out;
         })
+        .def("landing_rects", [](const Floorplan& fp, const std::string& name) {
+            auto rects = fp.landing_rects(name);
+            std::vector<std::tuple<int,int,int,int>> out;
+            for (const auto& r : rects) out.emplace_back(r.x1, r.y1, r.x2, r.y2);
+            return out;
+        })
+        .def("landing_bounds",          &Floorplan::landing_bounds)
+        .def("obstruction_rects", [](const Floorplan& fp, const std::string& name) {
+            auto rects = fp.obstruction_rects(name);
+            std::vector<std::tuple<int,int,int,int>> out;
+            for (const auto& r : rects) out.emplace_back(r.x1, r.y1, r.x2, r.y2);
+            return out;
+        })
         .def("set_block_corner_margin", &Floorplan::set_block_corner_margin)
         .def("set_global_corner_margin",&Floorplan::set_global_corner_margin)
         .def("set_min_stub_length",     &Floorplan::set_min_stub_length)

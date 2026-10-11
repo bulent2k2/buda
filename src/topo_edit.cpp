@@ -162,7 +162,7 @@ EditVerdict edit_add_stub(Topology& topo, const Floorplan& fp,
         return fail("unknown block '" + block + "'");
     const Segment& j = topo.segments[to_seg];
     const bool j_horiz = seg_is_horiz(j);
-    const Rect bb = fp.get_block_bounds(block);
+    const Rect bb = fp.landing_bounds(block);
 
     // Seed the tap exactly like the generators do: margin-inset bbox +
     // full extent + multi-rect (margin-inset per rect, open 9) + TEG.
@@ -174,7 +174,7 @@ EditVerdict edit_add_stub(Topology& topo, const Floorplan& fp,
     bt.bbox      = bb.shrink(cm.dx, cm.dy);
     bt.orig_bbox = bb;
     {
-        auto phys = fp.get_block_rects(block);
+        auto phys = fp.landing_rects(block);
         bt.rects  = shrink_rects(phys, cm);
         if ((cm.dx != 0 || cm.dy != 0) && !phys.empty())
             bt.orig_rects = std::move(phys);   // both face spellings (P2)

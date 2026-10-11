@@ -641,3 +641,16 @@ primitive.  `fix_pin` consumes a placement; the ladder's Q2 decision (no
 credible in-house baseline for pin assignment) stands.  A derived pin
 placement from the top's routed result — the `derive_top_plan` idea one level
 down — would be a separate item, and it would emit `fix_pin` lines.
+
+## Status
+
+- **PR 1a (landed in the branch `claude/todo-implementation-80cp5c`)**: the
+  two-geometry split.  `Floorplan::landing_rects` / `landing_bounds` and
+  `obstruction_rects` exist; every C++ and Python site in the census reads
+  the one it asks for, and `test_landing_obstruction_split.py` fails if a
+  landing consumer reads the raw store again or an obstruction consumer reads
+  landing geometry.  No `fix_pin` command yet; the fast tier is unchanged.
+  Vehicles: `flow/pin_fix/baseline_macro.buda`, `baseline_teg.buda`.
+- Q7 answered: the wrap-around pin is rare, so PR 1b proceeds.  Q1 answered:
+  hard-macro LEF first, plus a command usable from the Tcl front end to
+  exercise flat and hier flows.

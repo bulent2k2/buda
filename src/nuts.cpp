@@ -287,8 +287,8 @@ static void build_nuts_maps(
             const double s_hi = std::max((double)cs.along_lo, (double)cs.along_hi);
             for (const auto& bname : topo.connected_block_names) {
                 if (tapped_blocks.count(bname)) continue;
-                auto rects = floorplan.get_block_rects(bname);
-                if (rects.empty()) rects.push_back(floorplan.get_block_bounds(bname));
+                auto rects = floorplan.landing_rects(bname);
+                if (rects.empty()) rects.push_back(floorplan.landing_bounds(bname));
                 // Does this segment cover this BLOCK at all?  Same relation
                 // check_topo's coverage test uses: some rect with the nominal
                 // perp inside it and an along overlap.  This gate is what keeps

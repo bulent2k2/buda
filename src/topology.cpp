@@ -220,7 +220,7 @@ void annotate_topology(Topology& topo, const Floorplan& fp) {
         // multi-rect block must not be tapped through the gap between its rects —
         // and the teg_mode.
         auto cm   = fp.get_block_corner_margin(name);
-        auto phys = fp.get_block_rects(name);
+        auto phys = fp.landing_rects(name);
         Busterm bt{name, orig.shrink(cm.dx, cm.dy), orig,
                    shrink_rects(phys, cm), fp.get_block_teg_mode(name)};
         // Physical spelling kept beside the inset one (PR #835 P2): foreign
@@ -428,6 +428,15 @@ TegMode Floorplan::get_block_teg_mode(const std::string& name) const {
 std::vector<Rect> Floorplan::get_block_rects(const std::string& name) const {
     auto it = block_rects_.find(name);
     return (it != block_rects_.end()) ? it->second : std::vector<Rect>{};
+}
+std::vector<Rect> Floorplan::landing_rects(const std::string& name) const {
+    return get_block_rects(name);
+}
+Rect Floorplan::landing_bounds(const std::string& name) const {
+    return get_block_bounds(name);
+}
+std::vector<Rect> Floorplan::obstruction_rects(const std::string& name) const {
+    return get_block_rects(name);
 }
 void Floorplan::set_block_corner_margin(const std::string& name, int dx, int dy) {
     corner_margins_[name] = BlockCornerMargin{dx, dy};
@@ -1668,8 +1677,8 @@ std::vector<int> derive_fanin_seg_bits(
                 segs.push_back(si);
         }
         if (segs.empty()) {
-            auto rects = fp.get_block_rects(block);
-            if (rects.empty()) rects.push_back(fp.get_block_bounds(block));
+            auto rects = fp.landing_rects(block);
+            if (rects.empty()) rects.push_back(fp.landing_bounds(block));
             for (int si = 0; si < n_seg; ++si)
                 for (const Rect& r : rects)
                     if (seg_touches_rect(topo.segments[si], r)) {
@@ -3784,8 +3793,8 @@ std::vector<Topology> TopologyGenerator::generate_npin(
     std::vector<Busterm> blocks;
     auto mk_bt = [&](const std::string& n) {
         auto cm  = floorplan_.get_block_corner_margin(n);
-        Rect orig = floorplan_.get_block_bounds(n);
-        auto phys = floorplan_.get_block_rects(n);
+        Rect orig = floorplan_.landing_bounds(n);
+        auto phys = floorplan_.landing_rects(n);
         Busterm bt{n, orig.shrink(cm.dx, cm.dy), orig,
                    shrink_rects(phys, cm),
                    floorplan_.get_block_teg_mode(n)};
@@ -4254,7 +4263,7 @@ static int trim_shared_leg_overlaps(std::vector<Segment>& segs,
 // "Reached" is the audit's own reading and ONLY that: inclusive segment/rect
 // contact — `seg_touches_rect`, the shared predicate verify.cpp's TEG_OPEN
 // reads — judged on the PHYSICAL rects (`Busterm::orig_rects` — what
-// `fp.get_block_rects` hands the audit).  A rect an edge SPANS is reached
+// `fp.landing_rects` hands the audit).  A rect an edge SPANS is reached
 // (pass-through contact IS attachment); an ADJACENT rect nothing touches is
 // NOT (limitation 2, resolved 2026-08-27: the transitive contiguity closure
 // this pass used to run made the generator and the audit disagree about the
@@ -4302,7 +4311,7 @@ static void add_mst_teg_attachments(Topology& topo,
         // block's FOOTPRINT while the audit reads its METAL, so the two
         // disagreed by construction on an adjacent rect.  `seg_touches_rect`
         // IS verify.cpp's TEG_OPEN predicate, on the PHYSICAL rects the audit
-        // reads (`fp.get_block_rects`).
+        // reads (`fp.landing_rects`).
         auto reached_now = [&]() {
             std::vector<char> in(nr, 0);
             for (int ri = 0; ri < nr; ++ri)
@@ -4401,7 +4410,7 @@ void add_mst_teg_attachments(Topology& topo, const Floorplan& fp,
     std::vector<Busterm> bts;
     for (const auto& [name, orig] : fp.get_all_blocks()) {
         auto cm   = fp.get_block_corner_margin(name);
-        auto phys = fp.get_block_rects(name);
+        auto phys = fp.landing_rects(name);
         Busterm bt{name, orig.shrink(cm.dx, cm.dy), orig,
                    shrink_rects(phys, cm), fp.get_block_teg_mode(name)};
         if ((cm.dx != 0 || cm.dy != 0) && !phys.empty())
@@ -4584,8 +4593,8 @@ static bool topology_is_clean_tree(const Topology& topo, const Floorplan& fp) {
             if (c.kind == SegConn::BUSTERM) tapped.insert(c.block_name);
     for (const auto& bname : topo.connected_block_names) {
         if (tapped.count(bname)) continue;
-        auto rects = fp.get_block_rects(bname);
-        if (rects.empty()) rects.push_back(fp.get_block_bounds(bname));
+        auto rects = fp.landing_rects(bname);
+        if (rects.empty()) rects.push_back(fp.landing_bounds(bname));
         bool covered = false;
         for (const auto& cs : segs) {
             if (covered) break;
@@ -5512,8 +5521,8 @@ std::vector<Topology> TopologyGenerator::generate_candidates(
     std::vector<Topology> candidates;
     bool two_pin = false;
     if (dst_names.size() == 1) {
-        bool any_multi_rect = !floorplan_.get_block_rects(src_name).empty() ||
-                              !floorplan_.get_block_rects(dst_names[0]).empty();
+        bool any_multi_rect = !floorplan_.obstruction_rects(src_name).empty() ||
+                              !floorplan_.obstruction_rects(dst_names[0]).empty();
         two_pin = !any_multi_rect;
     }
     candidates = two_pin ? generate_2pin(src_name, dst_names[0])
@@ -5716,8 +5725,8 @@ std::vector<Topology> TopologyGenerator::generate_2pin(const std::string& src_na
     std::vector<Topology> candidates;
     auto mk_bt = [&](const std::string& n) {
         auto cm = floorplan_.get_block_corner_margin(n);
-        Rect orig = floorplan_.get_block_bounds(n);
-        auto phys = floorplan_.get_block_rects(n);
+        Rect orig = floorplan_.landing_bounds(n);
+        auto phys = floorplan_.landing_rects(n);
         Busterm bt{n, orig.shrink(cm.dx, cm.dy), orig,
                    shrink_rects(phys, cm),
                    floorplan_.get_block_teg_mode(n)};

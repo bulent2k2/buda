@@ -697,8 +697,23 @@ public:
     // only, like add_block's other declaration-time resolutions; a later
     // set_teg_mode does not re-mode already-declared blocks).
     void add_block_rects(const std::string& name, const std::vector<Rect>& rects);
+    // RAW store reader.  Geometry consumers do not call it: they ask one of the
+    // two named resolvers below, because "may a wire attach here" and "what does
+    // this block block" are DIFFERENT questions that share an answer until a pin
+    // is fixed (docs/internal/fixed_pin_design.md, second round).
     // Returns the individual rects for a multi-rect block, or empty for single-rect.
     std::vector<Rect> get_block_rects(const std::string& name) const;
+    // LANDING geometry: where a wire may ATTACH to the block.  Read by the
+    // generator's busterm construction, landing recognition, the pass-through
+    // clamp and anchor, the edit session, the auto bit cap and the audit.  With
+    // nothing fixed it is exactly get_block_rects / get_block_bounds (empty rects
+    // for a single-rect block).
+    std::vector<Rect> landing_rects(const std::string& name) const;
+    Rect              landing_bounds(const std::string& name) const;
+    // OBSTRUCTION geometry: what the block BLOCKS on the lower stack.  The
+    // physical footprint, never a landing strip: no pin declaration may turn a
+    // macro's body into routable space.
+    std::vector<Rect> obstruction_rects(const std::string& name) const;
     // TEG mode: controls over-the-block bridge generation for multi-rect blocks.
     void    set_block_teg_mode(const std::string& name, TegMode mode);
     TegMode get_block_teg_mode(const std::string& name) const;

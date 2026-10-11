@@ -321,7 +321,7 @@ def _split_oversized_bundles(session, raw_bundles):
             for blk, bits_at in at_block.items():
                 if not session.fp.has_block(blk):
                     continue
-                r = session.fp.get_block_bounds(blk)
+                r = session.fp.landing_bounds(blk)
                 edge = min(r.x2 - r.x1, r.y2 - r.y1)
                 cap = max(1, int(edge / pitch))
                 need = math.ceil(bits_at / cap)
@@ -351,7 +351,7 @@ def _split_oversized_bundles(session, raw_bundles):
                 for blk in {e[0], *e[1]}:
                     if blk in caps or not session.fp.has_block(blk):
                         continue
-                    r = session.fp.get_block_bounds(blk)
+                    r = session.fp.landing_bounds(blk)
                     caps[blk] = max(1, int(min(r.x2 - r.x1,
                                                r.y2 - r.y1) / pitch))
 
