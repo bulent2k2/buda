@@ -309,12 +309,12 @@ Repro and analysis: [hybrid_leg_overhang.md](../internal/hybrid_leg_overhang.md)
 ### `set_dead_span_escalate`
 
 ```
-set_dead_span_escalate [on|off]
+set_dead_span_escalate [on|off] [floor <F>]
 ```
 
 Force post-NUTS **dead-span escalation** at every `run_nuts`. Default **off**
 — a flow that never calls it is bit-identical. With no argument, prints the
-current state.
+current state (the flag and the floor in force).
 
 **The artifact it targets.** A LOW-layer segment whose *final placed geometry*
 — its seat, span × slide window — offers **fewer keepout-clear signal tracks
@@ -341,6 +341,28 @@ path.
 
 See `docs/internal/wishlist/wishlist-planner.md` → "dead-span discriminator" for the
 measurements behind the default.
+
+**`floor <F>` — what a re-solve is worth (#972 B1, opt-in).**  Every
+escalation iteration pays a FULL NUTS re-solve of the design, and the late
+iterations move a handful of segments for it: on the bigsoc vehicle at
+NQ=62 the three iterations moved 330, 23 and 1 segments at ~70 s of solve
+each, at NQ=32 1,308 then 14.  With a floor, an iteration that finds fewer
+than `ceil(F × segments)` dead LOW segments is **not applied**: the loop
+ends on the placement it already has, the segments it found are left on
+their layers and reported (`[DeadSpan] iteration k: m dead LOW segment(s)
+found, below the floor of n …`), and that iteration's re-solve is not paid.
+The floor governs this entry whichever way it was reached — the explicit
+`on` or the `healersAhead` automatic path — because both are the same loop;
+it does not touch the stage-b healer fold, the cull heal or ripup's refold
+tier, which carry their own accept contracts.  What it costs is stated in
+the report: a dead segment left on LOW strands every bit at DetailedNUTS in
+a healerless flow, while a flow that heals escalates it at stage b (`_heal_dead_spans`)
+with the re-solves the healers pay anyway.  `F` is a fraction of the result's
+segments (scale-free: a re-solve costs the design's size, a move buys one
+segment's bits), in `[0, 1]`; `0` (the default) applies every iteration and is
+byte-identical.  `BUDA_DEAD_SPAN_FLOOR=<F>` floors a whole run without editing
+its flows (a typed floor outranks it), which is how the corpus is swept.
+Measurements in [nuts_runtime_972.md](../internal/nuts_runtime_972.md).
 
 ---
 

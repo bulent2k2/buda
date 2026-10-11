@@ -203,3 +203,82 @@ def test_corner_bounds_with_enough_tracks_do_not_escalate():
         n = s._escalate_dead_low_segments()
     assert n == 0
     assert list(s.bundles[0].plan.seg_layers)[h_idx] == 2   # unchanged LOW M2
+
+
+# --- the escalation FLOOR (#972 B1): `set_dead_span_escalate floor <F>` ---
+
+def _nuts_floor(s, cmd):
+    """run_nuts under the given set_dead_span_escalate line, returning what
+    the escalation printed (the [DeadSpan] report is the subject)."""
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out), buda.ostream_redirect():
+        s.do_command(cmd)
+        s.do_command("run_nuts")
+        s._final_cull_heal_in_dnuts = False
+        s.do_command("run_detailed_nuts")
+    return out.getvalue()
+
+
+def test_floor_drops_a_sub_floor_iteration_and_says_so():
+    """An iteration moving fewer than ceil(F x segments) is NOT applied: the
+    vehicle's one dead stub is below a floor of 1.0 (every segment), so it
+    stays on LOW M2, its 8 bits strand, and the drop is reported with the
+    counts -- a healerless flow must be able to read what it paid."""
+    s, h_idx = _build(pin_low=True, keepout_m2=True)
+    out = _nuts_floor(s, "set_dead_span_escalate on floor 1.0")
+    assert list(s.bundles[0].plan.seg_layers)[h_idx] == 2   # left on M2
+    assert s.detailed_result.num_unplaced == 8
+    assert "[DeadSpan] iteration 1: 1 dead LOW segment(s) found, below the floor" in out
+    assert s._prof_esc_dropped == [1]
+
+
+def test_floor_cleared_applies_the_iteration():
+    """A floor the iteration clears changes nothing: ceil(0.01 x 2) = 1
+    segment, the one dead stub meets it and is escalated to TOP M4."""
+    s, h_idx = _build(pin_low=True, keepout_m2=True)
+    out = _nuts_floor(s, "set_dead_span_escalate on floor 0.01")
+    assert list(s.bundles[0].plan.seg_layers)[h_idx] == 4   # TOP M4
+    assert s.detailed_result.num_unplaced == 0
+    assert "[DeadSpan]" not in out
+
+
+def test_floor_zero_is_the_unfloored_loop():
+    """`floor 0` is the default: every iteration applied."""
+    s, h_idx = _build(pin_low=True, keepout_m2=True)
+    _nuts_floor(s, "set_dead_span_escalate on floor 0")
+    assert list(s.bundles[0].plan.seg_layers)[h_idx] == 4
+    assert s._dead_span_floor() == 0.0
+
+
+def test_env_floor_governs_the_auto_path_and_the_typed_floor_outranks_it(monkeypatch):
+    """BUDA_DEAD_SPAN_FLOOR is the corpus-sweep door: it floors the
+    healersAhead AUTO escalation with no flow edited, and a typed floor
+    outranks it (explicit > env > default)."""
+    monkeypatch.setenv("BUDA_DEAD_SPAN_FLOOR", "1.0")
+    s, h_idx = _build(pin_low=True, keepout_m2=True)
+    assert s._dead_span_floor() == 1.0
+    with contextlib.redirect_stdout(io.StringIO()), buda.ostream_redirect():
+        s.do_command("set_planner_param healersAhead 1")   # the auto path
+        s.do_command("run_nuts")
+    assert list(s.bundles[0].plan.seg_layers)[h_idx] == 2   # dropped
+    assert s._prof_esc_dropped == [1]
+    s2, h2 = _build(pin_low=True, keepout_m2=True)
+    _nuts_floor(s2, "set_dead_span_escalate on floor 0")      # typed wins
+    assert s2._dead_span_floor() == 0.0
+    assert list(s2.bundles[0].plan.seg_layers)[h2] == 4
+
+
+def test_floor_argument_errors_are_reported_not_raised():
+    """A floor with no value, a non-number, or one outside [0, 1] is an
+    Error line (the CLI's convention), and the knob is left unchanged."""
+    s, _ = _build(pin_low=False, keepout_m2=False)
+    for bad in ("floor", "floor x", "floor 1.5", "sideways"):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            s.do_command("set_dead_span_escalate " + bad)
+        assert out.getvalue().startswith("Error:"), bad
+        assert s._dead_span_floor_typed is None
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        s.do_command("set_dead_span_escalate")
+    assert "floor 0" in out.getvalue()
