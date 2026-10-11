@@ -175,6 +175,32 @@ measurable, and the 236 MB the NQ=16 session gives back is the four
 overlays (4 × 64 MB) minus the per-cut lists.  At the reticle dial the
 same arithmetic returns about 1 GB at four threads.
 
+The per-cut list's first form was one (band, value) pair per entry,
+rescanned on every insertion.  Codex (P2 on #979) named the path that
+makes it quadratic: under the default spread an oversized bus charges a
+contiguous ascending range of B bands per crossed cut, so B insertions
+cost O(B²) comparisons where the flat array cost O(B) — on a fine Hanan
+grid (the `ariane133`-class imports) B can be large.  The list is now
+ascending RUNS of bands (`CandOverlay::CutVals`: `{b0, n, off}` into a
+value vector), so a write that continues the cut's last run is one
+append, a write inside a run one index, and a read a scan over the few
+runs — O(1) amortised per band written; the greedy spread modes
+(nearest-first order) simply open more runs.  Measured three ways on a
+synthetic fine-grid flow (112 small staggered blocks, forty 96- and
+128-bit buses crossing them, 40 bundles / 1,265 candidates; planner
+≈ 1.1–1.5 s): dense, pair list and runs within the run-to-run noise of
+each other and decision-identical — the quadratic term does not show on
+that vehicle, so the restructuring is an argument from the shape of the
+spread, not a measured win, and costs nothing where it does not bite.
+Re-timed on the recorded dials BACK TO BACK against the pair-list build
+(the container had moved to a slower host between the two sessions — the
+pair list itself read 4.7–4.9 s at NQ=8 where the table above has 3.71 —
+so only the alternating pair is comparable): NQ=8, 1 thread, pair list
+4.74 / 4.87 s against runs 4.55 / 4.61 s; NQ=16, 4 threads, 7.82 against
+7.88 s — within noise, with the scoring block 3 % faster at NQ=8 and 2.5 %
+at NQ=16.  Peak RSS at NQ=16 with 4 threads still 343 MB; decisions
+identical at both dials and both thread counts.
+
 ## Landed 2026-10-11: the layer-only re-persist
 
 The dead-span escalation's selective re-persist rewrote every expanded
