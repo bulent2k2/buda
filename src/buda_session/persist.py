@@ -1023,9 +1023,12 @@ class PersistMixin:
         caller without one gets it derived here as before.
         """
         sel = w.plan.selected_topology_index
-        if sel < 0 or sel >= len(w.input.candidates):
+        # ONE read of the candidate pool: the `candidates` property returns a
+        # copy of every Topology on each access.
+        cands = w.input.candidates
+        if sel < 0 or sel >= len(cands):
             return 0
-        topo = w.input.candidates[sel]
+        topo = cands[sel]
         bid = w.input.original_bundle.id
         if ts_map is None:
             ts_map = {ts.seg_idx: ts for ts in self.nuts_result.segments

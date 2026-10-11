@@ -1274,7 +1274,37 @@ class NutsFlowMixin:
         top_h = _cheapest_top(buda.LayerDir.HORIZONTAL)
         top_v = _cheapest_top(buda.LayerDir.VERTICAL)
 
-        _member_bits = self._seg_member_bits
+        # Per-bundle / per-segment memos for the scan below (#972 follow-up):
+        # `w.input.candidates` returns a COPY of every candidate Topology on
+        # each access, and the scan asked for it once per segment per
+        # iteration (the pool size, then the selected candidate's seg_bits
+        # through _seg_member_bits, then the admission needs); none of those
+        # change inside one escalation call, so they are read once.
+        _ncand = {}
+        def _n_candidates(w):
+            bid = w.input.original_bundle.id
+            n = _ncand.get(bid)
+            if n is None:
+                n = _ncand[bid] = len(w.input.candidates)
+            return n
+        _mb_memo = {}
+        def _member_bits(w, sel, si):
+            k = (w.input.original_bundle.id, sel, si)
+            v = _mb_memo.get(k)
+            if v is None:
+                v = _mb_memo[k] = self._seg_member_bits(w, sel, si)
+            return v
+        _need_memo = {}
+        def _need(w, sel, si, layer, credited=True):
+            k = (w.input.original_bundle.id, sel, si, layer, credited)
+            v = _need_memo.get(k)
+            if v is None:
+                v = _need_memo[k] = (
+                    self._seg_admission_need(w, sel, si, layer=layer)
+                    if credited else
+                    self._seg_admission_need(w, sel, si, credited=False,
+                                             layer=layer))
+            return v
 
         def _hosts(lid, w, sel, seg, b_lo, b_hi):
             # DetailedNUTS admission on a candidate target layer — the same
@@ -1284,10 +1314,8 @@ class NutsFlowMixin:
             if b_lo > b_hi or not self.routing_grid.has_layer(lid):
                 return False
             g2 = self.routing_grid.get_layer_grid(lid)
-            need_l = self._seg_admission_need(w, sel, seg.seg_idx,
-                                              layer=lid)
-            pool_l = self._seg_admission_need(w, sel, seg.seg_idx,
-                                              credited=False, layer=lid)
+            need_l = _need(w, sel, seg.seg_idx, lid)
+            pool_l = _need(w, sel, seg.seg_idx, lid, credited=False)
             if g2.count_signal_tracks_in_span(
                     seg.span_lo, seg.span_hi,
                     seg.interval_lo, seg.interval_hi) >= pool_l:
@@ -1318,7 +1346,7 @@ class NutsFlowMixin:
                 if w is None or not w.plan.seg_layers:
                     continue
                 sel = w.plan.selected_topology_index
-                if sel < 0 or sel >= len(w.input.candidates):
+                if sel < 0 or sel >= _n_candidates(w):
                     continue
                 g = self.routing_grid.get_layer_grid(seg.layer)
                 # The exact DNUTS admission arithmetic on the PLACED
@@ -1346,11 +1374,8 @@ class NutsFlowMixin:
                 # selects its pool with.  All three coincide on an ungoverned
                 # segment, so every non-NDR flow is byte-identical.
                 bits = _member_bits(w, sel, seg.seg_idx)
-                need = self._seg_admission_need(w, sel, seg.seg_idx,
-                                                layer=seg.layer)
-                need_pool = self._seg_admission_need(w, sel, seg.seg_idx,
-                                                     credited=False,
-                                                     layer=seg.layer)
+                need = _need(w, sel, seg.seg_idx, seg.layer)
+                need_pool = _need(w, sel, seg.seg_idx, seg.layer, credited=False)
                 b_lo = max(seg.interval_lo, seg.track_lo_bound)
                 b_hi = min(seg.interval_hi, seg.track_hi_bound)
                 span_all = g.count_signal_tracks_in_span(
@@ -1502,6 +1527,8 @@ class NutsFlowMixin:
             if not moved:
                 break
             total += moved
+            # [NutsProf] bookkeeping: moves per escalation iteration.
+            self._prof_esc_moves = getattr(self, "_prof_esc_moves", []) + [moved]
             # Re-solve with the escalated assignments (mirrors cmd_run_nuts's
             # core, minus persist/log — those run once on the final result).
             pitch = self._nuts_pitch if getattr(self, '_nuts_pitch', None) else 1.0
@@ -1513,9 +1540,26 @@ class NutsFlowMixin:
                 nuts.set_extra_grid_points(
                     list(self.planner.get_x_grid()),
                     list(self.planner.get_y_grid()))
+            import time as _time
+            _t0 = _time.perf_counter()
             with buda.ostream_redirect():
                 self.nuts_result = nuts.run(self.bundles)
+            # [NutsProf] bookkeeping: how many full re-solves the escalation
+            # paid and their seconds (read by cmd_run_nuts).
+            self._prof_esc_resolves = getattr(self, "_prof_esc_resolves", 0) + 1
+            self._prof_esc_resolve_s = (getattr(self, "_prof_esc_resolve_s", 0.0)
+                                        + (_time.perf_counter() - _t0))
             self._adopt_doglegs()
+            # The adoption can APPEND a split candidate (the pool grows and the
+            # selection moves to the new last index, which the memoized pool
+            # size would read as out of range) or OVERWRITE the dogleg slot
+            # with a new split (same index, different segments), so every
+            # memo keyed on the pool is stale past this point: drop them and
+            # let the next iteration re-read, exactly as the un-memoized scan
+            # did (Codex P1 on #977).
+            _ncand.clear()
+            _mb_memo.clear()
+            _need_memo.clear()
         return total
 
     def _final_cull_heal(self, max_rounds: int = 3) -> int:

@@ -1100,7 +1100,8 @@ static void tighten_spans_to_reach(std::vector<TrackSegment>& segments,
 static int repack_overlap_clusters(const NUTSEngine& eng, double track_pitch,
                                    std::vector<TrackSegment>& segments,
                                    NutsContext& ctx,
-                                   const std::map<int, LayerConstraints>* seed_cons);
+                                   const std::map<int, LayerConstraints>* seed_cons,
+                                   const std::vector<KeepoutZone>& kozs_shared);
 
 void NUTSEngine::repair_overlaps(std::vector<TrackSegment>& segments,
                                  NutsContext& ctx,
@@ -1291,7 +1292,7 @@ void NUTSEngine::repair_overlaps(std::vector<TrackSegment>& segments,
         // single-victim sweep of this loop.
         if (!progress) {
             const int m = repack_overlap_clusters(*this, track_pitch_,
-                                                  segments, ctx, seed_cons);
+                                                  segments, ctx, seed_cons, kozs);
             if (m > 0) { moved += m; progress = true; }
         }
         if (!progress) break;
@@ -2241,7 +2242,8 @@ public:
     LayerSolver(const NUTSEngine& eng,
                 std::vector<TrackSegment*>& segs_in,
                 NutsContext& ctx,
-                const LayerConstraints& constraints)
+                const LayerConstraints& constraints,
+                const std::vector<KeepoutZone>* kozs_shared = nullptr)
         : eng_(eng), segs(segs_in),
           pull_map(ctx.pull_map), pull_win_map(ctx.pull_win_map),
           align_map(ctx.align_map),
@@ -2250,9 +2252,24 @@ public:
           order_preds(constraints.preds), order_bounds(constraints.bounds),
           // Incorporate KeepoutZones into 'occupied' list (user zones + leaf-cell
           // zones on LOW layers + fixed bottom-up segments' derived zones; TOP
-          // segments are filtered out by layer_ids).
-          kozs(eng.solver_keepouts())
+          // segments are filtered out by layer_ids).  A caller constructing
+          // many solvers (the cluster repack, one per attempt) hands the list
+          // in once instead of paying low_layer_keepouts() per attempt
+          // (#972 follow-up: one zone per leaf, a std::set each, copied per
+          // cluster attempt).
+          kozs_own(kozs_shared ? std::vector<KeepoutZone>{}
+                               : eng.solver_keepouts()),
+          kozs(kozs_shared ? *kozs_shared : kozs_own)
     {
+        // Zones that can apply to THIS layer, in the list's own order — the
+        // per-placement keepout walk is over these alone (same pushes, same
+        // order as walking every zone with keepout_occupied's layer test).
+        if (!segs.empty()) {
+            const int lid = segs.front()->layer;
+            for (const auto& koz : kozs)
+                if (koz.layer_ids.empty() || koz.layer_ids.count(lid))
+                    kozs_layer.push_back(&koz);
+        }
         // Same-layer lookup for alignment siblings (and ordering-constraint phase 0).
         for (TrackSegment* ts : segs)
             layer_map[{ts->bundle_id, ts->seg_idx}] = ts;
@@ -2306,14 +2323,29 @@ private:
     const std::map<std::pair<int,int>, TrackSegment*>&             jn_segs;
     const std::map<std::pair<int,int>, std::set<std::pair<int,int>>>& order_preds;
     const std::map<std::pair<int,int>, std::pair<double,double>>&  order_bounds;
-    const std::vector<KeepoutZone>     kozs;
+    const std::vector<KeepoutZone>     kozs_own;    // empty when shared
+    const std::vector<KeepoutZone>&    kozs;
+    std::vector<const KeepoutZone*>    kozs_layer;  // the zones this layer sees
     std::map<std::pair<int,int>, TrackSegment*> layer_map;
     std::set<std::pair<int,int>> constrained;
     std::set<std::pair<int,int>> has_successor;   // something ordered above it
 
     void add_keepout_occ(const TrackSegment* t,
                          std::vector<std::pair<double,double>>& occ) const {
-        keepout_occupied(kozs, t, occ);
+        // keepout_occupied over the layer's own zones (every LayerSolver is
+        // one layer, so the layer test is already decided per zone).
+        for (const KeepoutZone* koz : kozs_layer) {
+            if (!koz->layer_ids.empty() && !koz->layer_ids.count(t->layer)) continue;
+            if (t->horiz) {
+                if (sp_lo(*t) < koz->bbox.x2 && sp_hi(*t) > koz->bbox.x1)
+                    occ.push_back({static_cast<double>(koz->bbox.y1),
+                                   static_cast<double>(koz->bbox.y2)});
+            } else {
+                if (sp_lo(*t) < koz->bbox.y2 && sp_hi(*t) > koz->bbox.y1)
+                    occ.push_back({static_cast<double>(koz->bbox.x1),
+                                   static_cast<double>(koz->bbox.x2)});
+            }
+        }
     }
 
     // Occupancy a candidate placement must avoid: every already-placed segment
@@ -2366,7 +2398,14 @@ private:
     // best_effort — see repack_cluster).
     bool repack_members(std::vector<TrackSegment*> members,
                         bool best_effort = false) {
-        std::set<const TrackSegment*> member_set(members.begin(), members.end());
+        // Sorted pointer vector + binary search: the std::set lookup in the
+        // per-member occupancy build was the hottest self frame of the whole
+        // abstract solve at NQ = 32 (13 %).
+        std::vector<const TrackSegment*> member_set(members.begin(), members.end());
+        std::sort(member_set.begin(), member_set.end());
+        auto is_member = [&](const TrackSegment* o) {
+            return std::binary_search(member_set.begin(), member_set.end(), o);
+        };
 
         // Earliest deadline first: the member whose window ENDS soonest gets
         // the lowest position.  Ordering by window tightness instead can park
@@ -2399,7 +2438,7 @@ private:
                 TrackSegment* m = members[k];
                 add_keepout_occ(m, base_occ[k]);
                 for (const TrackSegment* o : segs) {
-                    if (member_set.count(o)) continue;
+                    if (is_member(o)) continue;
                     occupancy_from(*m, *o, base_occ[k]);
                 }
                 occ_built[k] = 1;
@@ -2822,8 +2861,11 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
 static int repack_overlap_clusters(const NUTSEngine& eng, double track_pitch,
                                    std::vector<TrackSegment>& segments,
                                    NutsContext& ctx,
-                                   const std::map<int, LayerConstraints>* seed_cons)
+                                   const std::map<int, LayerConstraints>* seed_cons,
+                                   const std::vector<KeepoutZone>& kozs_shared)
 {
+    // kozs_shared: the caller's (repair_overlaps') solver keepout list, handed
+    // to every attempt's LayerSolver instead of rebuilt per attempt.
     auto pairs = find_overlaps(segments);
     if (pairs.empty()) return 0;
 
@@ -2898,14 +2940,17 @@ static int repack_overlap_clusters(const NUTSEngine& eng, double track_pitch,
         //            windows may be full GIVEN the neighbours' positions, so
         //            the neighbours must move with them).
         std::vector<TrackSegment*> narrow;
-        std::set<const TrackSegment*> in_members;
+        std::vector<const TrackSegment*> in_members;
         for (int i : cluster) {
             narrow.push_back(&segments[i]);
-            in_members.insert(&segments[i]);
+            in_members.push_back(&segments[i]);
         }
+        std::sort(in_members.begin(), in_members.end());
         std::vector<TrackSegment*> wide = narrow;
         for (TrackSegment* o : layer_segs) {
-            if (!o->placed || in_members.count(o)) continue;
+            if (!o->placed ||
+                std::binary_search(in_members.begin(), in_members.end(),
+                                   (const TrackSegment*)o)) continue;
             if (o->interval_lo < hi && lo < o->interval_hi)
                 wide.push_back(o);
         }
@@ -2938,7 +2983,7 @@ static int repack_overlap_clusters(const NUTSEngine& eng, double track_pitch,
             const int    vi_before = count_violations(segments);
             PlacementSnapshot snap;
             snap.take(segments);
-            LayerSolver solver(eng, layer_segs, ctx, *cons);
+            LayerSolver solver(eng, layer_segs, ctx, *cons, &kozs_shared);
             if (!solver.repack_cluster(members))
                 continue;                   // nothing would move: state untouched
             // Scoped settle over the repack's member set (a SUPERSET of the

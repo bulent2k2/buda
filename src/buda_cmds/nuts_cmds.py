@@ -71,6 +71,27 @@ def cmd_run_nuts(session, cmd, args, cmd_line):
               f"Set the pitch with 'set_track_pitch <p>' before "
               f"run_planner (or re-run run_planner) so the planner's "
               f"pitch-aware band reservations match this NUTS run.")
+    # [NutsProf] (BUDA_REPLAN_PROF=1, the planner's gate): where a run_nuts
+    # command's wall goes — the engine's own per-pass seconds (NUTSResult.
+    # pass_seconds, stamped on every solve but printed by nothing on this
+    # path) beside the Python phases around it.  Observation only.
+    # The clock starts BEFORE the engine is built: the fan-in derivation,
+    # the bottom-up fixed-route injection, the grid points and the span
+    # snapshot are the `setup` phase, and a total that began after them
+    # left that phase reading zero (Codex P2 on #977).
+    import os as _os, time as _time
+    # Parsed as the planner's C++ gate parses it (`replan_prof_on`): set,
+    # non-empty and not starting with "0", so `BUDA_REPLAN_PROF=0` turns
+    # both profiles off rather than one (Codex P2 on #977).
+    _pv = _os.environ.get("BUDA_REPLAN_PROF", "")
+    _prof = bool(_pv) and not _pv.startswith("0")
+    _t = {}
+    _t0 = _time.perf_counter()
+    _tmark = [_t0]
+    def _lap(key):
+        now = _time.perf_counter()
+        _t[key] = _t.get(key, 0.0) + (now - _tmark[0])
+        _tmark[0] = now
     nuts = buda.NUTSEngine(session.fp, session.layers)
     nuts.set_track_pitch(pitch)
     # Tapered fan-in: (re)derive the selected candidates' per-segment bit
@@ -88,10 +109,17 @@ def cmd_run_nuts(session, cmd, args, cmd_line):
             list(session.planner.get_y_grid()))
     # Snapshot topology-derived initial spans before the solve.
     before = session._segment_states_from_topology()
+    _lap("setup")
     # C++ prints its own [NUTS] N segments placed across K layer(s) line.
     with buda.ostream_redirect():
         session.nuts_result = nuts.run(session.bundles)
+    _lap("engine_run")
+    _first_passes = dict(session.nuts_result.pass_seconds)
+    session._prof_esc_resolves = 0
+    session._prof_esc_moves = []
+    session._prof_esc_resolve_s = 0.0
     session._adopt_doglegs()
+    _lap("adopt_doglegs")
     # Post-NUTS dead-span escalation, run HERE (before any healer) so the
     # whole negotiate/ripup cascade can adapt around the escalated layers.
     # Measured (real config): escalating BEFORE the healers fixes flows the
@@ -112,6 +140,7 @@ def cmd_run_nuts(session, cmd, args, cmd_line):
                     and _healers_declared))
     if do_escalate:
         n_esc = session._escalate_dead_low_segments()
+        _lap("dead_span_escalate")
         if n_esc:
             print(f"[NUTS] dead-span escalation: moved {n_esc} dead LOW "
                   f"segment(s) to a TOP layer and re-solved.")
@@ -124,6 +153,7 @@ def cmd_run_nuts(session, cmd, args, cmd_line):
             # _checkpoint_routing (Codex #351 P2).  Trial-guarded inside.
             if session.bdb is not None:
                 session._persist_planner_output(selective=True)
+                _lap("persist_planner_after_escalation")
     # A fresh abstract solve invalidates any prior detailed result:
     # ripup_reroute / negotiate_congestion key their stage off
     # detailed_result, and hill-climbing against a detailed route of
@@ -135,13 +165,29 @@ def cmd_run_nuts(session, cmd, args, cmd_line):
     session.detailed_result = None
     # A handed-down plan's seats, audited against the placement (6c).
     session._report_plan_pins_seated()
+    _lap("plan_pins")
     layer_names = session._make_layer_names()
     diag = session._nuts_diagnostics(session.nuts_result, layer_names, before)
+    _lap("diagnostics")
     session._write_nuts_log(layer_names, extra_lines=diag)
+    _lap("nuts_log")
     ns, nv = session._persist_nuts()
+    _lap("persist")
     if ns:
         print(f"[BDB] persisted {ns} bus segment(s) and {nv} bus via(s) "
               f"to the open BDB.")
+    if _prof:
+        r = session.nuts_result
+        passes = " ".join(f"{k}={v:.3f}s" for k, v in
+                          sorted(_first_passes.items(), key=lambda kv: -kv[1]))
+        phases = " ".join(f"{k}={v:.3f}s" for k, v in _t.items())
+        print(f"[NutsProf] total={_time.perf_counter() - _t0:.3f}s "
+              f"segments={len(r.segments)} overlaps={r.num_overlaps} "
+              f"phases[{phases}] "
+              f"escalation[resolves={session._prof_esc_resolves} "
+              f"resolve_s={session._prof_esc_resolve_s:.3f} "
+              f"moves={session._prof_esc_moves}] "
+              f"first_solve_passes[{passes}]", file=sys.stderr)
 
 
 def cmd_run_detailed_nuts(session, cmd, args, cmd_line):
