@@ -471,7 +471,7 @@ void CongestionPlanner::rebuild_cuts_() {
             // so the obstruction predicate must judge the same geometry.
             // Single-rect blocks contribute their one rect in the same order,
             // so designs without multi-rect blocks judge byte-identically.
-            auto rects = floorplan_.get_block_rects(b.first);
+            auto rects = floorplan_.obstruction_rects(b.first);
             if (rects.empty()) leaf_rects_cache_.push_back(b.second);
             else for (const Rect& r : rects) leaf_rects_cache_.push_back(r);
             if (leaf_policy_)

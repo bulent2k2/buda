@@ -260,7 +260,7 @@ def _draw_block(ax, name, bbox, fp, lw=1.0, edge='#888888', face='#e8e8e8',
 
     Returns ([patches], label_text_artist).
     """
-    rects_raw = fp.get_block_rects(name)
+    rects_raw = fp.obstruction_rects(name)
     added_patches = []
 
     if rects_raw:

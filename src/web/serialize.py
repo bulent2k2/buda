@@ -117,7 +117,7 @@ def serialize_floorplan(fp):
     """Blocks (bbox + real rects + container flag + corner margin) and keepouts."""
     blocks = []
     for name, rect in fp.get_all_blocks():
-        rects = fp.get_block_rects(name)         # [] for single-rect blocks
+        rects = fp.obstruction_rects(name)       # [] for single-rect blocks
         # rects entries may be Rect or (x1,y1,x2,y2) tuples — normalize.
         norm_rects = []
         for rr in rects:

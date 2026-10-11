@@ -337,10 +337,10 @@ void derive_slide_ranges(const Topology& topo, const Floorplan& fp,
             // rather than throwing — mirrors the graceful misses in the other
             // Floorplan accessors (get_block_rects/bounds/corner_margin).
             if (!fp.has_block(conn.block_name)) continue;
-            Rect face_rect = fp.get_block_bounds(conn.block_name);
+            Rect face_rect = fp.landing_bounds(conn.block_name);
             BlockCornerMargin cm = fp.get_block_corner_margin(conn.block_name);
             {
-                const auto rects = fp.get_block_rects(conn.block_name);
+                const auto rects = fp.landing_rects(conn.block_name);
                 // Which rect(s) does this tap land on?  Generation lands taps
                 // on the MARGIN-INSET rect faces (open 9: Busterm rects are
                 // shrunk per rect like the bbox), so match face_coord against
@@ -537,7 +537,7 @@ void tighten_passthrough(const Topology& topo, const Floorplan& fp,
         if (!explicitly_connected.count(bname)) continue;   // no taps: the
         if (over_untapped.count(bname)) continue;           // normal path clamps
         if (fp.get_block_teg_mode(bname) != TegMode::OVER) continue;
-        auto rects = fp.get_block_rects(bname);
+        auto rects = fp.landing_rects(bname);
         if (rects.size() < 2) continue;
         std::vector<Rect> untapped;
         for (const Rect& r : rects) {
@@ -565,8 +565,8 @@ void tighten_passthrough(const Topology& topo, const Floorplan& fp,
     auto rects_of_block = [&](const std::string& bname) {
         auto it = over_untapped.find(bname);
         if (it != over_untapped.end()) return it->second;
-        auto rects = fp.get_block_rects(bname);
-        if (rects.empty()) rects.push_back(fp.get_block_bounds(bname));
+        auto rects = fp.landing_rects(bname);
+        if (rects.empty()) rects.push_back(fp.landing_bounds(bname));
         return rects;
     };
 
@@ -725,7 +725,7 @@ void pin_relay_taps(const Topology& topo, const Floorplan& fp,
             // The busterm sits at one of cs's along endpoints (see check_topo).
             if (f != cs.along_lo && f != cs.along_hi) continue;
             if (!fp.has_block(bc.block_name)) continue;   // block not in this floorplan
-            const Rect bb = fp.get_block_bounds(bc.block_name);
+            const Rect bb = fp.landing_bounds(bc.block_name);
             // OTC window = the cell footprint in the connector's perp direction.
             for (const auto& sc : cs.conns) {
                 if (sc.kind != SegConn::SEG || !sc.is_endpoint) continue;
