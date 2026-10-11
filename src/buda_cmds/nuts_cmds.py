@@ -80,7 +80,11 @@ def cmd_run_nuts(session, cmd, args, cmd_line):
     # snapshot are the `setup` phase, and a total that began after them
     # left that phase reading zero (Codex P2 on #977).
     import os as _os, time as _time
-    _prof = bool(_os.environ.get("BUDA_REPLAN_PROF"))
+    # Parsed as the planner's C++ gate parses it (`replan_prof_on`): set,
+    # non-empty and not starting with "0", so `BUDA_REPLAN_PROF=0` turns
+    # both profiles off rather than one (Codex P2 on #977).
+    _pv = _os.environ.get("BUDA_REPLAN_PROF", "")
+    _prof = bool(_pv) and not _pv.startswith("0")
     _t = {}
     _t0 = _time.perf_counter()
     _tmark = [_t0]
