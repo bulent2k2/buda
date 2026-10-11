@@ -1006,6 +1006,12 @@ public:
     // (chip_flow_parallelism.md C1).  Invalidates the route_snapshot like
     // the bulk clear — every selective site rewrites routing right after.
     void clear_expanded_bundle(const std::string& bundle_id);
+    // The ROUTING half of clear_expanded_bundle alone: ONE bundle's
+    // bus/net segment and via rows plus the route_snapshot, the bundle,
+    // net, busterm and topology rows left standing — what a re-persist
+    // needs when only the planner's assigned layers moved (#972's
+    // layer-only re-persist), since those rows are updated in place.
+    void clear_bundle_routing(const std::string& bundle_id);
 
     // ── Abstract-NUTS bus routing persistence (Stage-4 output) ─────────────
     void add_bus_segment(const BusSegRow& r);       // INSERT OR REPLACE
