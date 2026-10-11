@@ -188,9 +188,25 @@ Two mechanisms, one fixed:
    and part of the step share are.  The `_persist_route_snapshot` digest
    also re-reads every bundle's rows through four queries per bundle.
 
-The dogleg-adoption and dead-span-escalation re-solves are real work and
-stay; what the remaining persistence costs at the reticle dial is the
-next measurement (`run_nuts` was 514 s there with the planner at 111 s).
+Re-sampled after fix 1 (NQ=16, shares of the command's samples):
+`_escalate_dead_low_segments` 25 % (the re-solve), `_persist_planner_output`
+23 % → `_add_expanded_bundle` 18 % → `BDB::add_busterm` 15 % and
+`_persist_topology_annotations` 16 %, `sqlite3_step` 18 %, prepare 2.6 %,
+`_persist_nuts` 3 %.  That planner re-persist is the escalation's own
+(`selective=True`, Codex #351) and it is doing honest work: the
+escalation moved **638** segments here, so hundreds of expanded instances'
+fingerprints changed and each one is rewritten whole — bundle row, net
+and busterm links, the selected topology with its segments, the
+seg-busterm annotations — when all that changed is
+`topology_segment.assigned_layer` on a few rows.  The lever that remains
+is a LAYER-ONLY re-persist for an expanded instance whose selection,
+pins and candidate set are unchanged (update the assigned layers in
+place, fingerprint split into a shape part and a layer part), which has
+to stay byte-identical to the full rewrite and is not built here; the
+per-row statement preparation is 2.6 % and not worth a cache on its own.
+The dogleg-adoption and dead-span-escalation re-solves stay; what the
+remaining persistence costs at the reticle dial is the next measurement
+(`run_nuts` was 514 s there with the planner at 111 s).
 
 ## Method
 
