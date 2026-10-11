@@ -910,8 +910,16 @@ class PersistMixin:
             r.track_hi_bound = ts.track_hi_bound
             self.bdb.add_bus_segment(r)
         n_via = 0
+        # One pass over the placed segments for EVERY bundle (#972 follow-up):
+        # _persist_bundle_vias used to rebuild its per-bundle map by scanning
+        # the whole result per bundle — O(bundles x segments) pybind
+        # conversions, 24 % of run_nuts at NQ = 32 on bigsoc.
+        seg_by_bundle = {}
+        for ts in self.nuts_result.segments:
+            seg_by_bundle.setdefault(ts.bundle_id, {})[ts.seg_idx] = ts
         for w in self.bundles:
-            n_via += self._persist_bundle_vias(w)
+            n_via += self._persist_bundle_vias(
+                w, seg_by_bundle.get(w.input.original_bundle.id, {}))
         n_seg = len(self.nuts_result.segments)
         self._persist_route_snapshot(n_seg, n_via, "abstract_nuts")
         return (n_seg, n_via)
@@ -999,7 +1007,7 @@ class PersistMixin:
                          for k, v in sorted(blocked.items())])
             if blocked else "")
 
-    def _persist_bundle_vias(self, w):
+    def _persist_bundle_vias(self, w, ts_map=None):
         """Record one symbolic bus-via per layer-transition in a bundle's placed
         segments. Segment adjacency comes from `ConnTopology` (the repo's canonical
         connection model), so it covers both shared-endpoint bends AND T-junctions
@@ -1007,12 +1015,16 @@ class PersistMixin:
         via's position is the PLACED junction (from the segments' track positions).
         """
         sel = w.plan.selected_topology_index
-        if sel < 0 or sel >= len(w.input.candidates):
+        # ONE read of the candidate pool: the `candidates` property returns a
+        # copy of every Topology on each access.
+        cands = w.input.candidates
+        if sel < 0 or sel >= len(cands):
             return 0
-        topo = w.input.candidates[sel]
+        topo = cands[sel]
         bid = w.input.original_bundle.id
-        ts_map = {ts.seg_idx: ts for ts in self.nuts_result.segments
-                  if ts.bundle_id == bid}
+        if ts_map is None:
+            ts_map = {ts.seg_idx: ts for ts in self.nuts_result.segments
+                      if ts.bundle_id == bid}
         bit_width = len(w.input.original_bundle.get_net_names())
         ct = buda.ConnTopology()
         ct.build(topo, self.fp)
