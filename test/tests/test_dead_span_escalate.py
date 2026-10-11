@@ -301,12 +301,16 @@ def test_floor_argument_errors_are_reported_not_raised():
     """A floor with no value, a non-number, or one outside [0, 1] is an
     Error line (the CLI's convention), and the knob is left unchanged."""
     s, _ = _build(pin_low=False, keepout_m2=False)
-    for bad in ("floor", "floor x", "floor 1.5", "sideways"):
+    for bad in ("floor", "floor x", "floor 1.5", "sideways",
+                "on floor x", "floor 0.2 sideways"):
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
             s.do_command("set_dead_span_escalate " + bad)
         assert out.getvalue().startswith("Error:"), bad
-        assert s._dead_span_floor_typed is None
+        # Nothing committed ahead of the error: not the flag an earlier
+        # token set, not the floor a later token broke (Codex P2 on #981).
+        assert s._dead_span_floor_typed is None, bad
+        assert s._dead_span_escalate is False, bad
     out = io.StringIO()
     with contextlib.redirect_stdout(out):
         s.do_command("set_dead_span_escalate")

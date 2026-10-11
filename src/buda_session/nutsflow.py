@@ -1378,15 +1378,18 @@ class NutsFlowMixin:
         # LOW layers across the re-solve iterations.
         tried = {}
 
-        # The floor in segments: an iteration must move at least this many
-        # for its re-solve to be paid (0 = every iteration).
-        floor_n = 0
-        if floor and floor > 0.0:
-            import math as _math
-            floor_n = int(_math.ceil(floor * len(self.nuts_result.segments)))
+        import math as _math
 
         total = 0
         for it in range(max_iter):
+            # The floor in segments, read off THIS iteration's result: an
+            # iteration must move at least this many for its re-solve to be
+            # paid (0 = every iteration).  Per iteration because a re-solve's
+            # dogleg adoption can change the segment count (Codex P2 on
+            # #981).
+            n_segs = len(self.nuts_result.segments)
+            floor_n = (int(_math.ceil(floor * n_segs))
+                       if floor and floor > 0.0 else 0)
             moved = 0
             pending = []          # (wrapper, seg_idx, new_layer) this scan
             for seg in self.nuts_result.segments:
@@ -1588,7 +1591,7 @@ class NutsFlowMixin:
                                           + [moved])
                 print(f"[DeadSpan] iteration {it + 1}: {moved} dead LOW "
                       f"segment(s) found, below the floor of {floor_n} "
-                      f"({floor:g} x {len(self.nuts_result.segments)} "
+                      f"({floor:g} x {n_segs} "
                       f"segments) -- left on their layers, re-solve "
                       f"skipped (set_dead_span_escalate floor 0 applies "
                       f"every iteration).", flush=True)

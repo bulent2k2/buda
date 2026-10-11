@@ -463,31 +463,40 @@ def cmd_set_dead_span_escalate(session, cmd, args, cmd_line):
               + ("" if session._dead_span_floor_typed is not None
                  or not fl else " (BUDA_DEAD_SPAN_FLOOR)"))
         return
+    # Parse the whole line into temporaries and commit only once every token
+    # is valid: `on floor x` must not leave the flag on behind its Error
+    # line (Codex P2 on #981).
+    flag, floor_v = None, None
     rest = list(args)
     while rest:
         tok = rest.pop(0).lower()
         if tok in ("on", "off"):
-            session._dead_span_escalate = (tok == "on")
+            flag = (tok == "on")
         elif tok == "floor":
             if not rest:
                 print("Error: set_dead_span_escalate floor expects a value "
                       "(a fraction of the design's segments, 0 = off)")
                 return
+            raw = rest.pop(0)
             try:
-                f = float(rest.pop(0))
+                f = float(raw)
             except ValueError:
                 print(f"Error: set_dead_span_escalate floor expects a number, "
-                      f"got {args[-1]!r}")
+                      f"got {raw!r}")
                 return
             if not (0.0 <= f <= 1.0):
                 print(f"Error: set_dead_span_escalate floor must be in "
                       f"[0, 1] (a fraction of the segments), got {f:g}")
                 return
-            session._dead_span_floor_typed = f
+            floor_v = f
         else:
             print(f"Error: set_dead_span_escalate expects on|off and/or "
                   f"floor <F>, got {tok!r}")
             return
+    if flag is not None:
+        session._dead_span_escalate = flag
+    if floor_v is not None:
+        session._dead_span_floor_typed = floor_v
 
 
 def cmd_set_pair_align_heal(session, cmd, args, cmd_line):
