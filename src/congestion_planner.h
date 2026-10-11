@@ -265,6 +265,14 @@ struct BundleAssignment {
 //                   RoutingGridStack with def_track_pattern layers.
 enum class CapacityMode { WIDTH, SIGNAL_TRACKS };
 
+// How many times a plan_bundle scoring overlay was (re)sized to a grid since
+// the process started — one per scoring thread per grid generation now that
+// the worker threads persist (#972 lever B1).  A test's probe, not a tuning.
+long long plan_overlay_inits();
+// Threads the persistent scoring pool has created so far (it grows to the
+// largest worker count any plan_bundle call asked for and never shrinks).
+long long plan_scoring_pool_threads();
+
 class CongestionPlanner {
 public:
     CongestionPlanner(const Floorplan& fp, const LayerStack& layers);

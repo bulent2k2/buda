@@ -359,6 +359,12 @@ void bind_routing(py::module_& m) {
     // Analysis-cache instrumentation (Phase B, topo_conn_unification.md):
     // cumulative (computes, hits) of the content-fingerprint-validated
     // ConnTopology analysis cache, plus a reset.  Test/diagnostic only.
+    m.def("plan_overlay_inits", &plan_overlay_inits,
+          "How many times a planner scoring overlay was (re)sized to a grid "
+          "since the process started (one per scoring thread per grid "
+          "generation; #972 lever B1's probe).");
+    m.def("plan_scoring_pool_threads", &plan_scoring_pool_threads,
+          "Threads the persistent scoring pool has created so far.");
     m.def("analysis_cache_counters", &analysis_cache_counters);
     m.def("analysis_cache_reset_counters", &analysis_cache_reset_counters);
 

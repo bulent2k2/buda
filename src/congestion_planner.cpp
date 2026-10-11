@@ -28,6 +28,11 @@
 #include <atomic>
 #include <thread>
 #include <chrono>
+#include <condition_variable>
+#include <deque>
+#include <exception>
+#include <memory>
+#include <mutex>
 
 namespace buda {
 
@@ -141,6 +146,105 @@ thread_local CongestionPlanner::CandOverlay* CongestionPlanner::t_cand_overlay_ 
 // Process-wide cut-grid generation source (rebuild_cuts_ stamps cuts_gen_).
 static std::atomic<uint64_t> g_cuts_generation{0};
 
+namespace {
+// How many times a scoring overlay was (re)sized to a grid — one per thread
+// per grid generation when the threads persist, one per WORKER PER CALL when
+// they do not (#972 finding 2: fresh std::threads per plan_bundle re-created
+// their thread_local overlay, 45-266 MB each, on every call).  Read by
+// `plan_overlay_inits()` so a test can tell the two apart.
+std::atomic<long long> g_overlay_inits{0};
+
+// The persistent scoring pool (#972 lever B1).  plan_bundle used to spawn
+// n-1 std::threads per call; a thread's `thread_overlay_()` is thread_local,
+// so every worker paid the O(bands) `assign` on every call and the 4-thread
+// planner was slower than the 1-thread one (NQ=16: 137 s against 9 s).  The
+// workers here live for the process, so each one's overlay is sized once per
+// grid generation exactly as the main thread's always was.  Process-wide
+// rather than planner-owned because planners are COPIED (the trial sweep
+// makes one per worker) and a copy must not carry a thread pool; the sweep's
+// copies plan single-threaded (`set_plan_threads(1)`), so a nested run never
+// happens, and a concurrent run from another thread is still correct — each
+// job is one closure whose caller waits for the jobs it dispatched.
+//
+// run(n_extra, fn): hand fn to n_extra pool threads (growing the pool to
+// that many), run fn on the calling thread too, then wait for every
+// dispatched job to finish — jobs no thread has picked up by then are
+// withdrawn, since the caller's own loop has drained the shared work.  The
+// threads are detached and the pool is never destroyed (a static with
+// joinable threads cannot be torn down safely at exit).
+class ScoringPool {
+    struct Run {
+        const std::function<void()>* fn = nullptr;
+        int pending = 0;                 // dispatched and not yet finished (under mu_)
+        std::exception_ptr err;          // first worker exception (under mu_)
+    };
+public:
+    static ScoringPool& instance() {
+        static ScoringPool* p = new ScoringPool();
+        return *p;
+    }
+    size_t size() {
+        std::lock_guard<std::mutex> lk(mu_);
+        return n_threads_;
+    }
+    void run(int n_extra, const std::function<void()>& fn) {
+        auto r = std::make_shared<Run>();
+        r->fn = &fn;
+        {
+            std::lock_guard<std::mutex> lk(mu_);
+            while ((int)n_threads_ < n_extra) {
+                std::thread([this] { worker_(); }).detach();
+                ++n_threads_;
+            }
+            for (int i = 0; i < n_extra; ++i) queue_.push_back(r);
+            r->pending = n_extra;
+        }
+        cv_.notify_all();
+        std::exception_ptr own;
+        try { fn(); } catch (...) { own = std::current_exception(); }
+        std::exception_ptr err;
+        {
+            std::unique_lock<std::mutex> lk(mu_);
+            for (auto it = queue_.begin(); it != queue_.end();) {
+                if (*it == r) { --r->pending; it = queue_.erase(it); }
+                else ++it;
+            }
+            done_cv_.wait(lk, [&] { return r->pending == 0; });
+            err = r->err;
+        }
+        if (own) std::rethrow_exception(own);
+        if (err) std::rethrow_exception(err);
+    }
+private:
+    void worker_() {
+        for (;;) {
+            std::shared_ptr<Run> r;
+            {
+                std::unique_lock<std::mutex> lk(mu_);
+                cv_.wait(lk, [&] { return !queue_.empty(); });
+                r = queue_.front();
+                queue_.pop_front();
+            }
+            std::exception_ptr e;
+            try { (*r->fn)(); } catch (...) { e = std::current_exception(); }
+            {
+                std::lock_guard<std::mutex> lk(mu_);
+                if (e && !r->err) r->err = e;
+                --r->pending;
+            }
+            done_cv_.notify_all();
+        }
+    }
+    std::mutex mu_;
+    std::condition_variable cv_, done_cv_;
+    std::deque<std::shared_ptr<Run>> queue_;
+    size_t n_threads_ = 0;
+};
+}  // namespace
+
+long long plan_overlay_inits() { return g_overlay_inits.load(); }
+long long plan_scoring_pool_threads() { return (long long)ScoringPool::instance().size(); }
+
 CongestionPlanner::CandOverlay& CongestionPlanner::thread_overlay_() const {
     static thread_local CandOverlay ov;
     const size_t n = band_base_.empty() ? 0 : band_base_.back();
@@ -149,6 +253,7 @@ CongestionPlanner::CandOverlay& CongestionPlanner::thread_overlay_() const {
         ov.stamp.assign(n, 0);
         ov.epoch = 0;
         ov.gen   = cuts_gen_;
+        g_overlay_inits.fetch_add(1);
     }
     return ov;
 }
@@ -2183,16 +2288,15 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
     const int n_threads = resolved_plan_threads_((int)cand_indices.size());
     if (n_threads > 1) {
         std::atomic<size_t> next{0};
-        auto worker = [&]() {
+        std::function<void()> worker = [&]() {
             CandOverlay& ov = thread_overlay_();   // persistent per thread
             for (size_t k; (k = next.fetch_add(1)) < cand_indices.size(); )
                 scores[k] = score_candidate_(bw, cand_indices[k], mode, ctx, ov);
         };
-        std::vector<std::thread> pool;
-        pool.reserve(n_threads - 1);
-        for (int t = 1; t < n_threads; ++t) pool.emplace_back(worker);
-        worker();
-        for (auto& th : pool) th.join();
+        // Persistent pool threads (#972 lever B1): their overlays survive
+        // across calls, so a worker's `thread_overlay_()` above is the same
+        // zero-setup lookup the main thread's always was.
+        ScoringPool::instance().run(n_threads - 1, worker);
     } else {
         CandOverlay& ov = thread_overlay_();       // persistent per thread
         for (size_t k = 0; k < cand_indices.size(); ++k)

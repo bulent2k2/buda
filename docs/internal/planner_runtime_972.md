@@ -44,6 +44,9 @@ second is not in the issue:
    set `plan_threads_` explicitly, which outranks the env; `bin/btcl -j 1`
    or `bin/buda --threads 1` is the immediate lever.
 
+(Both are landed: fix 1 by #974, the worker overlay by B1 below, 2026-10-11,
+together with the rip-up victim index E and the merged refine probe C.)
+
 After those two, the planner is dominated by the per-candidate scoring
 proper (single-thread profile below), and the next quadratic term waiting
 at the reticle dial is the rip-up VICTIM RANKING (item 3 of the issue):
@@ -108,6 +111,40 @@ measurement and the totals are indicative.  With E and C in, the ranked
 list below stands with D, F and B (the worker overlay) as the remaining
 planner levers; abstract NUTS is the bigger term at NQ ≥ 32 (88 s against
 the planner's 39 s wall at NQ=32 here).
+
+## Landed 2026-10-11: B1 (persistent scoring workers)
+
+`plan_bundle` spawned `n-1` fresh `std::thread`s per call and each one's
+scoring overlay is a `thread_local` sized to every band of the grid, so a
+worker re-created it — 45 MB at NQ=8, 68 MB at NQ=16 — on EVERY call
+(finding 2 above; the 4-thread planner was 2–15x slower than the 1-thread
+one).  The workers now come from a process-wide persistent pool
+(`ScoringPool` in `congestion_planner.cpp`: detached threads, one closure
+per worker per call, the caller runs the same closure and waits for the
+jobs it dispatched), so a worker's overlay is sized once per grid
+generation exactly as the main thread's always was.  Process-wide rather
+than planner-owned because planners are copied (the trial sweep makes one
+per worker) and a copy must not carry threads; the sweep's copies plan
+single-threaded, so the pool is never entered twice at once by one flow.
+Decision-identical by the existing argument (the thread count never
+changes a decision; `test_planner_parallel_scoring.py`), and
+`test_planner_scoring_pool.py` reads the new `plan_overlay_inits()` probe:
+a 4-thread multi-bundle plan adds at most one overlay (re)size per thread,
+where per-call spawning added three per call.  The cost is memory that now
+PERSISTS instead of being paid and freed per call: up to `n-1` overlays of
+12 B per band alongside the main thread's (0.8 GB at NQ=62 with 4
+threads), which is what B2 — an O(touched) reset — would shrink.
+
+| dial | 1 thread (E+C) | 4 threads before B1 (post-#974) | 4 threads with B1 | scoring block, 4 thr before → after |
+|---|---|---|---|---|
+| NQ=8  | 3.72 | 13.80 | **2.59** | 12.4 → 1.58 |
+| NQ=16 | 9.62 | 136.9 | **6.17** | 133.0 → 3.87 |
+
+Four threads now beat one (1.44x and 1.56x on the whole planner, 1.8x and
+2.0x on the scoring block, on a 4-CPU box whose main thread also carries
+the serial phases), and the shipped default — `btcl`/`buda` with no `-j`
+run half the machine's threads — no longer needs `-j 1` as a workaround.
+Decisions identical to the 1-thread run at both dials.
 
 ## Method
 
@@ -221,7 +258,8 @@ is compared under a 1e-6 epsilon.  Measured identical here; the gate for
 landing is `tools/qor_corpus.py --vs main` (not run in this session).
 `BUDA_LAYERLOAD_SCAN=1` keeps the old scan as a study control.
 
-**B. Fix the scoring workers (the big one).**  Three shapes, cheapest first:
+**B. Fix the scoring workers (the big one) — B1 LANDED 2026-10-11, see
+above (NQ=16 at 4 threads 136.9 → 6.17 s); B2 stays open.**  Three shapes, cheapest first:
   * B1 — stop paying per call: make the worker overlay persistent (a
     planner-owned pool of `n_threads` overlays handed to the workers, or a
     persistent thread pool), so the O(bands) allocation happens once per
