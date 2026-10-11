@@ -160,8 +160,8 @@ the `fixpoint` bucket.
 ## Landed: B1 as a knob, and what it measures (2026-10-11)
 
 `set_dead_span_escalate floor <F>` (`BUDA_DEAD_SPAN_FLOOR` for a sweep;
-default 0, byte-identical): an escalation iteration that finds fewer than
-`ceil(F × segments)` dead LOW segments is NOT applied — the loop ends on
+default 0, byte-identical): a LATE escalation iteration (the second on)
+that finds fewer than `ceil(F × segments)` dead LOW segments is NOT applied — the loop ends on
 the placement it already has, the segments are reported and left on their
 layers, and that iteration's full re-solve is not paid.  Deferred
 application (the scan collects its moves and writes `seg_layers` only once
@@ -207,6 +207,46 @@ Second, the saving is bounded by the solve count: at NQ=62 four solves
 are 336 of the 367 s and the floor removes two; the solve itself (repair
 38.9 s, corner 29.0 s, fixpoint 15.5 s of the 86 s first solve) is where
 the remaining time is, which is option C.
+
+**The corpus, twice.**  Swept with `BUDA_DEAD_SPAN_FLOOR=0.01` against
+the same build with the variable unset (`qor_corpus.py --out` both sides,
+`--compare`; 57 flows, `ariane133_heal` NOT COMPARABLE for its fetched
+input).  The FIRST form of the knob floored every iteration and read
+**0 better / 1 worse / 55 unchanged**: `rnr/mix2` went from clean to
+4 overlaps / 32 unplaced / 2 violating bundles in a third of the time.
+mix2 has 238 segments, so the floor was 3, and its FIRST iteration found
+one dead segment — dropped, the whole escalation skipped, and the stage-a
+healers climbed from a different placement (overlaps 7 → 2 → 1 became
+5 → 2 → 0, DNUTS then 235 → 111 unplaced) into a basin the stage-b fold
+and ripup ended at 32 (ovl 4).  That is the measured reason the entry
+exists — escalating BEFORE the stage-a healers beats the stage-b fold
+alone — undone by the floor on a design small enough that one move is the
+whole escalation.  The dial vehicle could not show it: its first
+iteration is 41–1,308 moves, far above the floor at every size.  So the
+knob prices only the LATE iterations (the second on; the cascades a
+re-solve creates, which is what the estimate was about), and the dials'
+numbers above are unchanged by that (NQ=16 re-measured byte-identical).
+The SECOND run, under that rule, is **identical on every metric across
+all 57 flows, abstract and detailed WL +0** — no corpus flow has a late
+iteration under the floor: the corpus designs run zero or one entry
+iteration (`bigHalf` 253 segments and `mix2_fast_topdown` 262: zero,
+their dead spans arise at stage b; `mix2`: one), and the cascades the
+floor is for appear on the dials from NQ=8 up.  Harmless where it does
+not fire, honest where it does, and still a QoR trade, so it ships
+opt-in; `-abstract -noheal` dial sweeps and a healerless flow that
+accepts the audit's price are its market.
+
+**B2 probed and not built.**  The per-layer re-solve the engine already
+has (`rerun_layer`, the `run_nuts_on_layer` command) was timed on the
+NQ=32 result as the shape B2 would use for a late iteration — the two TOP
+layers the moved segments join: M6 3.1 s + M7 2.2 s against 7.1 s for the
+full re-solve it would replace (the escalation's re-solves are cheaper
+than the 31 s first solve, whose corner pass runs on the pre-escalation
+layer assignment).  A quarter saved per late iteration, and the per-layer
+solve is a different placement — on an already-solved design it moved 169
+of M6's 923 segments and the audit read 90 violations / 270 doomed seats
+against 84 / 265 — so it would trade the floor's stated price for an
+unstated one.  Left as measured.
 
 ## Not verified
 

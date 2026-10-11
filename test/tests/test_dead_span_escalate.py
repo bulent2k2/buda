@@ -219,17 +219,41 @@ def _nuts_floor(s, cmd):
     return out.getvalue()
 
 
-def test_floor_drops_a_sub_floor_iteration_and_says_so():
-    """An iteration moving fewer than ceil(F x segments) is NOT applied: the
-    vehicle's one dead stub is below a floor of 1.0 (every segment), so it
-    stays on LOW M2, its 8 bits strand, and the drop is reported with the
-    counts -- a healerless flow must be able to read what it paid."""
+def test_floor_never_drops_the_first_iteration():
+    """The first iteration is the measured win (escalating before the
+    stage-a healers) and is exempt from the floor: at a floor of 1.0 (every
+    segment) the vehicle's one dead stub is still escalated to TOP M4.
+    The first corpus run priced iteration 1 too, and `rnr/mix2` (238
+    segments, floor 3) went from clean to 4/32/2 by skipping its one move."""
     s, h_idx = _build(pin_low=True, keepout_m2=True)
     out = _nuts_floor(s, "set_dead_span_escalate on floor 1.0")
+    assert list(s.bundles[0].plan.seg_layers)[h_idx] == 4   # TOP M4
+    assert s.detailed_result.num_unplaced == 0
+    assert "[DeadSpan]" not in out
+    assert s._prof_esc_dropped == []
+
+
+def test_floor_drops_a_sub_floor_late_iteration_and_says_so():
+    """A LATE iteration moving fewer than ceil(F x segments) is NOT applied:
+    the loop ends on the placement it has, the dead segments it found stay
+    on their layers (here LOW M2, so the 8 bits strand), and the drop is
+    reported with the counts -- a healerless flow must be able to read what
+    it paid.  The vehicle has one iteration, so the floor is asked to start
+    at iteration 1 through the study door `floor_from`."""
+    s, h_idx = _build(pin_low=True, keepout_m2=True)
+    with contextlib.redirect_stdout(io.StringIO()), buda.ostream_redirect():
+        s.do_command("run_nuts")
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out), buda.ostream_redirect():
+        n = s._escalate_dead_low_segments(floor=1.0, floor_from=1)
+    assert n == 0
     assert list(s.bundles[0].plan.seg_layers)[h_idx] == 2   # left on M2
-    assert s.detailed_result.num_unplaced == 8
-    assert "[DeadSpan] iteration 1: 1 dead LOW segment(s) found, below the floor" in out
+    assert "[DeadSpan] iteration 1: 1 dead LOW segment(s) found, below the floor" in out.getvalue()
     assert s._prof_esc_dropped == [1]
+    # seg_layers and the result agree: nothing was half-applied.
+    assert all(seg.layer == 2 for seg in s.nuts_result.segments
+               if seg.bundle_id == s.bundles[0].input.original_bundle.id
+               and seg.seg_idx == h_idx)
 
 
 def test_floor_cleared_applies_the_iteration():
@@ -250,22 +274,27 @@ def test_floor_zero_is_the_unfloored_loop():
     assert s._dead_span_floor() == 0.0
 
 
-def test_env_floor_governs_the_auto_path_and_the_typed_floor_outranks_it(monkeypatch):
-    """BUDA_DEAD_SPAN_FLOOR is the corpus-sweep door: it floors the
-    healersAhead AUTO escalation with no flow edited, and a typed floor
-    outranks it (explicit > env > default)."""
-    monkeypatch.setenv("BUDA_DEAD_SPAN_FLOOR", "1.0")
+def test_env_floor_reaches_the_auto_path_and_the_typed_floor_outranks_it(monkeypatch):
+    """BUDA_DEAD_SPAN_FLOOR is the corpus-sweep door: it is the floor the
+    healersAhead AUTO escalation runs under with no flow edited, and a
+    typed floor outranks it (explicit > env > default)."""
+    monkeypatch.setenv("BUDA_DEAD_SPAN_FLOOR", "0.25")
     s, h_idx = _build(pin_low=True, keepout_m2=True)
-    assert s._dead_span_floor() == 1.0
+    assert s._dead_span_floor() == 0.25
     with contextlib.redirect_stdout(io.StringIO()), buda.ostream_redirect():
         s.do_command("set_planner_param healersAhead 1")   # the auto path
         s.do_command("run_nuts")
-    assert list(s.bundles[0].plan.seg_layers)[h_idx] == 2   # dropped
-    assert s._prof_esc_dropped == [1]
-    s2, h2 = _build(pin_low=True, keepout_m2=True)
-    _nuts_floor(s2, "set_dead_span_escalate on floor 0")      # typed wins
+    assert list(s.bundles[0].plan.seg_layers)[h_idx] == 4   # first iteration, applied
+    s2, _ = _build(pin_low=True, keepout_m2=True)
+    with contextlib.redirect_stdout(io.StringIO()):
+        s2.do_command("set_dead_span_escalate floor 0")      # typed wins
     assert s2._dead_span_floor() == 0.0
-    assert list(s2.bundles[0].plan.seg_layers)[h2] == 4
+    monkeypatch.setenv("BUDA_DEAD_SPAN_FLOOR", "x")
+    s3, _ = _build(pin_low=True, keepout_m2=True)
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        assert s3._dead_span_floor() == 0.0                   # malformed: ignored, said
+    assert "BUDA_DEAD_SPAN_FLOOR" in out.getvalue()
 
 
 def test_floor_argument_errors_are_reported_not_raised():

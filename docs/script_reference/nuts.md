@@ -346,7 +346,7 @@ measurements behind the default.
 escalation iteration pays a FULL NUTS re-solve of the design, and the late
 iterations move a handful of segments for it: on the bigsoc vehicle at
 NQ=62 the three iterations moved 330, 23 and 1 segments at ~70 s of solve
-each, at NQ=32 1,308 then 14.  With a floor, an iteration that finds fewer
+each, at NQ=32 1,308 then 14.  With a floor, a LATE iteration (the second on) that finds fewer
 than `ceil(F × segments)` dead LOW segments is **not applied**: the loop
 ends on the placement it already has, the segments it found are left on
 their layers and reported (`[DeadSpan] iteration k: m dead LOW segment(s)
@@ -357,7 +357,13 @@ it does not touch the stage-b healer fold, the cull heal or ripup's refold
 tier, which carry their own accept contracts.  What it costs is stated in
 the report: a dead segment left on LOW strands every bit at DetailedNUTS in
 a healerless flow, while a flow that heals escalates it at stage b (`_heal_dead_spans`)
-with the re-solves the healers pay anyway.  `F` is a fraction of the result's
+with the re-solves the healers pay anyway.  The first iteration is never
+floored: its moves are the dead spans of the placement the planner handed
+over, and escalating them BEFORE the stage-a healers is the measured reason
+this entry exists (`mix` 1/16 → 0/0 against the stage-b fold alone) — the
+first corpus run of the floor priced iteration 1 too, and `rnr/mix2` (238
+segments, so a floor of 3) skipped its one move and ended 4/32/2 from clean.
+`F` is a fraction of the result's
 segments (scale-free: a re-solve costs the design's size, a move buys one
 segment's bits), in `[0, 1]`; `0` (the default) applies every iteration and is
 byte-identical.  `BUDA_DEAD_SPAN_FLOOR=<F>` floors a whole run without editing

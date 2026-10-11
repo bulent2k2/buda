@@ -1204,7 +1204,8 @@ class NutsFlowMixin:
                                     cull_risk: bool = False,
                                     only=None, seek_host: bool = False,
                                     force: bool = False,
-                                    floor: float = 0.0) -> int:
+                                    floor: float = 0.0,
+                                    floor_from: int = 2) -> int:
         """Post-NUTS dead-span escalation (opt-in: `set_dead_span_escalate on`).
 
         After abstract NUTS, a LOW-layer segment whose ACTUAL placed geometry
@@ -1276,7 +1277,16 @@ class NutsFlowMixin:
         honest: the scan collects the moves and writes them to `seg_layers`
         only once the iteration has cleared the floor, so a dropped
         iteration leaves `seg_layers` and `nuts_result` agreeing.  0 = no
-        floor (every iteration applied, byte-identical).
+        floor (every iteration applied, byte-identical).  The FIRST
+        iteration is never floored (`floor_from` = 2): its moves are the
+        dead spans of the placement the planner handed over, and escalating
+        them BEFORE the stage-a healers is the measured reason this entry
+        exists (mix 1/16 -> 0/0 against the stage-b fold alone) -- the
+        first corpus run of the floor priced every iteration and `rnr/mix2`
+        (238 segments, floor 3) dropped its one first-iteration move and
+        ended 4/32/2 from clean.  The later iterations are the cascades a
+        re-solve creates, which is what the floor prices.  `floor_from`
+        is a study/test door, not a command option.
         """
         if self.nuts_result is None or self.routing_grid is None:
             return 0
@@ -1570,7 +1580,7 @@ class NutsFlowMixin:
                 moved += 1
             if not moved:
                 break
-            if floor_n and moved < floor_n:
+            if floor_n and it + 1 >= floor_from and moved < floor_n:
                 # Below the floor: nothing applied, the loop ends on the
                 # placement it has (see the docstring).  Said out loud, since
                 # every dead segment left is a strand a healerless flow pays.
