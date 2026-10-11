@@ -146,6 +146,52 @@ the serial phases), and the shipped default — `btcl`/`buda` with no `-j`
 run half the machine's threads — no longer needs `-j 1` as a workaround.
 Decisions identical to the 1-thread run at both dials.
 
+## Abstract NUTS: the time is persistence, not placement (2026-10-11)
+
+`run_nuts` is the next command at NQ ≥ 32 (88 s against the planner's
+39 s wall at NQ=32), and its engine is not where the time goes.  The
+engine's own per-pass timers (`NUTSResult.pass_seconds`, every stage of
+`NUTSEngine::run` charged) total **1.07 s of the command's 16.4 s at
+NQ=16 and 9.6 s of 95.0 s at NQ=32** (in-process, one thread, no CLI log
+capture) — corner 45–50 %, fixpoint 17–28 %, repair 17 %, tighten 9–10 %
+of that engine time.  A py-spy `--native` sample of the command on the
+symbols-kept build (`cmake -B build-prof -DBUDA_PROFILE=ON`) puts the
+rest in the SESSION's persistence of the result into the BDB, inside the
+`_batched` transaction wrapper (53 % of the command's samples at NQ=16):
+
+| where | share of `run_nuts` samples, NQ=16 |
+|---|---|
+| `_persist_nuts` → `_persist_bundle_vias` | 35 % (33 %) |
+| `_persist_planner_output` → `_add_expanded_bundle` → `BDB::add_busterm` | 18 % (14 %, 12 %) |
+| `_escalate_dead_low_segments` (the healersAhead re-solve, legitimate) | 17 % |
+| `_persist_topology_annotations` (`persist_seg_busterms`) | 12 % |
+| SQLite `sqlite3_step` / `sqlite3_prepare_v2` | 13 % / 5 % |
+| `malloc` / `operator new` | 19 % / 17 % |
+
+Two mechanisms, one fixed:
+
+1. **A by-value vector read per bundle** — `_persist_bundle_vias` read
+   `nuts_result.segments` (a by-value pybind field: every read copies the
+   whole vector into a Python list of `TrackSegment` copies) once PER
+   BUNDLE to pick out that bundle's segments: bundles × segments copies,
+   the `malloc`/`operator new` share above.  FIXED: `_persist_nuts` copies
+   the result once, groups it by bundle in one pass and hands each bundle
+   its map (same rows, same order).  `run_nuts` NQ=16 16.4 → 11.0 s (−33 %),
+   NQ=32 95.0 → 68.7 s (−28 %), the engine's 1.05 / 9.5 s unchanged — so
+   59 s of the NQ=32 command are still outside the engine, in the
+   remaining persistence below.
+2. **A statement prepared per row** — the write paths (`add_bus_via`,
+   `add_busterm`, `add_bundle_net`, `add_bundle_busterm`, …) build a
+   `Stmt` per call, so every row pays `sqlite3_prepare_v2`; only the hot
+   READ paths cache theirs (`_q_*`).  Open: cache the write statements the
+   same way (reset, never finalize), which is what the 5 % prepare share
+   and part of the step share are.  The `_persist_route_snapshot` digest
+   also re-reads every bundle's rows through four queries per bundle.
+
+The dogleg-adoption and dead-span-escalation re-solves are real work and
+stay; what the remaining persistence costs at the reticle dial is the
+next measurement (`run_nuts` was 514 s there with the planner at 111 s).
+
 ## Method
 
 * `BUDA_REPLAN_PROF=1` already timed `plan_bundle`'s `layer_load` and
