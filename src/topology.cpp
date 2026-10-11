@@ -5521,8 +5521,8 @@ std::vector<Topology> TopologyGenerator::generate_candidates(
     std::vector<Topology> candidates;
     bool two_pin = false;
     if (dst_names.size() == 1) {
-        bool any_multi_rect = !floorplan_.landing_rects(src_name).empty() ||
-                              !floorplan_.landing_rects(dst_names[0]).empty();
+        bool any_multi_rect = !floorplan_.obstruction_rects(src_name).empty() ||
+                              !floorplan_.obstruction_rects(dst_names[0]).empty();
         two_pin = !any_multi_rect;
     }
     candidates = two_pin ? generate_2pin(src_name, dst_names[0])

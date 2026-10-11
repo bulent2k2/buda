@@ -102,3 +102,14 @@ def test_baseline_flows_route_clean(flow):
     assert rc == 0, out[-800:]
     assert "Error:" not in out, out[-800:]
     assert out.count("Success") >= 2, out[-1200:]
+
+
+def test_multi_rect_classification_reads_the_physical_block():
+    """Whether a block IS multi-rect is a fact about its body, not its landings
+    (Codex on #978): a fix narrowing `landing_rects` must not flip the
+    FEEDTHRU_RELAY exemption, the TEG_OPEN gate or the 2-pin/n-pin choice."""
+    v = (SRC / "verify.cpp").read_text()
+    assert "fp.obstruction_rects(bname).size() > 1) continue;" in v
+    assert "fp.obstruction_rects(bname).size() < 2) continue;" in v
+    t = (SRC / "topology.cpp").read_text()
+    assert "!floorplan_.obstruction_rects(src_name).empty()" in t

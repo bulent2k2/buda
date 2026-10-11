@@ -213,7 +213,9 @@ static void detect_feedthru_relay(const std::vector<ConnSeg>& segs,
     // examined, so this stays cheap and flags genuine multi-component relays only.
     for (const auto& [bname, r] : fp.get_all_blocks()) {
         if (fp.is_container(bname)) continue;                     // transparent envelope, not a leaf cell
-        if (fp.landing_rects(bname).size() > 1) continue;       // TEG: internal eq. OK
+        // TEG: internal eq. OK.  Classification of the PHYSICAL block, not of its
+        // landings: a fix narrowing landing_rects must not change the exemption.
+        if (fp.obstruction_rects(bname).size() > 1) continue;
         if (std::find(topo.feedthru_blocks.begin(), topo.feedthru_blocks.end(),
                       bname) != topo.feedthru_blocks.end()) continue;   // opt-in feedthru
         std::vector<int> inc;
@@ -832,6 +834,9 @@ static void detect_teg_open(const std::map<int, std::vector<TegMetal>>& groups,
                             ConnResult& result)
 {
     for (const auto& bname : topo.connected_block_names) {
+        // Gate on the PHYSICAL rect count (is this a multi-rect/TEG block),
+        // then audit its rects as before.
+        if (fp.obstruction_rects(bname).size() < 2) continue;
         auto rects = fp.landing_rects(bname);
         if (rects.size() < 2) continue;
         if (fp.get_block_teg_mode(bname) != TegMode::OVER) {
