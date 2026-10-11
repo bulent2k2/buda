@@ -47,9 +47,11 @@ of them until the reticle dial:
 ## Method
 
 * `[NutsProf]` (new, `BUDA_REPLAN_PROF=1`, the planner's gate): the
-  `run_nuts` handler times its phases (engine run, dogleg adoption, the
-  escalation with its re-solve count and per-iteration moves, the
-  selective planner re-persist, the NUTS log, the persist) and prints the
+  `run_nuts` handler times its phases (the setup before the solve — engine
+  construction, fan-in derivation, bottom-up injection, the span snapshot;
+  0.1 s at NQ=16 — then the engine run, dogleg adoption, the escalation
+  with its re-solve count and per-iteration moves, the selective planner
+  re-persist, the NUTS log, the persist) and prints the
   engine's own `pass_seconds` of the FIRST solve.  The engine stamped
   those on every result already; nothing on this path printed them.
 * Sampling as in the planner profile: `py-spy record --native` on the

@@ -71,6 +71,23 @@ def cmd_run_nuts(session, cmd, args, cmd_line):
               f"Set the pitch with 'set_track_pitch <p>' before "
               f"run_planner (or re-run run_planner) so the planner's "
               f"pitch-aware band reservations match this NUTS run.")
+    # [NutsProf] (BUDA_REPLAN_PROF=1, the planner's gate): where a run_nuts
+    # command's wall goes — the engine's own per-pass seconds (NUTSResult.
+    # pass_seconds, stamped on every solve but printed by nothing on this
+    # path) beside the Python phases around it.  Observation only.
+    # The clock starts BEFORE the engine is built: the fan-in derivation,
+    # the bottom-up fixed-route injection, the grid points and the span
+    # snapshot are the `setup` phase, and a total that began after them
+    # left that phase reading zero (Codex P2 on #977).
+    import os as _os, time as _time
+    _prof = bool(_os.environ.get("BUDA_REPLAN_PROF"))
+    _t = {}
+    _t0 = _time.perf_counter()
+    _tmark = [_t0]
+    def _lap(key):
+        now = _time.perf_counter()
+        _t[key] = _t.get(key, 0.0) + (now - _tmark[0])
+        _tmark[0] = now
     nuts = buda.NUTSEngine(session.fp, session.layers)
     nuts.set_track_pitch(pitch)
     # Tapered fan-in: (re)derive the selected candidates' per-segment bit
@@ -88,19 +105,6 @@ def cmd_run_nuts(session, cmd, args, cmd_line):
             list(session.planner.get_y_grid()))
     # Snapshot topology-derived initial spans before the solve.
     before = session._segment_states_from_topology()
-    # [NutsProf] (BUDA_REPLAN_PROF=1, the planner's gate): where a run_nuts
-    # command's wall goes — the engine's own per-pass seconds (NUTSResult.
-    # pass_seconds, stamped on every solve but printed by nothing on this
-    # path) beside the Python phases around it.  Observation only.
-    import os as _os, time as _time
-    _prof = bool(_os.environ.get("BUDA_REPLAN_PROF"))
-    _t = {}
-    _t0 = _time.perf_counter()
-    _tmark = [_t0]
-    def _lap(key):
-        now = _time.perf_counter()
-        _t[key] = _t.get(key, 0.0) + (now - _tmark[0])
-        _tmark[0] = now
     _lap("setup")
     # C++ prints its own [NUTS] N segments placed across K layer(s) line.
     with buda.ostream_redirect():

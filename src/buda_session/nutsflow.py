@@ -1550,6 +1550,16 @@ class NutsFlowMixin:
             self._prof_esc_resolve_s = (getattr(self, "_prof_esc_resolve_s", 0.0)
                                         + (_time.perf_counter() - _t0))
             self._adopt_doglegs()
+            # The adoption can APPEND a split candidate (the pool grows and the
+            # selection moves to the new last index, which the memoized pool
+            # size would read as out of range) or OVERWRITE the dogleg slot
+            # with a new split (same index, different segments), so every
+            # memo keyed on the pool is stale past this point: drop them and
+            # let the next iteration re-read, exactly as the un-memoized scan
+            # did (Codex P1 on #977).
+            _ncand.clear()
+            _mb_memo.clear()
+            _need_memo.clear()
         return total
 
     def _final_cull_heal(self, max_rounds: int = 3) -> int:
