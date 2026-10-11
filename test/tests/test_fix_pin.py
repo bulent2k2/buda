@@ -98,17 +98,36 @@ def test_a_window_is_block_local_and_clipped_to_the_face():
     assert fp.pin_fix_strips("M") == []
 
 
-def test_a_rect_selector_picks_one_declared_rect_and_hides_interior_edges():
-    # an L: a wide bottom rect and a narrow top-left rect sharing area
+def test_a_rect_selector_picks_one_declared_rect():
+    # an L: a wide bottom rect and a narrow top-left rect sitting on it
     fp = _fp([(0, 0, 300, 100), (0, 100, 100, 300)])
     fp.set_pin_fix("M", E, 0)
     assert fp.pin_fix_strips("M") == [(299, 0, 300, 100, E)]
     fp.set_pin_fix("M", E, 1)
     assert fp.pin_fix_strips("M") == [(99, 100, 100, 300, E)]
-    # the bottom rect's north edge is interior where the top rect sits on it
+
+
+def test_only_the_exposed_stretch_of_a_partly_covered_edge_is_a_face():
+    """Codex on #980: a midpoint probe cannot tell.  The bottom rect's north
+    edge is covered where the top rect sits on it (x 0..100) and exposed from
+    x=100 to 300 — one strip, not the whole edge."""
+    fp = _fp([(0, 0, 300, 100), (0, 100, 100, 300)])
     fp.set_pin_fix("M", N, 0)
-    got = fp.pin_fix_strips("M")
-    assert all(f == N for *_r, f in got)
+    assert fp.pin_fix_strips("M") == [(100, 99, 300, 100, N)]
+
+
+def test_a_cover_in_the_middle_leaves_both_ends_exposed():
+    # a block on top of the middle of a long rect: the exposed north edge is
+    # two stretches, and the midpoint (which IS covered) is the one a probe sees
+    fp = _fp([(0, 0, 300, 100), (100, 100, 200, 200)])
+    fp.set_pin_fix("M", N, 0)
+    assert fp.pin_fix_strips("M") == [(0, 99, 100, 100, N), (200, 99, 300, 100, N)]
+
+
+def test_an_abutting_rect_hides_the_shared_edge():
+    fp = _fp([(0, 0, 100, 100), (100, 0, 200, 100)])
+    fp.set_pin_fix("M", E, 0)
+    assert fp.pin_fix_strips("M") == []          # rect 0's east edge is shared
 
 
 def test_a_fix_changes_what_the_block_blocks_not_at_all():
@@ -194,6 +213,21 @@ def test_a_refused_redeclaration_keeps_the_previous_fix():
     s, _ = _session(*BASE, "fix_pin MAC east")
     assert "Error:" in _say(s, "fix_pin MAC east at 400..500")
     assert s.fp.pin_fix_strips("MAC") == [(699, 400, 700, 700, E)]
+
+
+def test_a_fix_declared_before_its_block_is_checked_when_the_block_arrives():
+    """Codex on #980: the (block not declared yet) path skipped every check and
+    nothing revisited it, so a bad fix stranded the bus at generation."""
+    s, out = _session("fix_pin LATE east at 400..500")
+    assert "block not declared yet" in out
+    out = _say(s, "add_block LATE 0 0 100 100")
+    assert "Error:" in out and "dropped" in out, out
+    assert not s.fp.has_pin_fix("LATE") and "LATE" not in s._pin_fixes
+    s, _ = _session("fix_pin OK east at 10..50")
+    assert "Error:" not in _say(s, "add_block OK 0 0 100 100")
+    assert s.fp.pin_fix_strips("OK") == [(99, 10, 100, 50, E)]
+    s, _ = _session("fix_pin R rect 4")
+    assert "out of range" in _say(s, "add_block R 0 0 100 100")
 
 
 def test_the_command_is_registered_for_every_front_end():

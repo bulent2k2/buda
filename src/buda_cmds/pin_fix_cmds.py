@@ -145,6 +145,30 @@ def cmd_fix_pin(session, cmd, args, cmd_line):
           + (f" -> {n} landing strip(s)" if known else " (block not declared yet)"))
 
 
+def revalidate(session, block):
+    """A fix declared BEFORE its block exists could not be checked then.  Check it
+    when the block arrives: a rect out of range, or a fix that admits no landing,
+    is refused now (and dropped — there is no previous setting to keep), not
+    discovered later as a stranded bus."""
+    fixes = session._pin_fixes
+    fix = fixes.get(block)
+    if fix is None or not session.fp.has_block(block):
+        return
+    fp = session.fp
+    problem = None
+    if fix["rect"] >= _rect_count(fp, block):
+        problem = (f"rect {fix['rect'] + 1} out of range (block has "
+                   f"{_rect_count(fp, block)} rect(s))")
+    elif not fp.pin_fix_strips(block):
+        problem = (f"'{_declared(fix)}' admits no landing on this block (a face "
+                   f"interior to its rects, or a window outside the face)")
+    if problem:
+        del fixes[block]
+        fp.clear_pin_fix(block)
+        print(f"Error: fix_pin {block}: {problem}; the fix, declared before the "
+              f"block, is dropped")
+
+
 def cmd_dump_pin_fixes(session, cmd, args, cmd_line):
     fixes = session._pin_fixes
     if not fixes:

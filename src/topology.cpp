@@ -446,34 +446,50 @@ static std::vector<Rect> strips_of_rect(const PinFix& fx, int k,
     std::vector<Rect> out;
     const Rect& r = phys[k];
     const int mask = fx.faces ? fx.faces : (FACE_N | FACE_S | FACE_E | FACE_W);
-    auto inside_other = [&](int px, int py) {
-        for (int j = 0; j < (int)phys.size(); ++j) {
-            if (j == k) continue;
-            const Rect& o = phys[j];
-            if (px > o.x1 && px < o.x2 && py > o.y1 && py < o.y2) return true;
-        }
-        return false;
-    };
     for (int f : {FACE_N, FACE_S, FACE_E, FACE_W}) {
         if (!(mask & f)) continue;
         const bool vert_face = (f == FACE_E || f == FACE_W);   // face is a vertical edge
-        // Exposed faces only: an edge interior to the union (the L/C case) is
-        // not a face.  Probe just outside its midpoint.
-        const int mx = (r.x1 + r.x2) / 2, my = (r.y1 + r.y2) / 2;
-        const int px = f == FACE_E ? r.x2 + 1 : f == FACE_W ? r.x1 - 1 : mx;
-        const int py = f == FACE_N ? r.y2 + 1 : f == FACE_S ? r.y1 - 1 : my;
-        if (inside_other(px, py)) continue;
-        int lo = vert_face ? r.y1 : r.x1, hi = vert_face ? r.y2 : r.x2;
-        if (fx.has_window) {
-            lo = std::max(lo, fx.lo + (vert_face ? oy : ox));
-            hi = std::min(hi, fx.hi + (vert_face ? oy : ox));
+        // The face's extent along its own axis, minus every stretch another rect
+        // of the block covers just outside it (an edge interior to the union —
+        // the L/C case — is not a face).  A midpoint probe cannot tell: a
+        // partial overlap leaves some of the edge exposed and some not, and one
+        // covering the midpoint can hide exposed ends on either side.
+        std::vector<std::pair<int,int>> open{{vert_face ? r.y1 : r.x1,
+                                              vert_face ? r.y2 : r.x2}};
+        for (int j = 0; j < (int)phys.size(); ++j) {
+            if (j == k) continue;
+            const Rect& o = phys[j];
+            // o covers the outside of this edge iff it reaches the edge's line
+            // and extends past it (abutment counts: a shared edge is interior)
+            bool covers = false;
+            int clo = 0, chi = 0;
+            switch (f) {
+                case FACE_E: covers = o.x1 <= r.x2 && o.x2 > r.x2; clo = o.y1; chi = o.y2; break;
+                case FACE_W: covers = o.x2 >= r.x1 && o.x1 < r.x1; clo = o.y1; chi = o.y2; break;
+                case FACE_N: covers = o.y1 <= r.y2 && o.y2 > r.y2; clo = o.x1; chi = o.x2; break;
+                default:     covers = o.y2 >= r.y1 && o.y1 < r.y1; clo = o.x1; chi = o.x2; break;
+            }
+            if (!covers) continue;
+            std::vector<std::pair<int,int>> next;
+            for (const auto& iv : open) {
+                if (chi <= iv.first || clo >= iv.second) { next.push_back(iv); continue; }
+                if (clo > iv.first)  next.push_back({iv.first, clo});
+                if (chi < iv.second) next.push_back({chi, iv.second});
+            }
+            open = std::move(next);
         }
-        if (lo >= hi) continue;
-        switch (f) {
-            case FACE_E: out.push_back(Rect{std::max(r.x1, r.x2 - 1), lo, r.x2, hi, FACE_E}); break;
-            case FACE_W: out.push_back(Rect{r.x1, lo, std::min(r.x2, r.x1 + 1), hi, FACE_W}); break;
-            case FACE_N: out.push_back(Rect{lo, std::max(r.y1, r.y2 - 1), hi, r.y2, FACE_N}); break;
-            default:     out.push_back(Rect{lo, r.y1, hi, std::min(r.y2, r.y1 + 1), FACE_S}); break;
+        for (auto [lo, hi] : open) {
+            if (fx.has_window) {
+                lo = std::max(lo, fx.lo + (vert_face ? oy : ox));
+                hi = std::min(hi, fx.hi + (vert_face ? oy : ox));
+            }
+            if (lo >= hi) continue;
+            switch (f) {
+                case FACE_E: out.push_back(Rect{std::max(r.x1, r.x2 - 1), lo, r.x2, hi, FACE_E}); break;
+                case FACE_W: out.push_back(Rect{r.x1, lo, std::min(r.x2, r.x1 + 1), hi, FACE_W}); break;
+                case FACE_N: out.push_back(Rect{lo, std::max(r.y1, r.y2 - 1), hi, r.y2, FACE_N}); break;
+                default:     out.push_back(Rect{lo, r.y1, hi, std::min(r.y2, r.y1 + 1), FACE_S}); break;
+            }
         }
     }
     return out;
