@@ -799,9 +799,47 @@ private:
     // from the committed base on first touch and accumulated with the same
     // `+=`, so every read returns the bit-identical double the flat array
     // returned.
+    //
+    // The per-cut list is kept as ascending RUNS of bands rather than one
+    // (band, value) pair per entry: the spread charges a bus's footprint as a
+    // contiguous ascending band range per cut (for_each_band_w's proportional
+    // modes), so a write that continues the cut's last run is one append, a
+    // write inside a run is one index, and a read is a scan over the few runs
+    // — O(1) amortised per band written, where a flat (band, value) list
+    // rescanned per insertion was O(B²) on a cut a wide bus crosses on a
+    // fine grid (Codex P2 on #979).  The greedy spread modes emit bands in
+    // nearest-first order and simply open more runs.
     struct CandOverlay {
-        std::vector<uint32_t> cut_stamp;                            // per cut
-        std::vector<std::vector<std::pair<int, double>>> cut_vals;  // per cut: (band, value)
+        struct Run { int b0; int n; int off; };     // bands [b0, b0+n) at vals[off..]
+        struct CutVals {
+            std::vector<Run>    runs;
+            std::vector<double> vals;
+            void clear() { runs.clear(); vals.clear(); }   // capacity kept
+            const double* find(int b) const {
+                for (const Run& r : runs)
+                    if (b >= r.b0 && b < r.b0 + r.n) return &vals[r.off + (b - r.b0)];
+                return nullptr;
+            }
+            // The slot for band b, seeded with `seed` on first touch.
+            double& slot(int b, double seed) {
+                for (Run& r : runs)
+                    if (b >= r.b0 && b < r.b0 + r.n) return vals[r.off + (b - r.b0)];
+                if (!runs.empty()) {
+                    Run& last = runs.back();
+                    if (b == last.b0 + last.n &&
+                        last.off + last.n == (int)vals.size()) {   // continues the tail
+                        ++last.n;
+                        vals.push_back(seed);
+                        return vals.back();
+                    }
+                }
+                runs.push_back(Run{b, 1, (int)vals.size()});
+                vals.push_back(seed);
+                return vals.back();
+            }
+        };
+        std::vector<uint32_t> cut_stamp;   // per cut
+        std::vector<CutVals>  cut_vals;    // per cut: what this candidate wrote
         uint32_t epoch = 0;
         uint64_t gen   = 0;             // cuts_gen_ this overlay is sized for
         void clear() {                  // start a new candidate

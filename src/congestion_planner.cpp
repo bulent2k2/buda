@@ -252,7 +252,7 @@ CongestionPlanner::CandOverlay& CongestionPlanner::thread_overlay_() const {
         ov.cut_stamp.assign(n, 0);
         // Per-cut lists keep their capacity across candidates; a new grid
         // starts them empty (the old grid's cut indices mean nothing here).
-        ov.cut_vals.assign(n, {});
+        ov.cut_vals.assign(n, CandOverlay::CutVals{});
         ov.epoch = 0;
         ov.gen   = cuts_gen_;
         g_overlay_inits.fetch_add(1);
@@ -264,8 +264,7 @@ double CongestionPlanner::cand_usage_(int ci, int b) const {
     if (t_cand_overlay_) {
         const CandOverlay& ov = *t_cand_overlay_;
         if (ov.cut_stamp[ci] == ov.epoch)
-            for (const auto& e : ov.cut_vals[ci])
-                if (e.first == b) return e.second;
+            if (const double* v = ov.cut_vals[ci].find(b)) return *v;
     }
     return cuts_[ci].usage(b);
 }
@@ -1189,15 +1188,7 @@ void CongestionPlanner::apply_segment(const Segment& seg, int layer_id, double e
                 ov.cut_stamp[ci] = ov.epoch;
                 ov.cut_vals[ci].clear();        // capacity kept
             }
-            auto& vals = ov.cut_vals[ci];
-            double* slot = nullptr;
-            for (auto& e : vals)
-                if (e.first == b) { slot = &e.second; break; }
-            if (!slot) {
-                vals.emplace_back(b, cuts_[ci].usage(b));
-                slot = &vals.back().second;
-            }
-            *slot += eff_width * w;
+            ov.cut_vals[ci].slot(b, cuts_[ci].usage(b)) += eff_width * w;
         } else {
             cuts_[ci].add_usage(b, eff_width * w);
         }
