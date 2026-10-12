@@ -333,6 +333,7 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
         self._planner_pitch = None   # pitch the last run_planner reserved bands for
         self._detailed_bit_order = "LO_HI"
         self._dead_span_escalate = False  # opt-in post-NUTS dead-span escalation
+        self._dead_span_floor_typed = None  # set_dead_span_escalate floor <F> (#972 B1)
         self._heal_dead_spans_in_healers = True  # auto dead-span escalation in healers
         self._dead_span_auto_at_run_nuts = True  # auto-escalate at run_nuts when healers ahead
        # last track pitch used by run_nuts

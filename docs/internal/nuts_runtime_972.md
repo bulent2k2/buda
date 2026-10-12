@@ -157,6 +157,97 @@ dirty-layer re-solves nor the cluster repacks nor any of the Python; the
 single-thread numbers here are what `-j 1` pays, and `-j 4` changes only
 the `fixpoint` bucket.
 
+## Landed: B1 as a knob, and what it measures (2026-10-11)
+
+`set_dead_span_escalate floor <F>` (`BUDA_DEAD_SPAN_FLOOR` for a sweep;
+default 0, byte-identical): a LATE escalation iteration (the second on)
+that finds fewer than `ceil(F × segments)` dead LOW segments is NOT applied — the loop ends on
+the placement it already has, the segments are reported and left on their
+layers, and that iteration's full re-solve is not paid.  Deferred
+application (the scan collects its moves and writes `seg_layers` only once
+the iteration clears the floor) is what keeps a dropped iteration's
+`seg_layers` and `nuts_result` agreeing.  The run_nuts entry only — the
+explicit flag and the `healersAhead` auto path are the same loop — never
+the healers' own folds.
+
+Measured on the four dials at `F = 0.01`, one thread, the same build and
+session as the pair beside it (`[NutsProf]`; the audit line is
+`check_design nuts`, where a dead LOW segment the floor left shows up as a
+supply-doomed seat):
+
+| dial | `run_nuts` off → floor | iterations (moved) → (moved, dropped) | doomed seats off → floor | audit violations | abstract WL |
+|---|---|---|---|---|---|
+| NQ=8  | 1.75 → 1.20 s (−31 %) | [41, 2, 1] → [41] + [2] | 2 → 4 (64 → 112 bits) | 28 → 31 | +0.08 % |
+| NQ=16 | 5.26 → 3.98 s (−24 %) | [78, 5] → [78] + [5] | 3 → 8 (96 → 240) | 55 → 60 | +0.05 % |
+| NQ=32 | 64.6 → 55.3 s (−14 %) | [1308, 14] → [1308] + [14] | 265 → 279 (8,480 → 8,904) | 84 → 99 | +1.8 % |
+| NQ=62 | 366.6 → 188.1 s (−49 %) | [330, 23, 1] → [330] + [23] | 28 → 51 (896 → 1,392) | 119 → 142 | −0.5 % |
+
+(This box ran ~7 % slower than the part-2 table's: NQ=62 off is 366.6 s
+here against 343 s there on the same code; the pairs are what count.)
+
+What it buys is exactly what the estimate said — the late re-solves: one
+at NQ=8/16/32, two at NQ=62 (178 s of 367).  What it costs is exactly the
+segments dropped, and the audit prices them: every one is a seat with
+fewer clear tracks than its bits, so a flow that goes on to DetailedNUTS
+without healers strands those bits (NQ=62: 23 seats, 496 bits, 0.3 % of
+the segments).  The NQ=32 row also shows the final placement is a
+DIFFERENT one (iteration 1's re-solve rather than iteration 2's): +1.8 %
+abstract WL and 15 more audit violations for 14 dropped segments.
+
+**Two things the measurement corrects in the estimate.**  First, a flow
+that heals does not get the saving for free: the stage-b fold
+(`_heal_dead_spans`) escalates the dropped segments with the unfloored
+loop, so it pays a NUTS re-solve plus a DNUTS there — the floor DEFERS
+that re-solve to the healers rather than removing it, and only rides for
+free when the fold had other dead spans to escalate in the same pass.
+The floor's honest market is the healerless flow — the `-abstract -noheal`
+dial measurement, a healerless flow to DNUTS that accepts the strands —
+and the corpus run below says what it does to the healed endpoints.
+Second, the saving is bounded by the solve count: at NQ=62 four solves
+are 336 of the 367 s and the floor removes two; the solve itself (repair
+38.9 s, corner 29.0 s, fixpoint 15.5 s of the 86 s first solve) is where
+the remaining time is, which is option C.
+
+**The corpus, twice.**  Swept with `BUDA_DEAD_SPAN_FLOOR=0.01` against
+the same build with the variable unset (`qor_corpus.py --out` both sides,
+`--compare`; 57 flows, `ariane133_heal` NOT COMPARABLE for its fetched
+input).  The FIRST form of the knob floored every iteration and read
+**0 better / 1 worse / 55 unchanged**: `rnr/mix2` went from clean to
+4 overlaps / 32 unplaced / 2 violating bundles in a third of the time.
+mix2 has 238 segments, so the floor was 3, and its FIRST iteration found
+one dead segment — dropped, the whole escalation skipped, and the stage-a
+healers climbed from a different placement (overlaps 7 → 2 → 1 became
+5 → 2 → 0, DNUTS then 235 → 111 unplaced) into a basin the stage-b fold
+and ripup ended at 32 (ovl 4).  That is the measured reason the entry
+exists — escalating BEFORE the stage-a healers beats the stage-b fold
+alone — undone by the floor on a design small enough that one move is the
+whole escalation.  The dial vehicle could not show it: its first
+iteration is 41–1,308 moves, far above the floor at every size.  So the
+knob prices only the LATE iterations (the second on; the cascades a
+re-solve creates, which is what the estimate was about), and the dials'
+numbers above are unchanged by that (NQ=16 re-measured byte-identical).
+The SECOND run, under that rule, is **identical on every metric across
+all 57 flows, abstract and detailed WL +0** — no corpus flow has a late
+iteration under the floor: the corpus designs run zero or one entry
+iteration (`bigHalf` 253 segments and `mix2_fast_topdown` 262: zero,
+their dead spans arise at stage b; `mix2`: one), and the cascades the
+floor is for appear on the dials from NQ=8 up.  Harmless where it does
+not fire, honest where it does, and still a QoR trade, so it ships
+opt-in; `-abstract -noheal` dial sweeps and a healerless flow that
+accepts the audit's price are its market.
+
+**B2 probed and not built.**  The per-layer re-solve the engine already
+has (`rerun_layer`, the `run_nuts_on_layer` command) was timed on the
+NQ=32 result as the shape B2 would use for a late iteration — the two TOP
+layers the moved segments join: M6 3.1 s + M7 2.2 s against 7.1 s for the
+full re-solve it would replace (the escalation's re-solves are cheaper
+than the 31 s first solve, whose corner pass runs on the pre-escalation
+layer assignment).  A quarter saved per late iteration, and the per-layer
+solve is a different placement — on an already-solved design it moved 169
+of M6's 923 segments and the audit read 90 violations / 270 doomed seats
+against 84 / 265 — so it would trade the floor's stated price for an
+unstated one.  Left as measured.
+
 ## Not verified
 
 * The QoR corpus (`tools/qor_corpus.py --vs main`) was not run on the

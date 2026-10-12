@@ -1541,7 +1541,7 @@ _MODE_WORDS = {
     "set_prune_dominated": ("on", "off"),
     "set_dedup_loci": ("on", "off"),
     "set_pair_align_heal": ("on", "off"),
-    "set_dead_span_escalate": ("on", "off"),
+    "set_dead_span_escalate": ("on", "off", "floor"),
     "check_template_tracks": ("stop", "independent"),
     "align_bottom_up": ("max_shift", "force"),
     "negotiate_congestion": ("class_moves",),

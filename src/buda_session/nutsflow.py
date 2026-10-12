@@ -1179,10 +1179,33 @@ class NutsFlowMixin:
               f"not reservation conflicts.")
         return len(doomed)
 
+    def _dead_span_floor(self) -> float:
+        """The escalation floor in force at the run_nuts entry (#972 B1):
+        the typed `set_dead_span_escalate floor <F>` outranks the study
+        env `BUDA_DEAD_SPAN_FLOOR` (a corpus A/B without editing flows),
+        and the compiled default is 0 -- every iteration applied."""
+        typed = getattr(self, "_dead_span_floor_typed", None)
+        if typed is not None:
+            return float(typed)
+        import os as _os
+        v = _os.environ.get("BUDA_DEAD_SPAN_FLOOR", "")
+        if v:
+            try:
+                f = float(v)
+                if 0.0 <= f <= 1.0:
+                    return f
+            except ValueError:
+                pass
+            print(f"Warning: BUDA_DEAD_SPAN_FLOOR={v!r} is not a fraction "
+                  f"in [0, 1]; ignored.", flush=True)
+        return 0.0
+
     def _escalate_dead_low_segments(self, max_iter: int = 5,
                                     cull_risk: bool = False,
                                     only=None, seek_host: bool = False,
-                                    force: bool = False) -> int:
+                                    force: bool = False,
+                                    floor: float = 0.0,
+                                    floor_from: int = 2) -> int:
         """Post-NUTS dead-span escalation (opt-in: `set_dead_span_escalate on`).
 
         After abstract NUTS, a LOW-layer segment whose ACTUAL placed geometry
@@ -1240,6 +1263,30 @@ class NutsFlowMixin:
         a keepout seat is a CROWDING fault (the window had clear tracks,
         other buses took them), so the dead test does not fire on it, and
         the caller's measured accept is what judges the move.
+
+        `floor` (the run_nuts entry ONLY; `set_dead_span_escalate floor
+        <F>`, #972 B1): every iteration pays a FULL re-solve, and the late
+        ones move a handful of segments for it — on bigsoc at NQ=62 the
+        three iterations moved 330, 23 and 1 segments for ~67 s each.  An
+        iteration moving fewer than `ceil(F x segments)` is NOT applied: the
+        loop ends on the placement it already has, the dead segments it
+        found are reported and left on their layers (a healing flow's
+        stage-b fold escalates them, with the re-solves the healers pay
+        anyway; a healerless flow strands their bits at DNUTS -- the
+        declared trade).  Deferred application is what makes the floor
+        honest: the scan collects the moves and writes them to `seg_layers`
+        only once the iteration has cleared the floor, so a dropped
+        iteration leaves `seg_layers` and `nuts_result` agreeing.  0 = no
+        floor (every iteration applied, byte-identical).  The FIRST
+        iteration is never floored (`floor_from` = 2): its moves are the
+        dead spans of the placement the planner handed over, and escalating
+        them BEFORE the stage-a healers is the measured reason this entry
+        exists (mix 1/16 -> 0/0 against the stage-b fold alone) -- the
+        first corpus run of the floor priced every iteration and `rnr/mix2`
+        (238 segments, floor 3) dropped its one first-iteration move and
+        ended 4/32/2 from clean.  The later iterations are the cascades a
+        re-solve creates, which is what the floor prices.  `floor_from`
+        is a study/test door, not a command option.
         """
         if self.nuts_result is None or self.routing_grid is None:
             return 0
@@ -1331,9 +1378,20 @@ class NutsFlowMixin:
         # LOW layers across the re-solve iterations.
         tried = {}
 
+        import math as _math
+
         total = 0
-        for _ in range(max_iter):
+        for it in range(max_iter):
+            # The floor in segments, read off THIS iteration's result: an
+            # iteration must move at least this many for its re-solve to be
+            # paid (0 = every iteration).  Per iteration because a re-solve's
+            # dogleg adoption can change the segment count (Codex P2 on
+            # #981).
+            n_segs = len(self.nuts_result.segments)
+            floor_n = (int(_math.ceil(floor * n_segs))
+                       if floor and floor > 0.0 else 0)
             moved = 0
+            pending = []          # (wrapper, seg_idx, new_layer) this scan
             for seg in self.nuts_result.segments:
                 if only is not None and (seg.bundle_id,
                                          seg.seg_idx) not in only:
@@ -1518,14 +1576,30 @@ class NutsFlowMixin:
                     continue
                 tried.setdefault((seg.bundle_id, seg.seg_idx),
                                  {seg.layer}).add(new_layer)
-                sl = list(w.plan.seg_layers)
+                sl = w.plan.seg_layers
                 if seg.seg_idx >= len(sl) or sl[seg.seg_idx] == new_layer:
                     continue
-                sl[seg.seg_idx] = new_layer
-                w.plan.seg_layers = sl
+                pending.append((w, seg.seg_idx, new_layer))
                 moved += 1
             if not moved:
                 break
+            if floor_n and it + 1 >= floor_from and moved < floor_n:
+                # Below the floor: nothing applied, the loop ends on the
+                # placement it has (see the docstring).  Said out loud, since
+                # every dead segment left is a strand a healerless flow pays.
+                self._prof_esc_dropped = (getattr(self, "_prof_esc_dropped", [])
+                                          + [moved])
+                print(f"[DeadSpan] iteration {it + 1}: {moved} dead LOW "
+                      f"segment(s) found, below the floor of {floor_n} "
+                      f"({floor:g} x {n_segs} "
+                      f"segments) -- left on their layers, re-solve "
+                      f"skipped (set_dead_span_escalate floor 0 applies "
+                      f"every iteration).", flush=True)
+                break
+            for w, si, new_layer in pending:
+                sl = list(w.plan.seg_layers)
+                sl[si] = new_layer
+                w.plan.seg_layers = sl
             total += moved
             # [NutsProf] bookkeeping: moves per escalation iteration.
             self._prof_esc_moves = getattr(self, "_prof_esc_moves", []) + [moved]

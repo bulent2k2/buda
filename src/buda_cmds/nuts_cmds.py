@@ -117,6 +117,7 @@ def cmd_run_nuts(session, cmd, args, cmd_line):
     _first_passes = dict(session.nuts_result.pass_seconds)
     session._prof_esc_resolves = 0
     session._prof_esc_moves = []
+    session._prof_esc_dropped = []
     session._prof_esc_resolve_s = 0.0
     session._adopt_doglegs()
     _lap("adopt_doglegs")
@@ -139,7 +140,8 @@ def cmd_run_nuts(session, cmd, args, cmd_line):
                     and getattr(session, "_dead_span_auto_at_run_nuts", True)
                     and _healers_declared))
     if do_escalate:
-        n_esc = session._escalate_dead_low_segments()
+        n_esc = session._escalate_dead_low_segments(
+            floor=session._dead_span_floor())
         _lap("dead_span_escalate")
         if n_esc:
             print(f"[NUTS] dead-span escalation: moved {n_esc} dead LOW "
@@ -186,7 +188,8 @@ def cmd_run_nuts(session, cmd, args, cmd_line):
               f"phases[{phases}] "
               f"escalation[resolves={session._prof_esc_resolves} "
               f"resolve_s={session._prof_esc_resolve_s:.3f} "
-              f"moves={session._prof_esc_moves}] "
+              f"moves={session._prof_esc_moves} "
+              f"dropped={session._prof_esc_dropped}] "
               f"first_solve_passes[{passes}]", file=sys.stderr)
 
 
@@ -443,21 +446,57 @@ def cmd_run_nuts_on_layer(session, cmd, args, cmd_line):
 
 
 def cmd_set_dead_span_escalate(session, cmd, args, cmd_line):
-    # Usage: set_dead_span_escalate [on|off]
+    # Usage: set_dead_span_escalate [on|off] [floor <F>]
     # Opt-in post-NUTS dead-span escalation: after every run_nuts, a LOW
     # segment whose FINAL placed geometry has zero keepout-clear signal
     # tracks (a guaranteed DetailedNUTS open) is moved to the cheapest
     # same-direction TOP layer and NUTS re-solves.  Off by default =
     # bit-identical.  See wishlist-planner "dead-span discriminator".
+    # `floor <F>` (#972 B1): an escalation iteration moving fewer than
+    # F x the result's segments is not applied and ends the loop, which is
+    # one full re-solve not paid per such iteration; governs the explicit
+    # AND the healersAhead auto path, since both are this entry.  0 = off.
     if not args:
         state = "on" if getattr(session, "_dead_span_escalate", False) else "off"
-        print(f"dead_span_escalate is {state}")
+        fl = session._dead_span_floor()
+        print(f"dead_span_escalate is {state}, floor {fl:g}"
+              + ("" if session._dead_span_floor_typed is not None
+                 or not fl else " (BUDA_DEAD_SPAN_FLOOR)"))
         return
-    val = args[0].lower()
-    if val not in ("on", "off"):
-        print(f"Error: set_dead_span_escalate expects on|off, got {args[0]!r}")
-        return
-    session._dead_span_escalate = (val == "on")
+    # Parse the whole line into temporaries and commit only once every token
+    # is valid: `on floor x` must not leave the flag on behind its Error
+    # line (Codex P2 on #981).
+    flag, floor_v = None, None
+    rest = list(args)
+    while rest:
+        tok = rest.pop(0).lower()
+        if tok in ("on", "off"):
+            flag = (tok == "on")
+        elif tok == "floor":
+            if not rest:
+                print("Error: set_dead_span_escalate floor expects a value "
+                      "(a fraction of the design's segments, 0 = off)")
+                return
+            raw = rest.pop(0)
+            try:
+                f = float(raw)
+            except ValueError:
+                print(f"Error: set_dead_span_escalate floor expects a number, "
+                      f"got {raw!r}")
+                return
+            if not (0.0 <= f <= 1.0):
+                print(f"Error: set_dead_span_escalate floor must be in "
+                      f"[0, 1] (a fraction of the segments), got {f:g}")
+                return
+            floor_v = f
+        else:
+            print(f"Error: set_dead_span_escalate expects on|off and/or "
+                  f"floor <F>, got {tok!r}")
+            return
+    if flag is not None:
+        session._dead_span_escalate = flag
+    if floor_v is not None:
+        session._dead_span_floor_typed = floor_v
 
 
 def cmd_set_pair_align_heal(session, cmd, args, cmd_line):
