@@ -2181,6 +2181,15 @@ double NUTSEngine::preferred_fit(
     const std::vector<std::pair<double,double>>& occupied,
     double pref_lo, double pref_hi) const
 {
+    return preferred_fit_impl(lo, hi, width, occupied, pref_lo, pref_hi,
+                              track_pitch_, /*allow_merge=*/true);
+}
+
+double preferred_fit_impl(
+    double lo, double hi, double width,
+    const std::vector<std::pair<double,double>>& occupied,
+    double pref_lo, double pref_hi, double track_pitch_, bool allow_merge)
+{
     if (pref_hi < pref_lo) std::swap(pref_lo, pref_hi);
     const double half = width / 2.0;
     const double c_lo = lo + half;
@@ -2194,8 +2203,51 @@ double NUTSEngine::preferred_fit(
         candidates.push_back(occ_hi + track_pitch_ + half);
         candidates.push_back(occ_lo - track_pitch_ - half);
     }
+    // `valid` asks whether the open interval (c-half, c+half) meets any
+    // occupied interval.  The scan is O(n) per candidate and there are 2n+3
+    // candidates, so with hundreds of occupied entries (the wide cluster
+    // repack, #972) the selection is quadratic.  Over the UNION of the
+    // occupied intervals -- sorted, disjoint after merging overlapping or
+    // touching ones -- the same question is one binary search.  Exact for a
+    // positive-width query: two touching intervals leave a single point
+    // uncovered, which an open interval of positive width cannot sit on alone.
+    // Anything the merge cannot vouch for (a NaN or inverted interval, a zero
+    // width) keeps the scan, so the answers are the scan's own.
+    constexpr size_t kMergeMin = 16;
+    std::vector<std::pair<double,double>> merged;
+    bool use_merged = false;
+    if (allow_merge && occupied.size() >= kMergeMin && half > 0.0) {
+        use_merged = true;
+        merged.reserve(occupied.size());
+        bool sorted = true;
+        for (size_t i = 0; i < occupied.size(); ++i) {
+            if (!(occupied[i].first <= occupied[i].second)) { use_merged = false; break; }
+            if (i && occupied[i] < occupied[i - 1]) sorted = false;
+        }
+        if (use_merged) {
+            merged.assign(occupied.begin(), occupied.end());
+            if (!sorted) std::sort(merged.begin(), merged.end());
+            size_t w = 0;
+            for (size_t i = 1; i < merged.size(); ++i) {
+                if (merged[i].first <= merged[w].second)
+                    merged[w].second = std::max(merged[w].second, merged[i].second);
+                else
+                    merged[++w] = merged[i];
+            }
+            merged.resize(w + 1);
+        }
+    }
     auto valid = [&](double c) -> bool {
         if (c < c_lo || c > c_hi) return false;
+        if (use_merged) {
+            // First union interval ending after c-half; it blocks iff it
+            // also starts before c+half (later ones start even later).
+            const double q_lo = c - half, q_hi = c + half;
+            auto it = std::upper_bound(merged.begin(), merged.end(), q_lo,
+                [](double v, const std::pair<double,double>& m) {
+                    return v < m.second; });
+            return !(it != merged.end() && q_hi > it->first);
+        }
         for (const auto& [occ_lo, occ_hi] : occupied)
             if (c - half < occ_hi && c + half > occ_lo) return false;
         return true;
@@ -2286,11 +2338,30 @@ struct SpanIndex {
         fill(0, n);
     }
 
+    // The same tree over plain ranges (keepout edges): ord holds indices into
+    // r, ascending among equal starts.  Ends must not be NaN (integer bboxes).
+    void build_ranges(const std::vector<std::pair<double,double>>& r) {
+        ord.resize(r.size());
+        for (size_t i = 0; i < r.size(); ++i) ord[i] = (int)i;
+        std::sort(ord.begin(), ord.end(), [&](int x, int y) {
+            return r[x].first != r[y].first ? r[x].first < r[y].first : x < y;
+        });
+        const size_t n = ord.size();
+        lo.resize(n); hi.resize(n); maxhi.assign(n, -kInf);
+        for (size_t k = 0; k < n; ++k) { lo[k] = r[ord[k]].first; hi[k] = r[ord[k]].second; }
+        fill(0, n);
+    }
+
     // Segment indices (ascending) whose closed span touches [a, b].
     void query(double a, double b, std::vector<int>& out) const {
+        query_unordered(a, b, out);
+        std::sort(out.begin(), out.end());
+    }
+    // Same set, tree order.  For a caller whose result is sorted afterwards
+    // anyway (the repack's occupancy list), the ascending sort is waste.
+    void query_unordered(double a, double b, std::vector<int>& out) const {
         out.clear();
         walk(0, ord.size(), a, b, out);
-        std::sort(out.begin(), out.end());
     }
 
 private:
@@ -2408,10 +2479,52 @@ private:
     std::set<std::pair<int,int>> constrained;
     std::set<std::pair<int,int>> has_successor;   // something ordered above it
 
+    // Zones are static for the solver's life.  A layer carrying many (one per
+    // leaf cell) made this scan the repack's second-largest cost -- members x
+    // zones per attempt (#972) -- so with enough zones each orientation gets
+    // an interval tree over the zone edges its segments test against.  The
+    // tree is queried closed (a superset of the strict test) and hits are
+    // re-tested with the scan's own predicate, in zone order, so the
+    // occupancy pushed is the scan's.
+    mutable SpanIndex ko_x_, ko_y_;      // zone x-edges (horiz segs), y-edges (vert)
+    mutable bool ko_built_ = false;
+    mutable int  ko_scans_ = 0;          // scans paid before the tree is worth building
+    mutable std::vector<int> ko_hits_;
+
     void add_keepout_occ(const TrackSegment* t,
                          std::vector<std::pair<double,double>>& occ) const {
         // keepout_occupied over the layer's own zones (every LayerSolver is
         // one layer, so the layer test is already decided per zone).
+        if (kozs_layer.size() >= 32 && !span_index_off() &&
+            (ko_built_ || ++ko_scans_ > 64)) {
+            if (!ko_built_) {
+                std::vector<std::pair<double,double>> xr, yr;
+                xr.reserve(kozs_layer.size()); yr.reserve(kozs_layer.size());
+                for (const KeepoutZone* koz : kozs_layer) {
+                    xr.push_back({(double)koz->bbox.x1, (double)koz->bbox.x2});
+                    yr.push_back({(double)koz->bbox.y1, (double)koz->bbox.y2});
+                }
+                ko_x_.build_ranges(xr); ko_y_.build_ranges(yr);
+                ko_built_ = true;
+            }
+            const double a = sp_lo(*t), b = sp_hi(*t);
+            if (std::isnan(a) || std::isnan(b)) return;   // no comparison holds
+            (t->horiz ? ko_x_ : ko_y_).query(a, b, ko_hits_);
+            for (int i : ko_hits_) {
+                const KeepoutZone* koz = kozs_layer[i];
+                if (!koz->layer_ids.empty() && !koz->layer_ids.count(t->layer)) continue;
+                if (t->horiz) {
+                    if (a < koz->bbox.x2 && b > koz->bbox.x1)
+                        occ.push_back({static_cast<double>(koz->bbox.y1),
+                                       static_cast<double>(koz->bbox.y2)});
+                } else {
+                    if (a < koz->bbox.y2 && b > koz->bbox.y1)
+                        occ.push_back({static_cast<double>(koz->bbox.x1),
+                                       static_cast<double>(koz->bbox.x2)});
+                }
+            }
+            return;
+        }
         for (const KeepoutZone* koz : kozs_layer) {
             if (!koz->layer_ids.empty() && !koz->layer_ids.count(t->layer)) continue;
             if (t->horiz) {
@@ -2527,7 +2640,7 @@ private:
                 add_keepout_occ(m, base_occ[k]);
                 if (use_idx) {
                     if (!sidx_built) { sidx.build(segs); sidx_built = true; }
-                    sidx.query(sp_lo(*m), sp_hi(*m), hits);
+                    sidx.query_unordered(sp_lo(*m), sp_hi(*m), hits);
                     for (int i : hits) {
                         const TrackSegment* o = segs[i];
                         if (is_member(o)) continue;
