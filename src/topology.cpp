@@ -417,6 +417,10 @@ void Floorplan::set_block_teg_mode(const std::string& name, TegMode mode) {
     ++rev_;
 }
 TegMode Floorplan::get_block_teg_mode(const std::string& name) const {
+    // A fixed pin's strips are joined by the block's own metal, which is what
+    // `thru` asserts, so the EFFECTIVE mode of a fixed block is THRU for the
+    // generator, the audits and the slide analysis alike (they all read this).
+    if (pin_fixes_.count(name)) return TegMode::THRU;
     auto it = teg_modes_.find(name);
     return (it != teg_modes_.end()) ? it->second : TegMode::THRU;
 }

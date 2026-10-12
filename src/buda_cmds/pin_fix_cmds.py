@@ -70,12 +70,21 @@ def cmd_fix_pin(session, cmd, args, cmd_line):
               "[rect <n>] [at <lo>..<hi>]   |   fix_pin <block> off")
         return
     target = args[0]
-    block, _, pin = target.partition(".")
-    if pin not in ("", "*"):
+    # Block names may themselves contain a period (`u.core`, `IO.PAD`), so the
+    # exact declared name wins; only an explicit trailing `.*` is stripped, and
+    # a suffix is read as a per-pin selector only when its prefix IS a known block.
+    if session.fp.has_block(target):
+        block = target
+    elif target.endswith(".*"):
+        block = target[:-2]
+    elif "." in target and session.fp.has_block(target.rsplit(".", 1)[0]):
+        block = target.rsplit(".", 1)[0]
         print(f"Error: fix_pin '{target}': a per-pin selector is not supported "
               f"yet — a fix governs the whole block; name it as '{block}' or "
               f"'{block}.*'")
         return
+    else:
+        block = target      # not declared yet (or a dotted name declared later)
     fixes = session._pin_fixes
     if len(args) == 2 and args[1].lower() == "off":
         if block in fixes:

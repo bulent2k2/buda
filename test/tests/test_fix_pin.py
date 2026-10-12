@@ -350,6 +350,29 @@ def test_the_pass_through_reporters_read_the_two_face_geometry():
     assert u.seg_spans_block(cs, "MAC", ub, s.fp)
 
 
+def test_a_dotted_block_name_is_a_block_name():
+    """Codex on #980: `u.core` / `IO.PAD` were split as a per-pin selector."""
+    s, out = _session("add_block u.core 0 0 100 100", "fix_pin u.core east",
+                      "fix_pin u.core.* west")
+    assert "Error:" not in out
+    assert s.fp.has_pin_fix("u.core") and "u.core" in s._pin_fixes
+    assert "per-pin selector" in _say(s, "fix_pin u.core.d_in east")
+    s2, _ = _session("add_block MAC 0 0 100 100")
+    assert "per-pin selector" in _say(s2, "fix_pin MAC.d_in east")
+
+
+def test_a_fixed_multi_rect_over_block_is_audited_as_thru():
+    """Codex on #980: the strips are joined by the block's own metal (THRU), so
+    the audit must not read the declared `over` and demand metal on every strip."""
+    fp = buda.Floorplan()
+    fp.add_block_rects("T", [(300, 0, 400, 100), (0, 0, 100, 100)], buda.TegMode.OVER)
+    assert fp.get_block_teg_mode("T") == buda.TegMode.OVER
+    fp.set_pin_fix("T", E | W)
+    assert fp.get_block_teg_mode("T") == buda.TegMode.THRU
+    fp.clear_pin_fix("T")
+    assert fp.get_block_teg_mode("T") == buda.TegMode.OVER
+
+
 # ── flows ─────────────────────────────────────────────────────────────────
 
 def _run(flow):
