@@ -3030,8 +3030,9 @@ static int repack_overlap_clusters(const NUTSEngine& eng, double track_pitch,
 {
     // kozs_shared: the caller's (repair_overlaps') solver keepout list, handed
     // to every attempt's LayerSolver instead of rebuilt per attempt.
+    const auto t_fn0 = std::chrono::steady_clock::now();   // whole call, discovery included
     auto pairs = find_overlaps(segments);
-    if (pairs.empty()) return 0;
+    if (pairs.empty()) { g_repack.ns_total += ns_since(t_fn0); return 0; }
 
     // Connected components over segment indices (union-find).
     std::vector<int> parent(segments.size());
@@ -3076,7 +3077,6 @@ static int repack_overlap_clusters(const NUTSEngine& eng, double track_pitch,
         segs_of_layer[ts.layer].push_back(&ts);
 
     int moved = 0;
-    const auto t_fn0 = std::chrono::steady_clock::now();
     for (const auto& cluster : clusters) {
         const int layer = segments[cluster[0]].layer;
         const auto t_prep0 = std::chrono::steady_clock::now();
@@ -3168,8 +3168,9 @@ static int repack_overlap_clusters(const NUTSEngine& eng, double track_pitch,
             g_repack.ns_ctor += ns_since(t_a);
             const auto t_b = std::chrono::steady_clock::now();
             const bool did_move = solver.repack_cluster(members);
-            g_repack.ns_solve += ns_since(t_a);
-            g_repack.ns_solve_k[attempt_k] += ns_since(t_b);
+            const long long pack_ns = ns_since(t_b);   // pack only: ctor is ns_ctor
+            g_repack.ns_solve += pack_ns;
+            g_repack.ns_solve_k[attempt_k] += pack_ns;
             if (!did_move) {
                 ++g_repack.noop[attempt_k];
                 continue;                   // nothing would move: state untouched

@@ -251,7 +251,7 @@ unstated one.  Left as measured.
 ## Landed: C3 (attempt accounting) and C1 (span index for the repack) (2026-10-12)
 
 **C3 — count attempts before choosing a lever.**  `buda.repack_stats()`
-(process-wide atomics, observation only; `BUDA_REPLAN_PROF=1` prints a
+(process-wide atomics, observation only; `s_total` is the whole call, overlap discovery included, and `s_solve` the pack alone, constructor apart; `BUDA_REPLAN_PROF=1` prints a
 `[RepackProf]` line beside `[NutsProf]`, covering every solve of the
 command, re-solves included) counts `repack_overlap_clusters`' attempts and
 times its phases.  One thread, the three dials:
@@ -302,6 +302,10 @@ index reads **identical on every metric across the 56 comparable flows**
 +0.  Its runtime moved −0.9 % (1306 → 1294 s): the corpus designs seldom
 reach a repack of eight members, so the index barely engages there, and the
 gain is the large-design one in the table above.
+
+(The first cut of the timers started the total after overlap discovery and counted solver
+construction inside the solve; both are fixed above, and re-measured at NQ=32 the repack total
+reads 20.2 s against 19.8 s, so the tables stand to within half a second.)
 
 **What is left.**  The wide pack is still 108 s at NQ=62 (~24 ms per
 attempt, 449 members): what remains is per-member work that scales with the
