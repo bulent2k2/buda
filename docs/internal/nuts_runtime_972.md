@@ -248,6 +248,75 @@ of M6's 923 segments and the audit read 90 violations / 270 doomed seats
 against 84 / 265 — so it would trade the floor's stated price for an
 unstated one.  Left as measured.
 
+## Landed: C3 (attempt accounting) and C1 (span index for the repack) (2026-10-12)
+
+**C3 — count attempts before choosing a lever.**  `buda.repack_stats()`
+(process-wide atomics, observation only; `s_total` is the whole call, overlap discovery included, and `s_solve` the pack alone, constructor apart; `BUDA_REPLAN_PROF=1` prints a
+`[RepackProf]` line beside `[NutsProf]`, covering every solve of the
+command, re-solves included) counts `repack_overlap_clusters`' attempts and
+times its phases.  One thread, the three dials:
+
+| dial | repack of `run_nuts` | narrow attempts (noop / rejected / accepted) | wide attempts (rejected / accepted) | members per wide attempt | time in the pack |
+|---|---|---|---|---|---|
+| NQ=16 | 1.96 of 5.8 s | 675 (399 / 185 / 91) | 584 (574 / 10) | 123 | 1.22 s wide, 0.05 narrow |
+| NQ=32 | 34.1 of 51.7 s | 4,144 (3,391 / 607 / 146) | 3,998 (3,950 / 48) | 187 | 26.8 s wide, 0.4 narrow |
+| NQ=62 | 238.9 of 336.3 s | 4,778 (1,710 / 2,853 / 215) | 4,563 (4,454 / 109) | 449 | ~215 s wide |
+
+The repack is **the** cost of `run_nuts` at scale (71 % at NQ=62), the
+snapshot, restore, settle and guard terms are small (snapshot 0.4 s,
+restore 0.2 s, guard 15 s at NQ=62), solver construction is 2 s, and the time
+is the WIDE attempt's pack: 97–99 % of wide attempts are rejected by the
+guard, each carrying the cluster plus every same-layer neighbour in its
+window (123–449 members).  Narrow attempts are cheap and mostly no-ops (they
+fail the `members < 2` test once constrained trunks are dropped).  So the
+lever is the wide attempt's per-member cost (C1), or a prediction that a
+wide attempt will be rejected (which changes decisions and needs the
+corpus — not built).
+
+**C1 — an interval index for the occupancy build.**  Each member's base
+occupancy was found by testing every segment on the layer (`occupancy_from`:
+placed, other bundle, closed-span overlap), so a wide attempt cost
+members × layer (449 × ~2,200 at NQ=62, 4.5G tests in all).  The tests only
+need the segments whose span touches the member's, a handful.  With eight
+or more members, `repack_members` now builds a `SpanIndex` — a balanced
+implicit tree over the layer's placed segments sorted by span start, each
+node holding the maximum span end below it — once per call, and asks it
+for the touching segments in ascending layer order, then applies the same
+`occupancy_from` to them.  A repack's non-members do not move during the
+pack, so one build is exact; fewer than eight members keep the scan (the
+build would not repay).  `BUDA_NO_SPAN_INDEX=1` keeps the scan everywhere,
+so a before/after is one binary.
+
+| dial | `run_nuts` scan → index | repack | wide pack | NUTS log |
+|---|---|---|---|---|
+| NQ=16 | 5.07 → 4.57 s (−10 %) | 1.74 → 1.28 s | 1.22 → 0.75 s | identical |
+| NQ=32 | 50.6 → 36.8 s (−27 %) | 33.6 → 19.8 s | 26.8 → 13.0 s | identical |
+| NQ=62 | 336.3 → 228.0 s (−32 %) | 238.9 → 136.0 s | ~215 → 108.1 s | identical (vs the unmodified build) |
+
+`test_nuts_span_index.py` compares the index with `occupancy_from`'s own
+predicate over 300 randomized layers (touching and identical ends, nested
+spans, reversed ends, unplaced segments, a NaN end), and the QoR corpus
+swept on one binary with the scan (`BUDA_NO_SPAN_INDEX=1`) and with the
+index reads **identical on every metric across the 56 comparable flows**
+(`ariane133_heal` not comparable: fetched input), abstract and detailed WL
++0.  Its runtime moved −0.9 % (1306 → 1294 s): the corpus designs seldom
+reach a repack of eight members, so the index barely engages there, and the
+gain is the large-design one in the table above.
+
+(The first cut of the timers started the total after overlap discovery and counted solver
+construction inside the solve; both are fixed above, and re-measured at NQ=32 the repack total
+reads 20.2 s against 19.8 s, so the tables stand to within half a second.)
+
+**What is left.**  The wide pack is still 108 s at NQ=62 (~24 ms per
+attempt, 449 members): what remains is per-member work that scales with the
+occupancy list rather than with the layer — the copy of the base list, the
+loop over already-repacked members (members²/2 span tests), the sort and
+`preferred_fit` over a list of hundreds.  Two shapes, neither built: an
+incremental occupancy list for the repacked members (keep it sorted, insert
+instead of copy and re-sort), which is decision-identical; and skipping the
+wide attempt where the narrow attempt's failure already proves it cannot
+help, which is not and needs the corpus.
+
 ## Not verified
 
 * The QoR corpus (`tools/qor_corpus.py --vs main`) was not run on the

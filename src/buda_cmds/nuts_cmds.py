@@ -88,6 +88,8 @@ def cmd_run_nuts(session, cmd, args, cmd_line):
     _t = {}
     _t0 = _time.perf_counter()
     _tmark = [_t0]
+    if _prof:
+        buda.repack_stats_reset()
     def _lap(key):
         now = _time.perf_counter()
         _t[key] = _t.get(key, 0.0) + (now - _tmark[0])
@@ -191,6 +193,17 @@ def cmd_run_nuts(session, cmd, args, cmd_line):
               f"moves={session._prof_esc_moves} "
               f"dropped={session._prof_esc_dropped}] "
               f"first_solve_passes[{passes}]", file=sys.stderr)
+        rs = buda.repack_stats()
+        print(f"[RepackProf] clusters={rs['clusters']} "
+              f"precheck_skipped={rs['precheck_skipped']} "
+              f"narrow={rs['narrow']} wide={rs['wide']} "
+              f"layer_segs_sum={rs['layer_segs_sum']} "
+              f"s[total={rs['s_total']:.2f} prep={rs['s_prep']:.2f} "
+              f"snap={rs['s_snap']:.2f} solve={rs['s_solve']:.2f} "
+              f"settle={rs['s_settle']:.2f} guard={rs['s_guard']:.2f} "
+              f"restore={rs['s_restore']:.2f} ctor={rs['s_ctor']:.2f} "
+              f"pack_narrow={rs['s_solve_narrow']:.2f} "
+              f"pack_wide={rs['s_solve_wide']:.2f}]", file=sys.stderr)
 
 
 def cmd_run_detailed_nuts(session, cmd, args, cmd_line):

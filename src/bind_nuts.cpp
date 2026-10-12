@@ -88,6 +88,31 @@ void bind_nuts(py::module_& m) {
         .def("trunk_mst", &ConnTopology::trunk_mst);
 
     m.def("manhattan_nearest", &manhattan_nearest);
+    // #972 C3: cluster-repack attempt accounting (observation only).
+    m.def("repack_stats", [] {
+        RepackStats r = repack_stats_snapshot();
+        py::dict d;
+        d["clusters"] = r.clusters; d["precheck_skipped"] = r.precheck_skipped;
+        const char* nm[2] = {"narrow", "wide"};
+        for (int k = 0; k < 2; ++k) {
+            py::dict a;
+            a["attempts"] = r.attempts[k]; a["noop"] = r.noop[k];
+            a["rejected"] = r.rejected[k]; a["accepted"] = r.accepted[k];
+            a["members"] = r.members_sum[k];
+            d[nm[k]] = a;
+        }
+        d["layer_segs_sum"] = r.layer_segs_sum;
+        d["s_prep"] = r.ns_prep * 1e-9; d["s_snap"] = r.ns_snap * 1e-9;
+        d["s_solve"] = r.ns_solve * 1e-9; d["s_settle"] = r.ns_settle * 1e-9;
+        d["s_guard"] = r.ns_guard * 1e-9; d["s_restore"] = r.ns_restore * 1e-9;
+        d["s_total"] = r.ns_total * 1e-9;
+        d["s_ctor"] = r.ns_ctor * 1e-9;
+        d["s_solve_narrow"] = r.ns_solve_k[0] * 1e-9;
+        d["s_solve_wide"] = r.ns_solve_k[1] * 1e-9;
+        return d;
+    });
+    m.def("repack_stats_reset", &repack_stats_reset);
+    m.def("span_index_hits", &span_index_hits);
     m.def("seg_bbox",          &seg_bbox);
     m.def("compute_mst",
           static_cast<std::vector<MSTEdge>(*)(

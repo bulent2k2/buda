@@ -15,6 +15,7 @@
  */
 
 #pragma once
+#include <tuple>
 #include "congestion_planner.h"
 #include "placed_segment.h"
 #include <array>
@@ -308,6 +309,31 @@ struct NutsContext {
     int n_reach_pruned = 0;
     int n_reach_doomed = 0;
 };
+
+// Cluster-repack attempt accounting (#972 option C3): process-wide, atomic
+// (the parallel trial sweep runs solves concurrently), observation only.
+// Counts and nanoseconds per phase of repack_overlap_clusters' attempts, so
+// the engine lever is chosen on data: fewer attempts or cheaper ones.
+struct RepackStats {
+    long long clusters = 0, precheck_skipped = 0;
+    long long attempts[2] = {0, 0};      // [narrow, wide]
+    long long noop[2] = {0, 0};          // repack_cluster found nothing to move
+    long long rejected[2] = {0, 0};      // moved, guard restored
+    long long accepted[2] = {0, 0};
+    long long members_sum[2] = {0, 0};   // members over all attempts
+    long long layer_segs_sum = 0;        // layer size summed over clusters
+    long long ns_ctor = 0, ns_solve_k[2] = {0, 0};   // ctor; solve per kind
+    long long ns_prep = 0, ns_snap = 0, ns_solve = 0, ns_settle = 0,
+              ns_guard = 0, ns_restore = 0, ns_total = 0;
+};
+// Test door for the repack's span index (#972 C1): the indices of `spans`
+// ((span_lo, span_hi, placed) triples) whose closed span touches [a, b],
+// ascending -- the brute-force answer to compare against.
+std::vector<int> span_index_hits(
+    const std::vector<std::tuple<double, double, bool>>& spans,
+    double a, double b);
+RepackStats repack_stats_snapshot();
+void repack_stats_reset();
 
 class NUTSEngine {
 public:
