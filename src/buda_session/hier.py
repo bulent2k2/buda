@@ -744,7 +744,7 @@ class HierMixin:
         self._fp_add_comp_geom(fp, comp, mr, name, ox, oy)
         pf = getattr(self, "_pin_fixes", None)
         nm = comp.name if name is None else name
-        if pf and nm in pf:
+        if (pf and nm in pf) or nm in (getattr(self, "_pin_fix_sel", None) or {}):
             from buda_cmds.pin_fix_cmds import revalidate
             revalidate(self, nm, fp)
 
@@ -1183,6 +1183,13 @@ class HierMixin:
         for name, fx in (getattr(self, "_pin_fixes", None) or {}).items():
             fp.set_pin_fix(name, fx["faces"], fx["rect"], fx["has_window"],
                            fx["lo"], fx["hi"])
+        if getattr(self, "_pin_fix_sel", None) and not getattr(
+                self, "_pin_sel_hier_warned", False):
+            self._pin_sel_hier_warned = True
+            print("Error: fix_pin: per-pin selectors are not replayed onto "
+                  "hierarchical frames yet — "
+                  f"{', '.join(sorted(self._pin_fix_sel))} will be treated as "
+                  "UNFIXED here (declare a block-level fix instead)")
         return fp
 
     def _build_cell_local_floorplan(self, parent_comp_name):
@@ -5516,6 +5523,12 @@ class HierMixin:
             if key in wrapper_at:
                 expansion_map[rid] = [wrapper_at[key]]
         return result, expansion_map
+
+    def _gen_fixed(self, tg, w, src, dsts):
+        """generate_candidates under the bundle's effective per-pin fixes."""
+        from buda_cmds.pin_fix_cmds import set_gen_fixes
+        set_gen_fixes(self, tg, w)
+        return tg.generate_candidates(src, dsts)
 
     def _make_topo_gen(self, fp, use_center=False, use_double_detour=False,
                        use_multi_trunk=False, use_hanan_loci=True,

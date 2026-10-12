@@ -48,6 +48,32 @@ _KOZ_HATCH_MAX = 2000
 
 
 
+def _fix_strip_sets(fp, bundles):
+    """Every distinct (block, strips) a fixed block exposes: the floorplan's own
+    fixes, then — per bundle, under its own effective map — the ones a per-pin
+    selector gives it.  Drawn once each."""
+    import buda
+    seen = set()
+    scopes = [None]
+    for w in bundles or ():
+        try:
+            cands = w.input.candidates
+            t = cands[w.plan.selected_topology_index if len(cands) > w.plan.selected_topology_index >= 0 else 0]
+        except Exception:
+            continue
+        if t.has_block_fixes:
+            scopes.append(t)
+    for t in scopes:
+        with buda.BlockFixScope(t):
+            for name, _r in fp.get_all_blocks():
+                if not fp.has_pin_fix(name):
+                    continue
+                strips = tuple(fp.pin_fix_strips(name))
+                if (name, strips) not in seen:
+                    seen.add((name, strips))
+                    yield name, strips
+
+
 class VizAbstractDrawMixin:
 
     def _redraw_nuts_tracks(self, rerun_result):
@@ -252,10 +278,8 @@ class VizAbstractDrawMixin:
         fp = self.fp
         if not hasattr(fp, "has_pin_fix"):
             return
-        for name, _r in fp.get_all_blocks():
-            if not fp.has_pin_fix(name):
-                continue
-            for (x1, y1, x2, y2, face) in fp.pin_fix_strips(name):
+        for name, strips in _fix_strip_sets(fp, getattr(self, "bundles", None)):
+            for (x1, y1, x2, y2, face) in strips:
                 if face == 4:      xs, ys = [x2, x2], [y1, y2]     # east
                 elif face == 8:    xs, ys = [x1, x1], [y1, y2]     # west
                 elif face == 1:    xs, ys = [x1, x2], [y2, y2]     # north

@@ -11,6 +11,7 @@ Each PR adds the flows that show its change; run any of them with
 | `faces.buda` | 1b | four macros: free, west-only, north-only, east-only (the wrap-around pin, crossed over the body) |
 | `window.buda` | 1b | a window along the face (`at lo..hi`, block-local) on a west and an east pin bank |
 | `hier.buda` | 1b | fixes by instance path in a hierarchical flow (hbundles/01 with two windowed pins) |
+| `pins.buda` | 1c | one macro, three buses, three faces — per-pin selectors (exact pin, prefix) and the fix-uniform bundle split |
 
 The viewer draws each admissible landing as a thick green line on its face;
 `bin/buda --no-viz` runs headless and `tools/render_design.py <flow>` writes the

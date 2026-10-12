@@ -221,11 +221,22 @@ struct PinFix {
     bool has_window = false;
     int  lo = 0, hi = 0;       // block-local window along the face
 };
+// Block name -> fix.  A Topology may carry the EFFECTIVE map for its own bundle
+// (per-pin selectors: two bundles landing on one block can see different fixes).
+using FixMap = std::map<std::string, PinFix>;
+// The map in force on this thread (nullptr = the floorplan's own).  Floorplan's
+// fix readers consult it, so every resolver follows the bundle being processed
+// without a parameter threaded through the call sites.  Set by FixScope.
+const FixMap* active_block_fixes();
 // Per-segment busterm annotation: .first = busterm at segment start endpoint,
 // .second = busterm at segment end endpoint.  nullopt means the endpoint is an
 // internal junction (connects to another segment, not a block face).
 using SegEndpoints = std::pair<std::optional<Busterm>, std::optional<Busterm>>;
 struct Topology {
+    // Effective per-bundle fix map (see FixMap); only meaningful when
+    // has_block_fixes.  Deliberately outside the content fingerprint/uid.
+    bool   has_block_fixes = false;
+    FixMap block_fixes;
     std::string type;
     std::vector<Segment> segments;
     int estimated_wirelength  = 0;
@@ -666,6 +677,15 @@ private:
     }
 };
 
+// RAII: make `m` (nullptr = the floorplan's own fixes) the active map.
+struct FixScope {
+    const FixMap* prev_;
+    explicit FixScope(const FixMap* m);
+    explicit FixScope(const Topology& t) : FixScope(t.has_block_fixes ? &t.block_fixes : nullptr) {}
+    ~FixScope();
+    FixScope(const FixScope&) = delete;
+    FixScope& operator=(const FixScope&) = delete;
+};
 class Floorplan {
 public:
     // Cache key: which floorplan (uid) in which state (rev).  rev is bumped by
@@ -748,9 +768,12 @@ public:
     void set_pin_fix(const std::string& block, const PinFix& fix);
     void clear_pin_fix(const std::string& block);
     bool has_pin_fix(const std::string& block) const {
-        return pin_fixes_.count(block) > 0;
+        return fixes().count(block) > 0;
     }
     PinFix pin_fix(const std::string& block) const;
+    // The fix map readers must use: the active per-bundle one, else our own.
+    const FixMap& fixes() const { const FixMap* a = active_block_fixes(); return a ? *a : pin_fixes_; }
+    const FixMap& declared_fixes() const { return pin_fixes_; }
     // The admissible landing strips of a fixed block, each tagged with its one
     // face.  Empty when the fix admits nothing (the command refuses that).
     std::vector<Rect> pin_fix_strips(const std::string& block) const;
@@ -864,7 +887,7 @@ private:
     uint64_t rev_ = 0;
     std::map<std::string, Rect>          blocks_;
     std::map<std::string, std::vector<Rect>> block_rects_;  // only for multi-rect blocks
-    std::map<std::string, PinFix>        pin_fixes_;        // fixed-pin landings per block
+    FixMap                               pin_fixes_;        // fixed-pin landings per block
     std::set<std::string>                containers_;       // hierarchy envelopes (not leaf cells)
     std::map<std::string, std::set<int>> leaf_blocked_;     // explicit per-leaf blocked LOW layers
     std::map<std::string, TegMode>       teg_modes_;
@@ -879,6 +902,8 @@ private:
     std::vector<KeepoutZone> keepouts_;
 };
 class TopologyGenerator {
+    FixMap block_fixes_;
+    bool   has_block_fixes_ = false;
 public:
     explicit TopologyGenerator(const Floorplan& fp) : floorplan_(fp) {
         // Opt-in defaults from the environment so a whole corpus can be A/B'd
@@ -1042,6 +1067,12 @@ public:
     // SEARCH SPACE moves.  Trimming renumbers candidate indices, so
     // select_topology pins must come from an opted-in run.
     void set_trunk_stub_trim(bool v) { allow_trunk_stub_trim_ = v; }
+
+    // Per-bundle effective fixes (per-pin selectors).  Candidates generated
+    // afterwards carry the map (Topology::block_fixes) and are generated under
+    // it; clear_block_fixes() returns to the floorplan's own declarations.
+    void set_block_fixes(const FixMap& m) { block_fixes_ = m; has_block_fixes_ = true; }
+    void clear_block_fixes() { block_fixes_.clear(); has_block_fixes_ = false; }
 
     // Unified entry point: 1 dst → L/Z/U shapes; N dsts → trunk+branch shapes.
     std::vector<Topology> generate_candidates(

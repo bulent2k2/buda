@@ -123,6 +123,7 @@ uint64_t topology_fingerprint(const Topology& topo) {
 
 std::shared_ptr<const TopoAnalysis> analyze(const Topology& topo,
                                             const Floorplan& fp) {
+    FixScope fix_scope_(topo);
     const uint64_t tfp = topology_fingerprint(topo);
     if (auto c = topo.analysis_cache_;
         c && c->topo_fp == tfp && c->fp_uid == fp.uid()

@@ -39,6 +39,7 @@ EditVerdict fail(std::string note) {
 // filter_pinched would reject.
 EditVerdict finish(Topology& topo, const Floorplan& fp,
                    std::string note, int new_idx) {
+    FixScope fix_scope_(topo);
     annotate_seg_conns(topo);
     EditVerdict v;
     v.applied = true;
@@ -81,6 +82,7 @@ bool endpoint_tapped(const Topology& topo, int si, int ep) {
 
 EditVerdict edit_add_trunk(Topology& topo, const Floorplan& fp, bool horiz,
                            int perp_pos, int along_lo, int along_hi, int layer) {
+    FixScope fix_scope_(topo);
     std::vector<int> xs, ys;                    // one grid derivation, reused below
     fp.get_hanan_grid(xs, ys);
     if (along_lo > along_hi) {
@@ -148,6 +150,7 @@ EditVerdict edit_add_trunk(Topology& topo, const Floorplan& fp, bool horiz,
 }
 
 EditVerdict edit_remove_segment(Topology& topo, const Floorplan& fp, int seg_idx) {
+    FixScope fix_scope_(topo);
     if (seg_idx < 0 || seg_idx >= (int)topo.segments.size())
         return fail("segment index out of range");
     erase_segment(topo, seg_idx);
@@ -156,6 +159,7 @@ EditVerdict edit_remove_segment(Topology& topo, const Floorplan& fp, int seg_idx
 
 EditVerdict edit_add_stub(Topology& topo, const Floorplan& fp,
                           const std::string& block, int to_seg, int layer) {
+    FixScope fix_scope_(topo);
     if (to_seg < 0 || to_seg >= (int)topo.segments.size())
         return fail("target segment index out of range");
     if (!fp.has_block(block))
@@ -248,6 +252,7 @@ EditVerdict edit_add_stub(Topology& topo, const Floorplan& fp,
 
 EditVerdict edit_set_span(Topology& topo, const Floorplan& fp, int seg_idx,
                           int along_lo, int along_hi) {
+    FixScope fix_scope_(topo);
     if (seg_idx < 0 || seg_idx >= (int)topo.segments.size())
         return fail("segment index out of range");
     if (along_lo >= along_hi)
@@ -264,6 +269,7 @@ EditVerdict edit_set_span(Topology& topo, const Floorplan& fp, int seg_idx,
 }
 
 EditVerdict edit_connect(Topology& topo, const Floorplan& fp, int i, int j) {
+    FixScope fix_scope_(topo);
     int n = (int)topo.segments.size();
     if (i < 0 || i >= n || j < 0 || j >= n || i == j)
         return fail("segment index out of range");
@@ -318,6 +324,7 @@ EditVerdict edit_connect(Topology& topo, const Floorplan& fp, int i, int j) {
 
 EditVerdict edit_disconnect(Topology& topo, const Floorplan& fp, int i, int j,
                             int retract_to) {
+    FixScope fix_scope_(topo);
     int n = (int)topo.segments.size();
     if (i < 0 || i >= n || j < 0 || j >= n || i == j)
         return fail("segment index out of range");
@@ -351,6 +358,7 @@ EditVerdict edit_disconnect(Topology& topo, const Floorplan& fp, int i, int j,
 }
 
 EditVerdict edit_verdict(Topology& topo, const Floorplan& fp) {
+    FixScope fix_scope_(topo);
     return finish(topo, fp, "status", -1);
 }
 

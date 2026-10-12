@@ -82,6 +82,7 @@ static void build_nuts_maps(
             bw.plan.selected_topology_index >= (int)bw.input.candidates.size())
             continue;   // out-of-range index is UB (audit C1-02)
         const Topology& topo = bw.input.candidates[bw.plan.selected_topology_index];
+        FixScope fix_scope_(topo);
         int bid = bw.input.original_bundle.id;
         for (int si = 0; si < (int)topo.segments.size(); ++si) {
             const Segment& seg = topo.segments[si];
@@ -100,6 +101,7 @@ static void build_nuts_maps(
             bw.plan.selected_topology_index >= (int)bw.input.candidates.size())
             continue;   // out-of-range index is UB (audit C1-02)
         const Topology& topo = bw.input.candidates[bw.plan.selected_topology_index];
+        FixScope fix_scope_(topo);
         int bid = bw.input.original_bundle.id;
 
         ConnTopology ct;
@@ -1391,6 +1393,7 @@ static void apply_reserve_corridors(
         const int sel = bw.plan.selected_topology_index;
         if (sel < 0 || sel >= (int)bw.input.candidates.size()) continue;
         const Topology& topo = bw.input.candidates[sel];
+        FixScope fix_scope_(topo);
         const int nbits = (int)bw.input.original_bundle.get_net_names().size();
         for (int si = 0; si < (int)topo.segments.size(); ++si)
             bits_of[{bid, si}] = seg_bit_count(topo, si, nbits);
@@ -2053,6 +2056,7 @@ std::vector<TrackSegment> NUTSEngine::extract_segments(
         // placed segments are appended to the result verbatim instead.
         if (fixed_bundle_ids_.count(bw.input.original_bundle.id)) continue;
         const Topology& topo = bw.input.candidates[bw.plan.selected_topology_index];
+        FixScope fix_scope_(topo);
         for (int si = 0; si < (int)topo.segments.size(); ++si) {
             const Segment& seg = topo.segments[si];
             const bool is_horizontal = (seg.start.y == seg.end.y);
@@ -3536,6 +3540,7 @@ static void derive_unseatable_trunks(
         const int sel = bw.plan.selected_topology_index;
         if (sel < 0 || sel >= (int)bw.input.candidates.size()) continue;
         const Topology& topo = bw.input.candidates[sel];
+        FixScope fix_scope_(topo);
         const int bid = bw.input.original_bundle.id;
         ConnTopology ct;
         ct.build(topo, floorplan);
@@ -3577,6 +3582,7 @@ static void derive_junction_infeasibilities(
         const int sel = bw.plan.selected_topology_index;
         if (sel < 0 || sel >= (int)bw.input.candidates.size()) continue;
         const Topology& topo = bw.input.candidates[sel];
+        FixScope fix_scope_(topo);
         const int bid = bw.input.original_bundle.id;
         for (const auto& [key, partners] : topo.seg_conns) {
             const int a_si = key.first;

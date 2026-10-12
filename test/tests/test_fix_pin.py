@@ -194,7 +194,7 @@ def test_h_and_v_are_sugar_for_two_faces():
 
 
 @pytest.mark.parametrize("line,needle", [
-    ("fix_pin MAC.d_in east", "per-pin selector"),
+    ("fix_pin MAC.d_in east at 400..500", "admits no landing"),
     ("fix_pin MAC sideways", "unknown token"),
     ("fix_pin MAC east at 200..100", "is empty"),
     ("fix_pin MAC east at 5", "lo..hi"),
@@ -356,9 +356,10 @@ def test_a_dotted_block_name_is_a_block_name():
                       "fix_pin u.core.* west")
     assert "Error:" not in out
     assert s.fp.has_pin_fix("u.core") and "u.core" in s._pin_fixes
-    assert "per-pin selector" in _say(s, "fix_pin u.core.d_in east")
-    s2, _ = _session("add_block MAC 0 0 100 100")
-    assert "per-pin selector" in _say(s2, "fix_pin MAC.d_in east")
+    # the LAST dot splits a pin off a block; the whole name stays a block
+    assert "pin selector" in _say(s, "fix_pin u.core.d_in east")
+    assert ("name", "d_in") in s._pin_fix_sel["u.core"]
+    assert "u.core.d_in" not in s._pin_fixes
 
 
 def test_a_fixed_multi_rect_over_block_is_audited_as_thru():
@@ -413,3 +414,124 @@ def test_the_hier_flow_lands_inside_its_windows():
         if n.span_lo == 890 or n.span_hi == 890:
             if 110 <= n.track_position <= 190:
                 assert 160 <= n.track_position <= 180, n.track_position
+
+
+# ── per-pin selectors (PR 1c) ───────────────────────────────────────────────
+
+PINS_FLOW = FLOW / "pins.buda"
+
+
+def _run_pins(*extra, nets=None):
+    lines = [l.strip() for l in PINS_FLOW.read_text().splitlines()
+             if l.strip() and not l.startswith("#")
+             and not l.startswith(("visualize", "dump_", "report_", "check_design"))]
+    s, out = _session(*lines, *extra)
+    return s, out
+
+
+def _face_of(topo, block_rect):
+    """Faces of `block_rect` (x1,y1,x2,y2) that a segment END lies on."""
+    x1, y1, x2, y2 = block_rect
+    faces = set()
+    for g in topo.segments:
+        for p in (g.start, g.end):
+            if x1 <= p.x <= x2 and p.y == y2: faces.add("N")
+            if x1 <= p.x <= x2 and p.y == y1: faces.add("S")
+            if y1 <= p.y <= y2 and p.x == x2: faces.add("E")
+            if y1 <= p.y <= y2 and p.x == x1: faces.add("W")
+    return faces
+
+
+def test_each_pin_of_one_macro_lands_on_its_own_face():
+    s, out = _run_pins()
+    assert "[PinFix] split bundle" in out and "3 fix-uniform part" in out
+    by_net = {w.input.original_bundle.get_net_names()[0]: w for w in s.bundles}
+    mac = (400, 400, 600, 600)
+    lo = _face_of(by_net["lo_0"].input.candidates[0], mac)
+    hi = _face_of(by_net["hi_0"].input.candidates[0], mac)
+    mid = _face_of(by_net["mid_0"].input.candidates[0], mac)
+    assert lo == {"W"}, lo
+    assert "N" in hi, hi
+    assert "S" in mid, mid
+    # the bundles carry their OWN effective map, not the floorplan's
+    assert by_net["hi_0"].input.candidates[0].block_fixes["MAC"][0] == N
+    assert by_net["lo_0"].input.candidates[0].block_fixes["MAC"][0] == W
+    assert by_net["mid_0"].input.candidates[0].block_fixes["MAC"][0] == S
+
+
+def test_the_per_pin_flow_audits_clean_at_both_stages():
+    r = subprocess.run([sys.executable, str(_ROOT / "src" / "buda_cli.py"),
+                        "--no-viz", str(PINS_FLOW)],
+                       capture_output=True, text=True, env=buda_env(_ROOT),
+                       cwd=str(_ROOT))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert r.stdout.count("Success: no violations found.") == 2, r.stdout
+
+
+def test_selector_precedence_exact_pin_then_bus_then_prefix_then_block():
+    s, _ = _session("add_block M 0 0 100 100",
+                    "add_block A 200 0 300 100",
+                    "add_net n0 A.x M.cfg_a",
+                    "add_net n1 A.x M.cfg_b",
+                    "add_net n2 A.x M.d[0]",
+                    "add_net n3 A.x M.other",
+                    "fix_pin M east",             # block-level
+                    "fix_pin M.cfg* north",        # prefix
+                    "fix_pin M.d south",           # bus name (matches d[0])
+                    "fix_pin M.cfg_b west")        # exact pin
+    from buda_cmds.pin_fix_cmds import resolve_fix
+    f = lambda pin: resolve_fix(s, "M", pin)["faces"]
+    assert f("cfg_b") == W          # exact beats the prefix
+    assert f("cfg_a") == N          # prefix beats the block
+    assert f("d[0]") == S           # bus name
+    assert f("other") == E          # block-level
+
+
+def test_a_longer_prefix_wins():
+    s, _ = _session("add_block M 0 0 100 100", "fix_pin M.c* north",
+                    "fix_pin M.cfg* south")
+    from buda_cmds.pin_fix_cmds import resolve_fix
+    assert resolve_fix(s, "M", "cfg_a")["faces"] == S
+    assert resolve_fix(s, "M", "clk")["faces"] == N
+
+
+def test_a_selector_can_be_removed_and_a_bad_one_is_refused():
+    s, _ = _session("add_block M 0 0 100 100", "fix_pin M.tx east")
+    assert "no such pin fix" in _say(s, "fix_pin M.rx off")
+    assert "pin fix removed" in _say(s, "fix_pin M.tx off")
+    assert not s._pin_fix_sel
+    out = _say(s, "fix_pin M.tx east at 400..500")
+    assert "Error:" in out and "admits no landing" in out and not s._pin_fix_sel
+
+
+def test_a_selector_needs_its_block_declared_first():
+    """Before the block exists `M.tx` can only be read as a dotted block name."""
+    s, _ = _session("fix_pin M.tx east")
+    assert "M.tx" in s._pin_fixes and not s._pin_fix_sel
+
+
+def test_no_selector_leaves_generation_untouched():
+    s, _ = _session("add_block S 0 0 100 100", "add_block M 400 0 500 100", *TECH,
+                    "fix_pin M west", "add_bus b[2] S.o M.i", "run_bundler STRICT",
+                    "generate_topologies")
+    assert not s.bundles[0].input.candidates[0].has_block_fixes
+    assert s.fp.has_pin_fix("M")
+
+
+def test_block_fix_scope_swaps_the_floorplans_landings():
+    s, _ = _run_pins()
+    hi = next(w for w in s.bundles
+              if w.input.original_bundle.get_net_names()[0] == "hi_0")
+    assert not s.fp.has_pin_fix("MAC")          # nothing block-level declared
+    with buda.BlockFixScope(hi.input.candidates[0]):
+        assert s.fp.has_pin_fix("MAC")
+        assert {f for *_r, f in s.fp.pin_fix_strips("MAC")} == {N}
+    assert not s.fp.has_pin_fix("MAC")          # restored on exit
+
+
+def test_the_hier_flow_says_selectors_are_not_replayed():
+    s, _ = _session("add_block M 0 0 100 100", "fix_pin M.tx east")
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        s._apply_fp_session_settings(buda.Floorplan())
+    assert "per-pin selectors are not replayed" in out.getvalue()

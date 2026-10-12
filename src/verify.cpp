@@ -351,6 +351,7 @@ static std::vector<int> island_roots(const std::vector<ConnSeg>& segs)
 SegAttachment seg_attachment(const ConnSeg& cs, const Topology& topo,
                              const Floorplan& fp)
 {
+    FixScope fix_scope_(topo);
     SegAttachment a;
     // Distinct attachment POSITIONS along this segment (conn records at one
     // physical point count once) ...
@@ -1026,6 +1027,7 @@ static void detect_teg_open(const std::map<int, std::vector<TegMetal>>& groups,
 bool disconnected_islands_bridged(const ConnTopology& ct, const Topology& topo,
                                   const Floorplan& fp)
 {
+    FixScope fix_scope_(topo);
     if (topo.feedthru_blocks.empty()) return false;
     const auto& segs = ct.segs();
     int n = (int)segs.size();
@@ -1070,6 +1072,7 @@ bool disconnected_islands_bridged(const ConnTopology& ct, const Topology& topo,
 ConnResult check_topo(const ConnTopology& ct, const Topology& topo,
                       const Floorplan& fp, int bundle_id)
 {
+    FixScope fix_scope_(topo);
     ConnResult result;
     const auto& segs = ct.segs();
     int n = (int)segs.size();
@@ -1205,6 +1208,7 @@ ConnResult check_nuts(const ConnTopology& ct, const NUTSResult& nuts,
                       const LayerStack& layers, int bundle_id,
                       const Floorplan* zone_fp)
 {
+    FixScope fix_scope_(topo);
     ConnResult result;
     const auto& segs = ct.segs();
     int n = (int)segs.size();
@@ -1533,6 +1537,7 @@ ConnResult check_dnuts(const ConnTopology& ct, const DetailedNUTSResult& dnuts,
                        const LayerStack& layers, int bundle_id, int num_bits,
                        const Floorplan* zone_fp, const RoutingGridStack* grid)
 {
+    FixScope fix_scope_(topo);
     ConnResult result;
     const auto& segs = ct.segs();
     int n = (int)segs.size();

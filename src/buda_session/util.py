@@ -545,6 +545,11 @@ def seg_spans_block(cs, name, ubbox, fp):
 
 
 def passthru_blocks(topo, segs, fp):
+    import buda
+    with buda.BlockFixScope(topo):
+        return passthru_blocks_impl(topo, segs, fp)
+
+def passthru_blocks_impl(topo, segs, fp):
     """The bundle's OWN blocks a candidate passes THROUGH rather than taps —
     crossed solid geometry with no busterm landing on that segment.
 

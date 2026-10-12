@@ -298,7 +298,7 @@ class EditMixin:
                                          bulk_knobs[1], bulk_knobs[2],
                                          use_hanan_loci=False,
                                          use_spine_relays=bulk_knobs[4])
-            w.input.candidates = tg_off.generate_candidates(src, dsts)
+            w.input.candidates = self._gen_fixed(tg_off, w, src, dsts)
             self._reset_plan_for_regen(w, pin_uid, kept_user)
             print(f"  Re-applied knob memo '{knobs}' for bundle "
                   f"{w.input.original_bundle.id}: regenerated midpoint-only "
@@ -320,7 +320,7 @@ class EditMixin:
         pool = list(w.input.candidates)
         seen = {buda.topo_uid(c) for c in pool}
         added = 0
-        for c in tg.generate_candidates(src, dsts):
+        for c in self._gen_fixed(tg, w, src, dsts):
             uid = buda.topo_uid(c)
             if uid not in seen:
                 seen.add(uid)

@@ -759,6 +759,8 @@ def cmd_run_bundler(session, cmd, args, cmd_line):
         raw_bundles = _generalized_bundles(session, strat_arg, joined)
     else:
         raw_bundles = session.bundler.run(session.netlist)
+    from buda_cmds import pin_fix_cmds
+    raw_bundles = pin_fix_cmds.split_bundles_by_fix(session, raw_bundles)
     raw_bundles = _split_oversized_bundles(session, raw_bundles)
     # NDR rule-class split (phase 1 R8 position): every governed bundle
     # becomes rule-uniform, LOUDLY.  No-op with no set_ndr scopes.

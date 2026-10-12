@@ -22,9 +22,15 @@ LANDING geometry (`Floorplan.landing_rects`).  What the block BLOCKS
 (`obstruction_rects`) never changes: a fix narrows where a wire may attach, it
 does not make the macro's body routable.
 
-This is the first cut: a fix governs a BLOCK (every pin of it), in the
-placed (die) frame.  Per-pin selectors, cell-level fixes with the orientation
-transform, layers, bit order and persistence are the next changes.
+A fix governs a BLOCK (`fix_pin B ...`), or only some of its pins (`fix_pin
+B.tx ...`, `fix_pin B.d* ...`) in a FLAT flow; faces are stated in the placed
+(die) frame.  Cell-level fixes with the orientation transform, layers, bit
+order and persistence are the next changes.
+
+Selector precedence, most specific first: exact pin name > bus name (`tx`
+selects `tx[3]` / `tx_3`) > longest `prefix*` > the block-level fix.  Two nets
+landing on one block under DIFFERENT effective fixes cannot share a bundle
+(a bundle lands on one face), so the bundler splits them, loudly.
 """
 import re
 
@@ -62,6 +68,132 @@ def _apply(session, block, fix):
                            fix["lo"], fix["hi"])
 
 
+def _sel_store(session):
+    st = getattr(session, "_pin_fix_sel", None)
+    if st is None:
+        st = session._pin_fix_sel = {}
+    return st
+
+
+def _fixkey(fix):
+    return None if fix is None else (fix["faces"], fix["rect"], fix["has_window"],
+                                     fix["lo"], fix["hi"])
+
+
+def resolve_fix(session, block, pin_name):
+    """The effective fix for ONE pin of a block (None = unfixed): exact pin >
+    bus > longest prefix > the block-level fix."""
+    from bus_names import bus_name
+    sels = _sel_store(session).get(block)
+    if sels:
+        hit = sels.get(("name", pin_name))
+        if hit is not None:
+            return hit
+        hit = sels.get(("name", bus_name(pin_name)))
+        if hit is not None:
+            return hit
+        best = None
+        for (kind, key), fx in sels.items():
+            if kind == "prefix" and pin_name.startswith(key):
+                if best is None or len(key) > len(best[0]):
+                    best = (key, fx)
+        if best is not None:
+            return best[1]
+    return session._pin_fixes.get(block)
+
+
+def _net_pins_of(session, net):
+    return getattr(session, "_net_pins", {}).get(net)
+
+
+def net_fix_signature(session, net):
+    """((block, fixkey), ...) over the blocks this net touches that carry any
+    fix declaration — two nets with different signatures cannot share a bundle."""
+    pins = _net_pins_of(session, net)
+    if pins is None:
+        return ()
+    drv, rcvs = pins
+    sig = {}
+    for pin in [drv] + list(rcvs):
+        block, _, name = pin.rpartition(".")
+        if block in session._pin_fixes or block in _sel_store(session):
+            sig[block] = _fixkey(resolve_fix(session, block, name))
+    return tuple(sorted(sig.items(), key=lambda kv: kv[0]))
+
+
+def bundle_fix_map(session, net_names):
+    """The EFFECTIVE fix map for one bundle ({block: (faces, rect, has_window,
+    lo, hi)}), or None when no per-pin selector exists (the floorplan's own
+    block-level fixes then apply unchanged — the byte-identical path)."""
+    if not _sel_store(session):
+        return None
+    out = {}
+    for net in net_names:
+        for blk, key in net_fix_signature(session, net):
+            if key is not None and blk not in out:
+                out[blk] = key
+    return out
+
+
+def set_gen_fixes(session, tg, w):
+    """Point a generator at the bundle's effective fixes (no-op without selectors)."""
+    m = bundle_fix_map(session, w.input.original_bundle.get_net_names())
+    if m is None:
+        tg.clear_block_fixes()
+    else:
+        tg.set_block_fixes(m)
+
+
+def split_bundles_by_fix(session, raw_bundles):
+    """Fix-uniform split: a bundle whose nets resolve to different fixes at a
+    block cannot land on one face — split into uniform parts, LOUDLY.  No
+    selectors declared = input returned untouched."""
+    if not _sel_store(session):
+        return raw_bundles
+    import buda
+    out = []
+    next_id = max((b.id for b in raw_bundles), default=0)
+    for b in raw_bundles:
+        nets = list(b.get_net_names())
+        classes = {}
+        for n in nets:
+            classes.setdefault(net_fix_signature(session, n), []).append(n)
+        if len(classes) <= 1:
+            out.append(b)
+            continue
+        sizes = "+".join(str(len(v)) for v in classes.values())
+        print(f"[PinFix] split bundle {b.id} ({len(nets)} bits) into "
+              f"{len(classes)} fix-uniform part(s) ({sizes}): its nets land on "
+              f"a fixed block under different pin fixes, and one bundle lands "
+              f"on one face")
+        for k, (sig, part) in enumerate(sorted(classes.items(), key=repr), start=1):
+            nb = buda.HBundle()
+            if k == 1:
+                nb.id = b.id
+            else:
+                next_id += 1
+                nb.id = next_id
+            nb.net_names = part
+            nb.reason = f"{b.reason}|PINFIX:{k}"
+            nb.num_terminals = b.num_terminals
+            out.append(nb)
+    return out
+
+
+def _strips_with(session, block, fix):
+    """Strips `fix` would admit on `block`, without leaving it applied."""
+    fp = session.fp
+    prev = session._pin_fixes.get(block)
+    _apply(session, block, fix)
+    try:
+        return fp.pin_fix_strips(block)
+    finally:
+        if prev is None:
+            fp.clear_pin_fix(block)
+        else:
+            _apply(session, block, prev)
+
+
 def cmd_fix_pin(session, cmd, args, cmd_line):
     # fix_pin <block>[.*] [north|south|east|west|H|V ...] [rect <n>] [at <lo>..<hi>]
     # fix_pin <block> off
@@ -70,6 +202,7 @@ def cmd_fix_pin(session, cmd, args, cmd_line):
               "[rect <n>] [at <lo>..<hi>]   |   fix_pin <block> off")
         return
     target = args[0]
+    sel = None      # (kind, key) for a per-pin selector, else None (block-level)
     # Block names may themselves contain a period (`u.core`, `IO.PAD`), so the
     # exact declared name wins; only an explicit trailing `.*` is stripped, and
     # a suffix is read as a per-pin selector only when its prefix IS a known block.
@@ -78,15 +211,23 @@ def cmd_fix_pin(session, cmd, args, cmd_line):
     elif target.endswith(".*"):
         block = target[:-2]
     elif "." in target and session.fp.has_block(target.rsplit(".", 1)[0]):
-        block = target.rsplit(".", 1)[0]
-        print(f"Error: fix_pin '{target}': a per-pin selector is not supported "
-              f"yet — a fix governs the whole block; name it as '{block}' or "
-              f"'{block}.*'")
-        return
+        block, _, sel_text = target.rpartition(".")
+        sel = (("prefix", sel_text[:-1]) if sel_text.endswith("*")
+               else ("name", sel_text))
     else:
         block = target      # not declared yet (or a dotted name declared later)
     fixes = session._pin_fixes
-    if len(args) == 2 and args[1].lower() == "off":
+    sels = _sel_store(session)
+    if sel is not None and len(args) == 2 and args[1].lower() == "off":
+        if sels.get(block, {}).pop(sel, None) is not None:
+            if not sels[block]:
+                del sels[block]
+            print(f"[PinFix] {block}.{sel[1]}{'*' if sel[0] == 'prefix' else ''}: "
+                  f"pin fix removed")
+        else:
+            print(f"[PinFix] {target}: no such pin fix declared")
+        return
+    if sel is None and len(args) == 2 and args[1].lower() == "off":
         if block in fixes:
             del fixes[block]
             session.fp.clear_pin_fix(block)
@@ -133,6 +274,21 @@ def cmd_fix_pin(session, cmd, args, cmd_line):
               f"(block has {_rect_count(fp, block)} rect(s))"); return
     fix = {"faces": faces, "rect": rect, "has_window": window is not None,
            "lo": window[0] if window else 0, "hi": window[1] if window else 0}
+    if sel is not None:
+        if getattr(session, "bdb", None) is not None and not known:
+            print(f"Error: fix_pin {target}: a per-pin fix needs a flat-flow block "
+                  f"declared first; hierarchical designs take block-level fixes only")
+            return
+        if known and not _strips_with(session, block, fix):
+            print(f"Error: fix_pin {target}: '{_declared(fix)}' admits no landing "
+                  f"on this block (a face interior to its rects, or a window "
+                  f"outside the face); the previous setting is kept")
+            return
+        sels.setdefault(block, {})[sel] = fix
+        shown = f"{block}.{sel[1]}{'*' if sel[0] == 'prefix' else ''}"
+        print(f"[PinFix] {shown}: {_declared(fix)} (pin selector)"
+              + ("" if known else " (block not declared yet)"))
+        return
     prev = fixes.get(block)
     fixes[block] = fix
     _apply(session, block, fix)
@@ -164,7 +320,22 @@ def revalidate(session, block, fp=None):
     fixes = session._pin_fixes
     fix = fixes.get(block)
     fp = session.fp if fp is None else fp
-    if fix is None or not fp.has_block(block):
+    if not fp.has_block(block):
+        return
+    sels = _sel_store(session).get(block, {})
+    for sel, sfx in list(sels.items()):
+        bad = None
+        if sfx["rect"] >= _rect_count(fp, block):
+            bad = f"rect {sfx['rect'] + 1} out of range"
+        elif fp is session.fp and not _strips_with(session, block, sfx):
+            bad = f"'{_declared(sfx)}' admits no landing on this block"
+        if bad:
+            del sels[sel]
+            print(f"Error: fix_pin {block}.{sel[1]}{'*' if sel[0] == 'prefix' else ''}: "
+                  f"{bad}; the fix, declared before the block, is dropped")
+    if not sels:
+        _sel_store(session).pop(block, None)
+    if fix is None:
         return
     problem = None
     if fix["rect"] >= _rect_count(fp, block):
@@ -184,8 +355,15 @@ def revalidate(session, block, fp=None):
 
 def cmd_dump_pin_fixes(session, cmd, args, cmd_line):
     fixes = session._pin_fixes
-    if not fixes:
+    sels = _sel_store(session)
+    if not fixes and not sels:
         print("[PinFix] no fixed pins declared")
+        return
+    for block in sorted(sels):
+        for (kind, key), fx in sorted(sels[block].items()):
+            star = "*" if kind == "prefix" else ""
+            print(f"  fix_pin {block}.{key}{star} {_declared(fx)}   (pin selector)")
+    if not fixes:
         return
     print(f"[PinFix] {len(fixes)} fixed block(s):")
     for block in sorted(fixes):

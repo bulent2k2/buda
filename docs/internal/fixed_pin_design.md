@@ -668,3 +668,14 @@ down — would be a separate item, and it would emit `fix_pin` lines.
   (needs the track pitch) and the `PIN_FIX` kind.  Known limit, visible in
   the flows: a fix governs every bus landing on its block, so a block with an
   input and an output bus cannot be fixed to one face yet.
+- **PR 1c (per-pin selectors, flat flows)**: `fix_pin B.pin` / `B.bus` / `B.pre*`
+  with precedence exact pin > bus > longest prefix > block-level.  Mechanism
+  (chosen over threading an override through ~57 call sites): a thread-local
+  active `FixMap` that `Floorplan::fixes()` consults, set by an RAII `FixScope`
+  at every entry that holds a `Topology` (generation, analysis, `check_*`, NUTS,
+  edit ops); `Topology::block_fixes` carries the bundle's effective map, outside
+  the content fingerprint.  The bundler splits a bundle into fix-uniform parts
+  before the bit cap and the NDR split, loudly.  Python reporters and the
+  viewer wrap in `buda.BlockFixScope(topo)`.  Not done: hier selectors (the
+  replay says so), persistence of selectors / `block_fixes`, a restored
+  candidate carries no map until re-generated.  Vehicle: `flow/pin_fix/pins.buda`.
