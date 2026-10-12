@@ -5398,6 +5398,21 @@ void BDB::clear_expanded_bundles() {
         "DELETE FROM bundle WHERE is_replicated=1;");
 }
 
+void BDB::clear_bundle_routing(const std::string& bundle_id) {
+    // The first four of clear_expanded_bundle's tables, same order
+    // (children before parents), same route_snapshot invalidation.
+    static const char* kTables[] = {
+        "net_via", "net_segment", "bus_via", "bus_segment",
+    };
+    _exec("DELETE FROM route_snapshot;");
+    for (const char* t : kTables) {
+        Stmt s(_db, ("DELETE FROM " + std::string(t) +
+                     " WHERE bundle_id=?").c_str());
+        sqlite3_bind_text(s, 1, bundle_id.c_str(), -1, SQLITE_TRANSIENT);
+        step_checked(_db, s, "clear_bundle_routing");
+    }
+}
+
 void BDB::clear_expanded_bundle(const std::string& bundle_id) {
     // Per-bundle twin of clear_expanded_bundles (same child-before-parent
     // order, same route_snapshot invalidation) for the selective re-persist

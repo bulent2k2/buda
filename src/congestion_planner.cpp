@@ -247,10 +247,12 @@ long long plan_scoring_pool_threads() { return (long long)ScoringPool::instance(
 
 CongestionPlanner::CandOverlay& CongestionPlanner::thread_overlay_() const {
     static thread_local CandOverlay ov;
-    const size_t n = band_base_.empty() ? 0 : band_base_.back();
-    if (ov.gen != cuts_gen_ || ov.val.size() != n) {
-        ov.val.assign(n, 0.0);
-        ov.stamp.assign(n, 0);
+    const size_t n = cuts_.size();
+    if (ov.gen != cuts_gen_ || ov.cut_stamp.size() != n) {
+        ov.cut_stamp.assign(n, 0);
+        // Per-cut lists keep their capacity across candidates; a new grid
+        // starts them empty (the old grid's cut indices mean nothing here).
+        ov.cut_vals.assign(n, CandOverlay::CutVals{});
         ov.epoch = 0;
         ov.gen   = cuts_gen_;
         g_overlay_inits.fetch_add(1);
@@ -260,9 +262,9 @@ CongestionPlanner::CandOverlay& CongestionPlanner::thread_overlay_() const {
 
 double CongestionPlanner::cand_usage_(int ci, int b) const {
     if (t_cand_overlay_) {
-        const size_t k = band_base_[ci] + (size_t)b;
-        if (t_cand_overlay_->stamp[k] == t_cand_overlay_->epoch)
-            return t_cand_overlay_->val[k];
+        const CandOverlay& ov = *t_cand_overlay_;
+        if (ov.cut_stamp[ci] == ov.epoch)
+            if (const double* v = ov.cut_vals[ci].find(b)) return *v;
     }
     return cuts_[ci].usage(b);
 }
@@ -559,12 +561,8 @@ void CongestionPlanner::rebuild_cuts_() {
     // per (layer_id, dir), the (coord_2x, ci) pairs in ci order — which is
     // coordinate-ascending per layer by the build loops above, so the vector
     // is binary-searchable on coord_2x.
-    // Flattened band offsets for the candidate scoring overlay (CandOverlay):
-    // band_base_[ci] = first slot of cut ci; back() = total bands.  The fresh
-    // generation stamp invalidates every thread's persistent overlay.
-    band_base_.assign(cuts_.size() + 1, 0);
-    for (int ci = 0; ci < (int)cuts_.size(); ++ci)
-        band_base_[ci + 1] = band_base_[ci] + (size_t)cuts_[ci].num_bands();
+    // The fresh generation stamp invalidates every thread's persistent
+    // candidate scoring overlay (CandOverlay), which is sized per cut.
     cuts_gen_ = ++g_cuts_generation;
 
     cut_index_.clear();
@@ -1185,13 +1183,12 @@ void CongestionPlanner::apply_segment(const Segment& seg, int layer_id, double e
             // Scoring: charge the candidate's overlay, not cuts_.  First touch
             // seeds the band's committed value, so `+=` here is the same
             // arithmetic the in-place charge performed (bit-identical reads).
-            auto&        ov = *t_cand_overlay_;
-            const size_t k  = band_base_[ci] + (size_t)b;
-            if (ov.stamp[k] != ov.epoch) {
-                ov.stamp[k] = ov.epoch;
-                ov.val[k]   = cuts_[ci].usage(b);
+            auto& ov = *t_cand_overlay_;
+            if (ov.cut_stamp[ci] != ov.epoch) {
+                ov.cut_stamp[ci] = ov.epoch;
+                ov.cut_vals[ci].clear();        // capacity kept
             }
-            ov.val[k] += eff_width * w;
+            ov.cut_vals[ci].slot(b, cuts_[ci].usage(b)) += eff_width * w;
         } else {
             cuts_[ci].add_usage(b, eff_width * w);
         }

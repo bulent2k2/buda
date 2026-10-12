@@ -146,6 +146,85 @@ the serial phases), and the shipped default — `btcl`/`buda` with no `-j`
 run half the machine's threads — no longer needs `-j 1` as a workaround.
 Decisions identical to the 1-thread run at both dials.
 
+## Landed 2026-10-11: B2 (sparse scoring overlay)
+
+The overlay B1 made persistent was a flat array over EVERY band of the grid
+(a value and a stamp each, 12 B per band per scoring thread): 64 MB per
+thread at NQ=16, 268 MB at the NQ=62 reticle dial, times the thread count,
+resident for the process.  It is now an epoch stamp per CUT plus, per cut,
+the short list of (band, value) the candidate being scored has written —
+sized by the cuts (thousands) and by what a candidate touches, not by the
+grid.  A read is one array access on the cut's stamp and, only on a cut
+this candidate wrote, a scan of its few entries; the rollback is still
+`++epoch`.  Values are seeded from the committed base on first touch and
+accumulated with the same `+=`, so every read returns the bit-identical
+double (the earlier note that a hash map read ~15 % slower stands: the
+stamp stays dense over the cuts, and there is no hashing).  `band_base_`,
+the flattened band index the array needed, is gone.
+
+| dial, threads | planner (dense overlay) | planner (sparse) | peak RSS after `run_planner`, dense → sparse |
+|---|---|---|---|
+| NQ=8, 1  | 3.72 s | 3.71 s | — |
+| NQ=8, 4  | 2.59 s | 2.46 s | — |
+| NQ=16, 1 | 9.62 s | 9.60 s | — |
+| NQ=16, 4 | 6.17 s | 5.71 s | 579 → 343 MB (in-process, the whole session) |
+
+Decisions identical to the merge-base run at both dials and both thread
+counts (every `[Planner]` line); the per-read scan costs nothing
+measurable, and the 236 MB the NQ=16 session gives back is the four
+overlays (4 × 64 MB) minus the per-cut lists.  At the reticle dial the
+same arithmetic returns about 1 GB at four threads.
+
+The per-cut list's first form was one (band, value) pair per entry,
+rescanned on every insertion.  Codex (P2 on #979) named the path that
+makes it quadratic: under the default spread an oversized bus charges a
+contiguous ascending range of B bands per crossed cut, so B insertions
+cost O(B²) comparisons where the flat array cost O(B) — on a fine Hanan
+grid (the `ariane133`-class imports) B can be large.  The list is now
+ascending RUNS of bands (`CandOverlay::CutVals`: `{b0, n, off}` into a
+value vector), so a write that continues the cut's last run is one
+append, a write inside a run one index, and a read a scan over the few
+runs — O(1) amortised per band written; the greedy spread modes
+(nearest-first order) simply open more runs.  Measured three ways on a
+synthetic fine-grid flow (112 small staggered blocks, forty 96- and
+128-bit buses crossing them, 40 bundles / 1,265 candidates; planner
+≈ 1.1–1.5 s): dense, pair list and runs within the run-to-run noise of
+each other and decision-identical — the quadratic term does not show on
+that vehicle, so the restructuring is an argument from the shape of the
+spread, not a measured win, and costs nothing where it does not bite.
+Re-timed on the recorded dials BACK TO BACK against the pair-list build
+(the container had moved to a slower host between the two sessions — the
+pair list itself read 4.7–4.9 s at NQ=8 where the table above has 3.71 —
+so only the alternating pair is comparable): NQ=8, 1 thread, pair list
+4.74 / 4.87 s against runs 4.55 / 4.61 s; NQ=16, 4 threads, 7.82 against
+7.88 s — within noise, with the scoring block 3 % faster at NQ=8 and 2.5 %
+at NQ=16.  Peak RSS at NQ=16 with 4 threads still 343 MB; decisions
+identical at both dials and both thread counts.
+
+## Landed 2026-10-11: the layer-only re-persist
+
+The dead-span escalation's selective re-persist rewrote every expanded
+instance whose fingerprint changed (above): bundle row, net and busterm
+links, the selected topology with its segments, the seg-busterm
+annotations and the pinned-layer meta — to change `assigned_layer` on a
+few `topology_segment` rows.  `_persist_planner_output` now recognises a
+fingerprint that differs in the assigned layers ALONE
+(`_fp_differs_in_layers_only`), drops the instance's routing rows the way
+the rewrite does (`BDB::clear_bundle_routing`: bus/net segments and vias
+plus the route_snapshot, which every selective site rewrites right after)
+and updates the selected candidate's segment layers in place.  Any other
+difference — selection, pins, lock, NDR stamp, USER extras — still takes
+the full rewrite.  `test_persist_layer_only.py` runs `flow/soc_small.buda`
+through `run_nuts` both ways (`BUDA_PERSIST_FULL=1` is the control), dumps
+each BDB as text and compares every table's rows as a sorted multiset:
+identical, with the layer-only path having served the escalation's
+instances in the default arm.  `run_nuts` NQ=16 11.9 → 9.6 s (same
+build, `BUDA_PERSIST_FULL=1` against the default), NQ=32 68.7 → 64.2 s
+(in-process, one thread; the engine's own seconds unchanged).  Modest,
+because what dominates the command from here is the escalation's full
+re-solves — PR #977's measurement, where its option B (a floor on late
+moves) is the lever.
+
 ## Abstract NUTS: the time is persistence, not placement (2026-10-11)
 
 `run_nuts` is the next command at NQ ≥ 32 (88 s against the planner's
@@ -202,7 +281,8 @@ seg-busterm annotations — when all that changed is
 is a LAYER-ONLY re-persist for an expanded instance whose selection,
 pins and candidate set are unchanged (update the assigned layers in
 place, fingerprint split into a shape part and a layer part), which has
-to stay byte-identical to the full rewrite and is not built here; the
+to stay identical to the full rewrite row for row — BUILT, see the
+section above; the
 per-row statement preparation is 2.6 % and not worth a cache on its own.
 The dogleg-adoption and dead-span-escalation re-solves stay; what the
 remaining persistence costs at the reticle dial is the next measurement
@@ -320,8 +400,8 @@ is compared under a 1e-6 epsilon.  Measured identical here; the gate for
 landing is `tools/qor_corpus.py --vs main` (not run in this session).
 `BUDA_LAYERLOAD_SCAN=1` keeps the old scan as a study control.
 
-**B. Fix the scoring workers (the big one) — B1 LANDED 2026-10-11, see
-above (NQ=16 at 4 threads 136.9 → 6.17 s); B2 stays open.**  Three shapes, cheapest first:
+**B. Fix the scoring workers (the big one) — B1 and B2 LANDED 2026-10-11,
+see above (NQ=16 at 4 threads 136.9 → 5.71 s; peak RSS −236 MB).**  Three shapes, cheapest first:
   * B1 — stop paying per call: make the worker overlay persistent (a
     planner-owned pool of `n_threads` overlays handed to the workers, or a
     persistent thread pool), so the O(bands) allocation happens once per

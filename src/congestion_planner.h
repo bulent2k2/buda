@@ -783,18 +783,68 @@ private:
     // Band usage as the CURRENTLY-SCORED candidate sees it: its own overlay
     // charge when present, else the committed base value.
     double cand_usage_(int ci, int b) const;
-    // The overlay itself: an epoch-stamped flat array over ALL bands
-    // (flattened by band_base_), so a read is one branch + one array access
-    // and the per-candidate rollback is ++epoch — O(1), no hashing.  A map
-    // was measured ~15% slower serially (a hash probe on every hot read).
+    // The overlay itself (#972 lever B2): an epoch stamp per CUT plus, per
+    // cut, the short list of (band, value) this candidate has written — so
+    // it is sized by the cuts (thousands) and by what a candidate touches
+    // (a few hundred to a few thousand bands), not by every band of the
+    // grid.  Its predecessor was a flat array over ALL bands (a value and a
+    // stamp each): O(1) per read and per clear, but 12 B per band per
+    // scoring thread resident for the process once the workers persisted
+    // (B1) — 268 MB per thread at the NQ=62 reticle dial, 2.1 GB at the
+    // eight-thread auto cap.  A read here is one array access on the cut's
+    // stamp and, only on a cut this candidate wrote, a scan of its few
+    // entries; the per-candidate rollback is still ++epoch, O(1).  A hash
+    // map was measured ~15 % slower serially (a probe on every hot read),
+    // which is why the stamp stays dense over the cuts.  Values are seeded
+    // from the committed base on first touch and accumulated with the same
+    // `+=`, so every read returns the bit-identical double the flat array
+    // returned.
+    //
+    // The per-cut list is kept as ascending RUNS of bands rather than one
+    // (band, value) pair per entry: the spread charges a bus's footprint as a
+    // contiguous ascending band range per cut (for_each_band_w's proportional
+    // modes), so a write that continues the cut's last run is one append, a
+    // write inside a run is one index, and a read is a scan over the few runs
+    // — O(1) amortised per band written, where a flat (band, value) list
+    // rescanned per insertion was O(B²) on a cut a wide bus crosses on a
+    // fine grid (Codex P2 on #979).  The greedy spread modes emit bands in
+    // nearest-first order and simply open more runs.
     struct CandOverlay {
-        std::vector<double>   val;
-        std::vector<uint32_t> stamp;
+        struct Run { int b0; int n; int off; };     // bands [b0, b0+n) at vals[off..]
+        struct CutVals {
+            std::vector<Run>    runs;
+            std::vector<double> vals;
+            void clear() { runs.clear(); vals.clear(); }   // capacity kept
+            const double* find(int b) const {
+                for (const Run& r : runs)
+                    if (b >= r.b0 && b < r.b0 + r.n) return &vals[r.off + (b - r.b0)];
+                return nullptr;
+            }
+            // The slot for band b, seeded with `seed` on first touch.
+            double& slot(int b, double seed) {
+                for (Run& r : runs)
+                    if (b >= r.b0 && b < r.b0 + r.n) return vals[r.off + (b - r.b0)];
+                if (!runs.empty()) {
+                    Run& last = runs.back();
+                    if (b == last.b0 + last.n &&
+                        last.off + last.n == (int)vals.size()) {   // continues the tail
+                        ++last.n;
+                        vals.push_back(seed);
+                        return vals.back();
+                    }
+                }
+                runs.push_back(Run{b, 1, (int)vals.size()});
+                vals.push_back(seed);
+                return vals.back();
+            }
+        };
+        std::vector<uint32_t> cut_stamp;   // per cut
+        std::vector<CutVals>  cut_vals;    // per cut: what this candidate wrote
         uint32_t epoch = 0;
         uint64_t gen   = 0;             // cuts_gen_ this overlay is sized for
         void clear() {                  // start a new candidate
             if (++epoch == 0) {         // u32 wrap: re-zero once per 4G clears
-                std::fill(stamp.begin(), stamp.end(), 0);
+                std::fill(cut_stamp.begin(), cut_stamp.end(), 0);
                 epoch = 1;
             }
         }
@@ -845,14 +895,10 @@ private:
     // [1, min(ncand, 8)], and 1 below the small-pool gate.
     int resolved_plan_threads_(int ncand) const;
     int plan_threads_ = 0;
-    // Flattened band indexing for CandOverlay: band_base_[ci] is the first
-    // slot of cut ci's bands; band_base_.back() is the total.  Rebuilt with
-    // cuts_ (rebuild_cuts_ is the single builder).
-    std::vector<size_t> band_base_;
     // Monotonic id of this planner's cut grid (stamped by rebuild_cuts_ from
     // a process-wide counter): the overlay validity token.  Copied clones
-    // share it — their band_base_ is identical, which is all the overlay
-    // needs (values are seeded per touch from the CURRENT planner's cuts_).
+    // share it — their cut set is identical, which is all the overlay needs
+    // (values are seeded per touch from the CURRENT planner's cuts_).
     uint64_t cuts_gen_ = 0;
     // ── Fractional-share state (Phase 3, hier_layer_caps.md §6 Tier 2) ────
     // Share context of the wrapper plan_bundle is currently evaluating:
