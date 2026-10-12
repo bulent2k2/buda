@@ -48,20 +48,42 @@ enum class TegMode {
 };
 
 struct Point { int x, y; };
+// Landing-face tag on a Rect (docs/internal/fixed_pin_design.md).  0 = every
+// edge of the rect is a face, which is every rect that is not a fixed-pin
+// strip.  A strip carries exactly ONE bit: the edge a wire must END on.  Its
+// other three edges (the inner edge and the two short ends) are not faces, so
+// a stub ending there is not a landing.  North is +y.
+enum : int { FACE_ANY = 0, FACE_N = 1, FACE_S = 2, FACE_E = 4, FACE_W = 8 };
 struct Rect {
     int x1, y1, x2, y2;
+    int face = FACE_ANY;   // trailing + defaulted: Rect{a,b,c,d} stays valid
     Point center() const { return { (x1+x2)/2, (y1+y2)/2 }; }
     // Nearest block face in the direction of 'toward'. Returns 'toward' itself
     // if the value falls inside the block (= trunk passes through the block).
-    int face_x(int toward) const { return toward > x2 ? x2 : toward < x1 ? x1 : toward; }
-    int face_y(int toward) const { return toward > y2 ? y2 : toward < y1 ? y1 : toward; }
+    // A tagged strip's face is its tagged edge whatever 'toward' is: it has no
+    // inside to pass through, and the edge a wire may end on is fixed.
+    int face_x(int toward) const {
+        if (face == FACE_E) return x2;
+        if (face == FACE_W) return x1;
+        return toward > x2 ? x2 : toward < x1 ? x1 : toward;
+    }
+    int face_y(int toward) const {
+        if (face == FACE_N) return y2;
+        if (face == FACE_S) return y1;
+        return toward > y2 ? y2 : toward < y1 ? y1 : toward;
+    }
+    // May a wire end on this rect's x1 / x2 / y1 / y2 edge?
+    bool face_ok_x1() const { return face == FACE_ANY || face == FACE_W; }
+    bool face_ok_x2() const { return face == FACE_ANY || face == FACE_E; }
+    bool face_ok_y1() const { return face == FACE_ANY || face == FACE_S; }
+    bool face_ok_y2() const { return face == FACE_ANY || face == FACE_N; }
     // Return a rect inset by (dx, dy) on each side.
     // Guard: if the margin would invert an axis, keep that axis at full extent.
     Rect shrink(int dx, int dy) const {
         int nx1 = x1+dx, nx2 = x2-dx, ny1 = y1+dy, ny2 = y2-dy;
         if (nx1 > nx2) { nx1 = x1; nx2 = x2; }
         if (ny1 > ny2) { ny1 = y1; ny2 = y2; }
-        return Rect{nx1, ny1, nx2, ny2};
+        return Rect{nx1, ny1, nx2, ny2, face};
     }
 };
 struct Segment {
@@ -191,6 +213,13 @@ struct Busterm {
     // margined multi-rect block must not lose its tap (PR #835 P2).  Declared
     // last so the 5-field aggregate initializations stay valid.
     std::vector<Rect> orig_rects = {};
+};
+// A fixed-pin declaration on one block (see Floorplan::set_pin_fix).
+struct PinFix {
+    int  faces = 0;            // FACE_* mask; 0 = every exposed face
+    int  rect  = -1;           // declared-rect index; -1 = every rect
+    bool has_window = false;
+    int  lo = 0, hi = 0;       // block-local window along the face
 };
 // Per-segment busterm annotation: .first = busterm at segment start endpoint,
 // .second = busterm at segment end endpoint.  nullopt means the endpoint is an
@@ -710,6 +739,29 @@ public:
     // for a single-rect block).
     std::vector<Rect> landing_rects(const std::string& name) const;
     Rect              landing_bounds(const std::string& name) const;
+    // ── Fixed pins (docs/internal/fixed_pin_design.md) ──────────────────────
+    // A block's pin fix narrows where a wire may LAND, never what the block
+    // blocks.  faces: bitmask of FACE_* (0 = every face); rect: index into the
+    // block's declared rects (-1 = all); window: a span along the face in
+    // BLOCK-LOCAL coordinates (origin = the block's lower-left corner), absolute
+    // layout coordinates = local + that corner.
+    void set_pin_fix(const std::string& block, const PinFix& fix);
+    void clear_pin_fix(const std::string& block);
+    bool has_pin_fix(const std::string& block) const {
+        return pin_fixes_.count(block) > 0;
+    }
+    PinFix pin_fix(const std::string& block) const;
+    // The admissible landing strips of a fixed block, each tagged with its one
+    // face.  Empty when the fix admits nothing (the command refuses that).
+    std::vector<Rect> pin_fix_strips(const std::string& block) const;
+    // THE one place a Busterm is built from the floorplan.  Unfixed blocks get
+    // exactly what the generator sites used to build by hand (margin-inset bbox
+    // + rects, physical spelling kept beside it); a fixed block gets its strips
+    // as both spellings, un-inset (a declared window is physical).
+    Busterm landing_busterm(const std::string& block) const;
+    // Rects a wire CROSSING the block counts as covering it through (see the
+    // definition: a pass-through is two landings).  Unfixed = get_block_rects.
+    std::vector<Rect> passthrough_rects(const std::string& block) const;
     // OBSTRUCTION geometry: what the block BLOCKS on the lower stack.  The
     // physical footprint, never a landing strip: no pin declaration may turn a
     // macro's body into routable space.
@@ -812,6 +864,7 @@ private:
     uint64_t rev_ = 0;
     std::map<std::string, Rect>          blocks_;
     std::map<std::string, std::vector<Rect>> block_rects_;  // only for multi-rect blocks
+    std::map<std::string, PinFix>        pin_fixes_;        // fixed-pin landings per block
     std::set<std::string>                containers_;       // hierarchy envelopes (not leaf cells)
     std::map<std::string, std::set<int>> leaf_blocked_;     // explicit per-leaf blocked LOW layers
     std::map<std::string, TegMode>       teg_modes_;

@@ -243,6 +243,25 @@ class VizAbstractDrawMixin:
     def draw_blocks(self):
         self._redraw_blocks()
         self.draw_keepouts()
+        self.draw_pin_fixes()
+
+    def draw_pin_fixes(self):
+        """Fixed-pin landings (`fix_pin`): each admissible strip is drawn as a
+        thick green line along the ONE face a wire may end on, over the block's
+        physical outline (which is what the block still blocks)."""
+        fp = self.fp
+        if not hasattr(fp, "has_pin_fix"):
+            return
+        for name, _r in fp.get_all_blocks():
+            if not fp.has_pin_fix(name):
+                continue
+            for (x1, y1, x2, y2, face) in fp.pin_fix_strips(name):
+                if face == 4:      xs, ys = [x2, x2], [y1, y2]     # east
+                elif face == 8:    xs, ys = [x1, x1], [y1, y2]     # west
+                elif face == 1:    xs, ys = [x1, x2], [y2, y2]     # north
+                else:              xs, ys = [x1, x2], [y1, y1]     # south
+                self.ax.plot(xs, ys, color="#1a9850", lw=4, solid_capstyle="butt",
+                             zorder=6, label="_fixed_pin")
 
 
     def draw_keepouts(self):

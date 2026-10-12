@@ -520,6 +520,30 @@ void bind_routing(py::module_& m) {
             return out;
         })
         .def("landing_bounds",          &Floorplan::landing_bounds)
+        .def("set_pin_fix", [](Floorplan& fp, const std::string& block, int faces, int rect,
+                               bool has_window, int lo, int hi) {
+            PinFix f; f.faces = faces; f.rect = rect; f.has_window = has_window; f.lo = lo; f.hi = hi;
+            fp.set_pin_fix(block, f);
+        }, py::arg("block"), py::arg("faces") = 0, py::arg("rect") = -1,
+           py::arg("has_window") = false, py::arg("lo") = 0, py::arg("hi") = 0)
+        .def("clear_pin_fix",           &Floorplan::clear_pin_fix)
+        .def("passthrough_rects", [](const Floorplan& fp, const std::string& name) {
+            std::vector<std::tuple<int,int,int,int>> out;
+            for (const auto& r : fp.passthrough_rects(name))
+                out.emplace_back(r.x1, r.y1, r.x2, r.y2);
+            return out;
+        })
+        .def("has_pin_fix",             &Floorplan::has_pin_fix)
+        .def("pin_fix", [](const Floorplan& fp, const std::string& block) {
+            PinFix f = fp.pin_fix(block);
+            return py::make_tuple(f.faces, f.rect, f.has_window, f.lo, f.hi);
+        })
+        .def("pin_fix_strips", [](const Floorplan& fp, const std::string& block) {
+            std::vector<std::tuple<int,int,int,int,int>> out;
+            for (const auto& r : fp.pin_fix_strips(block))
+                out.emplace_back(r.x1, r.y1, r.x2, r.y2, r.face);
+            return out;
+        })
         .def("obstruction_rects", [](const Floorplan& fp, const std::string& name) {
             auto rects = fp.obstruction_rects(name);
             std::vector<std::tuple<int,int,int,int>> out;

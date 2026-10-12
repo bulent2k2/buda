@@ -249,6 +249,24 @@ def draw_blocks_faint(ax, cs):
                                    fc="none", ec="#999", lw=0.8, ls=":", zorder=1))
 
 
+def draw_pin_fixes(ax, s):
+    """Fixed-pin landings (`fix_pin`): each admissible strip is a thick green line
+    along the ONE face a wire may end on.  A design with no fix draws nothing."""
+    n = 0
+    fp = s.fp
+    for name, _r in fp.get_all_blocks():
+        if not fp.has_pin_fix(name):
+            continue
+        for (x1, y1, x2, y2, face) in fp.pin_fix_strips(name):
+            if face == 4:     xs, ys = [x2, x2], [y1, y2]
+            elif face == 8:   xs, ys = [x1, x1], [y1, y2]
+            elif face == 1:   xs, ys = [x1, x2], [y2, y2]
+            else:             xs, ys = [x1, x2], [y1, y1]
+            ax.plot(xs, ys, color="#1a9850", lw=4, solid_capstyle="butt", zorder=6)
+            n += 1
+    return n
+
+
 def draw_keepouts(ax, s):
     """Declared keepout zones, hatched in the colour of the layer they block
     (a zone on several layers takes the first), under the wires: the
@@ -418,6 +436,7 @@ def render(flow, prefix, title=None, dpi=150, label_depth=1):
                                         f"({n_bund} bundles, {n_ovl} overlap(s))")
         draw_blocks_faint(ax, cs)
         n_keep = draw_keepouts(ax, s)
+        draw_pin_fixes(ax, s)
         draw_nuts(ax, s, names)
         fig.savefig(prefix + "_nuts.png", dpi=dpi, bbox_inches="tight")
         plt.close(fig)
@@ -440,6 +459,7 @@ def render(flow, prefix, title=None, dpi=150, label_depth=1):
         fig, ax = _new_fig(bounds, die, f"{title} — DetailedNUTS: per-bit wires ({n_bits} bit-wires)")
         draw_blocks_faint(ax, cs)
         draw_keepouts(ax, s)
+        draw_pin_fixes(ax, s)
         draw_dnuts(ax, s, names, signal, shields)
         fig.savefig(prefix + "_dnuts.png", dpi=dpi, bbox_inches="tight")
         plt.close(fig)

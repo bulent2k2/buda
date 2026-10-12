@@ -338,7 +338,11 @@ void derive_slide_ranges(const Topology& topo, const Floorplan& fp,
             // Floorplan accessors (get_block_rects/bounds/corner_margin).
             if (!fp.has_block(conn.block_name)) continue;
             Rect face_rect = fp.landing_bounds(conn.block_name);
-            BlockCornerMargin cm = fp.get_block_corner_margin(conn.block_name);
+            // A fixed pin's window is PHYSICAL and was built un-inset: applying
+            // the block's corner margin again would shrink a declared window.
+            BlockCornerMargin cm = fp.has_pin_fix(conn.block_name)
+                                       ? BlockCornerMargin{}
+                                       : fp.get_block_corner_margin(conn.block_name);
             {
                 const auto rects = fp.landing_rects(conn.block_name);
                 // Which rect(s) does this tap land on?  Generation lands taps
@@ -565,7 +569,7 @@ void tighten_passthrough(const Topology& topo, const Floorplan& fp,
     auto rects_of_block = [&](const std::string& bname) {
         auto it = over_untapped.find(bname);
         if (it != over_untapped.end()) return it->second;
-        auto rects = fp.landing_rects(bname);
+        auto rects = fp.passthrough_rects(bname);
         if (rects.empty()) rects.push_back(fp.landing_bounds(bname));
         return rects;
     };
@@ -640,7 +644,9 @@ void tighten_passthrough(const Topology& topo, const Floorplan& fp,
             }
             if (span_lo > span_hi) continue; // segment doesn't span this block
 
-            BlockCornerMargin cm = fp.get_block_corner_margin(bname);
+            BlockCornerMargin cm = fp.has_pin_fix(bname)
+                                       ? BlockCornerMargin{}
+                                       : fp.get_block_corner_margin(bname);
             int margin = cs.horiz ? cm.dy : cm.dx;
             int lo = span_lo + margin;
             int hi = span_hi - margin;

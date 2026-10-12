@@ -83,7 +83,7 @@ def _feedthru_refused_blocks(session, names):
     return out
 
 
-def cmd_add_block(session, cmd, args, cmd_line):
+def _cmd_add_block(session, cmd, args, cmd_line):
     # Single-rect: add_block <name> <x1> <y1> <x2> <y2> [corner_margin ...]
     # Multi-rect:  add_block <name> rect <x1> <y1> <x2> <y2> [rect ...] [corner_margin ...]
     name = args[0]
@@ -213,6 +213,14 @@ def cmd_add_block(session, cmd, args, cmd_line):
         if "pct_v" in kws and "pct_h" not in kws and "dx" not in kws: cm_dx = cm_dy
         if cm_dx > 0 or cm_dy > 0:
             session.fp.set_block_corner_margin(name, cm_dx, cm_dy)
+
+
+def cmd_add_block(session, cmd, args, cmd_line):
+    _cmd_add_block(session, cmd, args, cmd_line)
+    # a `fix_pin` declared before its block could not be checked then
+    if args and getattr(session, "_pin_fixes", None) and args[0] in session._pin_fixes:
+        from buda_cmds.pin_fix_cmds import revalidate
+        revalidate(session, args[0])
 
 
 def cmd_set_teg_mode(session, cmd, args, cmd_line):

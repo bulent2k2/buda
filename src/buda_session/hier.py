@@ -738,6 +738,17 @@ class HierMixin:
         return out
 
     def _fp_add_comp(self, fp, comp, mr, name=None, ox=0.0, oy=0.0):
+        """`_fp_add_comp_geom`, then check a `fix_pin` declared before this block
+        existed (the geometry only arrives here, so this is where it can be
+        validated — for the session floorplan and every derived frame alike)."""
+        self._fp_add_comp_geom(fp, comp, mr, name, ox, oy)
+        pf = getattr(self, "_pin_fixes", None)
+        nm = comp.name if name is None else name
+        if pf and nm in pf:
+            from buda_cmds.pin_fix_cmds import revalidate
+            revalidate(self, nm, fp)
+
+    def _fp_add_comp_geom(self, fp, comp, mr, name=None, ox=0.0, oy=0.0):
         """Project ONE BDB component into `fp` — `add_block_rects` when its
         cell declares a multi-rect footprint, else the historical
         `add_block(bbox)`.  `name` overrides the block name (a cell-local
@@ -1166,6 +1177,12 @@ class HierMixin:
                 for n in blocks:
                     for lid in layers:
                         fp.set_feedthru_block_layer(n, lid, val)
+        # Fixed pins: matched by the name THIS frame knows (a full component
+        # path in depth/cross-level frames, the child's local name in a
+        # cell-local one), like the block-scoped feedthru rules above.
+        for name, fx in (getattr(self, "_pin_fixes", None) or {}).items():
+            fp.set_pin_fix(name, fx["faces"], fx["rect"], fx["has_window"],
+                           fx["lo"], fx["hi"])
         return fp
 
     def _build_cell_local_floorplan(self, parent_comp_name):

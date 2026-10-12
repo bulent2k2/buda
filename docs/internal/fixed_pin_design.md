@@ -654,3 +654,17 @@ down — would be a separate item, and it would emit `fix_pin` lines.
 - Q7 answered: the wrap-around pin is rare, so PR 1b proceeds.  Q1 answered:
   hard-macro LEF first, plus a command usable from the Tcl front end to
   exercise flat and hier flows.
+- **PR 1b, first cut (this branch)**: the tagged strips and the command for a
+  BLOCK — `Rect::face` tag, `Floorplan::set_pin_fix` / `pin_fix_strips` /
+  `landing_busterm` (the one place a busterm is built, replacing four hand
+  copies), `passthrough_rects` (the two-face rule), tag-aware landing
+  recognition, the `BUSTERM_FACE` audit on a fixed block, the generation drop
+  with BUDA-1922, `fix_pin` / `dump_pin_fixes`, the hier replay by frame name,
+  viewer and `render_design` drawing.  Shipped as a block-level fix on
+  purpose: the per-pin selector needs the bundle split and the per-bundle
+  resolver key, which is the next change, together with the cell-level
+  orientation transform, persistence (`pin_fix` table, and the face tag in the
+  persisted busterm rect rows — a restored busterm loses it today), `at <pos>`
+  (needs the track pitch) and the `PIN_FIX` kind.  Known limit, visible in
+  the flows: a fix governs every bus landing on its block, so a block with an
+  input and an output bus cannot be fixed to one face yet.

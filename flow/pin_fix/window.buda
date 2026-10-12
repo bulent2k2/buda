@@ -1,0 +1,38 @@
+# fix_pin PR 1b — a window along the face (`at lo..hi`, block-local coordinates).
+#
+# One tall macro whose west pins are only available between y=100 and y=160 of
+# the block (a pin bank, as a macro's LEF would give), fed by a wide 4-bit bus
+# from a source whose centre line sits well above the window.  Without the fix
+# the bus lands level with the source's centre; with it the stub bends to the
+# window and lands inside it.  A second macro (east pins, window 250..310) shows
+# the same on the far face.
+#
+# Run:   bin/buda flow/pin_fix/window.buda
+# Expect: both buses land inside their green window; check_design Success.
+
+add_block BANK     500   0 700 400
+add_block BANK_SRC   0 150 100 450
+add_block BANK2    500 700 700 1100
+add_block BANK2_SRC 900 900 1000 1100
+
+def_layer 4 M4 H TOP 0
+def_layer 5 M5 V TOP 0
+def_track_pattern 4 0 (SIGNAL 2 2)x60
+def_track_pattern 5 0 (SIGNAL 2 2)x60
+
+fix_pin BANK  west at 100..160
+fix_pin BANK2 east at 250..310
+dump_pin_fixes
+
+add_bus bank[4]  BANK_SRC.tx  BANK.rx
+add_bus bank2[4] BANK2_SRC.tx BANK2.rx
+
+run_bundler STRICT
+generate_topologies
+run_planner
+run_nuts
+check_design
+run_detailed_nuts
+check_design
+report_wl
+visualize
