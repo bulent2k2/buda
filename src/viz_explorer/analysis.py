@@ -304,7 +304,7 @@ class ExplorerAnalysisMixin:
         for name, ubbox in self.fp.get_all_blocks():
             if name in tapped:
                 continue
-            rects = self.fp.landing_rects(name)   # [] for single-rect blocks
+            rects = self.fp.passthrough_rects(name)   # [] for single-rect blocks
             if rects:
                 hit = any(crosses(x1, y1, x2, y2) for (x1, y1, x2, y2) in rects)
             else:

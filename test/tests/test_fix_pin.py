@@ -320,6 +320,36 @@ def test_a_fix_declared_before_hier_blocks_is_checked_when_they_are_projected(tm
     assert "src_i/buf_i" not in s._pin_fixes
 
 
+def test_a_corner_margin_does_not_shrink_a_declared_window():
+    """Codex on #980: derive_slide_ranges re-applied the block's margin to the
+    already-physical window, so `corner_margin 5` + `at 100..160` slid inside
+    105..155.  The declared window is the slide window."""
+    s, _ = _session(*BASE, "corner_margin dx 5 dy 5", "fix_pin MAC west at 100..160",
+                    *ROUTE)
+    ct = buda.ConnTopology()
+    sels = []
+    for t in s.bundles[0].input.candidates:
+        ct.build(t, s.fp)
+        for cs in ct.segs():
+            for conn in cs.conns:
+                if conn.block_name == "MAC":
+                    sels.append((cs.perp_lo, cs.perp_hi))
+    assert sels and any(lo == 500 and hi == 560 for lo, hi in sels), sels
+
+
+def test_the_pass_through_reporters_read_the_two_face_geometry():
+    """Codex on #980: with an east-only fix a horizontal segment spanning the
+    macro crosses the east strip but is NOT a pass-through (the west face is not
+    admitted); the reporters must agree with generation and the audit."""
+    import buda_session.util as u
+    s, _ = _session(*BASE, "fix_pin MAC east")
+    cs = type("CS", (), dict(horiz=True, perp_pos=500, along_lo=0, along_hi=800))()
+    ub = s.fp.get_block_bounds("MAC")
+    assert not u.seg_spans_block(cs, "MAC", ub, s.fp)
+    _say(s, "fix_pin MAC H")
+    assert u.seg_spans_block(cs, "MAC", ub, s.fp)
+
+
 # ── flows ─────────────────────────────────────────────────────────────────
 
 def _run(flow):
