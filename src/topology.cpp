@@ -531,19 +531,24 @@ std::vector<Rect> Floorplan::passthrough_rects(const std::string& name) const {
         if (fx.rect >= 0 && fx.rect != k) continue;
         const Rect& r = phys[k];
         const auto st = strips_of_rect(fx, k, phys, bit->second.x1, bit->second.y1);
-        const Rect *e = nullptr, *w = nullptr, *n = nullptr, *s = nullptr;
+        // A face split by another rect has SEVERAL strips; a crossing may run
+        // between any east strip and any west strip (north/south alike), so
+        // pair every combination and emit each non-empty overlap.
+        std::vector<const Rect*> e, w, n, s;
         for (const Rect& t : st) {
-            if (t.face == FACE_E) e = &t; else if (t.face == FACE_W) w = &t;
-            else if (t.face == FACE_N) n = &t; else s = &t;
+            if (t.face == FACE_E) e.push_back(&t); else if (t.face == FACE_W) w.push_back(&t);
+            else if (t.face == FACE_N) n.push_back(&t); else s.push_back(&t);
         }
-        if (e && w) {
-            const int lo = std::max(e->y1, w->y1), hi = std::min(e->y2, w->y2);
-            if (lo < hi) out.push_back(Rect{r.x1, lo, r.x2, hi});
-        }
-        if (n && s) {
-            const int lo = std::max(n->x1, s->x1), hi = std::min(n->x2, s->x2);
-            if (lo < hi) out.push_back(Rect{lo, r.y1, hi, r.y2});
-        }
+        for (const Rect* a : e)
+            for (const Rect* b : w) {
+                const int lo = std::max(a->y1, b->y1), hi = std::min(a->y2, b->y2);
+                if (lo < hi) out.push_back(Rect{r.x1, lo, r.x2, hi});
+            }
+        for (const Rect* a : n)
+            for (const Rect* b : s) {
+                const int lo = std::max(a->x1, b->x1), hi = std::min(a->x2, b->x2);
+                if (lo < hi) out.push_back(Rect{lo, r.y1, hi, r.y2});
+            }
     }
     if (out.empty()) {
         constexpr int far = INT_MIN / 4;

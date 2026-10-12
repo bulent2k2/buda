@@ -291,6 +291,35 @@ def test_a_bare_east_fix_admits_no_pass_through():
     assert fp.passthrough_rects("M") == [(400, 400, 700, 700)]
 
 
+def test_every_strip_of_a_split_face_can_carry_a_pass_through():
+    """Codex on #980: a face another rect splits has several strips and the
+    pass-through derivation kept only the last.  Rect (0,0)-(100,300) with an
+    abutting rect on its east side over y 100..200: east strips at y 0..100
+    and 200..300, one full west strip — a crossing at y=50 is admitted."""
+    fp = _fp([(0, 0, 100, 300), (100, 100, 200, 200)])
+    fp.set_pin_fix("M", E | W, 0)
+    assert sorted(fp.passthrough_rects("M")) == [(0, 0, 100, 100), (0, 200, 100, 300)]
+
+
+def test_a_fix_declared_before_hier_blocks_is_checked_when_they_are_projected(tmp_path):
+    """Codex on #980: `add_block` was the only validation point.  The hier
+    projection arrives through `_fp_add_comp`, for the session floorplan and
+    every derived frame."""
+    txt = (FLOW / "hier.buda").read_text()
+    txt = txt.replace("source ../tracks/tracks.buda",
+                      f"source {_ROOT / 'flow' / 'tracks' / 'tracks.buda'}")
+    txt = txt.replace("fix_pin src_i/buf_i east at 10..30", "fix_pin src_i/buf_i east at 500..600")
+    f = tmp_path / "bad_hier.buda"
+    f.write_text(txt)
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        s.do_command(f"source {f}")
+    assert "fix_pin src_i/buf_i" in out.getvalue() and "dropped" in out.getvalue(), out.getvalue()[-600:]
+    assert "src_i/buf_i" not in s._pin_fixes
+
+
 # ── flows ─────────────────────────────────────────────────────────────────
 
 def _run(flow):
