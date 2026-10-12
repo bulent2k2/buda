@@ -73,3 +73,43 @@ def test_touching_end_counts_as_a_hit():
 def test_empty_and_unplaced_only():
     assert list(buda.span_index_hits([], 0.0, 1.0)) == []
     assert list(buda.span_index_hits([(0.0, 5.0, False)], 0.0, 1.0)) == []
+
+
+def test_preferred_fit_union_matches_scan():
+    """`preferred_fit` asks, per candidate, whether the width-wide window meets
+    any occupied interval.  With many entries it asks the merged union by
+    binary search; the answer must be the scan's, so compare the two over
+    random occupancy -- overlapping, touching, nested, unsorted -- and
+    windows, preferences and widths."""
+    rnd = random.Random(972)
+    n_checked = 0
+    for _ in range(400):
+        n = rnd.choice([16, 17, 40, 120])
+        occ = []
+        for _ in range(n):
+            lo = rnd.randint(0, 400)
+            occ.append((float(lo), float(lo + rnd.choice([0, 1, 2, 5, 9, 30]))))
+        if rnd.random() < 0.5:
+            occ.sort()
+        else:
+            rnd.shuffle(occ)
+        lo = float(rnd.randint(-20, 100))
+        hi = lo + rnd.randint(5, 500)
+        width = float(rnd.choice([1, 2, 3, 8]))
+        pitch = rnd.choice([0.0, 1.0, 2.5])
+        p0 = rnd.uniform(lo, hi)
+        p1 = p0 + rnd.choice([0.0, 0.0, 12.0])
+        a = buda.preferred_fit_impl(lo, hi, width, occ, p0, p1, pitch, True)
+        b = buda.preferred_fit_impl(lo, hi, width, occ, p0, p1, pitch, False)
+        assert (math.isnan(a) and math.isnan(b)) or a == b, (occ, lo, hi, width, a, b)
+        n_checked += 1
+    assert n_checked == 400
+
+
+def test_preferred_fit_nan_or_inverted_occupancy_keeps_scan():
+    occ = [(float(i * 3), float(i * 3 + 1)) for i in range(20)]
+    occ[7] = (float("nan"), 5.0)
+    occ[9] = (30.0, 20.0)
+    a = buda.preferred_fit_impl(0, 100, 2, occ, 40.0, 40.0, 1.0, True)
+    b = buda.preferred_fit_impl(0, 100, 2, occ, 40.0, 40.0, 1.0, False)
+    assert a == b

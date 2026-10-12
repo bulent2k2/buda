@@ -326,6 +326,13 @@ struct RepackStats {
     long long ns_prep = 0, ns_snap = 0, ns_solve = 0, ns_settle = 0,
               ns_guard = 0, ns_restore = 0, ns_total = 0;
 };
+// preferred_fit's body with the pitch given and the union-merge fast path
+// switchable, so a test can hold the fast path against the scan it replaced.
+double preferred_fit_impl(
+    double lo, double hi, double width,
+    const std::vector<std::pair<double,double>>& occupied,
+    double pref_lo, double pref_hi, double track_pitch, bool allow_merge);
+
 // Test door for the repack's span index (#972 C1): the indices of `spans`
 // ((span_lo, span_hi, placed) triples) whose closed span touches [a, b],
 // ascending -- the brute-force answer to compare against.
