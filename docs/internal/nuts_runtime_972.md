@@ -371,6 +371,45 @@ but has to be invalidated when an accepted attempt moves a segment.  Skipping
 a wide attempt the narrow one proves hopeless still changes decisions and
 needs the corpus.
 
+## Landed: the base occupancy shared across attempts (2026-10-12)
+
+The wide attempt asks for the same neighbours' occupancy cluster after cluster
+(747k member builds over 4.6k segments at NQ=32), and 97-99 % of attempts are
+rejected, which restores the placement bitwise.  So each member's base
+occupancy (keepouts over its span, plus every touching other-bundle segment
+*with its interval*, filtered by the member set per attempt) is kept in a
+`RepackBaseCache` for the length of one `repack_overlap_clusters` call and
+cleared when an attempt is ACCEPTED (positions and follower spans moved).
+Only attempts with eight or more members use it, the same cut as the span
+index.  `BUDA_NO_REPACK_CACHE=1` rebuilds per attempt; `[RepackProf]` prints
+`cache=builds/reuses`.
+
+| dial | `run_nuts` before | after | wide pack before | after | cache builds/reuses | NUTS log |
+|---|---|---|---|---|---|---|
+| NQ=32 | 33.0 s | 31.4 s | 9.4 s | 7.4 s | 168k / 461k | identical |
+| NQ=62 | 167.5 s | 167.8 s | 59.4 s | 55.6 s | 665k / 1.30M | identical |
+
+This is a SMALL win and the table says so: the wide pack drops 6-22 %, but
+`run_nuts` moves by less than the run-to-run spread on this box (two runs of
+the same binary differ by 1-2 s at NQ=32 and by several seconds on a 105 s
+chip flow), and at NQ=62 the total did not move outside it.  A reuse rate of
+73 % is capped by the clear-on-accept rule: 194 accepts at NQ=32 flush every
+entry.  A finer invalidation (keep an entry unless its segment, one of its
+hits, or a changed segment touching it moved) was built and measured: builds
+fell 168k -> 118k and the wide pack did not get faster (7.5-7.8 s against
+7.4-7.6 s), so it was removed.  What remains per member is the copy of the
+cached list and the membership filter, then the sort and `preferred_fit`.
+
+QoR corpus against the previous head: identical on every metric across the 56
+comparable flows, abstract and detailed WL +0 (runtime +4 %, which is what the
+previous change read too and which the same-binary spread above covers).
+NUTS logs identical at NQ=16/32/62.
+
+**What is left.**  The wide attempt is still ~55 s of the 163 s at NQ=62.
+The remaining per-member work is O(occupancy list); an incrementally
+maintained sorted list would remove the copy and the sort.  Skipping a wide
+attempt the narrow one proves hopeless changes decisions and needs the corpus.
+
 ## Not verified
 
 * The QoR corpus (`tools/qor_corpus.py --vs main`) was not run on the
