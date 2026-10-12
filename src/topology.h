@@ -681,7 +681,9 @@ private:
 struct FixScope {
     const FixMap* prev_;
     explicit FixScope(const FixMap* m);
-    explicit FixScope(const Topology& t) : FixScope(t.has_block_fixes ? &t.block_fixes : nullptr) {}
+    // A topology without a per-bundle map leaves the ACTIVE one alone: the
+    // generator establishes its bundle's scope before its candidates are stamped.
+    explicit FixScope(const Topology& t) : FixScope(t.has_block_fixes ? &t.block_fixes : active_block_fixes()) {}
     ~FixScope();
     FixScope(const FixScope&) = delete;
     FixScope& operator=(const FixScope&) = delete;
