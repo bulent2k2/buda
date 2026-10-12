@@ -275,6 +275,15 @@ def _partition_nets(nets, target, caps, inc_fn):
     return parts
 
 
+def _landing_bounds(session, nets, blk):
+    """A block's landing bounds as THIS bundle sees them: under its per-pin
+    fixes, so the auto cap is sized by the window its bits can land in."""
+    import buda
+    from buda_cmds.pin_fix_cmds import bundle_fix_map
+    with buda.BlockFixScope(bundle_fix_map(session, nets)):
+        return session.fp.landing_bounds(blk)
+
+
 def _split_oversized_bundles(session, raw_bundles):
     """Optional bundle bit bound (set_max_bundle_bits): split any bundle
     over the limit into balanced parts, keeping bits of the same bus
@@ -321,7 +330,7 @@ def _split_oversized_bundles(session, raw_bundles):
             for blk, bits_at in at_block.items():
                 if not session.fp.has_block(blk):
                     continue
-                r = session.fp.landing_bounds(blk)
+                r = _landing_bounds(session, nets, blk)
                 edge = min(r.x2 - r.x1, r.y2 - r.y1)
                 cap = max(1, int(edge / pitch))
                 need = math.ceil(bits_at / cap)
@@ -351,7 +360,7 @@ def _split_oversized_bundles(session, raw_bundles):
                 for blk in {e[0], *e[1]}:
                     if blk in caps or not session.fp.has_block(blk):
                         continue
-                    r = session.fp.landing_bounds(blk)
+                    r = _landing_bounds(session, nets, blk)
                     caps[blk] = max(1, int(min(r.x2 - r.x1,
                                                r.y2 - r.y1) / pitch))
 

@@ -535,3 +535,31 @@ def test_the_hier_flow_says_selectors_are_not_replayed():
     with contextlib.redirect_stdout(out):
         s._apply_fp_session_settings(buda.Floorplan())
     assert "per-pin selectors are not replayed" in out.getvalue()
+
+
+def test_auto_bit_cap_is_sized_by_the_selected_landing_window():
+    """Codex on #983: the auto cap read the block's whole bounds, not the pin's window."""
+    pre = ["add_block S 0 0 100 100", "add_block M 400 0 600 200", *TECH]
+    post = ["set_max_bundle_bits auto", "add_bus b[4] S.o M.tx", "run_bundler STRICT"]
+    s0, _ = _session(*pre, *post)
+    s1, _ = _session(*pre, "fix_pin M.tx west at 80..90", *post)
+    assert len(s0.bundles) == 1
+    assert len(s1.bundles) > 1
+
+
+def test_annotate_topology_reads_the_topologys_own_fixes():
+    """Codex on #983: annotate_topology used the floorplan's block-level fix."""
+    s, _ = _run_pins()
+    w = next(w for w in s.bundles
+             if w.input.original_bundle.get_net_names()[0] == "hi_0")
+    topo = w.input.candidates[0]
+    s.fp.set_pin_fix("MAC", E, -1, False, 0, 0)       # a conflicting block-level fix
+    topo2 = buda.offset_topology(topo, 0, 0)
+    topo2.clear_analysis_cache()
+    buda.annotate_topology(topo2, s.fp)
+    assert any(ep[1] is not None or ep[0] is not None
+               for ep in topo2.seg_busterms.values())
+    ct = buda.ConnTopology()
+    ct.build(topo2, s.fp)
+    res = buda.check_topo(ct, topo2, s.fp, 0)
+    assert not [v for v in res.violations if "BUSTERM" in str(v.kind)]

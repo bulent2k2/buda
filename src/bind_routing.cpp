@@ -350,6 +350,7 @@ void bind_routing(py::module_& m) {
     // a floorplan, so ConnTopology can read the authoritative endpoint taps
     // (it no longer geometrically guesses).  Mutates topo in place.
     m.def("annotate_topology", [](Topology& topo, const Floorplan& fp) {
+        FixScope fix_scope(topo);   // landing_busterm reads the bundle's own fixes
         annotate_topology(topo, fp);
     }, py::arg("topo"), py::arg("fp"));
 
@@ -704,7 +705,9 @@ void bind_routing(py::module_& m) {
     py::class_<PyFixScope>(m, "BlockFixScope")
         .def(py::init([](py::object topo) {
             auto p = std::make_unique<PyFixScope>();
-            if (!topo.is_none()) {
+            if (py::isinstance<py::dict>(topo)) {      // an explicit effective map
+                p->map = fixmap_from_py(topo.cast<py::dict>()); p->use = true;
+            } else if (!topo.is_none()) {
                 const Topology& t = topo.cast<const Topology&>();
                 if (t.has_block_fixes) { p->map = t.block_fixes; p->use = true; }
             }
