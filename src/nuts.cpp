@@ -2488,13 +2488,15 @@ private:
     // occupancy pushed is the scan's.
     mutable SpanIndex ko_x_, ko_y_;      // zone x-edges (horiz segs), y-edges (vert)
     mutable bool ko_built_ = false;
+    mutable int  ko_scans_ = 0;          // scans paid before the tree is worth building
     mutable std::vector<int> ko_hits_;
 
     void add_keepout_occ(const TrackSegment* t,
                          std::vector<std::pair<double,double>>& occ) const {
         // keepout_occupied over the layer's own zones (every LayerSolver is
         // one layer, so the layer test is already decided per zone).
-        if (kozs_layer.size() >= 32 && !span_index_off()) {
+        if (kozs_layer.size() >= 32 && !span_index_off() &&
+            (ko_built_ || ++ko_scans_ > 64)) {
             if (!ko_built_) {
                 std::vector<std::pair<double,double>> xr, yr;
                 xr.reserve(kozs_layer.size()); yr.reserve(kozs_layer.size());

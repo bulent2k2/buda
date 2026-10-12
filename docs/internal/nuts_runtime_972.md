@@ -317,6 +317,60 @@ instead of copy and re-sort), which is decision-identical; and skipping the
 wide attempt where the narrow attempt's failure already proves it cannot
 help, which is not and needs the corpus.
 
+## Landed: the wide pack's per-member costs (2026-10-12)
+
+The first thing C3 asked for after C1 was a split of the wide pack's remaining
+~108 s at NQ=62, and the guess written above ("the copy, the members²/2 loop,
+the sort and `preferred_fit`") was wrong about the order.  Timed per phase at
+NQ=32 (800k member packs, 78 occupancy entries each on average):
+
+| per-member phase | s |
+|---|---|
+| base occupancy build: keepout scan | 3.6 |
+| base occupancy build: index query + `occupancy_from` over ~59 hits | 5.6 |
+| copy + loop over already-repacked members | 0.75 |
+| sort of the occupancy list | 2.1 |
+| `preferred_fit` | 2.5 |
+
+Three decision-identical changes, each kept only because the NUTS log did not
+move:
+
+* **Keepout scan.**  `add_keepout_occ` tested every zone the layer sees for
+  every member of every attempt.  With 32 or more zones the solver builds an
+  interval tree over the zone edges (x for horizontal segments, y for vertical)
+  and re-tests the hits with the scan's own strict predicate, in zone order.
+  The tree is only built after 64 scans: a chip-scale flow constructs a solver
+  per attempt and most attempts have few members.
+* **`preferred_fit`.**  Per candidate it scanned every occupied interval, and
+  there are 2n+3 candidates.  Over the merged union (sorted, disjoint) the
+  same question is one binary search.  Exact for a positive-width window;
+  NaN, inverted or zero-width input keeps the scan.
+* **Unsorted span query.**  The occupancy list is sorted before use, so the
+  ascending sort of the index hits was waste.
+
+| dial | `run_nuts` before | after | wide pack before | after | NUTS log |
+|---|---|---|---|---|---|
+| NQ=32 | 36.8 s | 33.0 s | 13.2 s | 9.4 s | identical |
+| NQ=62 | 228.0 s | 167.5 s | 108 s | 59.4 s | identical |
+
+QoR corpus against the previous branch head: identical on every metric across
+the 56 comparable flows, abstract and detailed WL +0.  Its runtime read +3.9 %
+(1294 → 1344 s), mostly the chip flows (+7 to +12 s each).  The keepout tree
+is the only part `BUDA_NO_SPAN_INDEX=1` switches off, and `chip_topdown` with
+and without it measures 109.8 s against 107.3 s, so the sweep's slowdown is
+not that; I did not separate the `preferred_fit` change from run-to-run noise
+on a shared box, and say so rather than claim it.  `test_nuts_span_index.py`
+holds the merged `preferred_fit` against the scan over 400 random occupancy
+sets (overlapping, touching, nested, unsorted) and checks the NaN/inverted
+fallback.
+
+**What is left.**  The repack is still 34 % of `run_nuts` at NQ=62.  The
+base occupancy is rebuilt for the same members in each attempt; sharing it
+between the narrow and wide attempt of a cluster would be decision-identical
+but has to be invalidated when an accepted attempt moves a segment.  Skipping
+a wide attempt the narrow one proves hopeless still changes decisions and
+needs the corpus.
+
 ## Not verified
 
 * The QoR corpus (`tools/qor_corpus.py --vs main`) was not run on the
