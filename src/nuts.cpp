@@ -2670,7 +2670,7 @@ private:
         std::vector<std::pair<double,double>> cache_tmp;
         auto base_of = [&](size_t k)
                 -> const std::vector<std::pair<double,double>>& {
-            if (!occ_built[k] && base_cache_ && !repack_cache_off()) {
+            if (!occ_built[k] && base_cache_ && use_idx && !repack_cache_off()) {
                 TrackSegment* m = members[k];
                 auto it = base_cache_->m.find(m);
                 if (it == base_cache_->m.end()) {
