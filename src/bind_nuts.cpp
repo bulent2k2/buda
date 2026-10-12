@@ -102,6 +102,7 @@ void bind_nuts(py::module_& m) {
             d[nm[k]] = a;
         }
         d["layer_segs_sum"] = r.layer_segs_sum;
+        d["cache_builds"] = r.cache_builds; d["cache_reuses"] = r.cache_reuses;
         d["s_prep"] = r.ns_prep * 1e-9; d["s_snap"] = r.ns_snap * 1e-9;
         d["s_solve"] = r.ns_solve * 1e-9; d["s_settle"] = r.ns_settle * 1e-9;
         d["s_guard"] = r.ns_guard * 1e-9; d["s_restore"] = r.ns_restore * 1e-9;
