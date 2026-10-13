@@ -274,3 +274,27 @@ the shorts it targets where the first round is the whole story, and costs
 bits on bottom-up designs, where a template's copied span is longer.  Not a
 default; the bottom-up regression wants its own look before it could be one.
 Fast tier: 3271 passed.
+
+### Why junction reach loses bits on `mix2_fast_bottomup_shared` (2026-10-13)
+
+The lever is better than the default before the healers and worse after them.
+First DetailedNUTS solve: 558 unplaced bits at the default, 398 with the lever
+(376 after its first healer round).  End of the flow: 0 unplaced at the default
+(2 shorted bits), 80 with the lever, in two groups: bundles 149..154 (2 segs x
+4 bits) and 171..174 (seg 1, 8 bits each).
+
+What differs is the route the healers settled on.  Bundle 171 ends as two
+segments at the default (`L_HV`: M4 seg 0, M5 seg 1) and as three with the
+lever (M5, M4, M5), whose M4 middle segment sits in a 15-unit perpendicular
+window, `[1340, 1355]`, that holds 6 to 7 signal tracks of the leased M4 (the
+flow's 75 % share) for 8 bits; DetailedNUTS reports "insufficient signal tracks
+(7) for bus width 8" at four such windows (`[420,435]`, `[880,895]`,
+`[1340,1355]`, `[1700,1715]`) that the default run never meets, and those four
+windows are bundles 171 to 174.  Bundles 149 to 154 are the same story on M2/M3.
+So the loss is a different healer trajectory (ripup re-pins to other candidates
+when the abstract spans are longer) landing on a seat too narrow for its bus,
+not a flaw in what the span says.  Not tried: constraining the healers so they
+cannot choose a candidate whose seat window is narrower than its bus.  Method:
+the flow's `.buda` run in a `BudaSession` with its `visualize`/`exit` lines
+dropped, abstract segments of the affected bundles printed with and without
+`BUDA_NUTS_JUNCTION_REACH=1`.
