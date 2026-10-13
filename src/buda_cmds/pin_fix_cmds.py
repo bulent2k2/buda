@@ -107,6 +107,15 @@ def _eff_faces(session, fix):
     return 0 if eff == 15 else eff
 
 
+def reapply_layer_fixes(session):
+    """A fix restored (or typed) before its layer was declared was stamped with
+    its un-narrowed faces; once a layer becomes known its direction can narrow
+    them, so re-stamp every block-level fix that names layers."""
+    for block, fix in session._pin_fixes.items():
+        if fix.get("layers") and session.fp.has_block(block):
+            _apply(session, block, fix)
+
+
 def _apply(session, block, fix):
     faces = _eff_faces(session, fix)
     session.fp.set_pin_fix(block, max(faces, 0) if faces >= 0 else fix["faces"],
@@ -123,7 +132,7 @@ def _sel_store(session):
 def _fixkey(fix):
     return None if fix is None else (fix["faces"], fix["rect"], fix["has_window"],
                                      fix["lo"], fix["hi"],
-                                     tuple(fix.get("layers") or ()),
+                                     tuple(sorted(fix.get("layers") or ())),
                                      fix.get("order") or "")
 
 

@@ -694,6 +694,8 @@ def cmd_def_layer(session, cmd, args, cmd_line):
     # A reservation restored (or typed) before this layer existed had no
     # axis to be checked on; now it has one (Codex P2 on #936).
     session._revalidate_layer_reserves()
+    from buda_cmds import pin_fix_cmds
+    pin_fix_cmds.reapply_layer_fixes(session)     # a fix naming this layer can narrow now
     # A pattern may already exist for this layer — the v29 restore installs
     # the grid at `open_bdb`, and a flow declares its stack AFTER that
     # (`flow/ariane133/ariane133_heal.buda`: open_bdb line 27, def_layer line
@@ -1113,6 +1115,8 @@ def cmd_import_lef_tech(session, cmd, args, cmd_line):
         if why and why != "no PITCH/WIDTH":
             print(f"[LEF] layer {l.name}: {why}; pattern skipped")
     session._revalidate_layer_reserves()   # the def_layer rule, once
+    from buda_cmds import pin_fix_cmds
+    pin_fix_cmds.reapply_layer_fixes(session)
 
     n_geom = 0
     for lid, l in sorted(geom_only):

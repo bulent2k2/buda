@@ -1102,3 +1102,24 @@ def test_an_orthogonal_only_overlap_with_set_bus_layers_is_refused():
            "add_net x_0 S.o A.i"]
     with pytest.raises(SystemExit):
         _session(*pre, "run_bundler STRICT")
+
+
+def test_layer_order_in_a_declaration_does_not_split_a_bundle():
+    """Codex P2 on #990: `layer M4,M5` and `layer M5,M4` are the same constraint."""
+    s, _ = _session("add_block S 0 400 100 600", "add_block M 400 400 600 600", *TECH,
+                    "fix_pin M.a layer M4,M5", "fix_pin M.b layer M5,M4",
+                    "add_bus x[2] S.o M.a", "add_bus y[2] S.o M.b",
+                    "run_bundler STRICT")
+    assert len(s.bundles) == 1
+
+
+def test_a_restored_layer_fix_narrows_once_its_layer_is_declared(tmp_path):
+    """Codex P1 on #990: open_bdb before the stack left the faces un-narrowed."""
+    path = str(tmp_path / "late_layer.bdb")
+    s, _ = _session(*TECH, f"open_bdb {path}", "add_block M 0 0 100 100",
+                    "fix_pin M layer M4")                      # M4 is horizontal
+    s2, _ = _session(f"open_bdb {path}", "add_block M 0 0 100 100")
+    assert s2._pin_fixes["M"]["layers"] == ["M4"]
+    assert {st[4] for st in s2.fp.pin_fix_strips("M")} == {N, S, E, W}   # layer unknown yet
+    _say(s2, "def_layer 4 M4 H TOP 0")
+    assert {st[4] for st in s2.fp.pin_fix_strips("M")} == {E, W}
