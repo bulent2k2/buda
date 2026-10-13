@@ -343,3 +343,24 @@ With the gate the lever's bottom-up losses shrink (`mix2_fast_bottomup_caps`
 disappear; the gate on its own makes two flows worse.  Sweep times (1047 s base,
 949 s lever, 1604 s gate, 1377 s gate + lever) come from different days and
 runs and are not comparable.  So neither is a default.
+
+### Junction reach, top-down designs only (2026-10-13)
+
+The bottom-up losses above are one kind of flow (a template solved once and
+copied, with goals of its own), so the lever got a mode that leaves them alone:
+`BUDA_NUTS_JUNCTION_REACH=topdown` applies it unless the design carries
+bottom-up marks.  The session tells the engine at each `run_nuts` and at each
+healer re-run (`set_junction_reach_allowed`, from `bdb.bottom_up_cells()`).
+
+`mix2_fast_bottomup_shared` with `topdown` is identical to the lever off (2
+violations, 890,954 WL); a top-down flow behaves as with the lever on.
+
+Corpus (57 flows) against the default: 5 better, 0 worse, 51 unchanged.
+Better: `tc3a` 0/0/2 -> 0/0/0, `mix2_fast_topdown` 1/0/0 -> 0/0/0,
+`chip_stack_topdown` 22/263/21 -> 21/235/19, `chip_topdown` 5/134/11 ->
+5/130/11, `chip3_topdown` 6/268/35 -> 6/266/35.  Detailed WL +0.01 %, abstract
+WL +4.85 % (longer spans by construction).  Against the lever on everywhere
+(6 better, 5 worse) the difference is the bottom-up rows, which return to the
+default.  The soc first-round shorts quoted above (A 20 to 2, B 9 to 2) were
+measured on top-down flows.  Fast tier: 3271 passed.  Not made a default: that
+call, and whether the abstract-WL growth is acceptable, is for the owner.
