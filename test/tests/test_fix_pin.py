@@ -1131,9 +1131,12 @@ def test_a_pin_layer_must_have_a_layer_on_its_axis_in_an_existing_ndr_mask():
            "def_layer 3 M3 H LOW 0", "def_track_pattern 3 0 (SIGNAL 2 2)x60",
            "def_ndr w width x2 layers M5", "set_ndr x_ w",
            "fix_pin A.i west layer M3", "add_net x_0 S.o A.i"]
+    sess = buda_cli.BudaSession()
+    sess.no_viz = True
     out = io.StringIO()
     with contextlib.redirect_stdout(out), pytest.raises(SystemExit):
-        _session(*pre, "run_bundler STRICT")
+        for c in pre + ["run_bundler STRICT"]:
+            sess.do_command(c)
     assert "no layer in common" in out.getvalue(), out.getvalue()
 
 
