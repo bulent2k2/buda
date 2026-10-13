@@ -15,7 +15,7 @@ import sys,sqlite3,collections,os
 sys.path.insert(0,os.path.join(os.path.dirname(os.path.abspath(__file__)),'..'))
 import independent_audit as ia
 def analyse(path):
-    c=sqlite3.connect(path); c.row_factory=sqlite3.Row
+    c=ia.open_design(path)
     layers=ia.read_layer_stack(c)
     leaf,_=ia.read_leaf_keepouts(c,layers) if layers else ({},None)
     decl,univ=ia.read_keepouts(c)

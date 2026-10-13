@@ -607,5 +607,9 @@ private:
 // Study lever (BUDA_NUTS_JUNCTION_REACH=topdown): the session tells the engine
 // whether junction reach may apply (false for a design with bottom-up marks).
 void set_junction_reach_allowed(bool allowed);
+// Whether the junction-reach lever is in force right now (env mode and, for
+// `topdown`, the session's permission): DetailedNUTS reads it to recognise a
+// span end that sits at a partner's far edge rather than at its centre.
+bool junction_reach_active();
 
 } // namespace buda

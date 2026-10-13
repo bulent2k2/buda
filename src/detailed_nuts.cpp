@@ -665,7 +665,7 @@ int DetailedNUTSEngine::guard_cross_shorts(
     // (num_cross_shorts) and the console is what it was — the audit already
     // names every short at check_design, and a line from every trial solve
     // of a healer would bury it.
-    if ((short_cull_) || short_reach_) {
+    if (short_cull_ || short_reach_) {
         std::cout << "[DetailedNUTS] WARNING: " << result.num_cross_shorts
                   << " cross-bundle short(s) in the final bit spans — two "
                   << "bundles' wires share metal on one layer (issue #962)";
@@ -1059,8 +1059,12 @@ void DetailedNUTSEngine::place_by_layer(
                             reserved.insert(track_key(asgn.track_positions[j]));
                     continue;
                 }
-                bool span_ov = o_lo < (kReach ? bs_hi : r_hi) &&
-                               o_hi > (kReach ? bs_lo : r_lo);
+                // An NDR segment compares by its own reach even here: it
+                // has no post-pick exact check, and an earlier NDR bus or
+                // fixed copy carries no per-track reach to test it against.
+                const bool own_reach = !kReach || bs.ndr.active();
+                bool span_ov = o_lo < (own_reach ? r_hi : bs_hi) &&
+                               o_hi > (own_reach ? r_lo : bs_lo);
                 if (span_ov)
                     for (double p : asgn.track_positions)
                         reserved.insert(track_key(p));
@@ -1404,7 +1408,8 @@ void DetailedNUTSEngine::place_by_layer(
             // resolution below can re-run it with the hazard tracks added.
             // Returns the bw chosen signal-track indices ascending, or empty
             // on failure (prints the corresponding warning).
-            auto choose = [&](const std::set<long long>& resv) -> std::vector<int> {
+            auto choose = [&](const std::set<long long>& resv,
+                              bool quiet = false) -> std::vector<int> {
                 std::vector<int> chosen;
                 if (use_anchor && !bs.timing_critical) {
                     // Path A: N closest available tracks.
@@ -1429,6 +1434,7 @@ void DetailedNUTSEngine::place_by_layer(
                     }
 
                     if ((int)avail.size() < bw) {
+                        if (!quiet)
                         std::cout << "[DetailedNUTS] Warning: Layer " << layer
                                   << " has " << avail.size() << " unreserved tracks"
                                   << " (need " << bw << ") in interval ["
@@ -1517,6 +1523,7 @@ void DetailedNUTSEngine::place_by_layer(
                 }
 
                 if (best_start < 0) {
+                    if (!quiet)
                     std::cout << "[DetailedNUTS] Warning: Layer " << layer
                               << " no valid window of " << bw << " tracks in interval ["
                               << bs.interval_lo << ", " << bs.interval_hi
@@ -1545,47 +1552,64 @@ void DetailedNUTSEngine::place_by_layer(
             // own reach is known (its partner's same-bit track), so test it
             // against every other bundle's per-track reach on the SAME track
             // and reserve the tracks that would short, then re-pick.  A few
-            // rounds; if the pool runs dry the last good pick stands and the
-            // cull (when on) removes whatever shorts.
-            auto bit_reaches = [&](const std::vector<int>& picks) {
-                std::vector<std::pair<double, double>> out;
-                out.reserve(picks.size());
-                for (int i = 0; i < (int)picks.size(); ++i)
-                    out.push_back(reach_bit(bs, layer, bit_on_rank(i),
-                                            bs_lo, bs_hi));
-                return out;
-            };
+            // rounds, each re-pick probed quietly (a failed probe is not a
+            // stranded bundle: the pick in hand is placed).  The pick that
+            // stands is the one with the FEWEST offending tracks, the first
+            // on a tie, so a pool that keeps shorting does not drift the
+            // bus away from its anchor for nothing; the cull (when on)
+            // removes whatever still shorts.  `resv_x` is what the probe
+            // rejected: the same-bundle hazard repairs below honour it too.
+            std::set<long long> resv_x;
             if (kReach && !bs.ndr.active()) {
-                std::set<long long> resv_r = reserved;
-                for (int round = 0; round < 4; ++round) {
-                    const auto br = bit_reaches(chosen_indices);
+                // A bit's reach does not depend on the pick: once.
+                std::vector<std::pair<double, double>> br;
+                for (int i = 0; i < bw; ++i)
+                    br.push_back(reach_bit(bs, layer, bit_on_rank(i),
+                                           bs_lo, bs_hi));
+                // Only assignments whose interval can meet this segment's.
+                std::vector<const LayerAssignment*> others;
+                for (const auto& asgn : layer_assigns)
+                    if (asgn.bundle_id != bs.bundle_id &&
+                        asgn.interval_lo < bs.interval_hi &&
+                        asgn.interval_hi > bs.interval_lo &&
+                        !(asgn.t_lo.empty() && asgn.reach_hi <= asgn.reach_lo))
+                        others.push_back(&asgn);
+                auto offenders = [&](const std::vector<int>& picks) {
                     std::set<long long> bad;
-                    for (size_t i = 0; i < chosen_indices.size(); ++i) {
-                        const long long tk = track_key(
-                            signal_tracks[chosen_indices[i]].first);
-                        for (const auto& asgn : layer_assigns) {
-                            if (asgn.bundle_id == bs.bundle_id) continue;
-                            if (asgn.t_lo.empty() && asgn.reach_hi <= asgn.reach_lo)
-                                continue;
-                            for (size_t j = 0; j < asgn.track_positions.size(); ++j) {
+                    for (size_t i = 0; i < picks.size(); ++i) {
+                        const long long tk =
+                            track_key(signal_tracks[picks[i]].first);
+                        for (const LayerAssignment* asgn : others)
+                            for (size_t j = 0; j < asgn->track_positions.size(); ++j) {
                                 if (!track_key_near(
-                                        track_key(asgn.track_positions[j]), tk))
+                                        track_key(asgn->track_positions[j]), tk))
                                     continue;
-                                const double a_lo = asgn.t_lo.empty()
-                                    ? asgn.reach_lo : asgn.t_lo[j];
-                                const double a_hi = asgn.t_lo.empty()
-                                    ? asgn.reach_hi : asgn.t_hi[j];
+                                const double a_lo = asgn->t_lo.empty()
+                                    ? asgn->reach_lo : asgn->t_lo[j];
+                                const double a_hi = asgn->t_lo.empty()
+                                    ? asgn->reach_hi : asgn->t_hi[j];
                                 if (a_lo < br[i].second && a_hi > br[i].first)
                                     bad.insert(tk);
                             }
-                        }
                     }
-                    if (bad.empty()) break;
-                    resv_r.insert(bad.begin(), bad.end());
-                    auto again = choose(resv_r);
-                    if (again.empty()) break;       // keep the last pick
-                    chosen_indices = std::move(again);
+                    return bad;
+                };
+                std::vector<int> best = chosen_indices;
+                std::set<long long> bad = offenders(best);
+                size_t best_n = bad.size();
+                for (int round = 0; round < 4 && !bad.empty(); ++round) {
+                    resv_x.insert(bad.begin(), bad.end());
+                    std::set<long long> resv_r = reserved;
+                    resv_r.insert(resv_x.begin(), resv_x.end());
+                    auto again = choose(resv_r, /*quiet=*/true);
+                    if (again.empty()) break;
+                    bad = offenders(again);
+                    if (bad.size() < best_n) {
+                        best = std::move(again);
+                        best_n = bad.size();
+                    }
                 }
+                chosen_indices = std::move(best);
             }
 
             // conflicted(): does any pick land a DIFFERENT bit (net) of this
@@ -1649,7 +1673,8 @@ void DetailedNUTSEngine::place_by_layer(
                         auto pit = pos_to_idx.lower_bound(ak - 1);
                         if (pit == pos_to_idx.end() ||
                             !track_key_near(pit->first, ak) ||
-                            reserved_has(reserved, ak)) { ok = false; break; }
+                            reserved_has(reserved, ak) ||
+                            reserved_has(resv_x, ak)) { ok = false; break; }
                         idxs.push_back(pit->second);
                     }
                     if (ok && conflicted(idxs)) ok = false;   // vs OTHER hazards
@@ -1693,7 +1718,8 @@ void DetailedNUTSEngine::place_by_layer(
                                 auto pit = pos_to_idx.lower_bound(ak - 1);
                                 if (pit == pos_to_idx.end() ||
                                     !track_key_near(pit->first, ak) ||
-                                    reserved_has(reserved, ak)) { ok = false; break; }
+                                    reserved_has(reserved, ak) ||
+                                    reserved_has(resv_x, ak)) { ok = false; break; }
                                 idxs.push_back(pit->second);
                             }
                             if (ok && conflicted(idxs)) ok = false;   // vs the OTHER hazards
@@ -1708,6 +1734,7 @@ void DetailedNUTSEngine::place_by_layer(
                     // the cross-layer corner bound.
                     if (repaired.empty()) {
                         std::set<long long> resv2 = reserved;
+                        resv2.insert(resv_x.begin(), resv_x.end());
                         for (const LayerAssignment* H : hazards)
                             for (double p : H->track_positions)
                                 resv2.insert(track_key(p));
@@ -2276,6 +2303,23 @@ std::vector<BusSegment> make_bus_segments(
                             if (std::min(dlo, dhi) <= kEndTol) {
                                 c.is_endpoint = true;
                                 c.lo_end      = (dlo <= dhi);
+                            } else if (junction_reach_active()) {
+                                // Junction reach ends the span at the partner's
+                                // far EDGE (track ± width/2), not its centre:
+                                // that end is the junction too, and a bit must
+                                // snap to its own via there or the bits keep a
+                                // shared end past it (dangling metal).
+                                const double hw = 0.5 * pit->second->width;
+                                const double elo = std::min(
+                                    std::abs(pos - hw - bs.span_lo),
+                                    std::abs(pos + hw - bs.span_lo));
+                                const double ehi = std::min(
+                                    std::abs(pos - hw - bs.span_hi),
+                                    std::abs(pos + hw - bs.span_hi));
+                                if (std::min(elo, ehi) <= kEndTol) {
+                                    c.is_endpoint = true;
+                                    c.lo_end      = (elo <= ehi);
+                                }
                             }
                         }
                         // An UNPLACED partner keeps the nominal label: there is

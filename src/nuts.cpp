@@ -782,6 +782,7 @@ static bool junction_reach_on() {
     if (mode == 2) return g_junction_reach_allowed.load();
     return true;
 }
+bool junction_reach_active() { return junction_reach_on(); }
 
 static void do_span_adjustments(
     const std::vector<TrackSegment*>&                               layer_segs,

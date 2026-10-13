@@ -381,3 +381,21 @@ def test_an_unknown_env_word_is_reported_not_read_as_off():
     got, err = _seeded("reach,cul")
     assert got == ["1", "0"]
     assert "'cul'" in err
+
+
+# ── reach, per bit: the exact half ─────────────────────────────────────────
+
+def test_reach_places_a_two_bit_bus_clear_of_a_stretching_partner():
+    # Same stub as above, but bundle 2 is a two-bit bus: both of its tracks
+    # must clear track 3.5 (the one bundle 1's stub stretches over).  The
+    # single-bit tests cannot tell per-bit reach from the envelope.
+    segs = _scenario()
+    segs[2].bit_width = 2
+    res = _run(segs, reach=True)
+    assert res.num_cross_shorts == 0
+    assert res.num_unplaced == 0
+    placed = sorted(ns.track_position for ns in res.net_segments
+                    if ns.bundle_id == 2)
+    assert len(placed) == 2 and 3.5 not in [pytest.approx(p) for p in placed]
+    assert not _audit(res)
+

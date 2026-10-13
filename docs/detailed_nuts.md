@@ -214,15 +214,23 @@ Then two post-passes over the emitted bit-wires:
      caught, which is what `cull` behind it is for.
 
      The reach is **per bit** (2026-10): a bit's span-follow ends at ITS
-     partner's same-bit track, so each assignment stores a reach per track and
-     a later segment (a) reserves a track only when that track's bit reaches
-     its abstract span, then (b) after picking, tests each chosen bit's own
-     reach against every other bundle's per-track reach on the same track and
-     re-picks without the offenders (up to four rounds; a pool that runs dry
-     keeps the last pick, and `cull` removes what still shorts).  The earlier
-     envelope form reserved every track of a segment against any neighbour its
-     envelope met, which dropped whole 32-bit segments to avoid 2-3 shorted
-     bits.
+     partner's same-bit track, so each ordinary assignment stores a reach per
+     track and a later segment (a) reserves a track only when that track's bit
+     reaches its abstract span, then (b) after picking, tests each chosen
+     bit's own reach against every other bundle's per-track reach on the same
+     track and re-picks without the offenders (up to four rounds, each probed
+     quietly: a probe that finds no pool is not a stranded bundle, and the
+     "reservation conflict" line stays the stranding diagnostic).  The pick
+     that stands is the one with the fewest offending tracks, the first on a
+     tie, so a pool that keeps shorting does not drift the bus off its anchor;
+     `cull` removes what still shorts.  The tracks the probe rejected are
+     honoured by the same-bundle hazard repairs (ALIGN, lever B, DISJOINT)
+     that run next.  The coverage has edges: an NDR segment and a bottom-up
+     fixed copy store the envelope only, so an NDR segment compares by its own
+     reach against them and gets no post-pick check, and a copy is compared by
+     its envelope.  The earlier envelope form reserved every track of a
+     segment against any neighbour its envelope met, which dropped whole
+     32-bit segments to avoid 2-3 shorted bits.
 
      **Measured, still not a default** (57-flow corpus, QoR triple; 4 sweeps on
      one build): `reach` 7 better / 3 worse (`bigHalf` 0/0/0 -> 0/52/1,
