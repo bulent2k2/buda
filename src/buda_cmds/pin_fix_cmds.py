@@ -547,8 +547,14 @@ def _local_name_decl(session):
     in names the same block `proc_i/pb_i` and holds no such declaration."""
     if getattr(session, "bdb", None) is None:
         return False
-    return any("/" not in k and not is_cell_key(k) and not session.fp.has_block(k)
-               for k in list(session._pin_fixes) + list(_sel_store(session)))
+    keys = [k for k in list(session._pin_fixes) + list(_sel_store(session))
+            if "/" not in k and not is_cell_key(k)]
+    if not keys:
+        return False
+    # decided from the hierarchy, not from what the session floorplan lacks: a
+    # top-level block may share a nested child's local name
+    nested = {n.rsplit("/", 1)[-1] for n in _comps(session) if "/" in n}
+    return any(k in nested for k in keys)
 
 
 def bundle_fix_map(session, net_names, local=False, names_local=None, always=False):

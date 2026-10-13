@@ -1613,3 +1613,18 @@ def test_a_local_name_block_fix_reaches_the_expanded_instances():
         fm = {b: v[0] for b, v in dict(w.input.candidates[0].block_fixes).items()}
         assert fm and all(v == S for b, v in fm.items() if b.endswith("pb_i")), fm
         assert all("/" in b for b in fm), fm
+
+
+def test_a_local_name_shared_with_a_top_level_block_still_reaches_the_expanded_instances():
+    """P2 (#992): the local-name test asked the session floorplan, so a top-level
+    block called `pb_i` hid the nested child's declaration."""
+    text = _flow_text("hier_cell_local.buda",
+                      ("\nadd_inst src_i   src_cell",
+                       "\nadd_inst pb_i   src_cell  -   50  900\nadd_inst src_i   src_cell"),
+                      ("\nfix_pin cell:pipe_cell.out east",
+                       "\nfix_pin cell:pipe_cell.out east\nfix_pin pb_i south"))
+    s, out = _run_flow_text(text)
+    assert "Error:" not in out, out[-600:]
+    for w in s.bundles:
+        fm = {b: v[0] for b, v in dict(w.input.candidates[0].block_fixes).items()}
+        assert all(v == S for b, v in fm.items() if b.endswith("/pb_i")), fm
