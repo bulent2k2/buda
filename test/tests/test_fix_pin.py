@@ -1175,3 +1175,36 @@ def test_a_dropped_restored_fix_does_not_wake_up_when_its_block_is_declared(tmp_
     _say(s2, "add_block M 0 0 100 100")
     assert not s2.fp.has_pin_fix("M")
     assert "M" not in s2._pin_fixes
+
+
+def test_a_user_candidate_joining_opposite_orders_is_reported_by_check_design():
+    """Codex P2 on #990: the generation gate cannot see a hand-edited candidate."""
+    lines = _order_lines(drop=("generate_topologies", "run_planner", "run_nuts",
+                               "run_detailed_nuts"))
+    s, _ = _session(*lines, "generate_topologies")
+    import buda
+    w = next(w for w in s.bundles
+             if w.input.original_bundle.get_net_names()[0].startswith("x_"))
+    raw = buda.TopologyGenerator(s.fp).generate_candidates("LEFT", ["RIGHT"])
+    straight = next(i for i, c in enumerate(raw) if c.type.startswith("I_"))
+    w.input.candidates = list(raw)          # as a USER candidate would arrive
+    bid = w.input.original_bundle.id
+    _say(s, f"select_topology id:{bid} {straight + 1}")
+    _say(s, "run_planner")
+    _say(s, "run_nuts")
+    out = _say(s, "check_design")
+    assert "PIN_FIX" in out and "opposite order" in out, out
+
+
+def test_rebundling_does_not_read_the_previous_wrappers_layer_base():
+    """Codex P2 on #990: the id-keyed base outlived its wrappers."""
+    pre = ["add_block S 0 400 100 600", "add_block A 400 400 600 600", *TECH,
+           "def_layer 3 M3 H LOW 0", "def_track_pattern 3 0 (SIGNAL 2 2)x60",
+           "def_layer 6 M6 V TOP 0", "def_track_pattern 6 0 (SIGNAL 2 2)x60",
+           "def_ndr w width x2 layers M3,M5", "set_ndr x_ w",
+           "fix_pin A.i west layer M3", "add_net x_0 S.o A.i",
+           "run_bundler STRICT"]
+    s, _ = _session(*pre, "set_ndr x_ off", "run_bundler STRICT")
+    got = sorted(s.bundles[0].input.allowed_layers)
+    ref, _ = _session(*[l for l in pre if not l.startswith(("def_ndr", "set_ndr"))])
+    assert got == sorted(ref.bundles[0].input.allowed_layers) and 6 in got, got

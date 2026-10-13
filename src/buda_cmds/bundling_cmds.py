@@ -802,6 +802,9 @@ def cmd_run_bundler(session, cmd, args, cmd_line):
     # for the FLAT flow this is the one-shot application (the hier
     # resolver re-applies it, as it does the NDR restriction).
     from buda_session.bus_layers import apply_bus_layer_restrictions
+    # Fresh wrappers reuse small bundle ids: the pre-restriction masks cached
+    # for the PREVIOUS wrappers must not be read back for these.
+    session._bus_layer_base = {}
     apply_bus_layer_restrictions(session)
     session._bu_clone_from = {}   # fresh ids: drop stale clone provenance
     print(f"Bundler created {len(session.bundles)} hbundles.")
@@ -1025,6 +1028,9 @@ def cmd_run_hier_bundler(session, cmd, args, cmd_line):
     # for the FLAT flow this is the one-shot application (the hier
     # resolver re-applies it, as it does the NDR restriction).
     from buda_session.bus_layers import apply_bus_layer_restrictions
+    # Fresh wrappers reuse small bundle ids: the pre-restriction masks cached
+    # for the PREVIOUS wrappers must not be read back for these.
+    session._bus_layer_base = {}
     apply_bus_layer_restrictions(session)
     session._hier_bundles_orig = list(session.bundles)  # snapshot for dump_hbundles
     # Fresh bundles reuse small integer ids: stale id-keyed clone provenance

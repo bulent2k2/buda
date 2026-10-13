@@ -333,15 +333,23 @@ def audit_pin_fix(session, w, topo):
     """PIN_FIX: a segment ending on a fixed pin's landing strip on a layer
     outside the fix's set.  Defence in depth for the bundle mask: the planner
     may have ended up outside it (BEST_EFFORT) or a pin took an unmasked
-    route.  Needs a plan; reads the assigned layers."""
+    route.  Needs a plan; reads the assigned layers.  Also reports a straight
+    segment joining two pins of opposite `order` — the generator's gate drops
+    those, but a hand-edited USER candidate arrives after it."""
+    out = []
+    for i, orders in sorted(segment_orders(session, w, topo).items()):
+        if len(orders) > 1:
+            out.append(_PinFixViolation("", i, (
+                f"PIN_FIX: segment {i} joins fixed pins of opposite order "
+                f"(index and rindex) — a straight wire cannot reverse its bits")))
     if not has_layer_fixes(session):
-        return []
+        return out
     layers = list(w.plan.seg_layers)
     segs = list(topo.segments)
     if len(layers) != len(segs):
-        return []
+        return out
     names = {lid: n for n, lid in session._layer_name_map.items()}
-    out, seen = [], set()
+    seen = set()
     for net in w.input.original_bundle.get_net_names():
         pins = _net_pins_of(session, net)
         if pins is None:
