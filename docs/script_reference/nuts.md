@@ -129,13 +129,19 @@ that span. The engine counts the shorts this leaves on every run. The env
 var `BUDA_DNUTS_SHORT_GUARD` turns on two levers, off by default (off is
 byte-identical): `cull` removes the stretched side of each short and counts
 it unplaced, so the healers see an open instead of an unseen short; `reach`
-reserves against the span each segment will reach instead, so the short does
-not happen. `reach,cull` is both. The **healer score** leaves placement
+reserves against the span each segment will reach instead (per bit; it avoids
+the shorts it can see and leaves the rest to `cull`, measured 7 better / 3
+worse on the corpus, so it is not a default). `reach,cull` is both. The **healer score** leaves placement
 alone and has the stage-b healers (`negotiate_congestion`, `ripup_reroute`,
 `refine_selection` and the heals inside this command) count each short as an
 open instead. It measured best of the three and is **on by default**;
-`BUDA_HEAL_SHORTS=0` turns it off. See
-[Detailed NUTS](../detailed_nuts.md) step 6b.
+`BUDA_HEAL_SHORTS=0` turns it off. Two more study switches, both off by
+default and byte-identical when unset: `BUDA_NUTS_JUNCTION_REACH=1|topdown`
+(the abstract span of a stub that meets a perpendicular partner ends at the
+partner's far edge instead of its centre; `topdown` skips designs carrying
+bottom-up marks) and `BUDA_RR_WIDTH_GATE_LOCKED=1` (the ripup width gate also
+runs on bottom-up sessions). See [Detailed NUTS](../detailed_nuts.md) step 6b
+and the [short study](../internal/cross_bundle_shorts_study.md).
 
 **Requires:** `run_nuts` must have been called first. At least one `def_track_pattern` must cover the layers used by the NUTS result.
 

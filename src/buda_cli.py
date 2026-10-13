@@ -955,6 +955,10 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
         # One tick per command: per-command caches (fix_pin's component and
         # net-pin indexes) are valid within a command, never across one.
         self._cmd_seq = getattr(self, "_cmd_seq", 0) + 1
+        # BUDA_NUTS_JUNCTION_REACH=topdown: tell the engine, before every
+        # command, whether this design carries bottom-up marks (the one choke
+        # point every NUTS path runs under, healers included).
+        self._sync_junction_reach()
         cmd = parts[0].lower()
         args = parts[1:]
         # Alias resolution (the `alias` command), at this ONE choke point —

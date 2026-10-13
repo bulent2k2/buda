@@ -242,13 +242,11 @@ def test_mix2_release_heals_bundle166_end_to_end():
         assert any(w.hier.locked for w in s.bundles), text
     # The healed route must be buildable — no layer-direction violations
     # (the forced-layer hazard this arc fixed), and nothing else the audit
-    # can name either, except the cross-bundle shorts #948 made visible:
-    # this endpoint carries two shorted bits (bundle 90's `top_bus3_w10`
-    # against bundle 119's `chip/i_dnuts1_0/r12` on M4 — the judge,
-    # `tools/independent_audit.py`, counts the same two on a checkpoint of
-    # it), which were always there, sit nowhere near the released instance,
-    # and no healer's metric reads.  Accepted as measured and no further.
-    known_cross_shorts = 2
+    # can name either, cross-bundle shorts (#948) included.  This endpoint
+    # used to carry two shorted bits (bundle 90's `top_bus3_w10` against
+    # bundle 119's `chip/i_dnuts1_0/r12` on M4) that no healer's metric
+    # read; since the healers score shorts (#962) it carries none.
+    known_cross_shorts = 0
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
         s.do_command("check_design")
