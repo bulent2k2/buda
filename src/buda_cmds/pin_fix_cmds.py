@@ -372,6 +372,7 @@ def revalidate(session, block, fp=None):
     if not fp.has_block(block):
         return
     sels = _sel_store(session).get(block, {})
+    dropped = False
     for sel, sfx in list(sels.items()):
         bad = None
         if sfx["rect"] >= _rect_count(fp, block):
@@ -380,10 +381,13 @@ def revalidate(session, block, fp=None):
             bad = f"'{_declared(sfx)}' admits no landing on this block"
         if bad:
             del sels[sel]
+            dropped = True
             print(f"Error: fix_pin {block}.{sel[1]}{'*' if sel[0] == 'prefix' else ''}: "
                   f"{bad}; the fix, declared before the block, is dropped")
     if not sels:
         _sel_store(session).pop(block, None)
+    if dropped:
+        persist(session)      # a delayed drop must not be restored again next time
     if fix is None:
         return
     problem = None
@@ -400,6 +404,7 @@ def revalidate(session, block, fp=None):
             session.fp.clear_pin_fix(block)
         print(f"Error: fix_pin {block}: {problem}; the fix, declared before the "
               f"block, is dropped")
+        persist(session)
 
 
 def cmd_dump_pin_fixes(session, cmd, args, cmd_line):
@@ -460,8 +465,22 @@ def _forget_overridden(session):
             del rs[k]
 
 
+def _keys(session):
+    return (set(session._pin_fixes),
+            {(b, k, n) for b, d in _sel_store(session).items() for (k, n) in d})
+
+
 def cmd_fix_pin(session, cmd, args, cmd_line):
+    before_b, before_s = _keys(session)
     _cmd_fix_pin(session, cmd, args, cmd_line)
+    after_b, after_s = _keys(session)
+    # A typed removal outranks any BDB opened later (typed wins), so remember it.
+    tb = session.__dict__.setdefault("_pin_fix_removed_blocks", set())
+    ts = session.__dict__.setdefault("_pin_fix_removed_sels", set())
+    tb |= before_b - after_b
+    ts |= before_s - after_s
+    tb -= after_b
+    ts -= after_s
     _forget_overridden(session)
     persist(session)
 
@@ -484,18 +503,24 @@ def restore(session):
             del sels[b]
     session._pin_fix_restored_blocks, session._pin_fix_restored_sels = {}, {}
     raw = session.bdb.meta_get(_META, "")
+    try:
+        session._pin_fix_ckpt = json.loads(raw) if raw else {"blocks": {}, "selectors": []}
+    except ValueError:
+        session._pin_fix_ckpt = None
     n = 0
     if raw:
         try:
             snap = json.loads(raw)
+            tb = getattr(session, "_pin_fix_removed_blocks", set())
+            ts = getattr(session, "_pin_fix_removed_sels", set())
             for b, fx in snap.get("blocks", {}).items():
-                if b not in fixes:
+                if b not in fixes and b not in tb:
                     fixes[b] = fx
                     _apply(session, b, fx)
                     session._pin_fix_restored_blocks[b] = fx
                     n += 1
             for b, kind, key, fx in snap.get("selectors", []):
-                if (kind, key) not in sels.get(b, {}):
+                if (kind, key) not in sels.get(b, {}) and (b, kind, key) not in ts:
                     sels.setdefault(b, {})[(kind, key)] = fx
                     session._pin_fix_restored_sels[(b, kind, key)] = fx
                     n += 1
@@ -515,9 +540,17 @@ def restamp_bundles(session):
     restored bundle whose nets the CURRENT fixes would repartition (a typed
     selector outranked the checkpoint's) is stale: the whole restored pipeline
     is voided, loudly, rather than routed under one map."""
+    import buda
+    ckpt = getattr(session, "_pin_fix_ckpt", None)
+    now = json.loads(json.dumps(_snapshot(session)))
+    if ckpt is not None and now != ckpt and len(session.bundles):
+        print("Error: load_pipeline: the pin fixes in force differ from the ones "
+              "the checkpoint was generated under; the restored pipeline is "
+              "voided — re-run run_bundler and the stages after it")
+        session.bundles = buda.BundleWrapperVec()
+        return
     if not _sel_store(session):
         return
-    import buda
     for w in session.bundles:
         nets = list(w.input.original_bundle.get_net_names())
         conflict = any(net_fix_conflicts(session, n) for n in nets)

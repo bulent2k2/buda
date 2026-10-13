@@ -710,3 +710,38 @@ def test_a_restored_bundle_that_current_fixes_repartition_is_voided(tmp_path):
                        "add_bus x[2] S.o M.a", "add_bus y[2] S.o M.b",
                        "load_pipeline")
     assert "voided" in out and len(s2.bundles) == 0
+
+
+def test_a_typed_off_survives_opening_another_bdb(tmp_path):
+    """Codex P1 on #989: a typed removal left no tombstone, so the next BDB restored it."""
+    (s, _), pa = _bdb_session(tmp_path, "add_block M 0 0 100 100",
+                              "fix_pin M west", "fix_pin M.tx north")
+    pb = str(tmp_path / "b.bdb")
+    (sb, _), _ = _session("open_bdb " + pb, "add_block M 0 0 100 100",
+                          "fix_pin M east", "fix_pin M.tx south"), None
+    s2, _ = _session("add_block M 0 0 100 100", f"open_bdb {pa}",
+                     "fix_pin M off", "fix_pin M.tx off", f"open_bdb {pb}")
+    assert "M" not in s2._pin_fixes and not s2._pin_fix_sel.get("M")
+
+
+def test_a_fix_changed_before_opening_voids_a_uniform_checkpoint(tmp_path):
+    """Codex P1 on #989: one partition does not mean the generated geometry is current."""
+    pre = ["add_block S 0 400 100 600", "add_block M 400 400 600 600", *TECH]
+    (s, _), path = _bdb_session(
+        tmp_path, *pre, "fix_pin M west", "add_bus x[2] S.o M.i", "bdb_net_mode on",
+        "run_bundler STRICT", "generate_topologies", "run_planner")
+    s2, out = _session(*pre, "fix_pin M north", f"open_bdb {path}",
+                       "add_bus x[2] S.o M.i", "load_pipeline")
+    assert "voided" in out and len(s2.bundles) == 0
+    s3, out3 = _session(*pre, f"open_bdb {path}", "add_bus x[2] S.o M.i",
+                        "load_pipeline")
+    assert "voided" not in out3 and len(s3.bundles) == 1
+
+
+def test_a_fix_dropped_by_delayed_validation_is_persisted(tmp_path):
+    """Codex P2 on #989: the drop at add_block was never written back."""
+    (s, _), path = _bdb_session(tmp_path, "fix_pin M rect 5")
+    s2, _ = _session(f"open_bdb {path}", "add_block M 0 0 100 100")
+    assert "M" not in s2._pin_fixes
+    s3, _ = _session(f"open_bdb {path}")
+    assert "M" not in s3._pin_fixes
