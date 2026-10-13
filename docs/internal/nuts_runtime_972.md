@@ -494,6 +494,52 @@ the rest of them are: 5.3 % of wide attempts after a REJECTED narrow attempt
 are accepted, so those cannot be skipped wholesale, and the 85 % no-op class
 below 256 members is the remaining bulk.
 
+## Re-profile of the whole `run_nuts` at NQ=62, and the escalation scan (2026-10-13)
+
+With the repack's constant factors spent, `BUDA_REPLAN_PROF=1` on the NQ=62
+trace (`--threads 1`) said where the rest of the command goes.  `run_nuts`
+took 137 s:
+
+| phase | seconds |
+|---|---|
+| engine run (the first solve) | 28.4 |
+| dead-span escalation | 105.9 |
+| setup, planner persist, logs, BDB persist | ~3 |
+
+The escalation loop re-solved the whole NUTS three times (moving 330, 26 and 1
+segments, ~27 s each, 81.7 s in all), and the repack, summed over all four
+solves, is 61.6 s of the 137 -- about 45 %, not the share that would make it
+the next target.
+
+The escalation phase's other ~24 s was not in any re-solve.  Timers around
+the loop's parts (`parts=` on the `[NutsProf]` line) put 25 s of it in the
+Python scan that decides which segments are dead, and 19 s of that in one C++
+call per segment, `count_signal_tracks_in_span` over the segment's full slide
+window.  The cost was in `for_each_signal_track_in_span`: each candidate track
+was tested against EVERY keepout on the layer, tracks x keepouts, and a SoC
+layer carries thousands.
+
+**The change.**  The walk now finds the keepouts that can block any track of
+the query once (the along test is the same for every track, and every centre
+lies inside the perp window) and tests each track against that short list.
+Same predicate, same answer, by construction; a randomized test compares the
+count against the per-track scan over all the keepouts
+(`test_span_walk_keepout_prefilter_matches_per_track_scan`).
+
+| NQ=62 | before | after |
+|---|---|---|
+| escalation scan | 25.4 s | 5.4 s |
+| `run_nuts` total | 137 s | 116 s |
+
+The NUTS log is byte-identical (the `Generated` line aside).  The same
+tracks x keepouts shape is in `signal_tracks_in` and `count_signal_tracks_in`
+(the midpoint walks); they were not the measured cost and are untouched.
+
+**What is left.**  The three re-solves are 80 s of the 116, and the last one
+moves a single segment for ~27 s.  A layer-scoped re-solve, or the existing
+`set_dead_span_escalate floor <F>` (not decision-identical), are the levers;
+neither is built.
+
 ## Not verified
 
 * The QoR corpus (`tools/qor_corpus.py --vs main`) was not run on the
