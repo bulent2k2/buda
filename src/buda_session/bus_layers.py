@@ -161,6 +161,16 @@ def apply_bus_layer_restrictions(session, wrappers=None):
                     layers, prefix = both, f"{prefix}+{f_label}"
                 else:
                     layers, prefix = f_layers, f_label
+            # Whatever else already governs the bundle (a cell band, an NDR
+            # rule's layers) must leave a layer on every constrained axis too.
+            pre = base.get(bid, list(w.input.allowed_layers))
+            if f_layers and pre and any(not (set(pre) & axis_set)
+                                        for axis_set in f_axes.values()):
+                b = w.input.original_bundle
+                print(f"Error: a fix_pin layer needs a layer on an axis that what "
+                      f"already governs bundle {b.id} ({sorted(pre)}) does not "
+                      f"allow — the two have no layer in common.  Widen one of them.")
+                sys.exit(1)
         if bid not in base and layers:
             base[bid] = list(w.input.allowed_layers)
         start = base.get(bid, list(w.input.allowed_layers))

@@ -110,10 +110,35 @@ def _eff_faces(session, fix):
 def reapply_layer_fixes(session):
     """A fix restored (or typed) before its layer was declared was stamped with
     its un-narrowed faces; once a layer becomes known its direction can narrow
-    them, so re-stamp every block-level fix that names layers."""
-    for block, fix in session._pin_fixes.items():
-        if fix.get("layers") and session.fp.has_block(block):
+    them, so re-stamp every block-level fix that names layers.  A fix whose
+    layers can now be seen to reach none of its faces is REFUSED the way a
+    typed one is: reported and dropped, never restored un-narrowed."""
+    dropped = False
+    for block, fix in list(session._pin_fixes.items()):
+        if not fix.get("layers"):
+            continue
+        if _eff_faces(session, fix) < 0:
+            del session._pin_fixes[block]
+            if session.fp.has_block(block):
+                session.fp.clear_pin_fix(block)
+            print(f"Error: fix_pin {block}: layer {','.join(fix['layers'])} cannot "
+                  f"reach the face(s) '{_faces_text(fix['faces'])}'; the fix is "
+                  f"dropped")
+            dropped = True
+        elif session.fp.has_block(block):
             _apply(session, block, fix)
+    for block, d in list(_sel_store(session).items()):
+        for key, fix in list(d.items()):
+            if fix.get("layers") and _eff_faces(session, fix) < 0:
+                del d[key]
+                print(f"Error: fix_pin {block}.{key[1]}: layer "
+                      f"{','.join(fix['layers'])} cannot reach the face(s) "
+                      f"'{_faces_text(fix['faces'])}'; the fix is dropped")
+                dropped = True
+        if not d:
+            del _sel_store(session)[block]
+    if dropped:
+        persist(session)
 
 
 def _apply(session, block, fix):

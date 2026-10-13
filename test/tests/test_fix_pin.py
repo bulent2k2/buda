@@ -1123,3 +1123,39 @@ def test_a_restored_layer_fix_narrows_once_its_layer_is_declared(tmp_path):
     assert {st[4] for st in s2.fp.pin_fix_strips("M")} == {N, S, E, W}   # layer unknown yet
     _say(s2, "def_layer 4 M4 H TOP 0")
     assert {st[4] for st in s2.fp.pin_fix_strips("M")} == {E, W}
+
+
+def test_a_pin_layer_must_have_a_layer_on_its_axis_in_an_existing_ndr_mask():
+    """Codex P2 on #990: only set_bus_layers was checked per axis."""
+    pre = ["add_block S 0 400 100 600", "add_block A 400 400 600 600", *TECH,
+           "def_layer 3 M3 H LOW 0", "def_track_pattern 3 0 (SIGNAL 2 2)x60",
+           "def_ndr w width x2 layers M5", "set_ndr x_ w",
+           "fix_pin A.i west layer M3", "add_net x_0 S.o A.i"]
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out), pytest.raises(SystemExit):
+        _session(*pre, "run_bundler STRICT")
+    assert "no layer in common" in out.getvalue(), out.getvalue()
+
+
+def test_the_order_gate_also_filters_a_knob_replay_pool():
+    """Codex P2 on #990: _gen_fixed (knob-memo replays) skipped the filter."""
+    s, _ = _session(*_order_lines(drop=("generate_topologies", "run_planner",
+                                        "run_nuts", "run_detailed_nuts")))
+    import buda
+    w = next(w for w in s.bundles
+             if w.input.original_bundle.get_net_names()[0].startswith("x_"))
+    pool = s._gen_fixed(buda.TopologyGenerator(s.fp), w, "LEFT", ["RIGHT"])
+    assert pool and all(not c.type.startswith("I_") for c in pool), \
+        [c.type for c in pool]
+
+
+def test_a_restored_layer_that_cannot_reach_its_faces_is_dropped(tmp_path):
+    """Codex P2 on #990: it was restored un-narrowed instead of refused."""
+    path = str(tmp_path / "bad_dir.bdb")
+    s, _ = _session(*TECH, f"open_bdb {path}", "add_block M 0 0 100 100",
+                    "fix_pin M east layer M4")                  # M4 is horizontal
+    s2, _ = _session(f"open_bdb {path}", "add_block M 0 0 100 100")
+    assert "M" in s2._pin_fixes
+    out = _say(s2, "def_layer 4 M4 V TOP 0")                    # ... now vertical
+    assert "Error:" in out and "cannot reach" in out, out
+    assert "M" not in s2._pin_fixes
