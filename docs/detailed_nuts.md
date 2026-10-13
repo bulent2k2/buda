@@ -213,6 +213,55 @@ Then two post-passes over the emitted bit-wires:
      abstract span. A partner that lands outside its footprint is not
      caught, which is what `cull` behind it is for.
 
+     The reach is **per bit** (2026-10): a bit's span-follow ends at ITS
+     partner's same-bit track, so each ordinary assignment stores a reach per
+     track and a later segment (a) reserves a track only when that track's bit
+     reaches its abstract span, then (b) after picking, tests each chosen
+     bit's own reach against every other bundle's per-track reach on the same
+     track and re-picks without the offenders (up to four rounds, each probed
+     quietly: a probe that finds no pool is not a stranded bundle, and the
+     "reservation conflict" line stays the stranding diagnostic).  The pick
+     that stands is the one with the fewest offending tracks, the first on a
+     tie, so a pool that keeps shorting does not drift the bus off its anchor;
+     `cull` removes what still shorts.  The tracks the probe rejected are
+     honoured by the same-bundle hazard repairs (ALIGN, lever B, DISJOINT)
+     that run next.  The coverage has edges: an NDR segment and a bottom-up
+     fixed copy store the envelope only, so an NDR segment compares by its own
+     reach against them and gets no post-pick check, and a copy is compared by
+     its envelope.  The earlier envelope form reserved every track of a
+     segment against any neighbour its envelope met, which dropped whole
+     32-bit segments to avoid 2-3 shorted bits.
+
+     **Measured, still not a default** (57-flow corpus, QoR triple; 4 sweeps on
+     one build): `reach` 7 better / 3 worse (`bigHalf` 0/0/0 -> 0/52/1,
+     `mix2_fast_bottomup_shared` 0/0/2 -> 4/60/7), `cull` 3 / 4, `reach,cull`
+     6 / 4; wirelength moves < 0.01 %.  On `soc.tcl 8 -LAYOUT compact -PAD 10
+     -GAP 4 -M 4 -noheal` the judge's 20 shorts become 0 only by dropping seven
+     whole M5 segments (envelope form) or ~18 bits (`cull`): the competing
+     bundle holds the tracks inside the follow range, so the stretched bit has
+     nowhere to go.  A **re-seat** lever (remove the culprit's track from its
+     pool and re-solve) was built and measured: it DIVERGES (20 -> 27 -> 45
+     shorts), because moving one track shifts the whole window onto tracks
+     the neighbours also reach; removed.
+
+     **Other repros** (judge on checkpoints, 2026-10): `converge.tcl soc 4
+     -arms blind -maxreserve 0 -informed 0 -judge` has 4 shorts (bundle 1
+     `pn_*` x bundle 176 `l2d_0_*`, M6), each with ONE wire stretched past
+     its reserved span and the other inside it.  `reach` SEES them (traced:
+     20 of bundle 1 seg 0's 32 picked tracks conflict) but the window holds
+     exactly 32 tracks for 32 bits, so there is no re-pick and the shorts
+     stay; the 20 is conservative, since the stretched wire's partner is on
+     a layer not placed yet and the bound is its whole abstract footprint
+     (x 851..1069), against a true reach of 105 units for 4 bits.  `cull`
+     turns the 4 into unplaced bits (85 -> 89).  (An earlier version of this
+     note said the partner lands OUTSIDE its footprint; measured, it lands
+     inside: the footprint is simply wide.)  The two mix2 recipes
+     (`test_topdown_recipe_heals_most_of_the_residual`,
+     `test_mix2_release_heals_bundle166_end_to_end`) now judge CLEAN with every
+     lever setting INCLUDING none — the 3 and 2 shorts their comments recorded
+     went away once the healers' score began to read shorts (#962), so both
+     tests' `known_cross_shorts` bounds are 0.
+
    **Measured (2026-09-27), neither is a default.** On the QoR corpus each
    lever removes 19–24 dirty bundles and strands 66–151 more bits (`cull`
    7 better / 5 worse, `reach` 6 / 7, `reach,cull` 7 / 7). `bigHalf` goes

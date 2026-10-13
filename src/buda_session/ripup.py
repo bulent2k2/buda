@@ -463,6 +463,19 @@ class RipupMixin:
                 w.plan.seg_layers = list(asn.seg_layers)
                 w.plan.seg_perp = list(asn.seg_perp)
 
+    def _sync_junction_reach(self):
+        """Tell the engine whether the junction-reach lever may apply:
+        BUDA_NUTS_JUNCTION_REACH=topdown means top-down designs only, and a
+        design carrying bottom-up marks (a template solved once and copied)
+        is the other kind of flow."""
+        if os.environ.get('BUDA_NUTS_JUNCTION_REACH') != 'topdown':
+            return
+        try:
+            marked = bool(self.bdb is not None and self.bdb.bottom_up_cells())
+            buda.set_junction_reach_allowed(not marked)
+        except Exception:
+            pass
+
     def _run_nuts_internal(self, skip_tighten=False):
         """Solve abstract NUTS for the current plan WITHOUT the run_nuts
         command's reporting/persistence (nuts-log write, diagnostics, BDB
@@ -644,8 +657,9 @@ class RipupMixin:
         # excluding a winning move — pure path chaos amplified by class-move
         # granularity.  The gate's motivating corners (mix/mix2) have no
         # locked wrappers, so the blunt boundary costs nothing there.
-        if any(w.hier.locked for w in self.bundles):
-            return False
+        if (any(w.hier.locked for w in self.bundles)
+                and os.environ.get('BUDA_RR_WIDTH_GATE_LOCKED', '0') != '1'):
+            return False                      # study knob: gate bottom-up too
         memo = getattr(self, '_rr_width_memo', None)
         if memo is None:
             memo = self._rr_width_memo = {}

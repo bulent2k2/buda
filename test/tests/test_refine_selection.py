@@ -321,13 +321,12 @@ def test_topdown_recipe_heals_most_of_the_residual():
     # LAYER_DIR, KEEPOUT_CROSS, NET_DRIVER_OPEN, BIT_SHORT, SEG_OPEN,
     # ANTENNA, DISCONNECTED — none of which #518 touches (review #530).
     #
-    # The one other thing it may report is the cross-bundle shorts #948 made
-    # visible: this endpoint carries three shorted bit pairs (bundles 33 x 123
-    # on M7 and 35 x 39 on M4 — `tools/independent_audit.py` counts the same
-    # three on a checkpoint of it), which were always there and which no
-    # healer's metric reads (overlaps and opens only).  Accepted as measured
-    # and no further: a fourth, or a short INSIDE a bundle, is a new failure.
-    known_cross_shorts = 3
+    # Cross-bundle shorts (#948) must not appear either.  This endpoint used
+    # to carry three shorted bit pairs (bundles 33 x 123 on M7, 35 x 39 on
+    # M4) that no healer's metric read; since the healers score shorts
+    # (#962) it carries none, so the first one is a new failure, as is a
+    # short INSIDE a bundle.
+    known_cross_shorts = 0
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
         s.do_command("check_design")

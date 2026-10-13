@@ -736,34 +736,47 @@ void DetailedNUTSEngine::place_by_layer(
     // credits) keeps the abstract one.  Off = none of this runs.
     const bool kReach = short_reach_;
     std::map<std::pair<int, int>, const BusSegment*> reach_seg;
-    std::map<std::pair<int, int>, std::pair<double, double>> placed_env;
-    size_t env_upto = 0;   // result.net_segments folded into placed_env
+    // Bits placed so far: (bundle, seg) -> global bit -> track.  A bit's
+    // span-follow reaches ITS partner's same-bit track, so reach is per bit.
+    std::map<std::pair<int, int>, std::map<int, double>> placed_bits;
+    size_t env_upto = 0;   // result.net_segments folded into placed_bits
     if (kReach)
         for (const auto& b : bus_segs)
             reach_seg[{b.bundle_id, b.seg_idx}] = &b;
-    auto reach_of = [&](const BusSegment& bs, int layer, double lo,
-                        double hi) -> std::pair<double, double> {
+    auto fold_placed = [&]() {
         for (; env_upto < result.net_segments.size(); ++env_upto) {
             const NetSegment& ns = result.net_segments[env_upto];
             if (ns.is_shield) continue;          // a shield has no partner
-            auto [it, fresh] = placed_env.try_emplace(
-                {ns.bundle_id, ns.seg_idx}, ns.track_position,
-                ns.track_position);
-            if (!fresh) {
-                it->second.first  = std::min(it->second.first,
-                                             ns.track_position);
-                it->second.second = std::max(it->second.second,
-                                             ns.track_position);
-            }
+            placed_bits[{ns.bundle_id, ns.seg_idx}][ns.bit_index] =
+                ns.track_position;
         }
+    };
+    // Reach of ONE bit (bit < 0: the whole segment's envelope): the span
+    // widened to the partner's same-bit track when the partner is placed (a
+    // partner that placed no such bit stretches nothing), or to the
+    // partner's abstract footprint when its layer is not placed yet — a
+    // bound the cull behind this lever catches the misses of.
+    auto reach_bit = [&](const BusSegment& bs, int layer, int bit, double lo,
+                         double hi) -> std::pair<double, double> {
+        fold_placed();
         for (const auto& conn : bs.connections) {
             auto ps = reach_seg.find({bs.bundle_id, conn.seg_idx});
             if (ps == reach_seg.end()) continue;
             const BusSegment& p = *ps->second;
-            auto pe = placed_env.find({p.bundle_id, p.seg_idx});
-            if (pe != placed_env.end()) {
-                lo = std::min(lo, pe->second.first);
-                hi = std::max(hi, pe->second.second);
+            auto pe = placed_bits.find({p.bundle_id, p.seg_idx});
+            if (pe != placed_bits.end()) {
+                if (bit < 0) {
+                    for (const auto& [b2, t] : pe->second) {
+                        lo = std::min(lo, t);
+                        hi = std::max(hi, t);
+                    }
+                } else {
+                    auto bt = pe->second.find(bit);
+                    if (bt != pe->second.end()) {
+                        lo = std::min(lo, bt->second);
+                        hi = std::max(hi, bt->second);
+                    }
+                }
                 continue;
             }
             if (p.layer < layer || !stack_.has_layer(p.layer)) continue;
@@ -773,6 +786,10 @@ void DetailedNUTSEngine::place_by_layer(
             hi = std::max(hi, p.abstract_pos + p.abstract_width / 2.0);
         }
         return {lo, hi};
+    };
+    auto reach_of = [&](const BusSegment& bs, int layer, double lo,
+                        double hi) -> std::pair<double, double> {
+        return reach_bit(bs, layer, -1, lo, hi);
     };
     // ------------------------------------------------------------------ //
     // 1. Group segment indices by layer; sort each layer by abstract_pos. //
@@ -822,6 +839,9 @@ void DetailedNUTSEngine::place_by_layer(
             std::vector<double> track_positions;
             std::vector<int>    bits_on_track;
             double reach_lo = 0.0, reach_hi = 0.0;
+            // Per-track reach (parallel to track_positions) under the reach
+            // lever; empty = every track reaches [reach_lo, reach_hi].
+            std::vector<double> t_lo, t_hi;
         };
         std::vector<LayerAssignment> layer_assigns;
 
@@ -1025,10 +1045,27 @@ void DetailedNUTSEngine::place_by_layer(
                 // the test is the one this was before the lever existed.
                 const double o_lo = asgn.reach_lo;
                 const double o_hi = asgn.reach_hi;
-                bool span_ov = o_lo < r_hi && o_hi > r_lo;
                 bool itvl_ov = asgn.interval_lo < bs.interval_hi &&
                                asgn.interval_hi > bs.interval_lo;
-                if (span_ov && itvl_ov)
+                if (!itvl_ov) continue;
+                if (kReach && !asgn.t_lo.empty()) {
+                    // Per-track: a track is reserved when ITS bit's reach
+                    // meets this segment's abstract span; the chosen tracks
+                    // are verified against this segment's own per-bit reach
+                    // after the pick (below).
+                    for (size_t j = 0; j < asgn.track_positions.size(); ++j)
+                        if (asgn.t_lo[j] < (bs.ndr.active() ? r_hi : bs_hi) &&
+                            asgn.t_hi[j] > (bs.ndr.active() ? r_lo : bs_lo))
+                            reserved.insert(track_key(asgn.track_positions[j]));
+                    continue;
+                }
+                // An NDR segment compares by its own reach even here: it
+                // has no post-pick exact check, and an earlier NDR bus or
+                // fixed copy carries no per-track reach to test it against.
+                const bool own_reach = !kReach || bs.ndr.active();
+                bool span_ov = o_lo < (own_reach ? r_hi : bs_hi) &&
+                               o_hi > (own_reach ? r_lo : bs_lo);
+                if (span_ov)
                     for (double p : asgn.track_positions)
                         reserved.insert(track_key(p));
             }
@@ -1371,7 +1408,8 @@ void DetailedNUTSEngine::place_by_layer(
             // resolution below can re-run it with the hazard tracks added.
             // Returns the bw chosen signal-track indices ascending, or empty
             // on failure (prints the corresponding warning).
-            auto choose = [&](const std::set<long long>& resv) -> std::vector<int> {
+            auto choose = [&](const std::set<long long>& resv,
+                              bool quiet = false) -> std::vector<int> {
                 std::vector<int> chosen;
                 if (use_anchor && !bs.timing_critical) {
                     // Path A: N closest available tracks.
@@ -1396,6 +1434,7 @@ void DetailedNUTSEngine::place_by_layer(
                     }
 
                     if ((int)avail.size() < bw) {
+                        if (!quiet)
                         std::cout << "[DetailedNUTS] Warning: Layer " << layer
                                   << " has " << avail.size() << " unreserved tracks"
                                   << " (need " << bw << ") in interval ["
@@ -1484,6 +1523,7 @@ void DetailedNUTSEngine::place_by_layer(
                 }
 
                 if (best_start < 0) {
+                    if (!quiet)
                     std::cout << "[DetailedNUTS] Warning: Layer " << layer
                               << " no valid window of " << bw << " tracks in interval ["
                               << bs.interval_lo << ", " << bs.interval_hi
@@ -1506,6 +1546,70 @@ void DetailedNUTSEngine::place_by_layer(
                 result.num_unplaced += bw;
                 if (over_budget()) return;
                 continue;
+            }
+
+            // Reach lever, exact half: with the tracks picked, each bit's
+            // own reach is known (its partner's same-bit track), so test it
+            // against every other bundle's per-track reach on the SAME track
+            // and reserve the tracks that would short, then re-pick.  A few
+            // rounds, each re-pick probed quietly (a failed probe is not a
+            // stranded bundle: the pick in hand is placed).  The pick that
+            // stands is the one with the FEWEST offending tracks, the first
+            // on a tie, so a pool that keeps shorting does not drift the
+            // bus away from its anchor for nothing; the cull (when on)
+            // removes whatever still shorts.  `resv_x` is what the probe
+            // rejected: the same-bundle hazard repairs below honour it too.
+            std::set<long long> resv_x;
+            if (kReach && !bs.ndr.active()) {
+                // A bit's reach does not depend on the pick: once.
+                std::vector<std::pair<double, double>> br;
+                for (int i = 0; i < bw; ++i)
+                    br.push_back(reach_bit(bs, layer, bit_on_rank(i),
+                                           bs_lo, bs_hi));
+                // Only assignments whose interval can meet this segment's.
+                std::vector<const LayerAssignment*> others;
+                for (const auto& asgn : layer_assigns)
+                    if (asgn.bundle_id != bs.bundle_id &&
+                        asgn.interval_lo < bs.interval_hi &&
+                        asgn.interval_hi > bs.interval_lo &&
+                        !(asgn.t_lo.empty() && asgn.reach_hi <= asgn.reach_lo))
+                        others.push_back(&asgn);
+                auto offenders = [&](const std::vector<int>& picks) {
+                    std::set<long long> bad;
+                    for (size_t i = 0; i < picks.size(); ++i) {
+                        const long long tk =
+                            track_key(signal_tracks[picks[i]].first);
+                        for (const LayerAssignment* asgn : others)
+                            for (size_t j = 0; j < asgn->track_positions.size(); ++j) {
+                                if (!track_key_near(
+                                        track_key(asgn->track_positions[j]), tk))
+                                    continue;
+                                const double a_lo = asgn->t_lo.empty()
+                                    ? asgn->reach_lo : asgn->t_lo[j];
+                                const double a_hi = asgn->t_lo.empty()
+                                    ? asgn->reach_hi : asgn->t_hi[j];
+                                if (a_lo < br[i].second && a_hi > br[i].first)
+                                    bad.insert(tk);
+                            }
+                    }
+                    return bad;
+                };
+                std::vector<int> best = chosen_indices;
+                std::set<long long> bad = offenders(best);
+                size_t best_n = bad.size();
+                for (int round = 0; round < 4 && !bad.empty(); ++round) {
+                    resv_x.insert(bad.begin(), bad.end());
+                    std::set<long long> resv_r = reserved;
+                    resv_r.insert(resv_x.begin(), resv_x.end());
+                    auto again = choose(resv_r, /*quiet=*/true);
+                    if (again.empty()) break;
+                    bad = offenders(again);
+                    if (bad.size() < best_n) {
+                        best = std::move(again);
+                        best_n = bad.size();
+                    }
+                }
+                chosen_indices = std::move(best);
             }
 
             // conflicted(): does any pick land a DIFFERENT bit (net) of this
@@ -1569,7 +1673,8 @@ void DetailedNUTSEngine::place_by_layer(
                         auto pit = pos_to_idx.lower_bound(ak - 1);
                         if (pit == pos_to_idx.end() ||
                             !track_key_near(pit->first, ak) ||
-                            reserved_has(reserved, ak)) { ok = false; break; }
+                            reserved_has(reserved, ak) ||
+                            reserved_has(resv_x, ak)) { ok = false; break; }
                         idxs.push_back(pit->second);
                     }
                     if (ok && conflicted(idxs)) ok = false;   // vs OTHER hazards
@@ -1613,7 +1718,8 @@ void DetailedNUTSEngine::place_by_layer(
                                 auto pit = pos_to_idx.lower_bound(ak - 1);
                                 if (pit == pos_to_idx.end() ||
                                     !track_key_near(pit->first, ak) ||
-                                    reserved_has(reserved, ak)) { ok = false; break; }
+                                    reserved_has(reserved, ak) ||
+                                    reserved_has(resv_x, ak)) { ok = false; break; }
                                 idxs.push_back(pit->second);
                             }
                             if (ok && conflicted(idxs)) ok = false;   // vs the OTHER hazards
@@ -1628,6 +1734,7 @@ void DetailedNUTSEngine::place_by_layer(
                     // the cross-layer corner bound.
                     if (repaired.empty()) {
                         std::set<long long> resv2 = reserved;
+                        resv2.insert(resv_x.begin(), resv_x.end());
                         for (const LayerAssignment* H : hazards)
                             for (double p : H->track_positions)
                                 resv2.insert(track_key(p));
@@ -1667,10 +1774,20 @@ void DetailedNUTSEngine::place_by_layer(
                 assigned.push_back(signal_tracks[chosen_indices[i]].first);
                 assigned_bits.push_back(bit_on_rank(i));
             }
+            std::vector<double> t_lo, t_hi;
+            if (kReach) {
+                // assigned[] is ascending-track; rank i carries bit_on_rank(i).
+                for (int i = 0; i < bw; ++i) {
+                    const auto rb = reach_bit(bs, layer, bit_on_rank(i),
+                                              bs_lo, bs_hi);
+                    t_lo.push_back(rb.first);
+                    t_hi.push_back(rb.second);
+                }
+            }
             layer_assigns.push_back({bs.bundle_id, bs.span_lo, bs.span_hi,
                                      bs.interval_lo, bs.interval_hi,
                                      std::move(assigned), std::move(assigned_bits),
-                                     r_lo, r_hi});
+                                     r_lo, r_hi, std::move(t_lo), std::move(t_hi)});
         }
     }
 }
@@ -2186,6 +2303,23 @@ std::vector<BusSegment> make_bus_segments(
                             if (std::min(dlo, dhi) <= kEndTol) {
                                 c.is_endpoint = true;
                                 c.lo_end      = (dlo <= dhi);
+                            } else if (junction_reach_active()) {
+                                // Junction reach ends the span at the partner's
+                                // far EDGE (track ± width/2), not its centre:
+                                // that end is the junction too, and a bit must
+                                // snap to its own via there or the bits keep a
+                                // shared end past it (dangling metal).
+                                const double hw = 0.5 * pit->second->width;
+                                const double elo = std::min(
+                                    std::abs(pos - hw - bs.span_lo),
+                                    std::abs(pos + hw - bs.span_lo));
+                                const double ehi = std::min(
+                                    std::abs(pos - hw - bs.span_hi),
+                                    std::abs(pos + hw - bs.span_hi));
+                                if (std::min(elo, ehi) <= kEndTol) {
+                                    c.is_endpoint = true;
+                                    c.lo_end      = (elo <= ehi);
+                                }
                             }
                         }
                         // An UNPLACED partner keeps the nominal label: there is
