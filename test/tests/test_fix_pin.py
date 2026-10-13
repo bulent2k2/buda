@@ -585,3 +585,18 @@ def test_auto_cap_of_a_fixed_pin_is_its_face_length():
            "fix_pin M.tx west at 80..100", "set_max_bundle_bits auto"]
     s, _ = _session(*pre, "add_bus b[4] S.o M.tx", "run_bundler STRICT")
     assert len(s.bundles) == 1          # 20 units / pitch 4 = 5 bits >= 4
+
+
+def test_one_net_on_two_differently_fixed_pins_of_a_block_is_rejected():
+    """Codex P1 on #983: the last pin's fix silently replaced the first's."""
+    s, _ = _session("add_block A 0 0 100 100", "add_block B 400 0 600 200", *TECH,
+                    "fix_pin B.x west", "fix_pin B.y north",
+                    "add_net n A.o B.x,B.y")
+    with pytest.raises(SystemExit):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            s.do_command("run_bundler STRICT")
+    s2, _ = _session("add_block A 0 0 100 100", "add_block B 400 0 600 200", *TECH,
+                     "fix_pin B.x west", "fix_pin B.y west",
+                     "add_net n A.o B.x,B.y", "run_bundler STRICT")
+    assert len(s2.bundles) == 1

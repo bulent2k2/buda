@@ -121,6 +121,24 @@ def net_fix_signature(session, net):
     return tuple(sorted(sig.items(), key=lambda kv: kv[0]))
 
 
+def net_fix_conflicts(session, net):
+    """[(block, [pin names])] where ONE net lands on a block through pins whose
+    fixes differ.  A net is a single bundle member, so it cannot be split to
+    honour both landings."""
+    pins = _net_pins_of(session, net)
+    if pins is None:
+        return []
+    drv, rcvs = pins
+    seen = {}           # block -> {fixkey: [pin names]}
+    for pin in [drv] + list(rcvs):
+        block, _, name = pin.rpartition(".")
+        if block in session._pin_fixes or block in _sel_store(session):
+            key = _fixkey(resolve_fix(session, block, name))
+            seen.setdefault(block, {}).setdefault(key, []).append(name)
+    return [(b, [n for names in d.values() for n in names])
+            for b, d in seen.items() if len(d) > 1]
+
+
 def bundle_fix_map(session, net_names):
     """The EFFECTIVE fix map for one bundle ({block: (faces, rect, has_window,
     lo, hi)}), or None when no per-pin selector exists (the floorplan's own
@@ -172,6 +190,17 @@ def split_bundles_by_fix(session, raw_bundles):
     if not _sel_store(session):
         return raw_bundles
     import buda
+    import sys
+    for b in raw_bundles:
+        for n in b.get_net_names():
+            bad = net_fix_conflicts(session, n)
+            if bad:
+                blk, pins = bad[0]
+                print(f"Error: net '{n}' reaches block '{blk}' through pins "
+                      f"{', '.join(pins)} whose pin fixes differ — one net "
+                      f"cannot land on two faces; give those pins the same "
+                      f"fix or split the net")
+                sys.exit(1)
     out = []
     next_id = max((b.id for b in raw_bundles), default=0)
     for b in raw_bundles:
