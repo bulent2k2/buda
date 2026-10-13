@@ -298,3 +298,23 @@ cannot choose a candidate whose seat window is narrower than its bus.  Method:
 the flow's `.buda` run in a `BudaSession` with its `visualize`/`exit` lines
 dropped, abstract segments of the affected bundles printed with and without
 `BUDA_NUTS_JUNCTION_REACH=1`.
+
+#### Healer seat scoring does not rescue it (2026-10-13)
+
+`set_heal_seats` (`BUDA_HEAL_SEATS=1`) already scores supply-doomed seats, which
+is the rule proposed above for the 15-unit windows, so it was tried instead of
+new code.  `mix2_fast_bottomup_shared`, final `check_design` violations (and
+detailed WL):
+
+| junction reach | heal seats | violations | detailed WL |
+|---|---|---|---|
+| off | off | 2 | 890,954 |
+| off | on | 2 | 943,484 |
+| on | off | 80 | 965,116 |
+| on | on | 320 | 808,764 (route incomplete) |
+
+Seat scoring costs 6 % wire with the lever off and leaves 2 violations, and with
+the lever on it makes the endpoint worse (320, 34 groups, 22 bundles), not
+better.  The hypothesis that a healer that avoids too-narrow seats recovers the
+lost bits is not supported by the existing mechanism; a purpose-built filter
+was not written.
