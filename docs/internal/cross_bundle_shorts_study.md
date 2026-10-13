@@ -318,3 +318,28 @@ the lever on it makes the endpoint worse (320, 34 groups, 22 bundles), not
 better.  The hypothesis that a healer that avoids too-narrow seats recovers the
 lost bits is not supported by the existing mechanism; a purpose-built filter
 was not written.
+
+#### The static width gate on bottom-up sessions (2026-10-13)
+
+The ripup trial gate `_rr_width_infeasible` (#523) already refuses a candidate
+whose segment cannot hold its bits in its slide window, and is scoped out of
+bottom-up sessions (an earlier measurement found it perturbed class moves).
+`BUDA_RR_WIDTH_GATE_LOCKED=1` (study knob, off by default) lets it run there.
+
+`mix2_fast_bottomup_shared` through `bin/buda`, final `check_design` violations
+(detailed WL): lever off, gate off 2 (890,954); lever off, gate on 0
+(905,451); lever on, gate off 80 (965,116); lever on, gate on 28 (943,902).
+
+Corpus (57 flows, QoR triple):
+
+| setting | better | worse | notes |
+|---|---|---|---|
+| gate only | 0 | 2 | `mix2_fast_bottomup_shared` 0/0/2 -> 5/0/0 (no opens, 5 abstract overlaps), `mix2_fast_on_aligned_sql` 2/16/1 -> 2/28/2; WL unchanged |
+| gate + junction reach | 7 | 5 | the lever's own 6/5, plus `mix2_fast_on_aligned_sql` -> 1/0/0 |
+| junction reach alone | 6 | 5 | |
+
+With the gate the lever's bottom-up losses shrink (`mix2_fast_bottomup_caps`
+11/72/11 -> 5/48/6, `mix2_fast_bottomup_shared` 4/80/10 -> 7/22/3) and do not
+disappear; the gate on its own makes two flows worse.  Sweep times (1047 s base,
+949 s lever, 1604 s gate, 1377 s gate + lever) come from different days and
+runs and are not comparable.  So neither is a default.
