@@ -846,3 +846,21 @@ def test_removing_the_last_fix_does_not_launder_an_unknown_generation(tmp_path):
     s2, _ = _session(*pre, f"open_bdb {path}", "fix_pin M off")
     from buda_cmds import pin_fix_cmds
     assert pin_fix_cmds.fixes_changed_since_generation(s2)
+
+
+def test_a_non_object_pin_fixes_row_does_not_abort_open_bdb(tmp_path):
+    """Codex P2 on #989: valid JSON of the wrong shape raised AttributeError."""
+    (s, _), path = _bdb_session(tmp_path, "add_block M 0 0 100 100", "fix_pin M west")
+    for bad in ("[]", "null", "3"):
+        s.bdb.meta_set("pin_fixes", bad)
+        s2, out = _session(f"open_bdb {path}")
+        assert "unreadable" in out and not s2._pin_fixes
+
+
+def test_restoring_different_fixes_voids_live_bundles(tmp_path):
+    """Codex P1 on #989: bundles built before open_bdb were never split for them."""
+    pre = ["add_block S 0 400 100 600", "add_block M 400 400 600 600", *TECH]
+    (s, _), path = _bdb_session(tmp_path, *pre, "fix_pin M.a west", "fix_pin M.b north")
+    s2, out = _session(*pre, "add_bus x[2] S.o M.a", "add_bus y[2] S.o M.b",
+                       "run_bundler STRICT", f"open_bdb {path}")
+    assert "voided" in out and len(s2.bundles) == 0

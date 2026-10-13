@@ -505,6 +505,7 @@ def restore(session):
     BEFORE the open had no BDB to write to, so they are stored now."""
     if getattr(session, "bdb", None) is None:
         return 0
+    before = json.loads(json.dumps(_snapshot(session)))
     sels = _sel_store(session)
     fixes = session._pin_fixes
     for b in list(getattr(session, "_pin_fix_restored_blocks", {})):
@@ -520,6 +521,8 @@ def restore(session):
     try:
         if gen:
             session._pin_fix_ckpt = json.loads(gen)
+            if not isinstance(session._pin_fix_ckpt, dict):
+                session._pin_fix_ckpt = {"unknown": True}
         elif raw:
             # No generation stamp: what the pipeline was generated under cannot be
             # inferred from mutable current state, so no snapshot can match.
@@ -545,12 +548,17 @@ def restore(session):
                     sels.setdefault(b, {})[(kind, key)] = fx
                     session._pin_fix_restored_sels[(b, kind, key)] = fx
                     n += 1
-        except (ValueError, KeyError, TypeError) as e:
+        except (ValueError, KeyError, TypeError, AttributeError) as e:
             print(f"Warning: stored pin fixes unreadable ({e}); ignored")
     for b in set(session._pin_fix_restored_blocks) | {k[0] for k in session._pin_fix_restored_sels}:
         revalidate(session, b)
     if n:
         print(f"[PinFix] restored {n} persisted fix declaration(s)")
+    if len(session.bundles) and json.loads(json.dumps(_snapshot(session))) != before:
+        print("Error: open_bdb: the restored pin fixes change the ones the live "
+              "bundles were generated under; the live pipeline is voided — "
+              "re-run run_bundler and the stages after it")
+        _void_pipeline(session)
     persist(session)
     return n
 
