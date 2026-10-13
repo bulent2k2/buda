@@ -217,6 +217,8 @@ class PersistMixin:
         if self.bdb is None:
             return 0
         import json
+        from buda_cmds import pin_fix_cmds
+        pin_fix_cmds.stamp_generation(self)
         wrappers = self._persist_wrappers()
         # This clear-and-rewrite drops expanded-bundle rows too, so the
         # selective-persist fingerprint memo no longer describes the DB.

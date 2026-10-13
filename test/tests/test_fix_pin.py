@@ -730,10 +730,13 @@ def test_a_fix_changed_before_opening_voids_a_uniform_checkpoint(tmp_path):
     (s, _), path = _bdb_session(
         tmp_path, *pre, "fix_pin M west", "add_bus x[2] S.o M.i", "bdb_net_mode on",
         "run_bundler STRICT", "generate_topologies", "run_planner")
+    pristine = str(tmp_path / "pristine.bdb")
+    _say(s, f"save_bdb {pristine}")    # a snapshot, not a file copy of an open WAL db
     s2, out = _session(*pre, "fix_pin M north", f"open_bdb {path}",
                        "add_bus x[2] S.o M.i", "load_pipeline")
     assert "voided" in out and len(s2.bundles) == 0
-    s3, out3 = _session(*pre, f"open_bdb {path}", "add_bus x[2] S.o M.i",
+    assert s2.nuts_result is None and s2.detailed_result is None
+    s3, out3 = _session(*pre, f"open_bdb {pristine}", "add_bus x[2] S.o M.i",
                         "load_pipeline")
     assert "voided" not in out3 and len(s3.bundles) == 1
 
@@ -745,3 +748,24 @@ def test_a_fix_dropped_by_delayed_validation_is_persisted(tmp_path):
     assert "M" not in s2._pin_fixes
     s3, _ = _session(f"open_bdb {path}")
     assert "M" not in s3._pin_fixes
+
+
+def test_an_off_typed_before_any_open_beats_the_checkpoint(tmp_path):
+    """Codex P1 on #989: no fix was live, so no tombstone was inferred."""
+    (s, _), path = _bdb_session(tmp_path, "add_block M 0 0 100 100",
+                                "fix_pin M west", "fix_pin M.tx north")
+    s2, _ = _session("add_block M 0 0 100 100", "fix_pin M off",
+                     "fix_pin M.tx off", f"open_bdb {path}")
+    assert "M" not in s2._pin_fixes and not s2._pin_fix_sel.get("M")
+
+
+def test_a_fix_typed_after_bundling_voids_the_next_resume(tmp_path):
+    """Codex P1 on #989: the single pin_fixes row was rewritten without the pipeline."""
+    pre = ["add_block S 0 400 100 600", "add_block M 400 400 600 600", *TECH]
+    (s, _), path = _bdb_session(
+        tmp_path, *pre, "fix_pin M west", "add_bus x[2] S.o M.i", "bdb_net_mode on",
+        "run_bundler STRICT", "generate_topologies", "run_planner",
+        "fix_pin M north")                      # typed AFTER the pipeline was stored
+    s2, out = _session(*pre, f"open_bdb {path}", "add_bus x[2] S.o M.i",
+                       "load_pipeline")
+    assert "voided" in out and len(s2.bundles) == 0

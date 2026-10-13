@@ -268,6 +268,7 @@ def _cmd_fix_pin(session, cmd, args, cmd_line):
     fixes = session._pin_fixes
     sels = _sel_store(session)
     if sel is not None and len(args) == 2 and args[1].lower() == "off":
+        _tombstone(session, block, sel)
         if sels.get(block, {}).pop(sel, None) is not None:
             if not sels[block]:
                 del sels[block]
@@ -277,6 +278,7 @@ def _cmd_fix_pin(session, cmd, args, cmd_line):
             print(f"[PinFix] {target}: no such pin fix declared")
         return
     if sel is None and len(args) == 2 and args[1].lower() == "off":
+        _tombstone(session, block, None)
         if block in fixes:
             del fixes[block]
             session.fp.clear_pin_fix(block)
@@ -430,6 +432,7 @@ def cmd_dump_pin_fixes(session, cmd, args, cmd_line):
 
 
 _META = "pin_fixes"
+_META_GEN = "pin_fixes_gen"
 
 
 def _snapshot(session):
@@ -463,6 +466,16 @@ def _forget_overridden(session):
         for k in [k for k, fx in rs.items()
                   if sels.get(k[0], {}).get((k[1], k[2])) is not fx]:
             del rs[k]
+
+
+def _tombstone(session, block, sel):
+    """An explicit `off` outranks any BDB opened later, whether or not a fix was
+    live when it was typed (typed wins)."""
+    if sel is None:
+        session.__dict__.setdefault("_pin_fix_removed_blocks", set()).add(block)
+    else:
+        session.__dict__.setdefault("_pin_fix_removed_sels", set()).add(
+            (block, sel[0], sel[1]))
 
 
 def _keys(session):
@@ -503,8 +516,10 @@ def restore(session):
             del sels[b]
     session._pin_fix_restored_blocks, session._pin_fix_restored_sels = {}, {}
     raw = session.bdb.meta_get(_META, "")
+    gen = session.bdb.meta_get(_META_GEN, "")
     try:
-        session._pin_fix_ckpt = json.loads(raw) if raw else {"blocks": {}, "selectors": []}
+        src = gen or raw
+        session._pin_fix_ckpt = json.loads(src) if src else {"blocks": {}, "selectors": []}
     except ValueError:
         session._pin_fix_ckpt = None
     n = 0
@@ -534,6 +549,27 @@ def restore(session):
     return n
 
 
+def _void_pipeline(session):
+    """Drop every restored stage together: a stale NUTS/DNUTS result must not
+    outlive the wrappers it was solved for."""
+    import buda
+    session.bundles = buda.BundleWrapperVec()
+    session.planner = None
+    session.nuts_result = None
+    session.detailed_result = None
+
+
+def stamp_generation(session):
+    """Bind the fixes in force to the pipeline being persisted: the bundler (the
+    stage that reads them) records them beside the bundle rows, so a fix typed
+    LATER, which rewrites `pin_fixes` only, still differs from what the stored
+    pipeline was generated under."""
+    if getattr(session, "bdb", None) is None:
+        return
+    snap = _snapshot(session)
+    session.bdb.meta_set(_META_GEN, json.dumps(snap, sort_keys=True))
+
+
 def restamp_bundles(session):
     """After load_pipeline: restored candidates carry no per-bundle map (it is
     not stored per candidate); stamp each from the restored selectors.  A
@@ -547,7 +583,7 @@ def restamp_bundles(session):
         print("Error: load_pipeline: the pin fixes in force differ from the ones "
               "the checkpoint was generated under; the restored pipeline is "
               "voided — re-run run_bundler and the stages after it")
-        session.bundles = buda.BundleWrapperVec()
+        _void_pipeline(session)
         return
     if not _sel_store(session):
         return
@@ -560,7 +596,7 @@ def restamp_bundles(session):
                   f"fixes (its nets now land on one block under different "
                   f"fixes); the restored pipeline is voided — re-run "
                   f"run_bundler and the stages after it")
-            session.bundles = buda.BundleWrapperVec()
+            _void_pipeline(session)
             return
     for w in session.bundles:
         m = bundle_fix_map(session, w.input.original_bundle.get_net_names())
