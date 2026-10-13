@@ -2408,9 +2408,11 @@ static bool repack_cache_off() {
 // during a pack, and entries are built lazily at pack time, before any commit.
 struct RepackBaseCache {
     struct Entry {
-        std::vector<std::pair<double,double>>                         ko;
-        std::vector<std::pair<const TrackSegment*,
-                              std::pair<double,double>>>              hits;
+        // Keepout intervals (owner null) and touching segments' intervals,
+        // sorted by interval once at build: filtering a sorted list by member
+        // set leaves it sorted, so the per-attempt base needs no sort.
+        std::vector<std::pair<std::pair<double,double>,
+                              const TrackSegment*>>                   all;
     };
     std::unordered_map<const TrackSegment*, Entry> m;
     long long builds = 0, reuses = 0;
@@ -2668,7 +2670,8 @@ private:
         std::vector<int> hits;
         const bool use_idx = members.size() >= 8 && !span_index_off();
         std::vector<std::pair<double,double>> cache_tmp;
-        auto base_of = [&](size_t k)
+        std::vector<char> base_sorted(members.size(), 0);
+        auto base_of_unsorted = [&](size_t k)
                 -> const std::vector<std::pair<double,double>>& {
             if (!occ_built[k] && base_cache_ && use_idx && !repack_cache_off()) {
                 TrackSegment* m = members[k];
@@ -2676,11 +2679,13 @@ private:
                 if (it == base_cache_->m.end()) {
                     ++base_cache_->builds;
                     RepackBaseCache::Entry& e = base_cache_->m[m];
-                    add_keepout_occ(m, e.ko);
+                    cache_tmp.clear();
+                    add_keepout_occ(m, cache_tmp);
+                    for (const auto& iv : cache_tmp) e.all.push_back({iv, nullptr});
                     auto take = [&](const TrackSegment* o) {
                         cache_tmp.clear();
                         occupancy_from(*m, *o, cache_tmp);
-                        if (!cache_tmp.empty()) e.hits.push_back({o, cache_tmp[0]});
+                        if (!cache_tmp.empty()) e.all.push_back({cache_tmp[0], o});
                     };
                     if (use_idx) {
                         if (!sidx_built) { sidx.build(segs); sidx_built = true; }
@@ -2689,14 +2694,18 @@ private:
                     } else {
                         for (const TrackSegment* o : segs) take(o);
                     }
+                    std::sort(e.all.begin(), e.all.end(),
+                              [](const auto& a, const auto& b) { return a.first < b.first; });
                     it = base_cache_->m.find(m);
                 } else {
                     ++base_cache_->reuses;
                 }
                 const RepackBaseCache::Entry& e = it->second;
-                base_occ[k] = e.ko;
-                for (const auto& [o, iv] : e.hits)
-                    if (!is_member(o)) base_occ[k].push_back(iv);
+                base_occ[k].clear();
+                base_occ[k].reserve(e.all.size());
+                for (const auto& [iv, o] : e.all)
+                    if (!o || !is_member(o)) base_occ[k].push_back(iv);
+                base_sorted[k] = 1;   // filtering a sorted list keeps it sorted
                 occ_built[k] = 1;
             }
             if (!occ_built[k]) {
@@ -2719,6 +2728,17 @@ private:
                 occ_built[k] = 1;
             }
             return base_occ[k];
+        };
+        // The base list sorted, once per member per call: both packs read it
+        // and the merge below needs it ordered.
+        auto base_of = [&](size_t k)
+                -> const std::vector<std::pair<double,double>>& {
+            const auto& b = base_of_unsorted(k);
+            if (!base_sorted[k]) {
+                std::sort(base_occ[k].begin(), base_occ[k].end());
+                base_sorted[k] = 1;
+            }
+            return b;
         };
 
         // Pack the members in deadline order.  In pull-aware mode each member
@@ -2744,7 +2764,11 @@ private:
                 // Keepouts + placed segments outside the repack set that
                 // overlap m's span (same-bundle never conflicts): the cached
                 // base occupancy from above.
-                std::vector<std::pair<double,double>> occ = base_of(k);
+                // sorted(base + repacked) == merge(sorted base, sorted extra):
+                // equal elements are equal pairs, so the sequence is the same
+                // as the sort of the concatenation, without re-sorting the base.
+                const std::vector<std::pair<double,double>>& base = base_of(k);
+                std::vector<std::pair<double,double>> extra;
                 for (const auto& [pm, ppos] : repacked) {
                     if (pm->bundle_id == m->bundle_id) continue;
                     // Members conflict only where their spans overlap — same
@@ -2756,9 +2780,19 @@ private:
                     if (!(sp_lo(*pm) <= sp_hi(*m) && sp_lo(*m) <= sp_hi(*pm)))  // closed: touch = occupied
                         continue;
                     const double h = pm->width / 2.0;
-                    occ.push_back({ppos - h, ppos + h});
+                    extra.push_back({ppos - h, ppos + h});
                 }
-                std::sort(occ.begin(), occ.end());
+                std::vector<std::pair<double,double>> merged_occ;
+                const std::vector<std::pair<double,double>>* occp = &base;
+                if (!extra.empty()) {
+                    std::sort(extra.begin(), extra.end());
+                    merged_occ.reserve(base.size() + extra.size());
+                    std::merge(base.begin(), base.end(),
+                               extra.begin(), extra.end(),
+                               std::back_inserter(merged_occ));
+                    occp = &merged_occ;
+                }
+                const std::vector<std::pair<double,double>>& occ = *occp;
                 double p;
                 if (pull_aware) {
                     auto pit = pull_map.find({m->bundle_id, m->seg_idx});
