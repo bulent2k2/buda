@@ -527,7 +527,7 @@ def restore(session):
         else:
             session._pin_fix_ckpt = {"blocks": {}, "selectors": []}
     except ValueError:
-        session._pin_fix_ckpt = None
+        session._pin_fix_ckpt = {"unknown": True}      # corrupt stamp: unverifiable
     n = 0
     if raw:
         try:
@@ -584,6 +584,25 @@ def stamp_generation(session):
     session._pin_fix_ckpt = snap            # a same-session reload sees the new generation
 
 
+def fixes_changed_since_generation(session):
+    """True when the fixes in force differ from (or cannot be compared with) the
+    ones the stored pipeline was generated under — then hand-edited USER
+    candidates the rebundle would keep were built for geometry that no longer
+    holds, and must not be carried into the new generation."""
+    bdb = getattr(session, "bdb", None)
+    if bdb is None:
+        return False
+    gen = bdb.meta_get(_META_GEN, "")
+    now = json.loads(json.dumps(_snapshot(session)))
+    try:
+        if gen:
+            return json.loads(gen) != now
+    except ValueError:
+        return True
+    return bool(bdb.meta_get(_META, "")) and bdb.meta_get(_META, "") != json.dumps(
+        now, sort_keys=True)
+
+
 def flush_generation(session):
     """Write a snapshot held from a bundler that ran before `open_bdb`."""
     pend = getattr(session, "_pin_fix_gen_pending", None)
@@ -610,6 +629,14 @@ def restamp_bundles(session):
         _void_pipeline(session)
         return
     if not _sel_store(session):
+        return
+    if any(_net_pins_of(session, n) is None for w in session.bundles
+           for n in w.input.original_bundle.get_net_names()):
+        print("Error: load_pipeline: pin selectors are declared but the nets' "
+              "endpoints are not (add_net / add_bus before load_pipeline), so "
+              "the restored bundles cannot be matched to their fixes; the "
+              "restored pipeline is voided")
+        _void_pipeline(session)
         return
     for w in session.bundles:
         nets = list(w.input.original_bundle.get_net_names())

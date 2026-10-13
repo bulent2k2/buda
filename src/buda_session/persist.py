@@ -285,7 +285,16 @@ class PersistMixin:
                     # would come back untapered (BUDA-1904) purely because
                     # some LATER run re-persisted without it.
                     self.bdb.bundle_net_endpoints(_row.id))
-        self.bdb.clear_bundles(keep_user=True)
+        from buda_cmds import pin_fix_cmds
+        _keep = True
+        if pin_fix_cmds.fixes_changed_since_generation(self) and any(
+                tr.source == "user" for _r in self.bdb.all_bundles()
+                for tr in self.bdb.topologies(_r.id)):
+            print("Warning: [PinFix] the pin fixes changed since the stored "
+                  "candidates were generated; hand-edited (USER) candidates are "
+                  "dropped with them — re-create them under the new fixes")
+            _keep = False
+        self.bdb.clear_bundles(keep_user=_keep)
         kept_ids = ({r.id for r in self.bdb.all_bundles()}
                     if absent_membership else set())
         for _bid, (_nets, _bts, _eps) in absent_membership.items():

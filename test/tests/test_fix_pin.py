@@ -805,3 +805,25 @@ def test_rebundling_then_reloading_in_one_session_is_not_voided(tmp_path):
     out += _say(s, "run_bundler STRICT") + _say(s, "generate_topologies")
     out += _say(s, "run_planner") + _say(s, "load_pipeline")
     assert "voided" not in out, out
+
+
+def test_a_corrupt_generation_stamp_is_unverifiable(tmp_path):
+    """Codex P2 on #989: a malformed pin_fixes_gen row skipped the mismatch check."""
+    pre = ["add_block S 0 400 100 600", "add_block M 400 400 600 600", *TECH]
+    (s, _), path = _bdb_session(
+        tmp_path, *pre, "fix_pin M west", "add_bus x[2] S.o M.i", "bdb_net_mode on",
+        "run_bundler STRICT", "generate_topologies", "run_planner")
+    s.bdb.meta_set("pin_fixes_gen", "{not json")
+    s2, out = _session(*pre, f"open_bdb {path}", "add_bus x[2] S.o M.i",
+                       "load_pipeline")
+    assert "voided" in out and len(s2.bundles) == 0
+
+
+def test_selectors_without_declared_nets_void_the_resume(tmp_path):
+    """Codex P1 on #989: with no net endpoints every bundle got an explicit empty map."""
+    pre = ["add_block S 0 400 100 600", "add_block M 400 400 600 600", *TECH]
+    (s, _), path = _bdb_session(
+        tmp_path, *pre, "fix_pin M.i north", "add_bus x[2] S.o M.i", "bdb_net_mode on",
+        "run_bundler STRICT", "generate_topologies", "run_planner")
+    s2, out = _session(*pre, f"open_bdb {path}", "load_pipeline")   # nets not redeclared
+    assert "voided" in out and len(s2.bundles) == 0
