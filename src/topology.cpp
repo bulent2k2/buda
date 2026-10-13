@@ -206,6 +206,7 @@ Topology transform_topology(const Topology& t, const std::string& orient,
 static void annotate_endpoints(Topology& topo, const std::vector<Busterm>& blocks);
 
 void annotate_topology(Topology& topo, const Floorplan& fp) {
+    FixScope fix_scope_(topo);
     // Build a Busterm per floorplan block and run the same geometric annotation
     // the generator uses, so a hand-built or BDB-reloaded topology gets the
     // authoritative seg_busterms it needs before ConnTopology::build (which no
@@ -4574,6 +4575,7 @@ static void add_mst_teg_attachments(Topology& topo,
 // re-implementing the rule).
 void add_mst_teg_attachments(Topology& topo, const Floorplan& fp,
                              int h_layer, int v_layer) {
+    FixScope fix_scope_(topo);   // landing_busterm reads the topology's own fixes
     std::vector<Busterm> bts;
     for (const auto& [name, orig] : fp.get_all_blocks()) {
         (void)orig;

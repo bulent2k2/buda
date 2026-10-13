@@ -600,3 +600,16 @@ def test_one_net_on_two_differently_fixed_pins_of_a_block_is_rejected():
                      "fix_pin B.x west", "fix_pin B.y west",
                      "add_net n A.o B.x,B.y", "run_bundler STRICT")
     assert len(s2.bundles) == 1
+
+
+def test_public_topology_helpers_read_the_topologys_own_fixes():
+    """Codex on #983: add_mst_teg_attachments built busterms from the floorplan's fixes."""
+    s, _ = _run_pins()
+    w = next(w for w in s.bundles
+             if w.input.original_bundle.get_net_names()[0] == "hi_0")
+    topo = buda.offset_topology(w.input.candidates[0], 0, 0)
+    s.fp.set_pin_fix("MAC", E, -1, False, 0, 0)       # conflicting block-level fix
+    before = [(g.start.x, g.start.y, g.end.x, g.end.y) for g in topo.segments]
+    buda.add_mst_teg_attachments(topo, s.fp, 4, 5)
+    after = [(g.start.x, g.start.y, g.end.x, g.end.y) for g in topo.segments]
+    assert after == before        # MAC is THRU under its own map: nothing to attach
