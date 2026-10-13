@@ -622,3 +622,265 @@ def test_conn_dump_of_a_bundle_with_no_candidates_does_not_raise():
     assert not list(s.bundles[0].input.candidates)      # nothing generated yet
     out = _say(s, "dump_topologies --conn")
     assert "Traceback" not in out and "IndexError" not in out
+
+
+# ── persistence ──────────────────────────────────────────────────────────────
+
+def _bdb_session(tmp_path, *cmds):
+    path = str(tmp_path / "pf.bdb")
+    return _session(f"open_bdb {path}", *cmds), path
+
+
+def test_fixes_and_selectors_survive_reopening_the_bdb(tmp_path):
+    (s, _), path = _bdb_session(tmp_path, "add_block M 0 0 100 100",
+                                "fix_pin M west", "fix_pin M.tx north at 10..20",
+                                "fix_pin M.d* south")
+    s.bdb.save_bdb(path) if hasattr(s.bdb, "save_bdb") else None
+    s2, out = _session(f"open_bdb {path}")
+    assert "restored 3 persisted fix" in out, out
+    assert s2._pin_fixes["M"]["faces"] == W
+    assert s2._pin_fix_sel["M"][("name", "tx")]["faces"] == N
+    assert s2._pin_fix_sel["M"][("name", "tx")]["has_window"]
+    assert s2._pin_fix_sel["M"][("prefix", "d")]["faces"] == S
+    assert s2.fp.has_pin_fix("M")
+
+
+def test_a_typed_fix_outranks_a_stored_one_and_off_is_stored(tmp_path):
+    (s, _), path = _bdb_session(tmp_path, "add_block M 0 0 100 100", "fix_pin M west")
+    s2, _ = _session("fix_pin M east", f"open_bdb {path}")
+    assert s2._pin_fixes["M"]["faces"] == E
+    s3, _ = _session(f"open_bdb {path}", "fix_pin M off")
+    s4, out4 = _session(f"open_bdb {path}")
+    assert "M" not in s4._pin_fixes
+
+
+def test_restored_selectors_restamp_loaded_candidates(tmp_path):
+    (s, _), path = _bdb_session(
+        tmp_path, "add_block S 0 400 100 600", "add_block M 400 400 600 600", *TECH,
+        "fix_pin M.hi_in north", "add_bus hi[4] S.o M.hi_in", "bdb_net_mode on",
+        "run_bundler STRICT", "generate_topologies", "run_planner")
+    s2, _ = _session("add_block S 0 400 100 600", "add_block M 400 400 600 600", *TECH,
+                     f"open_bdb {path}", "add_bus hi[4] S.o M.hi_in",
+                     "load_pipeline")
+    assert s2.bundles
+    t = s2.bundles[0].input.candidates[0]
+    assert t.has_block_fixes and t.block_fixes["M"][0] == N
+
+
+def test_persist_flows_build_then_resume_from_the_checkpoint(tmp_path):
+    import shutil
+    for n in ("persist_build.buda", "persist_resume.buda"):
+        shutil.copy(FLOW / n, tmp_path / n)
+    outs = []
+    for n in ("persist_build.buda", "persist_resume.buda"):
+        r = subprocess.run([sys.executable, str(_ROOT / "src" / "buda_cli.py"),
+                            "--no-viz", str(tmp_path / n)],
+                           capture_output=True, text=True, env=buda_env(_ROOT),
+                           cwd=str(_ROOT))
+        assert r.returncode == 0, r.stdout + r.stderr
+        outs.append(r.stdout)
+    assert "restored 3 persisted fix" in outs[1], outs[1]
+    assert "Error:" not in outs[1]
+    assert outs[1].count("Success: no violations found.") == 3, outs[1]
+
+
+def test_a_replacement_typed_after_a_restore_survives_opening_another_bdb(tmp_path):
+    """Codex P1 on #989: a typed replacement was still tracked as 'restored'."""
+    (s, _), pa = _bdb_session(tmp_path, "add_block M 0 0 100 100",
+                              "fix_pin M west", "fix_pin M.tx north")
+    pb = str(tmp_path / "other.bdb")
+    s2, _ = _session("add_block M 0 0 100 100", f"open_bdb {pa}",
+                     "fix_pin M east", "fix_pin M.tx south", f"open_bdb {pb}")
+    assert s2._pin_fixes["M"]["faces"] == E
+    assert s2._pin_fix_sel["M"][("name", "tx")]["faces"] == S
+    # an UNTOUCHED restored fix still drops when another BDB is opened
+    pc = str(tmp_path / "fresh.bdb")       # pb now holds s2's typed fixes
+    s3, _ = _session("add_block M 0 0 100 100", f"open_bdb {pa}", f"open_bdb {pc}")
+    assert "M" not in s3._pin_fixes and not s3._pin_fix_sel
+
+
+def test_a_restored_bundle_that_current_fixes_repartition_is_voided(tmp_path):
+    pre = ["add_block S 0 400 100 600", "add_block M 400 400 600 600", *TECH]
+    (s, _), path = _bdb_session(
+        tmp_path, *pre, "fix_pin M.a west", "fix_pin M.b west",
+        "add_bus x[2] S.o M.a", "add_bus y[2] S.o M.b", "bdb_net_mode on",
+        "run_bundler STRICT", "generate_topologies", "run_planner")
+    assert len(s.bundles) == 1                      # same fix -> one bundle
+    s2, out = _session(*pre, "fix_pin M.b north", f"open_bdb {path}",
+                       "add_bus x[2] S.o M.a", "add_bus y[2] S.o M.b",
+                       "load_pipeline")
+    assert "voided" in out and len(s2.bundles) == 0
+
+
+def test_a_typed_off_survives_opening_another_bdb(tmp_path):
+    """Codex P1 on #989: a typed removal left no tombstone, so the next BDB restored it."""
+    (s, _), pa = _bdb_session(tmp_path, "add_block M 0 0 100 100",
+                              "fix_pin M west", "fix_pin M.tx north")
+    pb = str(tmp_path / "b.bdb")
+    (sb, _), _ = _session("open_bdb " + pb, "add_block M 0 0 100 100",
+                          "fix_pin M east", "fix_pin M.tx south"), None
+    s2, _ = _session("add_block M 0 0 100 100", f"open_bdb {pa}",
+                     "fix_pin M off", "fix_pin M.tx off", f"open_bdb {pb}")
+    assert "M" not in s2._pin_fixes and not s2._pin_fix_sel.get("M")
+
+
+def test_a_fix_changed_before_opening_voids_a_uniform_checkpoint(tmp_path):
+    """Codex P1 on #989: one partition does not mean the generated geometry is current."""
+    pre = ["add_block S 0 400 100 600", "add_block M 400 400 600 600", *TECH]
+    (s, _), path = _bdb_session(
+        tmp_path, *pre, "fix_pin M west", "add_bus x[2] S.o M.i", "bdb_net_mode on",
+        "run_bundler STRICT", "generate_topologies", "run_planner")
+    pristine = str(tmp_path / "pristine.bdb")
+    _say(s, f"save_bdb {pristine}")    # a snapshot, not a file copy of an open WAL db
+    s2, out = _session(*pre, "fix_pin M north", f"open_bdb {path}",
+                       "add_bus x[2] S.o M.i", "load_pipeline")
+    assert "voided" in out and len(s2.bundles) == 0
+    assert s2.nuts_result is None and s2.detailed_result is None
+    s3, out3 = _session(*pre, f"open_bdb {pristine}", "add_bus x[2] S.o M.i",
+                        "load_pipeline")
+    assert "voided" not in out3 and len(s3.bundles) == 1
+
+
+def test_a_fix_dropped_by_delayed_validation_is_persisted(tmp_path):
+    """Codex P2 on #989: the drop at add_block was never written back."""
+    (s, _), path = _bdb_session(tmp_path, "fix_pin M rect 5")
+    s2, _ = _session(f"open_bdb {path}", "add_block M 0 0 100 100")
+    assert "M" not in s2._pin_fixes
+    s3, _ = _session(f"open_bdb {path}")
+    assert "M" not in s3._pin_fixes
+
+
+def test_an_off_typed_before_any_open_beats_the_checkpoint(tmp_path):
+    """Codex P1 on #989: no fix was live, so no tombstone was inferred."""
+    (s, _), path = _bdb_session(tmp_path, "add_block M 0 0 100 100",
+                                "fix_pin M west", "fix_pin M.tx north")
+    s2, _ = _session("add_block M 0 0 100 100", "fix_pin M off",
+                     "fix_pin M.tx off", f"open_bdb {path}")
+    assert "M" not in s2._pin_fixes and not s2._pin_fix_sel.get("M")
+
+
+def test_a_fix_typed_after_bundling_voids_the_next_resume(tmp_path):
+    """Codex P1 on #989: the single pin_fixes row was rewritten without the pipeline."""
+    pre = ["add_block S 0 400 100 600", "add_block M 400 400 600 600", *TECH]
+    (s, _), path = _bdb_session(
+        tmp_path, *pre, "fix_pin M west", "add_bus x[2] S.o M.i", "bdb_net_mode on",
+        "run_bundler STRICT", "generate_topologies", "run_planner",
+        "fix_pin M north")                      # typed AFTER the pipeline was stored
+    s2, out = _session(*pre, f"open_bdb {path}", "add_bus x[2] S.o M.i",
+                       "load_pipeline")
+    assert "voided" in out and len(s2.bundles) == 0
+
+
+def test_a_generic_repersist_does_not_restamp_the_generation(tmp_path):
+    """Codex P1 on #989: select_topology re-persisted the bundles and restamped the fixes."""
+    pre = ["add_block S 0 400 100 600", "add_block M 400 400 600 600", *TECH]
+    (s, _), path = _bdb_session(
+        tmp_path, *pre, "fix_pin M west", "add_bus x[2] S.o M.i", "bdb_net_mode on",
+        "run_bundler STRICT", "generate_topologies", "run_planner",
+        "fix_pin M north", "select_topology x 1")
+    s2, out = _session(*pre, f"open_bdb {path}", "add_bus x[2] S.o M.i",
+                       "load_pipeline")
+    assert "voided" in out and len(s2.bundles) == 0
+
+
+def test_a_bundler_run_before_open_bdb_still_binds_its_fixes(tmp_path):
+    """Codex P1 on #989: no stamp was written, so the live row stood in for it."""
+    pre = ["add_block S 0 400 100 600", "add_block M 400 400 600 600", *TECH]
+    path = str(tmp_path / "late.bdb")
+    s, _ = _session(*pre, "fix_pin M west", "add_bus x[2] S.o M.i",
+                    "run_bundler STRICT", f"open_bdb {path}",
+                    "generate_topologies", "run_planner", "fix_pin M north")
+    s2, out = _session(*pre, f"open_bdb {path}", "add_bus x[2] S.o M.i",
+                       "load_pipeline")
+    assert "voided" in out and len(s2.bundles) == 0
+
+
+def test_rebundling_then_reloading_in_one_session_is_not_voided(tmp_path):
+    """Codex P2 on #989: the cached snapshot outlived the new generation."""
+    pre = ["add_block S 0 400 100 600", "add_block M 400 400 600 600", *TECH]
+    (s, _), path = _bdb_session(
+        tmp_path, *pre, "fix_pin M west", "add_bus x[2] S.o M.i", "bdb_net_mode on",
+        "run_bundler STRICT", "generate_topologies", "run_planner")
+    out = _say(s, "fix_pin M north")
+    out += _say(s, "run_bundler STRICT") + _say(s, "generate_topologies")
+    out += _say(s, "run_planner") + _say(s, "load_pipeline")
+    assert "voided" not in out, out
+
+
+def test_a_corrupt_generation_stamp_is_unverifiable(tmp_path):
+    """Codex P2 on #989: a malformed pin_fixes_gen row skipped the mismatch check."""
+    pre = ["add_block S 0 400 100 600", "add_block M 400 400 600 600", *TECH]
+    (s, _), path = _bdb_session(
+        tmp_path, *pre, "fix_pin M west", "add_bus x[2] S.o M.i", "bdb_net_mode on",
+        "run_bundler STRICT", "generate_topologies", "run_planner")
+    s.bdb.meta_set("pin_fixes_gen", "{not json")
+    s2, out = _session(*pre, f"open_bdb {path}", "add_bus x[2] S.o M.i",
+                       "load_pipeline")
+    assert "voided" in out and len(s2.bundles) == 0
+
+
+def test_selectors_without_declared_nets_void_the_resume(tmp_path):
+    """Codex P1 on #989: with no net endpoints every bundle got an explicit empty map."""
+    pre = ["add_block S 0 400 100 600", "add_block M 400 400 600 600", *TECH]
+    (s, _), path = _bdb_session(
+        tmp_path, *pre, "fix_pin M.i north", "add_bus x[2] S.o M.i", "bdb_net_mode on",
+        "run_bundler STRICT", "generate_topologies", "run_planner")
+    s2, out = _session(*pre, f"open_bdb {path}", "load_pipeline")   # nets not redeclared
+    assert "voided" in out and len(s2.bundles) == 0
+
+
+def test_a_failed_load_does_not_void_the_live_pipeline(tmp_path):
+    """Codex P2 on #989: restamp ran after a load that restored nothing."""
+    pre = ["add_block S 0 400 100 600", "add_block M 400 400 600 600", *TECH]
+    s, out = _session(*pre, "fix_pin M.i north", "add_bus x[2] S.o M.i",
+                      "run_bundler STRICT", f"open_bdb {tmp_path / 'empty.bdb'}",
+                      "load_pipeline")
+    assert "voided" not in out and len(s.bundles) == 1
+
+
+def test_removing_the_last_fix_does_not_launder_an_unknown_generation(tmp_path):
+    """Codex P1 on #989: the live row was empty after `off`, hiding the missing stamp."""
+    pre = ["add_block S 0 400 100 600", "add_block M 400 400 600 600", *TECH]
+    (s, _), path = _bdb_session(tmp_path, *pre, "fix_pin M west")
+    s.bdb.meta_set("pin_fixes_gen", "")          # a checkpoint from before the stamp
+    s2, _ = _session(*pre, f"open_bdb {path}", "fix_pin M off")
+    from buda_cmds import pin_fix_cmds
+    assert pin_fix_cmds.fixes_changed_since_generation(s2)
+
+
+def test_a_non_object_pin_fixes_row_does_not_abort_open_bdb(tmp_path):
+    """Codex P2 on #989: valid JSON of the wrong shape raised AttributeError."""
+    (s, _), path = _bdb_session(tmp_path, "add_block M 0 0 100 100", "fix_pin M west")
+    for bad in ("[]", "null", "3"):
+        s.bdb.meta_set("pin_fixes", bad)
+        s2, out = _session(f"open_bdb {path}")
+        assert "unreadable" in out and not s2._pin_fixes
+
+
+def test_restoring_different_fixes_voids_live_bundles(tmp_path):
+    """Codex P1 on #989: bundles built before open_bdb were never split for them."""
+    pre = ["add_block S 0 400 100 600", "add_block M 400 400 600 600", *TECH]
+    (s, _), path = _bdb_session(tmp_path, *pre, "fix_pin M.a west", "fix_pin M.b north")
+    s2, out = _session(*pre, "add_bus x[2] S.o M.a", "add_bus y[2] S.o M.b",
+                       "run_bundler STRICT", f"open_bdb {path}")
+    assert "voided" in out and len(s2.bundles) == 0
+
+
+def test_a_malformed_nested_record_leaves_the_session_untouched(tmp_path):
+    """Codex P2 on #989: nested garbage was installed before revalidate() choked on it."""
+    import json
+    good = {"faces": 8, "rect": -1, "has_window": False, "lo": 0, "hi": 0}
+    cases = ['{"blocks":{},"selectors":[["M","name","tx",null]]}',
+             '{"blocks":{"A":%s,"B":{"faces":"x"}},"selectors":[]}' % json.dumps(good),
+             '{"blocks":[],"selectors":{}}',
+             '{"blocks":{"M":{"faces":16,"rect":-1,"has_window":false,"lo":0,"hi":0}},"selectors":[]}',
+             '{"blocks":{"M":{"faces":8,"rect":-2,"has_window":false,"lo":0,"hi":0}},"selectors":[]}',
+             '{"blocks":{"M":{"faces":8,"rect":-1,"has_window":true,"lo":9,"hi":9}},"selectors":[]}',
+             '{"blocks":{"M":{"faces":100000000000000000000,"rect":-1,'
+             '"has_window":false,"lo":0,"hi":0}},"selectors":[]}']
+    for i, bad in enumerate(cases):
+        path = str(tmp_path / f"n{i}.bdb")
+        s, _ = _session(f"open_bdb {path}", "add_block M 0 0 100 100", "fix_pin M west")
+        s.bdb.meta_set("pin_fixes", bad)
+        s2, out = _session(f"open_bdb {path}")
+        assert "unreadable" in out and not s2._pin_fixes and not s2._pin_fix_sel, bad

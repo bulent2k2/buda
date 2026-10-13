@@ -32,6 +32,7 @@ selects `tx[3]` / `tx_3`) > longest `prefix*` > the block-level fix.  Two nets
 landing on one block under DIFFERENT effective fixes cannot share a bundle
 (a bundle lands on one face), so the bundler splits them, loudly.
 """
+import json
 import re
 
 # BUDA-1922 (no candidate lands on a fixed pin) is emitted by the topology
@@ -242,7 +243,7 @@ def _strips_with(session, block, fix):
             _apply(session, block, prev)
 
 
-def cmd_fix_pin(session, cmd, args, cmd_line):
+def _cmd_fix_pin(session, cmd, args, cmd_line):
     # fix_pin <block>[.*] [north|south|east|west|H|V ...] [rect <n>] [at <lo>..<hi>]
     # fix_pin <block> off
     if not args:
@@ -267,6 +268,7 @@ def cmd_fix_pin(session, cmd, args, cmd_line):
     fixes = session._pin_fixes
     sels = _sel_store(session)
     if sel is not None and len(args) == 2 and args[1].lower() == "off":
+        _tombstone(session, block, sel)
         if sels.get(block, {}).pop(sel, None) is not None:
             if not sels[block]:
                 del sels[block]
@@ -276,6 +278,7 @@ def cmd_fix_pin(session, cmd, args, cmd_line):
             print(f"[PinFix] {target}: no such pin fix declared")
         return
     if sel is None and len(args) == 2 and args[1].lower() == "off":
+        _tombstone(session, block, None)
         if block in fixes:
             del fixes[block]
             session.fp.clear_pin_fix(block)
@@ -371,6 +374,7 @@ def revalidate(session, block, fp=None):
     if not fp.has_block(block):
         return
     sels = _sel_store(session).get(block, {})
+    dropped = False
     for sel, sfx in list(sels.items()):
         bad = None
         if sfx["rect"] >= _rect_count(fp, block):
@@ -379,10 +383,13 @@ def revalidate(session, block, fp=None):
             bad = f"'{_declared(sfx)}' admits no landing on this block"
         if bad:
             del sels[sel]
+            dropped = True
             print(f"Error: fix_pin {block}.{sel[1]}{'*' if sel[0] == 'prefix' else ''}: "
                   f"{bad}; the fix, declared before the block, is dropped")
     if not sels:
         _sel_store(session).pop(block, None)
+    if dropped:
+        persist(session)      # a delayed drop must not be restored again next time
     if fix is None:
         return
     problem = None
@@ -399,6 +406,7 @@ def revalidate(session, block, fp=None):
             session.fp.clear_pin_fix(block)
         print(f"Error: fix_pin {block}: {problem}; the fix, declared before the "
               f"block, is dropped")
+        persist(session)
 
 
 def cmd_dump_pin_fixes(session, cmd, args, cmd_line):
@@ -421,6 +429,274 @@ def cmd_dump_pin_fixes(session, cmd, args, cmd_line):
             for (x1, y1, x2, y2, face) in session.fp.pin_fix_strips(block):
                 name = {1: "north", 2: "south", 4: "east", 8: "west"}.get(face, "?")
                 print(f"    {name:5s} strip [{x1},{y1} .. {x2},{y2}]")
+
+
+_META = "pin_fixes"
+_META_GEN = "pin_fixes_gen"
+
+
+def _snapshot(session):
+    sels = [[b, kind, key, fx] for b, d in sorted(_sel_store(session).items())
+            for (kind, key), fx in sorted(d.items())]
+    return {"blocks": {b: fx for b, fx in sorted(session._pin_fixes.items())},
+            "selectors": sels}
+
+
+def persist(session):
+    """ONE meta row (`pin_fixes`, JSON), like the layer reserves: a fix is a
+    small declaration with a selector list, which no existing table holds."""
+    if getattr(session, "bdb", None) is None:
+        return
+    snap = _snapshot(session)
+    session.bdb.meta_set(_META, json.dumps(snap, sort_keys=True)
+                         if snap["blocks"] or snap["selectors"] else "")
+
+
+def _forget_overridden(session):
+    """A restored entry the user has since replaced (a new dict) or removed is
+    TYPED state now: it must not be dropped as 'restored' when another BDB is
+    opened (typed wins)."""
+    rb = getattr(session, "_pin_fix_restored_blocks", None)
+    if rb:
+        for b in [b for b, fx in rb.items() if session._pin_fixes.get(b) is not fx]:
+            del rb[b]
+    rs = getattr(session, "_pin_fix_restored_sels", None)
+    if rs:
+        sels = _sel_store(session)
+        for k in [k for k, fx in rs.items()
+                  if sels.get(k[0], {}).get((k[1], k[2])) is not fx]:
+            del rs[k]
+
+
+def _tombstone(session, block, sel):
+    """An explicit `off` outranks any BDB opened later, whether or not a fix was
+    live when it was typed (typed wins)."""
+    if sel is None:
+        session.__dict__.setdefault("_pin_fix_removed_blocks", set()).add(block)
+    else:
+        session.__dict__.setdefault("_pin_fix_removed_sels", set()).add(
+            (block, sel[0], sel[1]))
+
+
+def _keys(session):
+    return (set(session._pin_fixes),
+            {(b, k, n) for b, d in _sel_store(session).items() for (k, n) in d})
+
+
+def cmd_fix_pin(session, cmd, args, cmd_line):
+    before_b, before_s = _keys(session)
+    _cmd_fix_pin(session, cmd, args, cmd_line)
+    after_b, after_s = _keys(session)
+    # A typed removal outranks any BDB opened later (typed wins), so remember it.
+    tb = session.__dict__.setdefault("_pin_fix_removed_blocks", set())
+    ts = session.__dict__.setdefault("_pin_fix_removed_sels", set())
+    tb |= before_b - after_b
+    ts |= before_s - after_s
+    tb -= after_b
+    ts -= after_s
+    _forget_overridden(session)
+    persist(session)
+
+
+def _valid_fix(fx):
+    return (isinstance(fx, dict)
+            and all(isinstance(fx.get(k), int) and not isinstance(fx.get(k), bool)
+                    and -2**31 <= fx[k] < 2**31      # the binding takes native ints
+                    for k in ("faces", "rect", "lo", "hi"))
+            and isinstance(fx.get("has_window"), bool)
+            and 0 <= fx["faces"] <= 15                    # N|S|E|W mask, 0 = every face
+            and fx["rect"] >= -1
+            and (fx["lo"] < fx["hi"] if fx["has_window"] else True))
+
+
+def _validate_snapshot(snap):
+    """The WHOLE stored snapshot, before any of it touches the session: a
+    wrong-shaped record anywhere makes the row unreadable as a unit."""
+    if not isinstance(snap, dict):
+        raise ValueError("not a JSON object")
+    blocks, sels = snap.get("blocks", {}), snap.get("selectors", [])
+    if not isinstance(blocks, dict) or not isinstance(sels, list):
+        raise ValueError("blocks/selectors have the wrong type")
+    for b, fx in blocks.items():
+        if not isinstance(b, str) or not _valid_fix(fx):
+            raise ValueError(f"malformed fix for block {b!r}")
+    for rec in sels:
+        if (not isinstance(rec, list) or len(rec) != 4
+                or not all(isinstance(x, str) for x in rec[:3])
+                or rec[1] not in ("name", "prefix") or not _valid_fix(rec[3])):
+            raise ValueError(f"malformed selector record {rec!r}")
+
+
+def restore(session):
+    """open_bdb: fixes the BDB holds come back under the typed-wins contract (a
+    declaration typed in this session, before or after the open, outranks the
+    stored one); a previous BDB's restored entries drop first.  Entries typed
+    BEFORE the open had no BDB to write to, so they are stored now."""
+    if getattr(session, "bdb", None) is None:
+        return 0
+    before = json.loads(json.dumps(_snapshot(session)))
+    sels = _sel_store(session)
+    fixes = session._pin_fixes
+    for b in list(getattr(session, "_pin_fix_restored_blocks", {})):
+        if fixes.pop(b, None) is not None:
+            session.fp.clear_pin_fix(b)
+    for b, kind, key in list(getattr(session, "_pin_fix_restored_sels", {})):
+        sels.get(b, {}).pop((kind, key), None)
+        if b in sels and not sels[b]:
+            del sels[b]
+    session._pin_fix_restored_blocks, session._pin_fix_restored_sels = {}, {}
+    raw = session.bdb.meta_get(_META, "")
+    gen = session.bdb.meta_get(_META_GEN, "")
+    try:
+        if gen:
+            session._pin_fix_ckpt = json.loads(gen)
+            if not isinstance(session._pin_fix_ckpt, dict):
+                session._pin_fix_ckpt = {"unknown": True}
+        elif raw:
+            # No generation stamp: what the pipeline was generated under cannot be
+            # inferred from mutable current state, so no snapshot can match.
+            session._pin_fix_ckpt = {"unknown": True}
+        else:
+            session._pin_fix_ckpt = {"blocks": {}, "selectors": []}
+    except ValueError:
+        session._pin_fix_ckpt = {"unknown": True}      # corrupt stamp: unverifiable
+    n = 0
+    if raw:
+        try:
+            snap = json.loads(raw)
+            _validate_snapshot(snap)
+            tb = getattr(session, "_pin_fix_removed_blocks", set())
+            ts = getattr(session, "_pin_fix_removed_sels", set())
+            for b, fx in snap.get("blocks", {}).items():
+                if b not in fixes and b not in tb:
+                    fixes[b] = fx
+                    _apply(session, b, fx)
+                    session._pin_fix_restored_blocks[b] = fx
+                    n += 1
+            for b, kind, key, fx in snap.get("selectors", []):
+                if (kind, key) not in sels.get(b, {}) and (b, kind, key) not in ts:
+                    sels.setdefault(b, {})[(kind, key)] = fx
+                    session._pin_fix_restored_sels[(b, kind, key)] = fx
+                    n += 1
+        except (ValueError, KeyError, TypeError, AttributeError) as e:
+            print(f"Warning: stored pin fixes unreadable ({e}); ignored")
+    for b in set(session._pin_fix_restored_blocks) | {k[0] for k in session._pin_fix_restored_sels}:
+        revalidate(session, b)
+    if n:
+        print(f"[PinFix] restored {n} persisted fix declaration(s)")
+    if len(session.bundles) and json.loads(json.dumps(_snapshot(session))) != before:
+        print("Error: open_bdb: the restored pin fixes change the ones the live "
+              "bundles were generated under; the live pipeline is voided — "
+              "re-run run_bundler and the stages after it")
+        _void_pipeline(session)
+    persist(session)
+    return n
+
+
+def _void_pipeline(session):
+    """Drop every restored stage together: a stale NUTS/DNUTS result must not
+    outlive the wrappers it was solved for."""
+    import buda
+    session.bundles = buda.BundleWrapperVec()
+    session.planner = None
+    session.nuts_result = None
+    session.detailed_result = None
+    session._hier_bundles_orig = []
+    if hasattr(session, "_hier_expansion_map"):
+        session._hier_expansion_map = {}
+    session._planner_is_hier = False
+
+
+def stamp_generation(session):
+    """Bind the fixes in force to the pipeline being persisted: the bundler (the
+    stage that reads them) records them beside the bundle rows, so a fix typed
+    LATER, which rewrites `pin_fixes` only, still differs from what the stored
+    pipeline was generated under.  With no BDB open yet the snapshot is HELD and
+    written when the bundles are first persisted (`flush_generation`)."""
+    snap = json.loads(json.dumps(_snapshot(session)))
+    if getattr(session, "bdb", None) is None:
+        session._pin_fix_gen_pending = snap
+        return
+    session._pin_fix_gen_pending = None
+    session.bdb.meta_set(_META_GEN, json.dumps(snap, sort_keys=True))
+    session._pin_fix_ckpt = snap            # a same-session reload sees the new generation
+
+
+def fixes_changed_since_generation(session):
+    """True when the fixes in force differ from (or cannot be compared with) the
+    ones the stored pipeline was generated under — then hand-edited USER
+    candidates the rebundle would keep were built for geometry that no longer
+    holds, and must not be carried into the new generation."""
+    bdb = getattr(session, "bdb", None)
+    if bdb is None:
+        return False
+    gen = bdb.meta_get(_META_GEN, "")
+    now = json.loads(json.dumps(_snapshot(session)))
+    try:
+        if gen:
+            return json.loads(gen) != now
+    except ValueError:
+        return True
+    if (getattr(session, "_pin_fix_ckpt", None) or {}).get("unknown"):
+        return True          # restore() found the generation unknowable at open
+    # No generation stamp: what any retained candidate was built under is unknown,
+    # and the live row is mutable state (restore rewrites it), so it cannot vouch.
+    return bool(now["blocks"] or now["selectors"] or bdb.meta_get(_META, ""))
+
+
+def flush_generation(session):
+    """Write a snapshot held from a bundler that ran before `open_bdb`."""
+    pend = getattr(session, "_pin_fix_gen_pending", None)
+    if pend is None or getattr(session, "bdb", None) is None:
+        return
+    session._pin_fix_gen_pending = None
+    session.bdb.meta_set(_META_GEN, json.dumps(pend, sort_keys=True))
+    session._pin_fix_ckpt = pend
+
+
+def restamp_bundles(session):
+    """After load_pipeline: restored candidates carry no per-bundle map (it is
+    not stored per candidate); stamp each from the restored selectors.  A
+    restored bundle whose nets the CURRENT fixes would repartition (a typed
+    selector outranked the checkpoint's) is stale: the whole restored pipeline
+    is voided, loudly, rather than routed under one map."""
+    import buda
+    ckpt = getattr(session, "_pin_fix_ckpt", None)
+    now = json.loads(json.dumps(_snapshot(session)))
+    if ckpt is not None and now != ckpt and len(session.bundles):
+        print("Error: load_pipeline: the pin fixes in force differ from the ones "
+              "the checkpoint was generated under; the restored pipeline is "
+              "voided — re-run run_bundler and the stages after it")
+        _void_pipeline(session)
+        return
+    if not _sel_store(session):
+        return
+    if any(_net_pins_of(session, n) is None for w in session.bundles
+           for n in w.input.original_bundle.get_net_names()):
+        print("Error: load_pipeline: pin selectors are declared but the nets' "
+              "endpoints are not (add_net / add_bus before load_pipeline), so "
+              "the restored bundles cannot be matched to their fixes; the "
+              "restored pipeline is voided")
+        _void_pipeline(session)
+        return
+    for w in session.bundles:
+        nets = list(w.input.original_bundle.get_net_names())
+        conflict = any(net_fix_conflicts(session, n) for n in nets)
+        if conflict or len(_partition_by_fix(session, nets)) > 1:
+            print(f"Error: load_pipeline: restored bundle "
+                  f"{w.input.original_bundle.id} no longer fits the current pin "
+                  f"fixes (its nets now land on one block under different "
+                  f"fixes); the restored pipeline is voided — re-run "
+                  f"run_bundler and the stages after it")
+            _void_pipeline(session)
+            return
+    for w in session.bundles:
+        m = bundle_fix_map(session, w.input.original_bundle.get_net_names())
+        if m is not None:
+            cands = list(w.input.candidates)     # copies: stamp, then assign back
+            for c in cands:
+                c.block_fixes = m
+            w.input.candidates = cands
 
 
 COMMANDS = {

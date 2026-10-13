@@ -679,3 +679,11 @@ down — would be a separate item, and it would emit `fix_pin` lines.
   viewer wrap in `buda.BlockFixScope(topo)`.  Not done: hier selectors (the
   replay says so), persistence of selectors / `block_fixes`, a restored
   candidate carries no map until re-generated.  Vehicle: `flow/pin_fix/pins.buda`.
+- **PR 1d (persistence)**: one meta row `pin_fixes` (JSON: block fixes + selector
+  list), written through on every `fix_pin`, restored by `open_bdb` under the
+  typed-wins contract, stored at the open for entries typed before it.
+  `load_pipeline` re-stamps restored candidates from the restored selectors (the
+  map is not a per-candidate row).  Not done: the cell-level fix with the
+  orientation transform (a fix is still keyed by the placed block name), `layer`,
+  `order`, `at <pos>`, `from_pins`.  Vehicles: `flow/pin_fix/persist_build.buda`
+  then `persist_resume.buda`.

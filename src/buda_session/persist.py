@@ -217,6 +217,7 @@ class PersistMixin:
         if self.bdb is None:
             return 0
         import json
+        from buda_cmds import pin_fix_cmds
         wrappers = self._persist_wrappers()
         # This clear-and-rewrite drops expanded-bundle rows too, so the
         # selective-persist fingerprint memo no longer describes the DB.
@@ -283,7 +284,19 @@ class PersistMixin:
                     # would come back untapered (BUDA-1904) purely because
                     # some LATER run re-persisted without it.
                     self.bdb.bundle_net_endpoints(_row.id))
-        self.bdb.clear_bundles(keep_user=True)
+        from buda_cmds import pin_fix_cmds
+        _keep = True
+        if pin_fix_cmds.fixes_changed_since_generation(self) and any(
+                tr.source == "user" for _r in self.bdb.all_bundles()
+                for tr in self.bdb.topologies(_r.id)):
+            print("Warning: [PinFix] the pin fixes changed since the stored "
+                  "candidates were generated; hand-edited (USER) candidates are "
+                  "dropped with them — re-create them under the new fixes")
+            _keep = False
+        self.bdb.clear_bundles(keep_user=_keep)
+        # Only now, after the keep/drop decision read the generation the stored
+        # rows were built under, may a held pre-open snapshot replace it.
+        pin_fix_cmds.flush_generation(self)
         kept_ids = ({r.id for r in self.bdb.all_bundles()}
                     if absent_membership else set())
         for _bid, (_nets, _bts, _eps) in absent_membership.items():
