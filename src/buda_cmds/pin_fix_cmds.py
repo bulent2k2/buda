@@ -259,7 +259,7 @@ def apply_cell_fix(session, fp, name, comp):
     replay; this is only reached when there is none."""
     key = CELL + comp.cell
     fix = session._pin_fixes.get(key)
-    if fix is None:
+    if fix is None and key not in _sel_store(session):
         return
     # the declaration is judged on the cell's CURRENT footprint, once per command:
     # a later resize_cell / set_cell_rects may have left it admitting no landing
@@ -271,8 +271,8 @@ def apply_cell_fix(session, fp, name, comp):
         chk[1].add(key)
         revalidate(session, key)
         fix = session._pin_fixes.get(key)
-        if fix is None:
-            return
+    if fix is None:
+        return
     dims = _cell_dims(session, comp.cell)
     if dims is None:
         return
@@ -683,8 +683,13 @@ def bundle_layer_mask(session, w):
     per_axis = {"H": [], "V": []}
     # A name accepts both spellings here (full path / the child's local name):
     # a layer set needs no geometry, only WHICH pins the bundle lands on.
-    for pin, _path, _name, _blk, fix in wrapper_pins(session, w):
+    # ... and only for blocks the bundle's routing frame lands on: a leaf pin below
+    # a container the bundle lands on is that container's business
+    frame = {n for c in w.input.candidates for n in c.connected_block_names}
+    for pin, _path, _name, blk, fix in wrapper_pins(session, w):
         if not fix.get("layers"):
+            continue
+        if frame and blk not in frame:
             continue
         for ax, lids in _fix_axes(session, fix).items():
             per_axis[ax].append((pin, frozenset(lids)))

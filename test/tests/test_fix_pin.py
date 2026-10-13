@@ -1776,3 +1776,52 @@ def test_a_container_endpoint_keeps_its_block_fix_beside_a_selector():
     sess = NS(bdb=_Bdb(), _cmd_seq=1)
     drv, rcvs = pin_fix_cmds._bdb_net_index(sess)["n0"]
     assert drv == "drv.o" and set(rcvs) == {"box/leaf.i", "box.i"}, (drv, rcvs)
+
+
+def test_a_selector_only_cell_declaration_is_revalidated_too():
+    """P2 (#992): the revalidation looked for a block-level cell fix and returned
+    for a cell holding only `cell:k.pin` selectors."""
+    text = _flow_text("hier_pins.buda",
+                      ("\nderive_busterms 0", "\nresize_cell mac_cell 100 10\nderive_busterms 0"))
+    text = text.replace("fix_pin cell:mac_cell.lo_in west",
+                        "fix_pin cell:mac_cell.lo_in west at 60..90")
+    s, out = _run_flow_text(text)
+    assert "is dropped" in out and "lo_in" in out, out[-900:]
+    assert not any(k[1] == "lo_in" for d in pin_fix_cmds._sel_store(s).values() for k in d)
+
+
+def test_a_layer_fix_below_the_landing_frame_does_not_mask_the_outer_bundle():
+    """P2 (#992): a leaf pin under a container the bundle lands on named a layer
+    for the container-to-container route."""
+    from types import SimpleNamespace as NS
+    fix = {"layers": ["M4"], "faces": 0}
+    cand = NS(connected_block_names=["boxA", "boxB"])
+    w = NS(input=NS(candidates=[cand], original_bundle=NS(id=1)))
+    s = buda_cli.BudaSession()
+    s._layer_name_map = {"M4": 4}
+    called = []
+    orig = pin_fix_cmds.wrapper_pins
+    pin_fix_cmds.wrapper_pins = lambda sess, ww: [("boxA/leaf.p", "boxA/leaf", "p",
+                                                    "boxA/leaf", fix)]
+    orig_h = pin_fix_cmds.has_layer_fixes
+    pin_fix_cmds.has_layer_fixes = lambda sess: True
+    try:
+        assert pin_fix_cmds.bundle_layer_mask(s, w) == (None, None, {})
+    finally:
+        pin_fix_cmds.wrapper_pins = orig
+        pin_fix_cmds.has_layer_fixes = orig_h
+
+
+def test_the_hier_auto_cap_sizes_a_part_by_its_fixed_landing():
+    """P2 (#992): `set_max_bundle_bits auto` read the macro's whole shortest edge
+    where a window pins the landing to a few tracks."""
+    base = _flow_text("hier_cell.buda",
+                      ("\nrun_hier_bundler depth 0", "\nset_max_bundle_bits auto\nrun_hier_bundler depth 0"))
+    s0, out0 = _run_flow_text(base)
+    tight = base.replace("west at 20..60", "west at 20..22")
+    s1, out1 = _run_flow_text(tight)
+    n0 = len(s0.bundles)
+    n1 = len(s1.bundles)
+    assert "Error:" not in out1, out1[-600:]
+    assert n1 >= n0, (n0, n1)
+    assert "[HierBundler] split" in out1, out1[-900:]

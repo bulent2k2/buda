@@ -492,7 +492,29 @@ def _split_hier_bundles(session, raw_bundles):
     edge_cache = {}
     unresolved = set()
 
-    def _min_edge(blk):
+    def _fixed_edge(b, blk):
+        """The landing edge of `blk` under THIS bundle's pin fixes (a fixed face
+        or window), or None when no fix governs it here."""
+        from buda_cmds import pin_fix_cmds as pf
+        fp = session.fp
+        if not pf._any_fixes(session) or not fp.has_block(blk):
+            return None
+        import buda
+        with buda.BlockFixScope(pf.bundle_fix_map(
+                session, list(b.get_net_names()), bool(b.cell_context), False,
+                always=True)):
+            if not fp.has_pin_fix(blk):
+                return None
+            strips = fp.pin_fix_strips(blk)
+        if not strips:
+            return None
+        return max(max(x2 - x1, y2 - y1) for x1, y1, x2, y2, _f in strips)
+
+    def _min_edge(blk, b=None):
+        if b is not None:
+            fe = _fixed_edge(b, blk)
+            if fe is not None:
+                return fe
         if blk in edge_cache:
             return edge_cache[blk]
         cand = None
@@ -566,7 +588,7 @@ def _split_hier_bundles(session, raw_bundles):
                 for blk in blks:
                     at_block[blk] = at_block.get(blk, 0) + 1
             for blk, bits_at in at_block.items():
-                edge = _min_edge(blk)
+                edge = _min_edge(blk, b)
                 if edge is None or edge <= 0:
                     continue
                 cap = max(1, int(edge / pitch))
@@ -1005,12 +1027,13 @@ def cmd_run_hier_bundler(session, cmd, args, cmd_line):
     # set_max_bundle_bits: split over-limit TEMPLATE bundles BEFORE expansion
     # so the split propagates identically to every instance (each part is its
     # own template, replicated at run_planner hier).
-    raw_bundles = _split_hier_bundles(session, raw_bundles)
     # Fixed-pin selectors: a bundle landing on one block under different pin
     # fixes cannot land on one face — split before expansion (templates and
-    # their replicas in lockstep), loudly.  No selectors = untouched.
+    # their replicas in lockstep), loudly.  No selectors = untouched.  Fixes
+    # first, like the flat path, so the AUTO cap sizes each part by ITS landing.
     from buda_cmds import pin_fix_cmds
     raw_bundles = pin_fix_cmds.split_hbundles_by_fix(session, raw_bundles)
+    raw_bundles = _split_hier_bundles(session, raw_bundles)
     # NDR rule-class split (R2d — the flat split's hier twin, same order:
     # bit cap first, rules second): TEMPLATE bundles become rule-uniform
     # BEFORE per-instance expansion, replicas split in lockstep, and a
