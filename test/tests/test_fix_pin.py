@@ -781,3 +781,27 @@ def test_a_generic_repersist_does_not_restamp_the_generation(tmp_path):
     s2, out = _session(*pre, f"open_bdb {path}", "add_bus x[2] S.o M.i",
                        "load_pipeline")
     assert "voided" in out and len(s2.bundles) == 0
+
+
+def test_a_bundler_run_before_open_bdb_still_binds_its_fixes(tmp_path):
+    """Codex P1 on #989: no stamp was written, so the live row stood in for it."""
+    pre = ["add_block S 0 400 100 600", "add_block M 400 400 600 600", *TECH]
+    path = str(tmp_path / "late.bdb")
+    s, _ = _session(*pre, "fix_pin M west", "add_bus x[2] S.o M.i",
+                    "run_bundler STRICT", f"open_bdb {path}",
+                    "generate_topologies", "run_planner", "fix_pin M north")
+    s2, out = _session(*pre, f"open_bdb {path}", "add_bus x[2] S.o M.i",
+                       "load_pipeline")
+    assert "voided" in out and len(s2.bundles) == 0
+
+
+def test_rebundling_then_reloading_in_one_session_is_not_voided(tmp_path):
+    """Codex P2 on #989: the cached snapshot outlived the new generation."""
+    pre = ["add_block S 0 400 100 600", "add_block M 400 400 600 600", *TECH]
+    (s, _), path = _bdb_session(
+        tmp_path, *pre, "fix_pin M west", "add_bus x[2] S.o M.i", "bdb_net_mode on",
+        "run_bundler STRICT", "generate_topologies", "run_planner")
+    out = _say(s, "fix_pin M north")
+    out += _say(s, "run_bundler STRICT") + _say(s, "generate_topologies")
+    out += _say(s, "run_planner") + _say(s, "load_pipeline")
+    assert "voided" not in out, out

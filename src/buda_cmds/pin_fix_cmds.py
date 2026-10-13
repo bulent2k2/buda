@@ -518,8 +518,14 @@ def restore(session):
     raw = session.bdb.meta_get(_META, "")
     gen = session.bdb.meta_get(_META_GEN, "")
     try:
-        src = gen or raw
-        session._pin_fix_ckpt = json.loads(src) if src else {"blocks": {}, "selectors": []}
+        if gen:
+            session._pin_fix_ckpt = json.loads(gen)
+        elif raw:
+            # No generation stamp: what the pipeline was generated under cannot be
+            # inferred from mutable current state, so no snapshot can match.
+            session._pin_fix_ckpt = {"unknown": True}
+        else:
+            session._pin_fix_ckpt = {"blocks": {}, "selectors": []}
     except ValueError:
         session._pin_fix_ckpt = None
     n = 0
@@ -567,11 +573,25 @@ def stamp_generation(session):
     """Bind the fixes in force to the pipeline being persisted: the bundler (the
     stage that reads them) records them beside the bundle rows, so a fix typed
     LATER, which rewrites `pin_fixes` only, still differs from what the stored
-    pipeline was generated under."""
+    pipeline was generated under.  With no BDB open yet the snapshot is HELD and
+    written when the bundles are first persisted (`flush_generation`)."""
+    snap = json.loads(json.dumps(_snapshot(session)))
     if getattr(session, "bdb", None) is None:
+        session._pin_fix_gen_pending = snap
         return
-    snap = _snapshot(session)
+    session._pin_fix_gen_pending = None
     session.bdb.meta_set(_META_GEN, json.dumps(snap, sort_keys=True))
+    session._pin_fix_ckpt = snap            # a same-session reload sees the new generation
+
+
+def flush_generation(session):
+    """Write a snapshot held from a bundler that ran before `open_bdb`."""
+    pend = getattr(session, "_pin_fix_gen_pending", None)
+    if pend is None or getattr(session, "bdb", None) is None:
+        return
+    session._pin_fix_gen_pending = None
+    session.bdb.meta_set(_META_GEN, json.dumps(pend, sort_keys=True))
+    session._pin_fix_ckpt = pend
 
 
 def restamp_bundles(session):
