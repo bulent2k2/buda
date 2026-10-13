@@ -397,7 +397,7 @@ def _detailed_wl(session):
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason=_WIN_QOR_SKIP)
-def test_a_crossing_is_judged_at_the_bit_not_at_the_nominal_segment():
+def test_a_crossing_is_judged_at_the_bit_not_at_the_nominal_segment(no_junction_reach):
     """The reach a NOMINAL crossing used to grant, on a bit that crosses nothing.
 
     flow/rnr/mix2_topdown_refine bundle 35 seg 5 is the case: the nominal
@@ -436,7 +436,7 @@ def test_a_crossing_is_judged_at_the_bit_not_at_the_nominal_segment():
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason=_WIN_QOR_SKIP)
-def test_the_flow_opts_in_and_that_metal_is_gone_at_the_source():
+def test_the_flow_opts_in_and_that_metal_is_gone_at_the_source(no_junction_reach):
     """The shipped flow: opted in, and clean because the wire is gone.
 
     The audit goes silent because there is nothing left to report, not because

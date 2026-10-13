@@ -315,7 +315,7 @@ def _short_count(s):
 
 @pytest.mark.mid
 @pytest.mark.skipif(sys.platform == "win32", reason=_WIN_QOR_SKIP)
-def test_mix_heals_its_shorts_by_default(monkeypatch):
+def test_mix_heals_its_shorts_by_default(monkeypatch, no_junction_reach):
     # Before the flip `rnr/mix` ended 0 overlaps / 0 unplaced with 12
     # cross-bundle shorts no healer could see (#964's 0 -> 6 dirty bundles).
     # Counting them, stage b's negotiate + ripup clear every one.
