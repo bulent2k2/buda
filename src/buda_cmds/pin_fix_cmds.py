@@ -119,14 +119,13 @@ def reapply_layer_fixes(session):
             continue
         if _eff_faces(session, fix) < 0:
             del session._pin_fixes[block]
-            if session.fp.has_block(block):
-                session.fp.clear_pin_fix(block)
+            session.fp.clear_pin_fix(block)     # stored by name, block or not
             print(f"Error: fix_pin {block}: layer {','.join(fix['layers'])} cannot "
                   f"reach the face(s) '{_faces_text(fix['faces'])}'; the fix is "
                   f"dropped")
             dropped = True
-        elif session.fp.has_block(block):
-            _apply(session, block, fix)
+        else:
+            _apply(session, block, fix)         # likewise stamped before the block exists
     for block, d in list(_sel_store(session).items()):
         for key, fix in list(d.items()):
             if fix.get("layers") and _eff_faces(session, fix) < 0:

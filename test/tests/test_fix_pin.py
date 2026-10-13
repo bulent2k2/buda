@@ -1162,3 +1162,16 @@ def test_a_restored_layer_that_cannot_reach_its_faces_is_dropped(tmp_path):
     out = _say(s2, "def_layer 4 M4 V TOP 0")                    # ... now vertical
     assert "Error:" in out and "cannot reach" in out, out
     assert "M" not in s2._pin_fixes
+
+
+def test_a_dropped_restored_fix_does_not_wake_up_when_its_block_is_declared(tmp_path):
+    """Codex P1 on #990: the floorplan kept the entry for a block not yet declared."""
+    path = str(tmp_path / "early.bdb")
+    s, _ = _session(*TECH, f"open_bdb {path}", "add_block M 0 0 100 100",
+                    "fix_pin M east layer M4")
+    s2, _ = _session(f"open_bdb {path}")                  # restored, no block, no layer
+    out = _say(s2, "def_layer 4 M4 V TOP 0")              # now incompatible
+    assert "cannot reach" in out, out
+    _say(s2, "add_block M 0 0 100 100")
+    assert not s2.fp.has_pin_fix("M")
+    assert "M" not in s2._pin_fixes
