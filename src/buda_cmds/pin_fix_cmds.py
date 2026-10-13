@@ -837,11 +837,35 @@ def set_gen_fixes(session, tg, w, local=None):
         tg.set_block_fixes(m)
 
 
-def stamp_expanded(session, w):
+def stamp_expanded(session, w, orient=None):
     """An expanded instance wrapper: re-resolve its fix map in the ABSOLUTE
     frame (full block names, the instance's own pins and orientations).  A
     no-op without per-pin selectors, where the floorplan's own fixes apply."""
     b = w.input.original_bundle
+    if orient and orient != "N":
+        # The template's routing is turned with this occurrence.  A CELL fix turns
+        # with its instances (xf_fix); an instance or local-name fix states its
+        # faces in the placed frame, so one turned occurrence cannot share the
+        # template's solution with the others.
+        bad = set()
+        for net in b.get_net_names():
+            for pin in (lambda p: [p[0]] + list(p[1]))(_net_pins_of(session, net) or ("", [])):
+                if not pin:
+                    continue
+                path, _, name = pin.rpartition(".")
+                fx, src = _resolve(session, path, name, bool(b.cell_context))
+                if fx is not None and src and not is_cell_key(src[0]):
+                    bad.add(src[0])
+        if bad:
+            import sys
+            inst = b.instances[0] if b.instances else "?"
+            print(f"Error: pin fix(es) on {', '.join(sorted(bad))} govern a cell-level "
+                  f"bundle class whose occurrence {inst} is turned ({orient}) relative "
+                  f"to the template: an instance or local-name fix states its faces in "
+                  f"the placed frame, so it cannot ride a template solved once and "
+                  f"turned.  Declare the fix on the CELL (`fix_pin cell:<name> ...`), "
+                  f"which turns with each instance.")
+            sys.exit(1)
     m = bundle_fix_map(session, b.get_net_names(), bool(b.cell_context), False,
                        always=_local_name_decl(session))
     if m is None:
@@ -1303,7 +1327,9 @@ def revalidate(session, block, fp=None, fp_name=None):
     if fix["rect"] >= _rect_count(fp, name):
         problem = (f"rect {fix['rect'] + 1} out of range (block has "
                    f"{_rect_count(fp, name)} rect(s))")
-    elif not fp.pin_fix_strips(name):
+    elif not _strips_in(session, fp, name, fix):
+        # judged by its OWN temporary application: what the frame holds there now
+        # may be another owner's (a rejected override's) fix
         problem = (f"'{_declared(fix)}' admits no landing on this block (a face "
                    f"interior to its rects, or a window outside the face)")
     if problem:

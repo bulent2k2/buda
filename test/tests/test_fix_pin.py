@@ -1663,3 +1663,31 @@ def test_a_full_path_block_fix_outranks_the_local_alias_in_the_template_frame():
     assert [st[4] for st in loc.pin_fix_strips("pb_i")] == [E]
     loc_j = s._build_cell_local_floorplan("proc_j")
     assert [st[4] for st in loc_j.pin_fix_strips("pb_i")] == [S]
+
+
+def test_a_rejected_full_path_override_leaves_the_valid_local_fix_alone():
+    """P2 (#992): the local fix was judged against the strips of the (invalid)
+    override stamped over it, and deleted with it."""
+    text = _flow_text("hier_cell_local.buda",
+                      ("\nfix_pin cell:pipe_cell.out east",
+                       "\nfix_pin cell:pipe_cell.out east\nfix_pin pb_i south\n"
+                       "fix_pin proc_i/pb_i west rect 999"))
+    s, out = _run_flow_text(text)
+    assert "out of range" in out, out[-600:]
+    assert "pb_i" in s._pin_fixes and "proc_i/pb_i" not in s._pin_fixes
+    loc = s._build_cell_local_floorplan("proc_i")
+    assert [st[4] for st in loc.pin_fix_strips("pb_i")] == [S]
+
+
+def test_a_local_name_fix_cannot_ride_a_turned_replica():
+    """P2 (#992): the template's south landing turns north on a 180-degree replica
+    while the local declaration still said south — refuse, point at the cell fix."""
+    text = _flow_text(
+        "hier_cell_local.buda",
+        ("\nderive_busterms 1",
+         "\nrotate_comp proc_j 180\nrotate_comp proc_j/pa_i 180\n"
+         "rotate_comp proc_j/pb_i 180\nrotate_comp proc_j/pc_i 180\nderive_busterms 1"),
+        ("\nfix_pin cell:pipe_cell.out east",
+         "\nfix_pin cell:pipe_cell.out east\nfix_pin pb_i south"))
+    _s, out = _run_flow_text(text)
+    assert "is turned" in out and "cell:" in out and out.endswith("[exit]"), out[-700:]

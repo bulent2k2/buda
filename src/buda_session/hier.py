@@ -762,11 +762,15 @@ class HierMixin:
             # owner's declaration against the geometry this frame holds for it
             from buda_cmds.pin_fix_cmds import revalidate
             revalidate(self, comp.name, fp, fp_name=nm)
-        if (pf and ("cell:" + comp.cell) in pf and nm not in pf
-                and comp.name not in pf and not fp.has_pin_fix(nm)):
-            # an override that was just rejected must give the cell's fix back
-            from buda_cmds.pin_fix_cmds import apply_cell_fix
-            apply_cell_fix(self, fp, nm, comp)
+        if pf and not fp.has_pin_fix(nm):
+            # an override that was just rejected gives the next owner's fix back:
+            # the local alias's own, else the cell's
+            if nm in pf:
+                from buda_cmds.pin_fix_cmds import _apply
+                _apply(self, nm, pf[nm], fp)
+            elif comp.name not in pf and ("cell:" + comp.cell) in pf:
+                from buda_cmds.pin_fix_cmds import apply_cell_fix
+                apply_cell_fix(self, fp, nm, comp)
 
     def _fp_add_comp_geom(self, fp, comp, mr, name=None, ox=0.0, oy=0.0):
         """Project ONE BDB component into `fp` — `add_block_rects` when its
@@ -5493,7 +5497,7 @@ class HierMixin:
                 # frame, so re-resolve the nets' own pins by full path (each
                 # pin's own component orientation turns a cell-level fix).
                 from buda_cmds.pin_fix_cmds import stamp_expanded
-                stamp_expanded(self, new_w)
+                stamp_expanded(self, new_w, oi)
                 # Reserve the instance footprint: until this local bundle is
                 # planned, its demand is parked as virtual usage so earlier
                 # (global) bundles leave room over the cell interior.
