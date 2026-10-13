@@ -22,6 +22,7 @@
 #include <atomic>
 #include <bit>
 #include <chrono>
+#include <unordered_map>
 #include <cmath>
 #include <cstdlib>
 #include <functional>
@@ -2386,8 +2387,40 @@ private:
     }
 };
 
+// Study knob: BUDA_NO_REPACK_CACHE=1 rebuilds every member's base occupancy per
+// attempt, so a before/after is one binary (the cache is exact).
+static bool repack_cache_off() {
+    static const bool off = [] {
+        const char* e = std::getenv("BUDA_NO_REPACK_CACHE");
+        return e && *e && *e != '0';
+    }();
+    return off;
+}
+
+// A member's base occupancy for the cluster repack (#972): the keepouts over its
+// span, and every placed other-bundle segment whose span touches it -- with the
+// SEGMENT kept beside its interval, so a later attempt with a different member
+// set filters the same list instead of re-deriving it.  The wide attempt
+// re-asks for the same neighbours cluster after cluster (747k member builds
+// over 4.6k segments at NQ=32) and nearly every attempt is rejected, which
+// restores the placement bitwise -- so the answer only changes when an attempt
+// is ACCEPTED.  The caller clears the cache then; a non-member never moves
+// during a pack, and entries are built lazily at pack time, before any commit.
+struct RepackBaseCache {
+    struct Entry {
+        std::vector<std::pair<double,double>>                         ko;
+        std::vector<std::pair<const TrackSegment*,
+                              std::pair<double,double>>>              hits;
+    };
+    std::unordered_map<const TrackSegment*, Entry> m;
+    long long builds = 0, reuses = 0;
+    void clear() { m.clear(); }
+};
+
 class LayerSolver {
 public:
+    void set_base_cache(RepackBaseCache* c) { base_cache_ = c; }
+
     LayerSolver(const NUTSEngine& eng,
                 std::vector<TrackSegment*>& segs_in,
                 NutsContext& ctx,
@@ -2486,6 +2519,7 @@ private:
     // tree is queried closed (a superset of the strict test) and hits are
     // re-tested with the scan's own predicate, in zone order, so the
     // occupancy pushed is the scan's.
+    RepackBaseCache* base_cache_ = nullptr;   // cluster repack only, see above
     mutable SpanIndex ko_x_, ko_y_;      // zone x-edges (horiz segs), y-edges (vert)
     mutable bool ko_built_ = false;
     mutable int  ko_scans_ = 0;          // scans paid before the tree is worth building
@@ -2633,8 +2667,38 @@ private:
         bool sidx_built = false;
         std::vector<int> hits;
         const bool use_idx = members.size() >= 8 && !span_index_off();
+        std::vector<std::pair<double,double>> cache_tmp;
         auto base_of = [&](size_t k)
                 -> const std::vector<std::pair<double,double>>& {
+            if (!occ_built[k] && base_cache_ && use_idx && !repack_cache_off()) {
+                TrackSegment* m = members[k];
+                auto it = base_cache_->m.find(m);
+                if (it == base_cache_->m.end()) {
+                    ++base_cache_->builds;
+                    RepackBaseCache::Entry& e = base_cache_->m[m];
+                    add_keepout_occ(m, e.ko);
+                    auto take = [&](const TrackSegment* o) {
+                        cache_tmp.clear();
+                        occupancy_from(*m, *o, cache_tmp);
+                        if (!cache_tmp.empty()) e.hits.push_back({o, cache_tmp[0]});
+                    };
+                    if (use_idx) {
+                        if (!sidx_built) { sidx.build(segs); sidx_built = true; }
+                        sidx.query_unordered(sp_lo(*m), sp_hi(*m), hits);
+                        for (int i : hits) take(segs[i]);
+                    } else {
+                        for (const TrackSegment* o : segs) take(o);
+                    }
+                    it = base_cache_->m.find(m);
+                } else {
+                    ++base_cache_->reuses;
+                }
+                const RepackBaseCache::Entry& e = it->second;
+                base_occ[k] = e.ko;
+                for (const auto& [o, iv] : e.hits)
+                    if (!is_member(o)) base_occ[k].push_back(iv);
+                occ_built[k] = 1;
+            }
             if (!occ_built[k]) {
                 TrackSegment* m = members[k];
                 add_keepout_occ(m, base_occ[k]);
@@ -3075,6 +3139,7 @@ struct RepackAtomics {
     std::atomic<long long> attempts[2]{{0},{0}}, noop[2]{{0},{0}},
         rejected[2]{{0},{0}}, accepted[2]{{0},{0}}, members_sum[2]{{0},{0}};
     std::atomic<long long> layer_segs_sum{0};
+    std::atomic<long long> cache_builds{0}, cache_reuses{0};
     std::atomic<long long> ns_ctor{0}, ns_solve_k[2]{{0},{0}};
     std::atomic<long long> ns_prep{0}, ns_snap{0}, ns_solve{0}, ns_settle{0},
         ns_guard{0}, ns_restore{0}, ns_total{0};
@@ -3114,6 +3179,7 @@ RepackStats repack_stats_snapshot() {
         r.members_sum[k] = g_repack.members_sum[k];
     }
     r.layer_segs_sum = g_repack.layer_segs_sum;
+    r.cache_builds = g_repack.cache_builds; r.cache_reuses = g_repack.cache_reuses;
     r.ns_prep = g_repack.ns_prep; r.ns_snap = g_repack.ns_snap;
     r.ns_solve = g_repack.ns_solve; r.ns_settle = g_repack.ns_settle;
     r.ns_guard = g_repack.ns_guard; r.ns_restore = g_repack.ns_restore;
@@ -3129,6 +3195,7 @@ void repack_stats_reset() {
         g_repack.accepted[k] = 0; g_repack.members_sum[k] = 0;
     }
     g_repack.layer_segs_sum = 0;
+    g_repack.cache_builds = 0; g_repack.cache_reuses = 0;
     g_repack.ns_prep = 0; g_repack.ns_snap = 0; g_repack.ns_solve = 0;
     g_repack.ns_settle = 0; g_repack.ns_guard = 0; g_repack.ns_restore = 0;
     g_repack.ns_total = 0; g_repack.ns_ctor = 0;
@@ -3190,6 +3257,7 @@ static int repack_overlap_clusters(const NUTSEngine& eng, double track_pitch,
         segs_of_layer[ts.layer].push_back(&ts);
 
     int moved = 0;
+    RepackBaseCache base_cache;   // cleared whenever an attempt is accepted
     for (const auto& cluster : clusters) {
         const int layer = segments[cluster[0]].layer;
         const auto t_prep0 = std::chrono::steady_clock::now();
@@ -3278,6 +3346,7 @@ static int repack_overlap_clusters(const NUTSEngine& eng, double track_pitch,
             g_repack.ns_snap += ns_since(t_a);
             t_a = std::chrono::steady_clock::now();
             LayerSolver solver(eng, layer_segs, ctx, *cons, &kozs_shared);
+            solver.set_base_cache(&base_cache);
             g_repack.ns_ctor += ns_since(t_a);
             const auto t_b = std::chrono::steady_clock::now();
             const bool did_move = solver.repack_cluster(members);
@@ -3321,6 +3390,7 @@ static int repack_overlap_clusters(const NUTSEngine& eng, double track_pitch,
                 continue;
             }
             ++g_repack.accepted[attempt_k];
+            base_cache.clear();   // positions and follower spans moved
             moved += (int)members.size();
             std::cout << "[NUTS] cluster repack: separated a "
                       << cluster.size() << "-segment overlap cluster on layer "
@@ -3328,6 +3398,7 @@ static int repack_overlap_clusters(const NUTSEngine& eng, double track_pitch,
             break;                          // this cluster is done
         }
     }
+    g_repack.cache_builds += base_cache.builds; g_repack.cache_reuses += base_cache.reuses;
     g_repack.ns_total += ns_since(t_fn0);
     return moved;
 }
