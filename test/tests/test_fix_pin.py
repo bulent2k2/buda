@@ -1076,3 +1076,29 @@ def test_an_order_survives_the_checkpoint_and_a_bad_one_is_unreadable(tmp_path):
                     '"selectors":[]}')
     s3, out3 = _session(f"open_bdb {path}")
     assert "unreadable" in out3 and not s3._pin_fixes
+
+
+def test_a_selector_fix_with_a_layer_narrows_the_faces_the_generator_sees():
+    """Codex P1 on #990: the per-bundle map carried the DECLARED faces."""
+    pre = ["add_block S 0 400 100 600", "add_block M 400 400 600 600", *TECH,
+           "def_layer 3 M3 H LOW 0", "def_track_pattern 3 0 (SIGNAL 2 2)x60",
+           "fix_pin M.i layer M3", "add_bus x[2] S.o M.i", "run_bundler STRICT",
+           "generate_topologies"]
+    s, _ = _session(*pre)
+    m = s.bundles[0].input.candidates[0].block_fixes
+    assert m["M"][0] == (E | W), m
+    assert s.bundles[0].input.candidates
+    for c in s.bundles[0].input.candidates:
+        for g in c.segments:                      # no leg ends on M's N/S faces
+            for p in (g.start, g.end):
+                assert not (400 < p.x < 600 and p.y in (400, 600)), (c.type, p.x, p.y)
+
+
+def test_an_orthogonal_only_overlap_with_set_bus_layers_is_refused():
+    """Codex P2 on #990: the other axis's layers made the overlap look non-empty."""
+    pre = ["add_block S 0 400 100 600", "add_block A 400 400 600 600", *TECH,
+           "def_layer 3 M3 H LOW 0", "def_track_pattern 3 0 (SIGNAL 2 2)x60",
+           "fix_pin A.i west layer M3", "set_bus_layers x_ M5",     # M5 is vertical
+           "add_net x_0 S.o A.i"]
+    with pytest.raises(SystemExit):
+        _session(*pre, "run_bundler STRICT")

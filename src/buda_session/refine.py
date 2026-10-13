@@ -345,6 +345,9 @@ class RefineMixin:
         # overlaps alone, blind to the seat faults the metric now carries.
         if stage == 'a' and self._heal_seats_on():
             use_par = False
+        from buda_cmds import pin_fix_cmds
+        if pin_fix_cmds.has_order_fixes(self):
+            use_par = False       # workers ignore per-segment fix_pin orders
         if use_par:
             n_pool = self._rr_sweep_threads() or (os.cpu_count() or 1)
             use_par = n_pool > 1

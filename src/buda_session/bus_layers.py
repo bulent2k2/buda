@@ -145,11 +145,15 @@ def apply_bus_layer_restrictions(session, wrappers=None):
                           if getattr(session, "_bus_layer_scopes", None)
                           else (None, None))
         if fix_layers:
-            f_label, f_layers = pin_fix_cmds.bundle_layer_mask(session, w)
+            f_label, f_layers, f_axes = pin_fix_cmds.bundle_layer_mask(session, w)
             if f_layers:
                 if layers:
                     both = sorted(set(layers) & set(f_layers))
-                    if not both:
+                    # Per constrained axis, not just overall: layers of the
+                    # OTHER axis are in the mask only so an L/Z still routes,
+                    # and cannot realize the landing segment.
+                    if not both or any(not (set(layers) & axis_set)
+                                       for axis_set in f_axes.values()):
                         print(f"Error: set_bus_layers '{prefix}' and a fix_pin "
                               f"layer restrict bundle {bid} to layers with none "
                               f"in common — widen one of them.")

@@ -196,8 +196,17 @@ def bundle_fix_map(session, net_names):
     for net in net_names:
         for blk, key in net_fix_signature(session, net):
             if key is not None and blk not in out:
-                out[blk] = key
+                out[blk] = _geom_key(session, key)
     return out
+
+
+def _geom_key(session, key):
+    """The 5 fields the C++ map reads, with the faces the layers narrow them to
+    (the signature key keeps the DECLARED faces plus layers/order, so two fixes
+    differing only in those still split a bundle)."""
+    faces, rect, has_window, lo, hi, layers = key[:6]
+    eff = _eff_faces(session, {"faces": faces, "layers": list(layers)})
+    return (max(eff, 0) if eff >= 0 else faces, rect, has_window, lo, hi)
 
 
 def has_layer_fixes(session):
@@ -237,7 +246,7 @@ def bundle_layer_mask(session, w):
     both pins: the bus has two landings no single layer serves."""
     import buda
     if not has_layer_fixes(session):
-        return (None, None)
+        return (None, None, {})
     per_axis = {"H": [], "V": []}
     for net in w.input.original_bundle.get_net_names():
         pins = _net_pins_of(session, net)
@@ -252,14 +261,15 @@ def bundle_layer_mask(session, w):
             for ax, lids in _fix_axes(session, fix).items():
                 per_axis[ax].append((pin, frozenset(lids)))
     if not per_axis["H"] and not per_axis["V"]:
-        return (None, None)
-    allowed = []
+        return (None, None, {})
+    allowed, constrained = [], {}
     for ax, dirn in (("H", buda.LayerDir.HORIZONTAL), ("V", buda.LayerDir.VERTICAL)):
         every = list(session.layers.get_layer_ids_by_dir(dirn))
         if not per_axis[ax]:
             allowed += every
             continue
         common = set.intersection(*[set(l) for _p, l in per_axis[ax]])
+        constrained[ax] = common
         if not common:
             names = {lid: n for n, lid in session._layer_name_map.items()}
             shown = "; ".join(f"{p} -> {','.join(names.get(l, str(l)) for l in sorted(ls))}"
@@ -271,7 +281,7 @@ def bundle_layer_mask(session, w):
             import sys
             sys.exit(1)
         allowed += sorted(common)
-    return ("fix_pin layer", sorted(set(allowed)))
+    return ("fix_pin layer", sorted(set(allowed)), constrained)
 
 
 class _PinFixViolation:
