@@ -224,6 +224,24 @@ void RoutingGrid::for_each_signal_track_in_span(
     std::sort(cuts.begin(), cuts.end());
     cuts.erase(std::unique(cuts.begin(), cuts.end()), cuts.end());
 
+    // The keepouts that can block ANY track of this query, found once: the
+    // along test is the same for every track and every centre lies inside
+    // [perp_lo, perp_hi], so a keepout missing either can block none of them.
+    // The per-track test below then walks this short list rather than every
+    // keepout on the layer (a SoC layer carries thousands; the span walk is
+    // tracks x keepouts otherwise).  Same predicate, same answer (#972).
+    std::vector<std::pair<double, double>> local;
+    for (const auto& gk : keepouts_) {
+        const Rect& koz = gk.bbox;
+        const double k_p1 = is_horizontal_ ? koz.y1 : koz.x1;
+        const double k_p2 = is_horizontal_ ? koz.y2 : koz.x2;
+        const double k_a1 = is_horizontal_ ? koz.x1 : koz.y1;
+        const double k_a2 = is_horizontal_ ? koz.x2 : koz.y2;
+        if (along_lo <= k_a2 && along_hi >= k_a1 &&
+            k_p2 >= perp_lo && k_p1 <= perp_hi)
+            local.emplace_back(k_p1, k_p2);
+    }
+
     for (size_t si = 0; si + 1 < cuts.size(); ++si) {
         const double s_lo = cuts[si], s_hi = cuts[si + 1];
         // Interior boundaries are half-open (a centre exactly on a cut
@@ -255,14 +273,8 @@ void RoutingGrid::for_each_signal_track_in_span(
                 if (pat.bounded &&
                     (centre < pat.bound_lo || centre > pat.bound_hi)) continue;
                 bool blocked = false;
-                for (const auto& gk : keepouts_) {
-            const Rect& koz = gk.bbox;
-                    const double k_p1 = is_horizontal_ ? koz.y1 : koz.x1;
-                    const double k_p2 = is_horizontal_ ? koz.y2 : koz.x2;
-                    const double k_a1 = is_horizontal_ ? koz.x1 : koz.y1;
-                    const double k_a2 = is_horizontal_ ? koz.x2 : koz.y2;
-                    if (centre >= k_p1 && centre <= k_p2 &&
-                        along_lo <= k_a2 && along_hi >= k_a1) {
+                for (const auto& kp : local) {
+                    if (centre >= kp.first && centre <= kp.second) {
                         blocked = true;
                         break;
                     }

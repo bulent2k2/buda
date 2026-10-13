@@ -1,0 +1,97 @@
+# fix_pin PR 1b — fixed pins in a HIERARCHICAL flow.
+#
+# The design is hbundles/01_pipeline_hier (src -> proc -> snk, with a cell-local
+# pa -> pb -> pc chain inside every proc).  A fix is named by the block as the
+# routing frame knows it — here the leaf instance PATH, in the cross-level frames
+# that route src -> proc and proc -> snk:
+#
+#   fix_pin src_i/buf_i east at 10..30   the s2p bus leaves buf's EAST face, and only
+#                                        between y=10 and y=30 of the 80-high block
+#   fix_pin snk_i/rcv_i west at 50..70   the p2s bus lands on rcv's WEST face, and only
+#                                        between y=50 and y=70
+#
+# (A child's LOCAL name — `fix_pin pb_i south` — governs the same block inside
+# proc_cell's cell-local frame.  Not used here: in this design pa/pb/pc each carry
+# two buses, and in this change a fix governs EVERY bus landing on its block;
+# per-pin selectors arrive with the bundle split.)  Faces are in the placed (die)
+# frame; the orientation transform for cell-level fixes comes with the cell change.
+#
+# Run:   bin/buda flow/pin_fix/hier.buda            (viewer)
+# Expect: check_design Success at both stages; compare against the same flow
+#         without the two fix_pin lines (hbundles/01_pipeline_hier.buda).
+
+source ../tracks/tracks.buda
+
+corner_margin dx 5 dy 5
+set_min_stub_length 2
+
+# ── BDB: cell sizes ────────────────────────────────────────
+open_bdb :memory:
+
+add_cell src_cell    200 200
+add_cell proc_cell   420 200
+add_cell snk_cell    200 200
+add_cell gen_cell     80  80
+add_cell buf_cell     80  80
+add_cell pipe_cell   110  80
+add_cell rcv_cell     80  80
+add_cell store_cell   80  80
+
+# ── BDB: cell hierarchy ────────────────────────────────────
+add_inst_to_cell src_cell  gen_i    gen_cell    20  60
+add_inst_to_cell src_cell  buf_i    buf_cell   100  60
+
+add_inst_to_cell proc_cell pa_i     pipe_cell   20  60
+add_inst_to_cell proc_cell pb_i     pipe_cell  155  60
+add_inst_to_cell proc_cell pc_i     pipe_cell  290  60
+
+add_inst_to_cell snk_cell  rcv_i    rcv_cell    20  60
+add_inst_to_cell snk_cell  store_i  store_cell 100  60
+
+# ── BDB: place top-level instances ────────────────────────
+add_inst src_i   src_cell  -    50  50
+add_inst proc_i  proc_cell -   350  50
+add_inst snk_i   snk_cell  -   870  50
+
+fix_pin src_i/buf_i east at 10..30
+fix_pin snk_i/rcv_i west at 50..70
+
+# ── Derive busterms (depth 0 and 1) ───────────────────────
+derive_busterms 1
+
+# ── Populate floorplan with blocks at all routing levels ───
+# depth-0 blocks: needed by D0 cross-block topology candidates
+# depth-1 blocks: needed by D1 cross-block and expanded cell-level candidates
+add_blocks_from_bdb 0
+add_blocks_from_bdb 1 skip
+
+# ── Buses written to BDB ───────────────────────────────────
+bdb_net_mode on
+
+add_bus s2p[8]    src_i/buf_i.out    proc_i/pa_i.in
+add_bus pa_pb[8]  proc_i/pa_i.out   proc_i/pb_i.in
+add_bus pb_pc[8]  proc_i/pb_i.out   proc_i/pc_i.in
+add_bus p2s[8]    proc_i/pc_i.out   snk_i/rcv_i.in
+
+# ── HBundle pipeline ───────────────────────────────────────
+# Phase C: group nets into hierarchy-aware bundles
+run_hier_bundler depth 1
+
+# Phase D: generate topology candidates (cell-local for intra-cell,
+#          depth-0 absolute for cross-block)
+generate_hier_topologies
+
+# Phase E: hierarchy-aware planning — depth-0 first, constraint-first
+#          ordering within each depth; expand cell-level bundles to
+#          per-instance absolute-coordinate wrappers
+run_planner hier 5
+
+# Abstract track placement
+run_nuts
+
+check_design nuts
+
+run_detailed_nuts
+check_design dnuts
+
+visualize

@@ -72,6 +72,29 @@ def cmd_run_nuts(session, cmd, args, cmd_line):
               f"Set the pitch with 'set_track_pitch <p>' before "
               f"run_planner (or re-run run_planner) so the planner's "
               f"pitch-aware band reservations match this NUTS run.")
+    # [NutsProf] (BUDA_REPLAN_PROF=1, the planner's gate): where a run_nuts
+    # command's wall goes — the engine's own per-pass seconds (NUTSResult.
+    # pass_seconds, stamped on every solve but printed by nothing on this
+    # path) beside the Python phases around it.  Observation only.
+    # The clock starts BEFORE the engine is built: the fan-in derivation,
+    # the bottom-up fixed-route injection, the grid points and the span
+    # snapshot are the `setup` phase, and a total that began after them
+    # left that phase reading zero (Codex P2 on #977).
+    import os as _os, time as _time
+    # Parsed as the planner's C++ gate parses it (`replan_prof_on`): set,
+    # non-empty and not starting with "0", so `BUDA_REPLAN_PROF=0` turns
+    # both profiles off rather than one (Codex P2 on #977).
+    _pv = _os.environ.get("BUDA_REPLAN_PROF", "")
+    _prof = bool(_pv) and not _pv.startswith("0")
+    _t = {}
+    _t0 = _time.perf_counter()
+    _tmark = [_t0]
+    if _prof:
+        buda.repack_stats_reset()
+    def _lap(key):
+        now = _time.perf_counter()
+        _t[key] = _t.get(key, 0.0) + (now - _tmark[0])
+        _tmark[0] = now
     nuts = buda.NUTSEngine(session.fp, session.layers)
     nuts.set_track_pitch(pitch)
     # Tapered fan-in: (re)derive the selected candidates' per-segment bit
@@ -89,10 +112,19 @@ def cmd_run_nuts(session, cmd, args, cmd_line):
             list(session.planner.get_y_grid()))
     # Snapshot topology-derived initial spans before the solve.
     before = session._segment_states_from_topology()
+    _lap("setup")
     # C++ prints its own [NUTS] N segments placed across K layer(s) line.
     with buda.ostream_redirect():
         session.nuts_result = nuts.run(session.bundles)
+    _lap("engine_run")
+    _first_passes = dict(session.nuts_result.pass_seconds)
+    session._prof_esc_resolves = 0
+    session._prof_esc_moves = []
+    session._prof_esc_dropped = []
+    session._prof_esc_resolve_s = 0.0
+    session._prof_esc_parts = {}
     session._adopt_doglegs()
+    _lap("adopt_doglegs")
     # Post-NUTS dead-span escalation, run HERE (before any healer) so the
     # whole negotiate/ripup cascade can adapt around the escalated layers.
     # Measured (real config): escalating BEFORE the healers fixes flows the
@@ -112,7 +144,9 @@ def cmd_run_nuts(session, cmd, args, cmd_line):
                     and getattr(session, "_dead_span_auto_at_run_nuts", True)
                     and _healers_declared))
     if do_escalate:
-        n_esc = session._escalate_dead_low_segments()
+        n_esc = session._escalate_dead_low_segments(
+            floor=session._dead_span_floor())
+        _lap("dead_span_escalate")
         if n_esc:
             print(f"[NUTS] dead-span escalation: moved {n_esc} dead LOW "
                   f"segment(s) to a TOP layer and re-solved.")
@@ -125,6 +159,7 @@ def cmd_run_nuts(session, cmd, args, cmd_line):
             # _checkpoint_routing (Codex #351 P2).  Trial-guarded inside.
             if session.bdb is not None:
                 session._persist_planner_output(selective=True)
+                _lap("persist_planner_after_escalation")
     # A fresh abstract solve invalidates any prior detailed result:
     # ripup_reroute / negotiate_congestion key their stage off
     # detailed_result, and hill-climbing against a detailed route of
@@ -136,13 +171,44 @@ def cmd_run_nuts(session, cmd, args, cmd_line):
     session.detailed_result = None
     # A handed-down plan's seats, audited against the placement (6c).
     session._report_plan_pins_seated()
+    _lap("plan_pins")
     layer_names = session._make_layer_names()
     diag = session._nuts_diagnostics(session.nuts_result, layer_names, before)
+    _lap("diagnostics")
     session._write_nuts_log(layer_names, extra_lines=diag)
+    _lap("nuts_log")
     ns, nv = session._persist_nuts()
+    _lap("persist")
     if ns:
         print(f"[BDB] persisted {ns} bus segment(s) and {nv} bus via(s) "
               f"to the open BDB.")
+    if _prof:
+        r = session.nuts_result
+        passes = " ".join(f"{k}={v:.3f}s" for k, v in
+                          sorted(_first_passes.items(), key=lambda kv: -kv[1]))
+        phases = " ".join(f"{k}={v:.3f}s" for k, v in _t.items())
+        print(f"[NutsProf] total={_time.perf_counter() - _t0:.3f}s "
+              f"segments={len(r.segments)} overlaps={r.num_overlaps} "
+              f"phases[{phases}] "
+              f"escalation[resolves={session._prof_esc_resolves} "
+              f"resolve_s={session._prof_esc_resolve_s:.3f} "
+              f"parts={ {k: round(v, 2) for k, v in getattr(session, '_prof_esc_parts', {}).items()} } "
+              f"moves={session._prof_esc_moves} "
+              f"dropped={session._prof_esc_dropped}] "
+              f"first_solve_passes[{passes}]", file=sys.stderr)
+        rs = buda.repack_stats()
+        print(f"[RepackProf] clusters={rs['clusters']} "
+              f"precheck_skipped={rs['precheck_skipped']} "
+              f"narrow={rs['narrow']} wide={rs['wide']} "
+              f"layer_segs_sum={rs['layer_segs_sum']} "
+              f"cache={rs['cache_builds']}/{rs['cache_reuses']} "
+              f"wide_skipped={rs['wide_skipped']} "
+              f"s[total={rs['s_total']:.2f} prep={rs['s_prep']:.2f} "
+              f"snap={rs['s_snap']:.2f} solve={rs['s_solve']:.2f} "
+              f"settle={rs['s_settle']:.2f} guard={rs['s_guard']:.2f} "
+              f"restore={rs['s_restore']:.2f} ctor={rs['s_ctor']:.2f} "
+              f"pack_narrow={rs['s_solve_narrow']:.2f} "
+              f"pack_wide={rs['s_solve_wide']:.2f}]", file=sys.stderr)
 
 
 def cmd_run_detailed_nuts(session, cmd, args, cmd_line):
@@ -398,21 +464,57 @@ def cmd_run_nuts_on_layer(session, cmd, args, cmd_line):
 
 
 def cmd_set_dead_span_escalate(session, cmd, args, cmd_line):
-    # Usage: set_dead_span_escalate [on|off]
+    # Usage: set_dead_span_escalate [on|off] [floor <F>]
     # Opt-in post-NUTS dead-span escalation: after every run_nuts, a LOW
     # segment whose FINAL placed geometry has zero keepout-clear signal
     # tracks (a guaranteed DetailedNUTS open) is moved to the cheapest
     # same-direction TOP layer and NUTS re-solves.  Off by default =
     # bit-identical.  See wishlist-planner "dead-span discriminator".
+    # `floor <F>` (#972 B1): an escalation iteration moving fewer than
+    # F x the result's segments is not applied and ends the loop, which is
+    # one full re-solve not paid per such iteration; governs the explicit
+    # AND the healersAhead auto path, since both are this entry.  0 = off.
     if not args:
         state = "on" if getattr(session, "_dead_span_escalate", False) else "off"
-        print(f"dead_span_escalate is {state}")
+        fl = session._dead_span_floor()
+        print(f"dead_span_escalate is {state}, floor {fl:g}"
+              + ("" if session._dead_span_floor_typed is not None
+                 or not fl else " (BUDA_DEAD_SPAN_FLOOR)"))
         return
-    val = args[0].lower()
-    if val not in ("on", "off"):
-        print(f"Error: set_dead_span_escalate expects on|off, got {args[0]!r}")
-        return
-    session._dead_span_escalate = (val == "on")
+    # Parse the whole line into temporaries and commit only once every token
+    # is valid: `on floor x` must not leave the flag on behind its Error
+    # line (Codex P2 on #981).
+    flag, floor_v = None, None
+    rest = list(args)
+    while rest:
+        tok = rest.pop(0).lower()
+        if tok in ("on", "off"):
+            flag = (tok == "on")
+        elif tok == "floor":
+            if not rest:
+                print("Error: set_dead_span_escalate floor expects a value "
+                      "(a fraction of the design's segments, 0 = off)")
+                return
+            raw = rest.pop(0)
+            try:
+                f = float(raw)
+            except ValueError:
+                print(f"Error: set_dead_span_escalate floor expects a number, "
+                      f"got {raw!r}")
+                return
+            if not (0.0 <= f <= 1.0):
+                print(f"Error: set_dead_span_escalate floor must be in "
+                      f"[0, 1] (a fraction of the segments), got {f:g}")
+                return
+            floor_v = f
+        else:
+            print(f"Error: set_dead_span_escalate expects on|off and/or "
+                  f"floor <F>, got {tok!r}")
+            return
+    if flag is not None:
+        session._dead_span_escalate = flag
+    if floor_v is not None:
+        session._dead_span_floor_typed = floor_v
 
 
 def cmd_set_pair_align_heal(session, cmd, args, cmd_line):

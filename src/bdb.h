@@ -802,6 +802,23 @@ public:
     void set_comp_is_leaf(const std::string& name, bool is_leaf);
     void set_comp_bbox(const std::string& name,
                        double x1, double y1, double x2, double y2);
+    // The same, for MANY instances in one transaction with ONE HPWL
+    // recompute at the end: `auto_floorplan` stamps every instance of a
+    // design (thousands on the SoC vehicles), and set_comp_bbox recomputes
+    // every net's HPWL per call.  Each entry is (name, x1, y1, x2, y2); an
+    // unknown name throws before anything is written.
+    void set_comp_bboxes(
+        const std::vector<std::tuple<std::string,double,double,double,double>>& boxes);
+    // Set instances' orientation tokens in one transaction (name, orient),
+    // without touching their boxes: for a writer that writes UPRIGHT
+    // geometry over a rotated instance (`auto_floorplan`), so the row's
+    // token describes the box beside it.  Each instance's POSITIONED pins
+    // are re-derived through the new token over its current box (the one
+    // rule of _add_pin_by_path) and the HPWL recomputed once.  An unknown
+    // name or a token outside the eight orientations throws before anything
+    // is written.
+    void set_comp_orients(
+        const std::vector<std::pair<std::string,std::string>>& orients);
     // Give every UNPLACED container the bounding box of its placed
     // descendants, grown by `margin` on each side.  Returns how many were
     // placed; `unresolved` (if given) collects the containers left unplaced
@@ -989,6 +1006,12 @@ public:
     // (chip_flow_parallelism.md C1).  Invalidates the route_snapshot like
     // the bulk clear — every selective site rewrites routing right after.
     void clear_expanded_bundle(const std::string& bundle_id);
+    // The ROUTING half of clear_expanded_bundle alone: ONE bundle's
+    // bus/net segment and via rows plus the route_snapshot, the bundle,
+    // net, busterm and topology rows left standing — what a re-persist
+    // needs when only the planner's assigned layers moved (#972's
+    // layer-only re-persist), since those rows are updated in place.
+    void clear_bundle_routing(const std::string& bundle_id);
 
     // ── Abstract-NUTS bus routing persistence (Stage-4 output) ─────────────
     void add_bus_segment(const BusSegRow& r);       // INSERT OR REPLACE

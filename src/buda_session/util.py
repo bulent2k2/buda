@@ -533,11 +533,11 @@ def seg_crosses_rect(cs, x1, y1, x2, y2):
 
 def seg_spans_block(cs, name, ubbox, fp):
     """True iff `cs` crosses block `name`'s SOLID geometry.  Multi-rect / TEG
-    blocks store their real rectangles in get_block_rects(); a segment through
+    blocks store their real rectangles (passthrough_rects()); a segment through
     a notch/gap between them does NOT cross the block even though it crosses
     the union bbox.  Single-rect blocks have an empty rect list — fall back to
     the union bbox (which is their solid extent)."""
-    rects = fp.get_block_rects(name)   # [] for single-rect blocks
+    rects = fp.passthrough_rects(name)   # [] for single-rect blocks
     if rects:
         return any(seg_crosses_rect(cs, x1, y1, x2, y2)
                    for (x1, y1, x2, y2) in rects)
@@ -545,6 +545,11 @@ def seg_spans_block(cs, name, ubbox, fp):
 
 
 def passthru_blocks(topo, segs, fp):
+    import buda
+    with buda.BlockFixScope(topo):
+        return passthru_blocks_impl(topo, segs, fp)
+
+def passthru_blocks_impl(topo, segs, fp):
     """The bundle's OWN blocks a candidate passes THROUGH rather than taps —
     crossed solid geometry with no busterm landing on that segment.
 

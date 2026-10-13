@@ -101,6 +101,19 @@ def test_mode_is_found_wherever_it_sits(tmp_path):
     assert "run_hier_bundler:combined" in qc.flow_tokens(f)
 
 
+def test_dead_span_floor_is_a_mode_token(tmp_path):
+    """`set_dead_span_escalate floor <F>` (#972 B1) is its own coverage
+    token, distinct from the `on` form — a flow sweeping the floor would
+    otherwise read as the plain escalation (Codex P2 on #981).  The value
+    after `floor` is a number, never a mode word, so it adds nothing."""
+    f = _write(tmp_path, "a.buda", "set_dead_span_escalate on floor 0.01\n")
+    t = qc.flow_tokens(f)
+    assert {"set_dead_span_escalate:on", "set_dead_span_escalate:floor"} <= t
+    assert not any(tok.endswith(":0.01") for tok in t)
+    plain = _write(tmp_path, "b.buda", "set_dead_span_escalate on\n")
+    assert "set_dead_span_escalate:floor" not in qc.flow_tokens(plain)
+
+
 def test_unknown_mode_word_errs_toward_silence(tmp_path):
     """The documented cost of a closed vocabulary: a mode not in the table is
     not coverage.  That under-claims rather than manufacturing a finding — but

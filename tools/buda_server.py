@@ -246,6 +246,19 @@ def _messages(_s):
     return " ".join(f"{{{mid} {sev}}}" for mid, sev, _t in buda_diag.catalogue())
 
 
+def _die(s):
+    # The die as the session knows it: the BDB's (what `auto_floorplan`
+    # sets) when one is open, else the flat session's.  {w h}; -1 -1 when
+    # neither has one.
+    # A Tcl LIST, as the row queries are shaped (a Python list's repr is
+    # not one: `[1234.0, 567.0]` lassigns as two bracketed words).
+    if s.bdb is not None and s.bdb.die_w() > 0:
+        return f"{s.bdb.die_w():g} {s.bdb.die_h():g}"
+    w = getattr(s, "_die_w", 0) or 0
+    h = getattr(s, "_die_h", 0) or 0
+    return f"{w:g} {h:g}" if w > 0 else "-1 -1"
+
+
 def _demand(s, args=""):
     # Per-instance, per-layer demand (convergence ladder item 3): what the
     # rest of the design placed over each instance's footprint, in signal
@@ -380,6 +393,7 @@ _QUERIES = {
     "violations": _n_violations,
     "messages": _messages,
     "demand": _demand,
+    "die": _die,
     "caps": _caps,
     "reserves": _reserves,
     "reserve_audit": _reserve_audit,

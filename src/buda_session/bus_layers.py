@@ -134,12 +134,43 @@ def apply_bus_layer_restrictions(session, wrappers=None):
     base = getattr(session, "_bus_layer_base", None)
     if base is None:
         base = session._bus_layer_base = {}
-    if not getattr(session, "_bus_layer_scopes", None) and not base:
+    from buda_cmds import pin_fix_cmds
+    fix_layers = pin_fix_cmds.has_layer_fixes(session)
+    if not getattr(session, "_bus_layer_scopes", None) and not base and not fix_layers:
         return 0
     n = 0
     for w in wrappers:
         bid = w.input.original_bundle.id
-        prefix, layers = _bundle_scope(session, w)
+        prefix, layers = (_bundle_scope(session, w)
+                          if getattr(session, "_bus_layer_scopes", None)
+                          else (None, None))
+        if fix_layers:
+            f_label, f_layers, f_axes = pin_fix_cmds.bundle_layer_mask(session, w)
+            if f_layers:
+                if layers:
+                    both = sorted(set(layers) & set(f_layers))
+                    # Per constrained axis, not just overall: layers of the
+                    # OTHER axis are in the mask only so an L/Z still routes,
+                    # and cannot realize the landing segment.
+                    if not both or any(not (set(layers) & axis_set)
+                                       for axis_set in f_axes.values()):
+                        print(f"Error: set_bus_layers '{prefix}' and a fix_pin "
+                              f"layer restrict bundle {bid} to layers with none "
+                              f"in common — widen one of them.")
+                        sys.exit(1)
+                    layers, prefix = both, f"{prefix}+{f_label}"
+                else:
+                    layers, prefix = f_layers, f_label
+            # Whatever else already governs the bundle (a cell band, an NDR
+            # rule's layers) must leave a layer on every constrained axis too.
+            pre = base.get(bid, list(w.input.allowed_layers))
+            if f_layers and pre and any(not (set(pre) & axis_set)
+                                        for axis_set in f_axes.values()):
+                b = w.input.original_bundle
+                print(f"Error: a fix_pin layer needs a layer on an axis that what "
+                      f"already governs bundle {b.id} ({sorted(pre)}) does not "
+                      f"allow — the two have no layer in common.  Widen one of them.")
+                sys.exit(1)
         if bid not in base and layers:
             base[bid] = list(w.input.allowed_layers)
         start = base.get(bid, list(w.input.allowed_layers))
@@ -158,6 +189,7 @@ def apply_bus_layer_restrictions(session, wrappers=None):
             sys.exit(1)
         w.input.allowed_layers = eff
         n += 1
-    if not wrappers_given and not getattr(session, "_bus_layer_scopes", None):
+    if (not wrappers_given and not getattr(session, "_bus_layer_scopes", None)
+            and not fix_layers):
         base.clear()
     return n

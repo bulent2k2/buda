@@ -48,20 +48,42 @@ enum class TegMode {
 };
 
 struct Point { int x, y; };
+// Landing-face tag on a Rect (docs/internal/fixed_pin_design.md).  0 = every
+// edge of the rect is a face, which is every rect that is not a fixed-pin
+// strip.  A strip carries exactly ONE bit: the edge a wire must END on.  Its
+// other three edges (the inner edge and the two short ends) are not faces, so
+// a stub ending there is not a landing.  North is +y.
+enum : int { FACE_ANY = 0, FACE_N = 1, FACE_S = 2, FACE_E = 4, FACE_W = 8 };
 struct Rect {
     int x1, y1, x2, y2;
+    int face = FACE_ANY;   // trailing + defaulted: Rect{a,b,c,d} stays valid
     Point center() const { return { (x1+x2)/2, (y1+y2)/2 }; }
     // Nearest block face in the direction of 'toward'. Returns 'toward' itself
     // if the value falls inside the block (= trunk passes through the block).
-    int face_x(int toward) const { return toward > x2 ? x2 : toward < x1 ? x1 : toward; }
-    int face_y(int toward) const { return toward > y2 ? y2 : toward < y1 ? y1 : toward; }
+    // A tagged strip's face is its tagged edge whatever 'toward' is: it has no
+    // inside to pass through, and the edge a wire may end on is fixed.
+    int face_x(int toward) const {
+        if (face == FACE_E) return x2;
+        if (face == FACE_W) return x1;
+        return toward > x2 ? x2 : toward < x1 ? x1 : toward;
+    }
+    int face_y(int toward) const {
+        if (face == FACE_N) return y2;
+        if (face == FACE_S) return y1;
+        return toward > y2 ? y2 : toward < y1 ? y1 : toward;
+    }
+    // May a wire end on this rect's x1 / x2 / y1 / y2 edge?
+    bool face_ok_x1() const { return face == FACE_ANY || face == FACE_W; }
+    bool face_ok_x2() const { return face == FACE_ANY || face == FACE_E; }
+    bool face_ok_y1() const { return face == FACE_ANY || face == FACE_S; }
+    bool face_ok_y2() const { return face == FACE_ANY || face == FACE_N; }
     // Return a rect inset by (dx, dy) on each side.
     // Guard: if the margin would invert an axis, keep that axis at full extent.
     Rect shrink(int dx, int dy) const {
         int nx1 = x1+dx, nx2 = x2-dx, ny1 = y1+dy, ny2 = y2-dy;
         if (nx1 > nx2) { nx1 = x1; nx2 = x2; }
         if (ny1 > ny2) { ny1 = y1; ny2 = y2; }
-        return Rect{nx1, ny1, nx2, ny2};
+        return Rect{nx1, ny1, nx2, ny2, face};
     }
 };
 struct Segment {
@@ -192,11 +214,29 @@ struct Busterm {
     // last so the 5-field aggregate initializations stay valid.
     std::vector<Rect> orig_rects = {};
 };
+// A fixed-pin declaration on one block (see Floorplan::set_pin_fix).
+struct PinFix {
+    int  faces = 0;            // FACE_* mask; 0 = every exposed face
+    int  rect  = -1;           // declared-rect index; -1 = every rect
+    bool has_window = false;
+    int  lo = 0, hi = 0;       // block-local window along the face
+};
+// Block name -> fix.  A Topology may carry the EFFECTIVE map for its own bundle
+// (per-pin selectors: two bundles landing on one block can see different fixes).
+using FixMap = std::map<std::string, PinFix>;
+// The map in force on this thread (nullptr = the floorplan's own).  Floorplan's
+// fix readers consult it, so every resolver follows the bundle being processed
+// without a parameter threaded through the call sites.  Set by FixScope.
+const FixMap* active_block_fixes();
 // Per-segment busterm annotation: .first = busterm at segment start endpoint,
 // .second = busterm at segment end endpoint.  nullopt means the endpoint is an
 // internal junction (connects to another segment, not a block face).
 using SegEndpoints = std::pair<std::optional<Busterm>, std::optional<Busterm>>;
 struct Topology {
+    // Effective per-bundle fix map (see FixMap); only meaningful when
+    // has_block_fixes.  Deliberately outside the content fingerprint/uid.
+    bool   has_block_fixes = false;
+    FixMap block_fixes;
     std::string type;
     std::vector<Segment> segments;
     int estimated_wirelength  = 0;
@@ -637,6 +677,17 @@ private:
     }
 };
 
+// RAII: make `m` (nullptr = the floorplan's own fixes) the active map.
+struct FixScope {
+    const FixMap* prev_;
+    explicit FixScope(const FixMap* m);
+    // A topology without a per-bundle map leaves the ACTIVE one alone: the
+    // generator establishes its bundle's scope before its candidates are stamped.
+    explicit FixScope(const Topology& t) : FixScope(t.has_block_fixes ? &t.block_fixes : active_block_fixes()) {}
+    ~FixScope();
+    FixScope(const FixScope&) = delete;
+    FixScope& operator=(const FixScope&) = delete;
+};
 class Floorplan {
 public:
     // Cache key: which floorplan (uid) in which state (rev).  rev is bumped by
@@ -697,8 +748,49 @@ public:
     // only, like add_block's other declaration-time resolutions; a later
     // set_teg_mode does not re-mode already-declared blocks).
     void add_block_rects(const std::string& name, const std::vector<Rect>& rects);
+    // RAW store reader.  Geometry consumers do not call it: they ask one of the
+    // two named resolvers below, because "may a wire attach here" and "what does
+    // this block block" are DIFFERENT questions that share an answer until a pin
+    // is fixed (docs/internal/fixed_pin_design.md, second round).
     // Returns the individual rects for a multi-rect block, or empty for single-rect.
     std::vector<Rect> get_block_rects(const std::string& name) const;
+    // LANDING geometry: where a wire may ATTACH to the block.  Read by the
+    // generator's busterm construction, landing recognition, the pass-through
+    // clamp and anchor, the edit session, the auto bit cap and the audit.  With
+    // nothing fixed it is exactly get_block_rects / get_block_bounds (empty rects
+    // for a single-rect block).
+    std::vector<Rect> landing_rects(const std::string& name) const;
+    Rect              landing_bounds(const std::string& name) const;
+    // ── Fixed pins (docs/internal/fixed_pin_design.md) ──────────────────────
+    // A block's pin fix narrows where a wire may LAND, never what the block
+    // blocks.  faces: bitmask of FACE_* (0 = every face); rect: index into the
+    // block's declared rects (-1 = all); window: a span along the face in
+    // BLOCK-LOCAL coordinates (origin = the block's lower-left corner), absolute
+    // layout coordinates = local + that corner.
+    void set_pin_fix(const std::string& block, const PinFix& fix);
+    void clear_pin_fix(const std::string& block);
+    bool has_pin_fix(const std::string& block) const {
+        return fixes().count(block) > 0;
+    }
+    PinFix pin_fix(const std::string& block) const;
+    // The fix map readers must use: the active per-bundle one, else our own.
+    const FixMap& fixes() const { const FixMap* a = active_block_fixes(); return a ? *a : pin_fixes_; }
+    const FixMap& declared_fixes() const { return pin_fixes_; }
+    // The admissible landing strips of a fixed block, each tagged with its one
+    // face.  Empty when the fix admits nothing (the command refuses that).
+    std::vector<Rect> pin_fix_strips(const std::string& block) const;
+    // THE one place a Busterm is built from the floorplan.  Unfixed blocks get
+    // exactly what the generator sites used to build by hand (margin-inset bbox
+    // + rects, physical spelling kept beside it); a fixed block gets its strips
+    // as both spellings, un-inset (a declared window is physical).
+    Busterm landing_busterm(const std::string& block) const;
+    // Rects a wire CROSSING the block counts as covering it through (see the
+    // definition: a pass-through is two landings).  Unfixed = get_block_rects.
+    std::vector<Rect> passthrough_rects(const std::string& block) const;
+    // OBSTRUCTION geometry: what the block BLOCKS on the lower stack.  The
+    // physical footprint, never a landing strip: no pin declaration may turn a
+    // macro's body into routable space.
+    std::vector<Rect> obstruction_rects(const std::string& name) const;
     // TEG mode: controls over-the-block bridge generation for multi-rect blocks.
     void    set_block_teg_mode(const std::string& name, TegMode mode);
     TegMode get_block_teg_mode(const std::string& name) const;
@@ -797,6 +889,7 @@ private:
     uint64_t rev_ = 0;
     std::map<std::string, Rect>          blocks_;
     std::map<std::string, std::vector<Rect>> block_rects_;  // only for multi-rect blocks
+    FixMap                               pin_fixes_;        // fixed-pin landings per block
     std::set<std::string>                containers_;       // hierarchy envelopes (not leaf cells)
     std::map<std::string, std::set<int>> leaf_blocked_;     // explicit per-leaf blocked LOW layers
     std::map<std::string, TegMode>       teg_modes_;
@@ -811,6 +904,8 @@ private:
     std::vector<KeepoutZone> keepouts_;
 };
 class TopologyGenerator {
+    FixMap block_fixes_;
+    bool   has_block_fixes_ = false;
 public:
     explicit TopologyGenerator(const Floorplan& fp) : floorplan_(fp) {
         // Opt-in defaults from the environment so a whole corpus can be A/B'd
@@ -974,6 +1069,12 @@ public:
     // SEARCH SPACE moves.  Trimming renumbers candidate indices, so
     // select_topology pins must come from an opted-in run.
     void set_trunk_stub_trim(bool v) { allow_trunk_stub_trim_ = v; }
+
+    // Per-bundle effective fixes (per-pin selectors).  Candidates generated
+    // afterwards carry the map (Topology::block_fixes) and are generated under
+    // it; clear_block_fixes() returns to the floorplan's own declarations.
+    void set_block_fixes(const FixMap& m) { block_fixes_ = m; has_block_fixes_ = true; }
+    void clear_block_fixes() { block_fixes_.clear(); has_block_fixes_ = false; }
 
     // Unified entry point: 1 dst → L/Z/U shapes; N dsts → trunk+branch shapes.
     std::vector<Topology> generate_candidates(

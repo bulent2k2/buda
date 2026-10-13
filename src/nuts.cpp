@@ -22,6 +22,7 @@
 #include <atomic>
 #include <bit>
 #include <chrono>
+#include <unordered_map>
 #include <cmath>
 #include <cstdlib>
 #include <functional>
@@ -82,6 +83,7 @@ static void build_nuts_maps(
             bw.plan.selected_topology_index >= (int)bw.input.candidates.size())
             continue;   // out-of-range index is UB (audit C1-02)
         const Topology& topo = bw.input.candidates[bw.plan.selected_topology_index];
+        FixScope fix_scope_(topo);
         int bid = bw.input.original_bundle.id;
         for (int si = 0; si < (int)topo.segments.size(); ++si) {
             const Segment& seg = topo.segments[si];
@@ -100,6 +102,7 @@ static void build_nuts_maps(
             bw.plan.selected_topology_index >= (int)bw.input.candidates.size())
             continue;   // out-of-range index is UB (audit C1-02)
         const Topology& topo = bw.input.candidates[bw.plan.selected_topology_index];
+        FixScope fix_scope_(topo);
         int bid = bw.input.original_bundle.id;
 
         ConnTopology ct;
@@ -287,8 +290,8 @@ static void build_nuts_maps(
             const double s_hi = std::max((double)cs.along_lo, (double)cs.along_hi);
             for (const auto& bname : topo.connected_block_names) {
                 if (tapped_blocks.count(bname)) continue;
-                auto rects = floorplan.get_block_rects(bname);
-                if (rects.empty()) rects.push_back(floorplan.get_block_bounds(bname));
+                auto rects = floorplan.passthrough_rects(bname);
+                if (rects.empty()) rects.push_back(floorplan.landing_bounds(bname));
                 // Does this segment cover this BLOCK at all?  Same relation
                 // check_topo's coverage test uses: some rect with the nominal
                 // perp inside it and an along overlap.  This gate is what keeps
@@ -1129,7 +1132,8 @@ static void tighten_spans_to_reach(std::vector<TrackSegment>& segments,
 static int repack_overlap_clusters(const NUTSEngine& eng, double track_pitch,
                                    std::vector<TrackSegment>& segments,
                                    NutsContext& ctx,
-                                   const std::map<int, LayerConstraints>* seed_cons);
+                                   const std::map<int, LayerConstraints>* seed_cons,
+                                   const std::vector<KeepoutZone>& kozs_shared);
 
 void NUTSEngine::repair_overlaps(std::vector<TrackSegment>& segments,
                                  NutsContext& ctx,
@@ -1320,7 +1324,7 @@ void NUTSEngine::repair_overlaps(std::vector<TrackSegment>& segments,
         // single-victim sweep of this loop.
         if (!progress) {
             const int m = repack_overlap_clusters(*this, track_pitch_,
-                                                  segments, ctx, seed_cons);
+                                                  segments, ctx, seed_cons, kozs);
             if (m > 0) { moved += m; progress = true; }
         }
         if (!progress) break;
@@ -1419,6 +1423,7 @@ static void apply_reserve_corridors(
         const int sel = bw.plan.selected_topology_index;
         if (sel < 0 || sel >= (int)bw.input.candidates.size()) continue;
         const Topology& topo = bw.input.candidates[sel];
+        FixScope fix_scope_(topo);
         const int nbits = (int)bw.input.original_bundle.get_net_names().size();
         for (int si = 0; si < (int)topo.segments.size(); ++si)
             bits_of[{bid, si}] = seg_bit_count(topo, si, nbits);
@@ -2081,6 +2086,7 @@ std::vector<TrackSegment> NUTSEngine::extract_segments(
         // placed segments are appended to the result verbatim instead.
         if (fixed_bundle_ids_.count(bw.input.original_bundle.id)) continue;
         const Topology& topo = bw.input.candidates[bw.plan.selected_topology_index];
+        FixScope fix_scope_(topo);
         for (int si = 0; si < (int)topo.segments.size(); ++si) {
             const Segment& seg = topo.segments[si];
             const bool is_horizontal = (seg.start.y == seg.end.y);
@@ -2209,6 +2215,15 @@ double NUTSEngine::preferred_fit(
     const std::vector<std::pair<double,double>>& occupied,
     double pref_lo, double pref_hi) const
 {
+    return preferred_fit_impl(lo, hi, width, occupied, pref_lo, pref_hi,
+                              track_pitch_, /*allow_merge=*/true);
+}
+
+double preferred_fit_impl(
+    double lo, double hi, double width,
+    const std::vector<std::pair<double,double>>& occupied,
+    double pref_lo, double pref_hi, double track_pitch_, bool allow_merge)
+{
     if (pref_hi < pref_lo) std::swap(pref_lo, pref_hi);
     const double half = width / 2.0;
     const double c_lo = lo + half;
@@ -2222,8 +2237,51 @@ double NUTSEngine::preferred_fit(
         candidates.push_back(occ_hi + track_pitch_ + half);
         candidates.push_back(occ_lo - track_pitch_ - half);
     }
+    // `valid` asks whether the open interval (c-half, c+half) meets any
+    // occupied interval.  The scan is O(n) per candidate and there are 2n+3
+    // candidates, so with hundreds of occupied entries (the wide cluster
+    // repack, #972) the selection is quadratic.  Over the UNION of the
+    // occupied intervals -- sorted, disjoint after merging overlapping or
+    // touching ones -- the same question is one binary search.  Exact for a
+    // positive-width query: two touching intervals leave a single point
+    // uncovered, which an open interval of positive width cannot sit on alone.
+    // Anything the merge cannot vouch for (a NaN or inverted interval, a zero
+    // width) keeps the scan, so the answers are the scan's own.
+    constexpr size_t kMergeMin = 16;
+    std::vector<std::pair<double,double>> merged;
+    bool use_merged = false;
+    if (allow_merge && occupied.size() >= kMergeMin && half > 0.0) {
+        use_merged = true;
+        merged.reserve(occupied.size());
+        bool sorted = true;
+        for (size_t i = 0; i < occupied.size(); ++i) {
+            if (!(occupied[i].first <= occupied[i].second)) { use_merged = false; break; }
+            if (i && occupied[i] < occupied[i - 1]) sorted = false;
+        }
+        if (use_merged) {
+            merged.assign(occupied.begin(), occupied.end());
+            if (!sorted) std::sort(merged.begin(), merged.end());
+            size_t w = 0;
+            for (size_t i = 1; i < merged.size(); ++i) {
+                if (merged[i].first <= merged[w].second)
+                    merged[w].second = std::max(merged[w].second, merged[i].second);
+                else
+                    merged[++w] = merged[i];
+            }
+            merged.resize(w + 1);
+        }
+    }
     auto valid = [&](double c) -> bool {
         if (c < c_lo || c > c_hi) return false;
+        if (use_merged) {
+            // First union interval ending after c-half; it blocks iff it
+            // also starts before c+half (later ones start even later).
+            const double q_lo = c - half, q_hi = c + half;
+            auto it = std::upper_bound(merged.begin(), merged.end(), q_lo,
+                [](double v, const std::pair<double,double>& m) {
+                    return v < m.second; });
+            return !(it != merged.end() && q_hi > it->first);
+        }
         for (const auto& [occ_lo, occ_hi] : occupied)
             if (c - half < occ_hi && c + half > occ_lo) return false;
         return true;
@@ -2265,12 +2323,144 @@ double NUTSEngine::preferred_fit(
 // dependency order, run_phases12() anchors pulled segments then sweeps the
 // pull-free ones — all three share place_seg() / try_repack().
 // ---------------------------------------------------------------------------
+// Study knob: BUDA_NO_SPAN_INDEX=1 keeps the per-member layer scan, so a
+// before/after is one binary (the index is exact, so this changes no result).
+static bool span_index_off() {
+    static const bool off = [] {
+        const char* e = std::getenv("BUDA_NO_SPAN_INDEX");
+        return e && *e && *e != '0';
+    }();
+    return off;
+}
+
+// Interval index over a layer's PLACED segments by closed span, for the
+// repack's per-member occupancy build (#972 option C1).  That build asked
+// "which non-member segments' spans touch this member's span?" by scanning
+// the whole layer for every member of every attempt -- members x layer, 4.5G
+// occupancy tests at NQ=62 -- when the answer is a handful.  A balanced
+// implicit tree over the segments sorted by span start, each node carrying
+// the maximum span end below it, finds exactly the segments with
+// sp_lo <= hi && lo <= sp_hi (occupancy_from's own closed-span test).
+// Built from the CURRENT spans; a repack's non-members never move during
+// the pack, which is what makes one build per repack_members call exact.
+// A segment with a NaN span end never satisfies occupancy_from's comparisons,
+// so it is left out of the index (and keeps std::sort's ordering sane).
+struct SpanIndex {
+    std::vector<int>    ord;      // indices into the layer's segment vector
+    std::vector<double> lo, hi;   // span ends, parallel to ord (sorted by lo)
+    std::vector<double> maxhi;    // max hi over the node's subtree, at mid
+
+    void build(const std::vector<TrackSegment*>& segs) {
+        ord.clear();
+        for (int i = 0; i < (int)segs.size(); ++i) {
+            const TrackSegment* t = segs[i];
+            if (!t->placed) continue;
+            const double a = sp_lo(*t), b = sp_hi(*t);
+            if (std::isnan(a) || std::isnan(b)) continue;
+            ord.push_back(i);
+        }
+        std::sort(ord.begin(), ord.end(), [&](int x, int y) {
+            const double ax = sp_lo(*segs[x]), ay = sp_lo(*segs[y]);
+            return ax != ay ? ax < ay : x < y;
+        });
+        const size_t n = ord.size();
+        lo.resize(n); hi.resize(n); maxhi.assign(n, -kInf);
+        for (size_t k = 0; k < n; ++k) {
+            lo[k] = sp_lo(*segs[ord[k]]);
+            hi[k] = sp_hi(*segs[ord[k]]);
+        }
+        fill(0, n);
+    }
+
+    // The same tree over plain ranges (keepout edges): ord holds indices into
+    // r, ascending among equal starts.  Ends must not be NaN (integer bboxes).
+    void build_ranges(const std::vector<std::pair<double,double>>& r) {
+        ord.resize(r.size());
+        for (size_t i = 0; i < r.size(); ++i) ord[i] = (int)i;
+        std::sort(ord.begin(), ord.end(), [&](int x, int y) {
+            return r[x].first != r[y].first ? r[x].first < r[y].first : x < y;
+        });
+        const size_t n = ord.size();
+        lo.resize(n); hi.resize(n); maxhi.assign(n, -kInf);
+        for (size_t k = 0; k < n; ++k) { lo[k] = r[ord[k]].first; hi[k] = r[ord[k]].second; }
+        fill(0, n);
+    }
+
+    // Segment indices (ascending) whose closed span touches [a, b].
+    void query(double a, double b, std::vector<int>& out) const {
+        query_unordered(a, b, out);
+        std::sort(out.begin(), out.end());
+    }
+    // Same set, tree order.  For a caller whose result is sorted afterwards
+    // anyway (the repack's occupancy list), the ascending sort is waste.
+    void query_unordered(double a, double b, std::vector<int>& out) const {
+        out.clear();
+        walk(0, ord.size(), a, b, out);
+    }
+
+private:
+    double fill(size_t l, size_t r) {
+        if (l >= r) return -kInf;
+        const size_t mid = l + (r - l) / 2;
+        double m = hi[mid];
+        m = std::max(m, fill(l, mid));
+        m = std::max(m, fill(mid + 1, r));
+        maxhi[mid] = m;
+        return m;
+    }
+    void walk(size_t l, size_t r, double a, double b,
+              std::vector<int>& out) const {
+        if (l >= r) return;
+        const size_t mid = l + (r - l) / 2;
+        if (maxhi[mid] < a) return;               // nothing here reaches a
+        walk(l, mid, a, b, out);
+        if (lo[mid] > b) return;                  // this node and all right of it start past b
+        if (hi[mid] >= a) out.push_back(ord[mid]);
+        walk(mid + 1, r, a, b, out);
+    }
+};
+
+// Study knob: BUDA_NO_REPACK_CACHE=1 rebuilds every member's base occupancy per
+// attempt, so a before/after is one binary (the cache is exact).
+static bool repack_cache_off() {
+    static const bool off = [] {
+        const char* e = std::getenv("BUDA_NO_REPACK_CACHE");
+        return e && *e && *e != '0';
+    }();
+    return off;
+}
+
+// A member's base occupancy for the cluster repack (#972): the keepouts over its
+// span, and every placed other-bundle segment whose span touches it -- with the
+// SEGMENT kept beside its interval, so a later attempt with a different member
+// set filters the same list instead of re-deriving it.  The wide attempt
+// re-asks for the same neighbours cluster after cluster (747k member builds
+// over 4.6k segments at NQ=32) and nearly every attempt is rejected, which
+// restores the placement bitwise -- so the answer only changes when an attempt
+// is ACCEPTED.  The caller clears the cache then; a non-member never moves
+// during a pack, and entries are built lazily at pack time, before any commit.
+struct RepackBaseCache {
+    struct Entry {
+        // Keepout intervals (owner null) and touching segments' intervals,
+        // sorted by interval once at build: filtering a sorted list by member
+        // set leaves it sorted, so the per-attempt base needs no sort.
+        std::vector<std::pair<std::pair<double,double>,
+                              const TrackSegment*>>                   all;
+    };
+    std::unordered_map<const TrackSegment*, Entry> m;
+    long long builds = 0, reuses = 0;
+    void clear() { m.clear(); }
+};
+
 class LayerSolver {
 public:
+    void set_base_cache(RepackBaseCache* c) { base_cache_ = c; }
+
     LayerSolver(const NUTSEngine& eng,
                 std::vector<TrackSegment*>& segs_in,
                 NutsContext& ctx,
-                const LayerConstraints& constraints)
+                const LayerConstraints& constraints,
+                const std::vector<KeepoutZone>* kozs_shared = nullptr)
         : eng_(eng), segs(segs_in),
           pull_map(ctx.pull_map), pull_win_map(ctx.pull_win_map),
           align_map(ctx.align_map),
@@ -2279,9 +2469,24 @@ public:
           order_preds(constraints.preds), order_bounds(constraints.bounds),
           // Incorporate KeepoutZones into 'occupied' list (user zones + leaf-cell
           // zones on LOW layers + fixed bottom-up segments' derived zones; TOP
-          // segments are filtered out by layer_ids).
-          kozs(eng.solver_keepouts())
+          // segments are filtered out by layer_ids).  A caller constructing
+          // many solvers (the cluster repack, one per attempt) hands the list
+          // in once instead of paying low_layer_keepouts() per attempt
+          // (#972 follow-up: one zone per leaf, a std::set each, copied per
+          // cluster attempt).
+          kozs_own(kozs_shared ? std::vector<KeepoutZone>{}
+                               : eng.solver_keepouts()),
+          kozs(kozs_shared ? *kozs_shared : kozs_own)
     {
+        // Zones that can apply to THIS layer, in the list's own order — the
+        // per-placement keepout walk is over these alone (same pushes, same
+        // order as walking every zone with keepout_occupied's layer test).
+        if (!segs.empty()) {
+            const int lid = segs.front()->layer;
+            for (const auto& koz : kozs)
+                if (koz.layer_ids.empty() || koz.layer_ids.count(lid))
+                    kozs_layer.push_back(&koz);
+        }
         // Same-layer lookup for alignment siblings (and ordering-constraint phase 0).
         for (TrackSegment* ts : segs)
             layer_map[{ts->bundle_id, ts->seg_idx}] = ts;
@@ -2335,14 +2540,72 @@ private:
     const std::map<std::pair<int,int>, TrackSegment*>&             jn_segs;
     const std::map<std::pair<int,int>, std::set<std::pair<int,int>>>& order_preds;
     const std::map<std::pair<int,int>, std::pair<double,double>>&  order_bounds;
-    const std::vector<KeepoutZone>     kozs;
+    const std::vector<KeepoutZone>     kozs_own;    // empty when shared
+    const std::vector<KeepoutZone>&    kozs;
+    std::vector<const KeepoutZone*>    kozs_layer;  // the zones this layer sees
     std::map<std::pair<int,int>, TrackSegment*> layer_map;
     std::set<std::pair<int,int>> constrained;
     std::set<std::pair<int,int>> has_successor;   // something ordered above it
 
+    // Zones are static for the solver's life.  A layer carrying many (one per
+    // leaf cell) made this scan the repack's second-largest cost -- members x
+    // zones per attempt (#972) -- so with enough zones each orientation gets
+    // an interval tree over the zone edges its segments test against.  The
+    // tree is queried closed (a superset of the strict test) and hits are
+    // re-tested with the scan's own predicate, in zone order, so the
+    // occupancy pushed is the scan's.
+    RepackBaseCache* base_cache_ = nullptr;   // cluster repack only, see above
+    mutable SpanIndex ko_x_, ko_y_;      // zone x-edges (horiz segs), y-edges (vert)
+    mutable bool ko_built_ = false;
+    mutable int  ko_scans_ = 0;          // scans paid before the tree is worth building
+    mutable std::vector<int> ko_hits_;
+
     void add_keepout_occ(const TrackSegment* t,
                          std::vector<std::pair<double,double>>& occ) const {
-        keepout_occupied(kozs, t, occ);
+        // keepout_occupied over the layer's own zones (every LayerSolver is
+        // one layer, so the layer test is already decided per zone).
+        if (kozs_layer.size() >= 32 && !span_index_off() &&
+            (ko_built_ || ++ko_scans_ > 64)) {
+            if (!ko_built_) {
+                std::vector<std::pair<double,double>> xr, yr;
+                xr.reserve(kozs_layer.size()); yr.reserve(kozs_layer.size());
+                for (const KeepoutZone* koz : kozs_layer) {
+                    xr.push_back({(double)koz->bbox.x1, (double)koz->bbox.x2});
+                    yr.push_back({(double)koz->bbox.y1, (double)koz->bbox.y2});
+                }
+                ko_x_.build_ranges(xr); ko_y_.build_ranges(yr);
+                ko_built_ = true;
+            }
+            const double a = sp_lo(*t), b = sp_hi(*t);
+            if (std::isnan(a) || std::isnan(b)) return;   // no comparison holds
+            (t->horiz ? ko_x_ : ko_y_).query(a, b, ko_hits_);
+            for (int i : ko_hits_) {
+                const KeepoutZone* koz = kozs_layer[i];
+                if (!koz->layer_ids.empty() && !koz->layer_ids.count(t->layer)) continue;
+                if (t->horiz) {
+                    if (a < koz->bbox.x2 && b > koz->bbox.x1)
+                        occ.push_back({static_cast<double>(koz->bbox.y1),
+                                       static_cast<double>(koz->bbox.y2)});
+                } else {
+                    if (a < koz->bbox.y2 && b > koz->bbox.y1)
+                        occ.push_back({static_cast<double>(koz->bbox.x1),
+                                       static_cast<double>(koz->bbox.x2)});
+                }
+            }
+            return;
+        }
+        for (const KeepoutZone* koz : kozs_layer) {
+            if (!koz->layer_ids.empty() && !koz->layer_ids.count(t->layer)) continue;
+            if (t->horiz) {
+                if (sp_lo(*t) < koz->bbox.x2 && sp_hi(*t) > koz->bbox.x1)
+                    occ.push_back({static_cast<double>(koz->bbox.y1),
+                                   static_cast<double>(koz->bbox.y2)});
+            } else {
+                if (sp_lo(*t) < koz->bbox.y2 && sp_hi(*t) > koz->bbox.y1)
+                    occ.push_back({static_cast<double>(koz->bbox.x1),
+                                   static_cast<double>(koz->bbox.x2)});
+            }
+        }
     }
 
     // Occupancy a candidate placement must avoid: every already-placed segment
@@ -2395,7 +2658,14 @@ private:
     // best_effort — see repack_cluster).
     bool repack_members(std::vector<TrackSegment*> members,
                         bool best_effort = false) {
-        std::set<const TrackSegment*> member_set(members.begin(), members.end());
+        // Sorted pointer vector + binary search: the std::set lookup in the
+        // per-member occupancy build was the hottest self frame of the whole
+        // abstract solve at NQ = 32 (13 %).
+        std::vector<const TrackSegment*> member_set(members.begin(), members.end());
+        std::sort(member_set.begin(), member_set.end());
+        auto is_member = [&](const TrackSegment* o) {
+            return std::binary_search(member_set.begin(), member_set.end(), o);
+        };
 
         // Earliest deadline first: the member whose window ENDS soonest gets
         // the lowest position.  Ordering by window tightness instead can park
@@ -2422,18 +2692,86 @@ private:
         std::vector<std::vector<std::pair<double,double>>> base_occ(
             members.size());
         std::vector<char> occ_built(members.size(), 0);
-        auto base_of = [&](size_t k)
+        // Span index (C1): with enough members the layer scan per member is
+        // replaced by an interval query, built lazily on first use.  The
+        // hits come back in ascending layer order -- the order the scan
+        // produced them in -- and are filtered by occupancy_from itself, so
+        // the occupancy is the same list.  Few members cannot repay the
+        // build; they keep the scan (both are exact, the cut is only cost).
+        SpanIndex sidx;
+        bool sidx_built = false;
+        std::vector<int> hits;
+        const bool use_idx = members.size() >= 8 && !span_index_off();
+        std::vector<std::pair<double,double>> cache_tmp;
+        std::vector<char> base_sorted(members.size(), 0);
+        auto base_of_unsorted = [&](size_t k)
                 -> const std::vector<std::pair<double,double>>& {
+            if (!occ_built[k] && base_cache_ && use_idx && !repack_cache_off()) {
+                TrackSegment* m = members[k];
+                auto it = base_cache_->m.find(m);
+                if (it == base_cache_->m.end()) {
+                    ++base_cache_->builds;
+                    RepackBaseCache::Entry& e = base_cache_->m[m];
+                    cache_tmp.clear();
+                    add_keepout_occ(m, cache_tmp);
+                    for (const auto& iv : cache_tmp) e.all.push_back({iv, nullptr});
+                    auto take = [&](const TrackSegment* o) {
+                        cache_tmp.clear();
+                        occupancy_from(*m, *o, cache_tmp);
+                        if (!cache_tmp.empty()) e.all.push_back({cache_tmp[0], o});
+                    };
+                    if (use_idx) {
+                        if (!sidx_built) { sidx.build(segs); sidx_built = true; }
+                        sidx.query_unordered(sp_lo(*m), sp_hi(*m), hits);
+                        for (int i : hits) take(segs[i]);
+                    } else {
+                        for (const TrackSegment* o : segs) take(o);
+                    }
+                    std::sort(e.all.begin(), e.all.end(),
+                              [](const auto& a, const auto& b) { return a.first < b.first; });
+                    it = base_cache_->m.find(m);
+                } else {
+                    ++base_cache_->reuses;
+                }
+                const RepackBaseCache::Entry& e = it->second;
+                base_occ[k].clear();
+                base_occ[k].reserve(e.all.size());
+                for (const auto& [iv, o] : e.all)
+                    if (!o || !is_member(o)) base_occ[k].push_back(iv);
+                base_sorted[k] = 1;   // filtering a sorted list keeps it sorted
+                occ_built[k] = 1;
+            }
             if (!occ_built[k]) {
                 TrackSegment* m = members[k];
                 add_keepout_occ(m, base_occ[k]);
-                for (const TrackSegment* o : segs) {
-                    if (member_set.count(o)) continue;
-                    occupancy_from(*m, *o, base_occ[k]);
+                if (use_idx) {
+                    if (!sidx_built) { sidx.build(segs); sidx_built = true; }
+                    sidx.query_unordered(sp_lo(*m), sp_hi(*m), hits);
+                    for (int i : hits) {
+                        const TrackSegment* o = segs[i];
+                        if (is_member(o)) continue;
+                        occupancy_from(*m, *o, base_occ[k]);
+                    }
+                } else {
+                    for (const TrackSegment* o : segs) {
+                        if (is_member(o)) continue;
+                        occupancy_from(*m, *o, base_occ[k]);
+                    }
                 }
                 occ_built[k] = 1;
             }
             return base_occ[k];
+        };
+        // The base list sorted, once per member per call: both packs read it
+        // and the merge below needs it ordered.
+        auto base_of = [&](size_t k)
+                -> const std::vector<std::pair<double,double>>& {
+            const auto& b = base_of_unsorted(k);
+            if (!base_sorted[k]) {
+                std::sort(base_occ[k].begin(), base_occ[k].end());
+                base_sorted[k] = 1;
+            }
+            return b;
         };
 
         // Pack the members in deadline order.  In pull-aware mode each member
@@ -2459,7 +2797,11 @@ private:
                 // Keepouts + placed segments outside the repack set that
                 // overlap m's span (same-bundle never conflicts): the cached
                 // base occupancy from above.
-                std::vector<std::pair<double,double>> occ = base_of(k);
+                // sorted(base + repacked) == merge(sorted base, sorted extra):
+                // equal elements are equal pairs, so the sequence is the same
+                // as the sort of the concatenation, without re-sorting the base.
+                const std::vector<std::pair<double,double>>& base = base_of(k);
+                std::vector<std::pair<double,double>> extra;
                 for (const auto& [pm, ppos] : repacked) {
                     if (pm->bundle_id == m->bundle_id) continue;
                     // Members conflict only where their spans overlap — same
@@ -2471,9 +2813,19 @@ private:
                     if (!(sp_lo(*pm) <= sp_hi(*m) && sp_lo(*m) <= sp_hi(*pm)))  // closed: touch = occupied
                         continue;
                     const double h = pm->width / 2.0;
-                    occ.push_back({ppos - h, ppos + h});
+                    extra.push_back({ppos - h, ppos + h});
                 }
-                std::sort(occ.begin(), occ.end());
+                std::vector<std::pair<double,double>> merged_occ;
+                const std::vector<std::pair<double,double>>* occp = &base;
+                if (!extra.empty()) {
+                    std::sort(extra.begin(), extra.end());
+                    merged_occ.reserve(base.size() + extra.size());
+                    std::merge(base.begin(), base.end(),
+                               extra.begin(), extra.end(),
+                               std::back_inserter(merged_occ));
+                    occp = &merged_occ;
+                }
+                const std::vector<std::pair<double,double>>& occ = *occp;
                 double p;
                 if (pull_aware) {
                     auto pit = pull_map.find({m->bundle_id, m->seg_idx});
@@ -2848,13 +3200,106 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
 // when the GLOBAL overlap count strictly drops without new interval
 // violations, else restored.  Returns the number of member segments of the
 // accepted repacks (for the caller's summary line).
+namespace {
+struct RepackAtomics {
+    std::atomic<long long> clusters{0}, precheck_skipped{0};
+    std::atomic<long long> attempts[2]{{0},{0}}, noop[2]{{0},{0}},
+        rejected[2]{{0},{0}}, accepted[2]{{0},{0}}, members_sum[2]{{0},{0}};
+    std::atomic<long long> layer_segs_sum{0};
+    std::atomic<long long> cache_builds{0}, cache_reuses{0}, wide_skipped{0};
+    std::atomic<long long> ns_ctor{0}, ns_solve_k[2]{{0},{0}};
+    std::atomic<long long> ns_prep{0}, ns_snap{0}, ns_solve{0}, ns_settle{0},
+        ns_guard{0}, ns_restore{0}, ns_total{0};
+};
+RepackAtomics g_repack;
+inline long long ns_since(std::chrono::steady_clock::time_point t0) {
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now() - t0).count();
+}
+} // namespace
+
+std::vector<int> span_index_hits(
+    const std::vector<std::tuple<double, double, bool>>& spans,
+    double a, double b)
+{
+    std::vector<TrackSegment> store(spans.size());
+    std::vector<TrackSegment*> ptrs;
+    for (size_t i = 0; i < spans.size(); ++i) {
+        store[i].span_lo = std::get<0>(spans[i]);
+        store[i].span_hi = std::get<1>(spans[i]);
+        store[i].placed  = std::get<2>(spans[i]);
+        ptrs.push_back(&store[i]);
+    }
+    SpanIndex idx;
+    idx.build(ptrs);
+    std::vector<int> out;
+    idx.query(a, b, out);
+    return out;
+}
+
+RepackStats repack_stats_snapshot() {
+    RepackStats r;
+    r.clusters = g_repack.clusters; r.precheck_skipped = g_repack.precheck_skipped;
+    for (int k = 0; k < 2; ++k) {
+        r.attempts[k] = g_repack.attempts[k]; r.noop[k] = g_repack.noop[k];
+        r.rejected[k] = g_repack.rejected[k]; r.accepted[k] = g_repack.accepted[k];
+        r.members_sum[k] = g_repack.members_sum[k];
+    }
+    r.layer_segs_sum = g_repack.layer_segs_sum;
+    r.cache_builds = g_repack.cache_builds; r.cache_reuses = g_repack.cache_reuses;
+    r.wide_skipped = g_repack.wide_skipped;
+    r.ns_prep = g_repack.ns_prep; r.ns_snap = g_repack.ns_snap;
+    r.ns_solve = g_repack.ns_solve; r.ns_settle = g_repack.ns_settle;
+    r.ns_guard = g_repack.ns_guard; r.ns_restore = g_repack.ns_restore;
+    r.ns_total = g_repack.ns_total;
+    r.ns_ctor = g_repack.ns_ctor;
+    for (int k = 0; k < 2; ++k) r.ns_solve_k[k] = g_repack.ns_solve_k[k];
+    return r;
+}
+void repack_stats_reset() {
+    g_repack.clusters = 0; g_repack.precheck_skipped = 0;
+    for (int k = 0; k < 2; ++k) {
+        g_repack.attempts[k] = 0; g_repack.noop[k] = 0; g_repack.rejected[k] = 0;
+        g_repack.accepted[k] = 0; g_repack.members_sum[k] = 0;
+    }
+    g_repack.layer_segs_sum = 0;
+    g_repack.cache_builds = 0; g_repack.cache_reuses = 0; g_repack.wide_skipped = 0;
+    g_repack.ns_prep = 0; g_repack.ns_snap = 0; g_repack.ns_solve = 0;
+    g_repack.ns_settle = 0; g_repack.ns_guard = 0; g_repack.ns_restore = 0;
+    g_repack.ns_total = 0; g_repack.ns_ctor = 0;
+    for (int k = 0; k < 2; ++k) g_repack.ns_solve_k[k] = 0;
+}
+
+// Wide-attempt skip (#972): after a NO-OP narrow attempt -- the cluster's own
+// members found no better seat with every neighbour held still -- the wide
+// attempt, which moves the neighbours too, was accepted 16 times in 3391 at
+// NQ=32 (0.5 %), and its cost is proportional to its member count (the
+// 747k member packs of that run are 97-99 % rejected).  A wide set of this many
+// members or more is skipped after a no-op narrow attempt.  256 is the knee
+// of the measurement, not a derived constant: skipping at every size (1) was
+// a QoR loss on the corpus (chip_topdown, chip3_topdown) and at NQ=32
+// (+39 overlaps, +4 % abstract WL), while 256 left the corpus and NQ=8/16/32
+// byte-identical.  `BUDA_REPACK_WIDE_SKIP_NOOP=<N>` sets it, 0 disables.
+static size_t wide_skip_noop_min() {
+    static const size_t v = [] {
+        const char* e = std::getenv("BUDA_REPACK_WIDE_SKIP_NOOP");
+        return (e && *e) ? (size_t)std::strtoul(e, nullptr, 10) : (size_t)256;
+    }();
+    return v;
+}
+size_t repack_wide_skip_min() { return wide_skip_noop_min(); }
+
 static int repack_overlap_clusters(const NUTSEngine& eng, double track_pitch,
                                    std::vector<TrackSegment>& segments,
                                    NutsContext& ctx,
-                                   const std::map<int, LayerConstraints>* seed_cons)
+                                   const std::map<int, LayerConstraints>* seed_cons,
+                                   const std::vector<KeepoutZone>& kozs_shared)
 {
+    // kozs_shared: the caller's (repair_overlaps') solver keepout list, handed
+    // to every attempt's LayerSolver instead of rebuilt per attempt.
+    const auto t_fn0 = std::chrono::steady_clock::now();   // whole call, discovery included
     auto pairs = find_overlaps(segments);
-    if (pairs.empty()) return 0;
+    if (pairs.empty()) { g_repack.ns_total += ns_since(t_fn0); return 0; }
 
     // Connected components over segment indices (union-find).
     std::vector<int> parent(segments.size());
@@ -2899,8 +3344,11 @@ static int repack_overlap_clusters(const NUTSEngine& eng, double track_pitch,
         segs_of_layer[ts.layer].push_back(&ts);
 
     int moved = 0;
+    RepackBaseCache base_cache;   // cleared whenever an attempt is accepted
     for (const auto& cluster : clusters) {
         const int layer = segments[cluster[0]].layer;
+        const auto t_prep0 = std::chrono::steady_clock::now();
+        ++g_repack.clusters;
 
         // Spread-fit precheck: the members' union window must be able to host
         // every member stacked (Σwidth + inter-bus pitch).  A conservative
@@ -2913,8 +3361,11 @@ static int repack_overlap_clusters(const NUTSEngine& eng, double track_pitch,
             hi = std::max(hi, segments[i].interval_hi);
             sumw += segments[i].width;
         }
-        if (sumw + (double)(cluster.size() - 1) * track_pitch > hi - lo)
+        if (sumw + (double)(cluster.size() - 1) * track_pitch > hi - lo) {
+            ++g_repack.precheck_skipped;
+            g_repack.ns_prep += ns_since(t_prep0);
             continue;   // over-capacity: not a packing problem
+        }
 
         std::vector<TrackSegment*>& layer_segs = segs_of_layer[layer];
 
@@ -2927,14 +3378,17 @@ static int repack_overlap_clusters(const NUTSEngine& eng, double track_pitch,
         //            windows may be full GIVEN the neighbours' positions, so
         //            the neighbours must move with them).
         std::vector<TrackSegment*> narrow;
-        std::set<const TrackSegment*> in_members;
+        std::vector<const TrackSegment*> in_members;
         for (int i : cluster) {
             narrow.push_back(&segments[i]);
-            in_members.insert(&segments[i]);
+            in_members.push_back(&segments[i]);
         }
+        std::sort(in_members.begin(), in_members.end());
         std::vector<TrackSegment*> wide = narrow;
         for (TrackSegment* o : layer_segs) {
-            if (!o->placed || in_members.count(o)) continue;
+            if (!o->placed ||
+                std::binary_search(in_members.begin(), in_members.end(),
+                                   (const TrackSegment*)o)) continue;
             if (o->interval_lo < hi && lo < o->interval_hi)
                 wide.push_back(o);
         }
@@ -2962,14 +3416,42 @@ static int repack_overlap_clusters(const NUTSEngine& eng, double track_pitch,
             if (cit != seed_cons->end()) cons = &cit->second;
         }
 
+        g_repack.layer_segs_sum += (long long)layer_segs.size();
+        g_repack.ns_prep += ns_since(t_prep0);
+        int attempt_k = -1;
+        bool narrow_noop = false;
         for (const auto& members : {narrow, wide}) {
+            ++attempt_k;
+            if (attempt_k == 1 && narrow_noop && wide_skip_noop_min() > 0 &&
+                wide.size() >= wide_skip_noop_min()) {
+                ++g_repack.wide_skipped;     // study knob: see wide_skip_noop()
+                continue;
+            }
+            ++g_repack.attempts[attempt_k];
+            g_repack.members_sum[attempt_k] += (long long)members.size();
+            auto t_a = std::chrono::steady_clock::now();
             const size_t ic_before = in_cluster_ov();
             const int    vi_before = count_violations(segments);
+            g_repack.ns_guard += ns_since(t_a);
+            t_a = std::chrono::steady_clock::now();
             PlacementSnapshot snap;
             snap.take(segments);
-            LayerSolver solver(eng, layer_segs, ctx, *cons);
-            if (!solver.repack_cluster(members))
+            g_repack.ns_snap += ns_since(t_a);
+            t_a = std::chrono::steady_clock::now();
+            LayerSolver solver(eng, layer_segs, ctx, *cons, &kozs_shared);
+            solver.set_base_cache(&base_cache);
+            g_repack.ns_ctor += ns_since(t_a);
+            const auto t_b = std::chrono::steady_clock::now();
+            const bool did_move = solver.repack_cluster(members);
+            const long long pack_ns = ns_since(t_b);   // pack only: ctor is ns_ctor
+            g_repack.ns_solve += pack_ns;
+            g_repack.ns_solve_k[attempt_k] += pack_ns;
+            if (!did_move) {
+                ++g_repack.noop[attempt_k];
+                if (attempt_k == 0) narrow_noop = true;
                 continue;                   // nothing would move: state untouched
+            }
+            t_a = std::chrono::steady_clock::now();
             // Scoped settle over the repack's member set (a SUPERSET of the
             // actually-moved segments is exact: an unmoved member's
             // followers recompute idempotently).
@@ -2978,6 +3460,8 @@ static int repack_overlap_clusters(const NUTSEngine& eng, double track_pitch,
                                                        members.end());
                 settle_spans_scoped(ctx, moved);
             }
+            g_repack.ns_settle += ns_since(t_a);
+            t_a = std::chrono::steady_clock::now();
             // Accept when the cluster itself strictly improves and the world
             // does not get worse — a committed repack may trade an in-cluster
             // overlap for collateral elsewhere (follower spans stretch), which
@@ -2988,12 +3472,19 @@ static int repack_overlap_clusters(const NUTSEngine& eng, double track_pitch,
             // overlap_delta_vs cancels every pair both of whose endpoints
             // are unchanged), replacing the two full find_overlaps sweeps
             // this guard cost per attempt — the corner-pass hotspot.
-            if (overlap_delta_vs(segments, snap) > 0 ||
+            const bool reject = overlap_delta_vs(segments, snap) > 0 ||
                 in_cluster_ov() >= ic_before ||
-                count_violations(segments) > vi_before) {
+                count_violations(segments) > vi_before;
+            g_repack.ns_guard += ns_since(t_a);
+            if (reject) {
+                t_a = std::chrono::steady_clock::now();
                 snap.restore(segments);     // repack made things no better
+                g_repack.ns_restore += ns_since(t_a);
+                ++g_repack.rejected[attempt_k];
                 continue;
             }
+            ++g_repack.accepted[attempt_k];
+            base_cache.clear();   // positions and follower spans moved
             moved += (int)members.size();
             std::cout << "[NUTS] cluster repack: separated a "
                       << cluster.size() << "-segment overlap cluster on layer "
@@ -3001,6 +3492,8 @@ static int repack_overlap_clusters(const NUTSEngine& eng, double track_pitch,
             break;                          // this cluster is done
         }
     }
+    g_repack.cache_builds += base_cache.builds; g_repack.cache_reuses += base_cache.reuses;
+    g_repack.ns_total += ns_since(t_fn0);
     return moved;
 }
 
@@ -3321,6 +3814,7 @@ static void derive_unseatable_trunks(
         const int sel = bw.plan.selected_topology_index;
         if (sel < 0 || sel >= (int)bw.input.candidates.size()) continue;
         const Topology& topo = bw.input.candidates[sel];
+        FixScope fix_scope_(topo);
         const int bid = bw.input.original_bundle.id;
         ConnTopology ct;
         ct.build(topo, floorplan);
@@ -3362,6 +3856,7 @@ static void derive_junction_infeasibilities(
         const int sel = bw.plan.selected_topology_index;
         if (sel < 0 || sel >= (int)bw.input.candidates.size()) continue;
         const Topology& topo = bw.input.candidates[sel];
+        FixScope fix_scope_(topo);
         const int bid = bw.input.original_bundle.id;
         for (const auto& [key, partners] : topo.seg_conns) {
             const int a_si = key.first;

@@ -1,0 +1,87 @@
+# ============================================================
+# flow/mockpdk/mock.pdk -- the mock PDK's AREA MODEL: what a block costs
+# in area before anyone has designed it, so a hierarchical floorplan can
+# be sized from a netlist alone (`auto_floorplan pdk flow/mockpdk/mock.pdk`).
+#
+# One fact per line, `key value...`; `#` starts a comment.  Read by the
+# engine (`src/hier_floorplan.py`, `parse_pdk`) and by nothing else, so a
+# Tcl vehicle never has to parse it: the sizes it implies come back from
+# the engine's own report.
+#
+# UNITS: one layout unit is one micron, nominally (`unit_um`); the stack
+# beside it (`stack.buda`) prices one bit of a TOP-layer bus at `bit_pitch`
+# units of block face.  Every number below is a MOCK -- a plausible 28 nm
+# -class figure chosen so that a 32-bit datapath leaf comes out face-bound
+# (the routing interface sizes it, as `tpu_lib.tcl` measured) while a cache
+# comes out AREA-bound (the SRAM bits do), which is the split a real SoC
+# has and the reason the area model exists at all: without it every block
+# is the size of its pins and a megabyte of L2 is a 200-unit square.
+#
+#   unit_um          layout units per micron
+#   bit_pitch        TOP-layer face units per bus bit (the stack's M5 slot
+#                    channel: 32-unit period / 8 SIGNAL slots)
+#   stdcell_area     um^2 per gate equivalent (a NAND2) at the mock node
+#   util             target standard-cell utilisation inside a logic block
+#   sram_bit_area    um^2 per SRAM bit, array only
+#   sram_periph      array-to-macro multiplier (decoders, sense amps, I/O)
+#   pad              face slack added to every face-derived dimension
+#   facepad          the floor the LIGHT face keeps whatever its bundles ask (2 x pad when unstated)
+#   reticle_w/h      the reticle limit in microns -- the largest die the
+#                    mock lithography prints in one field (a 26 x 33 mm
+#                    field, the industry's), the ceiling a die's size is
+#                    measured against (`bigsoc.tcl -reticle`)
+#
+# LEAF RULES, first glob that matches a cell's name wins (`*` last):
+#
+#   leaf <glob> logic gates_per_bit G [gates_fixed G0] [aspect A]
+#        area = (G0 + G * B) * stdcell_area / util, B = the bits on the
+#        cell's PINS (every port, summed) -- a datapath cell's logic grows
+#        with the width of what it processes
+#   leaf <glob> sram bits N [aspect A]
+#        area = N * sram_bit_area * sram_periph -- a memory macro's size is
+#        a property of the compiler, not of its ports
+#   leaf <glob> macro w W h H
+#        a hard macro of a stated size (an IP block, a PLL, a PHY)
+#
+# A leaf's FACE still floors every dimension: the bits that land on it at
+# `bit_pitch` plus `pad`, spread over its four faces heaviest-first (the
+# `soc_lib.tcl` FACES rule), so the area model can only make a block
+# bigger than its pins need, never smaller.
+# ============================================================
+unit_um        1.0
+bit_pitch      4.0
+stdcell_area   0.8
+util           0.65
+sram_bit_area  0.12
+sram_periph    1.5
+pad            24
+facepad        48      # = 2 x pad: what a face no bus lands on keeps (a pad at each end)
+reticle_w      26000
+reticle_h      33000
+
+# memories: a bank is 32 KB (2^18 bits), a tag array an eighth of one
+leaf l0bank_*  sram  bits 16384
+leaf bank_*    sram  bits 262144
+leaf sram_*    sram  bits 262144
+leaf l2bank_*  sram  bits 524288
+leaf l3bank_*  sram  bits 1048576
+leaf tag_*     sram  bits 32768
+leaf wbuf_*    sram  bits 8192
+leaf fifo_*    sram  bits 4096
+# datapath and control logic, gates proportional to the bits they handle
+leaf mul_*     logic gates_per_bit 160 gates_fixed 400
+leaf alu_*     logic gates_per_bit  60 gates_fixed 300
+leaf regf_*    logic gates_per_bit  90 gates_fixed 200
+leaf dec_*     logic gates_per_bit  40 gates_fixed 600
+leaf pe_*      logic gates_per_bit  70 gates_fixed 120
+leaf acc_*     logic gates_per_bit  30 gates_fixed  80
+leaf feed_*    logic gates_per_bit  12 gates_fixed  60
+leaf xbar_*    logic gates_per_bit  25 gates_fixed 300
+leaf memctl_*  logic gates_per_bit  35 gates_fixed 2500
+leaf l2ctl_*   logic gates_per_bit  30 gates_fixed 2000
+leaf l3ctl_*   logic gates_per_bit  30 gates_fixed 3000
+leaf dma_*     logic gates_per_bit  20 gates_fixed 1500
+leaf bridge_*  logic gates_per_bit  20 gates_fixed 800
+leaf io_*      logic gates_per_bit  15 gates_fixed 200
+leaf phy_*     macro w 180 h 120
+leaf *         logic gates_per_bit  30 gates_fixed 200

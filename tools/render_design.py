@@ -80,6 +80,7 @@ for _p in (os.path.join(_ROOT, "src"), os.path.join(_ROOT, "build")):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
+import buda                                           # noqa: E402
 import buda_cli                                       # noqa: E402
 try:
     from viz_common import _LAYER_COLOR as LAYER_COLOR  # the viewer's palette
@@ -248,6 +249,48 @@ def draw_blocks_faint(ax, cs):
                                    fc="none", ec="#999", lw=0.8, ls=":", zorder=1))
 
 
+def fix_strip_sets(fp, bundles):
+    """Every distinct (block, strips) a fixed block exposes: the floorplan's own
+    fixes, then — per bundle, under its own effective map — the ones a per-pin
+    selector gives it.  Drawn once each."""
+    import buda
+    seen = set()
+    scopes = [None]
+    for w in bundles or ():
+        try:
+            cands = w.input.candidates
+            t = cands[w.plan.selected_topology_index if len(cands) > w.plan.selected_topology_index >= 0 else 0]
+        except Exception:
+            continue
+        if t.has_block_fixes:
+            scopes.append(t)
+    for t in scopes:
+        with buda.BlockFixScope(t):
+            for name, _r in fp.get_all_blocks():
+                if not fp.has_pin_fix(name):
+                    continue
+                strips = tuple(fp.pin_fix_strips(name))
+                if (name, strips) not in seen:
+                    seen.add((name, strips))
+                    yield name, strips
+
+
+def draw_pin_fixes(ax, s):
+    """Fixed-pin landings (`fix_pin`): each admissible strip is a thick green line
+    along the ONE face a wire may end on.  A design with no fix draws nothing."""
+    n = 0
+    fp = s.fp
+    for name, strips in fix_strip_sets(fp, getattr(s, "bundles", None)):
+        for (x1, y1, x2, y2, face) in strips:
+            if face == 4:     xs, ys = [x2, x2], [y1, y2]
+            elif face == 8:   xs, ys = [x1, x1], [y1, y2]
+            elif face == 1:   xs, ys = [x1, x2], [y2, y2]
+            else:             xs, ys = [x1, x2], [y1, y1]
+            ax.plot(xs, ys, color="#1a9850", lw=4, solid_capstyle="butt", zorder=6)
+            n += 1
+    return n
+
+
 def draw_keepouts(ax, s):
     """Declared keepout zones, hatched in the colour of the layer they block
     (a zone on several layers takes the first), under the wires: the
@@ -266,14 +309,27 @@ def draw_keepouts(ax, s):
     return n
 
 
-def _layer_legend(ax, names, used):
+def _layer_legend(ax, names, used, extra=()):
     hs = [Line2D([0], [0], color=LAYER_COLOR.get(l, "#000"), lw=3,
                  label=f"{names.get(l, 'L%d' % l)} ({'H' if h else 'V'})")
           for l, h in sorted(used.items())]
-    _side_legend(ax, hs, "layer")
+    _side_legend(ax, hs + list(extra), "layer")
 
 
-def draw_nuts(ax, s, names):
+# The overlap highlight: colours no routing layer in the viewer's palette
+# uses (LAYER_COLOR runs grey/orange/blue/red/green/purple).
+OVL_LINE = "#000000"
+OVL_FILL = "#ffd400"
+
+
+def draw_nuts(ax, s, names, highlight_overlaps=True):
+    """One line per placed bus segment in its layer's colour; the segments
+    of every OVERLAPPING pair (the engine's own `overlap_details`, the
+    pairs `num_overlaps` counts) drawn again on top in BLACK, their overlap
+    rectangle filled YELLOW — two colours no layer in the palette uses (M5
+    is red, so a red highlight read as more M5 on the first picture) — so
+    the dirt of an abstract route is where the eye goes first.  Returns the
+    number of overlap pairs drawn."""
     used = {}
     for g in s.nuts_result.segments:
         if getattr(g, "placed", True) is False:
@@ -286,7 +342,53 @@ def draw_nuts(ax, s, names):
         else:
             ax.plot([g.track_position] * 2, [g.span_lo, g.span_hi], color=c,
                     lw=1.1, alpha=0.85, zorder=5, solid_capstyle="butt")
-    _layer_legend(ax, names, used)
+    n_ovl = 0
+    if highlight_overlaps:
+        # A result RESTORED from a checkpoint (load_pipeline) carries the
+        # placement and no audit of it: recount with the solver's own
+        # predicate before drawing, so a checkpoint's picture shows the
+        # same overlaps the run reported.
+        if (not getattr(s.nuts_result, "overlap_details", None)
+                and getattr(s.nuts_result, "num_overlaps", 0) == 0
+                and hasattr(buda, "compute_nuts_metrics")):
+            buda.compute_nuts_metrics(s.nuts_result)
+        segs = {(g.bundle_id, g.seg_idx): g for g in s.nuts_result.segments}
+        from matplotlib.patches import Rectangle
+        for d in getattr(s.nuts_result, "overlap_details", []):
+            n_ovl += 1
+            for key in ((d.bid_a, d.seg_a), (d.bid_b, d.seg_b)):
+                g = segs.get(key)
+                if g is None:
+                    continue
+                if g.horiz:
+                    ax.plot([g.span_lo, g.span_hi], [g.track_position] * 2,
+                            color=OVL_LINE, lw=2.2, alpha=0.95, zorder=8,
+                            solid_capstyle="butt")
+                else:
+                    ax.plot([g.track_position] * 2, [g.span_lo, g.span_hi],
+                            color=OVL_LINE, lw=2.2, alpha=0.95, zorder=8,
+                            solid_capstyle="butt")
+            # the overlap rectangle itself: routing direction x perpendicular
+            ga = segs.get((d.bid_a, d.seg_a))
+            horiz = ga.horiz if ga is not None else True
+            if horiz:
+                x0, y0 = d.span_lo, d.perp_lo
+                w, h = d.span_hi - d.span_lo, d.perp_hi - d.perp_lo
+            else:
+                x0, y0 = d.perp_lo, d.span_lo
+                w, h = d.perp_hi - d.perp_lo, d.span_hi - d.span_lo
+            pad = 6.0
+            ax.add_patch(Rectangle((x0 - pad, y0 - pad), w + 2 * pad, h + 2 * pad,
+                                   facecolor=OVL_FILL, edgecolor=OVL_LINE,
+                                   alpha=0.9, lw=0.8, zorder=9))
+    extra = []
+    if n_ovl:
+        extra.append(Line2D([0], [0], color=OVL_LINE, lw=2.2,
+                            label=f"overlapping segments ({n_ovl} pair(s))"))
+        extra.append(Patch(facecolor=OVL_FILL, edgecolor=OVL_LINE,
+                           label="their overlap"))
+    _layer_legend(ax, names, used, extra)
+    return n_ovl
 
 
 def draw_dnuts(ax, s, names, signal, shields):
@@ -349,9 +451,16 @@ def render(flow, prefix, title=None, dpi=150, label_depth=1):
         # sharing a track are one wire, and an unplaced segment is no wire.
         _, _, awl, abs_unplaced = s._wirelength_by_bundle(s.nuts_result.segments)
         awl = round(awl)
-        fig, ax = _new_fig(bounds, die, f"{title} — NUTS: abstract bus tracks ({n_bund} bundles)")
+        if (not getattr(s.nuts_result, "overlap_details", None)
+                and s.nuts_result.num_overlaps == 0
+                and hasattr(buda, "compute_nuts_metrics")):
+            buda.compute_nuts_metrics(s.nuts_result)   # a restored result: recount
+        n_ovl = s.nuts_result.num_overlaps
+        fig, ax = _new_fig(bounds, die, f"{title} — NUTS: abstract bus tracks "
+                                        f"({n_bund} bundles, {n_ovl} overlap(s))")
         draw_blocks_faint(ax, cs)
         n_keep = draw_keepouts(ax, s)
+        draw_pin_fixes(ax, s)
         draw_nuts(ax, s, names)
         fig.savefig(prefix + "_nuts.png", dpi=dpi, bbox_inches="tight")
         plt.close(fig)
@@ -374,6 +483,7 @@ def render(flow, prefix, title=None, dpi=150, label_depth=1):
         fig, ax = _new_fig(bounds, die, f"{title} — DetailedNUTS: per-bit wires ({n_bits} bit-wires)")
         draw_blocks_faint(ax, cs)
         draw_keepouts(ax, s)
+        draw_pin_fixes(ax, s)
         draw_dnuts(ax, s, names, signal, shields)
         fig.savefig(prefix + "_dnuts.png", dpi=dpi, bbox_inches="tight")
         plt.close(fig)

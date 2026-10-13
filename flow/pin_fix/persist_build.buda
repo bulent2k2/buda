@@ -1,0 +1,37 @@
+# fix_pin PR 1d — persistence, part 1: declare fixes against a FILE-backed BDB.
+#
+# The fixes (block-level and per-pin) are written to the BDB as they are typed
+# (meta row `pin_fixes`).  Run this first, then persist_resume.buda, which
+# declares NO fix and still lands every bus on the face chosen here.
+#
+# Run:   bin/buda --no-viz flow/pin_fix/persist_build.buda
+#        bin/buda --no-viz flow/pin_fix/persist_resume.buda
+# Expect: the resume flow prints '[PinFix] restored 3 persisted fix
+#         declaration(s)' and the same faces/audit as pins.buda.
+
+open_bdb pf_ckpt.bdb
+bdb_net_mode on
+
+add_block SRC 0   400 100 600
+add_block MAC 400 400 600 600
+
+def_layer 4 M4 H TOP 0
+def_layer 5 M5 V TOP 0
+def_track_pattern 4 0 (SIGNAL 2 2)x60
+def_track_pattern 5 0 (SIGNAL 2 2)x60
+
+fix_pin MAC.lo_in west
+fix_pin MAC.hi_in north
+fix_pin MAC.cfg*  south
+
+add_bus lo[4]  SRC.o MAC.lo_in
+add_bus hi[4]  SRC.o MAC.hi_in
+add_bus mid[4] SRC.o MAC.cfg_a
+
+run_bundler STRICT
+generate_topologies
+run_planner
+run_nuts
+check_design
+run_detailed_nuts
+check_design

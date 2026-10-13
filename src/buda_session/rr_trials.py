@@ -97,6 +97,8 @@ class RRTrialsMixin:
                     segs = buda.make_bus_segments(
                         self.bundles, warm, self.fp,
                         self._detailed_bit_order, self.layers)
+                    from buda_cmds import pin_fix_cmds
+                    pin_fix_cmds.apply_orders(self, segs)
                     deng = buda.DetailedNUTSEngine(self.routing_grid)
                     dres = deng.run(segs, emit_vias=False,
                                     abort_unplaced=self._rr_m_primary(cur))
@@ -137,6 +139,8 @@ class RRTrialsMixin:
                 segs = buda.make_bus_segments(self.bundles, warm, self.fp,
                                               self._detailed_bit_order,
                                               self.layers)
+                from buda_cmds import pin_fix_cmds
+                pin_fix_cmds.apply_orders(self, segs)
                 deng = buda.DetailedNUTSEngine(self.routing_grid)
                 dres = deng.run(segs, emit_vias=False)
                 warm_m = (self._dn_opens(dres), warm.num_overlaps)

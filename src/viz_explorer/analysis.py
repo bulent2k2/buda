@@ -283,6 +283,11 @@ class ExplorerAnalysisMixin:
 
 
     def _seg_passthru_names(self, cs, tapped):
+        import buda
+        with buda.BlockFixScope(self._shown_topo()):
+            return self._seg_passthru_names_impl(cs, tapped)
+
+    def _seg_passthru_names_impl(self, cs, tapped):
         """Split the blocks `cs` geometrically crosses (solid rects — each real
         rect of a multi-rect block, the union bbox otherwise) WITHOUT tapping
         into `(passthru, otc_over)`: `passthru` = the BUNDLE's blocks — the
@@ -304,7 +309,7 @@ class ExplorerAnalysisMixin:
         for name, ubbox in self.fp.get_all_blocks():
             if name in tapped:
                 continue
-            rects = self.fp.get_block_rects(name)   # [] for single-rect blocks
+            rects = self.fp.passthrough_rects(name)   # [] for single-rect blocks
             if rects:
                 hit = any(crosses(x1, y1, x2, y2) for (x1, y1, x2, y2) in rects)
             else:
@@ -398,6 +403,11 @@ class ExplorerAnalysisMixin:
 
 
     def _bundle_hanan_grid(self):
+        import buda
+        with buda.BlockFixScope(self._shown_topo()):
+            return self._bundle_hanan_grid_impl()
+
+    def _bundle_hanan_grid_impl(self):
         """The per-bundle Hanan grid GENERATION actually uses for this bundle
         (TopologyGenerator::generate_npin): edges of the bundle's busterm
         rects — each individual rect of a multi-rect block, the orig bbox
@@ -410,12 +420,12 @@ class ExplorerAnalysisMixin:
             # while get_block_bounds returns a Rect object — the same split
             # _crossed_blocks above handles.  Mixing them in one list crashed
             # the explorer on every multi-rect bundle ('tuple' has no .x1).
-            rects = self.fp.get_block_rects(n)
+            rects = self.fp.landing_rects(n)
             if rects:
                 for (x1, y1, x2, y2) in rects:
                     xs.update((x1, x2)); ys.update((y1, y2))
             else:
-                r = self.fp.get_block_bounds(n)
+                r = self.fp.landing_bounds(n)
                 xs.update((r.x1, r.x2)); ys.update((r.y1, r.y2))
         for koz in self.fp.get_keepout_zones():
             xs.update((koz.bbox.x1, koz.bbox.x2))

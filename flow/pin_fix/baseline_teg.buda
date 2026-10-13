@@ -1,0 +1,29 @@
+# fix_pin PR 1a baseline — a two-rect `teg_mode over` block (an L of
+# disjoint rects) fed from two sides.  Multi-rect landings are the machinery a
+# fix_pin strip set reuses (best_rect, per-rect taps, TEG_OPEN), so this is the
+# multi-rect "before" picture for PR 1b.
+#
+# Run:   bin/buda flow/pin_fix/baseline_teg.buda
+# Expect: each rect gets its own tap; check_design Success at both stages.
+
+add_block T rect 300 0 400 100 rect 0 0 100 100 teg_mode over
+add_block src 600 0 700 100
+add_block up  0 300 100 400
+
+def_layer 4 M4 H TOP 0
+def_layer 5 M5 V TOP 0
+def_track_pattern 4 0 (SIGNAL 2 2)x20
+def_track_pattern 5 0 (SIGNAL 2 2)x20
+
+add_bus d[4] src.tx T.rx
+add_bus u[4] up.tx T.rx
+
+run_bundler STRICT
+generate_topologies
+run_planner
+run_nuts
+check_design
+run_detailed_nuts
+check_design
+report_wl
+visualize

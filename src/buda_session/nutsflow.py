@@ -1179,10 +1179,33 @@ class NutsFlowMixin:
               f"not reservation conflicts.")
         return len(doomed)
 
+    def _dead_span_floor(self) -> float:
+        """The escalation floor in force at the run_nuts entry (#972 B1):
+        the typed `set_dead_span_escalate floor <F>` outranks the study
+        env `BUDA_DEAD_SPAN_FLOOR` (a corpus A/B without editing flows),
+        and the compiled default is 0 -- every iteration applied."""
+        typed = getattr(self, "_dead_span_floor_typed", None)
+        if typed is not None:
+            return float(typed)
+        import os as _os
+        v = _os.environ.get("BUDA_DEAD_SPAN_FLOOR", "")
+        if v:
+            try:
+                f = float(v)
+                if 0.0 <= f <= 1.0:
+                    return f
+            except ValueError:
+                pass
+            print(f"Warning: BUDA_DEAD_SPAN_FLOOR={v!r} is not a fraction "
+                  f"in [0, 1]; ignored.", flush=True)
+        return 0.0
+
     def _escalate_dead_low_segments(self, max_iter: int = 5,
                                     cull_risk: bool = False,
                                     only=None, seek_host: bool = False,
-                                    force: bool = False) -> int:
+                                    force: bool = False,
+                                    floor: float = 0.0,
+                                    floor_from: int = 2) -> int:
         """Post-NUTS dead-span escalation (opt-in: `set_dead_span_escalate on`).
 
         After abstract NUTS, a LOW-layer segment whose ACTUAL placed geometry
@@ -1240,6 +1263,30 @@ class NutsFlowMixin:
         a keepout seat is a CROWDING fault (the window had clear tracks,
         other buses took them), so the dead test does not fire on it, and
         the caller's measured accept is what judges the move.
+
+        `floor` (the run_nuts entry ONLY; `set_dead_span_escalate floor
+        <F>`, #972 B1): every iteration pays a FULL re-solve, and the late
+        ones move a handful of segments for it — on bigsoc at NQ=62 the
+        three iterations moved 330, 23 and 1 segments for ~67 s each.  An
+        iteration moving fewer than `ceil(F x segments)` is NOT applied: the
+        loop ends on the placement it already has, the dead segments it
+        found are reported and left on their layers (a healing flow's
+        stage-b fold escalates them, with the re-solves the healers pay
+        anyway; a healerless flow strands their bits at DNUTS -- the
+        declared trade).  Deferred application is what makes the floor
+        honest: the scan collects the moves and writes them to `seg_layers`
+        only once the iteration has cleared the floor, so a dropped
+        iteration leaves `seg_layers` and `nuts_result` agreeing.  0 = no
+        floor (every iteration applied, byte-identical).  The FIRST
+        iteration is never floored (`floor_from` = 2): its moves are the
+        dead spans of the placement the planner handed over, and escalating
+        them BEFORE the stage-a healers is the measured reason this entry
+        exists (mix 1/16 -> 0/0 against the stage-b fold alone) -- the
+        first corpus run of the floor priced every iteration and `rnr/mix2`
+        (238 segments, floor 3) dropped its one first-iteration move and
+        ended 4/32/2 from clean.  The later iterations are the cascades a
+        re-solve creates, which is what the floor prices.  `floor_from`
+        is a study/test door, not a command option.
         """
         if self.nuts_result is None or self.routing_grid is None:
             return 0
@@ -1274,7 +1321,37 @@ class NutsFlowMixin:
         top_h = _cheapest_top(buda.LayerDir.HORIZONTAL)
         top_v = _cheapest_top(buda.LayerDir.VERTICAL)
 
-        _member_bits = self._seg_member_bits
+        # Per-bundle / per-segment memos for the scan below (#972 follow-up):
+        # `w.input.candidates` returns a COPY of every candidate Topology on
+        # each access, and the scan asked for it once per segment per
+        # iteration (the pool size, then the selected candidate's seg_bits
+        # through _seg_member_bits, then the admission needs); none of those
+        # change inside one escalation call, so they are read once.
+        _ncand = {}
+        def _n_candidates(w):
+            bid = w.input.original_bundle.id
+            n = _ncand.get(bid)
+            if n is None:
+                n = _ncand[bid] = len(w.input.candidates)
+            return n
+        _mb_memo = {}
+        def _member_bits(w, sel, si):
+            k = (w.input.original_bundle.id, sel, si)
+            v = _mb_memo.get(k)
+            if v is None:
+                v = _mb_memo[k] = self._seg_member_bits(w, sel, si)
+            return v
+        _need_memo = {}
+        def _need(w, sel, si, layer, credited=True):
+            k = (w.input.original_bundle.id, sel, si, layer, credited)
+            v = _need_memo.get(k)
+            if v is None:
+                v = _need_memo[k] = (
+                    self._seg_admission_need(w, sel, si, layer=layer)
+                    if credited else
+                    self._seg_admission_need(w, sel, si, credited=False,
+                                             layer=layer))
+            return v
 
         def _hosts(lid, w, sel, seg, b_lo, b_hi):
             # DetailedNUTS admission on a candidate target layer — the same
@@ -1284,10 +1361,8 @@ class NutsFlowMixin:
             if b_lo > b_hi or not self.routing_grid.has_layer(lid):
                 return False
             g2 = self.routing_grid.get_layer_grid(lid)
-            need_l = self._seg_admission_need(w, sel, seg.seg_idx,
-                                              layer=lid)
-            pool_l = self._seg_admission_need(w, sel, seg.seg_idx,
-                                              credited=False, layer=lid)
+            need_l = _need(w, sel, seg.seg_idx, lid)
+            pool_l = _need(w, sel, seg.seg_idx, lid, credited=False)
             if g2.count_signal_tracks_in_span(
                     seg.span_lo, seg.span_hi,
                     seg.interval_lo, seg.interval_hi) >= pool_l:
@@ -1303,9 +1378,25 @@ class NutsFlowMixin:
         # LOW layers across the re-solve iterations.
         tried = {}
 
+        import math as _math
+
         total = 0
-        for _ in range(max_iter):
+        import time as _tm
+        _pp = self.__dict__.setdefault("_prof_esc_parts", {})
+        def _acc(k, t0):
+            _pp[k] = _pp.get(k, 0.0) + (_tm.perf_counter() - t0)
+        for it in range(max_iter):
+            _ts = _tm.perf_counter()
+            # The floor in segments, read off THIS iteration's result: an
+            # iteration must move at least this many for its re-solve to be
+            # paid (0 = every iteration).  Per iteration because a re-solve's
+            # dogleg adoption can change the segment count (Codex P2 on
+            # #981).
+            n_segs = len(self.nuts_result.segments)
+            floor_n = (int(_math.ceil(floor * n_segs))
+                       if floor and floor > 0.0 else 0)
             moved = 0
+            pending = []          # (wrapper, seg_idx, new_layer) this scan
             for seg in self.nuts_result.segments:
                 if only is not None and (seg.bundle_id,
                                          seg.seg_idx) not in only:
@@ -1318,7 +1409,7 @@ class NutsFlowMixin:
                 if w is None or not w.plan.seg_layers:
                     continue
                 sel = w.plan.selected_topology_index
-                if sel < 0 or sel >= len(w.input.candidates):
+                if sel < 0 or sel >= _n_candidates(w):
                     continue
                 g = self.routing_grid.get_layer_grid(seg.layer)
                 # The exact DNUTS admission arithmetic on the PLACED
@@ -1346,11 +1437,8 @@ class NutsFlowMixin:
                 # selects its pool with.  All three coincide on an ungoverned
                 # segment, so every non-NDR flow is byte-identical.
                 bits = _member_bits(w, sel, seg.seg_idx)
-                need = self._seg_admission_need(w, sel, seg.seg_idx,
-                                                layer=seg.layer)
-                need_pool = self._seg_admission_need(w, sel, seg.seg_idx,
-                                                     credited=False,
-                                                     layer=seg.layer)
+                need = _need(w, sel, seg.seg_idx, seg.layer)
+                need_pool = _need(w, sel, seg.seg_idx, seg.layer, credited=False)
                 b_lo = max(seg.interval_lo, seg.track_lo_bound)
                 b_hi = min(seg.interval_hi, seg.track_hi_bound)
                 span_all = g.count_signal_tracks_in_span(
@@ -1493,17 +1581,37 @@ class NutsFlowMixin:
                     continue
                 tried.setdefault((seg.bundle_id, seg.seg_idx),
                                  {seg.layer}).add(new_layer)
-                sl = list(w.plan.seg_layers)
+                sl = w.plan.seg_layers
                 if seg.seg_idx >= len(sl) or sl[seg.seg_idx] == new_layer:
                     continue
-                sl[seg.seg_idx] = new_layer
-                w.plan.seg_layers = sl
+                pending.append((w, seg.seg_idx, new_layer))
                 moved += 1
+            _acc("scan", _ts)
             if not moved:
                 break
+            if floor_n and it + 1 >= floor_from and moved < floor_n:
+                # Below the floor: nothing applied, the loop ends on the
+                # placement it has (see the docstring).  Said out loud, since
+                # every dead segment left is a strand a healerless flow pays.
+                self._prof_esc_dropped = (getattr(self, "_prof_esc_dropped", [])
+                                          + [moved])
+                print(f"[DeadSpan] iteration {it + 1}: {moved} dead LOW "
+                      f"segment(s) found, below the floor of {floor_n} "
+                      f"({floor:g} x {n_segs} "
+                      f"segments) -- left on their layers, re-solve "
+                      f"skipped (set_dead_span_escalate floor 0 applies "
+                      f"every iteration).", flush=True)
+                break
+            for w, si, new_layer in pending:
+                sl = list(w.plan.seg_layers)
+                sl[si] = new_layer
+                w.plan.seg_layers = sl
             total += moved
+            # [NutsProf] bookkeeping: moves per escalation iteration.
+            self._prof_esc_moves = getattr(self, "_prof_esc_moves", []) + [moved]
             # Re-solve with the escalated assignments (mirrors cmd_run_nuts's
             # core, minus persist/log — those run once on the final result).
+            _ts = _tm.perf_counter()
             pitch = self._nuts_pitch if getattr(self, '_nuts_pitch', None) else 1.0
             nuts = buda.NUTSEngine(self.fp, self.layers)
             nuts.set_track_pitch(pitch)
@@ -1513,9 +1621,29 @@ class NutsFlowMixin:
                 nuts.set_extra_grid_points(
                     list(self.planner.get_x_grid()),
                     list(self.planner.get_y_grid()))
+            import time as _time
+            _acc("setup", _ts)
+            _t0 = _time.perf_counter()
             with buda.ostream_redirect():
                 self.nuts_result = nuts.run(self.bundles)
+            # [NutsProf] bookkeeping: how many full re-solves the escalation
+            # paid and their seconds (read by cmd_run_nuts).
+            self._prof_esc_resolves = getattr(self, "_prof_esc_resolves", 0) + 1
+            self._prof_esc_resolve_s = (getattr(self, "_prof_esc_resolve_s", 0.0)
+                                        + (_time.perf_counter() - _t0))
+            _ts = _tm.perf_counter()
             self._adopt_doglegs()
+            _acc("adopt", _ts)
+            # The adoption can APPEND a split candidate (the pool grows and the
+            # selection moves to the new last index, which the memoized pool
+            # size would read as out of range) or OVERWRITE the dogleg slot
+            # with a new split (same index, different segments), so every
+            # memo keyed on the pool is stale past this point: drop them and
+            # let the next iteration re-read, exactly as the un-memoized scan
+            # did (Codex P1 on #977).
+            _ncand.clear()
+            _mb_memo.clear()
+            _need_memo.clear()
         return total
 
     def _final_cull_heal(self, max_rounds: int = 3) -> int:
@@ -2511,6 +2639,8 @@ class NutsFlowMixin:
         self._sync_reserve_corridors()
         bus_segs = buda.make_bus_segments(self.bundles, self.nuts_result,
                                           self.fp, bit_order, self.layers)
+        from buda_cmds import pin_fix_cmds
+        pin_fix_cmds.apply_orders(self, bus_segs)
         self._resolve_shared_cell_ndr(bus_segs)
         if bu_plan is None:
             engine = buda.DetailedNUTSEngine(self.routing_grid)

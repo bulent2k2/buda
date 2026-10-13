@@ -316,6 +316,13 @@ class ReportsMixin:
         return seg_spans_block(cs, name, ubbox, fp if fp is not None else self.fp)
 
     def _dump_conn_detail(self, w, cand_idx, fp=None):
+        import buda
+        cands = w.input.candidates
+        topo = cands[cand_idx] if 0 <= cand_idx < len(cands) else None
+        with buda.BlockFixScope(topo):
+            return self._dump_conn_detail_impl(w, cand_idx, fp)
+
+    def _dump_conn_detail_impl(self, w, cand_idx, fp=None):
         """Print per-segment connectivity for one candidate of bundle `w`:
         (1) what each seg connects to (busterms + other segs), (2) the busterms
         it passes through without tapping, (3) its perpendicular slide range, and
@@ -948,6 +955,9 @@ class ReportsMixin:
                 # fills them): report-only, surfaced after the verdict below.
                 thru_census.extend(getattr(res, "thru_census", ()) or ())
                 violations += self._net_driver_fidelity(w, topo)
+                if stage != "topo":
+                    from buda_cmds import pin_fix_cmds
+                    violations += pin_fix_cmds.audit_pin_fix(self, w, topo)
                 # R9 typed NDR audit (dnuts stage, governed bundles only —
                 # no rules = no calls = byte-identical output): under-width
                 # wires, foreign metal inside a reserved run, missing or
@@ -1096,6 +1106,7 @@ class ReportsMixin:
         "KEEPOUT_CROSS": "wire placed on a keepout",
         "OFF_GRID":     "wire's metal not on its layer's SIGNAL slot(s)",
         "NET_DRIVER_OPEN": "net endpoint block not attached to the topology",
+        "PIN_FIX":      "a wire lands on a fixed pin outside its fixed layer set",
         "BIT_SHORT":    "different nets' metal overlaps on one layer (a short)",
         "ANTENNA":      "dangling metal past its own attachments",
         "TEG_OPEN":     "an OVER block's rect touched by no placed metal "

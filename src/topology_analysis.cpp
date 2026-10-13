@@ -123,6 +123,7 @@ uint64_t topology_fingerprint(const Topology& topo) {
 
 std::shared_ptr<const TopoAnalysis> analyze(const Topology& topo,
                                             const Floorplan& fp) {
+    FixScope fix_scope_(topo);
     const uint64_t tfp = topology_fingerprint(topo);
     if (auto c = topo.analysis_cache_;
         c && c->topo_fp == tfp && c->fp_uid == fp.uid()
@@ -321,8 +322,11 @@ void derive_conn_segs(const Topology& topo, const Floorplan& fp,
 
 void derive_slide_ranges(const Topology& topo, const Floorplan& fp,
                          std::vector<ConnSeg>& segs) {
-    std::map<std::string, Rect> bmap;
-    for (auto& [name, rect] : fp.get_all_blocks()) bmap[name] = rect;
+    // Look blocks up IN the floorplan (issue #972): building a private
+    // string-keyed copy of every block per call was ~90 % of analyze()'s
+    // cost on a 1,600-block design, two copies per candidate, and the
+    // planner analyzes every candidate once per wrapper.  Same lookups,
+    // same values -- byte-identical.
 
     // ── Pass 1 ──
     for (auto& cs : segs) {
@@ -333,12 +337,15 @@ void derive_slide_ranges(const Topology& topo, const Floorplan& fp,
             // name checked against a different floorplan); skip its constraint
             // rather than throwing — mirrors the graceful misses in the other
             // Floorplan accessors (get_block_rects/bounds/corner_margin).
-            auto bm_it = bmap.find(conn.block_name);
-            if (bm_it == bmap.end()) continue;
-            Rect face_rect = bm_it->second;
-            BlockCornerMargin cm = fp.get_block_corner_margin(conn.block_name);
+            if (!fp.has_block(conn.block_name)) continue;
+            Rect face_rect = fp.landing_bounds(conn.block_name);
+            // A fixed pin's window is PHYSICAL and was built un-inset: applying
+            // the block's corner margin again would shrink a declared window.
+            BlockCornerMargin cm = fp.has_pin_fix(conn.block_name)
+                                       ? BlockCornerMargin{}
+                                       : fp.get_block_corner_margin(conn.block_name);
             {
-                const auto rects = fp.get_block_rects(conn.block_name);
+                const auto rects = fp.landing_rects(conn.block_name);
                 // Which rect(s) does this tap land on?  Generation lands taps
                 // on the MARGIN-INSET rect faces (open 9: Busterm rects are
                 // shrunk per rect like the bbox), so match face_coord against
@@ -535,7 +542,7 @@ void tighten_passthrough(const Topology& topo, const Floorplan& fp,
         if (!explicitly_connected.count(bname)) continue;   // no taps: the
         if (over_untapped.count(bname)) continue;           // normal path clamps
         if (fp.get_block_teg_mode(bname) != TegMode::OVER) continue;
-        auto rects = fp.get_block_rects(bname);
+        auto rects = fp.landing_rects(bname);
         if (rects.size() < 2) continue;
         std::vector<Rect> untapped;
         for (const Rect& r : rects) {
@@ -563,8 +570,8 @@ void tighten_passthrough(const Topology& topo, const Floorplan& fp,
     auto rects_of_block = [&](const std::string& bname) {
         auto it = over_untapped.find(bname);
         if (it != over_untapped.end()) return it->second;
-        auto rects = fp.get_block_rects(bname);
-        if (rects.empty()) rects.push_back(fp.get_block_bounds(bname));
+        auto rects = fp.passthrough_rects(bname);
+        if (rects.empty()) rects.push_back(fp.landing_bounds(bname));
         return rects;
     };
 
@@ -638,7 +645,9 @@ void tighten_passthrough(const Topology& topo, const Floorplan& fp,
             }
             if (span_lo > span_hi) continue; // segment doesn't span this block
 
-            BlockCornerMargin cm = fp.get_block_corner_margin(bname);
+            BlockCornerMargin cm = fp.has_pin_fix(bname)
+                                       ? BlockCornerMargin{}
+                                       : fp.get_block_corner_margin(bname);
             int margin = cs.horiz ? cm.dy : cm.dx;
             int lo = span_lo + margin;
             int hi = span_hi - margin;
@@ -713,8 +722,6 @@ void tighten_passthrough(const Topology& topo, const Floorplan& fp,
 void pin_relay_taps(const Topology& topo, const Floorplan& fp,
                     std::vector<ConnSeg>& segs) {
     (void)topo;
-    std::map<std::string, Rect> bmap;
-    for (auto& [name, rect] : fp.get_all_blocks()) bmap[name] = rect;
 
     int n = (int)segs.size();
     for (int i = 0; i < n; ++i) {
@@ -724,9 +731,8 @@ void pin_relay_taps(const Topology& topo, const Floorplan& fp,
             int f = bc.face_coord;
             // The busterm sits at one of cs's along endpoints (see check_topo).
             if (f != cs.along_lo && f != cs.along_hi) continue;
-            auto bm_it = bmap.find(bc.block_name);
-            if (bm_it == bmap.end()) continue;            // block not in this floorplan
-            const Rect& bb = bm_it->second;
+            if (!fp.has_block(bc.block_name)) continue;   // block not in this floorplan
+            const Rect bb = fp.landing_bounds(bc.block_name);
             // OTC window = the cell footprint in the connector's perp direction.
             for (const auto& sc : cs.conns) {
                 if (sc.kind != SegConn::SEG || !sc.is_endpoint) continue;

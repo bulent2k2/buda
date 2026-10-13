@@ -641,3 +641,49 @@ primitive.  `fix_pin` consumes a placement; the ladder's Q2 decision (no
 credible in-house baseline for pin assignment) stands.  A derived pin
 placement from the top's routed result — the `derive_top_plan` idea one level
 down — would be a separate item, and it would emit `fix_pin` lines.
+
+## Status
+
+- **PR 1a (landed in the branch `claude/todo-implementation-80cp5c`)**: the
+  two-geometry split.  `Floorplan::landing_rects` / `landing_bounds` and
+  `obstruction_rects` exist; every C++ and Python site in the census reads
+  the one it asks for, and `test_landing_obstruction_split.py` fails if a
+  landing consumer reads the raw store again or an obstruction consumer reads
+  landing geometry.  No `fix_pin` command yet; the fast tier is unchanged.
+  Vehicles: `flow/pin_fix/baseline_macro.buda`, `baseline_teg.buda`.
+- Q7 answered: the wrap-around pin is rare, so PR 1b proceeds.  Q1 answered:
+  hard-macro LEF first, plus a command usable from the Tcl front end to
+  exercise flat and hier flows.
+- **PR 1b, first cut (this branch)**: the tagged strips and the command for a
+  BLOCK — `Rect::face` tag, `Floorplan::set_pin_fix` / `pin_fix_strips` /
+  `landing_busterm` (the one place a busterm is built, replacing four hand
+  copies), `passthrough_rects` (the two-face rule), tag-aware landing
+  recognition, the `BUSTERM_FACE` audit on a fixed block, the generation drop
+  with BUDA-1922, `fix_pin` / `dump_pin_fixes`, the hier replay by frame name,
+  viewer and `render_design` drawing.  Shipped as a block-level fix on
+  purpose: the per-pin selector needs the bundle split and the per-bundle
+  resolver key, which is the next change, together with the cell-level
+  orientation transform, persistence (`pin_fix` table, and the face tag in the
+  persisted busterm rect rows — a restored busterm loses it today), `at <pos>`
+  (needs the track pitch) and the `PIN_FIX` kind.  Known limit, visible in
+  the flows: a fix governs every bus landing on its block, so a block with an
+  input and an output bus cannot be fixed to one face yet.
+- **PR 1c (per-pin selectors, flat flows)**: `fix_pin B.pin` / `B.bus` / `B.pre*`
+  with precedence exact pin > bus > longest prefix > block-level.  Mechanism
+  (chosen over threading an override through ~57 call sites): a thread-local
+  active `FixMap` that `Floorplan::fixes()` consults, set by an RAII `FixScope`
+  at every entry that holds a `Topology` (generation, analysis, `check_*`, NUTS,
+  edit ops); `Topology::block_fixes` carries the bundle's effective map, outside
+  the content fingerprint.  The bundler splits a bundle into fix-uniform parts
+  before the bit cap and the NDR split, loudly.  Python reporters and the
+  viewer wrap in `buda.BlockFixScope(topo)`.  Not done: hier selectors (the
+  replay says so), persistence of selectors / `block_fixes`, a restored
+  candidate carries no map until re-generated.  Vehicle: `flow/pin_fix/pins.buda`.
+- **PR 1d (persistence)**: one meta row `pin_fixes` (JSON: block fixes + selector
+  list), written through on every `fix_pin`, restored by `open_bdb` under the
+  typed-wins contract, stored at the open for entries typed before it.
+  `load_pipeline` re-stamps restored candidates from the restored selectors (the
+  map is not a per-candidate row).  Not done: the cell-level fix with the
+  orientation transform (a fix is still keyed by the placed block name), `layer`,
+  `order`, `at <pos>`, `from_pins`.  Vehicles: `flow/pin_fix/persist_build.buda`
+  then `persist_resume.buda`.

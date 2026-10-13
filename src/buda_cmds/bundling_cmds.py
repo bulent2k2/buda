@@ -275,6 +275,22 @@ def _partition_nets(nets, target, caps, inc_fn):
     return parts
 
 
+def _landing_edge(session, nets, blk):
+    """The edge a bundle's bits can land along on `blk`, under that bundle's own
+    pin fixes.  Unfixed: the block's shortest edge.  Fixed: a landing strip is
+    one unit deep, so its capacity is the LENGTH of the face it lies on."""
+    import buda
+    from buda_cmds.pin_fix_cmds import bundle_fix_map
+    fp = session.fp
+    with buda.BlockFixScope(bundle_fix_map(session, nets)):
+        if fp.has_pin_fix(blk):
+            strips = fp.pin_fix_strips(blk)
+            if strips:
+                return max(max(x2 - x1, y2 - y1) for x1, y1, x2, y2, _f in strips)
+        r = fp.landing_bounds(blk)
+        return min(r.x2 - r.x1, r.y2 - r.y1)
+
+
 def _split_oversized_bundles(session, raw_bundles):
     """Optional bundle bit bound (set_max_bundle_bits): split any bundle
     over the limit into balanced parts, keeping bits of the same bus
@@ -321,8 +337,7 @@ def _split_oversized_bundles(session, raw_bundles):
             for blk, bits_at in at_block.items():
                 if not session.fp.has_block(blk):
                     continue
-                r = session.fp.get_block_bounds(blk)
-                edge = min(r.x2 - r.x1, r.y2 - r.y1)
+                edge = _landing_edge(session, nets, blk)
                 cap = max(1, int(edge / pitch))
                 need = math.ceil(bits_at / cap)
                 if need > n_parts:
@@ -351,9 +366,7 @@ def _split_oversized_bundles(session, raw_bundles):
                 for blk in {e[0], *e[1]}:
                     if blk in caps or not session.fp.has_block(blk):
                         continue
-                    r = session.fp.get_block_bounds(blk)
-                    caps[blk] = max(1, int(min(r.x2 - r.x1,
-                                               r.y2 - r.y1) / pitch))
+                    caps[blk] = max(1, int(_landing_edge(session, nets, blk) / pitch))
 
         def _inc(net):
             e = eps.get(net)
@@ -675,6 +688,13 @@ def _dump_flat_bundles(bundles):
         print(f"  b-{b.id:<3}  nets={n:<4}  \"{short_reason}\"  [{nets_str}]")
 
 
+def pin_fix_cmds_stamp(session):
+    # Only a (re)bundling rebuilds the pipeline the fixes were read by; the
+    # generic re-persist paths (select_topology, pin_plan, ...) must not restamp.
+    from buda_cmds import pin_fix_cmds
+    pin_fix_cmds.stamp_generation(session)
+
+
 def cmd_run_bundler(session, cmd, args, cmd_line):
     # run_bundler [STRICT|CONVERGENT|BIDIRECTIONAL|COMBINED] [--dump]  (default STRICT)
     # --dump prints one line per created bundle (id, net count, grouping reason,
@@ -759,6 +779,8 @@ def cmd_run_bundler(session, cmd, args, cmd_line):
         raw_bundles = _generalized_bundles(session, strat_arg, joined)
     else:
         raw_bundles = session.bundler.run(session.netlist)
+    from buda_cmds import pin_fix_cmds
+    raw_bundles = pin_fix_cmds.split_bundles_by_fix(session, raw_bundles)
     raw_bundles = _split_oversized_bundles(session, raw_bundles)
     # NDR rule-class split (phase 1 R8 position): every governed bundle
     # becomes rule-uniform, LOUDLY.  No-op with no set_ndr scopes.
@@ -780,6 +802,9 @@ def cmd_run_bundler(session, cmd, args, cmd_line):
     # for the FLAT flow this is the one-shot application (the hier
     # resolver re-applies it, as it does the NDR restriction).
     from buda_session.bus_layers import apply_bus_layer_restrictions
+    # Fresh wrappers reuse small bundle ids: the pre-restriction masks cached
+    # for the PREVIOUS wrappers must not be read back for these.
+    session._bus_layer_base = {}
     apply_bus_layer_restrictions(session)
     session._bu_clone_from = {}   # fresh ids: drop stale clone provenance
     print(f"Bundler created {len(session.bundles)} hbundles.")
@@ -788,6 +813,7 @@ def cmd_run_bundler(session, cmd, args, cmd_line):
     session._bundler_strategy = ("+".join(sorted(toks)) if len(toks) > 1
                                  else strat_arg)
     n = session._persist_bundles(strat_arg)
+    pin_fix_cmds_stamp(session)
     if n:
         print(f"[BDB] persisted {n} bundle(s) to the open BDB.")
 
@@ -1002,6 +1028,9 @@ def cmd_run_hier_bundler(session, cmd, args, cmd_line):
     # for the FLAT flow this is the one-shot application (the hier
     # resolver re-applies it, as it does the NDR restriction).
     from buda_session.bus_layers import apply_bus_layer_restrictions
+    # Fresh wrappers reuse small bundle ids: the pre-restriction masks cached
+    # for the PREVIOUS wrappers must not be read back for these.
+    session._bus_layer_base = {}
     apply_bus_layer_restrictions(session)
     session._hier_bundles_orig = list(session.bundles)  # snapshot for dump_hbundles
     # Fresh bundles reuse small integer ids: stale id-keyed clone provenance
@@ -1035,6 +1064,7 @@ def cmd_run_hier_bundler(session, cmd, args, cmd_line):
     strat_label = "+".join(sorted(strat_toks)) if len(strat_toks) > 1 else strat
     session._bundler_strategy = strat_label
     n = session._persist_bundles(strat_label)
+    pin_fix_cmds_stamp(session)
     if n:
         print(f"[BDB] persisted {n} bundle(s) to the open BDB.")
 

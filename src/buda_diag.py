@@ -221,6 +221,12 @@ MESSAGES = {
                   "through its own clone template; corridors inherited "
                   "from ancestors still apply, and the derivation folds no "
                   "rotated instance in)."),
+    "BUDA-1922": (WARNING, "No generated candidate lands on a block's fixed "
+                  "pin (fix_pin): every shape the generator knows ends a "
+                  "wire on a face the fix does not admit.  The pool is kept "
+                  "so the bus does not strand, and check_design reports "
+                  "each bad landing; widen the fix (more faces, a wider "
+                  "window) or move the block."),
     "BUDA-1919": (WARNING, "A cell's multi-rect footprint no longer unions to "
                            "the extent of an instance of that cell, so the "
                            "routing frame and the placement would be two "

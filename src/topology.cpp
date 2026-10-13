@@ -206,6 +206,7 @@ Topology transform_topology(const Topology& t, const std::string& orient,
 static void annotate_endpoints(Topology& topo, const std::vector<Busterm>& blocks);
 
 void annotate_topology(Topology& topo, const Floorplan& fp) {
+    FixScope fix_scope_(topo);
     // Build a Busterm per floorplan block and run the same geometric annotation
     // the generator uses, so a hand-built or BDB-reloaded topology gets the
     // authoritative seg_busterms it needs before ConnTopology::build (which no
@@ -219,15 +220,10 @@ void annotate_topology(Topology& topo, const Floorplan& fp) {
         // annotate_endpoints checks each rect face, not the union — a
         // multi-rect block must not be tapped through the gap between its rects —
         // and the teg_mode.
-        auto cm   = fp.get_block_corner_margin(name);
-        auto phys = fp.get_block_rects(name);
-        Busterm bt{name, orig.shrink(cm.dx, cm.dy), orig,
-                   shrink_rects(phys, cm), fp.get_block_teg_mode(name)};
+        (void)orig;
         // Physical spelling kept beside the inset one (PR #835 P2): foreign
         // geometry — a hand-built or restored segment — may land on either.
-        if ((cm.dx != 0 || cm.dy != 0) && !phys.empty())
-            bt.orig_rects = std::move(phys);
-        bts.push_back(std::move(bt));
+        bts.push_back(fp.landing_busterm(name));
     }
     annotate_endpoints(topo, bts);
     // seg_conns must be derived AFTER seg_busterms: a busterm-tapped endpoint is
@@ -417,17 +413,205 @@ void Floorplan::add_block_rects(const std::string& name,
     // declaration-time resolutions).
     add_block_rects(name, rects, default_teg_mode_);
 }
+static thread_local const FixMap* g_active_fixes = nullptr;
+const FixMap* active_block_fixes() { return g_active_fixes; }
+FixScope::FixScope(const FixMap* m) : prev_(g_active_fixes) { g_active_fixes = m; }
+FixScope::~FixScope() { g_active_fixes = prev_; }
+
 void Floorplan::set_block_teg_mode(const std::string& name, TegMode mode) {
     teg_modes_[name] = mode;
     ++rev_;
 }
 TegMode Floorplan::get_block_teg_mode(const std::string& name) const {
+    // A fixed pin's strips are joined by the block's own metal, which is what
+    // `thru` asserts, so the EFFECTIVE mode of a fixed block is THRU for the
+    // generator, the audits and the slide analysis alike (they all read this).
+    if (fixes().count(name)) return TegMode::THRU;
     auto it = teg_modes_.find(name);
     return (it != teg_modes_.end()) ? it->second : TegMode::THRU;
 }
 std::vector<Rect> Floorplan::get_block_rects(const std::string& name) const {
     auto it = block_rects_.find(name);
     return (it != block_rects_.end()) ? it->second : std::vector<Rect>{};
+}
+void Floorplan::set_pin_fix(const std::string& block, const PinFix& fix) {
+    pin_fixes_[block] = fix;
+    ++rev_;
+}
+void Floorplan::clear_pin_fix(const std::string& block) {
+    if (pin_fixes_.erase(block)) ++rev_;
+}
+PinFix Floorplan::pin_fix(const std::string& block) const {
+    auto it = fixes().find(block);
+    return it != fixes().end() ? it->second : PinFix{};
+}
+
+// The strips of ONE declared rect (index k of `phys`) under fix `fx`: thin rects
+// lying INSIDE their physical face (one unit deep — `Rect` is integer and a
+// zero-area rect is refused everywhere), each tagged with the ONE edge a wire
+// may end on.  `ox`,`oy` is the block-local origin (the union's lower-left).
+static std::vector<Rect> strips_of_rect(const PinFix& fx, int k,
+                                        const std::vector<Rect>& phys,
+                                        int ox, int oy) {
+    std::vector<Rect> out;
+    const Rect& r = phys[k];
+    const int mask = fx.faces ? fx.faces : (FACE_N | FACE_S | FACE_E | FACE_W);
+    for (int f : {FACE_N, FACE_S, FACE_E, FACE_W}) {
+        if (!(mask & f)) continue;
+        const bool vert_face = (f == FACE_E || f == FACE_W);   // face is a vertical edge
+        // The face's extent along its own axis, minus every stretch another rect
+        // of the block covers just outside it (an edge interior to the union —
+        // the L/C case — is not a face).  A midpoint probe cannot tell: a
+        // partial overlap leaves some of the edge exposed and some not, and one
+        // covering the midpoint can hide exposed ends on either side.
+        std::vector<std::pair<int,int>> open{{vert_face ? r.y1 : r.x1,
+                                              vert_face ? r.y2 : r.x2}};
+        for (int j = 0; j < (int)phys.size(); ++j) {
+            if (j == k) continue;
+            const Rect& o = phys[j];
+            // o covers the outside of this edge iff it reaches the edge's line
+            // and extends past it (abutment counts: a shared edge is interior)
+            bool covers = false;
+            int clo = 0, chi = 0;
+            switch (f) {
+                case FACE_E: covers = o.x1 <= r.x2 && o.x2 > r.x2; clo = o.y1; chi = o.y2; break;
+                case FACE_W: covers = o.x2 >= r.x1 && o.x1 < r.x1; clo = o.y1; chi = o.y2; break;
+                case FACE_N: covers = o.y1 <= r.y2 && o.y2 > r.y2; clo = o.x1; chi = o.x2; break;
+                default:     covers = o.y2 >= r.y1 && o.y1 < r.y1; clo = o.x1; chi = o.x2; break;
+            }
+            if (!covers) continue;
+            std::vector<std::pair<int,int>> next;
+            for (const auto& iv : open) {
+                if (chi <= iv.first || clo >= iv.second) { next.push_back(iv); continue; }
+                if (clo > iv.first)  next.push_back({iv.first, clo});
+                if (chi < iv.second) next.push_back({chi, iv.second});
+            }
+            open = std::move(next);
+        }
+        for (auto [lo, hi] : open) {
+            if (fx.has_window) {
+                lo = std::max(lo, fx.lo + (vert_face ? oy : ox));
+                hi = std::min(hi, fx.hi + (vert_face ? oy : ox));
+            }
+            if (lo >= hi) continue;
+            switch (f) {
+                case FACE_E: out.push_back(Rect{std::max(r.x1, r.x2 - 1), lo, r.x2, hi, FACE_E}); break;
+                case FACE_W: out.push_back(Rect{r.x1, lo, std::min(r.x2, r.x1 + 1), hi, FACE_W}); break;
+                case FACE_N: out.push_back(Rect{lo, std::max(r.y1, r.y2 - 1), hi, r.y2, FACE_N}); break;
+                default:     out.push_back(Rect{lo, r.y1, hi, std::min(r.y2, r.y1 + 1), FACE_S}); break;
+            }
+        }
+    }
+    return out;
+}
+
+std::vector<Rect> Floorplan::pin_fix_strips(const std::string& block) const {
+    std::vector<Rect> out;
+    auto fit = fixes().find(block);
+    auto bit = blocks_.find(block);
+    if (fit == fixes().end() || bit == blocks_.end()) return out;
+    const PinFix& fx = fit->second;
+    std::vector<Rect> phys = get_block_rects(block);  // raw-store: resolver
+    if (phys.empty()) phys.push_back(bit->second);
+    for (int k = 0; k < (int)phys.size(); ++k) {
+        if (fx.rect >= 0 && fx.rect != k) continue;
+        for (const Rect& st : strips_of_rect(fx, k, phys, bit->second.x1, bit->second.y1))
+            out.push_back(st);
+    }
+    return out;
+}
+
+// What a wire CROSSING the block may count as covering it.  Unfixed: the
+// block's own rects (empty for single-rect, as get_block_rects).  Fixed: a
+// pass-through is TWO landings — in on one face, out on the opposite — so it is
+// admitted only across a rect whose opposite faces are BOTH admitted, and only
+// within the overlap of their windows.  A bare `east` (or a point pin) admits
+// none: the exit face is not a landing.  When nothing is admitted the answer
+// is a sentinel rect that no wire can overlap, not an empty list (callers read
+// empty as "single-rect block, use the bounds").
+std::vector<Rect> Floorplan::passthrough_rects(const std::string& name) const {
+    auto fit = fixes().find(name);
+    auto bit = blocks_.find(name);
+    if (fit == fixes().end() || bit == blocks_.end()) return get_block_rects(name);  // raw-store: resolver
+    const PinFix& fx = fit->second;
+    std::vector<Rect> phys = get_block_rects(name);  // raw-store: resolver
+    if (phys.empty()) phys.push_back(bit->second);
+    std::vector<Rect> out;
+    for (int k = 0; k < (int)phys.size(); ++k) {
+        if (fx.rect >= 0 && fx.rect != k) continue;
+        const Rect& r = phys[k];
+        const auto st = strips_of_rect(fx, k, phys, bit->second.x1, bit->second.y1);
+        // A face split by another rect has SEVERAL strips; a crossing may run
+        // between any east strip and any west strip (north/south alike), so
+        // pair every combination and emit each non-empty overlap.
+        std::vector<const Rect*> e, w, n, s;
+        for (const Rect& t : st) {
+            if (t.face == FACE_E) e.push_back(&t); else if (t.face == FACE_W) w.push_back(&t);
+            else if (t.face == FACE_N) n.push_back(&t); else s.push_back(&t);
+        }
+        for (const Rect* a : e)
+            for (const Rect* b : w) {
+                const int lo = std::max(a->y1, b->y1), hi = std::min(a->y2, b->y2);
+                if (lo < hi) out.push_back(Rect{r.x1, lo, r.x2, hi});
+            }
+        for (const Rect* a : n)
+            for (const Rect* b : s) {
+                const int lo = std::max(a->x1, b->x1), hi = std::min(a->x2, b->x2);
+                if (lo < hi) out.push_back(Rect{lo, r.y1, hi, r.y2});
+            }
+    }
+    if (out.empty()) {
+        constexpr int far = INT_MIN / 4;
+        out.push_back(Rect{far, far, far, far});
+    }
+    return out;
+}
+
+std::vector<Rect> Floorplan::landing_rects(const std::string& name) const {
+    if (has_pin_fix(name)) {
+        auto strips = pin_fix_strips(name);
+        if (!strips.empty()) return strips;
+    }
+    return get_block_rects(name);
+}
+Rect Floorplan::landing_bounds(const std::string& name) const {
+    if (has_pin_fix(name)) {
+        auto strips = pin_fix_strips(name);
+        if (!strips.empty()) {
+            Rect u = strips[0];
+            u.face = FACE_ANY;
+            for (const Rect& s : strips) {
+                u.x1 = std::min(u.x1, s.x1); u.y1 = std::min(u.y1, s.y1);
+                u.x2 = std::max(u.x2, s.x2); u.y2 = std::max(u.y2, s.y2);
+            }
+            return u;
+        }
+    }
+    return get_block_bounds(name);
+}
+Busterm Floorplan::landing_busterm(const std::string& n) const {
+    if (has_pin_fix(n)) {
+        auto strips = pin_fix_strips(n);
+        if (!strips.empty()) {
+            // A fix replaces BOTH spellings of the busterm's rects, un-inset: a
+            // declared window is physical, and one spelling leaves one tag to
+            // honour.  The strips are joined by the block's own metal, which is
+            // what `thru` asserts.
+            const Rect u = landing_bounds(n);
+            return Busterm{n, u, u, std::move(strips), TegMode::THRU};
+        }
+    }
+    auto cm   = get_block_corner_margin(n);
+    Rect orig = get_block_bounds(n);  // raw-store: resolver
+    auto phys = get_block_rects(n);  // raw-store: resolver
+    Busterm bt{n, orig.shrink(cm.dx, cm.dy), orig,
+               shrink_rects(phys, cm), get_block_teg_mode(n)};
+    if ((cm.dx != 0 || cm.dy != 0) && !phys.empty())
+        bt.orig_rects = std::move(phys);   // both face spellings (PR #835 P2)
+    return bt;
+}
+std::vector<Rect> Floorplan::obstruction_rects(const std::string& name) const {
+    return get_block_rects(name);
 }
 void Floorplan::set_block_corner_margin(const std::string& name, int dx, int dy) {
     corner_margins_[name] = BlockCornerMargin{dx, dy};
@@ -1554,19 +1738,21 @@ static void annotate_endpoints(Topology& topo,
         auto abuts_rect = [&](const Point& P, const Point& other, const Rect& r) -> bool {
             if (horiz) {
                 if (!(P.y >= r.y1 && P.y <= r.y2)) return false;
-                if (P.x == r.x1) return other.x < P.x;
-                if (P.x == r.x2) return other.x > P.x;
+                if (P.x == r.x1 && r.face_ok_x1()) return other.x < P.x;
+                if (P.x == r.x2 && r.face_ok_x2()) return other.x > P.x;
                 return false;
             }
             if (!(P.x >= r.x1 && P.x <= r.x2)) return false;
-            if (P.y == r.y1) return other.y < P.y;
-            if (P.y == r.y2) return other.y > P.y;
+            if (P.y == r.y1 && r.face_ok_y1()) return other.y < P.y;
+            if (P.y == r.y2 && r.face_ok_y2()) return other.y > P.y;
             return false;
         };
         auto on_face_rect = [&](const Point& P, const Rect& r) -> bool {
             return horiz
-                ? (P.x == r.x1 || P.x == r.x2) && P.y >= r.y1 && P.y <= r.y2
-                : (P.y == r.y1 || P.y == r.y2) && P.x >= r.x1 && P.x <= r.x2;
+                ? ((P.x == r.x1 && r.face_ok_x1()) || (P.x == r.x2 && r.face_ok_x2()))
+                      && P.y >= r.y1 && P.y <= r.y2
+                : ((P.y == r.y1 && r.face_ok_y1()) || (P.y == r.y2 && r.face_ok_y2()))
+                      && P.x >= r.x1 && P.x <= r.x2;
         };
         auto assign = [&](std::optional<Busterm>& slot,
                           const Point& P, const Point& other) {
@@ -1636,6 +1822,7 @@ std::vector<int> derive_fanin_seg_bits(
     const std::vector<std::string>& driver_per_bit,
     const std::vector<std::vector<std::string>>& receivers_per_bit)
 {
+    FixScope fix_scope_(topo);   // pass-through fallback reads the bundle's own fixes
     const int n_seg  = (int)topo.segments.size();
     const int n_bits = (int)driver_per_bit.size();
     topo.seg_bits.clear();
@@ -1668,8 +1855,8 @@ std::vector<int> derive_fanin_seg_bits(
                 segs.push_back(si);
         }
         if (segs.empty()) {
-            auto rects = fp.get_block_rects(block);
-            if (rects.empty()) rects.push_back(fp.get_block_bounds(block));
+            auto rects = fp.passthrough_rects(block);
+            if (rects.empty()) rects.push_back(fp.landing_bounds(block));
             for (int si = 0; si < n_seg; ++si)
                 for (const Rect& r : rects)
                     if (seg_touches_rect(topo.segments[si], r)) {
@@ -3782,17 +3969,7 @@ std::vector<Topology> TopologyGenerator::generate_npin(
     std::vector<Topology> results;
     std::vector<Point>   pins;
     std::vector<Busterm> blocks;
-    auto mk_bt = [&](const std::string& n) {
-        auto cm  = floorplan_.get_block_corner_margin(n);
-        Rect orig = floorplan_.get_block_bounds(n);
-        auto phys = floorplan_.get_block_rects(n);
-        Busterm bt{n, orig.shrink(cm.dx, cm.dy), orig,
-                   shrink_rects(phys, cm),
-                   floorplan_.get_block_teg_mode(n)};
-        if ((cm.dx != 0 || cm.dy != 0) && !phys.empty())
-            bt.orig_rects = std::move(phys);   // both face spellings (P2)
-        return bt;
-    };
+    auto mk_bt = [&](const std::string& n) { return floorplan_.landing_busterm(n); };
     {
         Busterm bt = mk_bt(src_name);
         pins.push_back(bt.bbox.center()); blocks.push_back(bt);
@@ -4254,7 +4431,7 @@ static int trim_shared_leg_overlaps(std::vector<Segment>& segs,
 // "Reached" is the audit's own reading and ONLY that: inclusive segment/rect
 // contact — `seg_touches_rect`, the shared predicate verify.cpp's TEG_OPEN
 // reads — judged on the PHYSICAL rects (`Busterm::orig_rects` — what
-// `fp.get_block_rects` hands the audit).  A rect an edge SPANS is reached
+// `fp.landing_rects` hands the audit).  A rect an edge SPANS is reached
 // (pass-through contact IS attachment); an ADJACENT rect nothing touches is
 // NOT (limitation 2, resolved 2026-08-27: the transitive contiguity closure
 // this pass used to run made the generator and the audit disagree about the
@@ -4302,7 +4479,7 @@ static void add_mst_teg_attachments(Topology& topo,
         // block's FOOTPRINT while the audit reads its METAL, so the two
         // disagreed by construction on an adjacent rect.  `seg_touches_rect`
         // IS verify.cpp's TEG_OPEN predicate, on the PHYSICAL rects the audit
-        // reads (`fp.get_block_rects`).
+        // reads (`fp.landing_rects`).
         auto reached_now = [&]() {
             std::vector<char> in(nr, 0);
             for (int ri = 0; ri < nr; ++ri)
@@ -4398,15 +4575,11 @@ static void add_mst_teg_attachments(Topology& topo,
 // re-implementing the rule).
 void add_mst_teg_attachments(Topology& topo, const Floorplan& fp,
                              int h_layer, int v_layer) {
+    FixScope fix_scope_(topo);   // landing_busterm reads the topology's own fixes
     std::vector<Busterm> bts;
     for (const auto& [name, orig] : fp.get_all_blocks()) {
-        auto cm   = fp.get_block_corner_margin(name);
-        auto phys = fp.get_block_rects(name);
-        Busterm bt{name, orig.shrink(cm.dx, cm.dy), orig,
-                   shrink_rects(phys, cm), fp.get_block_teg_mode(name)};
-        if ((cm.dx != 0 || cm.dy != 0) && !phys.empty())
-            bt.orig_rects = std::move(phys);
-        bts.push_back(std::move(bt));
+        (void)orig;
+        bts.push_back(fp.landing_busterm(name));
     }
     int m_h = fp.get_min_stub_length(0 /*HORIZONTAL*/, h_layer);
     int m_v = fp.get_min_stub_length(1 /*VERTICAL*/,   v_layer);
@@ -4584,8 +4757,8 @@ static bool topology_is_clean_tree(const Topology& topo, const Floorplan& fp) {
             if (c.kind == SegConn::BUSTERM) tapped.insert(c.block_name);
     for (const auto& bname : topo.connected_block_names) {
         if (tapped.count(bname)) continue;
-        auto rects = fp.get_block_rects(bname);
-        if (rects.empty()) rects.push_back(fp.get_block_bounds(bname));
+        auto rects = fp.passthrough_rects(bname);
+        if (rects.empty()) rects.push_back(fp.landing_bounds(bname));
         bool covered = false;
         for (const auto& cs : segs) {
             if (covered) break;
@@ -5509,11 +5682,14 @@ std::vector<Topology> TopologyGenerator::generate_candidates(
     const std::string& src_name,
     const std::vector<std::string>& dst_names)
 {
+    FixScope fix_scope(has_block_fixes_ ? &block_fixes_ : nullptr);
     std::vector<Topology> candidates;
     bool two_pin = false;
     if (dst_names.size() == 1) {
-        bool any_multi_rect = !floorplan_.get_block_rects(src_name).empty() ||
-                              !floorplan_.get_block_rects(dst_names[0]).empty();
+        bool any_multi_rect = !floorplan_.obstruction_rects(src_name).empty() ||
+                              !floorplan_.obstruction_rects(dst_names[0]).empty() ||
+                              floorplan_.has_pin_fix(src_name) ||
+                              floorplan_.has_pin_fix(dst_names[0]);
         two_pin = !any_multi_rect;
     }
     candidates = two_pin ? generate_2pin(src_name, dst_names[0])
@@ -5528,6 +5704,12 @@ std::vector<Topology> TopologyGenerator::generate_candidates(
     // endpoint block is only grazed by a free-sliding trunk passes check_topo
     // at nominal but opens at NUTS time (BUSTERM_OPEN — bigHalf bus_038).
     filter_unanchored_bitrunk(candidates);
+    if (has_block_fixes_)
+        for (auto& c : candidates) {
+            c.has_block_fixes = true;
+            c.block_fixes = block_fixes_;
+            c.clear_analysis_cache();
+        }
     return candidates;
 }
 
@@ -5555,6 +5737,7 @@ void TopologyGenerator::filter_uncovered(std::vector<Topology>& candidates) cons
                       is_disc(candidates.size(), 0);
     int n_clean = 0;
     std::string first_block, first_type;
+    bool first_fixed = false;       // the first open is a fixed pin's landing
     for (size_t i = 0; i < candidates.size(); ++i) {
         ConnTopology ct;
         ct.build(candidates[i], floorplan_);
@@ -5582,6 +5765,17 @@ void TopologyGenerator::filter_uncovered(std::vector<Topology>& candidates) cons
                 // open and is dropped like any other DISCONNECTED candidate.
                 if (!disconnected_islands_bridged(ct, candidates[i], floorplan_))
                     is_disc[i] = 1;
+            } else if (v.kind == ViolationKind::BUSTERM_FACE &&
+                       floorplan_.has_pin_fix(v.block_name)) {
+                // A tap that is not an admitted landing of a FIXED pin: the
+                // wire does not reach the pin, whatever else it touches.
+                // Always dropped, like an uncovered block.
+                if (!is_open[i] && first_type.empty()) {
+                    first_block = v.block_name;
+                    first_type  = candidates[i].type;
+                    first_fixed = true;
+                }
+                is_open[i] = 1;
             } else if (v.kind == ViolationKind::FEEDTHRU_RELAY) {
                 is_relay[i] = 1;
             }
@@ -5614,6 +5808,10 @@ void TopologyGenerator::filter_uncovered(std::vector<Topology>& candidates) cons
         // check_connectivity will report the open.  (Reachable only for the
         // all-open / all-disconnected case — relays are dropped solely when a
         // clean one survives.)
+        if (first_fixed)
+            notes() << "BUDA-1922: WARNING: no candidate lands on the fixed pin of '"
+                    << first_block << "' (fix_pin); the pool is kept so the bus "
+                    << "does not strand, and check_design reports the bad landing.\n";
         notes() << "[TopoGen] WARNING: all " << candidates.size()
                   << " candidate(s) are broken (";
         if (!first_block.empty())
@@ -5714,17 +5912,7 @@ void TopologyGenerator::filter_unanchored_bitrunk(
 
 std::vector<Topology> TopologyGenerator::generate_2pin(const std::string& src_name, const std::string& dst_name) {
     std::vector<Topology> candidates;
-    auto mk_bt = [&](const std::string& n) {
-        auto cm = floorplan_.get_block_corner_margin(n);
-        Rect orig = floorplan_.get_block_bounds(n);
-        auto phys = floorplan_.get_block_rects(n);
-        Busterm bt{n, orig.shrink(cm.dx, cm.dy), orig,
-                   shrink_rects(phys, cm),
-                   floorplan_.get_block_teg_mode(n)};
-        if ((cm.dx != 0 || cm.dy != 0) && !phys.empty())
-            bt.orig_rects = std::move(phys);   // both face spellings (P2)
-        return bt;
-    };
+    auto mk_bt = [&](const std::string& n) { return floorplan_.landing_busterm(n); };
     Busterm src_bt = mk_bt(src_name);
     Busterm dst_bt = mk_bt(dst_name);
     const Rect& src = src_bt.bbox;

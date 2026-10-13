@@ -203,6 +203,30 @@ void load_seg_busterms(BDB& bdb, const std::string& bundle_id,
 
 }  // namespace
 
+// ── per-bundle fix maps (per-pin selectors) ───────────────────────────────
+static FixMap fixmap_from_py(const py::dict& d) {
+    FixMap m;
+    for (auto kv : d) {
+        auto t = kv.second.cast<py::tuple>();
+        PinFix f; f.faces = t[0].cast<int>(); f.rect = t[1].cast<int>();
+        f.has_window = t[2].cast<bool>(); f.lo = t[3].cast<int>(); f.hi = t[4].cast<int>();
+        m[kv.first.cast<std::string>()] = f;
+    }
+    return m;
+}
+static py::dict fixmap_to_py(const FixMap& m) {
+    py::dict d;
+    for (const auto& kv : m)
+        d[py::str(kv.first)] = py::make_tuple(kv.second.faces, kv.second.rect,
+                                              kv.second.has_window, kv.second.lo, kv.second.hi);
+    return d;
+}
+// Context manager: make a topology's per-bundle fixes the active ones while
+// Python helpers read the floorplan's landing/passthrough geometry.
+struct PyFixScope {
+    FixMap map; bool use = false; std::unique_ptr<FixScope> sc;
+};
+
 void bind_routing(py::module_& m) {
     // ── Layer enums ───────────────────────────────────────────────────────
     py::enum_<LayerDir>(m, "LayerDir")
@@ -280,6 +304,16 @@ void bind_routing(py::module_& m) {
         // spans the placer already produced.
         .def_readonly("seg_busterm_bits",       &Topology::seg_busterm_bits)
         .def_readwrite("feedthru_blocks",       &Topology::feedthru_blocks)
+        .def_readonly("has_block_fixes",        &Topology::has_block_fixes)
+        .def_property("block_fixes",
+            [](const Topology& t) { return fixmap_to_py(t.block_fixes); },
+            [](Topology& t, const py::dict& d) {
+                t.block_fixes = fixmap_from_py(d); t.has_block_fixes = true;
+                t.clear_analysis_cache();
+            })
+        .def("clear_block_fixes", [](Topology& t) {
+            t.block_fixes.clear(); t.has_block_fixes = false; t.clear_analysis_cache();
+        })
         .def_readwrite("wl_lo",                 &Topology::wl_lo)
         .def_readwrite("wl_hi",                 &Topology::wl_hi);
 
@@ -316,6 +350,7 @@ void bind_routing(py::module_& m) {
     // a floorplan, so ConnTopology can read the authoritative endpoint taps
     // (it no longer geometrically guesses).  Mutates topo in place.
     m.def("annotate_topology", [](Topology& topo, const Floorplan& fp) {
+        FixScope fix_scope(topo);   // landing_busterm reads the bundle's own fixes
         annotate_topology(topo, fp);
     }, py::arg("topo"), py::arg("fp"));
 
@@ -359,6 +394,12 @@ void bind_routing(py::module_& m) {
     // Analysis-cache instrumentation (Phase B, topo_conn_unification.md):
     // cumulative (computes, hits) of the content-fingerprint-validated
     // ConnTopology analysis cache, plus a reset.  Test/diagnostic only.
+    m.def("plan_overlay_inits", &plan_overlay_inits,
+          "How many times a planner scoring overlay was (re)sized to a grid "
+          "since the process started (one per scoring thread per grid "
+          "generation; #972 lever B1's probe).");
+    m.def("plan_scoring_pool_threads", &plan_scoring_pool_threads,
+          "Threads the persistent scoring pool has created so far.");
     m.def("analysis_cache_counters", &analysis_cache_counters);
     m.def("analysis_cache_reset_counters", &analysis_cache_reset_counters);
 
@@ -507,6 +548,43 @@ void bind_routing(py::module_& m) {
             for (const auto& r : rects) out.emplace_back(r.x1, r.y1, r.x2, r.y2);
             return out;
         })
+        .def("landing_rects", [](const Floorplan& fp, const std::string& name) {
+            auto rects = fp.landing_rects(name);
+            std::vector<std::tuple<int,int,int,int>> out;
+            for (const auto& r : rects) out.emplace_back(r.x1, r.y1, r.x2, r.y2);
+            return out;
+        })
+        .def("landing_bounds",          &Floorplan::landing_bounds)
+        .def("set_pin_fix", [](Floorplan& fp, const std::string& block, int faces, int rect,
+                               bool has_window, int lo, int hi) {
+            PinFix f; f.faces = faces; f.rect = rect; f.has_window = has_window; f.lo = lo; f.hi = hi;
+            fp.set_pin_fix(block, f);
+        }, py::arg("block"), py::arg("faces") = 0, py::arg("rect") = -1,
+           py::arg("has_window") = false, py::arg("lo") = 0, py::arg("hi") = 0)
+        .def("clear_pin_fix",           &Floorplan::clear_pin_fix)
+        .def("passthrough_rects", [](const Floorplan& fp, const std::string& name) {
+            std::vector<std::tuple<int,int,int,int>> out;
+            for (const auto& r : fp.passthrough_rects(name))
+                out.emplace_back(r.x1, r.y1, r.x2, r.y2);
+            return out;
+        })
+        .def("has_pin_fix",             &Floorplan::has_pin_fix)
+        .def("pin_fix", [](const Floorplan& fp, const std::string& block) {
+            PinFix f = fp.pin_fix(block);
+            return py::make_tuple(f.faces, f.rect, f.has_window, f.lo, f.hi);
+        })
+        .def("pin_fix_strips", [](const Floorplan& fp, const std::string& block) {
+            std::vector<std::tuple<int,int,int,int,int>> out;
+            for (const auto& r : fp.pin_fix_strips(block))
+                out.emplace_back(r.x1, r.y1, r.x2, r.y2, r.face);
+            return out;
+        })
+        .def("obstruction_rects", [](const Floorplan& fp, const std::string& name) {
+            auto rects = fp.obstruction_rects(name);
+            std::vector<std::tuple<int,int,int,int>> out;
+            for (const auto& r : rects) out.emplace_back(r.x1, r.y1, r.x2, r.y2);
+            return out;
+        })
         .def("set_block_corner_margin", &Floorplan::set_block_corner_margin)
         .def("set_global_corner_margin",&Floorplan::set_global_corner_margin)
         .def("set_min_stub_length",     &Floorplan::set_min_stub_length)
@@ -591,6 +669,9 @@ void bind_routing(py::module_& m) {
         .def("set_spine_relays",   &TopologyGenerator::set_spine_relays)
         .def("set_mst_leg_trim",   &TopologyGenerator::set_mst_leg_trim)
         .def("set_trunk_stub_trim", &TopologyGenerator::set_trunk_stub_trim)
+        .def("set_block_fixes", [](TopologyGenerator& g, const py::dict& d) {
+            g.set_block_fixes(fixmap_from_py(d)); })
+        .def("clear_block_fixes", &TopologyGenerator::clear_block_fixes)
         .def("set_layer_ids",      &TopologyGenerator::set_layer_ids)
         .def("set_all_h_layers",   &TopologyGenerator::set_all_h_layers)
         .def("set_all_v_layers",   &TopologyGenerator::set_all_v_layers)
@@ -621,6 +702,21 @@ void bind_routing(py::module_& m) {
     // returned per task, so the caller replays them in bundle order exactly
     // where the sequential loop would have printed them.
     // Returns [(candidates, notes_str), ...] in input order.
+    py::class_<PyFixScope>(m, "BlockFixScope")
+        .def(py::init([](py::object topo) {
+            auto p = std::make_unique<PyFixScope>();
+            if (py::isinstance<py::dict>(topo)) {      // an explicit effective map
+                p->map = fixmap_from_py(topo.cast<py::dict>()); p->use = true;
+            } else if (!topo.is_none()) {
+                const Topology& t = topo.cast<const Topology&>();
+                if (t.has_block_fixes) { p->map = t.block_fixes; p->use = true; }
+            }
+            return p;
+        }), py::arg("topology") = py::none())
+        .def("__enter__", [](PyFixScope& p) -> PyFixScope& {
+            p.sc = std::make_unique<FixScope>(p.use ? &p.map : nullptr); return p; })
+        .def("__exit__", [](PyFixScope& p, py::args) { p.sc.reset(); return false; });
+
     m.def("generate_candidates_batch",
           [](py::sequence gens, const std::vector<std::string>& srcs,
              const std::vector<std::vector<std::string>>& dsts,

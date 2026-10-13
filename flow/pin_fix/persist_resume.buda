@@ -1,0 +1,25 @@
+# fix_pin PR 1d — persistence, part 2: reopen the checkpoint persist_build.buda
+# wrote.  No fix_pin line here: the declarations come back from the BDB, the
+# restored candidates are re-stamped with each bundle's own pin fixes, and the
+# audit judges the landings against them.
+
+require_file pf_ckpt.bdb hint run_persist_build.buda_first
+
+def_layer 4 M4 H TOP 0
+def_layer 5 M5 V TOP 0
+def_track_pattern 4 0 (SIGNAL 2 2)x60
+def_track_pattern 5 0 (SIGNAL 2 2)x60
+add_block SRC 0   400 100 600
+add_block MAC 400 400 600 600
+add_bus lo[4]  SRC.o MAC.lo_in
+add_bus hi[4]  SRC.o MAC.hi_in
+add_bus mid[4] SRC.o MAC.cfg_a
+
+open_bdb pf_ckpt.bdb
+dump_pin_fixes
+load_pipeline
+check_design
+run_nuts
+check_design
+run_detailed_nuts
+check_design

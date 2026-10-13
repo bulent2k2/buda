@@ -61,7 +61,8 @@ from buda_cmds import COMMANDS
 from buda_session import (PersistMixin, HierMixin, NutsFlowMixin,
                           EditMixin, ReportsMixin, RipupMixin,
                           RRStateMixin, NegotiateMixin, RefineMixin,
-                          RRTrialsMixin, RRSweepsMixin, AdvisoryMixin)
+                          RRTrialsMixin, RRSweepsMixin, AdvisoryMixin,
+                          AutoFloorplanMixin)
 from buda_session.util import (_batched, _RR_DEFAULT_MAX_ITER,  # noqa: F401
                                _RR_MAX_CANDIDATES_PER_BUNDLE)   # compat re-exports
 
@@ -230,7 +231,7 @@ from buda_session.util import (                             # noqa: E402
 class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
                   ReportsMixin, RipupMixin, RRStateMixin,
                   NegotiateMixin, RefineMixin, RRTrialsMixin,
-                  RRSweepsMixin, AdvisoryMixin):
+                  RRSweepsMixin, AdvisoryMixin, AutoFloorplanMixin):
     def _get_log_path(self, suffix):
         """Get the log path for a given suffix, ensuring the log directory exists.
 
@@ -332,6 +333,7 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
         self._planner_pitch = None   # pitch the last run_planner reserved bands for
         self._detailed_bit_order = "LO_HI"
         self._dead_span_escalate = False  # opt-in post-NUTS dead-span escalation
+        self._dead_span_floor_typed = None  # set_dead_span_escalate floor <F> (#972 B1)
         self._heal_dead_spans_in_healers = True  # auto dead-span escalation in healers
         self._dead_span_auto_at_run_nuts = True  # auto-escalate at run_nuts when healers ahead
        # last track pitch used by run_nuts
@@ -424,6 +426,13 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
         # a block the flow declared routable-through.  Each entry is
         # (block_names_or_None, layer_ids_or_None, val); None = wildcard.
         self._feedthru_decls = []
+        # Fixed-pin declarations (fix_pin): {block name: fix dict}, replayed onto
+        # derived hier floorplans by _apply_fp_session_settings like feedthru.
+        self._pin_fixes = {}
+        # Per-pin selectors: {block: {("name"|"prefix", key): fix}}, and the
+        # (driver pin, receiver pins) of every flat net, which they resolve against.
+        self._pin_fix_sel = {}
+        self._net_pins = {}
         # Bundling permissions per net-name prefix (set_bundling) and the
         # optional bundle bit bound (set_max_bundle_bits) — consumed by
         # run_bundler's generalized/COMBINED path and its split pass.

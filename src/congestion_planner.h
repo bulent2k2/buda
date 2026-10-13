@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <functional>
 #include <map>
+#include <unordered_map>
 #include <optional>
 #include <set>
 #include <tuple>
@@ -57,10 +58,23 @@ struct GlobalCut {
     void init_bands(int n, const std::function<double(int)>& cap_fn) {
         band_cap_.resize(n);
         band_usage_.assign(n, 0.0);
+        total_usage_ = 0.0;
         for (int b = 0; b < n; ++b) band_cap_[b] = cap_fn(b);
     }
-    void reset_usage() { std::fill(band_usage_.begin(), band_usage_.end(), 0.0); }
-    void add_usage(int b, double delta) { band_usage_[b] += delta; }
+    void reset_usage() {
+        std::fill(band_usage_.begin(), band_usage_.end(), 0.0);
+        total_usage_ = 0.0;
+    }
+    void add_usage(int b, double delta) {
+        band_usage_[b] += delta;
+        total_usage_   += delta;
+    }
+    // Running sum of band_usage_ (issue #972): plan_bundle's per-layer load
+    // for the kBalance tie-breaker used to re-sum every band of every cut on
+    // every call — O(grid) per bundle, the planner's largest single cost at
+    // scale.  Every usage write goes through add_usage/reset_usage/init_bands,
+    // so the total is maintained at the chokepoint instead.
+    double total_usage() const { return total_usage_; }
 
     // Signal-track count per FULL band, precomputed once in SIGNAL_TRACKS mode so
     // usable_band_cap can skip the per-call pattern walk when the slide window does
@@ -75,6 +89,7 @@ struct GlobalCut {
 private:
     std::vector<double> band_cap_;    // capacity per perpendicular Hanan band
     std::vector<double> band_usage_;  // accumulated demand per band
+    double total_usage_ = 0.0;        // sum of band_usage_, maintained
     std::vector<int>    band_sig_ntrk_;  // cached full-band SIGNAL-track count (track mode)
 };
 
@@ -249,6 +264,14 @@ struct BundleAssignment {
 //                   Opt-in (`run_planner ... signal_tracks`); requires a
 //                   RoutingGridStack with def_track_pattern layers.
 enum class CapacityMode { WIDTH, SIGNAL_TRACKS };
+
+// How many times a plan_bundle scoring overlay was (re)sized to a grid since
+// the process started — one per scoring thread per grid generation now that
+// the worker threads persist (#972 lever B1).  A test's probe, not a tuning.
+long long plan_overlay_inits();
+// Threads the persistent scoring pool has created so far (it grows to the
+// largest worker count any plan_bundle call asked for and never shrinks).
+long long plan_scoring_pool_threads();
 
 class CongestionPlanner {
 public:
@@ -598,9 +621,20 @@ private:
     // costs_out (optional): when non-null, records a CandidateCost per scored
     // candidate (with per-segment breakdown) — the read-only source for the
     // debug cost view.  Null (the default) is byte-identical to before.
+    // probe_out / probe_topo (optional): fills *probe_out with the result the
+    // SAME call would return if it were pinned to candidate probe_topo alone
+    // (found = that candidate scored feasible; score, layers and perps are the
+    // candidate's own) — read off the one sweep rather than paid for with a
+    // second plan_bundle call.  Exact by construction: every candidate is
+    // scored from the same read-only base state, and score_candidate_ never
+    // reads the pin flag, so the pinned probe's one evaluation and the sweep's
+    // evaluation of the same index are the same arithmetic (the refine pass's
+    // `keep` probe, lever C of #972).  probe_topo not among the candidates
+    // scored leaves *probe_out untouched (caller falls back to the two calls).
     PlanResult plan_bundle(const BundleWrapper& bw, PlanMode mode,
                            std::set<std::pair<int,int>>* contended = nullptr,
-                           std::vector<CandidateCost>* costs_out = nullptr);
+                           std::vector<CandidateCost>* costs_out = nullptr,
+                           PlanResult* probe_out = nullptr, int probe_topo = -1);
     // Diagnosis for a bundle that reached the end of the escalation ladder
     // with nothing committed: names the routing direction its layer mask
     // starved, or "" when the mask is not the cause.  See the definition.
@@ -749,18 +783,68 @@ private:
     // Band usage as the CURRENTLY-SCORED candidate sees it: its own overlay
     // charge when present, else the committed base value.
     double cand_usage_(int ci, int b) const;
-    // The overlay itself: an epoch-stamped flat array over ALL bands
-    // (flattened by band_base_), so a read is one branch + one array access
-    // and the per-candidate rollback is ++epoch — O(1), no hashing.  A map
-    // was measured ~15% slower serially (a hash probe on every hot read).
+    // The overlay itself (#972 lever B2): an epoch stamp per CUT plus, per
+    // cut, the short list of (band, value) this candidate has written — so
+    // it is sized by the cuts (thousands) and by what a candidate touches
+    // (a few hundred to a few thousand bands), not by every band of the
+    // grid.  Its predecessor was a flat array over ALL bands (a value and a
+    // stamp each): O(1) per read and per clear, but 12 B per band per
+    // scoring thread resident for the process once the workers persisted
+    // (B1) — 268 MB per thread at the NQ=62 reticle dial, 2.1 GB at the
+    // eight-thread auto cap.  A read here is one array access on the cut's
+    // stamp and, only on a cut this candidate wrote, a scan of its few
+    // entries; the per-candidate rollback is still ++epoch, O(1).  A hash
+    // map was measured ~15 % slower serially (a probe on every hot read),
+    // which is why the stamp stays dense over the cuts.  Values are seeded
+    // from the committed base on first touch and accumulated with the same
+    // `+=`, so every read returns the bit-identical double the flat array
+    // returned.
+    //
+    // The per-cut list is kept as ascending RUNS of bands rather than one
+    // (band, value) pair per entry: the spread charges a bus's footprint as a
+    // contiguous ascending band range per cut (for_each_band_w's proportional
+    // modes), so a write that continues the cut's last run is one append, a
+    // write inside a run is one index, and a read is a scan over the few runs
+    // — O(1) amortised per band written, where a flat (band, value) list
+    // rescanned per insertion was O(B²) on a cut a wide bus crosses on a
+    // fine grid (Codex P2 on #979).  The greedy spread modes emit bands in
+    // nearest-first order and simply open more runs.
     struct CandOverlay {
-        std::vector<double>   val;
-        std::vector<uint32_t> stamp;
+        struct Run { int b0; int n; int off; };     // bands [b0, b0+n) at vals[off..]
+        struct CutVals {
+            std::vector<Run>    runs;
+            std::vector<double> vals;
+            void clear() { runs.clear(); vals.clear(); }   // capacity kept
+            const double* find(int b) const {
+                for (const Run& r : runs)
+                    if (b >= r.b0 && b < r.b0 + r.n) return &vals[r.off + (b - r.b0)];
+                return nullptr;
+            }
+            // The slot for band b, seeded with `seed` on first touch.
+            double& slot(int b, double seed) {
+                for (Run& r : runs)
+                    if (b >= r.b0 && b < r.b0 + r.n) return vals[r.off + (b - r.b0)];
+                if (!runs.empty()) {
+                    Run& last = runs.back();
+                    if (b == last.b0 + last.n &&
+                        last.off + last.n == (int)vals.size()) {   // continues the tail
+                        ++last.n;
+                        vals.push_back(seed);
+                        return vals.back();
+                    }
+                }
+                runs.push_back(Run{b, 1, (int)vals.size()});
+                vals.push_back(seed);
+                return vals.back();
+            }
+        };
+        std::vector<uint32_t> cut_stamp;   // per cut
+        std::vector<CutVals>  cut_vals;    // per cut: what this candidate wrote
         uint32_t epoch = 0;
         uint64_t gen   = 0;             // cuts_gen_ this overlay is sized for
         void clear() {                  // start a new candidate
             if (++epoch == 0) {         // u32 wrap: re-zero once per 4G clears
-                std::fill(stamp.begin(), stamp.end(), 0);
+                std::fill(cut_stamp.begin(), cut_stamp.end(), 0);
                 epoch = 1;
             }
         }
@@ -811,14 +895,10 @@ private:
     // [1, min(ncand, 8)], and 1 below the small-pool gate.
     int resolved_plan_threads_(int ncand) const;
     int plan_threads_ = 0;
-    // Flattened band indexing for CandOverlay: band_base_[ci] is the first
-    // slot of cut ci's bands; band_base_.back() is the total.  Rebuilt with
-    // cuts_ (rebuild_cuts_ is the single builder).
-    std::vector<size_t> band_base_;
     // Monotonic id of this planner's cut grid (stamped by rebuild_cuts_ from
     // a process-wide counter): the overlay validity token.  Copied clones
-    // share it — their band_base_ is identical, which is all the overlay
-    // needs (values are seeded per touch from the CURRENT planner's cuts_).
+    // share it — their cut set is identical, which is all the overlay needs
+    // (values are seeded per touch from the CURRENT planner's cuts_).
     uint64_t cuts_gen_ = 0;
     // ── Fractional-share state (Phase 3, hier_layer_caps.md §6 Tier 2) ────
     // Share context of the wrapper plan_bundle is currently evaluating:
@@ -1035,6 +1115,24 @@ private:
     // inverse and needs no record.  Cleared whenever the cut state is rebuilt
     // or its usage reset, since the indices and the baseline both move.
     std::map<std::pair<int, int>, std::vector<std::tuple<int, int, double>>> charge_log_;
+    // The inverse of charge_log_: (cut, band) -> {bundle id -> number of that
+    // bundle's segments charged there}.  Maintained in lockstep with the log
+    // (same insert, same erase), so it names exactly the bundles whose
+    // standing charge touches a band — which is what the rip-up victim
+    // ranking asks of EVERY committed plan with a full re-derivation
+    // (plan_band_overlap over the whole committed set, 23 s of the NQ=71
+    // planner, #972 lever E).  Under the GEOMETRIC spread modes (1, 2) a
+    // plan's bands are a pure function of (segment, layer, perp, width), so
+    // the log's band set at commit time IS the set a re-derivation sees at
+    // rank time, and reading candidates off this index then scoring only
+    // those with plan_band_overlap is decision-identical; the greedy modes
+    // (3-5) read live occupancy and the legacy mode keeps no log, so the
+    // ranking keeps its full scan there (`band_index_exact_()`).
+    std::unordered_map<unsigned long long, std::map<int, int>> band_index_;
+    bool band_index_exact_() const { return band_span_charge_ == 1 || band_span_charge_ == 2; }
+    static unsigned long long band_key_(int ci, int b) {
+        return ((unsigned long long)(unsigned)ci << 32) | (unsigned long long)(unsigned)b;
+    }
     // One-shot guard for the above-TOP config-smell warning.
     bool   warned_above_top_ = false;
     // BUDA_REPLAN_PROF instrumentation accumulators (B1): time inside
@@ -1047,6 +1145,20 @@ private:
     long long prof_scoring_us_   = 0;
     long long prof_plan_calls_   = 0;
     long long prof_cands_        = 0;
+    // optimize_topologies phase accumulators ([PlanProf], same env gate):
+    // where a whole planner run's wall time goes, per phase.
+    long long prof_ot_reserve_us_  = 0;   // apply_reservation park + release
+    long long prof_ot_strict_us_   = 0;   // the first STRICT plan_bundle per bundle
+    long long prof_ot_rank_us_     = 0;   // rip-up victim ranking (plan_band_overlap)
+    long long prof_ot_ladder_us_   = 0;   // rip-up trials (commit/uncommit + plans)
+    long long prof_ot_fallback_us_ = 0;   // ALLOW_OVERFLOW / BEST_EFFORT plans
+    long long prof_ot_commit_us_   = 0;   // commit_plan + assignment + log
+    long long prof_ot_refine_us_   = 0;   // refine passes
+    long long prof_ot_strict_fail_ = 0;   // STRICT found nothing (ladder entered)
+    long long prof_ot_ranked_      = 0;   // committed bundles scored by the ranking
+    long long prof_ot_ladder_plans_= 0;   // plan_bundle calls inside the ladder
+    long long prof_ot_ripups_      = 0;   // accepted rip-ups
+    long long prof_ot_refine_plans_= 0;   // plan_bundle calls inside refine
 };
 
 } // namespace buda

@@ -83,7 +83,7 @@ def _feedthru_refused_blocks(session, names):
     return out
 
 
-def cmd_add_block(session, cmd, args, cmd_line):
+def _cmd_add_block(session, cmd, args, cmd_line):
     # Single-rect: add_block <name> <x1> <y1> <x2> <y2> [corner_margin ...]
     # Multi-rect:  add_block <name> rect <x1> <y1> <x2> <y2> [rect ...] [corner_margin ...]
     name = args[0]
@@ -213,6 +213,15 @@ def cmd_add_block(session, cmd, args, cmd_line):
         if "pct_v" in kws and "pct_h" not in kws and "dx" not in kws: cm_dx = cm_dy
         if cm_dx > 0 or cm_dy > 0:
             session.fp.set_block_corner_margin(name, cm_dx, cm_dy)
+
+
+def cmd_add_block(session, cmd, args, cmd_line):
+    _cmd_add_block(session, cmd, args, cmd_line)
+    # a `fix_pin` declared before its block could not be checked then
+    if args and (args[0] in getattr(session, "_pin_fixes", {})
+                 or args[0] in getattr(session, "_pin_fix_sel", {})):
+        from buda_cmds.pin_fix_cmds import revalidate
+        revalidate(session, args[0])
 
 
 def cmd_set_teg_mode(session, cmd, args, cmd_line):
@@ -525,6 +534,7 @@ def cmd_add_net(session, cmd, args, cmd_line):
         sys.exit(1)
     session.netlist.add_net(name, drv_pin, rcv_pins)
     session._net_endpoints[name] = (drv_inst, rcv_insts)
+    session._net_pins[name] = (drv_pin, list(rcv_pins))
     if session.bdb is not None and session.bdb_net_mode:
         if unknown_dir:
             session.bdb.add_net_pins_undirected(name, [drv_pin] + rcv_pins)
@@ -584,6 +594,7 @@ def cmd_add_bus(session, cmd, args, cmd_line):
         net_name = f"{prefix}_{i}"
         session.netlist.add_net(net_name, drv_pin, rcv_pins)
         session._net_endpoints[net_name] = (drv_inst, rcv_insts)
+        session._net_pins[net_name] = (drv_pin, list(rcv_pins))
         if session.bdb is not None and session.bdb_net_mode:
             if unknown_dir:
                 session.bdb.add_net_pins_undirected(net_name, [drv_pin] + rcv_pins)
@@ -683,6 +694,8 @@ def cmd_def_layer(session, cmd, args, cmd_line):
     # A reservation restored (or typed) before this layer existed had no
     # axis to be checked on; now it has one (Codex P2 on #936).
     session._revalidate_layer_reserves()
+    from buda_cmds import pin_fix_cmds
+    pin_fix_cmds.reapply_layer_fixes(session)     # a fix naming this layer can narrow now
     # A pattern may already exist for this layer — the v29 restore installs
     # the grid at `open_bdb`, and a flow declares its stack AFTER that
     # (`flow/ariane133/ariane133_heal.buda`: open_bdb line 27, def_layer line
@@ -1102,6 +1115,8 @@ def cmd_import_lef_tech(session, cmd, args, cmd_line):
         if why and why != "no PITCH/WIDTH":
             print(f"[LEF] layer {l.name}: {why}; pattern skipped")
     session._revalidate_layer_reserves()   # the def_layer rule, once
+    from buda_cmds import pin_fix_cmds
+    pin_fix_cmds.reapply_layer_fixes(session)
 
     n_geom = 0
     for lid, l in sorted(geom_only):

@@ -217,6 +217,7 @@ class PersistMixin:
         if self.bdb is None:
             return 0
         import json
+        from buda_cmds import pin_fix_cmds
         wrappers = self._persist_wrappers()
         # This clear-and-rewrite drops expanded-bundle rows too, so the
         # selective-persist fingerprint memo no longer describes the DB.
@@ -283,7 +284,19 @@ class PersistMixin:
                     # would come back untapered (BUDA-1904) purely because
                     # some LATER run re-persisted without it.
                     self.bdb.bundle_net_endpoints(_row.id))
-        self.bdb.clear_bundles(keep_user=True)
+        from buda_cmds import pin_fix_cmds
+        _keep = True
+        if pin_fix_cmds.fixes_changed_since_generation(self) and any(
+                tr.source == "user" for _r in self.bdb.all_bundles()
+                for tr in self.bdb.topologies(_r.id)):
+            print("Warning: [PinFix] the pin fixes changed since the stored "
+                  "candidates were generated; hand-edited (USER) candidates are "
+                  "dropped with them — re-create them under the new fixes")
+            _keep = False
+        self.bdb.clear_bundles(keep_user=_keep)
+        # Only now, after the keep/drop decision read the generation the stored
+        # rows were built under, may a held pre-open snapshot replace it.
+        pin_fix_cmds.flush_generation(self)
         kept_ids = ({r.id for r in self.bdb.all_bundles()}
                     if absent_membership else set())
         for _bid, (_nets, _bts, _eps) in absent_membership.items():
@@ -885,7 +898,15 @@ class PersistMixin:
         if not referenced <= persisted:
             self._persist_planner_output()
         self.bdb.clear_bus_routing()
-        for ts in self.nuts_result.segments:
+        # ONE copy of the placed segments: `nuts_result.segments` is a
+        # by-value pybind field, so every read of it materialises the whole
+        # vector as a Python list.  The via pass used to read it once PER
+        # BUNDLE to pick out that bundle's segments — bundles x segments
+        # copies, a third of `run_nuts` at the bigsoc NQ=16 dial (#972's
+        # NUTS half) — so the per-bundle map is built here in one pass and
+        # handed down.
+        segs = list(self.nuts_result.segments)
+        for ts in segs:
             r = buda.BusSegRow()
             r.id = str(ts.bundle_id)
             r.seg_idx = ts.seg_idx
@@ -909,10 +930,14 @@ class PersistMixin:
             r.track_lo_bound = ts.track_lo_bound
             r.track_hi_bound = ts.track_hi_bound
             self.bdb.add_bus_segment(r)
+        by_bid = {}
+        for ts in segs:
+            by_bid.setdefault(ts.bundle_id, {})[ts.seg_idx] = ts
         n_via = 0
         for w in self.bundles:
-            n_via += self._persist_bundle_vias(w)
-        n_seg = len(self.nuts_result.segments)
+            n_via += self._persist_bundle_vias(
+                w, by_bid.get(w.input.original_bundle.id, {}))
+        n_seg = len(segs)
         self._persist_route_snapshot(n_seg, n_via, "abstract_nuts")
         return (n_seg, n_via)
 
@@ -999,20 +1024,28 @@ class PersistMixin:
                          for k, v in sorted(blocked.items())])
             if blocked else "")
 
-    def _persist_bundle_vias(self, w):
+    def _persist_bundle_vias(self, w, ts_map=None):
         """Record one symbolic bus-via per layer-transition in a bundle's placed
         segments. Segment adjacency comes from `ConnTopology` (the repo's canonical
         connection model), so it covers both shared-endpoint bends AND T-junctions
         where a stub lands on a trunk's interior (multi-terminal topologies). The
         via's position is the PLACED junction (from the segments' track positions).
+
+        `ts_map` is this bundle's placed segments by seg_idx; `_persist_nuts`
+        builds every bundle's in one pass over the result (see there), and a
+        caller without one gets it derived here as before.
         """
         sel = w.plan.selected_topology_index
-        if sel < 0 or sel >= len(w.input.candidates):
+        # ONE read of the candidate pool: the `candidates` property returns a
+        # copy of every Topology on each access.
+        cands = w.input.candidates
+        if sel < 0 or sel >= len(cands):
             return 0
-        topo = w.input.candidates[sel]
+        topo = cands[sel]
         bid = w.input.original_bundle.id
-        ts_map = {ts.seg_idx: ts for ts in self.nuts_result.segments
-                  if ts.bundle_id == bid}
+        if ts_map is None:
+            ts_map = {ts.seg_idx: ts for ts in self.nuts_result.segments
+                      if ts.bundle_id == bid}
         bit_width = len(w.input.original_bundle.get_net_names())
         ct = buda.ConnTopology()
         ct.build(topo, self.fp)
@@ -1891,6 +1924,22 @@ class PersistMixin:
         # top-level blocks every cross-hierarchy bundle taps) writes its wide
         # JSON row once; every candidate still writes its cheap link rows.
         seen_busterms = set()
+        # Layer-only re-persist (#972): the dead-span escalation moves
+        # segments to other layers and nothing else, so after it hundreds of
+        # expanded instances differ from their last persist in the
+        # `seg_layers` field of the fingerprint ALONE.  The full rewrite
+        # below drops and re-inserts every row of such an instance (bundle,
+        # net and busterm links, the selected topology, its segments and
+        # seg-busterm annotations) to change `assigned_layer` on its
+        # selected candidate's segment rows.  When only that field moved,
+        # update those rows in place instead: same end rows (the other
+        # tables' rows are, by the fingerprint's own contract, what the
+        # rewrite would re-insert), and the routing rows the full path
+        # drops are dropped the same way (every selective site rewrites
+        # them right after).  `BUDA_PERSIST_FULL=1` keeps the rewrite for a
+        # study; `_persist_layer_only_n` counts the instances it served.
+        layer_only_ok = not os.environ.get("BUDA_PERSIST_FULL")
+        n_layer_only = 0
         n = 0
         for w in self.bundles:
             sel = w.plan.selected_topology_index
@@ -1901,6 +1950,15 @@ class PersistMixin:
             if hbid in expanded_to_template:        # genuine hier expanded instance
                 if use_selective and fp_now[hbid] == memo[hbid]:
                     n += 1                          # rows already identical
+                    continue
+                if (use_selective and layer_only_ok
+                        and self._fp_differs_in_layers_only(memo[hbid],
+                                                            fp_now[hbid])):
+                    self.bdb.clear_bundle_routing(bid)
+                    ci = self._selected_bdb_cand_index(bid, w, sel)
+                    self._persist_assigned_layers(bid, ci, w)
+                    n_layer_only += 1
+                    n += 1
                     continue
                 if use_selective:
                     self.bdb.clear_expanded_bundle(bid)
@@ -1926,7 +1984,22 @@ class PersistMixin:
                 self._persist_assigned_layers(bid, ci, w)
             n += 1
         self._persisted_plan_fp = fp_now
+        self._persist_layer_only_n = (getattr(self, "_persist_layer_only_n", 0)
+                                      + n_layer_only)
         return n
+
+    @staticmethod
+    def _fp_differs_in_layers_only(old_fp, new_fp):
+        """True when two _planner_persist_fp tuples differ in the assigned
+        layers (index 1) and in nothing else — the dead-span escalation's
+        signature, and the one change `_persist_assigned_layers` writes
+        whole."""
+        if len(old_fp) != len(new_fp) or len(old_fp) < 2:
+            return False
+        if old_fp[1] == new_fp[1]:
+            return False
+        return all(a == b for i, (a, b) in enumerate(zip(old_fp, new_fp))
+                   if i != 1)
 
     def _persist_normal_bundle(self, w):
         """Persist a single non-expanded bundle (is_replicated=0) and ALL of its

@@ -1,0 +1,74 @@
+# mock.tech.lef -- the mock PDK's metal stack as a LEF technology file, the
+# twin of stack.buda for the `import_lef_tech` path.  LEF states a layer's
+# DIRECTION, PITCH and WIDTH and nothing about which tracks a power grid
+# takes, so an import of this file yields ALL-SIGNAL patterns; stack.buda
+# carries the rails.  The two agree on direction and on the SIGNAL pitch of
+# every layer (test_mockpdk.py pins it): M2..M4 pitch 1.5 width 1,
+# M5/M6 pitch 3 width 2, M7 pitch 5 width 3.  Units: DATABASE MICRONS 1000,
+# one layout unit = one micron (mock.pdk `unit_um 1.0`).
+VERSION 5.8 ;
+BUSBITCHARS "[]" ;
+DIVIDERCHAR "/" ;
+UNITS
+  DATABASE MICRONS 1000 ;
+END UNITS
+
+LAYER M2
+  TYPE ROUTING ;
+  DIRECTION HORIZONTAL ;
+  PITCH 1.5 ;
+  WIDTH 1.0 ;
+  OFFSET 0.5 ;
+END M2
+LAYER V2
+  TYPE CUT ;
+END V2
+LAYER M3
+  TYPE ROUTING ;
+  DIRECTION VERTICAL ;
+  PITCH 1.5 ;
+  WIDTH 1.0 ;
+  OFFSET 0.5 ;
+END M3
+LAYER V3
+  TYPE CUT ;
+END V3
+LAYER M4
+  TYPE ROUTING ;
+  DIRECTION HORIZONTAL ;
+  PITCH 1.5 ;
+  WIDTH 1.0 ;
+  OFFSET 0.5 ;
+END M4
+LAYER V4
+  TYPE CUT ;
+END V4
+LAYER M5
+  TYPE ROUTING ;
+  DIRECTION VERTICAL ;
+  PITCH 3.0 ;
+  WIDTH 2.0 ;
+  OFFSET 1.0 ;
+END M5
+LAYER V5
+  TYPE CUT ;
+END V5
+LAYER M6
+  TYPE ROUTING ;
+  DIRECTION HORIZONTAL ;
+  PITCH 3.0 ;
+  WIDTH 2.0 ;
+  OFFSET 1.0 ;
+END M6
+LAYER V6
+  TYPE CUT ;
+END V6
+LAYER M7
+  TYPE ROUTING ;
+  DIRECTION VERTICAL ;
+  PITCH 5.0 ;
+  WIDTH 3.0 ;
+  OFFSET 1.5 ;
+END M7
+
+END LIBRARY

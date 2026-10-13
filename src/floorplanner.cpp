@@ -402,6 +402,10 @@ void FloorplannerEngine::write_bdb(BDB& db) const {
         cell_by_block[b] = name;
     }
 
+    // Existing components' boxes go in ONE batched write at the end:
+    // set_comp_bbox recomputes every net's HPWL per call, which made this
+    // O(blocks x nets) on a placed design (Codex P2 on #973, round 5).
+    std::vector<std::tuple<std::string,double,double,double,double>> boxes;
     for (const Block* b : ordered) {
         double w = b->x2 - b->x1;
         double h = b->y2 - b->y1;
@@ -410,13 +414,14 @@ void FloorplannerEngine::write_bdb(BDB& db) const {
         bool is_leaf = (has_children.count(b->name) == 0);
         db.add_cell(cell, w, h);
         if (exists[b->name]) {
-            db.set_comp_bbox(b->name, b->x1, b->y1, b->x2, b->y2);
+            boxes.emplace_back(b->name, b->x1, b->y1, b->x2, b->y2);
             if (!is_leaf)
                 db.set_comp_is_leaf(b->name, false);
         } else {
             db.add_comp(b->name, cell, parent, b->x1, b->y1, b->x2, b->y2, is_leaf);
         }
     }
+    if (!boxes.empty()) db.set_comp_bboxes(boxes);
 }
 
 double FloorplannerEngine::_snap(double v) const {
