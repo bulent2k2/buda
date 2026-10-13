@@ -567,4 +567,8 @@ private:
                          double pref_lo, double pref_hi) const;
 };
 
+// Study lever (BUDA_NUTS_JUNCTION_REACH=topdown): the session tells the engine
+// whether junction reach may apply (false for a design with bottom-up marks).
+void set_junction_reach_allowed(bool allowed);
+
 } // namespace buda

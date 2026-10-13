@@ -463,6 +463,17 @@ class RipupMixin:
                 w.plan.seg_layers = list(asn.seg_layers)
                 w.plan.seg_perp = list(asn.seg_perp)
 
+    def _sync_junction_reach(self):
+        """Tell the engine whether the junction-reach lever may apply:
+        BUDA_NUTS_JUNCTION_REACH=topdown means top-down designs only, and a
+        design carrying bottom-up marks (a template solved once and copied)
+        is the other kind of flow."""
+        try:
+            marked = bool(self.bdb is not None and self.bdb.bottom_up_cells())
+            buda.set_junction_reach_allowed(not marked)
+        except Exception:
+            pass
+
     def _run_nuts_internal(self, skip_tighten=False):
         """Solve abstract NUTS for the current plan WITHOUT the run_nuts
         command's reporting/persistence (nuts-log write, diagnostics, BDB
@@ -472,6 +483,7 @@ class RipupMixin:
         stage a only): the solve skips the WL-only tighten_pulls pass, whose
         overlap count is provably non-increasing — the trial metric is then
         an UPPER BOUND, so accepts stay sound (commits re-run full)."""
+        self._sync_junction_reach()
         nuts = buda.NUTSEngine(self.fp, self.layers)
         nuts.set_track_pitch(self._nuts_pitch)
         nuts.set_skip_tighten(skip_tighten)

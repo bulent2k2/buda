@@ -764,9 +764,20 @@ static void prune_unreachable_partner_windows(
 // that ends at the partner's CENTRE under-states the metal by half the
 // partner's width.  With the lever on the span end is the partner's far edge,
 // and the overlap checks, the healers and DetailedNUTS's reservations see it.
+static std::atomic<bool> g_junction_reach_allowed{true};
+void set_junction_reach_allowed(bool allowed) { g_junction_reach_allowed = allowed; }
 static bool junction_reach_on() {
-    static const bool on = [] { bool o = std::getenv("BUDA_NUTS_JUNCTION_REACH") != nullptr; if (o) std::cout << "[NUTS] junction reach ON\n"; return o; }();
-    return on;
+    // BUDA_NUTS_JUNCTION_REACH: unset = off; "topdown" = on unless the session
+    // says the design carries bottom-up marks (set_junction_reach_allowed);
+    // anything else = on.
+    static const int mode = [] {
+        const char* e = std::getenv("BUDA_NUTS_JUNCTION_REACH");
+        if (!e) return 0;
+        return std::string(e) == "topdown" ? 2 : 1;
+    }();
+    if (mode == 0) return false;
+    if (mode == 2) return g_junction_reach_allowed.load();
+    return true;
 }
 
 static void do_span_adjustments(
