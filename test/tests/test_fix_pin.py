@@ -200,7 +200,7 @@ def test_h_and_v_are_sugar_for_two_faces():
     ("fix_pin MAC east at 5", "lo..hi"),
     ("fix_pin MAC rect 3", "out of range"),
     ("fix_pin MAC east at 400..500", "admits no landing"),
-    ("fix_pin MAC east order index", "not supported yet"),
+    ("fix_pin MAC east order sideways", "takes index"),
 ])
 def test_a_bad_declaration_is_refused_loudly_and_changes_nothing(line, needle):
     s, _ = _session(*BASE)
@@ -994,3 +994,85 @@ def test_a_stored_layers_field_of_the_wrong_shape_is_unreadable(tmp_path):
                    '"has_window":false,"lo":0,"hi":0,"layers":[3]}},"selectors":[]}')
     s2, out = _session(f"open_bdb {path}")
     assert "unreadable" in out and not s2._pin_fixes
+
+
+# ── order (PR 2b) ────────────────────────────────────────────────────────────
+
+ORDER_FLOW = FLOW / "order.buda"
+
+
+def _order_lines(drop=()):
+    return [l.strip() for l in ORDER_FLOW.read_text().splitlines()
+            if l.strip() and not l.startswith("#")
+            and not l.startswith(("visualize", "dump_", "report_", "check_design"))
+            and not any(l.startswith(d) for d in drop)]
+
+
+def _tracks_by_bit(s, first_net):
+    """{bit: track} of the landing segment of the bundle whose first net
+    starts with `first_net` — the one with the most bits on the pin's side."""
+    bid = next(w.input.original_bundle.id for w in s.bundles
+               if w.input.original_bundle.get_net_names()[0].startswith(first_net))
+    segs = {}
+    for n in s.detailed_result.net_segments:
+        if n.bundle_id == bid:
+            segs.setdefault(n.seg_idx, {})[n.bit_index] = n.track_position
+    return segs
+
+
+def test_index_runs_bit0_low_and_rindex_runs_it_high():
+    s, _ = _session(*_order_lines())
+    up = next(iter(_tracks_by_bit(s, "up").values()))
+    dn = next(iter(_tracks_by_bit(s, "dn").values()))
+    assert [up[b] for b in sorted(up)] == sorted(up.values())          # ascending
+    assert [dn[b] for b in sorted(dn)] == sorted(dn.values(), reverse=True)
+
+
+def test_without_order_both_buses_run_the_same_way():
+    s, _ = _session(*_order_lines(drop=("fix_pin MAC.dn_in",)),
+                    "fix_pin MAC.dn_in west at 20..80")
+    dn = next(iter(_tracks_by_bit(s, "dn").values()))
+    assert [dn[b] for b in sorted(dn)] == sorted(dn.values())          # default LO_HI
+
+
+def test_a_straight_wire_between_opposite_orders_is_dropped_and_a_bend_reverses():
+    s, out = _session(*_order_lines())
+    assert "dropped 1 candidate(s) that join fixed pins of opposite order" in out
+    w = next(w for w in s.bundles
+             if w.input.original_bundle.get_net_names()[0].startswith("x_"))
+    assert all(not c.type.startswith("I_") for c in w.input.candidates)
+    legs = _tracks_by_bit(s, "x_")
+    ends = [t for t in legs.values() if len(t) == 4]
+    asc = [sorted(t, key=t.get) == sorted(t) for t in ends]
+    assert True in asc and False in asc, legs        # one leg ascending, one reversed
+
+
+def test_when_every_candidate_conflicts_the_pool_is_kept_and_reported():
+    pre = ["add_block A 0 0 100 100", "add_block B 100 0 200 100", *TECH,
+           "fix_pin A.o east order index", "fix_pin B.i west order rindex",
+           "add_bus x[4] A.o B.i", "run_bundler STRICT"]
+    s, out = _session(*pre, "generate_topologies")
+    assert "every candidate of bundle" in out and "opposite order" in out, out
+    assert s.bundles[0].input.candidates       # never stranded
+
+
+def test_the_order_flow_routes_clean():
+    rc, out = _run("order.buda")
+    assert rc == 0, out[-800:]
+    assert "Error:" not in out and "PIN_FIX" not in out, out[-800:]
+    assert out.count("Success: no violations found") >= 2, out[-1500:]
+
+
+def test_an_order_survives_the_checkpoint_and_a_bad_one_is_unreadable(tmp_path):
+    path = str(tmp_path / "ord.bdb")
+    s, _ = _session(f"open_bdb {path}", "add_block M 0 0 100 100",
+                    "fix_pin M west order rindex", "fix_pin M.t east order index")
+    s2, out = _session(f"open_bdb {path}")
+    assert s2._pin_fixes["M"]["order"] == "rindex", out
+    assert s2._pin_fix_sel["M"][("name", "t")]["order"] == "index"
+    assert "order rindex" in _say(s2, "dump_pin_fixes")
+    s2.bdb.meta_set("pin_fixes", '{"blocks":{"M":{"faces":8,"rect":-1,'
+                    '"has_window":false,"lo":0,"hi":0,"order":"sideways"}},'
+                    '"selectors":[]}')
+    s3, out3 = _session(f"open_bdb {path}")
+    assert "unreadable" in out3 and not s3._pin_fixes

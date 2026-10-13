@@ -1,0 +1,56 @@
+# fix_pin PR 2b — `order`: which end of a pin's window bit 0 lands at.
+#
+#   SRC (west) drives MAC with two 4-bit buses on MAC's west face, each into
+#   its own window (block-local y):
+#
+#     up_*  -> MAC.up_in  fix_pin MAC.up_in west at 120..180 order index
+#                         bit 0 at the LOWEST y of the bundle's tracks
+#     dn_*  -> MAC.dn_in  fix_pin MAC.dn_in west at 20..80   order rindex
+#                         bit 0 at the HIGHEST y (the bits run reversed)
+#
+#   LEFT and RIGHT are aligned, so the straight wire between them is the
+#   cheapest shape — but their pins want OPPOSITE orders, and a straight wire
+#   cannot reverse its bits:
+#
+#     x_*   -> RIGHT.x_in  fix_pin LEFT.x_out east order index
+#                          fix_pin RIGHT.x_in west order rindex
+#
+#   The straight candidate is dropped ('[PinFix] ... dropped N candidate(s)')
+#   and a bend takes over: each leg of a Z gets its own landing's order.
+#
+# Run:   bin/buda flow/pin_fix/order.buda          (viewer)
+#        bin/buda --no-viz flow/pin_fix/order.buda (headless)
+# Expect: the dropped-candidate note, check_design Success at both stages,
+#         and in the viewer's detailed view up_* ascending and dn_* descending
+#         along MAC's west face (the per-bit labels show it).
+
+add_block SRC   0   400 100 600
+add_block MAC   400 400 600 600
+add_block LEFT  0   100 100 200
+add_block RIGHT 400 100 500 200
+
+def_layer 4 M4 H TOP 0
+def_layer 5 M5 V TOP 0
+def_track_pattern 4 0 (SIGNAL 2 2)x60
+def_track_pattern 5 0 (SIGNAL 2 2)x60
+
+fix_pin MAC.up_in west at 120..180 order index
+fix_pin MAC.dn_in west at 20..80   order rindex
+fix_pin LEFT.x_out east order index
+fix_pin RIGHT.x_in west order rindex
+dump_pin_fixes
+
+add_bus up[4] SRC.o  MAC.up_in
+add_bus dn[4] SRC.o  MAC.dn_in
+add_bus x[4]  LEFT.x_out RIGHT.x_in
+
+run_bundler STRICT
+generate_topologies
+run_planner
+dump_topologies --conn
+run_nuts
+check_design
+run_detailed_nuts
+check_design
+report_wl
+visualize

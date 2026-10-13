@@ -63,6 +63,8 @@ def _declared(fix):
         parts.append(f"at {fix['lo']}..{fix['hi']}")
     if fix.get("layers"):
         parts.append("layer " + ",".join(fix["layers"]))
+    if fix.get("order"):
+        parts.append("order " + fix["order"])
     return " ".join(parts)
 
 
@@ -121,7 +123,8 @@ def _sel_store(session):
 def _fixkey(fix):
     return None if fix is None else (fix["faces"], fix["rect"], fix["has_window"],
                                      fix["lo"], fix["hi"],
-                                     tuple(fix.get("layers") or ()))
+                                     tuple(fix.get("layers") or ()),
+                                     fix.get("order") or "")
 
 
 def resolve_fix(session, block, pin_name):
@@ -321,6 +324,88 @@ def audit_pin_fix(session, w, topo):
     return out
 
 
+def has_order_fixes(session):
+    return (any(f.get("order") for f in session._pin_fixes.values())
+            or any(f.get("order") for d in _sel_store(session).values()
+                   for f in d.values()))
+
+
+def segment_orders(session, w, topo):
+    """{segment index: {'index'|'rindex'}} — the bit order each segment is held
+    to by the fixed pins it ENDS on (an end inside an admitted landing strip)."""
+    out = {}
+    if not has_order_fixes(session):
+        return out
+    segs = list(topo.segments)
+    strips = {}
+    for net in w.input.original_bundle.get_net_names():
+        pins = _net_pins_of(session, net)
+        if pins is None:
+            continue
+        for pin in [pins[0]] + list(pins[1]):
+            block, _, name = pin.rpartition(".")
+            fix = resolve_fix(session, block, name)
+            if fix is None or not fix.get("order") or not session.fp.has_block(block):
+                continue
+            key = (block, _fixkey(fix))
+            if key not in strips:
+                strips[key] = (fix["order"], _strips_with(session, block, fix))
+            order, rects = strips[key]
+            for i, sg in enumerate(segs):
+                for p in (sg.start, sg.end):
+                    if any(x1 <= p.x <= x2 and y1 <= p.y <= y2
+                           for (x1, y1, x2, y2, _f) in rects):
+                        out.setdefault(i, set()).add(order)
+    return out
+
+
+def filter_order_conflicts(session, w, cands):
+    """A straight segment cannot reverse its bits, so a candidate whose one
+    segment joins two landings of OPPOSITE order is dropped (a bend may differ:
+    each leg takes its landing's order).  Decided per candidate, at generation,
+    because only a candidate knows which landings share a segment.  When every
+    candidate conflicts the pool is kept and the conflict is reported — the bus
+    must never strand."""
+    if not has_order_fixes(session) or not cands:
+        return cands
+    keep = [c for c in cands
+            if not any(len(o) > 1 for o in segment_orders(session, w, c).values())]
+    if keep and len(keep) == len(cands):
+        return cands
+    bid = w.input.original_bundle.id
+    if not keep:
+        print(f"Warning: [PinFix] every candidate of bundle {bid} joins two fixed "
+              f"pins of opposite order on one straight segment; the pool is kept "
+              f"— give the pins the same order, or move a block so a bend fits")
+        return cands
+    print(f"[PinFix] bundle {bid}: dropped {len(cands) - len(keep)} candidate(s) "
+          f"that join fixed pins of opposite order on one straight segment "
+          f"(a straight wire cannot reverse its bits)")
+    return keep
+
+
+def apply_orders(session, bus_segs):
+    """Hand each landing segment its fixed bit order (BusSegment.bit_order is
+    per segment).  `index` lays bit 0 at the lowest coordinate along the face —
+    the perpendicular axis of the landing wire — which is LO_HI; `rindex` is
+    HI_LO.  Segments no order fix touches keep the run's own order."""
+    if not has_order_fixes(session):
+        return bus_segs
+    by_bid = {w.input.original_bundle.id: w for w in session.bundles}
+    cache = {}
+    for bs in bus_segs:
+        w = by_bid.get(bs.bundle_id)
+        if w is None or w.plan.selected_topology_index < 0:
+            continue
+        if bs.bundle_id not in cache:
+            topo = w.input.candidates[w.plan.selected_topology_index]
+            cache[bs.bundle_id] = segment_orders(session, w, topo)
+        orders = cache[bs.bundle_id].get(bs.seg_idx)
+        if orders and len(orders) == 1:
+            bs.bit_order = "LO_HI" if next(iter(orders)) == "index" else "HI_LO"
+    return bus_segs
+
+
 def set_gen_fixes(session, tg, w):
     """Point a generator at the bundle's effective fixes (no-op without selectors)."""
     m = bundle_fix_map(session, w.input.original_bundle.get_net_names())
@@ -454,7 +539,7 @@ def _cmd_fix_pin(session, cmd, args, cmd_line):
             print(f"[PinFix] {block}: no fix declared")
         return
 
-    faces, rect, window, layers = 0, -1, None, []
+    faces, rect, window, layers, order = 0, -1, None, [], ""
     i = 1
     while i < len(args):
         tok = args[i].lower()
@@ -495,7 +580,11 @@ def _cmd_fix_pin(session, cmd, args, cmd_line):
             layers = sorted(set(layers), key=layers.index)
             i += 1
         elif tok == "order":
-            print(f"Error: fix_pin: '{tok}' is not supported yet"); return
+            if i + 1 >= len(args) or args[i + 1].lower() not in ("index", "rindex"):
+                print("Error: fix_pin: 'order' takes index (bit 0 at the lowest "
+                      "coordinate along the face) or rindex (reversed)"); return
+            order = args[i + 1].lower()
+            i += 1
         else:
             print(f"Error: fix_pin: unknown token '{args[i]}'"); return
         i += 1
@@ -507,7 +596,7 @@ def _cmd_fix_pin(session, cmd, args, cmd_line):
               f"(block has {_rect_count(fp, block)} rect(s))"); return
     fix = {"faces": faces, "rect": rect, "has_window": window is not None,
            "lo": window[0] if window else 0, "hi": window[1] if window else 0,
-           "layers": layers}
+           "layers": layers, "order": order}
     if layers and _eff_faces(session, fix) < 0:
         axes, _u = _layer_axes(session, layers)
         print(f"Error: fix_pin {target}: layer {','.join(layers)} "
@@ -697,6 +786,7 @@ def _valid_fix(fx):
             and isinstance(fx.get("has_window"), bool)
             and 0 <= fx["faces"] <= 15                    # N|S|E|W mask, 0 = every face
             and fx["rect"] >= -1
+            and fx.get("order", "") in ("", "index", "rindex")
             and (fx.get("layers", []) == [] or (
                 isinstance(fx["layers"], list)
                 and all(isinstance(n, str) for n in fx["layers"])))
