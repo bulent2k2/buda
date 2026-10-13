@@ -464,15 +464,21 @@ class RipupMixin:
                 w.plan.seg_perp = list(asn.seg_perp)
 
     def _sync_junction_reach(self):
-        """Tell the engine whether the junction-reach lever may apply:
-        BUDA_NUTS_JUNCTION_REACH=topdown means top-down designs only, and a
-        design carrying bottom-up marks (a template solved once and copied)
-        is the other kind of flow."""
-        if os.environ.get('BUDA_NUTS_JUNCTION_REACH') != 'topdown':
+        """Tell the engine whether the junction-reach lever may apply.
+
+        The default (BUDA_NUTS_JUNCTION_REACH unset, or `topdown`) is
+        top-down designs only: a design carrying bottom-up marks (a template
+        solved once and copied) is the other kind of flow.  `0`/`off` turns
+        the lever off, read HERE on every command so a test or a driver can
+        flip it inside a process; `1` applies it to every design."""
+        mode = os.environ.get('BUDA_NUTS_JUNCTION_REACH', '')
+        if mode not in ('', 'topdown', '0', 'off'):
             return
         try:
-            marked = bool(self.bdb is not None and self.bdb.bottom_up_cells())
-            buda.set_junction_reach_allowed(not marked)
+            marked = (mode in ('', 'topdown') and self.bdb is not None
+                      and bool(self.bdb.bottom_up_cells()))
+            buda.set_junction_reach_allowed(
+                mode in ('', 'topdown') and not marked)
         except Exception:
             pass
 

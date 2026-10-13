@@ -952,7 +952,7 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
     def do_command(self, cmd_line):
         parts = _strip_inline_comment(cmd_line).strip().split()
         if not parts: return
-        # BUDA_NUTS_JUNCTION_REACH=topdown: tell the engine, before every
+        # Junction reach (BUDA_NUTS_JUNCTION_REACH, default top-down only): tell the engine, before every
         # command, whether this design carries bottom-up marks (the one choke
         # point every NUTS path runs under, healers included).
         self._sync_junction_reach()

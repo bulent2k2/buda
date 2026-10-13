@@ -480,3 +480,16 @@ def pytest_collection_modifyitems(config, items):
     for item in items:
         if "needs_flock" in item.keywords:
             item.add_marker(skip)
+
+
+@pytest.fixture
+def no_junction_reach(monkeypatch):
+    """Run the test with the junction-reach lever OFF (BUDA_NUTS_JUNCTION_REACH=0).
+
+    The lever is on by default for top-down designs (it ends a stub at its
+    perpendicular partner's far edge, not its centre).  A fixture that builds
+    one exact engine mechanism -- a cross-layer corner, a cull shape, a pull
+    breakpoint, a dogleg's jog -- from the pre-lever spans is testing THAT
+    mechanism, and the longer spans change the geometry it is built on.  The
+    session reads the variable on every command, so this works in-process."""
+    monkeypatch.setenv("BUDA_NUTS_JUNCTION_REACH", "0")

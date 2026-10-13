@@ -1,3 +1,19 @@
+`BUDA_HEAL_SHORTS=0` turns it off.
+
+**Junction reach (on by default for top-down designs):** the abstract span of
+a stub that meets a perpendicular partner ends at the partner's far edge
+(`track ± width/2`) instead of its centre, so every partner bit is reachable,
+and DetailedNUTS treats that end as the junction so bits snap to their own
+vias. `BUDA_NUTS_JUNCTION_REACH` unset or `topdown` applies it unless the
+design carries bottom-up marks (a template solved once and copied: the lever
+lost bits there); `0`/`off` restores the earlier spans; `1` applies it to every
+design. It costs abstract wirelength (+4.85 % on the corpus, detailed +0.01 %)
+and does not touch the shorts of a bottom-up round. A second study switch,
+`BUDA_RR_WIDTH_GATE_LOCKED=1` (the ripup width gate also runs on bottom-up
+sessions), is off by default and byte-identical when unset. See
+[Detailed NUTS](../detailed_nuts.md) step 6b and the
+[short study](../internal/cross_bundle_shorts_study.md).
+
 # BUDA Script Reference — Stages 4 & 9 — Track assignment (NUTS)
 
 Abstract bus-level track placement and bit-level detailed placement, plus the feedback passes: `run_nuts`, `run_nuts_on_layer`, `run_detailed_nuts`, `ripup_reroute`, `negotiate_congestion`, `refine_selection`.

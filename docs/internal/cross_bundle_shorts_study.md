@@ -405,3 +405,28 @@ numbers reproducible, and raised points inside the levers.  What each came to:
 - **Not tested before:** a two-bit reach test now exists
   (`test_reach_places_a_two_bit_bus_clear_of_a_stretching_partner`).  Nothing
   tests the NDR comparison, the `topdown` session sync or the width gate.
+
+### Made the default for top-down designs (2026-10-13)
+
+The owner decided that `BUDA_NUTS_JUNCTION_REACH=topdown` becomes the default
+and that the abstract-WL growth is acceptable.  Unset (or empty) now means
+`topdown`; `0`/`off` is the pre-lever spans; `1` is every design, as before.
+The corpus numbers are the ones above (the `topdown` sweep against the old
+default on the same build: 5 better / 0 worse / 51 unchanged, abstract WL
++4.85 %, detailed WL +0.01 %), so no further sweep was needed; the QoR
+snapshot `qor/qor_table.md` is refreshed by the nightly's own PR.
+
+What the flip cost, found by running the fast tier with it on:
+- **Seven fixtures pinned the pre-lever spans** and failed: four exact-mechanism
+  tests (`nuts_corner_touch`'s cross-layer corner, the admit-then-cull shape,
+  b44's pull breakpoint, the dogleg's jog) and one wirelength pin
+  (`b3_bus_023` abstract 7765 -> 7770).  The mechanism tests now run with the
+  lever off through the `no_junction_reach` fixture (the session reads the
+  variable on every command, so it works in-process); the wirelength pin moved.
+- **`flow/nuts_corner_touch.buda` is a real, if small, regression.**  A
+  healerless micro-fixture outside the corpus, it ended 0 overlaps / 0
+  unplaced and now ends 1 overlap / 4 unplaced: the far-edge spans change the
+  cross-layer corner the fixture is built on.  The corpus (5/0/51) cannot see
+  it, and I did not chase it.
+- **Nothing here changes the converge repro**: its blind round is bottom-up,
+  so the four motivating shorts stay (see the review section above).

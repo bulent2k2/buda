@@ -100,11 +100,11 @@ def test_hier_flow_numbers_match_the_flows_own_header(tmp_path):
 def test_wirelength_is_the_reports_not_a_raw_sum_when_tracks_are_shared(tmp_path):
     """`big2/b3_bus_023` places same-bundle spans on shared tracks, so the
     metal on the die is LESS than the sum of the records: the report unions
-    them (7768 detailed / 7765 abstract) where a raw sum says 8426 / 8424.
+    them (7768 detailed / 7770 abstract) where a raw sum says 8426 detailed and more abstract.
     The JSON must carry the report's figure."""
     _, meta, _ = _render(tmp_path, _ROOT / "flow/big_data_test/big2/b3_bus_023.buda")
     assert meta["detailed_wl"] == 7768, meta["detailed_wl"]
-    assert meta["abstract_wl"] == 7765, meta["abstract_wl"]
+    assert meta["abstract_wl"] == 7770, meta["abstract_wl"]
     assert meta["abstract_unplaced"] == 0
 
 
