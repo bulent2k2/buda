@@ -32,6 +32,7 @@ selects `tx[3]` / `tx_3`) > longest `prefix*` > the block-level fix.  Two nets
 landing on one block under DIFFERENT effective fixes cannot share a bundle
 (a bundle lands on one face), so the bundler splits them, loudly.
 """
+import json
 import re
 
 # BUDA-1922 (no candidate lands on a fixed pin) is emitted by the topology
@@ -242,7 +243,7 @@ def _strips_with(session, block, fix):
             _apply(session, block, prev)
 
 
-def cmd_fix_pin(session, cmd, args, cmd_line):
+def _cmd_fix_pin(session, cmd, args, cmd_line):
     # fix_pin <block>[.*] [north|south|east|west|H|V ...] [rect <n>] [at <lo>..<hi>]
     # fix_pin <block> off
     if not args:
@@ -421,6 +422,88 @@ def cmd_dump_pin_fixes(session, cmd, args, cmd_line):
             for (x1, y1, x2, y2, face) in session.fp.pin_fix_strips(block):
                 name = {1: "north", 2: "south", 4: "east", 8: "west"}.get(face, "?")
                 print(f"    {name:5s} strip [{x1},{y1} .. {x2},{y2}]")
+
+
+_META = "pin_fixes"
+
+
+def _snapshot(session):
+    sels = [[b, kind, key, fx] for b, d in sorted(_sel_store(session).items())
+            for (kind, key), fx in sorted(d.items())]
+    return {"blocks": {b: fx for b, fx in sorted(session._pin_fixes.items())},
+            "selectors": sels}
+
+
+def persist(session):
+    """ONE meta row (`pin_fixes`, JSON), like the layer reserves: a fix is a
+    small declaration with a selector list, which no existing table holds."""
+    if getattr(session, "bdb", None) is None:
+        return
+    snap = _snapshot(session)
+    session.bdb.meta_set(_META, json.dumps(snap, sort_keys=True)
+                         if snap["blocks"] or snap["selectors"] else "")
+
+
+def cmd_fix_pin(session, cmd, args, cmd_line):
+    _cmd_fix_pin(session, cmd, args, cmd_line)
+    persist(session)
+
+
+def restore(session):
+    """open_bdb: fixes the BDB holds come back under the typed-wins contract (a
+    declaration typed in this session, before or after the open, outranks the
+    stored one); a previous BDB's restored entries drop first.  Entries typed
+    BEFORE the open had no BDB to write to, so they are stored now."""
+    if getattr(session, "bdb", None) is None:
+        return 0
+    sels = _sel_store(session)
+    fixes = session._pin_fixes
+    for b in list(getattr(session, "_pin_fix_restored_blocks", ())):
+        if fixes.pop(b, None) is not None:
+            session.fp.clear_pin_fix(b)
+    for b, kind, key in list(getattr(session, "_pin_fix_restored_sels", ())):
+        sels.get(b, {}).pop((kind, key), None)
+        if b in sels and not sels[b]:
+            del sels[b]
+    session._pin_fix_restored_blocks, session._pin_fix_restored_sels = set(), set()
+    raw = session.bdb.meta_get(_META, "")
+    n = 0
+    if raw:
+        try:
+            snap = json.loads(raw)
+            for b, fx in snap.get("blocks", {}).items():
+                if b not in fixes:
+                    fixes[b] = fx
+                    _apply(session, b, fx)
+                    session._pin_fix_restored_blocks.add(b)
+                    n += 1
+            for b, kind, key, fx in snap.get("selectors", []):
+                if (kind, key) not in sels.get(b, {}):
+                    sels.setdefault(b, {})[(kind, key)] = fx
+                    session._pin_fix_restored_sels.add((b, kind, key))
+                    n += 1
+        except (ValueError, KeyError, TypeError) as e:
+            print(f"Warning: stored pin fixes unreadable ({e}); ignored")
+    for b in set(session._pin_fix_restored_blocks) | {k[0] for k in session._pin_fix_restored_sels}:
+        revalidate(session, b)
+    if n:
+        print(f"[PinFix] restored {n} persisted fix declaration(s)")
+    persist(session)
+    return n
+
+
+def restamp_bundles(session):
+    """After load_pipeline: restored candidates carry no per-bundle map (it is
+    not stored per candidate); stamp each from the restored selectors."""
+    if not _sel_store(session):
+        return
+    for w in session.bundles:
+        m = bundle_fix_map(session, w.input.original_bundle.get_net_names())
+        if m is not None:
+            cands = list(w.input.candidates)     # copies: stamp, then assign back
+            for c in cands:
+                c.block_fixes = m
+            w.input.candidates = cands
 
 
 COMMANDS = {

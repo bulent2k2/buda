@@ -203,6 +203,9 @@ def cmd_open_bdb(session, cmd, args, cmd_line):
     # the restore, keeps the same precedence — what this session declared
     # wins and is what gets stored.
     session._flush_grid_journal()
+    # Fixed pins (fix_pin) persisted in this BDB come back, typed-wins.
+    from buda_cmds import pin_fix_cmds
+    pin_fix_cmds.restore(session)
 
 
 def cmd_set_import_scale(session, cmd, args, cmd_line):
@@ -1143,6 +1146,8 @@ def cmd_load_pipeline(session, cmd, args, cmd_line):
     session._persisted_plan_fp = None
     session._load_pipeline_from_bdb(
         expanded=bool(args) and args[0] == "expanded")
+    from buda_cmds import pin_fix_cmds
+    pin_fix_cmds.restamp_bundles(session)
 
 
 def _resolve_layer_id(session, tok):

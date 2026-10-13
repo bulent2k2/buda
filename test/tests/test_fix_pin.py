@@ -622,3 +622,63 @@ def test_conn_dump_of_a_bundle_with_no_candidates_does_not_raise():
     assert not list(s.bundles[0].input.candidates)      # nothing generated yet
     out = _say(s, "dump_topologies --conn")
     assert "Traceback" not in out and "IndexError" not in out
+
+
+# ── persistence ──────────────────────────────────────────────────────────────
+
+def _bdb_session(tmp_path, *cmds):
+    path = str(tmp_path / "pf.bdb")
+    return _session(f"open_bdb {path}", *cmds), path
+
+
+def test_fixes_and_selectors_survive_reopening_the_bdb(tmp_path):
+    (s, _), path = _bdb_session(tmp_path, "add_block M 0 0 100 100",
+                                "fix_pin M west", "fix_pin M.tx north at 10..20",
+                                "fix_pin M.d* south")
+    s.bdb.save_bdb(path) if hasattr(s.bdb, "save_bdb") else None
+    s2, out = _session(f"open_bdb {path}")
+    assert "restored 3 persisted fix" in out, out
+    assert s2._pin_fixes["M"]["faces"] == W
+    assert s2._pin_fix_sel["M"][("name", "tx")]["faces"] == N
+    assert s2._pin_fix_sel["M"][("name", "tx")]["has_window"]
+    assert s2._pin_fix_sel["M"][("prefix", "d")]["faces"] == S
+    assert s2.fp.has_pin_fix("M")
+
+
+def test_a_typed_fix_outranks_a_stored_one_and_off_is_stored(tmp_path):
+    (s, _), path = _bdb_session(tmp_path, "add_block M 0 0 100 100", "fix_pin M west")
+    s2, _ = _session("fix_pin M east", f"open_bdb {path}")
+    assert s2._pin_fixes["M"]["faces"] == E
+    s3, _ = _session(f"open_bdb {path}", "fix_pin M off")
+    s4, out4 = _session(f"open_bdb {path}")
+    assert "M" not in s4._pin_fixes
+
+
+def test_restored_selectors_restamp_loaded_candidates(tmp_path):
+    (s, _), path = _bdb_session(
+        tmp_path, "add_block S 0 400 100 600", "add_block M 400 400 600 600", *TECH,
+        "fix_pin M.hi_in north", "add_bus hi[4] S.o M.hi_in", "bdb_net_mode on",
+        "run_bundler STRICT", "generate_topologies", "run_planner")
+    s2, _ = _session("add_block S 0 400 100 600", "add_block M 400 400 600 600", *TECH,
+                     f"open_bdb {path}", "add_bus hi[4] S.o M.hi_in",
+                     "load_pipeline")
+    assert s2.bundles
+    t = s2.bundles[0].input.candidates[0]
+    assert t.has_block_fixes and t.block_fixes["M"][0] == N
+
+
+def test_persist_flows_build_then_resume_from_the_checkpoint(tmp_path):
+    import shutil
+    for n in ("persist_build.buda", "persist_resume.buda"):
+        shutil.copy(FLOW / n, tmp_path / n)
+    outs = []
+    for n in ("persist_build.buda", "persist_resume.buda"):
+        r = subprocess.run([sys.executable, str(_ROOT / "src" / "buda_cli.py"),
+                            "--no-viz", str(tmp_path / n)],
+                           capture_output=True, text=True, env=buda_env(_ROOT),
+                           cwd=str(_ROOT))
+        assert r.returncode == 0, r.stdout + r.stderr
+        outs.append(r.stdout)
+    assert "restored 3 persisted fix" in outs[1], outs[1]
+    assert "Error:" not in outs[1]
+    assert outs[1].count("Success: no violations found.") == 3, outs[1]
