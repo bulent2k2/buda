@@ -1555,3 +1555,34 @@ def test_an_instance_block_fix_on_a_replicated_template_is_refused_too():
                        "\nfix_pin cell:pipe_cell.out east\nfix_pin proc_i/pb_i south"))
     _s, out = _run_flow_text(text)
     assert "INCONSISTENTLY" in out and out.endswith("[exit]"), out[-600:]
+
+
+def test_a_turned_replica_with_composed_tokens_is_congruent_with_its_template():
+    """P2 (#992): a cell fix reads as different PLACED faces on a turned
+    occurrence; congruence compares the declarations, and the expansion's
+    transform accounts for the turn."""
+    text = _flow_text(
+        "hier_cell_local.buda",
+        ("\nderive_busterms 1",
+         "\nrotate_comp proc_j 180\nrotate_comp proc_j/pa_i 180\n"
+         "rotate_comp proc_j/pb_i 180\nrotate_comp proc_j/pc_i 180\nderive_busterms 1"))
+    s, out = _run_flow_text(text)
+    assert "INCONSISTENTLY" not in out and "Error:" not in out, out[-600:]
+    assert out.count("Success: no violations found") >= 2, out[-800:]
+    got = {w.input.original_bundle.get_net_names()[0]:
+           {b.rsplit("/", 1)[-1]: v[0] for b, v in dict(w.input.candidates[0].block_fixes).items()}
+           for w in s.bundles}
+    assert got["pa_pb_i_0"]["pb_i"] == N and got["pa_pb_j_0"]["pb_i"] == S
+
+
+def test_a_layer_declared_after_the_instances_narrows_a_restored_cell_fix(tmp_path):
+    """P2 (#992): a restored cell fix naming a layer projects un-narrowed until
+    the layer exists; declaring it must re-read every projected instance."""
+    db = tmp_path / "c.bdb"
+    pre = [f"open_bdb {db}", "add_cell k 100 100", "add_inst a k - 0 0", *TECH,
+           "fix_pin cell:k layer M4"]
+    _session(*pre)
+    s, _ = _session(f"open_bdb {db}", "add_blocks_from_bdb 0")
+    assert {st[4] for st in s.fp.pin_fix_strips("a")} == {N, S, E, W}   # layer unknown yet
+    _say(s, "def_layer 4 M4 H TOP 0")
+    assert {st[4] for st in s.fp.pin_fix_strips("a")} == {E, W}

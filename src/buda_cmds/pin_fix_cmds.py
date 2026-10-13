@@ -140,6 +140,7 @@ def reapply_layer_fixes(session):
             del _sel_store(session)[block]
     if dropped:
         persist(session)
+    resync_cell_fixes(session)      # projected instances re-read their (now narrowed) cell fix
 
 
 def _apply(session, block, fix, fp=None):
@@ -395,7 +396,7 @@ def _placed(session, fx, comp):
     return t
 
 
-def resolve_fix(session, block, pin_name, local=False):
+def _resolve(session, block, pin_name, local=False):
     """The effective fix for ONE pin of an owner (None = unfixed), as it reads
     in the placed frame.  `block` is the owner PATH (a flat block name, or a
     hierarchical instance path); `local` additionally lets the owner's last
@@ -415,10 +416,10 @@ def resolve_fix(session, block, pin_name, local=False):
     for k in keys:
         hit = _match_sel(sels.get(k), pin_name)
         if hit is not None:
-            return hit
+            return hit, (k, _fixkey(hit))
     for k in keys:
         if k in fixes:
-            return fixes[k]
+            return fixes[k], (k, _fixkey(fixes[k]))
     if any(is_cell_key(k) for k in fixes) or any(is_cell_key(k) for k in sels):
         comp = _comps(session).get(block)
         if comp is not None:
@@ -427,8 +428,13 @@ def resolve_fix(session, block, pin_name, local=False):
             if hit is None:
                 hit = fixes.get(ck)
             if hit is not None:
-                return _placed(session, hit, comp)
-    return None
+                return _placed(session, hit, comp), (ck, _fixkey(hit))
+    return None, None
+
+
+def resolve_fix(session, block, pin_name, local=False):
+    """The effective fix for ONE pin (see `_resolve`), as placed."""
+    return _resolve(session, block, pin_name, local)[0]
 
 
 def _owner_has_fixes(session, path, local):
@@ -496,7 +502,7 @@ def _any_fixes(session):
     return bool(session._pin_fixes or _sel_store(session))
 
 
-def net_fix_signature(session, net, local=False, names_local=None):
+def net_fix_signature(session, net, local=False, names_local=None, ident=False):
     """((frame block, fixkey), ...) over the blocks this net touches that
     resolve to any fix — two nets with different signatures cannot share a
     bundle.  `local` is how names are RESOLVED (a local name may match a
@@ -512,7 +518,8 @@ def net_fix_signature(session, net, local=False, names_local=None):
     for pin in [drv] + list(rcvs):
         path, _, name = pin.rpartition(".")
         if _owner_has_fixes(session, path, local):
-            sig[frame_block(path, nl)] = _fixkey(resolve_fix(session, path, name, local))
+            fx, src = _resolve(session, path, name, local)
+            sig[frame_block(path, nl)] = (src if ident else _fixkey(fx)) if fx is not None else None
     return tuple(sorted(sig.items(), key=lambda kv: kv[0]))
 
 
@@ -828,18 +835,18 @@ def stamp_expanded(session, w):
     w.input.candidates = cands
 
 
-def _net_fix_map(session, net, local=False):
-    return {blk: key for blk, key in net_fix_signature(session, net, local)}
+def _net_fix_map(session, net, local=False, ident=False):
+    return {blk: key for blk, key in net_fix_signature(session, net, local, None, ident)}
 
 
-def _partition_idx(session, nets, local=False):
+def _partition_idx(session, nets, local=False, ident=False):
     """Greedy partition of a bundle's nets into parts whose per-block fixes do
     not CONFLICT: [(merged {block: key}, [net indices])].  Nets landing on
     different fixed blocks share a part (one map can hold both); only
     differing resolutions at a block they share split."""
     parts = []
     for i, n in enumerate(nets):
-        m = _net_fix_map(session, n, local)
+        m = _net_fix_map(session, n, local, ident)
         for merged, members in parts:
             if all(merged.get(b, k) == k for b, k in m.items()):
                 merged.update(m)
@@ -931,10 +938,13 @@ def split_hbundles_by_fix(session, raw_bundles):
 
     def _classes(b):
         """[(sorted {block: fixkey}, [net indices])]: what each part lands on,
-        so occurrences are congruent only when they resolve to the same FIXES
-        as well as the same bits."""
+        so occurrences are congruent only when they resolve to the same
+        DECLARATIONS as well as the same bits.  The declaration, not its placed
+        result: a cell-level fix legitimately reads as different faces on a
+        turned occurrence, which the expansion's transform accounts for."""
         return [(tuple(sorted(g.items(), key=lambda kv: kv[0])), idxs) for g, idxs in
-                _partition_idx(session, list(b.get_net_names()), bool(b.cell_context))]
+                _partition_idx(session, list(b.get_net_names()),
+                               bool(b.cell_context), ident=True)]
 
     def _split_one(b, classes):
         classes = [idxs for _g, idxs in classes]
