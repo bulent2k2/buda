@@ -968,7 +968,7 @@ def split_hbundles_by_fix(session, raw_bundles):
     if not _any_fixes(session):
         return raw_bundles
     import sys
-    from buda_cmds.bundling_cmds import _fanin_core
+    from buda_cmds.bundling_cmds import _fanin_core, _fanout_core
     for b in raw_bundles:
         _refuse_conflicting_nets(session, b.get_net_names(), bool(b.cell_context))
     counter = [max((b.id for b in raw_bundles), default=0)]
@@ -994,7 +994,8 @@ def split_hbundles_by_fix(session, raw_bundles):
         nets = list(b.get_net_names())
         drvs = list(b.net_drivers)
         rcvs = [list(r) for r in b.net_receivers]
-        fanin = bool(drvs) and len(drvs) == len(nets)
+        fanout = b.reason.startswith('FANOUT:') and len(drvs) == len(nets)
+        fanin = bool(drvs) and len(drvs) == len(nets) and not fanout
         sizes = "+".join(str(len(i)) for i in classes)
         print(f"[PinFix] split hbundle {b.id} ({len(nets)} bits) into "
               f"{len(classes)} fix-uniform part(s) ({sizes}): its nets land on "
@@ -1005,7 +1006,17 @@ def split_hbundles_by_fix(session, raw_bundles):
             nb = session._clone_hbundle_with_id(b, b.id if k == 1 else _new_id())
             nb.net_names = [nets[i] for i in idxs]
             suffix = f"|PINFIX:{k}"
-            if fanin:
+            if fanout:
+                pd = [drvs[i] for i in idxs]
+                pr = [rcvs[i] for i in idxs]
+                nb.net_drivers = pd
+                nb.net_receivers = pr
+                core, root, leaves = _fanout_core(pd, pr)
+                nb.reason = (core if core else b.reason) + suffix
+                if core and b.cell_context and b.entry_busterm_ids:
+                    nb.entry_busterm_ids = ["bt:" + root]
+                    nb.exit_busterm_ids = ["bt:" + r for r in leaves]
+            elif fanin:
                 pd = [drvs[i] for i in idxs]
                 pr = [rcvs[i] for i in idxs]
                 nb.net_drivers = pd

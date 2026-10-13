@@ -1714,3 +1714,31 @@ def test_opening_a_bdb_resyncs_blocks_projected_before_it(tmp_path):
     assert s.fp.pin_fix_strips("a") == []
     _say(s, f"open_bdb {d1}")
     assert [st[4] for st in s.fp.pin_fix_strips("a")] == [W]
+
+
+def test_editing_an_expanded_bundle_sees_a_local_block_level_fix():
+    """P2 (#992): the edit session's empty topology read a local-name BLOCK-level
+    declaration as nothing, since only selectors forced the absolute map."""
+    text = _flow_text("hier_cell_local.buda",
+                      ("\nfix_pin cell:pipe_cell.out east",
+                       "\nfix_pin cell:pipe_cell.out east\nfix_pin pb_i south"))
+    s, out = _run_flow_text(text)
+    assert "Error:" not in out, out[-600:]
+    w = next(w for w in s.bundles
+             if w.input.original_bundle.get_net_names()[0].startswith("pa_pb_i"))
+    _say(s, f"edit_topology {w.input.original_bundle.id} new")
+    fm = dict(s._edit_topo.block_fixes)
+    assert {v[0] for b, v in fm.items() if b.endswith("pb_i")} == {S}, fm
+    _say(s, "edit_abort")
+
+
+def test_a_divergent_fixed_pin_split_stays_a_fan_out():
+    """P2 (#992): a split fan-out rides net_drivers like a fan-in, and was rebuilt
+    as FANIN: rooted at a receiver."""
+    text = _flow_text("hier_pins.buda",
+                      ("run_hier_bundler depth 0", "run_hier_bundler depth 0 DIVERGENT"))
+    s, out = _run_flow_text(text)
+    assert "[PinFix] split hbundle" in out, out[-800:]
+    reasons = [w.input.original_bundle.reason for w in s.bundles]
+    assert any(r.startswith("FANOUT:") for r in reasons), reasons
+    assert not any(r.startswith("FANIN:") for r in reasons), reasons
