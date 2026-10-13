@@ -317,7 +317,9 @@ class ReportsMixin:
 
     def _dump_conn_detail(self, w, cand_idx, fp=None):
         import buda
-        with buda.BlockFixScope(w.input.candidates[cand_idx]):
+        cands = w.input.candidates
+        topo = cands[cand_idx] if 0 <= cand_idx < len(cands) else None
+        with buda.BlockFixScope(topo):
             return self._dump_conn_detail_impl(w, cand_idx, fp)
 
     def _dump_conn_detail_impl(self, w, cand_idx, fp=None):

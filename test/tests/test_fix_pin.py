@@ -613,3 +613,12 @@ def test_public_topology_helpers_read_the_topologys_own_fixes():
     buda.add_mst_teg_attachments(topo, s.fp, 4, 5)
     after = [(g.start.x, g.start.y, g.end.x, g.end.y) for g in topo.segments]
     assert after == before        # MAC is THRU under its own map: nothing to attach
+
+
+def test_conn_dump_of_a_bundle_with_no_candidates_does_not_raise():
+    """Codex on #983: the scope wrapper indexed candidates before the bounds check."""
+    s, _ = _session("add_block A 0 0 100 100", "add_block B 400 0 500 100", *TECH,
+                    "add_bus b[2] A.o B.i", "run_bundler STRICT")
+    assert not list(s.bundles[0].input.candidates)      # nothing generated yet
+    out = _say(s, "dump_topologies --conn")
+    assert "Traceback" not in out and "IndexError" not in out
