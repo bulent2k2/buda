@@ -873,6 +873,9 @@ def test_a_malformed_nested_record_leaves_the_session_untouched(tmp_path):
     cases = ['{"blocks":{},"selectors":[["M","name","tx",null]]}',
              '{"blocks":{"A":%s,"B":{"faces":"x"}},"selectors":[]}' % json.dumps(good),
              '{"blocks":[],"selectors":{}}',
+             '{"blocks":{"M":{"faces":16,"rect":-1,"has_window":false,"lo":0,"hi":0}},"selectors":[]}',
+             '{"blocks":{"M":{"faces":8,"rect":-2,"has_window":false,"lo":0,"hi":0}},"selectors":[]}',
+             '{"blocks":{"M":{"faces":8,"rect":-1,"has_window":true,"lo":9,"hi":9}},"selectors":[]}',
              '{"blocks":{"M":{"faces":100000000000000000000,"rect":-1,'
              '"has_window":false,"lo":0,"hi":0}},"selectors":[]}']
     for i, bad in enumerate(cases):

@@ -503,7 +503,10 @@ def _valid_fix(fx):
             and all(isinstance(fx.get(k), int) and not isinstance(fx.get(k), bool)
                     and -2**31 <= fx[k] < 2**31      # the binding takes native ints
                     for k in ("faces", "rect", "lo", "hi"))
-            and isinstance(fx.get("has_window"), bool))
+            and isinstance(fx.get("has_window"), bool)
+            and 0 <= fx["faces"] <= 15                    # N|S|E|W mask, 0 = every face
+            and fx["rect"] >= -1
+            and (fx["lo"] < fx["hi"] if fx["has_window"] else True))
 
 
 def _validate_snapshot(snap):
