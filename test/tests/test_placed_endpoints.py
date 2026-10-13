@@ -84,6 +84,20 @@ def _solve(on):
     return s
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _pre_lever_spans():
+    """This file tests the placed-endpoints knob on the geometry where
+    tighten_spans_to_reach ends a span EXACTLY on the partner's track.  Junction
+    reach (on by default for top-down designs) ends it at the partner's far
+    edge instead, so the module pins the earlier spans.  Autouse + module scope
+    runs before the `off`/`on` solves below."""
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("BUDA_NUTS_JUNCTION_REACH", "0")
+        buda.set_junction_reach_allowed(False)
+        yield
+    buda.set_junction_reach_allowed(True)
+
+
 @pytest.fixture(scope="module")
 def off():
     return _solve(False)

@@ -78,7 +78,7 @@ def _run_bighalf(gate):
 
 
 @pytest.mark.mid
-def test_bighalf_dead_span_opens_are_largely_gone_by_default():
+def test_bighalf_dead_span_opens_are_largely_gone_by_default(no_junction_reach):
     """bigHalf's no-rr dead-span opens are now mostly fixed BEFORE this gate.
 
     History: the gate was measured escalating bigHalf's dead-span LOW stubs
