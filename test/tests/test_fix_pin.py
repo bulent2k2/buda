@@ -1742,3 +1742,37 @@ def test_a_divergent_fixed_pin_split_stays_a_fan_out():
     reasons = [w.input.original_bundle.reason for w in s.bundles]
     assert any(r.startswith("FANOUT:") for r in reasons), reasons
     assert not any(r.startswith("FANIN:") for r in reasons), reasons
+
+
+def test_a_cell_fix_is_revalidated_when_the_cell_shrinks_before_projection():
+    """P2 (#992): a window valid at declaration, then `resize_cell` — the fix was
+    applied unchecked, admitted no strip, and the pin read as unrestricted."""
+    text = _flow_text("hier_cell.buda",
+                      ("\nderive_busterms 0", "\nresize_cell mac_cell 100 10\nderive_busterms 0"))
+    s, out = _run_flow_text(text)
+    assert "fix_pin cell:mac_cell" in out and "is dropped" in out, out[-800:]
+    assert "cell:mac_cell" not in s._pin_fixes
+
+
+def test_a_container_endpoint_keeps_its_block_fix_beside_a_selector():
+    """P2 (#992): an imported net's index held leaf pins only, so a bundle landing
+    on a container read no fix for it once any selector made the map active."""
+    from types import SimpleNamespace as NS
+
+    class _Bdb:
+        def all_components(self):
+            return [NS(id=1, name="drv", is_leaf=True),
+                    NS(id=2, name="box", is_leaf=False),
+                    NS(id=3, name="box/leaf", is_leaf=True)]
+
+        def all_nets(self):
+            return [NS(id=1, name="n0")]
+
+        def all_pins(self):
+            return [NS(comp_id=1, net_id=1, pin_name="o", dir="OUTPUT"),
+                    NS(comp_id=2, net_id=1, pin_name="i", dir="INPUT"),
+                    NS(comp_id=3, net_id=1, pin_name="i", dir="INPUT")]
+
+    sess = NS(bdb=_Bdb(), _cmd_seq=1)
+    drv, rcvs = pin_fix_cmds._bdb_net_index(sess)["n0"]
+    assert drv == "drv.o" and set(rcvs) == {"box/leaf.i", "box.i"}, (drv, rcvs)

@@ -261,6 +261,18 @@ def apply_cell_fix(session, fp, name, comp):
     fix = session._pin_fixes.get(key)
     if fix is None:
         return
+    # the declaration is judged on the cell's CURRENT footprint, once per command:
+    # a later resize_cell / set_cell_rects may have left it admitting no landing
+    seq = getattr(session, "_cmd_seq", 0)
+    chk = session.__dict__.get("_cellfix_checked")
+    if chk is None or chk[0] != seq:
+        chk = session.__dict__["_cellfix_checked"] = (seq, set())
+    if key not in chk[1]:
+        chk[1].add(key)
+        revalidate(session, key)
+        fix = session._pin_fixes.get(key)
+        if fix is None:
+            return
     dims = _cell_dims(session, comp.cell)
     if dims is None:
         return
@@ -460,9 +472,10 @@ def frame_block(path, local):
 
 
 def _bdb_net_index(session):
-    """net -> (driver pin, [receiver pins]) as 'path.pin' strings over LEAF
-    pins, for nets no `add_net` declared (an imported design).  Ancestor
-    interface pins are skipped: a fix names a leaf block's pin."""
+    """net -> (driver pin, [receiver pins]) as 'path.pin' strings, for nets no
+    `add_net` declared (an imported design).  The driver and receivers are LEAF
+    pins; ancestor interface pins are appended as extra landings so a fix on a
+    container a bundle lands on is not lost."""
     seq = getattr(session, "_cmd_seq", 0)
     c = getattr(session, "_pf_netpin_cache", None)
     bdb = getattr(session, "bdb", None)
@@ -473,16 +486,24 @@ def _bdb_net_index(session):
     comps = {x.id: x for x in bdb.all_components()}
     names = {n.id: n.name for n in bdb.all_nets()}
     idx = {}
+    boundary = {}       # non-leaf interface pins: a bundle may land on a container
     for pr in bdb.all_pins():
         cp = comps.get(pr.comp_id)
         nn = names.get(pr.net_id)
-        if cp is None or nn is None or not cp.is_leaf:
+        if cp is None or nn is None:
             continue
-        idx.setdefault(nn, []).append((f"{cp.name}.{pr.pin_name}", pr.dir))
+        if cp.is_leaf:
+            idx.setdefault(nn, []).append((f"{cp.name}.{pr.pin_name}", pr.dir))
+        else:
+            boundary.setdefault(nn, []).append(f"{cp.name}.{pr.pin_name}")
     out = {}
     for nn, pins in idx.items():
         drv = next((p for p, d in pins if d == "OUTPUT"), pins[0][0])
-        out[nn] = (drv, [p for p, _d in pins if p != drv])
+        rcv = [p for p, _d in pins if p != drv]
+        # the leaf pins stay the driver/receivers; a container's pins ride along as
+        # extra landings so its own (block-level or cell) fix reaches the bundle map
+        rcv += [p for p in boundary.get(nn, ()) if p != drv and p not in rcv]
+        out[nn] = (drv, rcv)
     session._pf_netpin_cache = (seq, bdb, out)
     return out
 
