@@ -144,10 +144,31 @@ def set_gen_fixes(session, tg, w):
         tg.set_block_fixes(m)
 
 
+def _net_fix_map(session, net):
+    return {blk: key for blk, key in net_fix_signature(session, net)}
+
+
+def _partition_by_fix(session, nets):
+    """Greedy partition of a bundle's nets into parts whose per-block fixes do
+    not CONFLICT.  Nets landing on different fixed blocks share a part (one map
+    can hold both); only differing resolutions at a block they share split."""
+    parts = []          # [(merged {block: key}, [nets])]
+    for n in nets:
+        m = _net_fix_map(session, n)
+        for merged, members in parts:
+            if all(merged.get(b, k) == k for b, k in m.items()):
+                merged.update(m)
+                members.append(n)
+                break
+        else:
+            parts.append((dict(m), [n]))
+    return parts
+
+
 def split_bundles_by_fix(session, raw_bundles):
-    """Fix-uniform split: a bundle whose nets resolve to different fixes at a
-    block cannot land on one face — split into uniform parts, LOUDLY.  No
-    selectors declared = input returned untouched."""
+    """Fix-uniform split: a bundle whose nets resolve to DIFFERENT fixes at one
+    block cannot land on one face — split into conflict-free parts, LOUDLY.
+    No selectors declared = input returned untouched."""
     if not _sel_store(session):
         return raw_bundles
     import buda
@@ -155,18 +176,16 @@ def split_bundles_by_fix(session, raw_bundles):
     next_id = max((b.id for b in raw_bundles), default=0)
     for b in raw_bundles:
         nets = list(b.get_net_names())
-        classes = {}
-        for n in nets:
-            classes.setdefault(net_fix_signature(session, n), []).append(n)
-        if len(classes) <= 1:
+        parts = _partition_by_fix(session, nets)
+        if len(parts) <= 1:
             out.append(b)
             continue
-        sizes = "+".join(str(len(v)) for v in classes.values())
+        sizes = "+".join(str(len(m)) for _g, m in parts)
         print(f"[PinFix] split bundle {b.id} ({len(nets)} bits) into "
-              f"{len(classes)} fix-uniform part(s) ({sizes}): its nets land on "
-              f"a fixed block under different pin fixes, and one bundle lands "
+              f"{len(parts)} fix-uniform part(s) ({sizes}): its nets land on "
+              f"one fixed block under different pin fixes, and one bundle lands "
               f"on one face")
-        for k, (sig, part) in enumerate(sorted(classes.items(), key=repr), start=1):
+        for k, (_g, part) in enumerate(parts, start=1):
             nb = buda.HBundle()
             if k == 1:
                 nb.id = b.id

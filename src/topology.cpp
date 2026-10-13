@@ -1821,6 +1821,7 @@ std::vector<int> derive_fanin_seg_bits(
     const std::vector<std::string>& driver_per_bit,
     const std::vector<std::vector<std::string>>& receivers_per_bit)
 {
+    FixScope fix_scope_(topo);   // pass-through fallback reads the bundle's own fixes
     const int n_seg  = (int)topo.segments.size();
     const int n_bits = (int)driver_per_bit.size();
     topo.seg_bits.clear();

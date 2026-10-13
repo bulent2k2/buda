@@ -275,13 +275,20 @@ def _partition_nets(nets, target, caps, inc_fn):
     return parts
 
 
-def _landing_bounds(session, nets, blk):
-    """A block's landing bounds as THIS bundle sees them: under its per-pin
-    fixes, so the auto cap is sized by the window its bits can land in."""
+def _landing_edge(session, nets, blk):
+    """The edge a bundle's bits can land along on `blk`, under that bundle's own
+    pin fixes.  Unfixed: the block's shortest edge.  Fixed: a landing strip is
+    one unit deep, so its capacity is the LENGTH of the face it lies on."""
     import buda
     from buda_cmds.pin_fix_cmds import bundle_fix_map
+    fp = session.fp
     with buda.BlockFixScope(bundle_fix_map(session, nets)):
-        return session.fp.landing_bounds(blk)
+        if fp.has_pin_fix(blk):
+            strips = fp.pin_fix_strips(blk)
+            if strips:
+                return max(max(x2 - x1, y2 - y1) for x1, y1, x2, y2, _f in strips)
+        r = fp.landing_bounds(blk)
+        return min(r.x2 - r.x1, r.y2 - r.y1)
 
 
 def _split_oversized_bundles(session, raw_bundles):
@@ -330,8 +337,7 @@ def _split_oversized_bundles(session, raw_bundles):
             for blk, bits_at in at_block.items():
                 if not session.fp.has_block(blk):
                     continue
-                r = _landing_bounds(session, nets, blk)
-                edge = min(r.x2 - r.x1, r.y2 - r.y1)
+                edge = _landing_edge(session, nets, blk)
                 cap = max(1, int(edge / pitch))
                 need = math.ceil(bits_at / cap)
                 if need > n_parts:
@@ -360,9 +366,7 @@ def _split_oversized_bundles(session, raw_bundles):
                 for blk in {e[0], *e[1]}:
                     if blk in caps or not session.fp.has_block(blk):
                         continue
-                    r = _landing_bounds(session, nets, blk)
-                    caps[blk] = max(1, int(min(r.x2 - r.x1,
-                                               r.y2 - r.y1) / pitch))
+                    caps[blk] = max(1, int(_landing_edge(session, nets, blk) / pitch))
 
         def _inc(net):
             e = eps.get(net)

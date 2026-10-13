@@ -563,3 +563,25 @@ def test_annotate_topology_reads_the_topologys_own_fixes():
     ct.build(topo2, s.fp)
     res = buda.check_topo(ct, topo2, s.fp, 0)
     assert not [v for v in res.violations if "BUSTERM" in str(v.kind)]
+
+
+def test_a_fan_in_is_split_only_where_fixes_conflict_on_one_block():
+    """Codex on #983: nets from different fixed blocks into one sink stay bundled."""
+    pre = ["add_block A 0 0 100 100", "add_block B 0 300 100 400",
+           "add_block Z 600 100 800 300", *TECH,
+           "fix_pin A.out south", "fix_pin B.out north"]
+    s, out = _session(*pre, "add_bus x[2] A.out Z.in", "add_bus y[2] B.out Z.in",
+                      "run_bundler CONVERGENT")
+    assert "[PinFix] split" not in out and len(s.bundles) == 1
+    s2, out2 = _session(*pre, "fix_pin Z.in1 west", "fix_pin Z.in2 east",
+                        "add_bus p[2] A.out Z.in1", "add_bus q[2] A.out Z.in2",
+                        "run_bundler CONVERGENT")
+    assert "[PinFix] split" in out2 and len(s2.bundles) == 2
+
+
+def test_auto_cap_of_a_fixed_pin_is_its_face_length():
+    """Codex on #983: a one-unit-deep strip must not cap the bus at one bit."""
+    pre = ["add_block S 0 0 100 100", "add_block M 400 0 600 200", *TECH,
+           "fix_pin M.tx west at 80..100", "set_max_bundle_bits auto"]
+    s, _ = _session(*pre, "add_bus b[4] S.o M.tx", "run_bundler STRICT")
+    assert len(s.bundles) == 1          # 20 units / pitch 4 = 5 bits >= 4
