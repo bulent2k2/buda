@@ -323,6 +323,7 @@ struct RepackStats {
     long long members_sum[2] = {0, 0};   // members over all attempts
     long long layer_segs_sum = 0;        // layer size summed over clusters
     long long cache_builds = 0, cache_reuses = 0;   // base-occupancy cache
+    long long wide_skipped = 0;          // wide attempts skipped by the study knob
     long long ns_ctor = 0, ns_solve_k[2] = {0, 0};   // ctor; solve per kind
     long long ns_prep = 0, ns_snap = 0, ns_solve = 0, ns_settle = 0,
               ns_guard = 0, ns_restore = 0, ns_total = 0;
@@ -340,6 +341,8 @@ double preferred_fit_impl(
 std::vector<int> span_index_hits(
     const std::vector<std::tuple<double, double, bool>>& spans,
     double a, double b);
+// Effective wide-attempt skip threshold (0 = never skip); test door.
+size_t repack_wide_skip_min();
 RepackStats repack_stats_snapshot();
 void repack_stats_reset();
 

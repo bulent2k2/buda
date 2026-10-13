@@ -102,7 +102,7 @@ void bind_nuts(py::module_& m) {
             d[nm[k]] = a;
         }
         d["layer_segs_sum"] = r.layer_segs_sum;
-        d["cache_builds"] = r.cache_builds; d["cache_reuses"] = r.cache_reuses;
+        d["wide_skipped"] = r.wide_skipped; d["cache_builds"] = r.cache_builds; d["cache_reuses"] = r.cache_reuses;
         d["s_prep"] = r.ns_prep * 1e-9; d["s_snap"] = r.ns_snap * 1e-9;
         d["s_solve"] = r.ns_solve * 1e-9; d["s_settle"] = r.ns_settle * 1e-9;
         d["s_guard"] = r.ns_guard * 1e-9; d["s_restore"] = r.ns_restore * 1e-9;
@@ -115,6 +115,7 @@ void bind_nuts(py::module_& m) {
     m.def("repack_stats_reset", &repack_stats_reset);
     m.def("span_index_hits", &span_index_hits);
     m.def("preferred_fit_impl", &preferred_fit_impl);
+    m.def("repack_wide_skip_min", &repack_wide_skip_min);
     m.def("seg_bbox",          &seg_bbox);
     m.def("compute_mst",
           static_cast<std::vector<MSTEdge>(*)(

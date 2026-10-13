@@ -113,3 +113,30 @@ def test_preferred_fit_nan_or_inverted_occupancy_keeps_scan():
     a = buda.preferred_fit_impl(0, 100, 2, occ, 40.0, 40.0, 1.0, True)
     b = buda.preferred_fit_impl(0, 100, 2, occ, 40.0, 40.0, 1.0, False)
     assert a == b
+
+
+def test_wide_skip_threshold_default_and_env():
+    """After a no-op narrow attempt the wide repack attempt is skipped from 256
+    members up (#972); BUDA_REPACK_WIDE_SKIP_NOOP overrides it, 0 disables.  The
+    value is read once per process, so ask fresh interpreters."""
+    import os
+    import subprocess
+    import sys
+
+    def ask(env_val):
+        env = dict(os.environ)
+        env.pop("BUDA_REPACK_WIDE_SKIP_NOOP", None)
+        # conftest pins the build directory at sys.path[0]; a child does not
+        # inherit that, so hand it the directory this module came from.
+        env["PYTHONPATH"] = os.path.dirname(buda.__file__)
+        if env_val is not None:
+            env["BUDA_REPACK_WIDE_SKIP_NOOP"] = env_val
+        out = subprocess.run(
+            [sys.executable, "-c",
+             "import buda; print(buda.repack_wide_skip_min())"],
+            env=env, capture_output=True, text=True, check=True).stdout
+        return int(out.strip())
+
+    assert ask(None) == 256
+    assert ask("0") == 0
+    assert ask("64") == 64
