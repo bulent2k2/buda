@@ -364,3 +364,44 @@ WL +4.85 % (longer spans by construction).  Against the lever on everywhere
 default.  The soc first-round shorts quoted above (A 20 to 2, B 9 to 2) were
 measured on top-down flows.  Fast tier: 3271 passed.  Not made a default: that
 call, and whether the abstract-WL growth is acceptable, is for the owner.
+
+### Review of #991 (2026-10-13)
+
+A review of the PR at `cc7a3ad` found the default path byte-identical to
+`main` (full corpus, 13 CLI flows, a hash of 8 in-process routes) and the lever
+numbers reproducible, and raised points inside the levers.  What each came to:
+
+- **`topdown` does not reach the converge repro.**  `converge.tcl soc 4 -arms
+  blind -judge` is a `-bottomup` session (`converge::mark *` marks 18 cells), so
+  `topdown` decides per DESIGN and leaves the lever off for every bundle there,
+  the top-level ones that carry the shorts included.  The review's table: unset
+  4 judge SHORTs / 85 unplaced, `=1` 0 / 117, `topdown` 4 / 85 (identical to
+  unset).  The motivating shorts therefore stay under `topdown`, and converge is
+  not in the 57-flow corpus, so "5 better, 0 worse" says nothing about them.  I
+  have not re-run that table myself.
+- **Junction reach left per-bit dangling metal, and the judge cannot see it.**
+  The span end moved to the partner's far edge (`track ± width/2`), but
+  DetailedNUTS promotes a junction to a segment end only when the partner's
+  track equals the end exactly, so the bits kept a shared end past their vias:
+  on the mix2 top-down recipe with the lever on, bundle 35 seg 5 had 3 ANTENNA
+  bits (reproduced; unset has none).  `independent_audit.py` has no
+  dangling-metal check, so "Judge CLEAN" never covered this class.  Fixed:
+  DetailedNUTS now also promotes an end that sits at the partner's far edge when
+  the lever is active, and the recipe checks clean under both modes.  Re-swept:
+  `topdown` 5 better / 0 worse / 51 unchanged with the same five rows, abstract
+  WL +4.85 %, detailed WL +0.01 %; `reach` 7 / 3.  An ANTENNA count belongs in
+  any A/B before the lever is made a default.
+- **The per-bit `reach` lever's exact half**, three corrections: an NDR segment
+  compared by its abstract span against earlier NDR buses and bottom-up copies
+  (they carry no per-track reach), now by its own reach; the tracks the probe
+  rejected were dropped by the same-bundle hazard repairs, now honoured by all
+  three; and the loop's exits misreported, now the pick with the fewest
+  offending tracks stands (it used to drift after the fourth round) and the
+  probe is quiet, so a failed re-pick no longer prints the stranding warning for
+  a bundle that was placed.  The probe also skips assignments whose interval
+  cannot meet the segment's and computes the bit reaches once.  Not fixed: NDR
+  segments still get no post-pick exact check, and a bottom-up copy is compared
+  by its envelope.
+- **Not tested before:** a two-bit reach test now exists
+  (`test_reach_places_a_two_bit_bus_clear_of_a_stretching_partner`).  Nothing
+  tests the NDR comparison, the `topdown` session sync or the width gate.
