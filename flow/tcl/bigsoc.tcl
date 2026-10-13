@@ -68,6 +68,15 @@
 #   -abstract       stop at abstract NUTS (bus segments on tracks, the
 #                   NUTS-stage audit, no bit placed) -- a fast screen of a
 #                   floorplan, soc.tcl's `-abstract`
+#   -low N          keep only the N highest LOW layers of the mock stack
+#                   (default: all three, M2..M4); `-low 0` routes on the TOP
+#                   layers alone.  The layers are removed from the
+#                   declarations -- the `def_layer` AND `def_track_pattern`
+#                   lines -- before the engine sees the stack, so nothing else
+#                   changes: the netlist, the PDK area model (its `bit_pitch`
+#                   is the M5 slot channel) and therefore the floorplan are
+#                   the same, which is what makes the arms comparable.  An
+#                   experiment knob (docs/internal/low_layers_experiment.md).
 #   -npu auto|array the NPU's placement: `array` (default) = tpu_lib.tcl's
 #                   own rule written as fixed templates the engine keeps;
 #                   `auto` = the engine places the array like any cell
@@ -91,6 +100,7 @@ set reticle 0
 set fill 0.85
 set abstract 0
 set npu array
+set keep_low -1
 set demand_pct 80
 set grow_f 1.25
 set widen_f 1.5
@@ -108,7 +118,7 @@ while {$argi < $argc} {
         -abstract { set abstract 1; incr argi }
         -noheal   { set heal 0; incr argi }
         -caps     { set caps 1; incr argi }
-        -emit - -pdk - -fp - -save - -iterate - -demand - -grow - -widen - -fill - -npu {
+        -emit - -pdk - -fp - -save - -iterate - -demand - -grow - -widen - -fill - -npu - -low {
             if {$argi + 1 >= $argc} { error "bigsoc.tcl: $opt needs a value" }
             set v [lindex $argv [expr {$argi+1}]]
             switch -- $opt {
@@ -122,6 +132,12 @@ while {$argi < $argc} {
                 -widen   { set widen_f $v }
                 -fill    { set fill $v }
                 -npu     { set npu $v }
+                -low     {
+                    if {![string is integer -strict $v] || $v < 0} {
+                        error "bigsoc.tcl: -low wants a count of LOW layers to keep (0 = TOP layers only)"
+                    }
+                    set keep_low $v
+                }
             }
             incr argi 2
         }
@@ -137,6 +153,9 @@ while {$argi < $argc} {
 }
 
 if {$npu ni {auto array}} { error "bigsoc.tcl: -npu wants auto or array" }
+if {$keep_low == 0 && $caps} {
+    error "bigsoc.tcl: -caps (reserve_top_layers) needs a layer below the top pair; it cannot be combined with -low 0"
+}
 bigsoc::configure $overrides
 bigsoc::build
 puts [bigsoc::banner "bigsoc.tcl"]
@@ -158,6 +177,39 @@ if {$save eq ":memory:"} {
 }
 bigsoc::emit $vfile
 
+# The mock stack, optionally without its lowest LOW layers (-low N).  LOW =
+# a def_layer without the TOP token.  The removed layers' def_layer and
+# def_track_pattern lines are dropped from a temporary copy that is then
+# sourced like the original; every other line (corner margin, stub floor)
+# passes through.  N < 0 sources the file as it is (the baseline, byte for
+# byte the same session as before this knob existed).
+proc bigsoc::source_stack {repo keep} {
+    set stack [file join $repo flow mockpdk stack.buda]
+    if {$keep < 0} { buda::source $stack; return {} }
+    set f [open $stack r]; set lines [split [read $f] \n]; close $f
+    set low {}
+    foreach l $lines {
+        set t [regexp -all -inline {\S+} [lindex [split $l #] 0]]
+        if {[lindex $t 0] eq "def_layer" && "TOP" ni $t} { lappend low [lindex $t 1] }
+    }
+    set low [lsort -integer $low]
+    set ndrop [expr {[llength $low] - $keep}]
+    if {$ndrop < 0} { set ndrop 0 }
+    set dropped [lrange $low 0 [expr {$ndrop - 1}]]
+    set out {}
+    foreach l $lines {
+        set t [regexp -all -inline {\S+} [lindex [split $l #] 0]]
+        if {[lindex $t 0] in {def_layer def_track_pattern} && [lindex $t 1] in $dropped} { continue }
+        lappend out $l
+    }
+    set ch [file tempfile tmp stack_low.buda]
+    puts $ch [join $out \n]
+    close $ch
+    buda::source $tmp
+    file delete $tmp
+    return $dropped
+}
+
 # One ROUND: a session, the stack, the netlist, a floorplan under the
 # round's growth and channel, the hier flow, the audit.  Returns the
 # demand rows of the routed result (for the next round to read) with the
@@ -165,7 +217,10 @@ bigsoc::emit $vfile
 proc bigsoc::round {vfile save pdk fpopts grows gap bottomup caps heal {npu array} {abstract 0} {probe 0}} {
     set repo [file dirname [file dirname [file dirname [file normalize [info script]]]]]
     buda::start
-    buda::source [file join $repo flow mockpdk stack.buda]
+    set dropped [bigsoc::source_stack $repo $::keep_low]
+    if {$::keep_low >= 0} {
+        puts "bigsoc.tcl: stack -- LOW layers kept: $::keep_low, dropped layer id(s): [expr {[llength $dropped] ? $dropped : {none}}]"
+    }
     buda::set_planner_param healersAhead 1
     buda::open_bdb $save
     buda::import_verilog $vfile
