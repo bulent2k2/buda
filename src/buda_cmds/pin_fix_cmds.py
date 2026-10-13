@@ -289,6 +289,34 @@ def apply_cell_fix(session, fp, name, comp):
               f"the fix is NOT applied to it")
         return
     _apply(session, name, tfix, fp)
+    if fp is session.fp:
+        session.__dict__.setdefault("_cellfix_applied", set()).add(name)
+
+
+def resync_cell_fixes(session):
+    """Bring the session floorplan's blocks in line with the fixes now in force.
+    A cell-level fix is applied as each component is PROJECTED; one declared,
+    replaced or removed afterwards (or an instance override removed, which must
+    give the cell's fix back) would otherwise leave the blocks already
+    projected on the old answer, and the generator and audits would read it."""
+    if getattr(session, "bdb", None) is None:
+        return
+    applied = session.__dict__.setdefault("_cellfix_applied", set())
+    if not applied and not any(is_cell_key(k) for k in session._pin_fixes):
+        return
+    fp = session.fp
+    for name in list(applied):
+        if fp.has_block(name) and name not in session._pin_fixes:
+            fp.clear_pin_fix(name)
+    applied.clear()
+    for comp in _comps(session).values():
+        nm = comp.name
+        if (CELL + comp.cell) in session._pin_fixes and nm not in session._pin_fixes \
+                and fp.has_block(nm):
+            apply_cell_fix(session, fp, nm, comp)
+    for nm, fx in session._pin_fixes.items():
+        if not is_cell_key(nm) and fp.has_block(nm):
+            _apply(session, nm, fx)
 
 
 def _sel_store(session):
@@ -885,8 +913,11 @@ def split_hbundles_by_fix(session, raw_bundles):
     occurrences is a hard error — a template is solved once and copied, so every
     occurrence must resolve to the same fixes on the same bits.  Names are read
     in the bundle's own frame (a cell-local template: the children's local
-    names).  No selectors declared = input returned untouched."""
-    if not _sel_store(session):
+    names).  The occurrence-congruence check runs for ANY applicable fix, not
+    only selectors: a block-level instance override on one occurrence of a
+    replicated template is just as unable to ride a template solved once.  No
+    fixes declared = input returned untouched."""
+    if not _any_fixes(session):
         return raw_bundles
     import sys
     from buda_cmds.bundling_cmds import _fanin_core
@@ -1344,6 +1375,7 @@ def cmd_fix_pin(session, cmd, args, cmd_line):
     ts -= after_s
     _forget_overridden(session)
     persist(session)
+    resync_cell_fixes(session)
 
 
 def _valid_fix(fx):

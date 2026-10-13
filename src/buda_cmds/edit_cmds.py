@@ -88,6 +88,7 @@ def cmd_edit_topology(session, cmd, args, cmd_line):
         # the edit verdicts must judge landings under THIS bundle's pin fixes
         from buda_cmds.pin_fix_cmds import bundle_fix_map, wrapper_local
         fmap = bundle_fix_map(session, w.input.original_bundle.get_net_names(),
+                              bool(w.input.original_bundle.cell_context),
                               wrapper_local(session, w))
         if fmap is not None:
             topo.block_fixes = fmap

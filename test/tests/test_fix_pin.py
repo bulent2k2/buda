@@ -1498,3 +1498,60 @@ def test_a_wire_off_a_cell_pins_fixed_layer_is_reported_in_a_hier_flow():
     w.plan.seg_layers = [s._layer_name_map["M6"]] * len(w.plan.seg_layers)
     out = _say(s, "check_design")
     assert "PIN_FIX" in out and "outside the fixed layer" in out, out
+
+
+# ── Codex on #992 ──────────────────────────────────────────────────────────
+
+def _hier_cell_upto_blocks():
+    """hier_cell.buda without its cell fix, stopped after the blocks exist."""
+    lines = []
+    for line in (FLOW / "hier_cell.buda").read_text().splitlines():
+        if line.startswith("fix_pin") or line.startswith("dump_pin_fixes"):
+            continue
+        if line.startswith("derive_busterms"):
+            lines += [line, "add_blocks_from_bdb 0"]
+            break
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def test_a_cell_fix_declared_after_the_blocks_exist_reaches_them():
+    """P1: the fix was stored but the projected blocks never heard of it."""
+    s, _ = _run_flow_text(_hier_cell_upto_blocks())
+    assert s.fp.pin_fix_strips("mac_n") == []
+    _say(s, "fix_pin cell:mac_cell west at 20..60")
+    assert s.fp.pin_fix_strips("mac_n") == [(500, 720, 501, 760, W)]
+    assert s.fp.pin_fix_strips("mac_s")[0][4] == E        # turned with the instance
+    _say(s, "fix_pin cell:mac_cell north")                # replaced
+    assert s.fp.pin_fix_strips("mac_n")[0][4] == N
+    _say(s, "fix_pin mac_n east")                         # an instance override
+    assert s.fp.pin_fix_strips("mac_n")[0][4] == E
+    _say(s, "fix_pin mac_n off")                          # ... removed: the cell's comes back
+    assert s.fp.pin_fix_strips("mac_n")[0][4] == N
+    _say(s, "fix_pin cell:mac_cell off")
+    assert s.fp.pin_fix_strips("mac_n") == [] and s.fp.pin_fix_strips("mac_s") == []
+
+
+def test_editing_an_expanded_bundle_sees_a_local_name_selector():
+    """P2: the edit session resolved with the wrapper's absolute locality only."""
+    text = _flow_text("hier_cell_local.buda",
+                      ("\nfix_pin cell:pipe_cell.out east",
+                       "\nfix_pin cell:pipe_cell.out east\nfix_pin pb_i.in south"))
+    s, out = _run_flow_text(text)
+    assert "Error:" not in out
+    w = next(w for w in s.bundles
+             if w.input.original_bundle.get_net_names()[0].startswith("pa_pb_i"))
+    _say(s, f"edit_topology {w.input.original_bundle.id} new")
+    fm = dict(s._edit_topo.block_fixes)
+    assert {v[0] for b, v in fm.items() if b.endswith("pb_i")} == {S}, fm
+    _say(s, "edit_abort")
+
+
+def test_an_instance_block_fix_on_a_replicated_template_is_refused_too():
+    """P2: the congruence check was gated on selectors; a block-level override
+    on one occurrence is just as unable to ride a template solved once."""
+    text = _flow_text("hier_cell_local.buda",
+                      ("\nfix_pin cell:pipe_cell.out east",
+                       "\nfix_pin cell:pipe_cell.out east\nfix_pin proc_i/pb_i south"))
+    _s, out = _run_flow_text(text)
+    assert "INCONSISTENTLY" in out and out.endswith("[exit]"), out[-600:]

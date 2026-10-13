@@ -744,7 +744,12 @@ class HierMixin:
         self._fp_add_comp_geom(fp, comp, mr, name, ox, oy)
         pf = getattr(self, "_pin_fixes", None)
         nm = comp.name if name is None else name
-        if pf and ("cell:" + comp.cell) in pf and nm not in pf:
+        if pf and nm != comp.name and comp.name in pf and nm not in pf:
+            # a cell-local frame names the child locally; an instance-level fix
+            # written on its full path still governs this (reference) occurrence
+            from buda_cmds.pin_fix_cmds import _apply
+            _apply(self, nm, pf[comp.name], fp)
+        elif pf and ("cell:" + comp.cell) in pf and nm not in pf:
             from buda_cmds.pin_fix_cmds import apply_cell_fix
             apply_cell_fix(self, fp, nm, comp)      # an instance-level fix wins
         if (pf and nm in pf) or nm in (getattr(self, "_pin_fix_sel", None) or {}):
