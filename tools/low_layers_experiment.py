@@ -34,7 +34,7 @@ from the run's own output:
 
 Usage:
     tools/low_layers_experiment.py [--arms nq2,nq8full,nq8abs,nq16abs]
-                                   [--keep -1,2,1,0] [--out DIR]
+                                   [--keep -1,2,1,0] [--out DIR] [--reparse]
 """
 import argparse
 import json
@@ -69,6 +69,17 @@ def parse(text):
         r["bundles"], r["cuts"], r["bands"] = (int(m.group(1)), int(m.group(2)),
                                                int(m.group(3)))
         r["planner_s"] = float(m.group(4)) / 1000.0
+    m = re.search(r"\[PlanProf\].*?strict=([\d.]+)ms rank=[\d.]+ms\(fails=(\d+) "
+                  r"scored=\d+\) ladder=([\d.]+)ms\(plans=(\d+) ripups=(\d+)\)",
+                  text)
+    if m:
+        # the first planning pass and what it could not place: a failed
+        # STRICT plan sends the bundle to the rip-up ladder, which re-plans
+        r["strict_s"] = float(m.group(1)) / 1000.0
+        r["strict_fails"] = int(m.group(2))
+        r["ladder_s"] = float(m.group(3)) / 1000.0
+        r["ladder_plans"] = int(m.group(4))
+        r["ripups"] = int(m.group(5))
     m = re.search(r"\[NutsProf\] total=([\d.]+)s segments=(\d+) overlaps=(\d+)",
                   text)
     if m:
@@ -154,9 +165,26 @@ def main(argv):
     ap.add_argument("--keep", default="-1,2,1,0",
                     help="LOW layers kept per arm; -1 = the stack as it is")
     ap.add_argument("--out", default=str(REPO / "flow/tcl/log/low_layers"))
+    ap.add_argument("--reparse", action="store_true",
+                    help="re-read the saved logs in --out into results.json "
+                         "and results.md (wall time and exit code are kept "
+                         "from the old results.json); runs nothing")
     a = ap.parse_args(argv)
     outdir = Path(a.out)
     outdir.mkdir(parents=True, exist_ok=True)
+    if a.reparse:
+        old = json.loads((outdir / "results.json").read_text())
+        rows = []
+        for o in old:
+            tag = f"{o['arm']}_low{'all' if o['keep'] < 0 else o['keep']}"
+            r = parse((outdir / f"{tag}.log").read_text())
+            r.update(arm=o["arm"], keep=o["keep"], wall_s=o["wall_s"], rc=o["rc"])
+            rows.append(r)
+        (outdir / "results.json").write_text(json.dumps(rows, indent=1))
+        md = table(rows)
+        (outdir / "results.md").write_text(md + "\n")
+        print(md)
+        return
     rows = []
     for arm in a.arms.split(","):
         if arm not in ARMS:
