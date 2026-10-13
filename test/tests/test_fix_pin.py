@@ -1650,3 +1650,16 @@ def test_a_rejected_override_gives_the_cell_fix_back():
     assert "out of range" in out and "proc_i/pb_i" not in s._pin_fixes, out[-700:]
     loc = s._build_cell_local_floorplan("proc_i")
     assert [st[4] for st in loc.pin_fix_strips("pb_i")] == [E]
+
+
+def test_a_full_path_block_fix_outranks_the_local_alias_in_the_template_frame():
+    """P2 (#992): the full-path override was skipped when the alias was declared too."""
+    text = _flow_text("hier_cell_local.buda",
+                      ("\nfix_pin cell:pipe_cell.out east",
+                       "\nfix_pin cell:pipe_cell.out east\nfix_pin pb_i south\n"
+                       "fix_pin proc_i/pb_i east"))
+    s, _out = _run_flow_text(text)           # the replica disagrees: refused, but the frame exists
+    loc = s._build_cell_local_floorplan("proc_i")
+    assert [st[4] for st in loc.pin_fix_strips("pb_i")] == [E]
+    loc_j = s._build_cell_local_floorplan("proc_j")
+    assert [st[4] for st in loc_j.pin_fix_strips("pb_i")] == [S]
