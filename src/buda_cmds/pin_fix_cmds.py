@@ -498,6 +498,31 @@ def cmd_fix_pin(session, cmd, args, cmd_line):
     persist(session)
 
 
+def _valid_fix(fx):
+    return (isinstance(fx, dict)
+            and all(isinstance(fx.get(k), int) and not isinstance(fx.get(k), bool)
+                    for k in ("faces", "rect", "lo", "hi"))
+            and isinstance(fx.get("has_window"), bool))
+
+
+def _validate_snapshot(snap):
+    """The WHOLE stored snapshot, before any of it touches the session: a
+    wrong-shaped record anywhere makes the row unreadable as a unit."""
+    if not isinstance(snap, dict):
+        raise ValueError("not a JSON object")
+    blocks, sels = snap.get("blocks", {}), snap.get("selectors", [])
+    if not isinstance(blocks, dict) or not isinstance(sels, list):
+        raise ValueError("blocks/selectors have the wrong type")
+    for b, fx in blocks.items():
+        if not isinstance(b, str) or not _valid_fix(fx):
+            raise ValueError(f"malformed fix for block {b!r}")
+    for rec in sels:
+        if (not isinstance(rec, list) or len(rec) != 4
+                or not all(isinstance(x, str) for x in rec[:3])
+                or rec[1] not in ("name", "prefix") or not _valid_fix(rec[3])):
+            raise ValueError(f"malformed selector record {rec!r}")
+
+
 def restore(session):
     """open_bdb: fixes the BDB holds come back under the typed-wins contract (a
     declaration typed in this session, before or after the open, outranks the
@@ -535,6 +560,7 @@ def restore(session):
     if raw:
         try:
             snap = json.loads(raw)
+            _validate_snapshot(snap)
             tb = getattr(session, "_pin_fix_removed_blocks", set())
             ts = getattr(session, "_pin_fix_removed_sels", set())
             for b, fx in snap.get("blocks", {}).items():

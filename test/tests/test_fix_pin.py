@@ -864,3 +864,18 @@ def test_restoring_different_fixes_voids_live_bundles(tmp_path):
     s2, out = _session(*pre, "add_bus x[2] S.o M.a", "add_bus y[2] S.o M.b",
                        "run_bundler STRICT", f"open_bdb {path}")
     assert "voided" in out and len(s2.bundles) == 0
+
+
+def test_a_malformed_nested_record_leaves_the_session_untouched(tmp_path):
+    """Codex P2 on #989: nested garbage was installed before revalidate() choked on it."""
+    import json
+    good = {"faces": 8, "rect": -1, "has_window": False, "lo": 0, "hi": 0}
+    cases = ['{"blocks":{},"selectors":[["M","name","tx",null]]}',
+             '{"blocks":{"A":%s,"B":{"faces":"x"}},"selectors":[]}' % json.dumps(good),
+             '{"blocks":[],"selectors":{}}']
+    for i, bad in enumerate(cases):
+        path = str(tmp_path / f"n{i}.bdb")
+        s, _ = _session(f"open_bdb {path}", "add_block M 0 0 100 100", "fix_pin M west")
+        s.bdb.meta_set("pin_fixes", bad)
+        s2, out = _session(f"open_bdb {path}")
+        assert "unreadable" in out and not s2._pin_fixes and not s2._pin_fix_sel, bad
