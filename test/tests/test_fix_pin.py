@@ -1825,3 +1825,30 @@ def test_the_hier_auto_cap_sizes_a_part_by_its_fixed_landing():
     assert "Error:" not in out1, out1[-600:]
     assert n1 >= n0, (n0, n1)
     assert "[HierBundler] split" in out1, out1[-900:]
+
+
+# ── review of #992 at 448b9f4 ──────────────────────────────────────────────
+
+def test_the_same_instance_fix_on_every_occurrence_is_congruent():
+    """Minor (#992): the class signature kept the ABSOLUTE owner path in its value,
+    so identical per-occurrence fixes compared different."""
+    text = _flow_text("hier_cell_local.buda",
+                      ("\nfix_pin cell:pipe_cell.out east",
+                       "\nfix_pin cell:pipe_cell.out east\n"
+                       "fix_pin proc_i/pb_i.in south\nfix_pin proc_j/pb_i.in south"))
+    s, out = _run_flow_text(text)
+    assert "INCONSISTENTLY" not in out and "Error:" not in out, out[-700:]
+
+
+def test_removing_an_instance_fix_says_when_the_cell_fix_comes_back():
+    """Minor (#992): `off` claimed every face admitted landings while the cell's fix
+    was re-applied."""
+    s, _ = _run_flow_text(_hier_cell_upto_blocks())
+    _say(s, "fix_pin cell:mac_cell west at 20..60")
+    _say(s, "fix_pin mac_n east")
+    out = _say(s, "fix_pin mac_n off")
+    assert "reverts to the cell-level fix on cell 'mac_cell'" in out, out
+    assert "every face admits" not in out
+    _say(s, "fix_pin cell:mac_cell off")
+    _say(s, "fix_pin mac_n east")
+    assert "every face admits landings again" in _say(s, "fix_pin mac_n off")

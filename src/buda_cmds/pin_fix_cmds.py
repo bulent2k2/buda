@@ -539,7 +539,14 @@ def net_fix_signature(session, net, local=False, names_local=None, ident=False):
         path, _, name = pin.rpartition(".")
         if _owner_has_fixes(session, path, local):
             fx, src = _resolve(session, path, name, local)
-            sig[frame_block(path, nl)] = (src if ident else _fixkey(fx)) if fx is not None else None
+            if fx is not None and ident:
+                # an instance-path fix names its absolute owner; congruent
+                # occurrences carrying the SAME fix must compare equal
+                if not is_cell_key(src[0]) and src[0] == path:
+                    src = ("@instance", src[1])
+                sig[frame_block(path, nl)] = src
+            else:
+                sig[frame_block(path, nl)] = _fixkey(fx) if fx is not None else None
     return tuple(sorted(sig.items(), key=lambda kv: kv[0]))
 
 
@@ -1202,7 +1209,12 @@ def _cmd_fix_pin(session, cmd, args, cmd_line):
         if block in fixes:
             del fixes[block]
             session.fp.clear_pin_fix(block)
-            print(f"[PinFix] {block}: fix removed — every face admits landings again")
+            comp = _comps(session).get(block)
+            if comp is not None and (CELL + comp.cell) in fixes:
+                print(f"[PinFix] {block}: fix removed — reverts to the cell-level "
+                      f"fix on cell '{comp.cell}'")
+            else:
+                print(f"[PinFix] {block}: fix removed — every face admits landings again")
         else:
             print(f"[PinFix] {block}: no fix declared")
         return
