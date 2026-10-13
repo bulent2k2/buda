@@ -36,9 +36,7 @@ _BATCH_MIN_BUNDLES = 8
 
 
 def _gen_with_fixes(session, tg, w, src, dsts):
-    from buda_cmds.pin_fix_cmds import set_gen_fixes
-    set_gen_fixes(session, tg, w)
-    return tg.generate_candidates(src, dsts)
+    return session._gen_fixed(tg, w, src, dsts)     # fixes + the order-conflict gate
 
 
 def _endpoint_label(src, dsts, fanin=False):

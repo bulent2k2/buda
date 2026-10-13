@@ -2639,6 +2639,8 @@ class NutsFlowMixin:
         self._sync_reserve_corridors()
         bus_segs = buda.make_bus_segments(self.bundles, self.nuts_result,
                                           self.fp, bit_order, self.layers)
+        from buda_cmds import pin_fix_cmds
+        pin_fix_cmds.apply_orders(self, bus_segs)
         self._resolve_shared_cell_ndr(bus_segs)
         if bu_plan is None:
             engine = buda.DetailedNUTSEngine(self.routing_grid)

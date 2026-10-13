@@ -1750,6 +1750,11 @@ class RipupMixin:
         if stage == 'a' and self._heal_seats_on():
             use_parallel_sweep = False
             warm = False
+        # The C++ workers build their own BusSegments at the run-wide bit
+        # order, so a fix_pin `order` (per-segment) is invisible to them.
+        from buda_cmds import pin_fix_cmds
+        if pin_fix_cmds.has_order_fixes(self):
+            use_parallel_sweep = False
 
         # Fold in the dead-span escalation before the hill-climb (stage b):
         # a dead LOW segment is a guaranteed open no candidate re-pin reaches,

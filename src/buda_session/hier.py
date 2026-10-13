@@ -5526,9 +5526,9 @@ class HierMixin:
 
     def _gen_fixed(self, tg, w, src, dsts):
         """generate_candidates under the bundle's effective per-pin fixes."""
-        from buda_cmds.pin_fix_cmds import set_gen_fixes
+        from buda_cmds.pin_fix_cmds import set_gen_fixes, filter_order_conflicts
         set_gen_fixes(self, tg, w)
-        return tg.generate_candidates(src, dsts)
+        return filter_order_conflicts(self, w, tg.generate_candidates(src, dsts))
 
     def _make_topo_gen(self, fp, use_center=False, use_double_detour=False,
                        use_multi_trunk=False, use_hanan_loci=True,
