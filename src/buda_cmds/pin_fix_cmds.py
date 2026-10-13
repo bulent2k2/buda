@@ -413,11 +413,10 @@ def _resolve(session, block, pin_name, local=False):
     keys = [block]
     if local and "/" in block:
         keys.append(block.rsplit("/", 1)[-1])
-    for k in keys:
+    for k in keys:                 # each owner COMPLETELY (selector, then block-level) before the next
         hit = _match_sel(sels.get(k), pin_name)
         if hit is not None:
             return hit, (k, _fixkey(hit))
-    for k in keys:
         if k in fixes:
             return fixes[k], (k, _fixkey(fixes[k]))
     if any(is_cell_key(k) for k in fixes) or any(is_cell_key(k) for k in sels):

@@ -761,6 +761,11 @@ class HierMixin:
             # owner's declaration against the geometry this frame holds for it
             from buda_cmds.pin_fix_cmds import revalidate
             revalidate(self, comp.name, fp, fp_name=nm)
+        if (pf and ("cell:" + comp.cell) in pf and nm not in pf
+                and comp.name not in pf and not fp.has_pin_fix(nm)):
+            # an override that was just rejected must give the cell's fix back
+            from buda_cmds.pin_fix_cmds import apply_cell_fix
+            apply_cell_fix(self, fp, nm, comp)
 
     def _fp_add_comp_geom(self, fp, comp, mr, name=None, ox=0.0, oy=0.0):
         """Project ONE BDB component into `fp` — `add_block_rects` when its

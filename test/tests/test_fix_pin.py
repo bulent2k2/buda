@@ -1628,3 +1628,25 @@ def test_a_local_name_shared_with_a_top_level_block_still_reaches_the_expanded_i
     for w in s.bundles:
         fm = {b: v[0] for b, v in dict(w.input.candidates[0].block_fixes).items()}
         assert all(v == S for b, v in fm.items() if b.endswith("/pb_i")), fm
+
+
+def test_each_owner_is_resolved_completely_before_the_next():
+    """P2 (#992): the local alias's SELECTOR beat the full path's BLOCK fix."""
+    text = _flow_text("hier_cell_local.buda",
+                      ("\nfix_pin cell:pipe_cell.out east",
+                       "\nfix_pin cell:pipe_cell.out east\nfix_pin pb_i.in south\n"
+                       "fix_pin proc_i/pb_i east"))
+    _s, out = _run_flow_text(text)
+    assert "INCONSISTENTLY" in out and out.endswith("[exit]"), out[-600:]
+
+
+def test_a_rejected_override_gives_the_cell_fix_back():
+    """P2 (#992): dropping a bad instance override cleared the block outright."""
+    text = _flow_text("hier_cell_local.buda",
+                      ("\nfix_pin cell:pipe_cell.in  north layer M5\n"
+                       "fix_pin cell:pipe_cell.out east",
+                       "\nfix_pin cell:pipe_cell east\nfix_pin proc_i/pb_i south rect 999"))
+    s, out = _run_flow_text(text)
+    assert "out of range" in out and "proc_i/pb_i" not in s._pin_fixes, out[-700:]
+    loc = s._build_cell_local_floorplan("proc_i")
+    assert [st[4] for st in loc.pin_fix_strips("pb_i")] == [E]
