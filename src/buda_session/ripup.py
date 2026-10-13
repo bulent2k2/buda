@@ -644,8 +644,9 @@ class RipupMixin:
         # excluding a winning move — pure path chaos amplified by class-move
         # granularity.  The gate's motivating corners (mix/mix2) have no
         # locked wrappers, so the blunt boundary costs nothing there.
-        if any(w.hier.locked for w in self.bundles):
-            return False
+        if (any(w.hier.locked for w in self.bundles)
+                and os.environ.get('BUDA_RR_WIDTH_GATE_LOCKED', '0') != '1'):
+            return False                      # study knob: gate bottom-up too
         memo = getattr(self, '_rr_width_memo', None)
         if memo is None:
             memo = self._rr_width_memo = {}
