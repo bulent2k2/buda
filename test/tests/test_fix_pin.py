@@ -682,3 +682,31 @@ def test_persist_flows_build_then_resume_from_the_checkpoint(tmp_path):
     assert "restored 3 persisted fix" in outs[1], outs[1]
     assert "Error:" not in outs[1]
     assert outs[1].count("Success: no violations found.") == 3, outs[1]
+
+
+def test_a_replacement_typed_after_a_restore_survives_opening_another_bdb(tmp_path):
+    """Codex P1 on #989: a typed replacement was still tracked as 'restored'."""
+    (s, _), pa = _bdb_session(tmp_path, "add_block M 0 0 100 100",
+                              "fix_pin M west", "fix_pin M.tx north")
+    pb = str(tmp_path / "other.bdb")
+    s2, _ = _session("add_block M 0 0 100 100", f"open_bdb {pa}",
+                     "fix_pin M east", "fix_pin M.tx south", f"open_bdb {pb}")
+    assert s2._pin_fixes["M"]["faces"] == E
+    assert s2._pin_fix_sel["M"][("name", "tx")]["faces"] == S
+    # an UNTOUCHED restored fix still drops when another BDB is opened
+    pc = str(tmp_path / "fresh.bdb")       # pb now holds s2's typed fixes
+    s3, _ = _session("add_block M 0 0 100 100", f"open_bdb {pa}", f"open_bdb {pc}")
+    assert "M" not in s3._pin_fixes and not s3._pin_fix_sel
+
+
+def test_a_restored_bundle_that_current_fixes_repartition_is_voided(tmp_path):
+    pre = ["add_block S 0 400 100 600", "add_block M 400 400 600 600", *TECH]
+    (s, _), path = _bdb_session(
+        tmp_path, *pre, "fix_pin M.a west", "fix_pin M.b west",
+        "add_bus x[2] S.o M.a", "add_bus y[2] S.o M.b", "bdb_net_mode on",
+        "run_bundler STRICT", "generate_topologies", "run_planner")
+    assert len(s.bundles) == 1                      # same fix -> one bundle
+    s2, out = _session(*pre, "fix_pin M.b north", f"open_bdb {path}",
+                       "add_bus x[2] S.o M.a", "add_bus y[2] S.o M.b",
+                       "load_pipeline")
+    assert "voided" in out and len(s2.bundles) == 0

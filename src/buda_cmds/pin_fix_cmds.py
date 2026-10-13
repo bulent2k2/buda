@@ -444,8 +444,25 @@ def persist(session):
                          if snap["blocks"] or snap["selectors"] else "")
 
 
+def _forget_overridden(session):
+    """A restored entry the user has since replaced (a new dict) or removed is
+    TYPED state now: it must not be dropped as 'restored' when another BDB is
+    opened (typed wins)."""
+    rb = getattr(session, "_pin_fix_restored_blocks", None)
+    if rb:
+        for b in [b for b, fx in rb.items() if session._pin_fixes.get(b) is not fx]:
+            del rb[b]
+    rs = getattr(session, "_pin_fix_restored_sels", None)
+    if rs:
+        sels = _sel_store(session)
+        for k in [k for k, fx in rs.items()
+                  if sels.get(k[0], {}).get((k[1], k[2])) is not fx]:
+            del rs[k]
+
+
 def cmd_fix_pin(session, cmd, args, cmd_line):
     _cmd_fix_pin(session, cmd, args, cmd_line)
+    _forget_overridden(session)
     persist(session)
 
 
@@ -458,14 +475,14 @@ def restore(session):
         return 0
     sels = _sel_store(session)
     fixes = session._pin_fixes
-    for b in list(getattr(session, "_pin_fix_restored_blocks", ())):
+    for b in list(getattr(session, "_pin_fix_restored_blocks", {})):
         if fixes.pop(b, None) is not None:
             session.fp.clear_pin_fix(b)
-    for b, kind, key in list(getattr(session, "_pin_fix_restored_sels", ())):
+    for b, kind, key in list(getattr(session, "_pin_fix_restored_sels", {})):
         sels.get(b, {}).pop((kind, key), None)
         if b in sels and not sels[b]:
             del sels[b]
-    session._pin_fix_restored_blocks, session._pin_fix_restored_sels = set(), set()
+    session._pin_fix_restored_blocks, session._pin_fix_restored_sels = {}, {}
     raw = session.bdb.meta_get(_META, "")
     n = 0
     if raw:
@@ -475,12 +492,12 @@ def restore(session):
                 if b not in fixes:
                     fixes[b] = fx
                     _apply(session, b, fx)
-                    session._pin_fix_restored_blocks.add(b)
+                    session._pin_fix_restored_blocks[b] = fx
                     n += 1
             for b, kind, key, fx in snap.get("selectors", []):
                 if (kind, key) not in sels.get(b, {}):
                     sels.setdefault(b, {})[(kind, key)] = fx
-                    session._pin_fix_restored_sels.add((b, kind, key))
+                    session._pin_fix_restored_sels[(b, kind, key)] = fx
                     n += 1
         except (ValueError, KeyError, TypeError) as e:
             print(f"Warning: stored pin fixes unreadable ({e}); ignored")
@@ -494,9 +511,24 @@ def restore(session):
 
 def restamp_bundles(session):
     """After load_pipeline: restored candidates carry no per-bundle map (it is
-    not stored per candidate); stamp each from the restored selectors."""
+    not stored per candidate); stamp each from the restored selectors.  A
+    restored bundle whose nets the CURRENT fixes would repartition (a typed
+    selector outranked the checkpoint's) is stale: the whole restored pipeline
+    is voided, loudly, rather than routed under one map."""
     if not _sel_store(session):
         return
+    import buda
+    for w in session.bundles:
+        nets = list(w.input.original_bundle.get_net_names())
+        conflict = any(net_fix_conflicts(session, n) for n in nets)
+        if conflict or len(_partition_by_fix(session, nets)) > 1:
+            print(f"Error: load_pipeline: restored bundle "
+                  f"{w.input.original_bundle.id} no longer fits the current pin "
+                  f"fixes (its nets now land on one block under different "
+                  f"fixes); the restored pipeline is voided — re-run "
+                  f"run_bundler and the stages after it")
+            session.bundles = buda.BundleWrapperVec()
+            return
     for w in session.bundles:
         m = bundle_fix_map(session, w.input.original_bundle.get_net_names())
         if m is not None:
