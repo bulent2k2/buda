@@ -1702,3 +1702,15 @@ def test_a_restored_cell_fix_is_revalidated_against_the_cells_current_footprint(
              "set_cell_rects k off")                 # the footprint changed afterwards
     s, out = _session(f"open_bdb {db}")
     assert "out of range" in out and "cell:k" not in s._pin_fixes, out
+
+
+def test_opening_a_bdb_resyncs_blocks_projected_before_it(tmp_path):
+    """P2 (#992): restore applied the cell fix through a no-op for cell keys."""
+    d1, d2 = tmp_path / "d1.bdb", tmp_path / "d2.bdb"
+    base = ["add_cell k 100 100", "add_inst a k - 0 0"]
+    _session(f"open_bdb {d1}", *base, "fix_pin cell:k west")
+    _session(f"open_bdb {d2}", *base)
+    s, _ = _session(f"open_bdb {d2}", "add_blocks_from_bdb 0")
+    assert s.fp.pin_fix_strips("a") == []
+    _say(s, f"open_bdb {d1}")
+    assert [st[4] for st in s.fp.pin_fix_strips("a")] == [W]

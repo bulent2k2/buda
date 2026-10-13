@@ -1533,6 +1533,7 @@ def restore(session):
               "re-run run_bundler and the stages after it")
         _void_pipeline(session)
     persist(session)
+    resync_cell_fixes(session)      # blocks projected before this open read the restored cell fixes
     return n
 
 
