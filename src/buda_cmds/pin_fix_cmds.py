@@ -1300,6 +1300,11 @@ def revalidate(session, block, fp=None, fp_name=None):
     bus."""
     fixes = session._pin_fixes
     fix = fixes.get(block)
+    if is_cell_key(block) and fp is None:
+        # a cell-level declaration is judged on the cell's own footprint
+        fp, fp_name = _frame_of(session, block)
+        if fp is None:
+            return
     fp = session.fp if fp is None else fp
     name = block if fp_name is None else fp_name     # the owner key vs the frame's name for it
     if not fp.has_block(name):

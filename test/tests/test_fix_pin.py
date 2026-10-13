@@ -1691,3 +1691,14 @@ def test_a_local_name_fix_cannot_ride_a_turned_replica():
          "\nfix_pin cell:pipe_cell.out east\nfix_pin pb_i south"))
     _s, out = _run_flow_text(text)
     assert "is turned" in out and "cell:" in out and out.endswith("[exit]"), out[-700:]
+
+
+def test_a_restored_cell_fix_is_revalidated_against_the_cells_current_footprint(tmp_path):
+    """P2 (#992): `revalidate` looked for a block called `cell:k` and returned."""
+    db = tmp_path / "c.bdb"
+    _session(f"open_bdb {db}", "add_cell k 100 100",
+             "set_cell_rects k rect 0 0 50 100 rect 50 0 100 100",
+             "fix_pin cell:k rect 2 east",
+             "set_cell_rects k off")                 # the footprint changed afterwards
+    s, out = _session(f"open_bdb {db}")
+    assert "out of range" in out and "cell:k" not in s._pin_fixes, out
