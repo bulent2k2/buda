@@ -140,3 +140,48 @@ def test_wide_skip_threshold_default_and_env():
     assert ask(None) == 256
     assert ask("0") == 0
     assert ask("64") == 64
+
+
+def test_span_walk_keepout_prefilter_matches_per_track_scan():
+    """`for_each_signal_track_in_span` finds the keepouts that can block ANY
+    track of the query once and tests each track against that short list
+    (#972: the escalation scan spent 19 s of 25 on tracks x every keepout of
+    the layer).  The answer must be the one the per-track scan over ALL the
+    layer's keepouts gives, so compare against that scan written out here,
+    over randomized windows, keepouts that touch, nest and miss, on a
+    horizontal and a vertical layer."""
+    def slot(t, w, sp):
+        return buda.TrackSlot(type=t, label=t, width=w, space_after=sp)
+    pat = buda.TrackPattern(0.0, [
+        slot("POWER", 2.0, 1.0), slot("SIGNAL", 1.0, 1.0),
+        slot("SIGNAL", 1.0, 1.0), slot("GROUND", 2.0, 1.0),
+        slot("SIGNAL", 1.0, 1.0), slot("SIGNAL", 1.0, 1.0)])
+    rng = random.Random(972)
+    for horiz in (True, False):
+        stack = buda.RoutingGridStack()
+        stack.define_layer(4, pat, horiz)
+        zones = []
+        for _ in range(300):
+            a1 = rng.randrange(0, 900)
+            p1 = rng.randrange(0, 900)
+            z = (a1, p1, a1 + rng.randrange(1, 120), p1 + rng.randrange(1, 40))
+            zones.append(z)              # (along lo, perp lo, along hi, perp hi)
+            x1, y1, x2, y2 = ((z[0], z[1], z[2], z[3]) if horiz
+                              else (z[1], z[0], z[3], z[2]))
+            stack.add_keepout(4, x1=x1, y1=y1, x2=x2, y2=y2)
+        g = stack.get_layer_grid(4)
+        for _ in range(400):
+            al = rng.randrange(0, 900)
+            ah = al + rng.randrange(0, 200)
+            pl = rng.randrange(0, 900)
+            ph = pl + rng.randrange(0, 150)
+            want = 0
+            for c, sl in pat.tracks_in_range(pl, ph):
+                if sl.type != "SIGNAL":
+                    continue
+                if any(z[1] <= c <= z[3] and al <= z[2] and ah >= z[0]
+                       for z in zones):
+                    continue
+                want += 1
+            assert g.count_signal_tracks_in_span(al, ah, pl, ph) == want, \
+                (horiz, al, ah, pl, ph)

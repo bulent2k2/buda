@@ -121,6 +121,7 @@ def cmd_run_nuts(session, cmd, args, cmd_line):
     session._prof_esc_moves = []
     session._prof_esc_dropped = []
     session._prof_esc_resolve_s = 0.0
+    session._prof_esc_parts = {}
     session._adopt_doglegs()
     _lap("adopt_doglegs")
     # Post-NUTS dead-span escalation, run HERE (before any healer) so the
@@ -190,6 +191,7 @@ def cmd_run_nuts(session, cmd, args, cmd_line):
               f"phases[{phases}] "
               f"escalation[resolves={session._prof_esc_resolves} "
               f"resolve_s={session._prof_esc_resolve_s:.3f} "
+              f"parts={ {k: round(v, 2) for k, v in getattr(session, '_prof_esc_parts', {}).items()} } "
               f"moves={session._prof_esc_moves} "
               f"dropped={session._prof_esc_dropped}] "
               f"first_solve_passes[{passes}]", file=sys.stderr)

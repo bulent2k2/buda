@@ -1381,7 +1381,12 @@ class NutsFlowMixin:
         import math as _math
 
         total = 0
+        import time as _tm
+        _pp = self.__dict__.setdefault("_prof_esc_parts", {})
+        def _acc(k, t0):
+            _pp[k] = _pp.get(k, 0.0) + (_tm.perf_counter() - t0)
         for it in range(max_iter):
+            _ts = _tm.perf_counter()
             # The floor in segments, read off THIS iteration's result: an
             # iteration must move at least this many for its re-solve to be
             # paid (0 = every iteration).  Per iteration because a re-solve's
@@ -1581,6 +1586,7 @@ class NutsFlowMixin:
                     continue
                 pending.append((w, seg.seg_idx, new_layer))
                 moved += 1
+            _acc("scan", _ts)
             if not moved:
                 break
             if floor_n and it + 1 >= floor_from and moved < floor_n:
@@ -1605,6 +1611,7 @@ class NutsFlowMixin:
             self._prof_esc_moves = getattr(self, "_prof_esc_moves", []) + [moved]
             # Re-solve with the escalated assignments (mirrors cmd_run_nuts's
             # core, minus persist/log — those run once on the final result).
+            _ts = _tm.perf_counter()
             pitch = self._nuts_pitch if getattr(self, '_nuts_pitch', None) else 1.0
             nuts = buda.NUTSEngine(self.fp, self.layers)
             nuts.set_track_pitch(pitch)
@@ -1615,6 +1622,7 @@ class NutsFlowMixin:
                     list(self.planner.get_x_grid()),
                     list(self.planner.get_y_grid()))
             import time as _time
+            _acc("setup", _ts)
             _t0 = _time.perf_counter()
             with buda.ostream_redirect():
                 self.nuts_result = nuts.run(self.bundles)
@@ -1623,7 +1631,9 @@ class NutsFlowMixin:
             self._prof_esc_resolves = getattr(self, "_prof_esc_resolves", 0) + 1
             self._prof_esc_resolve_s = (getattr(self, "_prof_esc_resolve_s", 0.0)
                                         + (_time.perf_counter() - _t0))
+            _ts = _tm.perf_counter()
             self._adopt_doglegs()
+            _acc("adopt", _ts)
             # The adoption can APPEND a split candidate (the pool grows and the
             # selection moves to the new last index, which the memoized pool
             # size would read as out of range) or OVERWRITE the dogleg slot
