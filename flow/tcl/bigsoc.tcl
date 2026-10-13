@@ -101,6 +101,7 @@ set fill 0.85
 set abstract 0
 set npu array
 set keep_low -1
+set add_top 0
 set demand_pct 80
 set grow_f 1.25
 set widen_f 1.5
@@ -118,7 +119,7 @@ while {$argi < $argc} {
         -abstract { set abstract 1; incr argi }
         -noheal   { set heal 0; incr argi }
         -caps     { set caps 1; incr argi }
-        -emit - -pdk - -fp - -save - -iterate - -demand - -grow - -widen - -fill - -npu - -low {
+        -emit - -pdk - -fp - -save - -iterate - -demand - -grow - -widen - -fill - -npu - -low - -top {
             if {$argi + 1 >= $argc} { error "bigsoc.tcl: $opt needs a value" }
             set v [lindex $argv [expr {$argi+1}]]
             switch -- $opt {
@@ -132,6 +133,12 @@ while {$argi < $argc} {
                 -widen   { set widen_f $v }
                 -fill    { set fill $v }
                 -npu     { set npu $v }
+                -top     {
+                    if {![string is integer -strict $v] || $v < 0 || $v > 3} {
+                        error "bigsoc.tcl: -top wants a count of EXTRA TOP layers to add above M7 (0..3: M8 H, M9 V, M10 H)"
+                    }
+                    set add_top $v
+                }
                 -low     {
                     if {![string is integer -strict $v] || $v < 0} {
                         error "bigsoc.tcl: -low wants a count of LOW layers to keep (0 = TOP layers only)"
@@ -183,10 +190,11 @@ bigsoc::emit $vfile
 # sourced like the original; every other line (corner margin, stub floor)
 # passes through.  N < 0 sources the file as it is (the baseline, byte for
 # byte the same session as before this knob existed).
-proc bigsoc::source_stack {repo keep} {
+proc bigsoc::source_stack {repo keep {add 0}} {
     set stack [file join $repo flow mockpdk stack.buda]
-    if {$keep < 0} { buda::source $stack; return {} }
+    if {$keep < 0 && $add == 0} { buda::source $stack; return {} }
     set f [open $stack r]; set lines [split [read $f] \n]; close $f
+    if {$keep < 0} { set keep 99 }
     set low {}
     foreach l $lines {
         set t [regexp -all -inline {\S+} [lindex [split $l #] 0]]
@@ -202,6 +210,17 @@ proc bigsoc::source_stack {repo keep} {
         if {[lindex $t 0] in {def_layer def_track_pattern} && [lindex $t 1] in $dropped} { continue }
         lappend out $l
     }
+    # -top N: N more TOP layers above M7, alternating direction (M8 H, M9 V,
+    # M10 H) with the patterns of the same-direction TOP layers below them
+    # (M6 for H, M5 for V), so an added layer costs and hosts exactly what
+    # its neighbour does -- the experiment varies HOW MANY, not what kind.
+    set extra {
+        {def_layer 8 M8 H TOP 52.94} {def_track_pattern 8 -400 POWER 4 1  (SIGNAL 2 1)x4  GROUND 4 1  (SIGNAL 2 1)x4}
+        {def_layer 9 M9 V TOP 50}    {def_track_pattern 9    0 POWER 3 1  (SIGNAL 2 1)x4  GROUND 3 1  (SIGNAL 2 1)x4}
+        {def_layer 10 M10 H TOP 52.94} {def_track_pattern 10 -400 POWER 4 1  (SIGNAL 2 1)x4  GROUND 4 1  (SIGNAL 2 1)x4}
+    }
+    lappend out "# -top $add: extra TOP layers"
+    foreach l [lrange $extra 0 [expr {2 * $add - 1}]] { lappend out $l }
     set ch [file tempfile tmp stack_low.buda]
     puts $ch [join $out \n]
     close $ch
@@ -217,9 +236,9 @@ proc bigsoc::source_stack {repo keep} {
 proc bigsoc::round {vfile save pdk fpopts grows gap bottomup caps heal {npu array} {abstract 0} {probe 0}} {
     set repo [file dirname [file dirname [file dirname [file normalize [info script]]]]]
     buda::start
-    set dropped [bigsoc::source_stack $repo $::keep_low]
-    if {$::keep_low >= 0} {
-        puts "bigsoc.tcl: stack -- LOW layers kept: $::keep_low, dropped layer id(s): [expr {[llength $dropped] ? $dropped : {none}}]"
+    set dropped [bigsoc::source_stack $repo $::keep_low $::add_top]
+    if {$::keep_low >= 0 || $::add_top > 0} {
+        puts "bigsoc.tcl: stack -- LOW layers kept: [expr {$::keep_low < 0 ? {all} : $::keep_low}], dropped layer id(s): [expr {[llength $dropped] ? $dropped : {none}}], TOP layers added: $::add_top"
     }
     buda::set_planner_param healersAhead 1
     buda::open_bdb $save

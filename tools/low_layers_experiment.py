@@ -120,26 +120,36 @@ def parse(text):
     return r
 
 
-def run_arm(arm, keep, outdir, extra_env):
+def tag_of(arm, keep, add=0):
+    return f"{arm}_low{'all' if keep < 0 else keep}" + (f"_top{add}" if add else "")
+
+
+def run_arm(arm, keep, outdir, extra_env, add=0):
     args, _what = ARMS[arm]
     cmd = [str(REPO / "bin" / "btcl"), "-j", "1", str(REPO / "flow/tcl/bigsoc.tcl")]
     cmd += args.split()
     if keep >= 0:
         cmd += ["-low", str(keep)]
+    if add:
+        cmd += ["-top", str(add)]
     env = dict(os.environ, BUDA_REPLAN_PROF="1", **extra_env)
+    if os.environ.get("LOW_RECORD"):
+        # write the session down as a flat .buda beside the log, for
+        # tools/render_design.py (the recorder flattens the stack source)
+        env["BUDA_RECORD"] = str(outdir / (tag_of(arm, keep, add) + ".buda"))
     t0 = time.time()
     p = subprocess.run(cmd, cwd=REPO, env=env, capture_output=True, text=True)
     wall = time.time() - t0
     text = p.stdout + "\n" + p.stderr
-    tag = f"{arm}_low{'all' if keep < 0 else keep}"
+    tag = tag_of(arm, keep, add)
     (outdir / f"{tag}.log").write_text(text)
     r = parse(text)
-    r.update(arm=arm, keep=keep, wall_s=round(wall, 1), rc=p.returncode)
+    r.update(arm=arm, keep=keep, add_top=add, wall_s=round(wall, 1), rc=p.returncode)
     return r
 
 
 def table(rows):
-    cols = [("arm", "arm"), ("keep", "LOW kept"), ("wall_s", "wall s"),
+    cols = [("arm", "arm"), ("keep", "LOW kept"), ("add_top", "TOP added"), ("wall_s", "wall s"),
             ("planner_s", "planner s"), ("bands", "bands"),
             ("run_nuts_s", "run_nuts s"), ("abs_ovl", "abs ovl"),
             ("abs_seats", "seats"), ("first_unpl", "1st unpl"),
@@ -164,6 +174,9 @@ def main(argv):
     ap.add_argument("--arms", default="nq2,nq8full,nq8abs,nq16abs")
     ap.add_argument("--keep", default="-1,2,1,0",
                     help="LOW layers kept per arm; -1 = the stack as it is")
+    ap.add_argument("--match", action="store_true",
+                    help="replace every dropped LOW layer by an added TOP layer: "
+                         "each --keep K (K>=0) runs with -top (3-K)")
     ap.add_argument("--out", default=str(REPO / "flow/tcl/log/low_layers"))
     ap.add_argument("--reparse", action="store_true",
                     help="re-read the saved logs in --out into results.json "
@@ -176,9 +189,9 @@ def main(argv):
         old = json.loads((outdir / "results.json").read_text())
         rows = []
         for o in old:
-            tag = f"{o['arm']}_low{'all' if o['keep'] < 0 else o['keep']}"
+            tag = tag_of(o["arm"], o["keep"], o.get("add_top", 0))
             r = parse((outdir / f"{tag}.log").read_text())
-            r.update(arm=o["arm"], keep=o["keep"], wall_s=o["wall_s"], rc=o["rc"])
+            r.update(arm=o["arm"], keep=o["keep"], add_top=o.get("add_top", 0), wall_s=o["wall_s"], rc=o["rc"])
             rows.append(r)
         (outdir / "results.json").write_text(json.dumps(rows, indent=1))
         md = table(rows)
@@ -191,7 +204,7 @@ def main(argv):
             sys.exit(f"unknown arm {arm!r}; one of {', '.join(ARMS)}")
         dies = set()
         for keep in [int(k) for k in a.keep.split(",")]:
-            r = run_arm(arm, keep, outdir, {})
+            r = run_arm(arm, keep, outdir, {}, add=(3 - keep) if a.match and keep >= 0 else 0)
             rows.append(r)
             dies.add(r.get("die"))
             print(f"{arm} keep={keep}: wall {r['wall_s']}s rc={r['rc']}",
