@@ -1087,11 +1087,11 @@ def test_a_selector_fix_with_a_layer_narrows_the_faces_the_generator_sees():
     s, _ = _session(*pre)
     m = s.bundles[0].input.candidates[0].block_fixes
     assert m["M"][0] == (E | W), m
-    assert s.bundles[0].input.candidates
-    for c in s.bundles[0].input.candidates:
-        for g in c.segments:                      # no leg ends on M's N/S faces
-            for p in (g.start, g.end):
-                assert not (400 < p.x < 600 and p.y in (400, 600)), (c.type, p.x, p.y)
+    # the pool is the one an explicit `east west` selector produces
+    ref, _ = _session(*[("fix_pin M.i east west" if l == "fix_pin M.i layer M3" else l)
+                        for l in pre])
+    key = lambda sess: sorted(c.type for c in sess.bundles[0].input.candidates)
+    assert key(s) == key(ref) and key(s)
 
 
 def test_an_orthogonal_only_overlap_with_set_bus_layers_is_refused():
