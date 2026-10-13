@@ -341,6 +341,8 @@ double preferred_fit_impl(
 std::vector<int> span_index_hits(
     const std::vector<std::tuple<double, double, bool>>& spans,
     double a, double b);
+// Effective wide-attempt skip threshold (0 = never skip); test door.
+size_t repack_wide_skip_min();
 RepackStats repack_stats_snapshot();
 void repack_stats_reset();
 

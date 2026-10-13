@@ -442,6 +442,58 @@ making FEWER member packs: skipping a wide attempt the narrow attempt already
 proves hopeless (97-99 % of wide attempts are rejected).  That changes
 decisions and is corpus-gated.
 
+## Landed: skipping the wide attempt after a no-op narrow one (2026-10-13)
+
+This is the first change in the series that can alter a decision, so it was
+measured as one.  Per wide attempt at NQ=16/32 (`BUDA_WIDE_TRACE`, a throwaway
+instrument): after a narrow attempt that was REJECTED the wide attempt is
+accepted 32 of 607 times (5.3 %); after a narrow attempt that was a NO-OP (the
+cluster's own members found no better seat with every neighbour held still) 16
+of 3391 (0.5 %) -- and that second class is 85 % of all wide attempts.  Of the
+rejections, 3790 of 3950 are "the cluster itself was not improved".  Nothing
+cheap separates the 16 accepts from the 3375 rejections: they span every
+cluster size, wide-set size (26-672 members) and window; capping on wide-set
+size alone loses accepts at every cap, and a capacity pre-check is not a
+necessary condition (the accept only needs the cluster to improve, not the
+neighbours to fit).
+
+So the rule is empirical: after a no-op narrow attempt, skip the wide attempt
+when its member count is at least K.  Measured (one thread, `run_nuts` / end of
+NUTS overlaps / abstract WL):
+
+| NQ | no skip | K=1 (skip every no-op) | K=256 |
+|---|---|---|---|
+| 8 | 1.5 s / 104 / 340,565 | 1.6 s / 104 / 340,565 | 1.8 s / 104 / 340,565 |
+| 16 | 4.5 s / 99 / 611,394 | 4.0 s / 99 / 611,380 | 4.2 s / 99 / 611,394 |
+| 32 | 30.2 s / 637 / 1,276,487 | **17.1 s / 676 / 1,327,545** | 25.9 s / 637 / 1,276,487 |
+| 62 | 153.5 s / 1036 / 2,834,330 | 130.7 s / 1005 / 2,817,071 | 130.6 s / 1004 / 2,817,191 |
+
+K=1 is the aggressive form and it is a trajectory change in both directions:
+NQ=32 loses 39 overlaps' worth of repack accepts and ends +4 % WL, NQ=62 ends
+slightly BETTER, and the QoR corpus reads **0 better / 2 worse** (`chip_topdown`
+5/134/11 -> 6/134/12, `chip3_topdown` 6/268/35 -> 8/268/35).  K=256 leaves NQ=8,
+16 and 32 byte-identical (same NUTS log), NQ=62 shifts by 32 overlaps (better,
+and the one place a wide set of 256+ members was accepted-after-no-op), and the
+corpus reads **identical on every metric across the 56 comparable flows**,
+abstract and detailed WL +0.  So K=256 ships as the DEFAULT, with
+`BUDA_REPACK_WIDE_SKIP_NOOP=<N>` to set it and `0` to turn it off (the
+decision-identical behaviour of the previous change).
+
+256 is the knee of the above, not a derived constant, and the honest limits are
+these: it was chosen on four SoC sizes and the 56-flow corpus; it is a cost
+bound (a wide pack of 256 members costs ~100x a narrow one) rather than a
+statement about when the neighbours cannot help; and at NQ=62 it is not
+decision-identical, so any later change of the repack should be compared
+against the SAME setting.  Runtime on the corpus read -9.2 % (1343 -> 1220 s,
+inside the ~4 % same-binary spread plus the gain), which is the large-design
+effect showing on the chip flows; `[RepackProf]` prints `wide_skipped=`.
+
+**What is left.**  At NQ=62 the repack is now ~40 % of `run_nuts`.  The next
+lever is the same kind -- fewer member packs -- and the data above says where
+the rest of them are: 5.3 % of wide attempts after a REJECTED narrow attempt
+are accepted, so those cannot be skipped wholesale, and the 85 % no-op class
+below 256 members is the remaining bulk.
+
 ## Not verified
 
 * The QoR corpus (`tools/qor_corpus.py --vs main`) was not run on the

@@ -3237,13 +3237,24 @@ void repack_stats_reset() {
     for (int k = 0; k < 2; ++k) g_repack.ns_solve_k[k] = 0;
 }
 
-static size_t wide_skip_noop_min() {   // 0 = never skip
+// Wide-attempt skip (#972): after a NO-OP narrow attempt -- the cluster's own
+// members found no better seat with every neighbour held still -- the wide
+// attempt, which moves the neighbours too, was accepted 16 times in 3391 at
+// NQ=32 (0.5 %), and its cost is proportional to its member count (the
+// 747k member packs of that run are 97-99 % rejected).  A wide set of this many
+// members or more is skipped after a no-op narrow attempt.  256 is the knee
+// of the measurement, not a derived constant: skipping at every size (1) was
+// a QoR loss on the corpus (chip_topdown, chip3_topdown) and at NQ=32
+// (+39 overlaps, +4 % abstract WL), while 256 left the corpus and NQ=8/16/32
+// byte-identical.  `BUDA_REPACK_WIDE_SKIP_NOOP=<N>` sets it, 0 disables.
+static size_t wide_skip_noop_min() {
     static const size_t v = [] {
         const char* e = std::getenv("BUDA_REPACK_WIDE_SKIP_NOOP");
-        return (e && *e) ? (size_t)std::strtoul(e, nullptr, 10) : (size_t)0;
+        return (e && *e) ? (size_t)std::strtoul(e, nullptr, 10) : (size_t)256;
     }();
     return v;
 }
+size_t repack_wide_skip_min() { return wide_skip_noop_min(); }
 
 static int repack_overlap_clusters(const NUTSEngine& eng, double track_pitch,
                                    std::vector<TrackSegment>& segments,

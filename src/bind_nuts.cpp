@@ -115,6 +115,7 @@ void bind_nuts(py::module_& m) {
     m.def("repack_stats_reset", &repack_stats_reset);
     m.def("span_index_hits", &span_index_hits);
     m.def("preferred_fit_impl", &preferred_fit_impl);
+    m.def("repack_wide_skip_min", &repack_wide_skip_min);
     m.def("seg_bbox",          &seg_bbox);
     m.def("compute_mst",
           static_cast<std::vector<MSTEdge>(*)(
