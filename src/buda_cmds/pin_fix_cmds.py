@@ -22,10 +22,12 @@ LANDING geometry (`Floorplan.landing_rects`).  What the block BLOCKS
 (`obstruction_rects`) never changes: a fix narrows where a wire may attach, it
 does not make the macro's body routable.
 
-A fix governs a BLOCK (`fix_pin B ...`), or only some of its pins (`fix_pin
-B.tx ...`, `fix_pin B.d* ...`) in a FLAT flow; faces are stated in the placed
-(die) frame.  Cell-level fixes with the orientation transform, layers, bit
-order and persistence are the next changes.
+A fix governs a BLOCK / instance (`fix_pin B ...`), only some of its pins
+(`fix_pin B.tx ...`, `fix_pin B.d* ...`), or EVERY instance of a BDB cell
+(`fix_pin cell:K ...`, `fix_pin cell:K.tx ...`), flat or hierarchical.  A block /
+instance fix states its faces in the placed (die) frame; a cell fix states them
+in the cell's own frame and each instance reads it turned by its orientation
+(`xf_fix`).
 
 Selector precedence, most specific first: exact pin name > bus name (`tx`
 selects `tx[3]` / `tx_3`) > longest `prefix*` > the block-level fix.  Two nets
@@ -140,10 +142,153 @@ def reapply_layer_fixes(session):
         persist(session)
 
 
-def _apply(session, block, fix):
+def _apply(session, block, fix, fp=None):
+    if is_cell_key(block):
+        return            # a cell-level fix is applied per INSTANCE, as blocks are projected
     faces = _eff_faces(session, fix)
-    session.fp.set_pin_fix(block, max(faces, 0) if faces >= 0 else fix["faces"],
-                           fix["rect"], fix["has_window"], fix["lo"], fix["hi"])
+    (session.fp if fp is None else fp).set_pin_fix(
+        block, max(faces, 0) if faces >= 0 else fix["faces"],
+        fix["rect"], fix["has_window"], fix["lo"], fix["hi"])
+
+
+CELL = "cell:"
+
+
+def is_cell_key(key):
+    return key.startswith(CELL)
+
+
+def cell_of(key):
+    return key[len(CELL):]
+
+
+def _cell_dims(session, cell):
+    """(w, h) of a BDB cell, or None."""
+    bdb = getattr(session, "bdb", None)
+    if bdb is None:
+        return None
+    for c in bdb.all_cells():
+        if c.name == cell:
+            return int(round(c.width)), int(round(c.height))
+    return None
+
+
+def _cell_scratch(session, cell):
+    """(floorplan, block name) holding ONLY the cell's own footprint at the
+    origin, so a cell-level fix can be judged (rect range, admits a landing)
+    before any instance exists.  None when the BDB does not know the cell."""
+    import buda
+    dims = _cell_dims(session, cell)
+    if dims is None:
+        return None
+    fp = buda.Floorplan()
+    rects = [tuple(int(round(v)) for v in r) for r in session.bdb.cell_rects(cell)]
+    if len(rects) >= 2:
+        fp.add_block_rects("C", rects)
+    else:
+        fp.add_block("C", 0, 0, dims[0], dims[1])
+    return fp, "C"
+
+
+def xf_fix(fix, orient, cw, ch):
+    """A cell-local fix as seen on an instance placed with `orient` (cw x ch =
+    the cell's own box).  Faces turn with the cell; a window along a face is
+    re-read on the face it lands on, reversed when the transform reverses the
+    along-axis; and `order` flips with that reversal, because 'bit 0 at the low
+    coordinate' is a statement in the PLACED frame while the cell's pins keep
+    their bit order.  A window or an `order` is only defined for faces on ONE
+    axis (checked at declaration): a mixed set reads its window on a different
+    axis per face, so no single transformed window exists."""
+    import orient_rect
+    swap, rx, ry = orient_rect.ORIENT_MAPS.get(orient, (0, 0, 0))
+    vec = {1: (0, 1), 2: (0, -1), 4: (1, 0), 8: (-1, 0)}
+
+    def vmap(v):
+        x, y = v
+        if swap:
+            x, y = y, x
+        if rx:
+            x = -x
+        if ry:
+            y = -y
+        return x, y
+    bit_of = {v: b for b, v in vec.items()}
+    out = dict(fix)
+    out["faces"] = 0
+    for b, v in vec.items():
+        if fix["faces"] & b:
+            out["faces"] |= bit_of[vmap(v)]
+    if fix["has_window"] or fix.get("order"):
+        fb = [b for b in vec if fix["faces"] & b]
+        # `order` is a statement about the along-axis too; faces=0 is both axes
+        horiz_face = bool(fb) and all(b in (4, 8) for b in fb)
+        vert_face = bool(fb) and all(b in (1, 2) for b in fb)
+        if not (horiz_face or vert_face):
+            return out        # refused at declaration; defensive
+        lo, hi = fix["lo"], fix["hi"]
+        if not fix["has_window"]:
+            lo, hi = 0, 1
+
+        def pt(t):
+            p = (0, t) if horiz_face else (t, 0)
+            x, y = p
+            bw, bh = cw, ch
+            if swap:
+                x, y, bw, bh = y, x, ch, cw
+            if rx:
+                x = bw - x
+            if ry:
+                y = bh - y
+            return x, y
+        a, b = pt(lo), pt(hi)
+        new_vert = bool(out["faces"] & 12)        # east/west faces fill the y axis
+        ca, cb = (a[1], b[1]) if new_vert else (a[0], b[0])
+        reversed_ = cb < ca
+        if fix["has_window"]:
+            out["lo"], out["hi"] = min(ca, cb), max(ca, cb)
+        if fix.get("order") and reversed_:
+            out["order"] = "rindex" if fix["order"] == "index" else "index"
+    return out
+
+
+def apply_cell_fix(session, fp, name, comp):
+    """Project the CELL-level fix of `comp`'s cell onto the block `name` of the
+    frame `fp`, transformed by the instance's orientation.  An instance-level
+    declaration (`fix_pin <name>`) wins and is applied by the caller's own
+    replay; this is only reached when there is none."""
+    key = CELL + comp.cell
+    fix = session._pin_fixes.get(key)
+    if fix is None:
+        return
+    dims = _cell_dims(session, comp.cell)
+    if dims is None:
+        return
+    cw, ch = dims
+    bw = int(round(comp.x2 - comp.x1))
+    bh = int(round(comp.y2 - comp.y1))
+    import orient_rect
+    orient = comp.orient if comp.orient in orient_rect.ORIENT_MAPS else "N"
+    swap = orient_rect.ORIENT_MAPS[orient][0]
+    want = (ch, cw) if swap else (cw, ch)
+    if (bw, bh) != want and cw != ch:
+        said = session.__dict__.setdefault("_cellfix_rot_said", set())
+        if name not in said:
+            said.add(name)
+            print(f"Warning: [PinFix] instance '{comp.name}' of cell '{comp.cell}' "
+                  f"is {bw}x{bh} but orientation '{orient}' of a {cw}x{ch} cell "
+                  f"would be {want[0]}x{want[1]} (a container rotated after its "
+                  f"children were placed keeps their tokens, BUDA-1918): its "
+                  f"orientation cannot be read, so the cell-level fix is NOT "
+                  f"applied to it — declare `fix_pin {comp.name} ...` instead")
+        return
+    tfix = xf_fix(fix, orient, cw, ch)
+    if tfix.get("layers") and _eff_faces(session, tfix) < 0:
+        print(f"Warning: [PinFix] instance '{comp.name}' ({orient}): layer "
+              f"{','.join(tfix['layers'])} cannot reach the face(s) "
+              f"'{_faces_text(tfix['faces'])}' its cell-level fix turns into; "
+              f"the fix is NOT applied to it")
+        return
+    _apply(session, name, tfix, fp)
 
 
 def _sel_store(session):
@@ -160,76 +305,259 @@ def _fixkey(fix):
                                      fix.get("order") or "")
 
 
-def resolve_fix(session, block, pin_name):
-    """The effective fix for ONE pin of a block (None = unfixed): exact pin >
-    bus > longest prefix > the block-level fix."""
+def _match_sel(sels, pin_name):
+    """The selector of ONE owner that governs `pin_name`: exact pin > bus >
+    longest prefix (None = the owner has no selector for it)."""
     from bus_names import bus_name
-    sels = _sel_store(session).get(block)
-    if sels:
-        hit = sels.get(("name", pin_name))
+    if not sels:
+        return None
+    hit = sels.get(("name", pin_name))
+    if hit is not None:
+        return hit
+    hit = sels.get(("name", bus_name(pin_name)))
+    if hit is not None:
+        return hit
+    best = None
+    for (kind, key), fx in sels.items():
+        if kind == "prefix" and pin_name.startswith(key):
+            if best is None or len(key) > len(best[0]):
+                best = (key, fx)
+    return best[1] if best is not None else None
+
+
+def _comps(session):
+    """name -> BDB component, rebuilt once per command (components move)."""
+    bdb = getattr(session, "bdb", None)
+    if bdb is None:
+        return {}
+    seq = getattr(session, "_cmd_seq", 0)
+    c = getattr(session, "_pf_comp_cache", None)
+    if c is None or c[0] != seq or c[1] is not bdb:
+        c = (seq, bdb, {x.name: x for x in bdb.all_components()})
+        session._pf_comp_cache = c
+    return c[2]
+
+
+def _placed(session, fx, comp):
+    """A cell-level fix as it reads on one INSTANCE (turned by its orientation),
+    or None when the instance's orientation cannot be read (see
+    apply_cell_fix) or the turned fix is unsatisfiable by its layers."""
+    import orient_rect
+    dims = _cell_dims(session, comp.cell)
+    if dims is None:
+        return None
+    cw, ch = dims
+    bw = int(round(comp.x2 - comp.x1))
+    bh = int(round(comp.y2 - comp.y1))
+    orient = comp.orient if comp.orient in orient_rect.ORIENT_MAPS else "N"
+    swap = orient_rect.ORIENT_MAPS[orient][0]
+    want = (ch, cw) if swap else (cw, ch)
+    if (bw, bh) != want and cw != ch:
+        said = session.__dict__.setdefault("_cellfix_rot_said", set())
+        if comp.name not in said:
+            said.add(comp.name)
+            print(f"Warning: [PinFix] instance '{comp.name}' of cell '{comp.cell}' "
+                  f"is {bw}x{bh} but orientation '{orient}' of a {cw}x{ch} cell "
+                  f"would be {want[0]}x{want[1]}: its orientation cannot be read "
+                  f"(BUDA-1918), so the cell-level fix is NOT applied to it")
+        return None
+    t = xf_fix(fx, orient, cw, ch)
+    if t.get("layers") and _eff_faces(session, t) < 0:
+        return None
+    return t
+
+
+def resolve_fix(session, block, pin_name, local=False):
+    """The effective fix for ONE pin of an owner (None = unfixed), as it reads
+    in the placed frame.  `block` is the owner PATH (a flat block name, or a
+    hierarchical instance path); `local` additionally lets the owner's last
+    path segment match, because a cell-local frame names its children that way.
+
+    Owner specificity first (an instance takes over what it names), then pin
+    specificity inside the owner:
+        instance selectors > instance block-level >
+        cell selectors > cell block-level      (cell fixes turned by the
+                                                instance's orientation)
+    and within one owner exact pin > bus > longest prefix."""
+    sels = _sel_store(session)
+    fixes = session._pin_fixes
+    keys = [block]
+    if local and "/" in block:
+        keys.append(block.rsplit("/", 1)[-1])
+    for k in keys:
+        hit = _match_sel(sels.get(k), pin_name)
         if hit is not None:
             return hit
-        hit = sels.get(("name", bus_name(pin_name)))
-        if hit is not None:
-            return hit
-        best = None
-        for (kind, key), fx in sels.items():
-            if kind == "prefix" and pin_name.startswith(key):
-                if best is None or len(key) > len(best[0]):
-                    best = (key, fx)
-        if best is not None:
-            return best[1]
-    return session._pin_fixes.get(block)
+    for k in keys:
+        if k in fixes:
+            return fixes[k]
+    if any(is_cell_key(k) for k in fixes) or any(is_cell_key(k) for k in sels):
+        comp = _comps(session).get(block)
+        if comp is not None:
+            ck = CELL + comp.cell
+            hit = _match_sel(sels.get(ck), pin_name)
+            if hit is None:
+                hit = fixes.get(ck)
+            if hit is not None:
+                return _placed(session, hit, comp)
+    return None
+
+
+def _owner_has_fixes(session, path, local):
+    """True when ANY fix declaration could govern some pin of this owner (its
+    own, or its cell's).  An UNFIXED pin of such an owner is still a distinct
+    landing from a fixed one — two nets with different signatures there cannot
+    share a bundle — so the signature keeps its None."""
+    sels = _sel_store(session)
+    fixes = session._pin_fixes
+    keys = [path] + ([path.rsplit("/", 1)[-1]] if local and "/" in path else [])
+    if any(k in fixes or k in sels for k in keys):
+        return True
+    if any(is_cell_key(k) for k in fixes) or any(is_cell_key(k) for k in sels):
+        comp = _comps(session).get(path)
+        if comp is not None:
+            ck = CELL + comp.cell
+            return ck in fixes or ck in sels
+    return False
+
+
+def frame_block(path, local):
+    """The name the bundle's frame gives the block at `path`."""
+    return path.rsplit("/", 1)[-1] if local and "/" in path else path
+
+
+def _bdb_net_index(session):
+    """net -> (driver pin, [receiver pins]) as 'path.pin' strings over LEAF
+    pins, for nets no `add_net` declared (an imported design).  Ancestor
+    interface pins are skipped: a fix names a leaf block's pin."""
+    seq = getattr(session, "_cmd_seq", 0)
+    c = getattr(session, "_pf_netpin_cache", None)
+    bdb = getattr(session, "bdb", None)
+    if bdb is None:
+        return {}
+    if c is not None and c[0] == seq and c[1] is bdb:
+        return c[2]
+    comps = {x.id: x for x in bdb.all_components()}
+    names = {n.id: n.name for n in bdb.all_nets()}
+    idx = {}
+    for pr in bdb.all_pins():
+        cp = comps.get(pr.comp_id)
+        nn = names.get(pr.net_id)
+        if cp is None or nn is None or not cp.is_leaf:
+            continue
+        idx.setdefault(nn, []).append((f"{cp.name}.{pr.pin_name}", pr.dir))
+    out = {}
+    for nn, pins in idx.items():
+        drv = next((p for p, d in pins if d == "OUTPUT"), pins[0][0])
+        out[nn] = (drv, [p for p, _d in pins if p != drv])
+    session._pf_netpin_cache = (seq, bdb, out)
+    return out
 
 
 def _net_pins_of(session, net):
-    return getattr(session, "_net_pins", {}).get(net)
+    hit = getattr(session, "_net_pins", {}).get(net)
+    if hit is not None:
+        return hit
+    if getattr(session, "bdb", None) is not None and (
+            session._pin_fixes or _sel_store(session)):
+        return _bdb_net_index(session).get(net)
+    return None
 
 
-def net_fix_signature(session, net):
-    """((block, fixkey), ...) over the blocks this net touches that carry any
-    fix declaration — two nets with different signatures cannot share a bundle."""
+def _any_fixes(session):
+    return bool(session._pin_fixes or _sel_store(session))
+
+
+def net_fix_signature(session, net, local=False, names_local=None):
+    """((frame block, fixkey), ...) over the blocks this net touches that
+    resolve to any fix — two nets with different signatures cannot share a
+    bundle.  `local` is how names are RESOLVED (a local name may match a
+    declaration); `names_local` is how the bundle's frame NAMES its blocks
+    (an expanded instance resolves like its template but lives in the
+    absolute frame)."""
     pins = _net_pins_of(session, net)
-    if pins is None:
+    if pins is None or not _any_fixes(session):
         return ()
+    nl = local if names_local is None else names_local
     drv, rcvs = pins
     sig = {}
     for pin in [drv] + list(rcvs):
-        block, _, name = pin.rpartition(".")
-        if block in session._pin_fixes or block in _sel_store(session):
-            sig[block] = _fixkey(resolve_fix(session, block, name))
+        path, _, name = pin.rpartition(".")
+        if _owner_has_fixes(session, path, local):
+            sig[frame_block(path, nl)] = _fixkey(resolve_fix(session, path, name, local))
     return tuple(sorted(sig.items(), key=lambda kv: kv[0]))
 
 
-def net_fix_conflicts(session, net):
+def net_fix_conflicts(session, net, local=False):
     """[(block, [pin names])] where ONE net lands on a block through pins whose
     fixes differ.  A net is a single bundle member, so it cannot be split to
     honour both landings."""
     pins = _net_pins_of(session, net)
-    if pins is None:
+    if pins is None or not _any_fixes(session):
         return []
     drv, rcvs = pins
     seen = {}           # block -> {fixkey: [pin names]}
     for pin in [drv] + list(rcvs):
-        block, _, name = pin.rpartition(".")
-        if block in session._pin_fixes or block in _sel_store(session):
-            key = _fixkey(resolve_fix(session, block, name))
-            seen.setdefault(block, {}).setdefault(key, []).append(name)
+        path, _, name = pin.rpartition(".")
+        if _owner_has_fixes(session, path, local):
+            key = _fixkey(resolve_fix(session, path, name, local))
+            seen.setdefault(frame_block(path, local), {}).setdefault(key, []).append(name)
     return [(b, [n for names in d.values() for n in names])
             for b, d in seen.items() if len(d) > 1]
 
 
-def bundle_fix_map(session, net_names):
+def bundle_fix_map(session, net_names, local=False, names_local=None):
     """The EFFECTIVE fix map for one bundle ({block: (faces, rect, has_window,
     lo, hi)}), or None when no per-pin selector exists (the floorplan's own
     block-level fixes then apply unchanged — the byte-identical path)."""
-    if not _sel_store(session):
+    if not any(True for _ in _sel_store(session)):
         return None
     out = {}
     for net in net_names:
-        for blk, key in net_fix_signature(session, net):
+        for blk, key in net_fix_signature(session, net, local, names_local):
             if key is not None and blk not in out:
                 out[blk] = _geom_key(session, key)
+    return out
+
+
+def _expanded_ids(session):
+    """Bundle ids of the per-instance wrappers `run_planner hier` expanded."""
+    seq = getattr(session, "_cmd_seq", 0)
+    c = getattr(session, "_pf_exp_cache", None)
+    em = getattr(session, "_hier_expansion_map", None) or {}
+    if c is None or c[0] != seq or c[1] is not em:
+        ids = {x.input.original_bundle.id for ws in em.values() for x in ws}
+        c = (seq, em, ids)
+        session._pf_exp_cache = c
+    return c[2]
+
+
+def wrapper_local(session, w):
+    """True when the wrapper's CURRENT geometry is in a cell-local frame (a
+    template, before expansion) — its blocks carry the child's local name.  An
+    expanded instance, a cross-level / depth bundle and a flat bundle are all
+    in an absolute frame with full block names."""
+    b = w.input.original_bundle
+    return bool(b.cell_context) and b.id not in _expanded_ids(session)
+
+
+def wrapper_pins(session, w):
+    """[(pin string, owner path, pin name, frame block, fix)] for every pin of
+    every net of a bundle that resolves to a fix.  Names RESOLVE the way the
+    bundle was born (a cell-level template and its expanded instances accept a
+    child's local name) and are FRAMED the way its geometry is now."""
+    resolve_local = bool(w.input.original_bundle.cell_context)
+    frame_local = wrapper_local(session, w)
+    out = []
+    for net in w.input.original_bundle.get_net_names():
+        pins = _net_pins_of(session, net)
+        if pins is None:
+            continue
+        for pin in [pins[0]] + list(pins[1]):
+            path, _, name = pin.rpartition(".")
+            fx = resolve_fix(session, path, name, resolve_local)
+            if fx is not None:
+                out.append((pin, path, name, frame_block(path, frame_local), fx))
     return out
 
 
@@ -281,18 +609,13 @@ def bundle_layer_mask(session, w):
     if not has_layer_fixes(session):
         return (None, None, {})
     per_axis = {"H": [], "V": []}
-    for net in w.input.original_bundle.get_net_names():
-        pins = _net_pins_of(session, net)
-        if pins is None:
+    # A name accepts both spellings here (full path / the child's local name):
+    # a layer set needs no geometry, only WHICH pins the bundle lands on.
+    for pin, _path, _name, _blk, fix in wrapper_pins(session, w):
+        if not fix.get("layers"):
             continue
-        drv, rcvs = pins
-        for pin in [drv] + list(rcvs):
-            block, _, name = pin.rpartition(".")
-            fix = resolve_fix(session, block, name)
-            if fix is None or not fix.get("layers"):
-                continue
-            for ax, lids in _fix_axes(session, fix).items():
-                per_axis[ax].append((pin, frozenset(lids)))
+        for ax, lids in _fix_axes(session, fix).items():
+            per_axis[ax].append((pin, frozenset(lids)))
     if not per_axis["H"] and not per_axis["V"]:
         return (None, None, {})
     allowed, constrained = [], {}
@@ -350,28 +673,23 @@ def audit_pin_fix(session, w, topo):
         return out
     names = {lid: n for n, lid in session._layer_name_map.items()}
     seen = set()
-    for net in w.input.original_bundle.get_net_names():
-        pins = _net_pins_of(session, net)
-        if pins is None:
+    fp = session.fp
+    for pin, _path, _name, block, fix in wrapper_pins(session, w):
+        if not fix.get("layers") or not fp.has_block(block):
             continue
-        for pin in [pins[0]] + list(pins[1]):
-            block, _, name = pin.rpartition(".")
-            fix = resolve_fix(session, block, name)
-            if fix is None or not fix.get("layers") or not session.fp.has_block(block):
-                continue
-            ok = {session._layer_name_map.get(n) for n in fix["layers"]}
-            for (x1, y1, x2, y2, _f) in _strips_with(session, block, fix):
-                for i, sg in enumerate(segs):
-                    for p in (sg.start, sg.end):
-                        if x1 <= p.x <= x2 and y1 <= p.y <= y2 and layers[i] not in ok:
-                            key = (pin, i)
-                            if key in seen:
-                                continue
-                            seen.add(key)
-                            out.append(_PinFixViolation(block, i, (
-                                f"PIN_FIX: segment {i} lands on {pin} on "
-                                f"{names.get(layers[i], layers[i])}, outside the "
-                                f"fixed layer(s) {','.join(fix['layers'])}")))
+        ok = {session._layer_name_map.get(n) for n in fix["layers"]}
+        for (x1, y1, x2, y2, _f) in _strips_in(session, fp, block, fix):
+            for i, sg in enumerate(segs):
+                for p in (sg.start, sg.end):
+                    if x1 <= p.x <= x2 and y1 <= p.y <= y2 and layers[i] not in ok:
+                        key = (pin, i)
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        out.append(_PinFixViolation(block, i, (
+                            f"PIN_FIX: segment {i} lands on {pin} on "
+                            f"{names.get(layers[i], layers[i])}, outside the "
+                            f"fixed layer(s) {','.join(fix['layers'])}")))
     return out
 
 
@@ -381,36 +699,34 @@ def has_order_fixes(session):
                    for f in d.values()))
 
 
-def segment_orders(session, w, topo):
+def segment_orders(session, w, topo, fp=None):
     """{segment index: {'index'|'rindex'}} — the bit order each segment is held
-    to by the fixed pins it ENDS on (an end inside an admitted landing strip)."""
+    to by the fixed pins it ENDS on (an end inside an admitted landing strip).
+    `fp` is the frame the topology's geometry lives in (the session floorplan
+    for anything already absolute; a generator's cell-local frame for a
+    template that is still being generated)."""
     out = {}
     if not has_order_fixes(session):
         return out
+    fp = session.fp if fp is None else fp
     segs = list(topo.segments)
     strips = {}
-    for net in w.input.original_bundle.get_net_names():
-        pins = _net_pins_of(session, net)
-        if pins is None:
+    for pin, path, name, block, fix in wrapper_pins(session, w):
+        if not fix.get("order") or not fp.has_block(block):
             continue
-        for pin in [pins[0]] + list(pins[1]):
-            block, _, name = pin.rpartition(".")
-            fix = resolve_fix(session, block, name)
-            if fix is None or not fix.get("order") or not session.fp.has_block(block):
-                continue
-            key = (block, _fixkey(fix))
-            if key not in strips:
-                strips[key] = (fix["order"], _strips_with(session, block, fix))
-            order, rects = strips[key]
-            for i, sg in enumerate(segs):
-                for p in (sg.start, sg.end):
-                    if any(x1 <= p.x <= x2 and y1 <= p.y <= y2
-                           for (x1, y1, x2, y2, _f) in rects):
-                        out.setdefault(i, set()).add(order)
+        key = (block, _fixkey(fix))
+        if key not in strips:
+            strips[key] = (fix["order"], _strips_in(session, fp, block, fix))
+        order, rects = strips[key]
+        for i, sg in enumerate(segs):
+            for p in (sg.start, sg.end):
+                if any(x1 <= p.x <= x2 and y1 <= p.y <= y2
+                       for (x1, y1, x2, y2, _f) in rects):
+                    out.setdefault(i, set()).add(order)
     return out
 
 
-def filter_order_conflicts(session, w, cands):
+def filter_order_conflicts(session, w, cands, fp=None):
     """A straight segment cannot reverse its bits, so a candidate whose one
     segment joins two landings of OPPOSITE order is dropped (a bend may differ:
     each leg takes its landing's order).  Decided per candidate, at generation,
@@ -420,7 +736,7 @@ def filter_order_conflicts(session, w, cands):
     if not has_order_fixes(session) or not cands:
         return cands
     keep = [c for c in cands
-            if not any(len(o) > 1 for o in segment_orders(session, w, c).values())]
+            if not any(len(o) > 1 for o in segment_orders(session, w, c, fp).values())]
     if keep and len(keep) == len(cands):
         return cands
     bid = w.input.original_bundle.id
@@ -457,34 +773,71 @@ def apply_orders(session, bus_segs):
     return bus_segs
 
 
-def set_gen_fixes(session, tg, w):
-    """Point a generator at the bundle's effective fixes (no-op without selectors)."""
-    m = bundle_fix_map(session, w.input.original_bundle.get_net_names())
+def set_gen_fixes(session, tg, w, local=None):
+    """Point a generator at the bundle's effective fixes (no-op without selectors).
+    The map is keyed by the names the bundle's FRAME gives its blocks, so a
+    cell-local template reads the children's local names."""
+    if local is None:
+        local = wrapper_local(session, w)
+    m = bundle_fix_map(session, w.input.original_bundle.get_net_names(), local)
     if m is None:
         tg.clear_block_fixes()
     else:
         tg.set_block_fixes(m)
 
 
-def _net_fix_map(session, net):
-    return {blk: key for blk, key in net_fix_signature(session, net)}
+def stamp_expanded(session, w):
+    """An expanded instance wrapper: re-resolve its fix map in the ABSOLUTE
+    frame (full block names, the instance's own pins and orientations).  A
+    no-op without per-pin selectors, where the floorplan's own fixes apply."""
+    b = w.input.original_bundle
+    m = bundle_fix_map(session, b.get_net_names(), bool(b.cell_context), False)
+    if m is None:
+        return
+    cands = list(w.input.candidates)         # copies: stamp, then assign back
+    for c in cands:
+        c.block_fixes = m
+    w.input.candidates = cands
 
 
-def _partition_by_fix(session, nets):
+def _net_fix_map(session, net, local=False):
+    return {blk: key for blk, key in net_fix_signature(session, net, local)}
+
+
+def _partition_idx(session, nets, local=False):
     """Greedy partition of a bundle's nets into parts whose per-block fixes do
-    not CONFLICT.  Nets landing on different fixed blocks share a part (one map
-    can hold both); only differing resolutions at a block they share split."""
-    parts = []          # [(merged {block: key}, [nets])]
-    for n in nets:
-        m = _net_fix_map(session, n)
+    not CONFLICT: [(merged {block: key}, [net indices])].  Nets landing on
+    different fixed blocks share a part (one map can hold both); only
+    differing resolutions at a block they share split."""
+    parts = []
+    for i, n in enumerate(nets):
+        m = _net_fix_map(session, n, local)
         for merged, members in parts:
             if all(merged.get(b, k) == k for b, k in m.items()):
                 merged.update(m)
-                members.append(n)
+                members.append(i)
                 break
         else:
-            parts.append((dict(m), [n]))
+            parts.append((dict(m), [i]))
     return parts
+
+
+def _partition_by_fix(session, nets, local=False):
+    return [(g, [nets[i] for i in idxs])
+            for g, idxs in _partition_idx(session, nets, local)]
+
+
+def _refuse_conflicting_nets(session, nets, local):
+    import sys
+    for n in nets:
+        bad = net_fix_conflicts(session, n, local)
+        if bad:
+            blk, pins = bad[0]
+            print(f"Error: net '{n}' reaches block '{blk}' through pins "
+                  f"{', '.join(pins)} whose pin fixes differ — one net "
+                  f"cannot land on two faces; give those pins the same "
+                  f"fix or split the net")
+            sys.exit(1)
 
 
 def split_bundles_by_fix(session, raw_bundles):
@@ -494,17 +847,8 @@ def split_bundles_by_fix(session, raw_bundles):
     if not _sel_store(session):
         return raw_bundles
     import buda
-    import sys
     for b in raw_bundles:
-        for n in b.get_net_names():
-            bad = net_fix_conflicts(session, n)
-            if bad:
-                blk, pins = bad[0]
-                print(f"Error: net '{n}' reaches block '{blk}' through pins "
-                      f"{', '.join(pins)} whose pin fixes differ — one net "
-                      f"cannot land on two faces; give those pins the same "
-                      f"fix or split the net")
-                sys.exit(1)
+        _refuse_conflicting_nets(session, b.get_net_names(), False)
     out = []
     next_id = max((b.id for b in raw_bundles), default=0)
     for b in raw_bundles:
@@ -532,18 +876,151 @@ def split_bundles_by_fix(session, raw_bundles):
     return out
 
 
-def _strips_with(session, block, fix):
-    """Strips `fix` would admit on `block`, without leaving it applied."""
-    fp = session.fp
-    prev = session._pin_fixes.get(block)
-    _apply(session, block, fix)
+def split_hbundles_by_fix(session, raw_bundles):
+    """Hier twin of `split_bundles_by_fix`, applied to TEMPLATE bundles BEFORE
+    per-instance expansion (the NDR rule-class split's position and shape): a
+    cell-local template's REPLICAS split in lockstep with it, every HBundle
+    hier field is preserved per part, per-net fan-in arrays split in the same
+    net partition, and a class the fixes govern INCONSISTENTLY across its
+    occurrences is a hard error — a template is solved once and copied, so every
+    occurrence must resolve to the same fixes on the same bits.  Names are read
+    in the bundle's own frame (a cell-local template: the children's local
+    names).  No selectors declared = input returned untouched."""
+    if not _sel_store(session):
+        return raw_bundles
+    import sys
+    from buda_cmds.bundling_cmds import _fanin_core
+    for b in raw_bundles:
+        _refuse_conflicting_nets(session, b.get_net_names(), bool(b.cell_context))
+    counter = [max((b.id for b in raw_bundles), default=0)]
+
+    def _new_id():
+        counter[0] += 1
+        return counter[0]
+
+    def _classes(b):
+        """[(sorted {block: fixkey}, [net indices])]: what each part lands on,
+        so occurrences are congruent only when they resolve to the same FIXES
+        as well as the same bits."""
+        return [(tuple(sorted(g.items(), key=lambda kv: kv[0])), idxs) for g, idxs in
+                _partition_idx(session, list(b.get_net_names()), bool(b.cell_context))]
+
+    def _split_one(b, classes):
+        classes = [idxs for _g, idxs in classes]
+        if len(classes) <= 1:
+            return [b]
+        nets = list(b.get_net_names())
+        drvs = list(b.net_drivers)
+        rcvs = [list(r) for r in b.net_receivers]
+        fanin = bool(drvs) and len(drvs) == len(nets)
+        sizes = "+".join(str(len(i)) for i in classes)
+        print(f"[PinFix] split hbundle {b.id} ({len(nets)} bits) into "
+              f"{len(classes)} fix-uniform part(s) ({sizes}): its nets land on "
+              f"one fixed block under different pin fixes, and one bundle lands "
+              f"on one face")
+        parts = []
+        for k, idxs in enumerate(classes, start=1):
+            nb = session._clone_hbundle_with_id(b, b.id if k == 1 else _new_id())
+            nb.net_names = [nets[i] for i in idxs]
+            suffix = f"|PINFIX:{k}"
+            if fanin:
+                pd = [drvs[i] for i in idxs]
+                pr = [rcvs[i] for i in idxs]
+                nb.net_drivers = pd
+                nb.net_receivers = pr
+                core, uniq_drv, root, extra_rcv = _fanin_core(pd, pr)
+                nb.reason = (core if core else b.reason) + suffix
+                if core and b.cell_context and b.entry_busterm_ids:
+                    nb.entry_busterm_ids = ["bt:" + d for d in uniq_drv]
+                    nb.exit_busterm_ids = (["bt:" + root]
+                                           + ["bt:" + r for r in extra_rcv])
+            else:
+                nb.reason = b.reason + suffix
+            parts.append(nb)
+        return parts
+
+    cell_ids = {b.id for b in raw_bundles if b.cell_context}
+
+    def _is_replica(b):
+        return bool(b.cell_context and b.parent_id in cell_ids and b.instances)
+
+    replicas_of = {}
+    for b in raw_bundles:
+        if _is_replica(b):
+            replicas_of.setdefault(b.parent_id, []).append(b)
+    out = []
+    for b in raw_bundles:
+        if _is_replica(b):
+            continue
+        reps = replicas_of.get(b.id, ())
+        tcls = _classes(b)
+        for rb in reps:
+            rcls = _classes(rb)
+            if rcls != tcls:
+                print(f"Error: pin fixes govern cell-level bundle class {b.id} "
+                      f"INCONSISTENTLY across its occurrences: the template "
+                      f"partitions as {[len(i) for _g, i in tcls]} but occurrence "
+                      f"bundle {rb.id} ({rb.instances[0] if rb.instances else '?'}) "
+                      f"as {[len(i) for _g, i in rcls]} — a cell-local template is "
+                      f"solved once and copied, so every occurrence must resolve "
+                      f"to the same fixes on the same bits.  Declare the fix on "
+                      f"the CELL (`fix_pin cell:<name>.<pin>`) or on the child's "
+                      f"local name, not on one instance's path.")
+                sys.exit(1)
+        tparts = _split_one(b, tcls)
+        out.extend(tparts)
+        for rb in reps:
+            rparts = _split_one(rb, _classes(rb))
+            for tp, rp in zip(tparts, rparts):
+                rp.parent_id = tp.id
+            out.extend(rparts)
+    return out
+
+
+def _is_instance_owner(session, name):
+    """`name` is a BDB instance path, or the local name of one (the name a
+    cell-local frame gives a child): a hierarchical pin selector's owner."""
+    if getattr(session, "bdb", None) is None:
+        return False
+    comps = _comps(session)
+    if name in comps:
+        return True
+    return "/" not in name and any(c.rsplit("/", 1)[-1] == name for c in comps)
+
+
+def _frame_of(session, block):
+    """(floorplan, block name) a fix on `block` is judged against: the session
+    floorplan for a block, the cell's own footprint for a `cell:` key.
+    (None, None) when there is nothing to judge against yet."""
+    if is_cell_key(block):
+        scratch = _cell_scratch(session, cell_of(block))
+        return scratch if scratch else (None, None)
+    return session.fp, block
+
+
+def _strips_in(session, fp, name, fix):
+    """Strips `fix` would admit on block `name` of frame `fp`, leaving whatever
+    the frame held there (a cell-level fix applied at projection included)
+    exactly as it was."""
+    had = fp.has_pin_fix(name)
+    prev = fp.pin_fix(name) if had else None
+    _apply(session, name, fix, fp)
     try:
-        return fp.pin_fix_strips(block)
+        return fp.pin_fix_strips(name)
     finally:
-        if prev is None:
-            fp.clear_pin_fix(block)
+        if had:
+            fp.set_pin_fix(name, *prev)
         else:
-            _apply(session, block, prev)
+            fp.clear_pin_fix(name)
+
+
+def _strips_with(session, block, fix):
+    """Strips `fix` would admit on `block` (a session-floorplan block, or a
+    `cell:` key judged on the cell's own footprint)."""
+    fp, name = _frame_of(session, block)
+    if fp is None:
+        return []
+    return _strips_in(session, fp, name, fix)
 
 
 def _cmd_fix_pin(session, cmd, args, cmd_line):
@@ -555,14 +1032,35 @@ def _cmd_fix_pin(session, cmd, args, cmd_line):
         return
     target = args[0]
     sel = None      # (kind, key) for a per-pin selector, else None (block-level)
-    # Block names may themselves contain a period (`u.core`, `IO.PAD`), so the
-    # exact declared name wins; only an explicit trailing `.*` is stripped, and
-    # a suffix is read as a per-pin selector only when its prefix IS a known block.
-    if session.fp.has_block(target):
+    # `cell:<name>` governs EVERY instance of a BDB cell, transformed by each
+    # instance's orientation; anything else names one block / instance.  Block
+    # names may themselves contain a period (`u.core`, `IO.PAD`), so the exact
+    # declared name wins; only an explicit trailing `.*` is stripped, and a
+    # suffix is read as a per-pin selector only when its prefix IS a known block
+    # (or, for `cell:`, a known cell).
+    if target.startswith(CELL):
+        body = target[len(CELL):]
+        if _cell_dims(session, body) is not None:
+            block = CELL + body
+        elif body.endswith(".*"):
+            block = CELL + body[:-2]
+        elif "." in body and _cell_dims(session, body.rsplit(".", 1)[0]) is not None:
+            cname, _, sel_text = body.rpartition(".")
+            block = CELL + cname
+            sel = (("prefix", sel_text[:-1]) if sel_text.endswith("*")
+                   else ("name", sel_text))
+        else:
+            block = CELL + body
+        if _cell_dims(session, cell_of(block)) is None:
+            print(f"Error: fix_pin {target}: no BDB cell named '{cell_of(block)}' "
+                  f"(a cell-level fix needs open_bdb and add_cell / import first)")
+            return
+    elif session.fp.has_block(target):
         block = target
     elif target.endswith(".*"):
         block = target[:-2]
-    elif "." in target and session.fp.has_block(target.rsplit(".", 1)[0]):
+    elif "." in target and (session.fp.has_block(target.rsplit(".", 1)[0])
+                            or _is_instance_owner(session, target.rsplit(".", 1)[0])):
         block, _, sel_text = target.rpartition(".")
         sel = (("prefix", sel_text[:-1]) if sel_text.endswith("*")
                else ("name", sel_text))
@@ -640,11 +1138,25 @@ def _cmd_fix_pin(session, cmd, args, cmd_line):
             print(f"Error: fix_pin: unknown token '{args[i]}'"); return
         i += 1
 
-    fp = session.fp
-    known = fp.has_block(block)
-    if known and rect >= _rect_count(fp, block):
+    cellfix = is_cell_key(block)
+    fp, fname = _frame_of(session, block)
+    if fp is None:
+        fp, fname = session.fp, block
+    known = fp.has_block(fname)
+    if known and rect >= _rect_count(fp, fname):
         print(f"Error: fix_pin {block}: rect {rect + 1} out of range "
-              f"(block has {_rect_count(fp, block)} rect(s))"); return
+              f"(block has {_rect_count(fp, fname)} rect(s))"); return
+    if cellfix and (window is not None or order):
+        # A window / order is stated along ONE face axis; a cell-level fix is
+        # re-read per instance orientation, and a mixed face set reads its
+        # window on a different axis per face, so there is no single answer.
+        if not (faces and (all(f in (4, 8) for f in _FACE_BITS.values() if faces & f)
+                           or all(f in (1, 2) for f in _FACE_BITS.values() if faces & f))):
+            print(f"Error: fix_pin {block}: 'at' and 'order' on a cell-level fix "
+                  f"need faces on ONE axis (H, V, or a single face): the window "
+                  f"is read along the face, and an instance turned 90 degrees "
+                  f"reads a mixed set along a different axis per face")
+            return
     fix = {"faces": faces, "rect": rect, "has_window": window is not None,
            "lo": window[0] if window else 0, "hi": window[1] if window else 0,
            "layers": layers, "order": order}
@@ -657,9 +1169,9 @@ def _cmd_fix_pin(session, cmd, args, cmd_line):
               f"setting is kept")
         return
     if sel is not None:
-        if getattr(session, "bdb", None) is not None and not known:
-            print(f"Error: fix_pin {target}: a per-pin fix needs a flat-flow block "
-                  f"declared first; hierarchical designs take block-level fixes only")
+        if not known and not cellfix and not _is_instance_owner(session, block):
+            print(f"Error: fix_pin {target}: a per-pin fix needs its block declared "
+                  f"first (add_block, or an instance of the open BDB)")
             return
         if known and not _strips_with(session, block, fix):
             print(f"Error: fix_pin {target}: '{_declared(fix)}' admits no landing "
@@ -674,12 +1186,16 @@ def _cmd_fix_pin(session, cmd, args, cmd_line):
     prev = fixes.get(block)
     fixes[block] = fix
     _apply(session, block, fix)
-    if known and not fp.pin_fix_strips(block):
+    if cellfix:
+        # judged on the cell's own footprint (a scratch frame): `_apply` skips
+        # a cell key, so apply it there for the strip count
+        _apply(session, fname, fix, fp)
+    if known and not fp.pin_fix_strips(fname):
         # Nothing admissible: a fix that admits no landing at all strands the
         # bus, which is never what was meant.  Refuse and put the old one back.
         if prev is None:
             del fixes[block]
-            fp.clear_pin_fix(block)
+            fp.clear_pin_fix(fname)
         else:
             fixes[block] = prev
             _apply(session, block, prev)
@@ -687,9 +1203,10 @@ def _cmd_fix_pin(session, cmd, args, cmd_line):
               f"on this block (a face interior to its rects, or a window "
               f"outside the face); the previous setting is kept")
         return
-    n = len(fp.pin_fix_strips(block)) if known else 0
+    n = len(fp.pin_fix_strips(fname)) if known else 0
     print(f"[PinFix] {block}: {_declared(fix)}"
-          + (f" -> {n} landing strip(s)" if known else " (block not declared yet)"))
+          + (f" -> {n} landing strip(s)" if known else " (block not declared yet)")
+          + (" (every instance, turned with its orientation)" if cellfix else ""))
 
 
 def revalidate(session, block, fp=None):
@@ -1016,8 +1533,9 @@ def restamp_bundles(session):
         return
     for w in session.bundles:
         nets = list(w.input.original_bundle.get_net_names())
-        conflict = any(net_fix_conflicts(session, n) for n in nets)
-        if conflict or len(_partition_by_fix(session, nets)) > 1:
+        loc = wrapper_local(session, w)
+        conflict = any(net_fix_conflicts(session, n, loc) for n in nets)
+        if conflict or len(_partition_by_fix(session, nets, loc)) > 1:
             print(f"Error: load_pipeline: restored bundle "
                   f"{w.input.original_bundle.id} no longer fits the current pin "
                   f"fixes (its nets now land on one block under different "
@@ -1026,7 +1544,9 @@ def restamp_bundles(session):
             _void_pipeline(session)
             return
     for w in session.bundles:
-        m = bundle_fix_map(session, w.input.original_bundle.get_net_names())
+        m = bundle_fix_map(session, w.input.original_bundle.get_net_names(),
+                           bool(w.input.original_bundle.cell_context),
+                           wrapper_local(session, w))
         if m is not None:
             cands = list(w.input.candidates)     # copies: stamp, then assign back
             for c in cands:

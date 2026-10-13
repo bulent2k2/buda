@@ -1,0 +1,63 @@
+# fix_pin — a CELL-level pin fix inside CELL-LOCAL templates (two occurrences).
+#
+# proc_cell is placed twice (proc_i, proc_j); each holds a pa -> pb -> pc chain of
+# pipe_cell blocks.  The chain's buses are cell-local TEMPLATES: routed once in
+# proc_cell's own frame, then expanded to both instances.  One declaration governs
+# every pipe_cell wherever the frame is drawn:
+#
+#   fix_pin cell:pipe_cell.in  north layer M5   pb/pc take their input on the TOP face,
+#                                               and the landing wire is on M5 (vertical)
+#   fix_pin cell:pipe_cell.out east             pa/pb put their output on the EAST face
+#
+# so the pa -> pb bus has to climb over pb to reach the north face instead of
+# landing on its west face.  The template and its replica are solved to the same
+# shape (the split is congruent), and each instance keeps its own absolute-frame
+# map after expansion.
+#
+# Run:   bin/buda flow/pin_fix/hier_cell_local.buda       (viewer; green = landings)
+# Expect: check_design Success at both stages; every pipe_cell input on a north strip.
+
+source ../tracks/tracks.buda
+
+corner_margin dx 5 dy 5
+set_min_stub_length 2
+
+open_bdb :memory:
+
+add_cell proc_cell   420 240
+add_cell pipe_cell   110  80
+add_cell src_cell    120 120
+add_cell snk_cell    120 120
+
+add_inst_to_cell proc_cell pa_i  pipe_cell   20  100
+add_inst_to_cell proc_cell pb_i  pipe_cell  155  100
+add_inst_to_cell proc_cell pc_i  pipe_cell  290  100
+
+add_inst src_i   src_cell  -    50  300
+add_inst proc_i  proc_cell -   300  100
+add_inst proc_j  proc_cell -   300  600
+add_inst snk_i   snk_cell  -   900  300
+
+fix_pin cell:pipe_cell.in  north layer M5
+fix_pin cell:pipe_cell.out east
+dump_pin_fixes
+
+derive_busterms 1
+add_blocks_from_bdb 0
+add_blocks_from_bdb 1 skip
+
+bdb_net_mode on
+add_bus pa_pb_i[8] proc_i/pa_i.out proc_i/pb_i.in
+add_bus pb_pc_i[8] proc_i/pb_i.out proc_i/pc_i.in
+add_bus pa_pb_j[8] proc_j/pa_i.out proc_j/pb_i.in
+add_bus pb_pc_j[8] proc_j/pb_i.out proc_j/pc_i.in
+
+run_hier_bundler depth 1
+generate_hier_topologies
+run_planner hier 5
+run_nuts
+check_design nuts
+run_detailed_nuts
+check_design dnuts
+
+visualize

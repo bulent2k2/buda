@@ -1,0 +1,56 @@
+# fix_pin — per-PIN fixes in a HIERARCHICAL flow, on a CELL.
+#
+# One macro cell, two ports, two different faces — stated once on the cell:
+#
+#   fix_pin cell:mac_cell.lo_in west     lo_in sits on the west face
+#   fix_pin cell:mac_cell.hi_in north    hi_in sits on the north face
+#
+# drv_i drives both ports of both instances, so STRICT bundling would merge
+# lo_* and hi_* into one 8-bit bundle per instance; one bundle lands on one face,
+# so the hier bundler SPLITS it ([PinFix] split hbundle ...), before expansion,
+# exactly as the NDR rule-class split does.  mac_b is turned 180 degrees: the
+# SAME declaration puts its lo_in on the EAST face and its hi_in on the SOUTH.
+#
+# Run:   bin/buda flow/pin_fix/hier_pins.buda          (viewer; green = landings)
+# Expect: '[PinFix] split hbundle' lines, check_design Success at both stages,
+#         lo_* arriving from the west and hi_* from the north at mac_a, and the
+#         mirror image at mac_b.
+
+source ../tracks/tracks.buda
+
+corner_margin dx 5 dy 5
+set_min_stub_length 2
+
+open_bdb :memory:
+
+add_cell drv_cell 100 700
+add_cell mac_cell 100 100
+
+add_inst drv_i  drv_cell -   50  50
+add_inst mac_a  mac_cell -  500 500
+add_inst mac_b  mac_cell -  500 100
+
+rotate_comp mac_b 180
+
+fix_pin cell:mac_cell.lo_in west
+fix_pin cell:mac_cell.hi_in north
+dump_pin_fixes
+
+derive_busterms 0
+add_blocks_from_bdb 0
+
+bdb_net_mode on
+add_bus lo_a[4] drv_i.o mac_a.lo_in
+add_bus hi_a[4] drv_i.o mac_a.hi_in
+add_bus lo_b[4] drv_i.o mac_b.lo_in
+add_bus hi_b[4] drv_i.o mac_b.hi_in
+
+run_hier_bundler depth 0
+generate_hier_topologies
+run_planner hier 5
+run_nuts
+check_design nuts
+run_detailed_nuts
+check_design dnuts
+
+visualize

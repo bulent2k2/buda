@@ -1,0 +1,57 @@
+# fix_pin — a CELL-level fix in a hierarchical flow, turned with each instance.
+#
+# `fix_pin cell:mac_cell west at 20..60` is stated ONCE on the cell, in the
+# cell's own frame: the macro's pins are on its west face, between y=20 and y=60.
+# Every instance of the cell inherits it, TURNED WITH THE INSTANCE'S ORIENTATION:
+#
+#   mac_n   upright (N)        pins on the WEST face,  y 20..60 of the block
+#   mac_s   turned 180 (S)     pins on the EAST face,  y 40..80 (the window flips)
+#   mac_e   turned 90          pins on a NORTH/SOUTH face (the axes swap)
+#
+# The driver sits at the left; the buses to mac_s and mac_e have to come around
+# to the far faces.  An instance-level `fix_pin <instance> ...` would replace the
+# cell's fix for that one instance.
+#
+# Run:   bin/buda flow/pin_fix/hier_cell.buda          (viewer; green = landings)
+# Expect: three [PinFix] lines, check_design Success at both stages, and the
+#         three buses landing on three differently turned faces.
+
+source ../tracks/tracks.buda
+
+corner_margin dx 5 dy 5
+set_min_stub_length 2
+
+open_bdb :memory:
+
+add_cell drv_cell 100 500
+add_cell mac_cell 100 100
+
+add_inst drv_i  drv_cell -   50 100
+add_inst mac_n  mac_cell -  500 700
+add_inst mac_s  mac_cell -  500 350
+add_inst mac_e  mac_cell -  500  50
+
+rotate_comp mac_s 180
+rotate_comp mac_e 90
+
+fix_pin cell:mac_cell west at 20..60
+dump_pin_fixes
+
+derive_busterms 0
+add_blocks_from_bdb 0
+
+bdb_net_mode on
+add_bus to_n[4] drv_i.o mac_n.i
+add_bus to_s[4] drv_i.o mac_s.i
+add_bus to_e[4] drv_i.o mac_e.i
+
+run_hier_bundler depth 0
+generate_hier_topologies
+dump_pin_fixes
+run_planner hier 5
+run_nuts
+check_design nuts
+run_detailed_nuts
+check_design dnuts
+
+visualize

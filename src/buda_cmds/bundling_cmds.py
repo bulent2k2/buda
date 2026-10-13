@@ -1006,6 +1006,11 @@ def cmd_run_hier_bundler(session, cmd, args, cmd_line):
     # so the split propagates identically to every instance (each part is its
     # own template, replicated at run_planner hier).
     raw_bundles = _split_hier_bundles(session, raw_bundles)
+    # Fixed-pin selectors: a bundle landing on one block under different pin
+    # fixes cannot land on one face — split before expansion (templates and
+    # their replicas in lockstep), loudly.  No selectors = untouched.
+    from buda_cmds import pin_fix_cmds
+    raw_bundles = pin_fix_cmds.split_hbundles_by_fix(session, raw_bundles)
     # NDR rule-class split (R2d — the flat split's hier twin, same order:
     # bit cap first, rules second): TEMPLATE bundles become rule-uniform
     # BEFORE per-instance expansion, replicas split in lockstep, and a

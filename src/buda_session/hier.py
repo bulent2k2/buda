@@ -744,6 +744,9 @@ class HierMixin:
         self._fp_add_comp_geom(fp, comp, mr, name, ox, oy)
         pf = getattr(self, "_pin_fixes", None)
         nm = comp.name if name is None else name
+        if pf and ("cell:" + comp.cell) in pf and nm not in pf:
+            from buda_cmds.pin_fix_cmds import apply_cell_fix
+            apply_cell_fix(self, fp, nm, comp)      # an instance-level fix wins
         if (pf and nm in pf) or nm in (getattr(self, "_pin_fix_sel", None) or {}):
             from buda_cmds.pin_fix_cmds import revalidate
             revalidate(self, nm, fp)
@@ -1181,15 +1184,10 @@ class HierMixin:
         # path in depth/cross-level frames, the child's local name in a
         # cell-local one), like the block-scoped feedthru rules above.
         for name, fx in (getattr(self, "_pin_fixes", None) or {}).items():
+            if name.startswith("cell:"):
+                continue                  # applied per INSTANCE, as blocks are added
             fp.set_pin_fix(name, fx["faces"], fx["rect"], fx["has_window"],
                            fx["lo"], fx["hi"])
-        if getattr(self, "_pin_fix_sel", None) and not getattr(
-                self, "_pin_sel_hier_warned", False):
-            self._pin_sel_hier_warned = True
-            print("Error: fix_pin: per-pin selectors are not replayed onto "
-                  "hierarchical frames yet — "
-                  f"{', '.join(sorted(self._pin_fix_sel))} will be treated as "
-                  "UNFIXED here (declare a block-level fix instead)")
         return fp
 
     def _build_cell_local_floorplan(self, parent_comp_name):
@@ -1226,9 +1224,10 @@ class HierMixin:
             (and any receiver beyond the root) as leaves, exactly the
             flat _bundle_endpoints convention, so generation builds the
             same per-bit tapered fan-in tree.
-        A '|SPLIT:k/n' suffix (the bundle bit bound's split marker) is
-        stripped first.  Returns (None, []) on failure."""
-        reason = reason.split('|SPLIT:')[0]
+        A '|SPLIT:k/n' suffix (the bundle bit bound's split marker) and a
+        '|PINFIX:k' suffix (the fixed-pin selector split's) are stripped
+        first.  Returns (None, []) on failure."""
+        reason = reason.split('|SPLIT:')[0].split('|PINFIX:')[0]
         try:
             if reason.startswith('FANIN:'):
                 root_part, from_part = reason[len('FANIN:'):].split('|FROM:')
@@ -1329,6 +1328,12 @@ class HierMixin:
         if prep is None:
             return None
         tg, src, dsts, meta = prep
+        # Fixed pins: this bundle's generator reads the fixes its nets resolve
+        # to, keyed by the names THIS frame gives its blocks (a cell-local
+        # template: the children's local names).
+        b_ = w.input.original_bundle
+        from buda_cmds.pin_fix_cmds import set_gen_fixes
+        set_gen_fixes(self, tg, w, local=bool(b_.cell_context and b_.entry_busterm_ids))
         fp = meta['fp']
         absent = [d for d in dsts if not fp.has_block(d)]
         src_absent = src is None or not fp.has_block(src)
@@ -1514,6 +1519,11 @@ class HierMixin:
         batch generation paths.  Returns the candidate count (new-candidate
         count under additive)."""
         b = w.input.original_bundle
+        # A straight segment cannot reverse its bits: the order-conflict gate
+        # the flat generators run (the batch path generates in C++, so it is
+        # applied here, where both paths meet).
+        from buda_cmds.pin_fix_cmds import filter_order_conflicts
+        fresh = filter_order_conflicts(self, w, fresh, meta['fp'])
         if additive:
             added, dups = self._merge_more_candidates(w, fresh)
             n, detail = added, (f"+{added} new candidate(s), {dups} "
@@ -5461,6 +5471,12 @@ class HierMixin:
                     for t in cands:
                         buda.derive_fanin_seg_bits(t, self.fp, d_drvs, d_rcvs)
                     new_w.input.candidates = cands
+                # Fixed pins: the template's map names its blocks the way the
+                # cell-local frame does; this instance lives in the absolute
+                # frame, so re-resolve the nets' own pins by full path (each
+                # pin's own component orientation turns a cell-level fix).
+                from buda_cmds.pin_fix_cmds import stamp_expanded
+                stamp_expanded(self, new_w)
                 # Reserve the instance footprint: until this local bundle is
                 # planned, its demand is parked as virtual usage so earlier
                 # (global) bundles leave room over the cell interior.
@@ -5524,11 +5540,11 @@ class HierMixin:
                 expansion_map[rid] = [wrapper_at[key]]
         return result, expansion_map
 
-    def _gen_fixed(self, tg, w, src, dsts):
+    def _gen_fixed(self, tg, w, src, dsts, fp=None):
         """generate_candidates under the bundle's effective per-pin fixes."""
         from buda_cmds.pin_fix_cmds import set_gen_fixes, filter_order_conflicts
         set_gen_fixes(self, tg, w)
-        return filter_order_conflicts(self, w, tg.generate_candidates(src, dsts))
+        return filter_order_conflicts(self, w, tg.generate_candidates(src, dsts), fp)
 
     def _make_topo_gen(self, fp, use_center=False, use_double_detour=False,
                        use_multi_trunk=False, use_hanan_loci=True,

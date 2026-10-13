@@ -952,6 +952,9 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
     def do_command(self, cmd_line):
         parts = _strip_inline_comment(cmd_line).strip().split()
         if not parts: return
+        # One tick per command: per-command caches (fix_pin's component and
+        # net-pin indexes) are valid within a command, never across one.
+        self._cmd_seq = getattr(self, "_cmd_seq", 0) + 1
         cmd = parts[0].lower()
         args = parts[1:]
         # Alias resolution (the `alias` command), at this ONE choke point —

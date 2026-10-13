@@ -8,7 +8,8 @@
 # feedthru.feature is this repository's record of what happens otherwise.
 # Flip to @landed and bind per PR as the design's three changes land
 # (PR 1a: the two-geometry split, byte-identical; PR 1b: strips + command;
-# PR 2: layer, order, per-bit targets, from_pins).
+# PR 2: layer, order, per-bit targets, from_pins; PR 3: cell-level fixes with the
+# orientation transform and the hierarchical frames).
 Feature: Fixed pins — a busterm restricted to a set of admissible landings
   As a chip planner holding a partner's pin assignment
   I want to constrain where a bus may land on a block
@@ -213,14 +214,21 @@ Feature: Fixed pins — a busterm restricted to a set of admissible landings
     Then the admissible face on that instance is <face>
     And bit 0 is at the <end> end of the window
 
+    # Orientation tokens are the BDB's (`component.orient`, the convention
+    # src/orient_rect.py and orient_map in topology.cpp share): FN mirrors about
+    # the X axis (y flips), FS about the Y axis (x flips) — DEF spells the two
+    # the other way round.  Bound by test_fix_pin.py::
+    # test_the_transformed_fix_lands_where_the_footprint_transform_puts_the_strips
+    # (every orientation, against the multi-rect footprint transform) and
+    # ::test_a_flipped_instance_reverses_the_order_it_was_declared_in.
     Examples:
       | orient | face  | end  |
       | N      | east  | low  |
       | S      | west  | high |
-      | FN     | west  | low  |
-      | FS     | east  | high |
-      | E      | north | low  |
-      | W      | south | high |
+      | FN     | east  | high |
+      | FS     | west  | low  |
+      | E      | south | low  |
+      | W      | north | high |
 
   Scenario: A bottom-up template's copies inherit the fix
     Given "core_cell" is a bottom-up template with congruent instances
