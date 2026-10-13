@@ -688,6 +688,13 @@ def _dump_flat_bundles(bundles):
         print(f"  b-{b.id:<3}  nets={n:<4}  \"{short_reason}\"  [{nets_str}]")
 
 
+def pin_fix_cmds_stamp(session):
+    # Only a (re)bundling rebuilds the pipeline the fixes were read by; the
+    # generic re-persist paths (select_topology, pin_plan, ...) must not restamp.
+    from buda_cmds import pin_fix_cmds
+    pin_fix_cmds.stamp_generation(session)
+
+
 def cmd_run_bundler(session, cmd, args, cmd_line):
     # run_bundler [STRICT|CONVERGENT|BIDIRECTIONAL|COMBINED] [--dump]  (default STRICT)
     # --dump prints one line per created bundle (id, net count, grouping reason,
@@ -803,6 +810,7 @@ def cmd_run_bundler(session, cmd, args, cmd_line):
     session._bundler_strategy = ("+".join(sorted(toks)) if len(toks) > 1
                                  else strat_arg)
     n = session._persist_bundles(strat_arg)
+    pin_fix_cmds_stamp(session)
     if n:
         print(f"[BDB] persisted {n} bundle(s) to the open BDB.")
 
@@ -1050,6 +1058,7 @@ def cmd_run_hier_bundler(session, cmd, args, cmd_line):
     strat_label = "+".join(sorted(strat_toks)) if len(strat_toks) > 1 else strat
     session._bundler_strategy = strat_label
     n = session._persist_bundles(strat_label)
+    pin_fix_cmds_stamp(session)
     if n:
         print(f"[BDB] persisted {n} bundle(s) to the open BDB.")
 

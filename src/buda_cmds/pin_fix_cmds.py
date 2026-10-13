@@ -557,6 +557,10 @@ def _void_pipeline(session):
     session.planner = None
     session.nuts_result = None
     session.detailed_result = None
+    session._hier_bundles_orig = []
+    if hasattr(session, "_hier_expansion_map"):
+        session._hier_expansion_map = {}
+    session._planner_is_hier = False
 
 
 def stamp_generation(session):

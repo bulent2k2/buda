@@ -769,3 +769,15 @@ def test_a_fix_typed_after_bundling_voids_the_next_resume(tmp_path):
     s2, out = _session(*pre, f"open_bdb {path}", "add_bus x[2] S.o M.i",
                        "load_pipeline")
     assert "voided" in out and len(s2.bundles) == 0
+
+
+def test_a_generic_repersist_does_not_restamp_the_generation(tmp_path):
+    """Codex P1 on #989: select_topology re-persisted the bundles and restamped the fixes."""
+    pre = ["add_block S 0 400 100 600", "add_block M 400 400 600 600", *TECH]
+    (s, _), path = _bdb_session(
+        tmp_path, *pre, "fix_pin M west", "add_bus x[2] S.o M.i", "bdb_net_mode on",
+        "run_bundler STRICT", "generate_topologies", "run_planner",
+        "fix_pin M north", "select_topology x 1")
+    s2, out = _session(*pre, f"open_bdb {path}", "add_bus x[2] S.o M.i",
+                       "load_pipeline")
+    assert "voided" in out and len(s2.bundles) == 0
