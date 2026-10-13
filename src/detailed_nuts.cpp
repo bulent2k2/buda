@@ -1054,7 +1054,8 @@ void DetailedNUTSEngine::place_by_layer(
                     // are verified against this segment's own per-bit reach
                     // after the pick (below).
                     for (size_t j = 0; j < asgn.track_positions.size(); ++j)
-                        if (asgn.t_lo[j] < bs_hi && asgn.t_hi[j] > bs_lo)
+                        if (asgn.t_lo[j] < (bs.ndr.active() ? r_hi : bs_hi) &&
+                            asgn.t_hi[j] > (bs.ndr.active() ? r_lo : bs_lo))
                             reserved.insert(track_key(asgn.track_positions[j]));
                     continue;
                 }

@@ -952,6 +952,10 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
     def do_command(self, cmd_line):
         parts = _strip_inline_comment(cmd_line).strip().split()
         if not parts: return
+        # BUDA_NUTS_JUNCTION_REACH=topdown: tell the engine, before every
+        # command, whether this design carries bottom-up marks (the one choke
+        # point every NUTS path runs under, healers included).
+        self._sync_junction_reach()
         cmd = parts[0].lower()
         args = parts[1:]
         # Alias resolution (the `alias` command), at this ONE choke point —

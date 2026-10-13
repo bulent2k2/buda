@@ -40,7 +40,6 @@ _RR_FLAGS = ("use_edge_candidates", "no_global",
 
 
 def cmd_run_nuts(session, cmd, args, cmd_line):
-    session._sync_junction_reach()
     # Usage: run_nuts [track_pitch]
     # NUTS places the planner-selected topology of each bundle, so it
     # needs a plan first. Without one every selected_topology_index is -1

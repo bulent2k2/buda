@@ -468,6 +468,8 @@ class RipupMixin:
         BUDA_NUTS_JUNCTION_REACH=topdown means top-down designs only, and a
         design carrying bottom-up marks (a template solved once and copied)
         is the other kind of flow."""
+        if os.environ.get('BUDA_NUTS_JUNCTION_REACH') != 'topdown':
+            return
         try:
             marked = bool(self.bdb is not None and self.bdb.bottom_up_cells())
             buda.set_junction_reach_allowed(not marked)
@@ -483,7 +485,6 @@ class RipupMixin:
         stage a only): the solve skips the WL-only tighten_pulls pass, whose
         overlap count is provably non-increasing — the trial metric is then
         an UPPER BOUND, so accepts stay sound (commits re-run full)."""
-        self._sync_junction_reach()
         nuts = buda.NUTSEngine(self.fp, self.layers)
         nuts.set_track_pitch(self._nuts_pitch)
         nuts.set_skip_tighten(skip_tighten)
