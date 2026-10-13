@@ -410,6 +410,38 @@ The remaining per-member work is O(occupancy list); an incrementally
 maintained sorted list would remove the copy and the sort.  Skipping a wide
 attempt the narrow one proves hopeless changes decisions and needs the corpus.
 
+## Landed: the cached base occupancy kept sorted (2026-10-13)
+
+The per-member timing after the cache (NQ=32, 800k member packs, ~75 base
+entries and ~8 already-repacked entries each) put the remaining wide-pack cost
+in four places: the base list (copy + membership filter + a sort) 5.3 s, the
+loop over already-repacked members 0.7 s, merging them in 0.3 s, and
+`preferred_fit` 2.5 s.  The sort was in the first of those, redone for every
+attempt of every member.  A member's cache entry now stores its intervals
+sorted, each with the segment that owns it (keepouts have none); filtering a
+sorted list by the member set leaves it sorted, so the per-attempt sort is
+gone, and the few already-repacked members are sorted on their own and merged
+in -- `sorted(base + extra)` and `merge(sorted base, sorted extra)` are the same
+sequence, equal elements being equal pairs.
+
+| dial | `run_nuts` before | after | wide pack before | after | NUTS log |
+|---|---|---|---|---|---|
+| NQ=32 | 31.4 s | 30.2 s | 7.4 s | 6.7 s | identical |
+| NQ=62 | 167.8 s | 156.1 s | 55.6 s | 52.7 s | identical |
+
+Again small: the wide pack moves 5-10 %, and the 156 s at NQ=62 is partly the
+same-binary spread (the previous cache change read 162.9 s to 167.8 s on two
+runs).  QoR corpus against the previous head: identical on every metric across
+the 56 comparable flows, WL +0.
+
+**Where this stops.**  What is left per member is O(75) work, and there are
+800k of them at NQ=32 (1.3M cache reuses plus 665k builds at NQ=62): the
+per-member cost is already a few microseconds, so another constant-factor cut
+is a few percent of the wide pack.  The only lever of a different kind is
+making FEWER member packs: skipping a wide attempt the narrow attempt already
+proves hopeless (97-99 % of wide attempts are rejected).  That changes
+decisions and is corpus-gated.
+
 ## Not verified
 
 * The QoR corpus (`tools/qor_corpus.py --vs main`) was not run on the
