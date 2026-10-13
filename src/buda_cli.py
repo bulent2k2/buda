@@ -429,6 +429,10 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
         # Fixed-pin declarations (fix_pin): {block name: fix dict}, replayed onto
         # derived hier floorplans by _apply_fp_session_settings like feedthru.
         self._pin_fixes = {}
+        # Per-pin selectors: {block: {("name"|"prefix", key): fix}}, and the
+        # (driver pin, receiver pins) of every flat net, which they resolve against.
+        self._pin_fix_sel = {}
+        self._net_pins = {}
         # Bundling permissions per net-name prefix (set_bundling) and the
         # optional bundle bit bound (set_max_bundle_bits) — consumed by
         # run_bundler's generalized/COMBINED path and its split pass.

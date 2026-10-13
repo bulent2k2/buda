@@ -203,6 +203,30 @@ void load_seg_busterms(BDB& bdb, const std::string& bundle_id,
 
 }  // namespace
 
+// ── per-bundle fix maps (per-pin selectors) ───────────────────────────────
+static FixMap fixmap_from_py(const py::dict& d) {
+    FixMap m;
+    for (auto kv : d) {
+        auto t = kv.second.cast<py::tuple>();
+        PinFix f; f.faces = t[0].cast<int>(); f.rect = t[1].cast<int>();
+        f.has_window = t[2].cast<bool>(); f.lo = t[3].cast<int>(); f.hi = t[4].cast<int>();
+        m[kv.first.cast<std::string>()] = f;
+    }
+    return m;
+}
+static py::dict fixmap_to_py(const FixMap& m) {
+    py::dict d;
+    for (const auto& kv : m)
+        d[py::str(kv.first)] = py::make_tuple(kv.second.faces, kv.second.rect,
+                                              kv.second.has_window, kv.second.lo, kv.second.hi);
+    return d;
+}
+// Context manager: make a topology's per-bundle fixes the active ones while
+// Python helpers read the floorplan's landing/passthrough geometry.
+struct PyFixScope {
+    FixMap map; bool use = false; std::unique_ptr<FixScope> sc;
+};
+
 void bind_routing(py::module_& m) {
     // ── Layer enums ───────────────────────────────────────────────────────
     py::enum_<LayerDir>(m, "LayerDir")
@@ -280,6 +304,16 @@ void bind_routing(py::module_& m) {
         // spans the placer already produced.
         .def_readonly("seg_busterm_bits",       &Topology::seg_busterm_bits)
         .def_readwrite("feedthru_blocks",       &Topology::feedthru_blocks)
+        .def_readonly("has_block_fixes",        &Topology::has_block_fixes)
+        .def_property("block_fixes",
+            [](const Topology& t) { return fixmap_to_py(t.block_fixes); },
+            [](Topology& t, const py::dict& d) {
+                t.block_fixes = fixmap_from_py(d); t.has_block_fixes = true;
+                t.clear_analysis_cache();
+            })
+        .def("clear_block_fixes", [](Topology& t) {
+            t.block_fixes.clear(); t.has_block_fixes = false; t.clear_analysis_cache();
+        })
         .def_readwrite("wl_lo",                 &Topology::wl_lo)
         .def_readwrite("wl_hi",                 &Topology::wl_hi);
 
@@ -316,6 +350,7 @@ void bind_routing(py::module_& m) {
     // a floorplan, so ConnTopology can read the authoritative endpoint taps
     // (it no longer geometrically guesses).  Mutates topo in place.
     m.def("annotate_topology", [](Topology& topo, const Floorplan& fp) {
+        FixScope fix_scope(topo);   // landing_busterm reads the bundle's own fixes
         annotate_topology(topo, fp);
     }, py::arg("topo"), py::arg("fp"));
 
@@ -634,6 +669,9 @@ void bind_routing(py::module_& m) {
         .def("set_spine_relays",   &TopologyGenerator::set_spine_relays)
         .def("set_mst_leg_trim",   &TopologyGenerator::set_mst_leg_trim)
         .def("set_trunk_stub_trim", &TopologyGenerator::set_trunk_stub_trim)
+        .def("set_block_fixes", [](TopologyGenerator& g, const py::dict& d) {
+            g.set_block_fixes(fixmap_from_py(d)); })
+        .def("clear_block_fixes", &TopologyGenerator::clear_block_fixes)
         .def("set_layer_ids",      &TopologyGenerator::set_layer_ids)
         .def("set_all_h_layers",   &TopologyGenerator::set_all_h_layers)
         .def("set_all_v_layers",   &TopologyGenerator::set_all_v_layers)
@@ -664,6 +702,21 @@ void bind_routing(py::module_& m) {
     // returned per task, so the caller replays them in bundle order exactly
     // where the sequential loop would have printed them.
     // Returns [(candidates, notes_str), ...] in input order.
+    py::class_<PyFixScope>(m, "BlockFixScope")
+        .def(py::init([](py::object topo) {
+            auto p = std::make_unique<PyFixScope>();
+            if (py::isinstance<py::dict>(topo)) {      // an explicit effective map
+                p->map = fixmap_from_py(topo.cast<py::dict>()); p->use = true;
+            } else if (!topo.is_none()) {
+                const Topology& t = topo.cast<const Topology&>();
+                if (t.has_block_fixes) { p->map = t.block_fixes; p->use = true; }
+            }
+            return p;
+        }), py::arg("topology") = py::none())
+        .def("__enter__", [](PyFixScope& p) -> PyFixScope& {
+            p.sc = std::make_unique<FixScope>(p.use ? &p.map : nullptr); return p; })
+        .def("__exit__", [](PyFixScope& p, py::args) { p.sc.reset(); return false; });
+
     m.def("generate_candidates_batch",
           [](py::sequence gens, const std::vector<std::string>& srcs,
              const std::vector<std::vector<std::string>>& dsts,

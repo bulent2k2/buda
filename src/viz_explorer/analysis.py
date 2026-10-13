@@ -283,6 +283,11 @@ class ExplorerAnalysisMixin:
 
 
     def _seg_passthru_names(self, cs, tapped):
+        import buda
+        with buda.BlockFixScope(self._shown_topo()):
+            return self._seg_passthru_names_impl(cs, tapped)
+
+    def _seg_passthru_names_impl(self, cs, tapped):
         """Split the blocks `cs` geometrically crosses (solid rects — each real
         rect of a multi-rect block, the union bbox otherwise) WITHOUT tapping
         into `(passthru, otc_over)`: `passthru` = the BUNDLE's blocks — the
@@ -398,6 +403,11 @@ class ExplorerAnalysisMixin:
 
 
     def _bundle_hanan_grid(self):
+        import buda
+        with buda.BlockFixScope(self._shown_topo()):
+            return self._bundle_hanan_grid_impl()
+
+    def _bundle_hanan_grid_impl(self):
         """The per-bundle Hanan grid GENERATION actually uses for this bundle
         (TopologyGenerator::generate_npin): edges of the bundle's busterm
         rects — each individual rect of a multi-rect block, the orig bbox

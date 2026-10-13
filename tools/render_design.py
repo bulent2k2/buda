@@ -249,15 +249,39 @@ def draw_blocks_faint(ax, cs):
                                    fc="none", ec="#999", lw=0.8, ls=":", zorder=1))
 
 
+def fix_strip_sets(fp, bundles):
+    """Every distinct (block, strips) a fixed block exposes: the floorplan's own
+    fixes, then — per bundle, under its own effective map — the ones a per-pin
+    selector gives it.  Drawn once each."""
+    import buda
+    seen = set()
+    scopes = [None]
+    for w in bundles or ():
+        try:
+            cands = w.input.candidates
+            t = cands[w.plan.selected_topology_index if len(cands) > w.plan.selected_topology_index >= 0 else 0]
+        except Exception:
+            continue
+        if t.has_block_fixes:
+            scopes.append(t)
+    for t in scopes:
+        with buda.BlockFixScope(t):
+            for name, _r in fp.get_all_blocks():
+                if not fp.has_pin_fix(name):
+                    continue
+                strips = tuple(fp.pin_fix_strips(name))
+                if (name, strips) not in seen:
+                    seen.add((name, strips))
+                    yield name, strips
+
+
 def draw_pin_fixes(ax, s):
     """Fixed-pin landings (`fix_pin`): each admissible strip is a thick green line
     along the ONE face a wire may end on.  A design with no fix draws nothing."""
     n = 0
     fp = s.fp
-    for name, _r in fp.get_all_blocks():
-        if not fp.has_pin_fix(name):
-            continue
-        for (x1, y1, x2, y2, face) in fp.pin_fix_strips(name):
+    for name, strips in fix_strip_sets(fp, getattr(s, "bundles", None)):
+        for (x1, y1, x2, y2, face) in strips:
             if face == 4:     xs, ys = [x2, x2], [y1, y2]
             elif face == 8:   xs, ys = [x1, x1], [y1, y2]
             elif face == 1:   xs, ys = [x1, x2], [y2, y2]

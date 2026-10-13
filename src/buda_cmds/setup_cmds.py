@@ -218,7 +218,8 @@ def _cmd_add_block(session, cmd, args, cmd_line):
 def cmd_add_block(session, cmd, args, cmd_line):
     _cmd_add_block(session, cmd, args, cmd_line)
     # a `fix_pin` declared before its block could not be checked then
-    if args and getattr(session, "_pin_fixes", None) and args[0] in session._pin_fixes:
+    if args and (args[0] in getattr(session, "_pin_fixes", {})
+                 or args[0] in getattr(session, "_pin_fix_sel", {})):
         from buda_cmds.pin_fix_cmds import revalidate
         revalidate(session, args[0])
 
@@ -533,6 +534,7 @@ def cmd_add_net(session, cmd, args, cmd_line):
         sys.exit(1)
     session.netlist.add_net(name, drv_pin, rcv_pins)
     session._net_endpoints[name] = (drv_inst, rcv_insts)
+    session._net_pins[name] = (drv_pin, list(rcv_pins))
     if session.bdb is not None and session.bdb_net_mode:
         if unknown_dir:
             session.bdb.add_net_pins_undirected(name, [drv_pin] + rcv_pins)
@@ -592,6 +594,7 @@ def cmd_add_bus(session, cmd, args, cmd_line):
         net_name = f"{prefix}_{i}"
         session.netlist.add_net(net_name, drv_pin, rcv_pins)
         session._net_endpoints[net_name] = (drv_inst, rcv_insts)
+        session._net_pins[net_name] = (drv_pin, list(rcv_pins))
         if session.bdb is not None and session.bdb_net_mode:
             if unknown_dir:
                 session.bdb.add_net_pins_undirected(net_name, [drv_pin] + rcv_pins)

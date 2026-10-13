@@ -316,6 +316,13 @@ class ReportsMixin:
         return seg_spans_block(cs, name, ubbox, fp if fp is not None else self.fp)
 
     def _dump_conn_detail(self, w, cand_idx, fp=None):
+        import buda
+        cands = w.input.candidates
+        topo = cands[cand_idx] if 0 <= cand_idx < len(cands) else None
+        with buda.BlockFixScope(topo):
+            return self._dump_conn_detail_impl(w, cand_idx, fp)
+
+    def _dump_conn_detail_impl(self, w, cand_idx, fp=None):
         """Print per-segment connectivity for one candidate of bundle `w`:
         (1) what each seg connects to (busterms + other segs), (2) the busterms
         it passes through without tapping, (3) its perpendicular slide range, and

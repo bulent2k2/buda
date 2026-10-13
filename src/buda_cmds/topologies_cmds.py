@@ -35,6 +35,12 @@ import buda
 _BATCH_MIN_BUNDLES = 8
 
 
+def _gen_with_fixes(session, tg, w, src, dsts):
+    from buda_cmds.pin_fix_cmds import set_gen_fixes
+    set_gen_fixes(session, tg, w)
+    return tg.generate_candidates(src, dsts)
+
+
 def _endpoint_label(src, dsts, fanin=False):
     """Human-readable endpoint label for generation messages.  A fan-in
     bundle is rooted at the shared SINK with the drivers as leaves, so the
@@ -408,7 +414,7 @@ def cmd_generate_topologies_for_bundle(session, cmd, args, cmd_line):
             session._validate_endpoint_blocks(net_name, src, dsts)
             old_pin_uid = session._pinned_uid(w)
             kept_user = session._user_candidates(w)
-            w.input.candidates = topo_gen.generate_candidates(src, dsts)
+            w.input.candidates = _gen_with_fixes(session, topo_gen, w, src, dsts)
             session._reset_plan_for_regen(w, old_pin_uid, kept_user)
             label = _endpoint_label(src, dsts, fanin)
             print(f"Generated {len(w.input.candidates)} topologies for bundle "
@@ -560,7 +566,7 @@ def cmd_generate_more_topologies(session, cmd, args, cmd_line):
                 continue
             src, dsts, fanin = ep
             session._validate_endpoint_blocks(net_name, src, dsts)
-            fresh = topo_gen.generate_candidates(src, dsts)
+            fresh = _gen_with_fixes(session, topo_gen, w, src, dsts)
             # topo_uid dedup + WL re-sort with selection/dogleg remap — the
             # SAME helper runs in the knob-memo replays (_apply_gen_knobs /
             # _apply_hier_gen_knobs) so a resumed bundle stays ranked.
@@ -635,7 +641,7 @@ def cmd_generate_topologies(session, cmd, args, cmd_line):
         session._validate_endpoint_blocks(net_name, src, dsts)
         old_pin_uid = session._pinned_uid(w)
         kept_user = session._user_candidates(w)
-        w.input.candidates = topo_gen.generate_candidates(src, dsts)
+        w.input.candidates = _gen_with_fixes(session, topo_gen, w, src, dsts)
         session._reset_plan_for_regen(w, old_pin_uid, kept_user)
         session._apply_gen_knobs(w, src, dsts, old_pin_uid,
                                  bulk_knobs=bulk_knobs)

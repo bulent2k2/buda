@@ -206,6 +206,7 @@ Topology transform_topology(const Topology& t, const std::string& orient,
 static void annotate_endpoints(Topology& topo, const std::vector<Busterm>& blocks);
 
 void annotate_topology(Topology& topo, const Floorplan& fp) {
+    FixScope fix_scope_(topo);
     // Build a Busterm per floorplan block and run the same geometric annotation
     // the generator uses, so a hand-built or BDB-reloaded topology gets the
     // authoritative seg_busterms it needs before ConnTopology::build (which no
@@ -412,6 +413,11 @@ void Floorplan::add_block_rects(const std::string& name,
     // declaration-time resolutions).
     add_block_rects(name, rects, default_teg_mode_);
 }
+static thread_local const FixMap* g_active_fixes = nullptr;
+const FixMap* active_block_fixes() { return g_active_fixes; }
+FixScope::FixScope(const FixMap* m) : prev_(g_active_fixes) { g_active_fixes = m; }
+FixScope::~FixScope() { g_active_fixes = prev_; }
+
 void Floorplan::set_block_teg_mode(const std::string& name, TegMode mode) {
     teg_modes_[name] = mode;
     ++rev_;
@@ -420,7 +426,7 @@ TegMode Floorplan::get_block_teg_mode(const std::string& name) const {
     // A fixed pin's strips are joined by the block's own metal, which is what
     // `thru` asserts, so the EFFECTIVE mode of a fixed block is THRU for the
     // generator, the audits and the slide analysis alike (they all read this).
-    if (pin_fixes_.count(name)) return TegMode::THRU;
+    if (fixes().count(name)) return TegMode::THRU;
     auto it = teg_modes_.find(name);
     return (it != teg_modes_.end()) ? it->second : TegMode::THRU;
 }
@@ -436,8 +442,8 @@ void Floorplan::clear_pin_fix(const std::string& block) {
     if (pin_fixes_.erase(block)) ++rev_;
 }
 PinFix Floorplan::pin_fix(const std::string& block) const {
-    auto it = pin_fixes_.find(block);
-    return it != pin_fixes_.end() ? it->second : PinFix{};
+    auto it = fixes().find(block);
+    return it != fixes().end() ? it->second : PinFix{};
 }
 
 // The strips of ONE declared rect (index k of `phys`) under fix `fx`: thin rects
@@ -501,9 +507,9 @@ static std::vector<Rect> strips_of_rect(const PinFix& fx, int k,
 
 std::vector<Rect> Floorplan::pin_fix_strips(const std::string& block) const {
     std::vector<Rect> out;
-    auto fit = pin_fixes_.find(block);
+    auto fit = fixes().find(block);
     auto bit = blocks_.find(block);
-    if (fit == pin_fixes_.end() || bit == blocks_.end()) return out;
+    if (fit == fixes().end() || bit == blocks_.end()) return out;
     const PinFix& fx = fit->second;
     std::vector<Rect> phys = get_block_rects(block);  // raw-store: resolver
     if (phys.empty()) phys.push_back(bit->second);
@@ -524,9 +530,9 @@ std::vector<Rect> Floorplan::pin_fix_strips(const std::string& block) const {
 // is a sentinel rect that no wire can overlap, not an empty list (callers read
 // empty as "single-rect block, use the bounds").
 std::vector<Rect> Floorplan::passthrough_rects(const std::string& name) const {
-    auto fit = pin_fixes_.find(name);
+    auto fit = fixes().find(name);
     auto bit = blocks_.find(name);
-    if (fit == pin_fixes_.end() || bit == blocks_.end()) return get_block_rects(name);  // raw-store: resolver
+    if (fit == fixes().end() || bit == blocks_.end()) return get_block_rects(name);  // raw-store: resolver
     const PinFix& fx = fit->second;
     std::vector<Rect> phys = get_block_rects(name);  // raw-store: resolver
     if (phys.empty()) phys.push_back(bit->second);
@@ -1816,6 +1822,7 @@ std::vector<int> derive_fanin_seg_bits(
     const std::vector<std::string>& driver_per_bit,
     const std::vector<std::vector<std::string>>& receivers_per_bit)
 {
+    FixScope fix_scope_(topo);   // pass-through fallback reads the bundle's own fixes
     const int n_seg  = (int)topo.segments.size();
     const int n_bits = (int)driver_per_bit.size();
     topo.seg_bits.clear();
@@ -4568,6 +4575,7 @@ static void add_mst_teg_attachments(Topology& topo,
 // re-implementing the rule).
 void add_mst_teg_attachments(Topology& topo, const Floorplan& fp,
                              int h_layer, int v_layer) {
+    FixScope fix_scope_(topo);   // landing_busterm reads the topology's own fixes
     std::vector<Busterm> bts;
     for (const auto& [name, orig] : fp.get_all_blocks()) {
         (void)orig;
@@ -5674,6 +5682,7 @@ std::vector<Topology> TopologyGenerator::generate_candidates(
     const std::string& src_name,
     const std::vector<std::string>& dst_names)
 {
+    FixScope fix_scope(has_block_fixes_ ? &block_fixes_ : nullptr);
     std::vector<Topology> candidates;
     bool two_pin = false;
     if (dst_names.size() == 1) {
@@ -5695,6 +5704,12 @@ std::vector<Topology> TopologyGenerator::generate_candidates(
     // endpoint block is only grazed by a free-sliding trunk passes check_topo
     // at nominal but opens at NUTS time (BUSTERM_OPEN — bigHalf bus_038).
     filter_unanchored_bitrunk(candidates);
+    if (has_block_fixes_)
+        for (auto& c : candidates) {
+            c.has_block_fixes = true;
+            c.block_fixes = block_fixes_;
+            c.clear_analysis_cache();
+        }
     return candidates;
 }
 
