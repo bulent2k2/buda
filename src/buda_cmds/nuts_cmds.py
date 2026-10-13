@@ -199,6 +199,7 @@ def cmd_run_nuts(session, cmd, args, cmd_line):
               f"narrow={rs['narrow']} wide={rs['wide']} "
               f"layer_segs_sum={rs['layer_segs_sum']} "
               f"cache={rs['cache_builds']}/{rs['cache_reuses']} "
+              f"wide_skipped={rs['wide_skipped']} "
               f"s[total={rs['s_total']:.2f} prep={rs['s_prep']:.2f} "
               f"snap={rs['s_snap']:.2f} solve={rs['s_solve']:.2f} "
               f"settle={rs['s_settle']:.2f} guard={rs['s_guard']:.2f} "

@@ -3173,7 +3173,7 @@ struct RepackAtomics {
     std::atomic<long long> attempts[2]{{0},{0}}, noop[2]{{0},{0}},
         rejected[2]{{0},{0}}, accepted[2]{{0},{0}}, members_sum[2]{{0},{0}};
     std::atomic<long long> layer_segs_sum{0};
-    std::atomic<long long> cache_builds{0}, cache_reuses{0};
+    std::atomic<long long> cache_builds{0}, cache_reuses{0}, wide_skipped{0};
     std::atomic<long long> ns_ctor{0}, ns_solve_k[2]{{0},{0}};
     std::atomic<long long> ns_prep{0}, ns_snap{0}, ns_solve{0}, ns_settle{0},
         ns_guard{0}, ns_restore{0}, ns_total{0};
@@ -3214,6 +3214,7 @@ RepackStats repack_stats_snapshot() {
     }
     r.layer_segs_sum = g_repack.layer_segs_sum;
     r.cache_builds = g_repack.cache_builds; r.cache_reuses = g_repack.cache_reuses;
+    r.wide_skipped = g_repack.wide_skipped;
     r.ns_prep = g_repack.ns_prep; r.ns_snap = g_repack.ns_snap;
     r.ns_solve = g_repack.ns_solve; r.ns_settle = g_repack.ns_settle;
     r.ns_guard = g_repack.ns_guard; r.ns_restore = g_repack.ns_restore;
@@ -3229,11 +3230,19 @@ void repack_stats_reset() {
         g_repack.accepted[k] = 0; g_repack.members_sum[k] = 0;
     }
     g_repack.layer_segs_sum = 0;
-    g_repack.cache_builds = 0; g_repack.cache_reuses = 0;
+    g_repack.cache_builds = 0; g_repack.cache_reuses = 0; g_repack.wide_skipped = 0;
     g_repack.ns_prep = 0; g_repack.ns_snap = 0; g_repack.ns_solve = 0;
     g_repack.ns_settle = 0; g_repack.ns_guard = 0; g_repack.ns_restore = 0;
     g_repack.ns_total = 0; g_repack.ns_ctor = 0;
     for (int k = 0; k < 2; ++k) g_repack.ns_solve_k[k] = 0;
+}
+
+static size_t wide_skip_noop_min() {   // 0 = never skip
+    static const size_t v = [] {
+        const char* e = std::getenv("BUDA_REPACK_WIDE_SKIP_NOOP");
+        return (e && *e) ? (size_t)std::strtoul(e, nullptr, 10) : (size_t)0;
+    }();
+    return v;
 }
 
 static int repack_overlap_clusters(const NUTSEngine& eng, double track_pitch,
@@ -3366,8 +3375,14 @@ static int repack_overlap_clusters(const NUTSEngine& eng, double track_pitch,
         g_repack.layer_segs_sum += (long long)layer_segs.size();
         g_repack.ns_prep += ns_since(t_prep0);
         int attempt_k = -1;
+        bool narrow_noop = false;
         for (const auto& members : {narrow, wide}) {
             ++attempt_k;
+            if (attempt_k == 1 && narrow_noop && wide_skip_noop_min() > 0 &&
+                wide.size() >= wide_skip_noop_min()) {
+                ++g_repack.wide_skipped;     // study knob: see wide_skip_noop()
+                continue;
+            }
             ++g_repack.attempts[attempt_k];
             g_repack.members_sum[attempt_k] += (long long)members.size();
             auto t_a = std::chrono::steady_clock::now();
@@ -3389,6 +3404,7 @@ static int repack_overlap_clusters(const NUTSEngine& eng, double track_pitch,
             g_repack.ns_solve_k[attempt_k] += pack_ns;
             if (!did_move) {
                 ++g_repack.noop[attempt_k];
+                if (attempt_k == 0) narrow_noop = true;
                 continue;                   // nothing would move: state untouched
             }
             t_a = std::chrono::steady_clock::now();

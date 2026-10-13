@@ -323,6 +323,7 @@ struct RepackStats {
     long long members_sum[2] = {0, 0};   // members over all attempts
     long long layer_segs_sum = 0;        // layer size summed over clusters
     long long cache_builds = 0, cache_reuses = 0;   // base-occupancy cache
+    long long wide_skipped = 0;          // wide attempts skipped by the study knob
     long long ns_ctor = 0, ns_solve_k[2] = {0, 0};   // ctor; solve per kind
     long long ns_prep = 0, ns_snap = 0, ns_solve = 0, ns_settle = 0,
               ns_guard = 0, ns_restore = 0, ns_total = 0;
