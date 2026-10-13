@@ -872,7 +872,9 @@ def test_a_malformed_nested_record_leaves_the_session_untouched(tmp_path):
     good = {"faces": 8, "rect": -1, "has_window": False, "lo": 0, "hi": 0}
     cases = ['{"blocks":{},"selectors":[["M","name","tx",null]]}',
              '{"blocks":{"A":%s,"B":{"faces":"x"}},"selectors":[]}' % json.dumps(good),
-             '{"blocks":[],"selectors":{}}']
+             '{"blocks":[],"selectors":{}}',
+             '{"blocks":{"M":{"faces":100000000000000000000,"rect":-1,'
+             '"has_window":false,"lo":0,"hi":0}},"selectors":[]}']
     for i, bad in enumerate(cases):
         path = str(tmp_path / f"n{i}.bdb")
         s, _ = _session(f"open_bdb {path}", "add_block M 0 0 100 100", "fix_pin M west")

@@ -501,6 +501,7 @@ def cmd_fix_pin(session, cmd, args, cmd_line):
 def _valid_fix(fx):
     return (isinstance(fx, dict)
             and all(isinstance(fx.get(k), int) and not isinstance(fx.get(k), bool)
+                    and -2**31 <= fx[k] < 2**31      # the binding takes native ints
                     for k in ("faces", "rect", "lo", "hi"))
             and isinstance(fx.get("has_window"), bool))
 
