@@ -200,7 +200,7 @@ def test_h_and_v_are_sugar_for_two_faces():
     ("fix_pin MAC east at 5", "lo..hi"),
     ("fix_pin MAC rect 3", "out of range"),
     ("fix_pin MAC east at 400..500", "admits no landing"),
-    ("fix_pin MAC east layer M5", "not supported yet"),
+    ("fix_pin MAC east order index", "not supported yet"),
 ])
 def test_a_bad_declaration_is_refused_loudly_and_changes_nothing(line, needle):
     s, _ = _session(*BASE)
@@ -884,3 +884,113 @@ def test_a_malformed_nested_record_leaves_the_session_untouched(tmp_path):
         s.bdb.meta_set("pin_fixes", bad)
         s2, out = _session(f"open_bdb {path}")
         assert "unreadable" in out and not s2._pin_fixes and not s2._pin_fix_sel, bad
+
+
+# ── layer (PR 2a) ────────────────────────────────────────────────────────────
+
+LAYERS_FLOW = FLOW / "layers.buda"
+
+
+def _layers_lines(drop=()):
+    return [l.strip() for l in LAYERS_FLOW.read_text().splitlines()
+            if l.strip() and not l.startswith("#")
+            and not l.startswith(("visualize", "dump_", "report_", "check_design"))
+            and not any(l.startswith(d) for d in drop)]
+
+
+def _layer_names(s):
+    names = {lid: n for n, lid in s._layer_name_map.items()}
+    return {w.input.original_bundle.get_net_names()[0].split("_")[0]:
+            [names[l] for l in w.plan.seg_layers] for w in s.bundles}
+
+
+def test_a_fixed_layer_is_where_the_landing_wire_goes():
+    s, out = _session(*_layers_lines())
+    got = _layer_names(s)
+    assert got["fixed"] == ["M3"], got
+    assert got["down"] == ["M4"], got
+    assert got["free"] == ["M5"], got        # untouched bus keeps the planner's choice
+
+
+def test_without_the_layer_fix_the_same_buses_take_the_top_layers():
+    s, _ = _session(*_layers_lines(drop=("fix_pin",)))
+    got = _layer_names(s)
+    assert got["fixed"] != ["M3"] and got["down"] != ["M4"], got
+
+
+def test_a_layer_narrows_the_faces_to_the_ones_it_can_reach():
+    s, _ = _session(*BASE, "fix_pin MAC layer M4")            # M4 is horizontal
+    assert {st[4] for st in s.fp.pin_fix_strips("MAC")} == {E, W}
+    s2, _ = _session(*BASE, "fix_pin MAC layer M4,M5")        # + M5, vertical
+    assert {st[4] for st in s2.fp.pin_fix_strips("MAC")} == {N, S, E, W}
+
+
+@pytest.mark.parametrize("line,needle", [
+    ("fix_pin MAC north layer M4", "cannot reach"),
+    ("fix_pin MAC east layer M5", "cannot reach"),
+    ("fix_pin MAC east layer M9", "unknown layer"),
+    ("fix_pin MAC east layer", "takes a layer"),
+])
+def test_a_bad_layer_declaration_is_refused_and_changes_nothing(line, needle):
+    s, _ = _session(*BASE)
+    out = _say(s, line)
+    assert "Error:" in out and needle in out, out
+    assert not s.fp.has_pin_fix("MAC")
+
+
+def test_two_pins_that_share_no_layer_cannot_share_a_bundle():
+    pre = ["add_block S 0 400 100 600", "add_block A 400 400 600 600",
+           "add_block B 400 0 600 200", *TECH,
+           "def_layer 3 M3 H LOW 0", "def_layer 2 M2 H LOW 0",
+           "def_track_pattern 3 0 (SIGNAL 2 2)x60",
+           "def_track_pattern 2 0 (SIGNAL 2 2)x60",
+           "fix_pin A.i west layer M3", "fix_pin B.i west layer M2",
+           "add_net x_0 S.o A.i,B.i"]
+    with pytest.raises(SystemExit):
+        _session(*pre, "run_bundler STRICT")
+
+
+def test_a_layer_fix_and_set_bus_layers_must_share_a_layer():
+    pre = ["add_block S 0 400 100 600", "add_block A 400 400 600 600", *TECH,
+           "def_layer 3 M3 H LOW 0", "def_track_pattern 3 0 (SIGNAL 2 2)x60",
+           "fix_pin A.i west layer M3", "set_bus_layers x_ M4",
+           "add_net x_0 S.o A.i"]
+    with pytest.raises(SystemExit):
+        _session(*pre, "run_bundler STRICT")
+
+
+def test_a_wire_off_its_fixed_layer_is_reported_as_pin_fix():
+    s, _ = _session(*_layers_lines())
+    w = next(w for w in s.bundles
+             if w.input.original_bundle.get_net_names()[0].startswith("fixed"))
+    wrong = s._layer_name_map["M5"]
+    w.plan.seg_layers = [wrong] * len(w.plan.seg_layers)
+    out = _say(s, "check_design")
+    assert "PIN_FIX" in out and "outside the fixed layer" in out, out
+
+
+def test_the_layer_flow_routes_clean_and_audits_clean():
+    rc, out = _run("layers.buda")
+    assert rc == 0, out[-800:]
+    assert "Error:" not in out and "PIN_FIX" not in out, out[-800:]
+    assert out.count("Success: no violations found") >= 2, out[-1500:]
+
+
+def test_a_layer_survives_the_checkpoint(tmp_path):
+    path = str(tmp_path / "ly.bdb")
+    s, _ = _session(f"open_bdb {path}", "add_block M 0 0 100 100",
+                    "def_layer 3 M3 H LOW 0", "fix_pin M west layer M3",
+                    "fix_pin M.t west layer M3")
+    s2, out = _session("def_layer 3 M3 H LOW 0", f"open_bdb {path}")
+    assert s2._pin_fixes["M"]["layers"] == ["M3"], out
+    assert s2._pin_fix_sel["M"][("name", "t")]["layers"] == ["M3"]
+    assert "layer M3" in _say(s2, "dump_pin_fixes")
+
+
+def test_a_stored_layers_field_of_the_wrong_shape_is_unreadable(tmp_path):
+    path = str(tmp_path / "ly2.bdb")
+    s, _ = _session(f"open_bdb {path}", "add_block M 0 0 100 100", "fix_pin M west")
+    s.bdb.meta_set("pin_fixes", '{"blocks":{"M":{"faces":8,"rect":-1,'
+                   '"has_window":false,"lo":0,"hi":0,"layers":[3]}},"selectors":[]}')
+    s2, out = _session(f"open_bdb {path}")
+    assert "unreadable" in out and not s2._pin_fixes

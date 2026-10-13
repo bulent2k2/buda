@@ -61,12 +61,54 @@ def _declared(fix):
         parts.append(f"rect {fix['rect'] + 1}")
     if fix["has_window"]:
         parts.append(f"at {fix['lo']}..{fix['hi']}")
+    if fix.get("layers"):
+        parts.append("layer " + ",".join(fix["layers"]))
     return " ".join(parts)
 
 
+def _layer_axes(session, names):
+    """({'H','V'} reachable by these layer names, unknown names).  A layer not
+    declared yet has no direction to judge."""
+    import buda
+    axes, unknown = set(), []
+    for n in names:
+        lid = session._layer_name_map.get(n)
+        if lid is None:
+            unknown.append(n)
+        elif session.layers.get_layer_dir(lid) == buda.LayerDir.HORIZONTAL:
+            axes.add("H")
+        else:
+            axes.add("V")
+    return axes, unknown
+
+
+def _eff_faces(session, fix):
+    """The face mask the geometry sees: the declared faces narrowed to the ones
+    a named layer can REACH.  An east or west face is landed on by a horizontal
+    stub, a north or south face by a vertical one, so `layer M5` (H) leaves
+    only east/west.  0 stays 'every face'; -1 = nothing is left."""
+    names = fix.get("layers") or []
+    mask = fix["faces"]
+    if not names:
+        return mask
+    axes, unknown = _layer_axes(session, names)
+    if unknown or not axes:
+        return mask                  # layers not declared yet: judged later
+    reach = 0
+    if "H" in axes:
+        reach |= _FACE_BITS["east"] | _FACE_BITS["west"]
+    if "V" in axes:
+        reach |= _FACE_BITS["north"] | _FACE_BITS["south"]
+    eff = (mask or 15) & reach
+    if not eff:
+        return -1
+    return 0 if eff == 15 else eff
+
+
 def _apply(session, block, fix):
-    session.fp.set_pin_fix(block, fix["faces"], fix["rect"], fix["has_window"],
-                           fix["lo"], fix["hi"])
+    faces = _eff_faces(session, fix)
+    session.fp.set_pin_fix(block, max(faces, 0) if faces >= 0 else fix["faces"],
+                           fix["rect"], fix["has_window"], fix["lo"], fix["hi"])
 
 
 def _sel_store(session):
@@ -78,7 +120,8 @@ def _sel_store(session):
 
 def _fixkey(fix):
     return None if fix is None else (fix["faces"], fix["rect"], fix["has_window"],
-                                     fix["lo"], fix["hi"])
+                                     fix["lo"], fix["hi"],
+                                     tuple(fix.get("layers") or ()))
 
 
 def resolve_fix(session, block, pin_name):
@@ -151,6 +194,130 @@ def bundle_fix_map(session, net_names):
         for blk, key in net_fix_signature(session, net):
             if key is not None and blk not in out:
                 out[blk] = key
+    return out
+
+
+def has_layer_fixes(session):
+    return (any(f.get("layers") for f in session._pin_fixes.values())
+            or any(f.get("layers") for d in _sel_store(session).values()
+                   for f in d.values()))
+
+
+def _fix_axes(session, fix):
+    """Axes ('H'/'V') a fix's landing stub may take: the layers named, each in
+    its own direction, limited to the faces the fix still admits."""
+    import buda
+    faces = _eff_faces(session, fix) or 15
+    out = {}
+    for n in fix["layers"]:
+        lid = session._layer_name_map.get(n)
+        if lid is None:
+            continue
+        horiz = session.layers.get_layer_dir(lid) == buda.LayerDir.HORIZONTAL
+        if faces & ((_FACE_BITS["east"] | _FACE_BITS["west"]) if horiz
+                    else (_FACE_BITS["north"] | _FACE_BITS["south"])):
+            out.setdefault("H" if horiz else "V", set()).add(lid)
+    return out
+
+
+def bundle_layer_mask(session, w):
+    """(label, [layer ids]) a bundle's pin-fix layers allow, or (None, None).
+
+    The landing stub is the segment `layer` constrains, but the planner masks a
+    BUNDLE's layers, not one segment's.  So per axis: if some fix on the bundle
+    names layers of that axis, the bundle takes the INTERSECTION of those sets
+    on that axis (every landing must be satisfiable by the one layer a straight
+    run takes); an axis nobody constrains keeps all its layers, so the other leg
+    of an L or Z still routes.  The cost is that a bundle's OTHER same-axis
+    segments follow the same layers — the per-segment set is the later,
+    finer form.  An axis whose fixes share no layer is a hard error naming
+    both pins: the bus has two landings no single layer serves."""
+    import buda
+    if not has_layer_fixes(session):
+        return (None, None)
+    per_axis = {"H": [], "V": []}
+    for net in w.input.original_bundle.get_net_names():
+        pins = _net_pins_of(session, net)
+        if pins is None:
+            continue
+        drv, rcvs = pins
+        for pin in [drv] + list(rcvs):
+            block, _, name = pin.rpartition(".")
+            fix = resolve_fix(session, block, name)
+            if fix is None or not fix.get("layers"):
+                continue
+            for ax, lids in _fix_axes(session, fix).items():
+                per_axis[ax].append((pin, frozenset(lids)))
+    if not per_axis["H"] and not per_axis["V"]:
+        return (None, None)
+    allowed = []
+    for ax, dirn in (("H", buda.LayerDir.HORIZONTAL), ("V", buda.LayerDir.VERTICAL)):
+        every = list(session.layers.get_layer_ids_by_dir(dirn))
+        if not per_axis[ax]:
+            allowed += every
+            continue
+        common = set.intersection(*[set(l) for _p, l in per_axis[ax]])
+        if not common:
+            names = {lid: n for n, lid in session._layer_name_map.items()}
+            shown = "; ".join(f"{p} -> {','.join(names.get(l, str(l)) for l in sorted(ls))}"
+                              for p, ls in dict(per_axis[ax]).items())
+            print(f"Error: fix_pin: bundle {w.input.original_bundle.id} lands on "
+                  f"pins whose {ax} layers share none ({shown}); one bus cannot "
+                  f"take two layers — give the pins a common layer, or keep "
+                  f"their nets apart (set_bundling)")
+            import sys
+            sys.exit(1)
+        allowed += sorted(common)
+    return ("fix_pin layer", sorted(set(allowed)))
+
+
+class _PinFixViolation:
+    """Duck-typed audit row, like reports._FidelityViolation."""
+    class _Kind:
+        name = "PIN_FIX"
+    kind = _Kind()
+    seg_idx2 = -1
+    bit_index = -1
+
+    def __init__(self, block, seg, message):
+        self.block_name, self.seg_idx, self.message = block, seg, message
+
+
+def audit_pin_fix(session, w, topo):
+    """PIN_FIX: a segment ending on a fixed pin's landing strip on a layer
+    outside the fix's set.  Defence in depth for the bundle mask: the planner
+    may have ended up outside it (BEST_EFFORT) or a pin took an unmasked
+    route.  Needs a plan; reads the assigned layers."""
+    if not has_layer_fixes(session):
+        return []
+    layers = list(w.plan.seg_layers)
+    segs = list(topo.segments)
+    if len(layers) != len(segs):
+        return []
+    names = {lid: n for n, lid in session._layer_name_map.items()}
+    out, seen = [], set()
+    for net in w.input.original_bundle.get_net_names():
+        pins = _net_pins_of(session, net)
+        if pins is None:
+            continue
+        for pin in [pins[0]] + list(pins[1]):
+            block, _, name = pin.rpartition(".")
+            fix = resolve_fix(session, block, name)
+            if fix is None or not fix.get("layers") or not session.fp.has_block(block):
+                continue
+            ok = {session._layer_name_map.get(n) for n in fix["layers"]}
+            for (x1, y1, x2, y2, _f) in _strips_with(session, block, fix):
+                for i, sg in enumerate(segs):
+                    for p in (sg.start, sg.end):
+                        if x1 <= p.x <= x2 and y1 <= p.y <= y2 and layers[i] not in ok:
+                            key = (pin, i)
+                            if key in seen:
+                                continue
+                            seen.add(key)
+                            out.append(_PinFixViolation(block, i, (
+                                f"PIN_FIX: segment {i} lands on {pin} on "
+                                f"{names.get(layers[i], layers[i])}, outside the "
+                                f"fixed layer(s) {','.join(fix['layers'])}")))
     return out
 
 
@@ -287,7 +454,7 @@ def _cmd_fix_pin(session, cmd, args, cmd_line):
             print(f"[PinFix] {block}: no fix declared")
         return
 
-    faces, rect, window = 0, -1, None
+    faces, rect, window, layers = 0, -1, None, []
     i = 1
     while i < len(args):
         tok = args[i].lower()
@@ -312,7 +479,22 @@ def _cmd_fix_pin(session, cmd, args, cmd_line):
             if window[0] >= window[1]:
                 print(f"Error: fix_pin: window {window[0]}..{window[1]} is empty"); return
             i += 1
-        elif tok in ("layer", "order"):
+        elif tok == "layer":
+            if i + 1 >= len(args):
+                print("Error: fix_pin: 'layer' takes a layer name or a comma list "
+                      "(M5 or M3,M5)"); return
+            layers = [n.strip() for n in args[i + 1].split(",") if n.strip()]
+            if not layers:
+                print("Error: fix_pin: 'layer' names no layer"); return
+            bad = [n for n in layers if n not in session._layer_name_map]
+            if bad:
+                print(f"Error: fix_pin: unknown layer {', '.join(bad)} (declare it "
+                      f"with def_layer first; declared: "
+                      f"{', '.join(sorted(session._layer_name_map)) or 'none'})")
+                return
+            layers = sorted(set(layers), key=layers.index)
+            i += 1
+        elif tok == "order":
             print(f"Error: fix_pin: '{tok}' is not supported yet"); return
         else:
             print(f"Error: fix_pin: unknown token '{args[i]}'"); return
@@ -324,7 +506,16 @@ def _cmd_fix_pin(session, cmd, args, cmd_line):
         print(f"Error: fix_pin {block}: rect {rect + 1} out of range "
               f"(block has {_rect_count(fp, block)} rect(s))"); return
     fix = {"faces": faces, "rect": rect, "has_window": window is not None,
-           "lo": window[0] if window else 0, "hi": window[1] if window else 0}
+           "lo": window[0] if window else 0, "hi": window[1] if window else 0,
+           "layers": layers}
+    if layers and _eff_faces(session, fix) < 0:
+        axes, _u = _layer_axes(session, layers)
+        print(f"Error: fix_pin {target}: layer {','.join(layers)} "
+              f"({'/'.join(sorted(axes))}) cannot reach the face(s) "
+              f"'{_faces_text(faces)}': a horizontal layer lands on an east or "
+              f"west face, a vertical one on a north or south face; the previous "
+              f"setting is kept")
+        return
     if sel is not None:
         if getattr(session, "bdb", None) is not None and not known:
             print(f"Error: fix_pin {target}: a per-pin fix needs a flat-flow block "
@@ -506,6 +697,9 @@ def _valid_fix(fx):
             and isinstance(fx.get("has_window"), bool)
             and 0 <= fx["faces"] <= 15                    # N|S|E|W mask, 0 = every face
             and fx["rect"] >= -1
+            and (fx.get("layers", []) == [] or (
+                isinstance(fx["layers"], list)
+                and all(isinstance(n, str) for n in fx["layers"])))
             and (fx["lo"] < fx["hi"] if fx["has_window"] else True))
 
 
