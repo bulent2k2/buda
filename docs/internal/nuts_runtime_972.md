@@ -531,7 +531,11 @@ count against the per-track scan over all the keepouts
 | escalation scan | 25.4 s | 5.4 s |
 | `run_nuts` total | 137 s | 116 s |
 
-The NUTS log is byte-identical (the `Generated` line aside).  The same
+The NUTS log is byte-identical (the `Generated` line aside), and the QoR
+corpus (`tools/qor_corpus.py --vs origin/main`) is 0 better / 0 worse / 56
+unchanged with abstract and detailed WL +0; its runtime read -7.9 %
+(1413 -> 1302 s), the chip flows -13 % (879 -> 763 s) and every other family
+within noise.  The same
 tracks x keepouts shape is in `signal_tracks_in` and `count_signal_tracks_in`
 (the midpoint walks); they were not the measured cost and are untouched.
 
