@@ -599,6 +599,8 @@ def fixes_changed_since_generation(session):
             return json.loads(gen) != now
     except ValueError:
         return True
+    if (getattr(session, "_pin_fix_ckpt", None) or {}).get("unknown"):
+        return True          # restore() found the generation unknowable at open
     # No generation stamp: what any retained candidate was built under is unknown,
     # and the live row is mutable state (restore rewrites it), so it cannot vouch.
     return bool(now["blocks"] or now["selectors"] or bdb.meta_get(_META, ""))

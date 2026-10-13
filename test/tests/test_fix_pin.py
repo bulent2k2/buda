@@ -836,3 +836,13 @@ def test_a_failed_load_does_not_void_the_live_pipeline(tmp_path):
                       "run_bundler STRICT", f"open_bdb {tmp_path / 'empty.bdb'}",
                       "load_pipeline")
     assert "voided" not in out and len(s.bundles) == 1
+
+
+def test_removing_the_last_fix_does_not_launder_an_unknown_generation(tmp_path):
+    """Codex P1 on #989: the live row was empty after `off`, hiding the missing stamp."""
+    pre = ["add_block S 0 400 100 600", "add_block M 400 400 600 600", *TECH]
+    (s, _), path = _bdb_session(tmp_path, *pre, "fix_pin M west")
+    s.bdb.meta_set("pin_fixes_gen", "")          # a checkpoint from before the stamp
+    s2, _ = _session(*pre, f"open_bdb {path}", "fix_pin M off")
+    from buda_cmds import pin_fix_cmds
+    assert pin_fix_cmds.fixes_changed_since_generation(s2)
