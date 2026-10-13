@@ -1250,7 +1250,7 @@ def _cmd_fix_pin(session, cmd, args, cmd_line):
           + (" (every instance, turned with its orientation)" if cellfix else ""))
 
 
-def revalidate(session, block, fp=None):
+def revalidate(session, block, fp=None, fp_name=None):
     """A fix declared BEFORE its block exists could not be checked then.  Check it
     when the block arrives — on the session floorplan (`add_block`) or on a
     derived hier frame as each BDB component is projected: a rect out of range,
@@ -1260,15 +1260,16 @@ def revalidate(session, block, fp=None):
     fixes = session._pin_fixes
     fix = fixes.get(block)
     fp = session.fp if fp is None else fp
-    if not fp.has_block(block):
+    name = block if fp_name is None else fp_name     # the owner key vs the frame's name for it
+    if not fp.has_block(name):
         return
     sels = _sel_store(session).get(block, {})
     dropped = False
     for sel, sfx in list(sels.items()):
         bad = None
-        if sfx["rect"] >= _rect_count(fp, block):
+        if sfx["rect"] >= _rect_count(fp, name):
             bad = f"rect {sfx['rect'] + 1} out of range"
-        elif fp is session.fp and not _strips_with(session, block, sfx):
+        elif (fp is session.fp or fp_name is not None) and not _strips_in(session, fp, name, sfx):
             bad = f"'{_declared(sfx)}' admits no landing on this block"
         if bad:
             del sels[sel]
@@ -1282,15 +1283,15 @@ def revalidate(session, block, fp=None):
     if fix is None:
         return
     problem = None
-    if fix["rect"] >= _rect_count(fp, block):
+    if fix["rect"] >= _rect_count(fp, name):
         problem = (f"rect {fix['rect'] + 1} out of range (block has "
-                   f"{_rect_count(fp, block)} rect(s))")
-    elif not fp.pin_fix_strips(block):
+                   f"{_rect_count(fp, name)} rect(s))")
+    elif not fp.pin_fix_strips(name):
         problem = (f"'{_declared(fix)}' admits no landing on this block (a face "
                    f"interior to its rects, or a window outside the face)")
     if problem:
         del fixes[block]
-        fp.clear_pin_fix(block)
+        fp.clear_pin_fix(name)
         if fp is not session.fp:
             session.fp.clear_pin_fix(block)
         print(f"Error: fix_pin {block}: {problem}; the fix, declared before the "

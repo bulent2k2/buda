@@ -755,6 +755,12 @@ class HierMixin:
         if (pf and nm in pf) or nm in (getattr(self, "_pin_fix_sel", None) or {}):
             from buda_cmds.pin_fix_cmds import revalidate
             revalidate(self, nm, fp)
+        if nm != comp.name and (comp.name in (pf or {})
+                                or comp.name in (getattr(self, "_pin_fix_sel", None) or {})):
+            # declared on the full path, projected under a local alias: judge the
+            # owner's declaration against the geometry this frame holds for it
+            from buda_cmds.pin_fix_cmds import revalidate
+            revalidate(self, comp.name, fp, fp_name=nm)
 
     def _fp_add_comp_geom(self, fp, comp, mr, name=None, ox=0.0, oy=0.0):
         """Project ONE BDB component into `fp` — `add_block_rects` when its

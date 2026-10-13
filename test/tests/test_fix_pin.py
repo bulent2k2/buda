@@ -1586,3 +1586,14 @@ def test_a_layer_declared_after_the_instances_narrows_a_restored_cell_fix(tmp_pa
     assert {st[4] for st in s.fp.pin_fix_strips("a")} == {N, S, E, W}   # layer unknown yet
     _say(s, "def_layer 4 M4 H TOP 0")
     assert {st[4] for st in s.fp.pin_fix_strips("a")} == {E, W}
+
+
+def test_a_full_path_fix_is_validated_when_projected_under_a_local_alias():
+    """P2 (#992): the guard looked at the alias only, so an out-of-range rect on
+    a full-path declaration was accepted and later yielded no landing."""
+    text = _flow_text("hier_cell_local.buda",
+                      ("\nfix_pin cell:pipe_cell.out east",
+                       "\nfix_pin cell:pipe_cell.out east\nfix_pin proc_i/pb_i south rect 999"))
+    s, out = _run_flow_text(text)
+    assert "out of range" in out and "proc_i/pb_i" not in s._pin_fixes, out[-700:]
+    assert "INCONSISTENTLY" not in out          # dropped, so the occurrences agree again
