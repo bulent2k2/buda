@@ -541,11 +541,22 @@ def net_fix_conflicts(session, net, local=False):
             for b, d in seen.items() if len(d) > 1]
 
 
-def bundle_fix_map(session, net_names, local=False, names_local=None):
+def _local_name_decl(session):
+    """A fix declared on a child's LOCAL name (`fix_pin pb_i south`): a cell-local
+    frame matches it by name, but the absolute frame the expanded instances live
+    in names the same block `proc_i/pb_i` and holds no such declaration."""
+    if getattr(session, "bdb", None) is None:
+        return False
+    return any("/" not in k and not is_cell_key(k) and not session.fp.has_block(k)
+               for k in list(session._pin_fixes) + list(_sel_store(session)))
+
+
+def bundle_fix_map(session, net_names, local=False, names_local=None, always=False):
     """The EFFECTIVE fix map for one bundle ({block: (faces, rect, has_window,
     lo, hi)}), or None when no per-pin selector exists (the floorplan's own
-    block-level fixes then apply unchanged — the byte-identical path)."""
-    if not any(True for _ in _sel_store(session)):
+    block-level fixes then apply unchanged — the byte-identical path) unless
+    `always` asks for the map regardless."""
+    if not always and not any(True for _ in _sel_store(session)):
         return None
     out = {}
     for net in net_names:
@@ -826,7 +837,8 @@ def stamp_expanded(session, w):
     frame (full block names, the instance's own pins and orientations).  A
     no-op without per-pin selectors, where the floorplan's own fixes apply."""
     b = w.input.original_bundle
-    m = bundle_fix_map(session, b.get_net_names(), bool(b.cell_context), False)
+    m = bundle_fix_map(session, b.get_net_names(), bool(b.cell_context), False,
+                       always=_local_name_decl(session))
     if m is None:
         return
     cands = list(w.input.candidates)         # copies: stamp, then assign back
@@ -1564,7 +1576,7 @@ def restamp_bundles(session):
               "voided — re-run run_bundler and the stages after it")
         _void_pipeline(session)
         return
-    if not _sel_store(session):
+    if not _sel_store(session) and not _local_name_decl(session):
         return
     if any(_net_pins_of(session, n) is None for w in session.bundles
            for n in w.input.original_bundle.get_net_names()):
@@ -1589,7 +1601,7 @@ def restamp_bundles(session):
     for w in session.bundles:
         m = bundle_fix_map(session, w.input.original_bundle.get_net_names(),
                            bool(w.input.original_bundle.cell_context),
-                           wrapper_local(session, w))
+                           wrapper_local(session, w), always=_local_name_decl(session))
         if m is not None:
             cands = list(w.input.candidates)     # copies: stamp, then assign back
             for c in cands:

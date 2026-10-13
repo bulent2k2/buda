@@ -1597,3 +1597,19 @@ def test_a_full_path_fix_is_validated_when_projected_under_a_local_alias():
     s, out = _run_flow_text(text)
     assert "out of range" in out and "proc_i/pb_i" not in s._pin_fixes, out[-700:]
     assert "INCONSISTENTLY" not in out          # dropped, so the occurrences agree again
+
+
+def test_a_local_name_block_fix_reaches_the_expanded_instances():
+    """P2 (#992): without selectors no map was stamped, and the absolute frame
+    holds no declaration for `proc_i/pb_i`, so NUTS and the audits judged the
+    expanded route with the wrong landing."""
+    text = _flow_text("hier_cell_local.buda",
+                      ("\nfix_pin cell:pipe_cell.out east",
+                       "\nfix_pin cell:pipe_cell.out east\nfix_pin pb_i south"))
+    s, out = _run_flow_text(text)
+    assert "Error:" not in out, out[-600:]
+    assert out.count("Success: no violations found") >= 2, out[-800:]
+    for w in s.bundles:
+        fm = {b: v[0] for b, v in dict(w.input.candidates[0].block_fixes).items()}
+        assert fm and all(v == S for b, v in fm.items() if b.endswith("pb_i")), fm
+        assert all("/" in b for b in fm), fm
