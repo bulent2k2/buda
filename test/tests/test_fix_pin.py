@@ -827,3 +827,12 @@ def test_selectors_without_declared_nets_void_the_resume(tmp_path):
         "run_bundler STRICT", "generate_topologies", "run_planner")
     s2, out = _session(*pre, f"open_bdb {path}", "load_pipeline")   # nets not redeclared
     assert "voided" in out and len(s2.bundles) == 0
+
+
+def test_a_failed_load_does_not_void_the_live_pipeline(tmp_path):
+    """Codex P2 on #989: restamp ran after a load that restored nothing."""
+    pre = ["add_block S 0 400 100 600", "add_block M 400 400 600 600", *TECH]
+    s, out = _session(*pre, "fix_pin M.i north", "add_bus x[2] S.o M.i",
+                      "run_bundler STRICT", f"open_bdb {tmp_path / 'empty.bdb'}",
+                      "load_pipeline")
+    assert "voided" not in out and len(s.bundles) == 1

@@ -599,8 +599,9 @@ def fixes_changed_since_generation(session):
             return json.loads(gen) != now
     except ValueError:
         return True
-    return bool(bdb.meta_get(_META, "")) and bdb.meta_get(_META, "") != json.dumps(
-        now, sort_keys=True)
+    # No generation stamp: what any retained candidate was built under is unknown,
+    # and the live row is mutable state (restore rewrites it), so it cannot vouch.
+    return bool(now["blocks"] or now["selectors"] or bdb.meta_get(_META, ""))
 
 
 def flush_generation(session):

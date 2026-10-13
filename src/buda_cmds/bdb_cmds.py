@@ -1144,10 +1144,11 @@ def cmd_load_pipeline(session, cmd, args, cmd_line):
     # fingerprint memo describes the PREVIOUS wrappers' persisted rows, so
     # the next persist must rebuild it from a full pass.
     session._persisted_plan_fp = None
-    session._load_pipeline_from_bdb(
+    loaded = session._load_pipeline_from_bdb(
         expanded=bool(args) and args[0] == "expanded")
-    from buda_cmds import pin_fix_cmds
-    pin_fix_cmds.restamp_bundles(session)
+    if loaded:          # a failed load leaves the live pipeline alone: don't void it
+        from buda_cmds import pin_fix_cmds
+        pin_fix_cmds.restamp_bundles(session)
 
 
 def _resolve_layer_id(session, tok):
