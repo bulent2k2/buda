@@ -687,3 +687,22 @@ down — would be a separate item, and it would emit `fix_pin` lines.
   orientation transform (a fix is still keyed by the placed block name), `layer`,
   `order`, `at <pos>`, `from_pins`.  Vehicles: `flow/pin_fix/persist_build.buda`
   then `persist_resume.buda`.
+- **PR 2 (layer, order; flat flows)**: landed (#990).  Vehicles `flow/pin_fix/layers.buda`,
+  `order.buda`.
+- **PR 3 (cell-level fixes, hierarchical frames)**: `fix_pin cell:<name>[.<pin>]` governs every
+  instance of a BDB cell, stated in the cell's frame and read per instance through
+  `xf_fix` (faces turn with the orientation token, a window is re-read on the face it
+  lands on, `order` flips when the transform reverses the along-axis), projected where a
+  BDB component becomes a block (`_fp_add_comp`) so it reaches the depth, cross-level and
+  cell-local frames alike.  Pin selectors, `layer`, `order` and the `PIN_FIX` audit work
+  on hierarchical bundles: a bundle resolves its nets' pins by owner (instance > cell) and
+  names its blocks the way ITS frame does (a cell-local template: the children's local
+  names; any other frame: full paths), the hier bundler splits a mixed bundle before
+  expansion (templates and replicas in lockstep, the NDR split's shape), an inconsistent
+  class is a hard error, an expanded instance re-resolves its map in the absolute frame,
+  and nets with no `add_net` resolve through the BDB's leaf pins (an imported design, a
+  resumed checkpoint).  Not done: a cell fix inside a CONTAINER rotated after placement
+  (its children keep their tokens, BUDA-1918 — warned for a non-square instance,
+  undetectable for a square one), bottom-up rotation-class clones' own frames, a pin
+  selector deeper than the bundle's landing block, per-bit `at <pos>`, `from_pins`, the
+  endpoint-via kind.  Vehicles: `hier_cell.buda`, `hier_pins.buda`, `hier_cell_local.buda`.

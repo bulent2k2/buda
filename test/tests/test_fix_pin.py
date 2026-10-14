@@ -529,12 +529,14 @@ def test_block_fix_scope_swaps_the_floorplans_landings():
     assert not s.fp.has_pin_fix("MAC")          # restored on exit
 
 
-def test_the_hier_flow_says_selectors_are_not_replayed():
+def test_a_selector_is_no_longer_reported_as_unreplayed_on_a_hier_frame():
+    """PR 3 replays selectors per bundle (a map on the generator), so the frame
+    replay no longer says they are ignored."""
     s, _ = _session("add_block M 0 0 100 100", "fix_pin M.tx east")
     out = io.StringIO()
     with contextlib.redirect_stdout(out):
         s._apply_fp_session_settings(buda.Floorplan())
-    assert "per-pin selectors are not replayed" in out.getvalue()
+    assert "not replayed" not in out.getvalue()
 
 
 def test_auto_bit_cap_is_sized_by_the_selected_landing_window():
@@ -1208,3 +1210,645 @@ def test_rebundling_does_not_read_the_previous_wrappers_layer_base():
     got = sorted(s.bundles[0].input.allowed_layers)
     ref, _ = _session(*[l for l in pre if not l.startswith(("def_ndr", "set_ndr"))])
     assert got == sorted(ref.bundles[0].input.allowed_layers) and 6 in got, got
+
+
+# ── cell-level fix, turned with the instance (PR 3) ─────────────────────────
+
+import orient_rect  # noqa: E402
+from buda_cmds import pin_fix_cmds  # noqa: E402
+
+_ALL_O = sorted(orient_rect.ORIENT_MAPS)
+
+
+def _cell_fix(**kw):
+    base = {"faces": 0, "rect": -1, "has_window": False, "lo": 0, "hi": 0,
+            "layers": [], "order": ""}
+    base.update(kw)
+    return base
+
+
+def _strips_of(fix, w, h):
+    fp = buda.Floorplan()
+    fp.add_block("B", 0, 0, w, h)
+    fp.set_pin_fix("B", fix["faces"], fix["rect"], fix["has_window"],
+                   fix["lo"], fix["hi"])
+    return sorted(fp.pin_fix_strips("B"))
+
+
+@pytest.mark.parametrize("orient", _ALL_O)
+@pytest.mark.parametrize("faces,win", [(W, (20, 60)), (E, (10, 90)), (N, (5, 40)),
+                                       (S, (30, 50)), (E | W, (25, 75)),
+                                       (N | S, (10, 20))])
+def test_the_transformed_fix_lands_where_the_footprint_transform_puts_the_strips(
+        orient, faces, win):
+    """The cell's strips, pushed through the SAME 8-orientation rect transform
+    the multi-rect footprint uses, are the strips of the transformed fix."""
+    cw, ch = 60, 100
+    fix = _cell_fix(faces=faces, has_window=True, lo=win[0], hi=win[1])
+    tfix = pin_fix_cmds.xf_fix(fix, orient, cw, ch)
+    swap = orient_rect.ORIENT_MAPS[orient][0]
+    bw, bh = (ch, cw) if swap else (cw, ch)
+    got = _strips_of(tfix, bw, bh)
+    want = []
+    for (x1, y1, x2, y2, face) in _strips_of(fix, cw, ch):
+        r = orient_rect.oxf_rect(orient, x1, y1, x2, y2, cw, ch)
+        want.append(r)
+    assert [g[:4] for g in got] == sorted(want)
+
+
+def test_a_flipped_instance_reverses_the_order_it_was_declared_in():
+    """`order` is bit 0 at the low coordinate in the PLACED frame; the cell's
+    pins keep their bit order, so a transform that reverses the along-axis
+    reverses the order."""
+    f = _cell_fix(faces=W, has_window=True, lo=10, hi=50, order="index")
+    assert pin_fix_cmds.xf_fix(f, "N", 60, 100)["order"] == "index"
+    assert pin_fix_cmds.xf_fix(f, "FN", 60, 100)["order"] == "rindex"   # y flipped
+    assert pin_fix_cmds.xf_fix(f, "FS", 60, 100)["order"] == "index"    # x flipped only
+    assert pin_fix_cmds.xf_fix(f, "S", 60, 100)["order"] == "rindex"
+
+
+def _hier_session(*extra):
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        s.do_command(f"source {FLOW / 'hier_cell.buda'}")
+        for c in extra:
+            s.do_command(c)
+    return s, out.getvalue()
+
+
+def test_the_cell_flow_turns_one_declaration_into_three_faces():
+    s, out = _hier_session()
+    assert "Error:" not in out
+    st = {b: s.fp.pin_fix_strips(b) for b in ("mac_n", "mac_s", "mac_e")}
+    assert st["mac_n"] == [(500, 720, 501, 760, W)]        # west, y 20..60 of the block
+    assert st["mac_s"] == [(599, 390, 600, 430, E)]        # turned 180: east, window flips
+    assert st["mac_e"] == [(540, 50, 580, 51, S)]          # turned 90: the axes swap
+    assert out.count("Success: no violations found") >= 2, out[-600:]
+
+
+def test_an_instance_level_fix_replaces_the_cell_level_one():
+    s, out = _hier_session()
+    s2 = buda_cli.BudaSession()
+    s2.no_viz = True
+    txt = (FLOW / "hier_cell.buda").read_text().replace(
+        "dump_pin_fixes\n\nderive_busterms",
+        "fix_pin mac_s north\ndump_pin_fixes\n\nderive_busterms", 1)
+    with contextlib.redirect_stdout(io.StringIO()):
+        for line in txt.splitlines():
+            if line.strip() and not line.lstrip().startswith("#"):
+                s2.do_command(line.replace("source ../tracks/tracks.buda",
+                                           f"source {_ROOT / 'flow/tracks/tracks.buda'}"))
+    assert s2.fp.pin_fix_strips("mac_s")[0][4] == N      # the instance's own fix
+    assert s2.fp.pin_fix_strips("mac_n")[0][4] == W      # the others still follow the cell
+
+
+def test_a_cell_fix_needs_a_known_cell_and_a_landing():
+    s, _ = _session("open_bdb :memory:", "add_cell k 60 100")
+    assert "no BDB cell named 'nope'" in _say(s, "fix_pin cell:nope west")
+    assert "cell:nope" not in s._pin_fixes
+    out = _say(s, "fix_pin cell:k west at 500..600")
+    assert "admits no landing" in out and "cell:k" not in s._pin_fixes
+    out = _say(s, "fix_pin cell:k rect 3 west")
+    assert "out of range" in out
+    out = _say(s, "fix_pin cell:k at 10..40")
+    assert "ONE axis" in out and "cell:k" not in s._pin_fixes
+    out = _say(s, "fix_pin cell:k west at 10..40")
+    assert "every instance" in out and "cell:k" in s._pin_fixes
+
+
+def test_a_cell_fix_round_trips_through_the_checkpoint(tmp_path):
+    db = tmp_path / "c.bdb"
+    s, _ = _session(f"open_bdb {db}", "add_cell k 60 100", "fix_pin cell:k west at 10..40")
+    s2, out = _session(f"open_bdb {db}")
+    assert s2._pin_fixes.get("cell:k", {}).get("has_window"), out
+
+
+# ── per-pin selectors and layer/order in hierarchical frames (PR 3) ─────────
+
+def _run_flow_text(text, name="x.buda"):
+    """Run flow text with the checked-in track fixtures, return (session, out)."""
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    out = io.StringIO()
+    text = text.replace("source ../tracks/tracks.buda",
+                        f"source {_ROOT / 'flow/tracks/tracks.buda'}")
+    exited = False
+    with contextlib.redirect_stdout(out):
+        try:
+            for line in text.splitlines():
+                if line.strip() and not line.lstrip().startswith("#") \
+                        and not line.startswith(("visualize", "dump_")):
+                    s.do_command(line)
+        except SystemExit:
+            exited = True
+    return s, out.getvalue() + ("\n[exit]" if exited else "")
+
+
+def _flow_text(name, *edits):
+    txt = (FLOW / name).read_text()
+    for old, new in edits:
+        assert old in txt, old
+        txt = txt.replace(old, new, 1)
+    return txt
+
+
+def _faces_of(s, w):
+    return {b: v[0] for b, v in dict(w.input.candidates[0].block_fixes).items()}
+
+
+def test_a_cell_pin_selector_splits_the_hier_bundle_and_turns_with_the_instance():
+    s, out = _run_flow_text(_flow_text("hier_pins.buda"))
+    assert out.count("split hbundle") == 2, out
+    assert "Error:" not in out
+    by = {w.input.original_bundle.get_net_names()[0][:4]: _faces_of(s, w)
+          for w in s.bundles}
+    assert by["lo_a"] == {"mac_a": W} and by["hi_a"] == {"mac_a": N}
+    # turned 180 degrees: west -> east, north -> south
+    assert by["lo_b"] == {"mac_b": E} and by["hi_b"] == {"mac_b": S}
+    assert out.count("Success: no violations found") >= 2, out[-500:]
+
+
+def test_the_hier_pins_flow_lands_each_bus_on_its_own_face():
+    s, _ = _run_flow_text(_flow_text("hier_pins.buda"))
+    comps = {c.name: c for c in s.bdb.all_components()}
+    for net, blk, face in (("lo_a", "mac_a", W), ("hi_a", "mac_a", N),
+                           ("lo_b", "mac_b", E), ("hi_b", "mac_b", S)):
+        c = comps[blk]
+        w = next(w for w in s.bundles
+                 if w.input.original_bundle.get_net_names()[0].startswith(net))
+        t = w.input.candidates[w.plan.selected_topology_index]
+        edge = {W: lambda p: p.x == c.x1, E: lambda p: p.x == c.x2,
+                N: lambda p: p.y == c.y2, S: lambda p: p.y == c.y1}[face]
+        assert any(edge(p) for sg in t.segments for p in (sg.start, sg.end)), \
+            (net, blk, [(sg.start.x, sg.start.y, sg.end.x, sg.end.y) for sg in t.segments])
+
+
+def test_cell_local_templates_and_replicas_get_one_congruent_map():
+    s, out = _run_flow_text(_flow_text("hier_cell_local.buda"))
+    assert "Error:" not in out, out[-800:]
+    assert out.count("Success: no violations found") >= 2
+    for w in s.bundles:
+        fm = dict(w.input.candidates[0].block_fixes)
+        # the absolute-frame names of the instance this wrapper routes
+        assert fm and all("/" in b for b in fm), fm
+        for b, v in fm.items():
+            if b.endswith("pb_i") or b.endswith("pc_i"):
+                if w.input.original_bundle.get_net_names()[0].startswith("pa_pb") and b.endswith("pb_i"):
+                    assert v[0] == N
+    layers = {s.layers.get_layer_name(l) if hasattr(s.layers, "get_layer_name") else l
+              for w in s.bundles for l in w.plan.seg_layers}
+    assert layers
+
+
+def test_the_fixed_layer_reaches_hier_bundles():
+    text = _flow_text("hier_cell_local.buda", ("\nfix_pin cell:pipe_cell.in  north layer M5", "\nfix_pin cell:pipe_cell.in  north layer M3"))
+    s, out = _run_flow_text(text)
+    assert "Error:" not in out, out[-600:]
+    names = {v: k for k, v in s._layer_name_map.items()}
+    for w in s.bundles:
+        if w.input.original_bundle.get_net_names()[0].startswith("pa_pb"):
+            # the V leg that lands on pb's north face is on M3, not the planner's M5
+            assert "M3" in [names[l] for l in w.plan.seg_layers], \
+                [names[l] for l in w.plan.seg_layers]
+
+
+def test_an_instance_specific_selector_on_a_replicated_template_is_refused():
+    text = _flow_text("hier_cell_local.buda",
+                      ("\nfix_pin cell:pipe_cell.out east",
+                       "\nfix_pin cell:pipe_cell.out east\nfix_pin proc_i/pb_i.in south"))
+    _s, out = _run_flow_text(text)
+    # the fix lives on ONE occurrence of a template solved once and copied
+    assert "INCONSISTENTLY" in out and out.endswith("[exit]"), out[-600:]
+
+
+def test_a_local_name_selector_governs_every_occurrence():
+    text = _flow_text("hier_cell_local.buda",
+                      ("\nfix_pin cell:pipe_cell.out east",
+                       "\nfix_pin cell:pipe_cell.out east\nfix_pin pb_i.in south"))
+    s, out = _run_flow_text(text)
+    assert "Error:" not in out, out[-600:]
+    for w in s.bundles:
+        if w.input.original_bundle.get_net_names()[0].startswith("pa_pb"):
+            fm = dict(w.input.candidates[0].block_fixes)
+            assert {v[0] for b, v in fm.items() if b.endswith("pb_i")} == {S}, fm
+
+
+def test_hier_order_follows_the_instance_orientation():
+    text = _flow_text("hier_pins.buda",
+                      ("\nfix_pin cell:mac_cell.lo_in west",
+                       "\nfix_pin cell:mac_cell.lo_in west at 20..80 order index"))
+    s, out = _run_flow_text(text)
+    assert "Error:" not in out, out[-600:]
+    names = {w.input.original_bundle.get_net_names()[0][:4]: w for w in s.bundles}
+    for key, want in (("lo_a", "index"), ("lo_b", "rindex")):
+        w = names[key]
+        topo = w.input.candidates[w.plan.selected_topology_index]
+        orders = pin_fix_cmds.segment_orders(s, w, topo)
+        assert {o for v in orders.values() for o in v} == {want}, (key, orders)
+
+
+def test_the_cell_flows_route_clean():
+    for flow in ("hier_cell.buda", "hier_pins.buda", "hier_cell_local.buda"):
+        rc, out = _run(flow)
+        assert rc == 0 and "Error:" not in out, (flow, out[-600:])
+        assert out.count("Success: no violations found") >= 2, (flow, out[-800:])
+
+
+def test_hier_selectors_survive_a_checkpoint_resume(tmp_path):
+    """Fixes come back with the BDB, nets come back with it too (no add_bus in
+    the resuming session), and load_pipeline re-stamps each bundle's map."""
+    db = tmp_path / "c.bdb"
+    _s, out = _run_flow_text(_flow_text("hier_pins.buda",
+                                        ("open_bdb :memory:", f"open_bdb {db}")))
+    assert "Error:" not in out
+    resume = f"""source ../tracks/tracks.buda
+corner_margin dx 5 dy 5
+set_min_stub_length 2
+open_bdb {db}
+add_blocks_from_bdb 0
+load_pipeline
+run_planner hier 5
+run_nuts
+check_design nuts
+run_detailed_nuts
+check_design dnuts
+"""
+    s2, out2 = _run_flow_text(resume)
+    assert "restored" in out2 and "voided" not in out2, out2[-800:]
+    by = {w.input.original_bundle.get_net_names()[0][:4]: _faces_of(s2, w)
+          for w in s2.bundles}
+    assert by == {"lo_a": {"mac_a": W}, "hi_a": {"mac_a": N},
+                  "lo_b": {"mac_b": E}, "hi_b": {"mac_b": S}}
+    assert out2.count("Success: no violations found") >= 2
+
+
+def test_a_wire_off_a_cell_pins_fixed_layer_is_reported_in_a_hier_flow():
+    text = _flow_text("hier_pins.buda",
+                      ("\nfix_pin cell:mac_cell.lo_in west",
+                       "\nfix_pin cell:mac_cell.lo_in west layer M4"))
+    s, out = _run_flow_text(text)
+    assert "Error:" not in out and "PIN_FIX" not in out, out[-600:]
+    names = {v: k for k, v in s._layer_name_map.items()}
+    w = next(w for w in s.bundles
+             if w.input.original_bundle.get_net_names()[0].startswith("lo_a"))
+    assert [names[l] for l in w.plan.seg_layers] == ["M4"], \
+        [names[l] for l in w.plan.seg_layers]       # the mask put the wire on M4
+    w.plan.seg_layers = [s._layer_name_map["M6"]] * len(w.plan.seg_layers)
+    out = _say(s, "check_design")
+    assert "PIN_FIX" in out and "outside the fixed layer" in out, out
+
+
+# ── Codex on #992 ──────────────────────────────────────────────────────────
+
+def _hier_cell_upto_blocks():
+    """hier_cell.buda without its cell fix, stopped after the blocks exist."""
+    lines = []
+    for line in (FLOW / "hier_cell.buda").read_text().splitlines():
+        if line.startswith("fix_pin") or line.startswith("dump_pin_fixes"):
+            continue
+        if line.startswith("derive_busterms"):
+            lines += [line, "add_blocks_from_bdb 0"]
+            break
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def test_a_cell_fix_declared_after_the_blocks_exist_reaches_them():
+    """P1: the fix was stored but the projected blocks never heard of it."""
+    s, _ = _run_flow_text(_hier_cell_upto_blocks())
+    assert s.fp.pin_fix_strips("mac_n") == []
+    _say(s, "fix_pin cell:mac_cell west at 20..60")
+    assert s.fp.pin_fix_strips("mac_n") == [(500, 720, 501, 760, W)]
+    assert s.fp.pin_fix_strips("mac_s")[0][4] == E        # turned with the instance
+    _say(s, "fix_pin cell:mac_cell north")                # replaced
+    assert s.fp.pin_fix_strips("mac_n")[0][4] == N
+    _say(s, "fix_pin mac_n east")                         # an instance override
+    assert s.fp.pin_fix_strips("mac_n")[0][4] == E
+    _say(s, "fix_pin mac_n off")                          # ... removed: the cell's comes back
+    assert s.fp.pin_fix_strips("mac_n")[0][4] == N
+    _say(s, "fix_pin cell:mac_cell off")
+    assert s.fp.pin_fix_strips("mac_n") == [] and s.fp.pin_fix_strips("mac_s") == []
+
+
+def test_editing_an_expanded_bundle_sees_a_local_name_selector():
+    """P2: the edit session resolved with the wrapper's absolute locality only."""
+    text = _flow_text("hier_cell_local.buda",
+                      ("\nfix_pin cell:pipe_cell.out east",
+                       "\nfix_pin cell:pipe_cell.out east\nfix_pin pb_i.in south"))
+    s, out = _run_flow_text(text)
+    assert "Error:" not in out
+    w = next(w for w in s.bundles
+             if w.input.original_bundle.get_net_names()[0].startswith("pa_pb_i"))
+    _say(s, f"edit_topology {w.input.original_bundle.id} new")
+    fm = dict(s._edit_topo.block_fixes)
+    assert {v[0] for b, v in fm.items() if b.endswith("pb_i")} == {S}, fm
+    _say(s, "edit_abort")
+
+
+def test_an_instance_block_fix_on_a_replicated_template_is_refused_too():
+    """P2: the congruence check was gated on selectors; a block-level override
+    on one occurrence is just as unable to ride a template solved once."""
+    text = _flow_text("hier_cell_local.buda",
+                      ("\nfix_pin cell:pipe_cell.out east",
+                       "\nfix_pin cell:pipe_cell.out east\nfix_pin proc_i/pb_i south"))
+    _s, out = _run_flow_text(text)
+    assert "INCONSISTENTLY" in out and out.endswith("[exit]"), out[-600:]
+
+
+def test_a_turned_replica_with_composed_tokens_is_congruent_with_its_template():
+    """P2 (#992): a cell fix reads as different PLACED faces on a turned
+    occurrence; congruence compares the declarations, and the expansion's
+    transform accounts for the turn."""
+    text = _flow_text(
+        "hier_cell_local.buda",
+        ("\nderive_busterms 1",
+         "\nrotate_comp proc_j 180\nrotate_comp proc_j/pa_i 180\n"
+         "rotate_comp proc_j/pb_i 180\nrotate_comp proc_j/pc_i 180\nderive_busterms 1"))
+    s, out = _run_flow_text(text)
+    assert "INCONSISTENTLY" not in out and "Error:" not in out, out[-600:]
+    assert out.count("Success: no violations found") >= 2, out[-800:]
+    got = {w.input.original_bundle.get_net_names()[0]:
+           {b.rsplit("/", 1)[-1]: v[0] for b, v in dict(w.input.candidates[0].block_fixes).items()}
+           for w in s.bundles}
+    assert got["pa_pb_i_0"]["pb_i"] == N and got["pa_pb_j_0"]["pb_i"] == S
+
+
+def test_a_layer_declared_after_the_instances_narrows_a_restored_cell_fix(tmp_path):
+    """P2 (#992): a restored cell fix naming a layer projects un-narrowed until
+    the layer exists; declaring it must re-read every projected instance."""
+    db = tmp_path / "c.bdb"
+    pre = [f"open_bdb {db}", "add_cell k 100 100", "add_inst a k - 0 0", *TECH,
+           "fix_pin cell:k layer M4"]
+    _session(*pre)
+    s, _ = _session(f"open_bdb {db}", "add_blocks_from_bdb 0")
+    assert {st[4] for st in s.fp.pin_fix_strips("a")} == {N, S, E, W}   # layer unknown yet
+    _say(s, "def_layer 4 M4 H TOP 0")
+    assert {st[4] for st in s.fp.pin_fix_strips("a")} == {E, W}
+
+
+def test_a_full_path_fix_is_validated_when_projected_under_a_local_alias():
+    """P2 (#992): the guard looked at the alias only, so an out-of-range rect on
+    a full-path declaration was accepted and later yielded no landing."""
+    text = _flow_text("hier_cell_local.buda",
+                      ("\nfix_pin cell:pipe_cell.out east",
+                       "\nfix_pin cell:pipe_cell.out east\nfix_pin proc_i/pb_i south rect 999"))
+    s, out = _run_flow_text(text)
+    assert "out of range" in out and "proc_i/pb_i" not in s._pin_fixes, out[-700:]
+    assert "INCONSISTENTLY" not in out          # dropped, so the occurrences agree again
+
+
+def test_a_local_name_block_fix_reaches_the_expanded_instances():
+    """P2 (#992): without selectors no map was stamped, and the absolute frame
+    holds no declaration for `proc_i/pb_i`, so NUTS and the audits judged the
+    expanded route with the wrong landing."""
+    text = _flow_text("hier_cell_local.buda",
+                      ("\nfix_pin cell:pipe_cell.out east",
+                       "\nfix_pin cell:pipe_cell.out east\nfix_pin pb_i south"))
+    s, out = _run_flow_text(text)
+    assert "Error:" not in out, out[-600:]
+    assert out.count("Success: no violations found") >= 2, out[-800:]
+    for w in s.bundles:
+        fm = {b: v[0] for b, v in dict(w.input.candidates[0].block_fixes).items()}
+        assert fm and all(v == S for b, v in fm.items() if b.endswith("pb_i")), fm
+        assert all("/" in b for b in fm), fm
+
+
+def test_a_local_name_shared_with_a_top_level_block_still_reaches_the_expanded_instances():
+    """P2 (#992): the local-name test asked the session floorplan, so a top-level
+    block called `pb_i` hid the nested child's declaration."""
+    text = _flow_text("hier_cell_local.buda",
+                      ("\nadd_inst src_i   src_cell",
+                       "\nadd_inst pb_i   src_cell  -   50  900\nadd_inst src_i   src_cell"),
+                      ("\nfix_pin cell:pipe_cell.out east",
+                       "\nfix_pin cell:pipe_cell.out east\nfix_pin pb_i south"))
+    s, out = _run_flow_text(text)
+    assert "Error:" not in out, out[-600:]
+    for w in s.bundles:
+        fm = {b: v[0] for b, v in dict(w.input.candidates[0].block_fixes).items()}
+        assert all(v == S for b, v in fm.items() if b.endswith("/pb_i")), fm
+
+
+def test_each_owner_is_resolved_completely_before_the_next():
+    """P2 (#992): the local alias's SELECTOR beat the full path's BLOCK fix."""
+    text = _flow_text("hier_cell_local.buda",
+                      ("\nfix_pin cell:pipe_cell.out east",
+                       "\nfix_pin cell:pipe_cell.out east\nfix_pin pb_i.in south\n"
+                       "fix_pin proc_i/pb_i east"))
+    _s, out = _run_flow_text(text)
+    assert "INCONSISTENTLY" in out and out.endswith("[exit]"), out[-600:]
+
+
+def test_a_rejected_override_gives_the_cell_fix_back():
+    """P2 (#992): dropping a bad instance override cleared the block outright."""
+    text = _flow_text("hier_cell_local.buda",
+                      ("\nfix_pin cell:pipe_cell.in  north layer M5\n"
+                       "fix_pin cell:pipe_cell.out east",
+                       "\nfix_pin cell:pipe_cell east\nfix_pin proc_i/pb_i south rect 999"))
+    s, out = _run_flow_text(text)
+    assert "out of range" in out and "proc_i/pb_i" not in s._pin_fixes, out[-700:]
+    loc = s._build_cell_local_floorplan("proc_i")
+    assert [st[4] for st in loc.pin_fix_strips("pb_i")] == [E]
+
+
+def test_a_full_path_block_fix_outranks_the_local_alias_in_the_template_frame():
+    """P2 (#992): the full-path override was skipped when the alias was declared too."""
+    text = _flow_text("hier_cell_local.buda",
+                      ("\nfix_pin cell:pipe_cell.out east",
+                       "\nfix_pin cell:pipe_cell.out east\nfix_pin pb_i south\n"
+                       "fix_pin proc_i/pb_i east"))
+    s, _out = _run_flow_text(text)           # the replica disagrees: refused, but the frame exists
+    loc = s._build_cell_local_floorplan("proc_i")
+    assert [st[4] for st in loc.pin_fix_strips("pb_i")] == [E]
+    loc_j = s._build_cell_local_floorplan("proc_j")
+    assert [st[4] for st in loc_j.pin_fix_strips("pb_i")] == [S]
+
+
+def test_a_rejected_full_path_override_leaves_the_valid_local_fix_alone():
+    """P2 (#992): the local fix was judged against the strips of the (invalid)
+    override stamped over it, and deleted with it."""
+    text = _flow_text("hier_cell_local.buda",
+                      ("\nfix_pin cell:pipe_cell.out east",
+                       "\nfix_pin cell:pipe_cell.out east\nfix_pin pb_i south\n"
+                       "fix_pin proc_i/pb_i west rect 999"))
+    s, out = _run_flow_text(text)
+    assert "out of range" in out, out[-600:]
+    assert "pb_i" in s._pin_fixes and "proc_i/pb_i" not in s._pin_fixes
+    loc = s._build_cell_local_floorplan("proc_i")
+    assert [st[4] for st in loc.pin_fix_strips("pb_i")] == [S]
+
+
+def test_a_local_name_fix_cannot_ride_a_turned_replica():
+    """P2 (#992): the template's south landing turns north on a 180-degree replica
+    while the local declaration still said south — refuse, point at the cell fix."""
+    text = _flow_text(
+        "hier_cell_local.buda",
+        ("\nderive_busterms 1",
+         "\nrotate_comp proc_j 180\nrotate_comp proc_j/pa_i 180\n"
+         "rotate_comp proc_j/pb_i 180\nrotate_comp proc_j/pc_i 180\nderive_busterms 1"),
+        ("\nfix_pin cell:pipe_cell.out east",
+         "\nfix_pin cell:pipe_cell.out east\nfix_pin pb_i south"))
+    _s, out = _run_flow_text(text)
+    assert "is turned" in out and "cell:" in out and out.endswith("[exit]"), out[-700:]
+
+
+def test_a_restored_cell_fix_is_revalidated_against_the_cells_current_footprint(tmp_path):
+    """P2 (#992): `revalidate` looked for a block called `cell:k` and returned."""
+    db = tmp_path / "c.bdb"
+    _session(f"open_bdb {db}", "add_cell k 100 100",
+             "set_cell_rects k rect 0 0 50 100 rect 50 0 100 100",
+             "fix_pin cell:k rect 2 east",
+             "set_cell_rects k off")                 # the footprint changed afterwards
+    s, out = _session(f"open_bdb {db}")
+    assert "out of range" in out and "cell:k" not in s._pin_fixes, out
+
+
+def test_opening_a_bdb_resyncs_blocks_projected_before_it(tmp_path):
+    """P2 (#992): restore applied the cell fix through a no-op for cell keys."""
+    d1, d2 = tmp_path / "d1.bdb", tmp_path / "d2.bdb"
+    base = ["add_cell k 100 100", "add_inst a k - 0 0"]
+    _session(f"open_bdb {d1}", *base, "fix_pin cell:k west")
+    _session(f"open_bdb {d2}", *base)
+    s, _ = _session(f"open_bdb {d2}", "add_blocks_from_bdb 0")
+    assert s.fp.pin_fix_strips("a") == []
+    _say(s, f"open_bdb {d1}")
+    assert [st[4] for st in s.fp.pin_fix_strips("a")] == [W]
+
+
+def test_editing_an_expanded_bundle_sees_a_local_block_level_fix():
+    """P2 (#992): the edit session's empty topology read a local-name BLOCK-level
+    declaration as nothing, since only selectors forced the absolute map."""
+    text = _flow_text("hier_cell_local.buda",
+                      ("\nfix_pin cell:pipe_cell.out east",
+                       "\nfix_pin cell:pipe_cell.out east\nfix_pin pb_i south"))
+    s, out = _run_flow_text(text)
+    assert "Error:" not in out, out[-600:]
+    w = next(w for w in s.bundles
+             if w.input.original_bundle.get_net_names()[0].startswith("pa_pb_i"))
+    _say(s, f"edit_topology {w.input.original_bundle.id} new")
+    fm = dict(s._edit_topo.block_fixes)
+    assert {v[0] for b, v in fm.items() if b.endswith("pb_i")} == {S}, fm
+    _say(s, "edit_abort")
+
+
+def test_a_divergent_fixed_pin_split_stays_a_fan_out():
+    """P2 (#992): a split fan-out rides net_drivers like a fan-in, and was rebuilt
+    as FANIN: rooted at a receiver."""
+    text = _flow_text("hier_pins.buda",
+                      ("run_hier_bundler depth 0", "run_hier_bundler depth 0 DIVERGENT"))
+    s, out = _run_flow_text(text)
+    assert "[PinFix] split hbundle" in out, out[-800:]
+    reasons = [w.input.original_bundle.reason for w in s.bundles]
+    assert any(r.startswith("FANOUT:") for r in reasons), reasons
+    assert not any(r.startswith("FANIN:") for r in reasons), reasons
+
+
+def test_a_cell_fix_is_revalidated_when_the_cell_shrinks_before_projection():
+    """P2 (#992): a window valid at declaration, then `resize_cell` — the fix was
+    applied unchecked, admitted no strip, and the pin read as unrestricted."""
+    text = _flow_text("hier_cell.buda",
+                      ("\nderive_busterms 0", "\nresize_cell mac_cell 100 10\nderive_busterms 0"))
+    s, out = _run_flow_text(text)
+    assert "fix_pin cell:mac_cell" in out and "is dropped" in out, out[-800:]
+    assert "cell:mac_cell" not in s._pin_fixes
+
+
+def test_a_container_endpoint_keeps_its_block_fix_beside_a_selector():
+    """P2 (#992): an imported net's index held leaf pins only, so a bundle landing
+    on a container read no fix for it once any selector made the map active."""
+    from types import SimpleNamespace as NS
+
+    class _Bdb:
+        def all_components(self):
+            return [NS(id=1, name="drv", is_leaf=True),
+                    NS(id=2, name="box", is_leaf=False),
+                    NS(id=3, name="box/leaf", is_leaf=True)]
+
+        def all_nets(self):
+            return [NS(id=1, name="n0")]
+
+        def all_pins(self):
+            return [NS(comp_id=1, net_id=1, pin_name="o", dir="OUTPUT"),
+                    NS(comp_id=2, net_id=1, pin_name="i", dir="INPUT"),
+                    NS(comp_id=3, net_id=1, pin_name="i", dir="INPUT")]
+
+    sess = NS(bdb=_Bdb(), _cmd_seq=1)
+    drv, rcvs = pin_fix_cmds._bdb_net_index(sess)["n0"]
+    assert drv == "drv.o" and set(rcvs) == {"box/leaf.i", "box.i"}, (drv, rcvs)
+
+
+def test_a_selector_only_cell_declaration_is_revalidated_too():
+    """P2 (#992): the revalidation looked for a block-level cell fix and returned
+    for a cell holding only `cell:k.pin` selectors."""
+    text = _flow_text("hier_pins.buda",
+                      ("\nderive_busterms 0", "\nresize_cell mac_cell 100 10\nderive_busterms 0"))
+    text = text.replace("fix_pin cell:mac_cell.lo_in west",
+                        "fix_pin cell:mac_cell.lo_in west at 60..90")
+    s, out = _run_flow_text(text)
+    assert "is dropped" in out and "lo_in" in out, out[-900:]
+    assert not any(k[1] == "lo_in" for d in pin_fix_cmds._sel_store(s).values() for k in d)
+
+
+def test_a_layer_fix_below_the_landing_frame_does_not_mask_the_outer_bundle():
+    """P2 (#992): a leaf pin under a container the bundle lands on named a layer
+    for the container-to-container route."""
+    from types import SimpleNamespace as NS
+    fix = {"layers": ["M4"], "faces": 0}
+    cand = NS(connected_block_names=["boxA", "boxB"])
+    w = NS(input=NS(candidates=[cand], original_bundle=NS(id=1)))
+    s = buda_cli.BudaSession()
+    s._layer_name_map = {"M4": 4}
+    called = []
+    orig = pin_fix_cmds.wrapper_pins
+    pin_fix_cmds.wrapper_pins = lambda sess, ww: [("boxA/leaf.p", "boxA/leaf", "p",
+                                                    "boxA/leaf", fix)]
+    orig_h = pin_fix_cmds.has_layer_fixes
+    pin_fix_cmds.has_layer_fixes = lambda sess: True
+    try:
+        assert pin_fix_cmds.bundle_layer_mask(s, w) == (None, None, {})
+    finally:
+        pin_fix_cmds.wrapper_pins = orig
+        pin_fix_cmds.has_layer_fixes = orig_h
+
+
+def test_the_hier_auto_cap_sizes_a_part_by_its_fixed_landing():
+    """P2 (#992): `set_max_bundle_bits auto` read the macro's whole shortest edge
+    where a window pins the landing to a few tracks."""
+    base = _flow_text("hier_cell.buda",
+                      ("\nrun_hier_bundler depth 0", "\nset_max_bundle_bits auto\nrun_hier_bundler depth 0"))
+    s0, out0 = _run_flow_text(base)
+    tight = base.replace("west at 20..60", "west at 20..22")
+    s1, out1 = _run_flow_text(tight)
+    n0 = len(s0.bundles)
+    n1 = len(s1.bundles)
+    assert "Error:" not in out1, out1[-600:]
+    assert n1 >= n0, (n0, n1)
+    assert "[HierBundler] split" in out1, out1[-900:]
+
+
+# ── review of #992 at 448b9f4 ──────────────────────────────────────────────
+
+def test_the_same_instance_fix_on_every_occurrence_is_congruent():
+    """Minor (#992): the class signature kept the ABSOLUTE owner path in its value,
+    so identical per-occurrence fixes compared different."""
+    text = _flow_text("hier_cell_local.buda",
+                      ("\nfix_pin cell:pipe_cell.out east",
+                       "\nfix_pin cell:pipe_cell.out east\n"
+                       "fix_pin proc_i/pb_i.in south\nfix_pin proc_j/pb_i.in south"))
+    s, out = _run_flow_text(text)
+    assert "INCONSISTENTLY" not in out and "Error:" not in out, out[-700:]
+
+
+def test_removing_an_instance_fix_says_when_the_cell_fix_comes_back():
+    """Minor (#992): `off` claimed every face admitted landings while the cell's fix
+    was re-applied."""
+    s, _ = _run_flow_text(_hier_cell_upto_blocks())
+    _say(s, "fix_pin cell:mac_cell west at 20..60")
+    _say(s, "fix_pin mac_n east")
+    out = _say(s, "fix_pin mac_n off")
+    assert "reverts to the cell-level fix on cell 'mac_cell'" in out, out
+    assert "every face admits" not in out
+    _say(s, "fix_pin cell:mac_cell off")
+    _say(s, "fix_pin mac_n east")
+    assert "every face admits landings again" in _say(s, "fix_pin mac_n off")
