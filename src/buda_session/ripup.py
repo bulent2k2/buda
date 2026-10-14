@@ -465,12 +465,17 @@ class RipupMixin:
 
     def _sync_junction_reach(self):
         """Tell the engine, before every command, whether junction reach is
-        in force.  The session is the one authority and reads
-        BUDA_NUTS_JUNCTION_REACH each time, so it can change in-process:
-        unset or `topdown` = on unless the design carries bottom-up marks (a
-        template solved once and copied is the other kind of flow), `0`/`off`
-        = off, anything else (`1`) = on for every design."""
-        mode = os.environ.get('BUDA_NUTS_JUNCTION_REACH', '')
+        in force.  The session is the one authority and reads the mode each
+        time, so it can change in-process.  A typed `set_junction_reach`
+        wins over BUDA_NUTS_JUNCTION_REACH; either way: unset or `topdown` =
+        on unless the design carries bottom-up marks (a template solved once
+        and copied is the other kind of flow), `0`/`off` = off, anything else
+        (`1`, `on`) = on for every design."""
+        typed = getattr(self, '_junction_reach_mode', None)
+        if typed is not None:
+            mode = {'on': '1', 'off': '0', 'topdown': 'topdown'}[typed]
+        else:
+            mode = os.environ.get('BUDA_NUTS_JUNCTION_REACH', '')
         try:
             if mode in ('0', 'off'):
                 allowed = False

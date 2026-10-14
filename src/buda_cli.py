@@ -351,6 +351,9 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
         # the hit rate from 0.00 to 1.00 at no cost.  Moves nothing on a
         # design with no reservation either way.
         self._reserve_steer = os.environ.get("BUDA_RESERVE_STEER", "0") == "1"
+        # Junction reach, typed override (`set_junction_reach`): None = the
+        # BUDA_NUTS_JUNCTION_REACH variable decides, else "on"/"off"/"topdown".
+        self._junction_reach_mode = None
         # Unit-plausibility guard (Phase 1d): 'on' (hard error) | 'warn' | 'off'
         self._unit_check = "on"
         # The (layer, unit_pitch) tuple last judged — report once per stage

@@ -97,3 +97,58 @@ def test_the_default_run_uses_the_longer_spans(monkeypatch):
     # and the default run (lever on) does not -- the lever really is in force.
     assert _overlaps(monkeypatch, "0") == 0
     assert _overlaps(monkeypatch, None) == 1
+
+
+def _typed(monkeypatch, env, line, marked):
+    if env is None:
+        monkeypatch.delenv(_VAR, raising=False)
+    else:
+        monkeypatch.setenv(_VAR, env)
+    s = buda_cli.BudaSession()
+    s.bdb = _Bdb(marked)
+    s.do_command(line)
+    return buda.junction_reach_active()
+
+
+@pytest.mark.parametrize("marked", [False, True])
+def test_set_junction_reach_on_and_off_outrank_the_variable(monkeypatch, marked):
+    assert _typed(monkeypatch, "0", "set_junction_reach on", marked) is True
+    assert _typed(monkeypatch, "1", "set_junction_reach off", marked) is False
+
+
+def test_set_junction_reach_topdown_is_the_default_policy(monkeypatch):
+    assert _typed(monkeypatch, "0", "set_junction_reach topdown", False) is True
+    assert _typed(monkeypatch, "1", "set_junction_reach topdown", True) is False
+
+
+def test_set_junction_reach_env_hands_the_decision_back(monkeypatch):
+    monkeypatch.setenv(_VAR, "0")
+    s = buda_cli.BudaSession()
+    s.bdb = _Bdb(False)
+    s.do_command("set_junction_reach on")
+    assert buda.junction_reach_active() is True
+    s.do_command("set_junction_reach env")
+    assert buda.junction_reach_active() is False
+
+
+def test_set_junction_reach_rejects_a_bad_value_and_keeps_the_setting(
+        monkeypatch, capsys):
+    monkeypatch.delenv(_VAR, raising=False)
+    s = buda_cli.BudaSession()
+    s.bdb = _Bdb(False)
+    s.do_command("set_junction_reach off")
+    s.do_command("set_junction_reach maybe")
+    assert "expects on|off|topdown|env" in capsys.readouterr().out
+    s.do_command("set_junction_reach")
+    assert buda.junction_reach_active() is False
+
+
+def test_a_flow_can_switch_it_off_itself(monkeypatch):
+    # The same fixture as the default-run test, with the lever turned off by
+    # the flow's own first line rather than by the environment.
+    monkeypatch.delenv(_VAR, raising=False)
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    s.do_command("set_junction_reach off")
+    s.do_command(f"source {os.path.abspath(_FLOW)}")
+    assert s.nuts_result.num_overlaps == 0

@@ -7,7 +7,11 @@ and DetailedNUTS treats that end as the junction so bits snap to their own
 vias. `BUDA_NUTS_JUNCTION_REACH` unset or `topdown` applies it unless the
 design carries bottom-up marks (a template solved once and copied: the lever
 lost bits there); `0`/`off` restores the earlier spans; `1` applies it to every
-design. It costs abstract wirelength (+4.85 % on the corpus, detailed +0.01 %)
+design. A flow can say it itself: `set_junction_reach on|off|topdown|env`
+(`topdown` is the default policy, `on` forces every design, `off` restores
+the earlier spans, `env` hands the decision back to the variable; a typed
+setting outranks the variable and is session state, not stored in the BDB;
+no argument prints it). It costs abstract wirelength (+4.85 % on the corpus, detailed +0.01 %)
 and does not touch the shorts of a bottom-up round. A second study switch,
 `BUDA_RR_WIDTH_GATE_LOCKED=1` (the ripup width gate also runs on bottom-up
 sessions), is off by default and byte-identical when unset. See
@@ -151,12 +155,10 @@ worse on the corpus, so it is not a default). `reach,cull` is both. The **healer
 alone and has the stage-b healers (`negotiate_congestion`, `ripup_reroute`,
 `refine_selection` and the heals inside this command) count each short as an
 open instead. It measured best of the three and is **on by default**;
-`BUDA_HEAL_SHORTS=0` turns it off. Two more study switches, both off by
-default and byte-identical when unset: `BUDA_NUTS_JUNCTION_REACH=1|topdown`
-(the abstract span of a stub that meets a perpendicular partner ends at the
-partner's far edge instead of its centre; `topdown` skips designs carrying
-bottom-up marks) and `BUDA_RR_WIDTH_GATE_LOCKED=1` (the ripup width gate also
-runs on bottom-up sessions). See [Detailed NUTS](../detailed_nuts.md) step 6b
+`BUDA_HEAL_SHORTS=0` turns it off. One more study switch, off by
+default and byte-identical when unset: `BUDA_RR_WIDTH_GATE_LOCKED=1` (the
+ripup width gate also runs on bottom-up sessions); junction reach, which this
+sentence used to list, is on by default now (above). See [Detailed NUTS](../detailed_nuts.md) step 6b
 and the [short study](../internal/cross_bundle_shorts_study.md).
 
 **Requires:** `run_nuts` must have been called first. At least one `def_track_pattern` must cover the layers used by the NUTS result.
