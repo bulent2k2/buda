@@ -779,7 +779,7 @@ def test_nuts_corner_overlap_3layer():
 # sides of a split coordinate.  Resolves the overlap (and the bits it blocked).
 # ---------------------------------------------------------------------------
 
-def test_nuts_corner_touch_xlayer(no_junction_reach):
+def test_nuts_corner_touch_xlayer():
     out, rc = run_script("nuts_corner_touch.buda")
     assert_clean(out, rc, "nuts_corner_touch.buda")
     # Trunks split across two layers (M4 and M6).

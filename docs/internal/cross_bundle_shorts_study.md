@@ -427,6 +427,9 @@ What the flip cost, found by running the fast tier with it on:
   healerless micro-fixture outside the corpus, it ended 0 overlaps / 0
   unplaced and now ends 1 overlap / 4 unplaced: the far-edge spans change the
   cross-layer corner the fixture is built on.  The corpus (5/0/51) cannot see
-  it, and I did not chase it.
+  it, and I did not chase it.  The flow now declares `set_junction_reach off`
+  on its first lines (the script-level switch added to #994), so it keeps the
+  behaviour it was built for whatever the environment says, and its three
+  tests no longer need the `no_junction_reach` fixture.
 - **Nothing here changes the converge repro**: its blind round is bottom-up,
   so the four motivating shorts stay (see the review section above).

@@ -21,6 +21,7 @@ it off; `1` applies it to every design.  The session decides per command, so
 the verdict is read through `buda.junction_reach_active()`.
 """
 import os
+import shutil
 import sys
 
 import pytest
@@ -81,22 +82,36 @@ def test_the_variable_is_re_read_on_every_command(monkeypatch):
     assert _active(monkeypatch, "off", marked=False) is False
 
 
-def _overlaps(monkeypatch, value):
+def _overlaps(monkeypatch, value, tmp_path, keep_switch):
+    """Run nuts_corner_touch in-process.  The flow pins the pre-lever spans
+    itself (`set_junction_reach off`); keep_switch=False runs a copy without
+    that line (and with its sidecar, found by the flow's name) so the
+    environment alone decides."""
     if value is None:
         monkeypatch.delenv(_VAR, raising=False)
     else:
         monkeypatch.setenv(_VAR, value)
+    flow = os.path.abspath(_FLOW)
+    if not keep_switch:
+        src = open(flow).read()
+        assert "set_junction_reach off\n" in src
+        flow = str(tmp_path / "nuts_corner_touch.buda")
+        with open(flow, "w") as f:
+            f.write(src.replace("set_junction_reach off\n", ""))
+        shutil.copy(os.path.abspath(_FLOW).replace(".buda", ".json"),
+                    str(tmp_path / "nuts_corner_touch.json"))
     s = buda_cli.BudaSession()
     s.no_viz = True
-    s.do_command(f"source {os.path.abspath(_FLOW)}")
+    s.do_command(f"source {flow}")
     return s.nuts_result.num_overlaps
 
 
-def test_the_default_run_uses_the_longer_spans(monkeypatch):
-    # nuts_corner_touch is built from the pre-lever spans: off it places clean,
-    # and the default run (lever on) does not -- the lever really is in force.
-    assert _overlaps(monkeypatch, "0") == 0
-    assert _overlaps(monkeypatch, None) == 1
+def test_the_default_run_uses_the_longer_spans(monkeypatch, tmp_path):
+    # nuts_corner_touch is built from the pre-lever spans: with the lever off
+    # it places clean, and a copy without the flow's own switch, on the default,
+    # does not -- the lever really is in force.
+    assert _overlaps(monkeypatch, "0", tmp_path, keep_switch=False) == 0
+    assert _overlaps(monkeypatch, None, tmp_path, keep_switch=False) == 1
 
 
 def _typed(monkeypatch, env, line, marked):
@@ -143,12 +158,10 @@ def test_set_junction_reach_rejects_a_bad_value_and_keeps_the_setting(
     assert buda.junction_reach_active() is False
 
 
-def test_a_flow_can_switch_it_off_itself(monkeypatch):
-    # The same fixture as the default-run test, with the lever turned off by
-    # the flow's own first line rather than by the environment.
-    monkeypatch.delenv(_VAR, raising=False)
-    s = buda_cli.BudaSession()
-    s.no_viz = True
-    s.do_command("set_junction_reach off")
-    s.do_command(f"source {os.path.abspath(_FLOW)}")
-    assert s.nuts_result.num_overlaps == 0
+def test_a_flow_can_switch_it_off_itself(monkeypatch, tmp_path):
+    # The shipped flow's own `set_junction_reach off` beats the environment,
+    # even `1` (every design): it places clean where the copy without the
+    # switch does not.
+    assert _overlaps(monkeypatch, "1", tmp_path, keep_switch=True) == 0
+    assert _overlaps(monkeypatch, None, tmp_path, keep_switch=True) == 0
+    assert _overlaps(monkeypatch, "1", tmp_path, keep_switch=False) == 1

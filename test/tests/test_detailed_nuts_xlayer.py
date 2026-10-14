@@ -62,7 +62,7 @@ def _detailed_shorts_and_unplaced(flow_path):
     return shorts, sess.detailed_result.num_unplaced
 
 
-def test_cross_layer_corner_no_detailed_short(no_junction_reach):
+def test_cross_layer_corner_no_detailed_short():
     # nuts_corner_touch pins bundle 1's trunk to M4 and bundle 2's to M6 over
     # aligned grids — the cross-layer corner case.  With the carry-bound fix the
     # trunks snap to disjoint signal tracks, so the M5 stubs do not short.
@@ -71,7 +71,7 @@ def test_cross_layer_corner_no_detailed_short(no_junction_reach):
     assert unplaced == 0, f"unplaced bits: {unplaced} (expected 0)"
 
 
-def test_rerun_layer_clears_stale_split_bounds(no_junction_reach):
+def test_rerun_layer_clears_stale_split_bounds():
     # A per-layer rerun re-solves the target layer unconstrained (no corner pass),
     # so any cross-layer split bound from the full solve is now stale and must be
     # cleared — otherwise detailed NUTS filters the trunk to an obsolete side.
