@@ -66,20 +66,19 @@ def test_zero_and_off_turn_it_off_for_every_design(monkeypatch, value):
     assert _active(monkeypatch, value, marked=True) is False
 
 
-def test_one_leaves_the_engines_verdict_to_the_environment(monkeypatch):
-    # `1` applies the lever to every design, so there is nothing for the
-    # session to tell the engine: a permission left at False is not reset by
-    # a bottom-up-marked design's sync, nor by an unmarked one's.
-    monkeypatch.setenv(_VAR, "1")
-    try:
-        for marked in (True, False):
-            buda.set_junction_reach_allowed(False)
-            s = buda_cli.BudaSession()
-            s.bdb = _Bdb(marked)
-            s._sync_junction_reach()
-            assert buda.junction_reach_active() is False  # untouched
-    finally:
-        buda.set_junction_reach_allowed(True)
+def test_one_applies_it_to_every_design(monkeypatch):
+    assert _active(monkeypatch, "1", marked=False) is True
+    assert _active(monkeypatch, "1", marked=True) is True
+
+
+def test_the_variable_is_re_read_on_every_command(monkeypatch):
+    # No state is cached from the first call: off, then the default, then `1`
+    # on a bottom-up-marked design, in one process and in any order.
+    assert _active(monkeypatch, "0", marked=False) is False
+    assert _active(monkeypatch, None, marked=False) is True
+    assert _active(monkeypatch, None, marked=True) is False
+    assert _active(monkeypatch, "1", marked=True) is True
+    assert _active(monkeypatch, "off", marked=False) is False
 
 
 def _overlaps(monkeypatch, value):
