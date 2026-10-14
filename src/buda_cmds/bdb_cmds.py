@@ -1771,6 +1771,30 @@ def cmd_set_reserve_steer(session, cmd, args, cmd_line):
           + (f" — {n} corridor(s) installed" if n else ""))
 
 
+def cmd_set_junction_reach(session, cmd, args, cmd_line):
+    # Usage: set_junction_reach [on|off|topdown|env]
+    # Whether a stub meeting a perpendicular partner ends at the partner's
+    # far edge (track +- width/2) instead of its centre, so every partner
+    # bit is reachable (#991/#994).  `topdown` is the default policy (on
+    # unless the design carries set_bottom_up marks), `on` forces it for
+    # every design, bottom-up included, `off` restores the pre-lever spans,
+    # `env` drops the typed setting and lets BUDA_NUTS_JUNCTION_REACH decide
+    # again.  A typed setting outranks the variable; it is session state,
+    # applied from the next command and not persisted in the BDB.
+    cur = getattr(session, "_junction_reach_mode", None)
+    if not args:
+        print(f"junction_reach is {cur or 'env (BUDA_NUTS_JUNCTION_REACH)'}")
+        return
+    val = args[0].lower()
+    if val not in ("on", "off", "topdown", "env"):
+        print(f"Error: set_junction_reach expects on|off|topdown|env, "
+              f"got {args[0]!r}")
+        return
+    session._junction_reach_mode = None if val == "env" else val
+    session._sync_junction_reach()
+    print(f"[Nuts] junction reach: {val}")
+
+
 def cmd_set_cell_layer_reserve(session, cmd, args, cmd_line):
     # set_cell_layer_reserve <cell>|* <layer> <pos>[,<pos>...]|off
     # The POSITIONAL reservation (convergence ladder item 6, E5's corridor):
@@ -2201,6 +2225,7 @@ COMMANDS = {
     "set_cell_layer_share": cmd_set_cell_layer_share,
     "set_cell_layer_reserve": cmd_set_cell_layer_reserve,
     "set_reserve_steer": cmd_set_reserve_steer,
+    "set_junction_reach": cmd_set_junction_reach,
     "set_layer_caps_by_depth": cmd_set_layer_caps_by_depth,
     "reserve_top_layers": cmd_reserve_top_layers,
     "align_bottom_up": cmd_align_bottom_up,

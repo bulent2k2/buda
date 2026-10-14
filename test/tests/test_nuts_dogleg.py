@@ -208,7 +208,7 @@ def test_dogleg_subtrunks_share_slide_multicast():
     _check_subtrunks_share_slide("dogleg2.buda")
 
 
-def test_dogleg_aligned_stub_no_overstretch():
+def test_dogleg_aligned_stub_no_overstretch(no_junction_reach):
     # Repro of the "original stub on the jog column" case: top1/top4 are placed
     # symmetric about bot3, so the multicast driver stub (bot3) sits exactly on
     # the jog column and becomes an interior tap on the split trunk.  The lower

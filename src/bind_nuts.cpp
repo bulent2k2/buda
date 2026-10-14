@@ -88,6 +88,7 @@ void bind_nuts(py::module_& m) {
         .def("trunk_mst", &ConnTopology::trunk_mst);
 
     m.def("set_junction_reach_allowed", &set_junction_reach_allowed);
+    m.def("junction_reach_active", &junction_reach_active);
     m.def("manhattan_nearest", &manhattan_nearest);
     // #972 C3: cluster-repack attempt accounting (observation only).
     m.def("repack_stats", [] {

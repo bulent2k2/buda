@@ -767,20 +767,24 @@ static void prune_unreachable_partner_windows(
 // that ends at the partner's CENTRE under-states the metal by half the
 // partner's width.  With the lever on the span end is the partner's far edge,
 // and the overlap checks, the healers and DetailedNUTS's reservations see it.
-static std::atomic<bool> g_junction_reach_allowed{true};
-void set_junction_reach_allowed(bool allowed) { g_junction_reach_allowed = allowed; }
+// -1 = no session has said: the environment decides (an engine driven without
+// a BudaSession); 0 / 1 = the session's verdict for the command in flight.
+static std::atomic<int> g_junction_reach_allowed{-1};
+void set_junction_reach_allowed(bool allowed) { g_junction_reach_allowed = allowed ? 1 : 0; }
 static bool junction_reach_on() {
-    // BUDA_NUTS_JUNCTION_REACH: unset = off; "topdown" = on unless the session
-    // says the design carries bottom-up marks (set_junction_reach_allowed);
-    // anything else = on.
-    static const int mode = [] {
+    // The session decides per command (BudaSession._sync_junction_reach reads
+    // BUDA_NUTS_JUNCTION_REACH each time: unset/`topdown` = on unless the
+    // design carries bottom-up marks, `0`/`off` = off, anything else = on), so
+    // the variable can change inside a process.  Only an engine with no
+    // session behind it falls back to the variable as the process started.
+    const int v = g_junction_reach_allowed.load();
+    if (v >= 0) return v == 1;
+    static const bool env_on = [] {
         const char* e = std::getenv("BUDA_NUTS_JUNCTION_REACH");
-        if (!e) return 0;
-        return std::string(e) == "topdown" ? 2 : 1;
+        const std::string m = e ? e : "";
+        return !(m == "0" || m == "off");
     }();
-    if (mode == 0) return false;
-    if (mode == 2) return g_junction_reach_allowed.load();
-    return true;
+    return env_on;
 }
 bool junction_reach_active() { return junction_reach_on(); }
 

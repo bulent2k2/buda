@@ -464,15 +464,27 @@ class RipupMixin:
                 w.plan.seg_perp = list(asn.seg_perp)
 
     def _sync_junction_reach(self):
-        """Tell the engine whether the junction-reach lever may apply:
-        BUDA_NUTS_JUNCTION_REACH=topdown means top-down designs only, and a
-        design carrying bottom-up marks (a template solved once and copied)
-        is the other kind of flow."""
-        if os.environ.get('BUDA_NUTS_JUNCTION_REACH') != 'topdown':
-            return
+        """Tell the engine, before every command, whether junction reach is
+        in force.  The session is the one authority and reads the mode each
+        time, so it can change in-process.  A typed `set_junction_reach`
+        wins over BUDA_NUTS_JUNCTION_REACH; either way: unset or `topdown` =
+        on unless the design carries bottom-up marks (a template solved once
+        and copied is the other kind of flow), `0`/`off` = off, anything else
+        (`1`, `on`) = on for every design."""
+        typed = getattr(self, '_junction_reach_mode', None)
+        if typed is not None:
+            mode = {'on': '1', 'off': '0', 'topdown': 'topdown'}[typed]
+        else:
+            mode = os.environ.get('BUDA_NUTS_JUNCTION_REACH', '')
         try:
-            marked = bool(self.bdb is not None and self.bdb.bottom_up_cells())
-            buda.set_junction_reach_allowed(not marked)
+            if mode in ('0', 'off'):
+                allowed = False
+            elif mode in ('', 'topdown'):
+                allowed = not (self.bdb is not None
+                               and bool(self.bdb.bottom_up_cells()))
+            else:
+                allowed = True
+            buda.set_junction_reach_allowed(allowed)
         except Exception:
             pass
 

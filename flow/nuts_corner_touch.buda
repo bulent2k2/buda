@@ -13,6 +13,13 @@
 # no bit-level short.  See docs/future/nuts_packing_gaps.md §3.
 #
 # (flow/xlayer_short.buda is a standalone, self-documenting copy of this repro.)
+#
+# The repro is built from the pre-junction-reach spans: with the lever on (the
+# default for a top-down design) a stub ends at its partner's far edge, the
+# stubs reach past the split, and the corner overlaps again (1 overlap / 4
+# unplaced).  The flow pins the earlier behaviour itself rather than leaning
+# on the environment.
+set_junction_reach off
 
 def_layer 4 M4 H TOP 52.94
 def_layer 5 M5 V TOP 50.00

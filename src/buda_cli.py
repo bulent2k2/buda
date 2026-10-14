@@ -351,6 +351,9 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
         # the hit rate from 0.00 to 1.00 at no cost.  Moves nothing on a
         # design with no reservation either way.
         self._reserve_steer = os.environ.get("BUDA_RESERVE_STEER", "0") == "1"
+        # Junction reach, typed override (`set_junction_reach`): None = the
+        # BUDA_NUTS_JUNCTION_REACH variable decides, else "on"/"off"/"topdown".
+        self._junction_reach_mode = None
         # Unit-plausibility guard (Phase 1d): 'on' (hard error) | 'warn' | 'off'
         self._unit_check = "on"
         # The (layer, unit_pitch) tuple last judged — report once per stage
@@ -955,7 +958,7 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
         # One tick per command: per-command caches (fix_pin's component and
         # net-pin indexes) are valid within a command, never across one.
         self._cmd_seq = getattr(self, "_cmd_seq", 0) + 1
-        # BUDA_NUTS_JUNCTION_REACH=topdown: tell the engine, before every
+        # Junction reach (BUDA_NUTS_JUNCTION_REACH, default top-down only): tell the engine, before every
         # command, whether this design carries bottom-up marks (the one choke
         # point every NUTS path runs under, healers included).
         self._sync_junction_reach()

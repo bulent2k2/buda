@@ -106,7 +106,7 @@ def test_anchored_vote_flattened_by_interval_model():
     assert math.isnan(ts[3].pull_target)            # no pull, no target
 
 
-def test_b44_mst_realization_no_overshoot():
+def test_b44_mst_realization_no_overshoot(no_junction_reach):
     """The end-to-end effect: the pinned 6-seg TRUNK_H+MST
     realizes near its envelope floor instead of +1000/bit of tug-of-war
     stretch.  seg1's pull_target is the 1200 breakpoint (was 258.5 = window

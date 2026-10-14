@@ -97,7 +97,7 @@ def _nuts(s, heal=True):
     return buf.getvalue()
 
 
-def test_admit_then_cull_shape_without_heal():
+def test_admit_then_cull_shape_without_heal(no_junction_reach):
     """Baseline (heal family opted out): the keepout overlaps the span but
     misses the along-midpoint, so all 8 bits ADMIT via the midpoint pool and
     are then culled — unplaced == 8, all of them keepout-cull bits."""
@@ -154,7 +154,7 @@ def test_cull_heal_noop_without_culls():
     assert list(s.bundles[0].plan.seg_layers)[h_idx] == 2   # unchanged LOW M2
 
 
-def test_cull_heal_checkpoints_route_when_bdb_open(monkeypatch):
+def test_cull_heal_checkpoints_route_when_bdb_open(monkeypatch, no_junction_reach):
     """An ACCEPTED heal changed plan.seg_layers and the abstract solve; with
     an open BDB the pre-heal bus_segment/bus_via rows and planner
     assignments would otherwise go stale under the healed detailed rows,
