@@ -1970,6 +1970,18 @@ def test_from_pins_drops_a_selector_for_a_pin_that_derives_interior():
     assert ("name", "a") in pin_fix_cmds._sel_store(s)["cell:mac"]
 
 
+def test_from_pins_drops_a_selector_for_a_pin_the_lef_no_longer_draws():
+    """P2 (#996): only pins returned by cell_pin_ports were visited, so a selector
+    for a pin absent from a re-imported LEF stayed active on obsolete geometry."""
+    text = _from_pins_flow().replace(
+        "fix_pin cell:mac from_pins",
+        "fix_pin cell:mac.ghost west\nfix_pin cell:mac from_pins")
+    s, out = _run_flow_text(text)
+    keys = set(pin_fix_cmds._sel_store(s).get("cell:mac", {}))
+    assert ("name", "ghost") not in keys, (keys, out[-500:])
+    assert ("name", "a") in keys, keys
+
+
 def test_from_pins_keeps_an_opaque_lef_pin_name_exact():
     """P2 (#996): a pin named `A.B` or `d*` was re-read as selector syntax."""
     lef = (FLOW / "from_pins.lef").read_text().replace("PIN b\n", "PIN b.c\n", 1).replace(

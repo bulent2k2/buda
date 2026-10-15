@@ -1582,6 +1582,14 @@ def _from_pins(session, cmd, target, cmd_line):
             _apply_fix_pin(session, cmd, [f"{CELL}{cell}.{pin}"] + toks, cmd_line,
                         exact=(cell, pin))
             n_fix += 1
+        # an exact selector for a pin the (re-)imported LEF no longer draws at
+        # all has no geometry behind it either: leave that pin free too
+        stale = [k[1] for k in list(_sel_store(session).get(CELL + cell, {}))
+                 if k[0] == "name" and k[1] not in by_pin]
+        for pin in stale:
+            _apply_fix_pin(session, cmd, [f"{CELL}{cell}.{pin}", "off"], cmd_line,
+                           exact=(cell, pin))
+        n_int += len(stale)
         done += n_fix
         print(f"[PinFix] {cell} from_pins: {n_fix} pin(s) fixed from LEF ports"
               + (f", {n_int} interior (no boundary port) left free" if n_int else ""))
