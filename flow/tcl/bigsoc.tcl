@@ -65,6 +65,10 @@
 #                   reticle (`reticle_w/h` in mock.pdk) at -fill of its
 #                   area, re-floorplanned and reported against it
 #   -fill F         the reticle fill the dial aims at (default 0.85)
+#   -healabs        with -abstract: run negotiate_congestion + ripup_reroute after
+#                   abstract NUTS (stage a, fast trials) and report before/after
+#   -healseats      with -healabs: the healers also count supply-doomed seats
+#                   (set_heal_seats on)
 #   -fponly         stop right after auto_floorplan (seconds, not a routing run):
 #                   the table's per-level utilization and the die's LEAF
 #                   utilization are the whole output -- for sweeping `-fp "..."`
@@ -106,6 +110,8 @@ set npu array
 set keep_low -1
 set add_top 0
 set fponly 0
+set healabs 0
+set healseats 0
 set demand_pct 80
 set grow_f 1.25
 set widen_f 1.5
@@ -122,6 +128,8 @@ while {$argi < $argc} {
         -reticle  { set reticle 1; incr argi }
         -abstract { set abstract 1; incr argi }
         -fponly   { set fponly 1; incr argi }
+        -healabs  { set healabs 1; incr argi }
+        -healseats { set healseats 1; incr argi }
         -noheal   { set heal 0; incr argi }
         -caps     { set caps 1; incr argi }
         -emit - -pdk - -fp - -save - -iterate - -demand - -grow - -widen - -fill - -npu - -low - -top {
@@ -246,6 +254,7 @@ proc bigsoc::round {vfile save pdk fpopts grows gap bottomup caps heal {npu arra
         puts "bigsoc.tcl: stack -- LOW layers kept: [expr {$::keep_low < 0 ? {all} : $::keep_low}], dropped layer id(s): [expr {[llength $dropped] ? $dropped : {none}}], TOP layers added: $::add_top"
     }
     buda::set_planner_param healersAhead 1
+    if {$::healseats} { buda::set_heal_seats on }
     buda::open_bdb $save
     buda::import_verilog $vfile
 
@@ -288,6 +297,18 @@ proc bigsoc::round {vfile save pdk fpopts grows gap bottomup caps heal {npu arra
     buda::run_planner hier 5
     buda::run_nuts
     buda::check_design nuts
+    if {$abstract && $::healabs} {
+        # The healers at the abstract stage only: they read the NUTS
+        # overlaps (stage a), default to fast trials, the fixed-context
+        # screen and the parallel sweep.  -healseats also lets them see
+        # the supply-doomed seats, which the overlaps-only score cannot.
+        set t0 [clock milliseconds]
+        puts "bigsoc.tcl: abstract before healing -- [buda::query overlaps] overlaps, [buda::query violations] audit violations, [buda::query seats] seat faults"
+        buda::negotiate_congestion 10
+        buda::ripup_reroute 20
+        buda::check_design nuts
+        puts "bigsoc.tcl: abstract healing took [format %.1f [expr {([clock milliseconds] - $t0) / 1000.0}]] s"
+    }
     if {$abstract} {
         puts "bigsoc.tcl: abstract audit -- [buda::query overlaps] overlaps, [buda::query violations] audit violations, [buda::query seats] seat faults"
         buda::report_wirelength
