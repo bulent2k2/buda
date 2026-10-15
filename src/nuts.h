@@ -612,5 +612,8 @@ void set_junction_reach_allowed(bool allowed);
 // `topdown`, the session's permission): DetailedNUTS reads it to recognise a
 // span end that sits at a partner's far edge rather than at its centre.
 bool junction_reach_active();
+// Per-bundle form (adaptive mode): the design verdict OR the bundle is listed.
+void set_junction_reach_bundles(const std::vector<int>& ids);
+bool junction_reach_active(int bundle_id);
 
 } // namespace buda

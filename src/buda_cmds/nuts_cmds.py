@@ -168,6 +168,11 @@ def cmd_run_nuts(session, cmd, args, cmd_line):
     # trial rerun (_run_nuts_internal) deliberately does NOT clear it —
     # trials re-run DNUTS themselves and restore refs via snapshot.
     session.detailed_result = None
+    # A fresh abstract solve under the session's own verdict: the adaptive
+    # reach heal's per-bundle set belongs to the solve it was accepted on.
+    if getattr(session, '_reach_bundles', None):
+        session._reach_bundles = set()
+        session._sync_junction_reach()
     # A handed-down plan's seats, audited against the placement (6c).
     session._report_plan_pins_seated()
     _lap("plan_pins")
@@ -250,6 +255,7 @@ def cmd_run_detailed_nuts(session, cmd, args, cmd_line):
     # cull-doomed LOW segments under the refold's accept contract, so
     # healerless flows get the cover ripup's refold gives healered ones.
     # No-op without culled bits; persists below only the accepted state.
+    session._final_reach_heal()
     session._final_cull_heal()
     # Measured TOP re-seat heal (#536 follow-up): re-seat supply-doomed TOP
     # segments — the class the LOW->TOP escalation family cannot reach — on

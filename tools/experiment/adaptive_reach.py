@@ -55,7 +55,7 @@ if __name__ == "__main__":
     from concurrent.futures import ProcessPoolExecutor
     out = sys.argv[1]
     flows = qc.CORPUS
-    jobs = [(f, m) for f in flows for m in ("off", "on")]
+    jobs = [(f, m) for f in flows for m in (sys.argv[2].split(",") if len(sys.argv) > 2 else ("off", "on"))]
     res = []
     with ProcessPoolExecutor(max_workers=4, initializer=qc._worker_init) as ex:
         for r in ex.map(one, jobs):

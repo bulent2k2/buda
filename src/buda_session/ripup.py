@@ -473,7 +473,8 @@ class RipupMixin:
         (`1`, `on`) = on for every design."""
         typed = getattr(self, '_junction_reach_mode', None)
         if typed is not None:
-            mode = {'on': '1', 'off': '0', 'topdown': 'topdown'}[typed]
+            mode = {'on': '1', 'off': '0', 'topdown': 'topdown',
+                    'adaptive': '0'}[typed]
         else:
             mode = os.environ.get('BUDA_NUTS_JUNCTION_REACH', '')
         try:
@@ -485,6 +486,11 @@ class RipupMixin:
             else:
                 allowed = True
             buda.set_junction_reach_allowed(allowed)
+            # Adaptive mode: the design verdict is SHORT; the bundles the
+            # reach heal lengthened ride in the per-bundle set.
+            buda.set_junction_reach_bundles(
+                sorted(getattr(self, '_reach_bundles', ()))
+                if typed == 'adaptive' else [])
         except Exception:
             pass
 

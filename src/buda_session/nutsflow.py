@@ -1646,6 +1646,57 @@ class NutsFlowMixin:
             _need_memo.clear()
         return total
 
+    def _final_reach_heal(self) -> int:
+        """Adaptive per-bundle junction reach (set_junction_reach adaptive).
+
+        The design starts on the SHORT spans (the pre-#994 behaviour).  When
+        the detailed result carries cross-bundle shorts, the bundles on them
+        are put on the far-edge spans (junction reach) and NUTS + DNUTS
+        re-run; the trial is kept only if opens strictly drop and overlaps
+        do not rise, else everything is restored.  Long spans everywhere cost
+        1.4k-29k abstract units on the corpus; the shorts sit on ~2 bundles
+        per flow.  Bottom-up (locked) sessions are scoped out: long spans
+        measured much worse there."""
+        if getattr(self, '_junction_reach_mode', None) != 'adaptive':
+            return 0
+        dr = self.detailed_result
+        if dr is None or self.nuts_result is None or not dr.cross_shorts:
+            return 0
+        if any(w.hier.locked for w in self.bundles):
+            return 0
+        bids = set()
+        for cs in dr.cross_shorts:
+            bids.add(cs.bundle_a)
+            bids.add(cs.bundle_b)
+        bids -= set(getattr(self, '_reach_bundles', ()))
+        if not bids:
+            return 0
+        base = (self._dn_opens(), self.nuts_result.num_overlaps)
+        snap = self._rr_snapshot()
+        old = set(getattr(self, '_reach_bundles', ()))
+        self._reach_bundles = old | bids
+        self._sync_junction_reach()
+        self._run_nuts_internal()
+        self._run_detailed_nuts(bit_order=self._detailed_bit_order)
+        cur = (self._dn_opens(), self.nuts_result.num_overlaps)
+        if cur[0] < base[0] and cur[1] <= base[1]:
+            print(f"[DetailedNUTS] REACH-HEAL: lengthened {len(bids)} "
+                  f"bundle(s) on cross-bundle shorts, opens "
+                  f"{base[0]}->{cur[0]} (ovl {base[1]}->{cur[1]})",
+                  flush=True)
+            if self.planner is not None:
+                self.planner.recharge_committed(self.bundles)
+            if self.bdb is not None:
+                self._checkpoint_routing()
+            return len(bids)
+        self._rr_restore(snap)
+        self._reach_bundles = old
+        self._sync_junction_reach()
+        print(f"[DetailedNUTS] REACH-HEAL: trial rejected (opens "
+              f"{base[0]}->{cur[0]}, ovl {base[1]}->{cur[1]}), restored",
+              flush=True)
+        return 0
+
     def _final_cull_heal(self, max_rounds: int = 3) -> int:
         """Measured keepout-cull heal at run_detailed_nuts (the #523 spreader
         outcome, part 2 — the healerless-flow cover).
