@@ -331,3 +331,33 @@ its floorplan [`bigsoc_nq16_fp.png`](internal/img/bigsoc_nq16_fp.png).
   fact; the vehicle's `-bottomup` uses the latter.
 * **The PDK is a mock.**  `flow/mockpdk/ReadMe.md` says what a real one
   replaces.
+
+## Landings and facing (2026-10-15)
+
+Two opt-in options attack the stranded bits of `bigsoc` that a floorplan
+causes: `landings 1` (a face is sized per bundle landing, not per face) and
+`facing <rounds>` (a block SIDE is grown to the bits whose far block lies
+that way).  Healerless, one thread, `bigsoc.tcl NQ [-NC 4 -N 8 -NL3 4 -NMC 4
+-NIO 16] -noheal`; NQ 16 stops at abstract NUTS (`-abstract`).
+
+| NQ | arm | die | abstract WL | overlaps | audit viol. | seat faults | unplaced (DNUTS) |
+|---|---|---|---|---|---|---|---|
+| 2 | base | 4508×2434 | 55,426 | 18 | 848 | — | 528 |
+| 2 | `landings 1` | 4484×2434 | 59,242 | 24 | 448 | — | 448 |
+| 2 | `landings 1 facing 3` | 5078×2680 | 52,760 | 23 | 564 | — | 488 |
+| 8 | base | 11236×7120 | 422,299 | 116 | 5,229 | 91 | 3,296 |
+| 8 | `landings 1` | 10416×7912 | 457,494 | 129 | 2,766 | 22 | 2,540 |
+| 8 | `landings 1 facing 3` | 11584×7480 | 434,122 | 114 | 2,333 | 8 | 1,709 |
+| 16 | base | 11752×11740 | 695,356 | 196 | 49 | 157 | — |
+| 16 | `landings 1` | 10644×12620 | 682,675 | 244 | 73 | 75 | — |
+| 16 | `landings 1 facing 3` | 13963×14096 | 702,881 | 113 | 4 | 4 | — |
+
+(The audit-violation column is the DNUTS-stage count where DNUTS ran and the
+abstract-stage count otherwise, so compare it within a row group only.)
+Reading: `landings` removes the doomed seats at every size; `facing` removes
+nearly all the rest of the static faults at NQ 8 and 16 and halves the
+overlaps at NQ 16, but it is not free — the die is +5 % at NQ 8, +13 % at
+NQ 2 and **+43 %** at NQ 16 (every cell grown for one container is grown in
+all of them, and the growth cascades up the tree), and at NQ 2 it does not
+beat `landings` alone.  What is left at NQ 8 is all *contended* (top-level
+M5 and `l1_cell` M5 buses on windows that could host them), not a width fact.
