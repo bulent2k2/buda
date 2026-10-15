@@ -67,6 +67,7 @@
 #   -fill F         the reticle fill the dial aims at (default 0.85)
 #   -healabs        with -abstract: run negotiate_congestion + ripup_reroute after
 #                   abstract NUTS (stage a, fast trials) and report before/after
+#   -noripup        with -healabs: negotiate only (ripup's trials are most of the time)
 #   -healseats      with -healabs: the healers also count supply-doomed seats
 #                   (set_heal_seats on)
 #   -fponly         stop right after auto_floorplan (seconds, not a routing run):
@@ -112,6 +113,7 @@ set add_top 0
 set fponly 0
 set healabs 0
 set healseats 0
+set noripup 0
 set demand_pct 80
 set grow_f 1.25
 set widen_f 1.5
@@ -130,6 +132,7 @@ while {$argi < $argc} {
         -fponly   { set fponly 1; incr argi }
         -healabs  { set healabs 1; incr argi }
         -healseats { set healseats 1; incr argi }
+        -noripup  { set noripup 1; incr argi }
         -noheal   { set heal 0; incr argi }
         -caps     { set caps 1; incr argi }
         -emit - -pdk - -fp - -save - -iterate - -demand - -grow - -widen - -fill - -npu - -low - -top {
@@ -305,7 +308,7 @@ proc bigsoc::round {vfile save pdk fpopts grows gap bottomup caps heal {npu arra
         set t0 [clock milliseconds]
         puts "bigsoc.tcl: abstract before healing -- [buda::query overlaps] overlaps, [buda::query violations] audit violations, [buda::query seats] seat faults"
         buda::negotiate_congestion 10
-        buda::ripup_reroute 20
+        if {!$::noripup} { buda::ripup_reroute 20 }
         buda::check_design nuts
         puts "bigsoc.tcl: abstract healing took [format %.1f [expr {([clock milliseconds] - $t0) / 1000.0}]] s"
     }
