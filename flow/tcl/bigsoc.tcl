@@ -71,6 +71,8 @@
 #   -healseats      with -healabs: the healers also count supply-doomed seats
 #                   (set_heal_seats on)
 #   -pp "n v ..."   planner knobs, applied before run_planner (`-pp "kPeak 1"`)
+#                   (`-fp "landings 1"` sizes each face per landing: see
+#                   docs/script_reference/floorplan.md)
 #   -fponly         stop right after auto_floorplan (seconds, not a routing run):
 #                   the table's per-level utilization and the die's LEAF
 #                   utilization are the whole output -- for sweeping `-fp "..."`
