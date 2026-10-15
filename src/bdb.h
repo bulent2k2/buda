@@ -628,7 +628,7 @@ public:
     //       because the footprint is a property of the cell type (LEF's
     //       `SIZE` is), so one declaration governs every instance and the
     //       rects survive a move by construction.
-    static constexpr int SCHEMA_VERSION = 31;
+    static constexpr int SCHEMA_VERSION = 32;
 
     explicit BDB(const std::string& db_path);
     ~BDB();
@@ -708,6 +708,19 @@ public:
         cell_rects(const std::string& cell) const;
     std::string cell_teg_mode(const std::string& cell) const;
     std::vector<std::string> multirect_cells() const;
+
+    // LEF pin PORT geometry (v32, cell_pin_port).  A pin is PORTS, plural: the
+    // BDB's cell_pin keeps only a centroid, which on a multi-port pin can lie
+    // on no port, so `fix_pin ... from_pins` reads these rows instead.  Rects
+    // are CELL-LOCAL layout units (offsets from the cell origin, like
+    // cell_rect), one row per LEF rect, in declaration order.  Filled by
+    // import_def_lef for signal pins (POWER/GROUND/CLOCK pins are pre-routes,
+    // as in cell_pin); cell_pin_ports(cell) returns {pin, layer, x1,y1,x2,y2}.
+    void set_cell_pin_ports(
+        const std::string& cell, const std::string& pin,
+        const std::vector<std::tuple<std::string,double,double,double,double>>& rects);
+    std::vector<std::tuple<std::string,std::string,double,double,double,double>>
+        cell_pin_ports(const std::string& cell) const;
 
     // ── NDR rule persistence (v21, docs/internal/ndr_architecture.md §4) ──
     // set_ndr_rule upserts a declared rule; ndr_rules returns every rule

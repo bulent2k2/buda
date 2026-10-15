@@ -1852,3 +1852,86 @@ def test_removing_an_instance_fix_says_when_the_cell_fix_comes_back():
     _say(s, "fix_pin cell:mac_cell off")
     _say(s, "fix_pin mac_n east")
     assert "every face admits landings again" in _say(s, "fix_pin mac_n off")
+
+
+# ── from_pins (schema v32: the LEF pin ports the BDB now holds) ───────────
+
+def _from_pins_flow(extra=""):
+    text = (FLOW / "from_pins.buda").read_text()
+    text = text.replace("import_def_lef from_pins.def from_pins.lef",
+                        f"import_def_lef {FLOW / 'from_pins.def'} {FLOW / 'from_pins.lef'}")
+    return text.replace("\nderive_busterms 0", extra + "\nderive_busterms 0", 1)
+
+
+def test_the_importer_stores_each_signal_pins_ports_cell_locally():
+    s, out = _run_flow_text(_from_pins_flow())
+    rows = s.bdb.cell_pin_ports("mac")
+    assert [(r[0], r[1]) for r in rows] == [("a", "M6"), ("b", "M7"), ("c", "M6"), ("i", "M4")]
+    assert rows[0][2:] == (0, 20, 2, 60) and rows[1][2:] == (30, 98, 70, 100)
+    assert [r[0] for r in s.bdb.cell_pin_ports("drv")] == ["oa", "ob", "oc"]
+
+
+def test_from_pins_writes_one_selector_per_boundary_pin():
+    s, out = _run_flow_text(_from_pins_flow())
+    sels = pin_fix_cmds._sel_store(s)["cell:mac"]
+    got = {k[1]: (fx["faces"], fx["has_window"], fx["lo"], fx["hi"], fx.get("layers", []))
+           for k, fx in sels.items()}
+    assert got == {"a": (W, True, 20, 60, ["M6"]),         # M6 is horizontal: a west face takes it
+                   "b": (N, True, 30, 70, ["M7"]),         # M7 vertical: north takes it
+                   "c": (S, True, 20, 80, [])}, got        # M6 runs the wrong way for south
+    assert "1 interior" in out and "Error:" not in out, out[-500:]
+    assert out.count("Success: no violations found") >= 2, out[-700:]
+
+
+def test_from_pins_lands_each_instance_on_its_turned_faces():
+    s, _ = _run_flow_text(_from_pins_flow())
+    got = {}
+    for w in s.bundles:
+        net = w.input.original_bundle.get_net_names()[0]        # na_a, nb_b, ...
+        blk = "mac_" + net[-1]
+        got[net] = dict(w.input.candidates[0].block_fixes).get(blk, (None,))[0]
+    assert got == {"na_a": W, "nb_a": N, "nc_a": S,
+                   "na_b": E, "nb_b": S, "nc_b": N}, got        # mac_b is turned 180
+
+
+def test_derive_pin_faces_rules():
+    d = pin_fix_cmds.derive_pin_faces
+    # a west port drawn a little INSIDE the edge still counts (10 % of the short side)
+    assert d([("M6", 3, 20, 5, 60)], 100, 100) == ({"west"}, (20, 60), ["M6"])
+    # an interior port lands on no face
+    assert d([("M4", 40, 40, 60, 60)], 100, 100) is None
+    # two ports on ONE face: the window is their hull
+    got = d([("M6", 0, 10, 2, 20), ("M6", 0, 70, 2, 90)], 100, 100)
+    assert got[0] == {"west"} and got[1] == (10, 90)
+    # ports on two faces: both faces, no window (one `at` cannot say two)
+    got = d([("M6", 0, 10, 2, 20), ("M6", 98, 10, 100, 20)], 100, 100)
+    assert got[0] == {"west", "east"} and got[1] is None
+    # the window is clipped to the face
+    assert d([("M6", 0, -5, 2, 30)], 100, 100)[1] == (0, 30)
+
+
+def test_from_pins_says_so_for_a_cell_with_no_ports():
+    text = _from_pins_flow().replace("fix_pin cell:mac from_pins", "fix_pin cell:drv from_pins")
+    s, out = _run_flow_text(text)
+    assert "3 pin(s) fixed" in out            # drv has boundary ports too
+    s2, _ = _run_flow_text("open_bdb :memory:\nadd_cell lone 50 50")
+    out2 = _say(s2, "fix_pin cell:lone from_pins")
+    assert "no LEF pin ports stored" in out2, out2
+    assert "cell:lone" not in s2._pin_fixes and not pin_fix_cmds._sel_store(s2)
+
+
+def test_from_pins_replaces_a_typed_selector_and_persists(tmp_path):
+    ck = tmp_path / "fp.bdb"
+    text = _from_pins_flow().replace("open_bdb :memory:", f"open_bdb {ck}")
+    text = text.replace("fix_pin cell:mac from_pins",
+                        "fix_pin cell:mac.a east at 70..90\nfix_pin cell:mac from_pins")
+    s, _ = _run_flow_text(text)
+    fx = pin_fix_cmds._sel_store(s)["cell:mac"][("name", "a")]
+    assert fx["faces"] == W and (fx["lo"], fx["hi"]) == (20, 60)      # from_pins won
+    s.bdb = None
+    s2 = buda_cli.BudaSession()
+    s2.no_viz = True
+    _say(s2, f"open_bdb {ck}")
+    assert s2.bdb.cell_pin_ports("mac")                              # the ports survive
+    fx2 = pin_fix_cmds._sel_store(s2)["cell:mac"][("name", "a")]
+    assert (fx2["faces"], fx2["lo"], fx2["hi"]) == (W, 20, 60)       # ... and so do the fixes

@@ -1,0 +1,23 @@
+VERSION 5.8 ;
+DIVIDERCHAR "/" ;
+BUSBITCHARS "[]" ;
+DESIGN from_pins ;
+UNITS DISTANCE MICRONS 1 ;
+DIEAREA ( 0 0 ) ( 1000 1000 ) ;
+
+COMPONENTS 3 ;
+  - drv_i drv + PLACED ( 50 100 ) N ;
+  - mac_a mac + PLACED ( 500 700 ) N ;
+  - mac_b mac + PLACED ( 500 300 ) S ;
+END COMPONENTS
+
+NETS 6 ;
+  - na_a ( drv_i oa ) ( mac_a a ) + USE SIGNAL ;
+  - nb_a ( drv_i ob ) ( mac_a b ) + USE SIGNAL ;
+  - nc_a ( drv_i oc ) ( mac_a c ) + USE SIGNAL ;
+  - na_b ( drv_i oa ) ( mac_b a ) + USE SIGNAL ;
+  - nb_b ( drv_i ob ) ( mac_b b ) + USE SIGNAL ;
+  - nc_b ( drv_i oc ) ( mac_b c ) + USE SIGNAL ;
+END NETS
+
+END DESIGN

@@ -8,8 +8,9 @@
 # feedthru.feature is this repository's record of what happens otherwise.
 # Flip to @landed and bind per PR as the design's three changes land
 # (PR 1a: the two-geometry split, byte-identical; PR 1b: strips + command;
-# PR 2: layer, order, per-bit targets, from_pins; PR 3: cell-level fixes with the
-# orientation transform and the hierarchical frames).
+# PR 2: layer, order; PR 3: cell-level fixes with the orientation transform and the
+# hierarchical frames; PR 4: from_pins (LEF pin ports, schema v32); still open:
+# per-bit targets and the endpoint-via kind).
 Feature: Fixed pins — a busterm restricted to a set of admissible landings
   As a chip planner holding a partner's pin assignment
   I want to constrain where a bus may land on a block

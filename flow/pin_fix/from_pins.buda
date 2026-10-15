@@ -1,0 +1,44 @@
+# fix_pin ... from_pins -- consume the LEF pin PORTS the BDB now holds (schema v32).
+#
+# `import_def_lef` stores each signal pin's port rectangles (cell-local, with the
+# layer the LEF drew them on).  `fix_pin cell:mac from_pins` then writes one
+# per-pin cell fix from them, so the placement the LEF already states becomes the
+# landing constraint without anyone retyping it:
+#
+#   a  west face, y 20..60, M6 (horizontal)  -> west at 20..60 layer M6
+#   b  north face, x 30..70, M7 (vertical)   -> north at 30..70 layer M7
+#   c  south face, x 20..80, M6 (horizontal) -> south at 20..80  (M6 runs the wrong
+#                                               way for a south face, so no layer)
+#   i  interior                              -> no boundary port, left free
+#
+# mac_b is placed turned 180 degrees: the SAME fixes land on its east / south /
+# north faces (the cell-level transform of the previous change).
+#
+# Run:   bin/buda flow/pin_fix/from_pins.buda          (viewer; green = landings)
+# Expect: the `[PinFix] mac from_pins: 3 pin(s) fixed from LEF ports, 1 interior ...`
+#         line, `dump_pin_fixes` listing the three selectors, and check_design
+#         Success at both stages.
+
+source ../tracks/tracks.buda
+
+corner_margin dx 5 dy 5
+set_min_stub_length 2
+
+open_bdb :memory:
+import_def_lef from_pins.def from_pins.lef
+
+fix_pin cell:mac from_pins
+dump_pin_fixes
+
+derive_busterms 0
+add_blocks_from_bdb 0
+
+run_hier_bundler depth 0
+generate_hier_topologies
+run_planner hier 5
+run_nuts
+check_design nuts
+run_detailed_nuts
+check_design dnuts
+
+visualize

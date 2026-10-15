@@ -758,6 +758,9 @@ void bind_db(py::module_& m) {
         .def("set_cell_rects", &BDB::set_cell_rects,
              py::arg("cell"), py::arg("rects"), py::arg("teg_mode") = "THRU")
         .def("cell_rects", &BDB::cell_rects, py::arg("cell"))
+        .def("set_cell_pin_ports", &BDB::set_cell_pin_ports,
+             py::arg("cell"), py::arg("pin"), py::arg("rects"))
+        .def("cell_pin_ports", &BDB::cell_pin_ports, py::arg("cell"))
         .def("cell_teg_mode", &BDB::cell_teg_mode, py::arg("cell"))
         .def("multirect_cells", &BDB::multirect_cells)
         .def("layer_share_cells", &BDB::layer_share_cells)
