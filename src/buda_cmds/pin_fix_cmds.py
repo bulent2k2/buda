@@ -1150,7 +1150,7 @@ def _strips_with(session, block, fix):
     return _strips_in(session, fp, name, fix)
 
 
-def _cmd_fix_pin(session, cmd, args, cmd_line):
+def _cmd_fix_pin(session, cmd, args, cmd_line, exact=None):
     # fix_pin <block>[.*] [north|south|east|west|H|V ...] [rect <n>] [at <lo>..<hi>]
     # fix_pin <block> off
     if not args:
@@ -1165,7 +1165,11 @@ def _cmd_fix_pin(session, cmd, args, cmd_line):
     # declared name wins; only an explicit trailing `.*` is stripped, and a
     # suffix is read as a per-pin selector only when its prefix IS a known block
     # (or, for `cell:`, a known cell).
-    if target.startswith(CELL):
+    if exact is not None:
+        # an IMPORTED pin name is opaque: `A.B` or `d*` must not be re-read as
+        # selector syntax, so the caller names the (cell, exact pin) outright
+        block, sel = CELL + exact[0], ("name", exact[1])
+    elif target.startswith(CELL):
         body = target[len(CELL):]
         if _cell_dims(session, body) is not None:
             block = CELL + body
@@ -1485,7 +1489,7 @@ def derive_pin_faces(ports, cw, ch):
     extents, and exists only when every port lands on that one face (a pin on
     two faces has two windows, which one `at` cannot say)."""
     tol = _FROM_PINS_EDGE * min(cw, ch)
-    faces, along, layers = {}, {}, []
+    faces, along, by_face = {}, {}, {}
     for layer, x1, y1, x2, y2 in ports:
         # distance from the rect to each face LINE: zero when the rect spans it
         # (a port overhanging the edge sits ON the face), else its nearer edge
@@ -1500,10 +1504,15 @@ def derive_pin_faces(ports, cw, ch):
         lo, hi = (y1, y2) if face in ("east", "west") else (x1, x2)
         a = along.setdefault(face, [lo, hi])
         a[0], a[1] = min(a[0], lo), max(a[1], hi)
-        if layer and layer not in layers:
-            layers.append(layer)
+        lf = by_face.setdefault(face, [])
+        if layer and layer not in lf:
+            lf.append(layer)
     if not faces:
         return None
+    # one layer set per selector: keep only layers drawn on EVERY face the pin
+    # lands on, so a west M6 / east M8 pin does not permit M8 at the west face
+    fl = list(by_face.values())
+    layers = [l for l in fl[0] if all(l in other for other in fl)]
     window = None
     if len(faces) == 1:
         face = next(iter(faces))
@@ -1553,7 +1562,8 @@ def _from_pins(session, cmd, target, cmd_line):
                 # a selector left from a typed fix or an earlier run was derived
                 # from geometry this pin no longer has: drop it, don't keep it
                 if ("name", pin) in _sel_store(session).get(CELL + cell, {}):
-                    cmd_fix_pin(session, cmd, [f"{CELL}{cell}.{pin}", "off"], cmd_line)
+                    cmd_fix_pin(session, cmd, [f"{CELL}{cell}.{pin}", "off"], cmd_line,
+                                exact=(cell, pin))
                 continue
             faces, window, layers = got
             toks = sorted(faces)
@@ -1569,7 +1579,8 @@ def _from_pins(session, cmd, target, cmd_line):
                             == buda.LayerDir.HORIZONTAL) == next(iter(horiz)))]
                 if ok:
                     toks += ["layer", ",".join(ok)]
-            cmd_fix_pin(session, cmd, [f"{CELL}{cell}.{pin}"] + toks, cmd_line)
+            cmd_fix_pin(session, cmd, [f"{CELL}{cell}.{pin}"] + toks, cmd_line,
+                        exact=(cell, pin))
             n_fix += 1
         done += n_fix
         print(f"[PinFix] {cell} from_pins: {n_fix} pin(s) fixed from LEF ports"
@@ -1578,12 +1589,12 @@ def _from_pins(session, cmd, target, cmd_line):
         print("[PinFix] from_pins: no cell holds LEF pin ports")
 
 
-def cmd_fix_pin(session, cmd, args, cmd_line):
-    if len(args) == 2 and args[1].lower() == "from_pins":
+def cmd_fix_pin(session, cmd, args, cmd_line, exact=None):
+    if exact is None and len(args) == 2 and args[1].lower() == "from_pins":
         _from_pins(session, cmd, args[0], cmd_line)
         return
     before_b, before_s = _keys(session)
-    _cmd_fix_pin(session, cmd, args, cmd_line)
+    _cmd_fix_pin(session, cmd, args, cmd_line, exact)
     after_b, after_s = _keys(session)
     # A typed removal outranks any BDB opened later (typed wins), so remember it.
     tb = session.__dict__.setdefault("_pin_fix_removed_blocks", set())

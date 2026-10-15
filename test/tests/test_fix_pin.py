@@ -1908,6 +1908,11 @@ def test_derive_pin_faces_rules():
     assert got[0] == {"west", "east"} and got[1] is None
     # the window is clipped to the face
     assert d([("M6", 0, -5, 2, 30)], 100, 100)[1] == (0, 30)
+    # different layers per face: only a layer valid on EVERY face is emitted
+    got = d([("M6", 0, 10, 2, 20), ("M8", 98, 10, 100, 20)], 100, 100)
+    assert got[0] == {"west", "east"} and got[2] == []
+    got = d([("M6", 0, 10, 2, 20), ("M6", 98, 10, 100, 20), ("M8", 98, 30, 100, 40)], 100, 100)
+    assert got[2] == ["M6"]
     # a port overhanging the edge by more than the tolerance still SITS on it
     assert d([("M6", -20, 20, 2, 60)], 100, 100) == ({"west"}, (20, 60), ["M6"])
 
@@ -1963,3 +1968,21 @@ def test_from_pins_drops_a_selector_for_a_pin_that_derives_interior():
     s, out = _run_flow_text(text)
     assert ("name", "i") not in pin_fix_cmds._sel_store(s).get("cell:mac", {}), out[-400:]
     assert ("name", "a") in pin_fix_cmds._sel_store(s)["cell:mac"]
+
+
+def test_from_pins_keeps_an_opaque_lef_pin_name_exact():
+    """P2 (#996): a pin named `A.B` or `d*` was re-read as selector syntax."""
+    lef = (FLOW / "from_pins.lef").read_text().replace("PIN b\n", "PIN b.c\n", 1).replace(
+        "END b\n", "END b.c\n", 1).replace("PIN c\n", "PIN d*\n", 1).replace("END c\n", "END d*\n", 1)
+    import tempfile
+    d = Path(tempfile.mkdtemp())
+    (d / "m.lef").write_text(lef)
+    # the DEF connects a pin named b / c, so rename those too
+    deff = (FLOW / "from_pins.def").read_text().replace("mac_a b )", "mac_a b.c )").replace(
+        "mac_b b )", "mac_b b.c )").replace("mac_a c )", "mac_a d* )").replace("mac_b c )", "mac_b d* )")
+    (d / "m.def").write_text(deff)
+    text = _from_pins_flow().replace(str(FLOW / "from_pins.lef"), str(d / "m.lef")).replace(
+        str(FLOW / "from_pins.def"), str(d / "m.def"))
+    s, out = _run_flow_text(text)
+    keys = set(pin_fix_cmds._sel_store(s)["cell:mac"])
+    assert keys == {("name", "a"), ("name", "b.c"), ("name", "d*")}, (keys, out[-500:])
