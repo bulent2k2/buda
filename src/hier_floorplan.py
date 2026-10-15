@@ -786,6 +786,187 @@ def _span_hpwl(spanning, pos, size, a, b, idx):
     return total
 
 
+# ── facing overlap ────────────────────────────────────────────────────────
+# A bus between two ADJACENT blocks lands on the faces they present to
+# each other, and the window it has is their OVERLAP along the shared edge
+# (less the corner margins) -- a leaf sized for its own bits can still be
+# placed against a neighbour that overlaps it by 132 units where the bus
+# wants 142.  `facing_pairs` reads that off a finished packing and
+# `align_facing` shifts blocks along the edge to buy the missing overlap.
+
+
+def facing_pairs(pos: dict, size: dict, nets, bit_pitch: float, pad: int):
+    """[(a, b, need, have, axis)] for every pair of blocks that FACE each
+    other (separated along one axis, overlapping along the other) and are
+    joined by nets.  `need` is the bits between them at the bit pitch plus
+    one pad, capped at the shorter block's side; `have` the overlap.
+    `axis` is the axis the overlap runs along (0 = x, 1 = y)."""
+    bits = {}
+    for w, members in nets:
+        names = sorted({member(m)[0] for m in members if member(m)[0] in pos})
+        if len(names) != 2:
+            continue
+        bits[tuple(names)] = bits.get(tuple(names), 0) + w
+    out = []
+    for (a, b), nb in bits.items():
+        (ax, ay), (aw, ah) = pos[a], size[a]
+        (bx, by), (bw, bh) = pos[b], size[b]
+        ox = min(ax + aw, bx + bw) - max(ax, bx)
+        oy = min(ay + ah, by + bh) - max(ay, by)
+        if ox > 0 and oy <= 0:
+            axis, have, cap = 0, ox, min(aw, bw)
+        elif oy > 0 and ox <= 0:
+            axis, have, cap = 1, oy, min(ah, bh)
+        else:
+            continue
+        need = min(int(math.ceil(nb * bit_pitch)) + int(pad), cap)
+        out.append((a, b, need, have, axis))
+    return out
+
+
+def side_loads(pos: dict, size: dict, nets, bit_pitch: float, pad: int):
+    """Per block and side (E, W, N, S) the bits whose far block lies that
+    way (dominant axis of the centre offset) -> {(block, side): bits}.
+    Multi-member nets count once toward each other member."""
+    load = {}
+    for w, members in nets:
+        names = sorted({member(m)[0] for m in members if member(m)[0] in pos})
+        if len(names) < 2:
+            continue
+        for a in names:
+            ax = pos[a][0] + size[a][0] / 2.0
+            ay = pos[a][1] + size[a][1] / 2.0
+            for b in names:
+                if b == a:
+                    continue
+                dx = pos[b][0] + size[b][0] / 2.0 - ax
+                dy = pos[b][1] + size[b][1] / 2.0 - ay
+                # normalised by the half extents so a wide block's far
+                # neighbour above it reads N, not E
+                if abs(dx) / (size[a][0] + size[b][0]) >= \
+                        abs(dy) / (size[a][1] + size[b][1]):
+                    side = "E" if dx > 0 else "W"
+                else:
+                    side = "N" if dy > 0 else "S"
+                load[(a, side)] = load.get((a, side), 0) + w / (len(names) - 1)
+    return load
+
+
+def side_overload(pos, size, nets, bit_pitch, pad):
+    """[(block, side, need, length)] for every side whose bits (at the bit
+    pitch, plus a pad per far block) exceed the side's length."""
+    out = []
+    for (a, side), bits in side_loads(pos, size, nets, bit_pitch, pad).items():
+        length = size[a][1] if side in "EW" else size[a][0]
+        need = int(math.ceil(bits * bit_pitch)) + int(pad)
+        if need > length:
+            out.append((a, side, need, length))
+    return out
+
+
+def facing_shortfall(pos, size, nets, bit_pitch, pad) -> int:
+    return sum(max(0, need - have) for _a, _b, need, have, _x in
+               facing_pairs(pos, size, nets, bit_pitch, pad))
+
+
+def align_facing(p: Packing, items, nets, gap: int, margin: int,
+                 bit_pitch: float, pad: int, snap: tuple = (1, 1),
+                 passes: int = 4) -> Packing:
+    """Shift single blocks ALONG the edge they share with a neighbour so a
+    bus between them has the overlap it needs.  A move is kept only when
+    the container stays the same size, nothing overlaps (a `gap` apart),
+    and the total shortfall over every facing pair strictly drops.  The
+    packing's size is never changed, so the cost the packer minimised
+    moves only through the nets' wirelength."""
+    size = {nm: (w, h) for nm, w, h in items}
+    pos = dict(p.pos)
+    sx, sy = max(1, int(snap[0])), max(1, int(snap[1]))
+    step = (sx, sy)
+    before = facing_shortfall(pos, size, nets, bit_pitch, pad)
+    if before == 0:
+        return p
+
+    def clear(nm, x, y):
+        w, h = size[nm]
+        if x < margin or y < margin or x + w > p.w - margin or \
+                y + h > p.h - margin:
+            return False
+        for o, (ox, oy) in pos.items():
+            if o == nm:
+                continue
+            ow, oh = size[o]
+            if x < ox + ow + gap and ox < x + w + gap and \
+                    y < oy + oh + gap and oy < y + h + gap:
+                # touching along a cut is how a slicing is built, so only a
+                # true overlap of the bloated boxes is refused when the two
+                # are separated by at least the gap already
+                if x < ox + ow and ox < x + w and y < oy + oh and oy < y + h:
+                    return False
+                if not (x >= ox + ow + gap or ox >= x + w + gap or
+                        y >= oy + oh + gap or oy >= y + h + gap):
+                    return False
+        return True
+
+    cur = before
+    for _ in range(passes):
+        improved = False
+        pairs = sorted(facing_pairs(pos, size, nets, bit_pitch, pad),
+                       key=lambda t: t[3] - t[2])
+        for a, b, need, have, axis in pairs:
+            if have >= need:
+                continue
+            for nm in (a, b):
+                x, y = pos[nm]
+                other = b if nm == a else a
+                ox, oy = pos[other]
+                w, h = size[nm]
+                # slide so the overlap grows to `need`: toward the other
+                # block's centre along `axis`
+                if axis == 0:
+                    ctr = ox + size[other][0] / 2.0
+                    d = need - have
+                    d = d if ctr > x + w / 2.0 else -d
+                    d = int(math.ceil(abs(d) / sx) * sx) * (1 if d > 0 else -1)
+                    cand = (x + d, y)
+                else:
+                    ctr = oy + size[other][1] / 2.0
+                    d = need - have
+                    d = d if ctr > y + h / 2.0 else -d
+                    d = int(math.ceil(abs(d) / sy) * sy) * (1 if d > 0 else -1)
+                    cand = (x, y + d)
+                if not clear(nm, *cand):
+                    continue
+                old = pos[nm]
+                pos[nm] = cand
+                new = facing_shortfall(pos, size, nets, bit_pitch, pad)
+                if new < cur:
+                    cur = new
+                    improved = True
+                    break
+                pos[nm] = old
+        if not improved or cur == 0:
+            break
+    if cur >= before:
+        return p
+    out = Packing(p.w, p.h, pos, p.method + f"+face({before}->{cur})", p.hpwl)
+    return out
+
+
+
+def grow_packing(p: Packing, minw: int, minh: int,
+                 snap: tuple = (1, 1)) -> Packing:
+    """A packing grown to at least (minw, minh), the children centred in
+    the room that adds (origins kept on the snap grid)."""
+    sx, sy = max(1, int(snap[0])), max(1, int(snap[1]))
+    W, H = max(p.w, _ceil_to(minw, sx)), max(p.h, _ceil_to(minh, sy))
+    if (W, H) == (p.w, p.h):
+        return p
+    dx = ((W - p.w) // 2) // sx * sx
+    dy = ((H - p.h) // 2) // sy * sy
+    return Packing(W, H, {n: (x + dx, y + dy) for n, (x, y) in p.pos.items()},
+                   p.method + "+grow", p.hpwl)
+
+
 def padded_dims(w: int, h: int, floors: tuple, snap: tuple = (1, 1)) -> tuple:
     """The container's dims once its own faces are honoured: the heavy
     floor on whichever axis needs the less padding, the light one on the

@@ -21,7 +21,7 @@ from ._options import reject_unknown_options
 
 _OPTS = ("pdk", "util", "gap", "margin", "top_margin", "place", "seed",
          "keep", "wl", "snap", "bitpitch", "pad", "aspect", "grow", "cols",
-         "sa_iter", "fixed", "landings")
+         "sa_iter", "fixed", "landings", "facing")
 _PLACE = ("auto", "slice", "grid", "sa")
 
 
@@ -52,11 +52,11 @@ def cmd_auto_floorplan(session, cmd, args, cmd_line):
     #        [top_margin <n>] [place auto|slice|grid|sa] [seed <n>]
     #        [keep <n>] [wl <f>] [snap <px> <py>] [bitpitch <f>] [pad <n>]
     #        [aspect <f>] [grow <cell>=<f>,...] [cols <cell>=<n>,...]
-    #        [sa_iter <n>] [fixed <cell>,...] [landings 0|1]
+    #        [sa_iter <n>] [fixed <cell>,...] [landings 0|1] [facing 0|1]
     kw = dict(pdk_path=None, gap=16, margin=16, place="auto", seed=1,
               keep=5, wl_weight=0.5, snap=(1, 1), bit_pitch=None, pad=None,
               aspect_cap=2.0, grow=None, cols=None, sa_iter=0,
-              top_margin=None, util=None, fixed=(), landings=0)
+              top_margin=None, util=None, fixed=(), landings=0, facing=0)
     i = 0
     keys = []
     while i < len(args):
@@ -120,7 +120,7 @@ def cmd_auto_floorplan(session, cmd, args, cmd_line):
                 print(f"Error: {cmd}: {k} must be a number, got '{v}'")
                 return
             if k in ("gap", "margin", "top_margin", "pad", "seed", "keep",
-                     "sa_iter", "landings"):
+                     "sa_iter", "landings", "facing"):
                 if fv < 0 or fv != int(fv):
                     print(f"Error: {cmd}: {k} must be a non-negative "
                           f"integer, got '{v}'")

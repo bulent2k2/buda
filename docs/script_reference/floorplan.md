@@ -17,7 +17,7 @@ auto_floorplan [pdk <file>] [gap <n>] [margin <n>] [top_margin <n>]
                [place auto|slice|grid|sa] [wl <f>] [snap <px> <py>]
                [grow <cell>=<f>,...] [cols <cell>=<n>,...]
                [seed <n>] [keep <n>] [pad <n>] [bitpitch <f>] [aspect <f>]
-               [util <f>] [sa_iter <n>] [fixed <cell>,...] [landings 0|1]
+               [util <f>] [sa_iter <n>] [fixed <cell>,...] [landings 0|1] [facing <rounds>]
 ```
 
 Size and place the whole cell tree of the open BDB — every leaf, every
@@ -43,6 +43,7 @@ used otherwise.
 | `util <f>` | the PDK's | the standard-cell utilisation the logic area is sized at |
 | `fixed <cell>,...` | none | cells whose geometry the BDB ALREADY holds — the size from the `cell` table (`resize_cell`), the children's offsets from the `cell_children` template rows (`add_inst_to_cell`) — kept untouched and stamped at every instance like any other template.  A placement the caller computed by a rule of its own: a systolic array is not a job for a placer, so `bigsoc.tcl` writes the NPU by `tpu_lib.tcl`'s own array rule and fixes it.  Refused when a fixed cell has no size or a child no offset |
 | `landings 0\|1` | 0 | size a leaf face PER LANDING: one pad per bundle landing on it plus a `gap` between landings, instead of one pad per face (two 32-bit bundles: 2×152+16 = 320, not 280), and split the driver groups so two drivers into one block are two landings.  A face whose window (overlap with the neighbour minus the corner margins) holds fewer tracks than the bits landing on it is a *doomed seat*; at NQ 8 on `bigsoc` this takes them 58 → 1 for +8 % abstract WL and +3 % die area.  Default 0 = byte-identical |
+| `facing <rounds>` | 0 | up to `rounds` dry passes of pack → measure → grow before the pass that writes the BDB: each block SIDE is checked against the bits whose far block lies that way (dominant axis of the centre offset; the face rule spreads a block's bundles over four faces, a placement can concentrate them), and every cell with a side shorter than its bits at the bit pitch plus a pad is grown to host them (`BUDA` prints `[AutoFP] facing round N`).  A cell grown for one container is grown everywhere (a template).  Stops when a round grows nothing.  On `bigsoc` NQ 8 with `landings 1`: abstract audit 129/21 violations/22 seat faults → 114/8/8, full healerless unplaced 2,540 → 1,709, for +5 % die area (+25 % at NQ 2).  Default 0 = byte-identical |
 
 Prints a table — per cell its level, instance count, children, size, how
 it was sized (`face` / `area` / `macro` for a leaf with the face bits and

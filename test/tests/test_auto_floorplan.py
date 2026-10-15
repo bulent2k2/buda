@@ -352,3 +352,26 @@ def test_landing_floor_is_one_pad_per_landing():
     import hier_floorplan as hf
     assert hf.landing_floor(64, 1, 4, 24, 16) == 64 * 4 + 24
     assert hf.landing_floor(64, 2, 4, 24, 16) == 64 * 4 + 2 * 24 + 16
+
+
+def test_side_overload_names_a_side_too_short_for_its_bits():
+    """`facing` grows a cell whose side hosts more bits than it is long."""
+    import hier_floorplan as hf
+    size = {"a": (100, 100), "b": (100, 100), "c": (100, 100)}
+    pos = {"a": (0, 0), "b": (200, 0), "c": (200, 200)}
+    nets = [(32, [("a", None, None), ("b", None, None)]),
+            (32, [("a", None, None), ("c", None, None)])]
+    over = hf.side_overload(pos, size, nets, 4.0, 24)
+    assert ("a", "E", 280, 100) in [(n, s, int(nd), l) for n, s, nd, l in over]
+
+
+def test_facing_grows_cells_and_is_off_by_default(tpu):
+    s, _ = tpu
+    off = [(c.name, c.x1, c.y1, c.x2, c.y2) for c in s.bdb.all_components()]
+    out = _run(s, f"auto_floorplan pdk {_PDK} wl 0.25 facing 3")
+    assert "Error" not in out and "facing round" in out
+    on = [(c.name, c.x1, c.y1, c.x2, c.y2) for c in s.bdb.all_components()]
+    _run(s, f"auto_floorplan pdk {_PDK} wl 0.25")        # restore for the module
+    again = [(c.name, c.x1, c.y1, c.x2, c.y2) for c in s.bdb.all_components()]
+    assert again == off
+    assert on != off or "converged" in out

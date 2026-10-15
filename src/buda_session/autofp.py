@@ -79,11 +79,45 @@ class AutoFloorplanMixin:
                         seed=1, keep=5, wl_weight=0.5, snap=(1, 1),
                         bit_pitch=None, pad=None, aspect_cap=2.0,
                         grow=None, cols=None, sa_iter=0, top_margin=None,
-                        util=None, fixed=(), landings=0):
+                        util=None, fixed=(), landings=0, facing=0, minsize=None,
+                        _dry=False, _final=False):
         """Size and place the whole cell tree of the open BDB.  Returns the
         report dict (`cells`, `die`, `issues`) or None after printing an
-        error.  See the module docstring for the rules."""
+        error.  See the module docstring for the rules.
+
+        `facing` (opt-in): after a packing, every block SIDE is checked
+        against the bits whose far block lies that way (the face rule
+        spread them over four faces; a placement can concentrate them),
+        and the cells whose side is too short are grown to host them, up
+        to `facing` rounds of pack -> measure -> grow on dry passes before
+        the one that writes the BDB."""
         import buda
+        if facing and not _dry and not _final:
+            kw = dict(pdk_path=pdk_path, gap=gap, margin=margin, place=place,
+                      seed=seed, keep=keep, wl_weight=wl_weight, snap=snap,
+                      bit_pitch=bit_pitch, pad=pad, aspect_cap=aspect_cap,
+                      grow=grow, cols=cols, sa_iter=sa_iter,
+                      top_margin=top_margin, util=util, fixed=fixed,
+                      landings=landings, facing=facing)
+            ms = dict(minsize or {})
+            for rnd in range(int(facing)):
+                r = self._auto_floorplan(minsize=ms, _dry=True, **kw)
+                if r is None:
+                    return None
+                grew = False
+                for c, (mw, mh) in r["overloads"].items():
+                    ow, oh = ms.get(c, (0, 0))
+                    if mw > ow or mh > oh:
+                        ms[c] = (max(mw, ow), max(mh, oh))
+                        grew = True
+                print(f"[AutoFP] facing round {rnd + 1}: "
+                      f"{len(r['overloads'])} cell(s) with an overloaded "
+                      f"side" + ("" if grew else " (converged)"))
+                if not grew:
+                    break
+            return self._auto_floorplan(minsize=ms, _final=True, **kw)
+        minsize = minsize or {}
+        over = {}
         if self.bdb is None:
             print("Error: auto_floorplan needs an open BDB (open_bdb, then "
                   "import_verilog or add_cell/add_inst)")
@@ -403,6 +437,8 @@ class AutoFloorplanMixin:
                                   total_bits=sum(port_bits.get(cell, {}).values()),
                                   faces=fb, landings=landings, lgap=gap)
                 w, h = int(math.ceil(ls.w * f)), int(math.ceil(ls.h * f))
+                if cell in minsize:
+                    w, h = max(w, minsize[cell][0]), max(h, minsize[cell][1])
                 if snap != (1, 1):
                     w, h = hf._ceil_to(w, snap[0]), hf._ceil_to(h, snap[1])
                 size[cell] = (w, h)
@@ -432,7 +468,14 @@ class AutoFloorplanMixin:
                                           seed, keep, wl_weight, snap,
                                           aspect_cap, cols.get(cell, 0),
                                           sa_iter, floors,
-                                          {nm: cc for nm, cc in ch}, ext)
+                                          {nm: cc for nm, cc in ch}, ext,
+                                          (bp, pd) if facing else None)
+            if facing:
+                self._note_overloads(over, items, nets, packing, bp, pd,
+                                     {nm: cc for nm, cc in ch})
+            if cell in minsize:
+                packing = hf.grow_packing(packing, minsize[cell][0],
+                                          minsize[cell][1], snap)
             size[cell] = (packing.w, packing.h)
             tpos[cell] = packing.pos
             resolve_ports(cell, r, packing)
@@ -452,8 +495,15 @@ class AutoFloorplanMixin:
         top = self._pack_children("<top>", items, nets, gap, top_margin,
                                   place, seed, keep, wl_weight, snap,
                                   aspect_cap, cols.get("<top>", 0), sa_iter,
-                                  (), {c.name: c.cell for c in roots})
+                                  (), {c.name: c.cell for c in roots}, None,
+                                  (bp, pd) if facing else None)
         die_w, die_h = top.w, top.h
+        if facing:
+            self._note_overloads(over, items, nets, top, bp, pd,
+                                 {c.name: c.cell for c in roots})
+        if _dry:
+            return dict(overloads={c: v for c, v in over.items()
+                                   if c not in fixed})
 
         # ── write it: cell sizes, template rows, every instance's box.
         for cell, (w, h) in size.items():
@@ -521,6 +571,24 @@ class AutoFloorplanMixin:
         self._autofp_last = out
         return out
 
+    @staticmethod
+    def _note_overloads(over, items, nets, packing, bp, pd, cell_of):
+        """Record, per child CELL, the side length its worst occurrence in
+        this packing needs (`hf.side_overload`): an E/W side wants height,
+        N/S width."""
+        sizes = {nm: (w, h) for nm, w, h in items}
+        for nm, side, need, _len in hf.side_overload(packing.pos, sizes, nets,
+                                                     bp, pd):
+            c = cell_of.get(nm)
+            if c is None:
+                continue
+            mw, mh = over.get(c, (0, 0))
+            if side in "EW":
+                mh = max(mh, need)
+            else:
+                mw = max(mw, need)
+            over[c] = (mw, mh)
+
     def _cell_children_rows(self, cell):
         """[(inst_name, child_cell, x, y)] of a cell's template rows.  The
         BDB binds the parent/child EDGES only, so the rows are read through
@@ -550,7 +618,7 @@ class AutoFloorplanMixin:
 
     def _pack_children(self, cell, items, nets, gap, margin, place, seed,
                        keep, wl_weight, snap, aspect_cap, force_cols, sa_iter,
-                       floors, kind=None, ext=None):
+                       floors, kind=None, ext=None, facing=None):
         import buda
         n = len(items)
 
@@ -571,7 +639,11 @@ class AutoFloorplanMixin:
                                 wl_weight=wl_weight, aspect_cap=aspect_cap,
                                 snap=snap, floors=floors,
                                 max_group=_SLICE_MAX, ext=ext)
-            return hf.pad_packing(p, floors, snap)
+            p = hf.pad_packing(p, floors, snap)
+            if facing:
+                p = hf.align_facing(p, items, nets, gap, margin,
+                                    facing[0], facing[1], snap)
+            return p
         grid = hf.best_grid(items, gap, margin, nets, wl_weight, floors,
                             snap, force_cols)
         if method == "grid" or n < 2:
