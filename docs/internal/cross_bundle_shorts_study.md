@@ -433,3 +433,56 @@ What the flip cost, found by running the fast tier with it on:
   tests no longer need the `no_junction_reach` fixture.
 - **Nothing here changes the converge repro**: its blind round is bottom-up,
   so the four motivating shorts stay (see the review section above).
+
+### How the junction-reach switch works, in detail (2026-10-15)
+
+**Who decides.**  `BudaSession._sync_junction_reach` runs before every
+command and hands the engine one verdict (`buda.set_junction_reach_allowed`;
+`buda.junction_reach_active()` reads it back).  Order of precedence: a typed
+`set_junction_reach on|off|topdown` first, then `BUDA_NUTS_JUNCTION_REACH`,
+then the default.  `topdown` (the default) is on unless the BDB carries
+`set_bottom_up` marks; `on` / `1` forces every design; `off` / `0` forces none;
+`env` drops the typed setting.  The engine holds no mode of its own (-1 = no
+session behind it, so the process environment decides), which is why a driver
+can flip it in-process and why the first caller no longer freezes it.
+
+**Where it acts: abstract NUTS and DetailedNUTS, never the planner.**  Four
+places read the verdict, none of them in `congestion_planner.cpp`:
+- `do_span_adjustments` (`src/nuts.cpp`): a stub that follows a perpendicular
+  partner no longer ends at the partner's track *centre* but at its far edge,
+  `track -+ width/2`, on the end that faces away (`sc.lo_end` picks the sign).
+- the same pass's cover step: the partner's two edges are covered, not just
+  its centre, so every bit of the partner is reachable.
+- `tighten_spans_to_reach`: the reach window is widened by half the partner's
+  width on both sides (`jh`).
+- `make_bus_segments` (`src/detailed_nuts.cpp`): a placed stub end that lies
+  on the partner's far edge, not only at its centre, is promoted to an
+  endpoint junction, so bits snap to their own vias there instead of keeping a
+  shared abstract end past it (which left dangling metal).
+The planner picks topologies and layers and charges bands from the *nominal*
+spans, so it never prices the extra half-width.  The cost shows up only in
+NUTS output: abstract wirelength +4.85 % on the corpus, detailed +0.01 %.
+Whether a planner that priced the longer spans would choose differently is
+not measured.
+
+**The two failure modes point in opposite directions.**
+- *Short spans* (the old behaviour) fail at DetailedNUTS: a bit snapped to its
+  partner's track past the stub's end lands on another bundle's metal, a
+  cross-bundle short (`DetailedNUTSResult.num_cross_shorts`).
+- *Long spans* (the new default) are what overlaps the corner in
+  `flow/nuts_corner_touch.buda`, which therefore declares
+  `set_junction_reach off` itself.
+
+**Consequence for an adaptive setting.**  "Start short, switch to long if
+corner overlaps appear" would switch the wrong way.  The trigger that matches
+the evidence is: run short, and if DetailedNUTS leaves cross-bundle shorts,
+redo with long spans.  Two costs make it more than a flag: the span is decided
+in abstract NUTS, so the redo is `run_nuts` + `run_detailed_nuts`, not
+DetailedNUTS alone; and the switch can be whole-design (simple, but lengthens
+bundles that were fine) or per bundle (needs a per-segment flag read by both
+NUTS and DetailedNUTS, and pays wire only where a short was actually found).
+Both would be accepted only when the redo has fewer shorts and no more
+overlaps or unplaced bits, the same rule the heals use.  An experiment over
+the corpus (every flow under short and under long spans, with the final
+shorts, the bundles they sit on and per-bundle wirelength) is the way to size
+the per-bundle saving before building it; its results go in the next section.
