@@ -486,3 +486,53 @@ overlaps or unplaced bits, the same rule the heals use.  An experiment over
 the corpus (every flow under short and under long spans, with the final
 shorts, the bundles they sit on and per-bundle wirelength) is the way to size
 the per-bundle saving before building it; its results go in the next section.
+
+### Adaptive junction reach, measured (2026-10-15)
+
+`tools/experiment/adaptive_reach.py` runs every corpus flow twice, short
+spans (`set_junction_reach off`) and long spans (`on`, every design, bottom-up
+included), recording the final overlaps / unplaced / violating bundles, the
+cross-bundle shorts and the bundles they sit on, and per-bundle abstract
+wirelength; `adaptive_reach_analyze.py` scores policies from that file.  One
+sweep, 56 flows (`ariane133_heal` needs its fetched inputs and was not run),
+healers on as each flow ships.  The two whole-design adaptive rules take the
+long run only when it is componentwise no worse on (overlaps, unplaced,
+viol_bundles) and strictly better on one.
+
+| policy | overlaps | unplaced | viol | clean flows | abstract WL (sum) | shorts left |
+|---|---|---|---|---|---|---|
+| always short | 289 | 1393 | 135 | 43 | 36,649,322 | 15 |
+| always long | 304 | 1536 | 152 | 46 | 38,287,457 | 5 |
+| shipped default (long, except bottom-up marks) | 287 | 1359 | 131 | 45 | 38,144,904 | 11 |
+| adaptive, trigger = short run left shorts | 288 | 1400 | 133 | 44 | 36,695,871 | 5 |
+| adaptive, trigger = short run is dirty | 286 | 1359 | 131 | 46 | 36,724,714 | 11 |
+
+- **Trigger on dirty, not on shorts.**  Only 5 flows leave shorts under short
+  spans, and the shorts-only rule misses the flows that long spans help
+  through overlaps (`mix2_fast_topdown` 1 -> 0 overlaps, `chip_stack_topdown`
+  263 -> 235 unplaced): 1400 unplaced against 1359.
+- **Dirty-triggered adaptive matches the shipped default on quality** (same
+  unplaced and violating bundles, one fewer overlap, one more clean flow:
+  `mix2_fast_bottomup` goes clean under long spans, which the default does not
+  give a bottom-up design) **at 3.7 % less abstract wire** (36.72 M against
+  38.14 M).  Nearly all of that wire is one flow: `rv/soc_conv_div`, clean under
+  short spans, grows 1.36 M under long (8 %); the next three are 30 k each.
+  Read it as "a clean design keeps its short wire", which is the point of the
+  rule, not as a broad saving.
+- **The accept rule is doing real work.**  Long spans are much worse on
+  `mix2_fast_bottomup_shared` ((0,0,2) -> (4,80,10)) and
+  `mix2_fast_bottomup_caps` ((2,0,0) -> (11,72,11)); blind "always long on a
+  dirty design" would take those.  `chip_stack_bottomup` and
+  `chip_bottomup` trade unplaced bits against shorts and are refused too.
+- **Per bundle looks promising, unproven.**  In every flow whose short run
+  leaves shorts, they sit on 2 bundles out of 80-660, and lengthening only
+  those costs 53-188 abstract units against 1,408-29,260 for lengthening all
+  (`tc3a` 53 against 1,408; `chip_topdown` 188 against 23,529;
+  `mix2_fast_bottomup_shared` is the exception, 2,644 of 12,143, and long
+  spans are worse there anyway).  This is the wire cost on the bundles
+  concerned in the all-long run; it does not show that lengthening only them
+  clears the shorts, nor how the packing reacts to a design with mixed spans.
+- **Caveats.**  One run per cell and greedy healers, so single-unit differences
+  on the chip flows are inside basin noise; the policies are scored from the
+  two uniform runs, not from a built adaptive pass, so a real redo (which
+  re-runs NUTS and DetailedNUTS and re-heals) can land elsewhere.
