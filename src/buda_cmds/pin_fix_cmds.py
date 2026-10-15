@@ -1562,7 +1562,7 @@ def _from_pins(session, cmd, target, cmd_line):
                 # a selector left from a typed fix or an earlier run was derived
                 # from geometry this pin no longer has: drop it, don't keep it
                 if ("name", pin) in _sel_store(session).get(CELL + cell, {}):
-                    cmd_fix_pin(session, cmd, [f"{CELL}{cell}.{pin}", "off"], cmd_line,
+                    _apply_fix_pin(session, cmd, [f"{CELL}{cell}.{pin}", "off"], cmd_line,
                                 exact=(cell, pin))
                 continue
             faces, window, layers = got
@@ -1579,7 +1579,7 @@ def _from_pins(session, cmd, target, cmd_line):
                             == buda.LayerDir.HORIZONTAL) == next(iter(horiz)))]
                 if ok:
                     toks += ["layer", ",".join(ok)]
-            cmd_fix_pin(session, cmd, [f"{CELL}{cell}.{pin}"] + toks, cmd_line,
+            _apply_fix_pin(session, cmd, [f"{CELL}{cell}.{pin}"] + toks, cmd_line,
                         exact=(cell, pin))
             n_fix += 1
         done += n_fix
@@ -1589,7 +1589,11 @@ def _from_pins(session, cmd, target, cmd_line):
         print("[PinFix] from_pins: no cell holds LEF pin ports")
 
 
-def cmd_fix_pin(session, cmd, args, cmd_line, exact=None):
+def cmd_fix_pin(session, cmd, args, cmd_line):
+    _apply_fix_pin(session, cmd, args, cmd_line)
+
+
+def _apply_fix_pin(session, cmd, args, cmd_line, exact=None):
     if exact is None and len(args) == 2 and args[1].lower() == "from_pins":
         _from_pins(session, cmd, args[0], cmd_line)
         return
