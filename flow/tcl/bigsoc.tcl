@@ -65,6 +65,9 @@
 #                   reticle (`reticle_w/h` in mock.pdk) at -fill of its
 #                   area, re-floorplanned and reported against it
 #   -fill F         the reticle fill the dial aims at (default 0.85)
+#   -fponly         stop right after auto_floorplan (seconds, not a routing run):
+#                   the table's per-level utilization and the die's LEAF
+#                   utilization are the whole output -- for sweeping `-fp "..."`
 #   -abstract       stop at abstract NUTS (bus segments on tracks, the
 #                   NUTS-stage audit, no bit placed) -- a fast screen of a
 #                   floorplan, soc.tcl's `-abstract`
@@ -102,6 +105,7 @@ set abstract 0
 set npu array
 set keep_low -1
 set add_top 0
+set fponly 0
 set demand_pct 80
 set grow_f 1.25
 set widen_f 1.5
@@ -117,6 +121,7 @@ while {$argi < $argc} {
         -bottomup { set bottomup 1; incr argi }
         -reticle  { set reticle 1; incr argi }
         -abstract { set abstract 1; incr argi }
+        -fponly   { set fponly 1; incr argi }
         -noheal   { set heal 0; incr argi }
         -caps     { set caps 1; incr argi }
         -emit - -pdk - -fp - -save - -iterate - -demand - -grow - -widen - -fill - -npu - -low - -top {
@@ -255,6 +260,7 @@ proc bigsoc::round {vfile save pdk fpopts grows gap bottomup caps heal {npu arra
         lappend opts fixed [join [bigsoc::npu_fixed_templates] ,]
     }
     buda::auto_floorplan {*}$opts {*}$fpopts
+    if {$::fponly} { puts "bigsoc.tcl: -fponly, stopping after the floorplan"; buda::stop; exit 0 }
     if {$probe} { return [buda::query die] }
 
     if {$bottomup} {

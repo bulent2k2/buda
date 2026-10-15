@@ -486,9 +486,11 @@ class AutoFloorplanMixin:
             self._die_w, self._die_h = float(die_w), float(die_h)
 
         issues = self._validate_placement()
+        leaf_area = sum(size[c.cell][0] * size[c.cell][1]
+                        for c in comps if not kids.get(c.id))
         self._print_autofp_report(pdk, bp, pd, gap, margin, rows, order,
                                   top, items, die_w, die_h, n_leaf, issues,
-                                  snap)
+                                  snap, leaf_area)
         out = dict(cells={c: dict(rows[c]) for c in rows},
                    die=(die_w, die_h), top=dict(top.pos),
                    top_method=top.method, issues=issues,
@@ -607,7 +609,7 @@ class AutoFloorplanMixin:
 
     def _print_autofp_report(self, pdk, bp, pd, gap, margin, rows, order,
                              top, top_items, die_w, die_h, n_leaf, issues,
-                             snap):
+                             snap, leaf_area=None):
         src = pdk.path if pdk else "none (face rule only)"
         print(f"=== auto_floorplan: PDK {src}; bit pitch {bp:g}, pad {pd}, "
               f"gap {gap}, margin {margin}"
@@ -630,6 +632,12 @@ class AutoFloorplanMixin:
         print(f"  die {die_w}x{die_h}: {len(top_items)} top-level block(s) "
               f"by {top.method}, utilization {util:.3f}; {n_leaf} childless "
               f"component(s) marked leaf")
+        if leaf_area is not None and die_w * die_h > 0:
+            # the number the per-level columns multiply into: how much of the
+            # die is a leaf cell at all (the rest is every level's channels,
+            # margins and shape slack)
+            print(f"  leaf area {leaf_area:,.0f} of die {die_w * die_h:,.0f}: "
+                  f"leaf utilization {leaf_area / (die_w * die_h):.3f}")
         kinds = {}
         for k, _a, _b, _m in issues:
             kinds[k] = kinds.get(k, 0) + 1
