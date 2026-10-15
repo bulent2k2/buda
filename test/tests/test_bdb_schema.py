@@ -130,6 +130,28 @@ def test_pre_v30_db_gains_the_multirect_footprint_tables_on_open(tmp_path):
     assert db.multirect_cells() == ["mac"]
 
 
+def test_pre_v32_db_gains_the_pin_port_table_on_open(tmp_path):
+    # v31 to v32: LEF pin PORT geometry (cell_pin_port).  A pre-v32 checkpoint
+    # never held it, so an empty table is exactly the design that was stored.
+    p = str(tmp_path / "v31.bdb")
+    db = buda.BDB(p)
+    db.add_cell("mac", 100, 100)
+    del db
+    con = sqlite3.connect(p)
+    con.executescript("DROP TABLE cell_pin_port; PRAGMA user_version = 31;")
+    con.commit()
+    con.close()
+
+    db = buda.BDB(p)                       # opening migrates
+    assert db.schema_version() == buda.BDB.SCHEMA_VERSION
+    assert db.cell_pin_ports("mac") == []  # a pre-v32 design stored none
+    db.set_cell_pin_ports("mac", "a", [("M6", 0, 20, 2, 60), ("M6", 0, 70, 2, 90)])
+    assert db.cell_pin_ports("mac") == [("a", "M6", 0, 20, 2, 60),
+                                        ("a", "M6", 0, 70, 2, 90)]
+    db.set_cell_pin_ports("mac", "a", [("M6", 0, 10, 2, 30)])     # REPLACES the pin's rows
+    assert db.cell_pin_ports("mac") == [("a", "M6", 0, 10, 2, 30)]
+
+
 def test_newer_schema_version_is_rejected(tmp_path):
     # A DB written by a newer BUDA (user_version > SCHEMA_VERSION) must fail fast
     # rather than be opened writable by an older binary that can't understand it.

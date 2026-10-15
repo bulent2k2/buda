@@ -1,5 +1,5 @@
 -- BUDA BDB text dump (sqlite3 iterdump); regenerate via tools/bdb_serialize.py
-PRAGMA user_version=31;
+PRAGMA user_version=32;
 BEGIN TRANSACTION;
 CREATE TABLE bundle (
         id             TEXT PRIMARY KEY,
@@ -167,6 +167,7 @@ INSERT INTO "cell_pin" VALUES('src_cell','s2p_3','OUTPUT',-1.0,-1.0);
 INSERT INTO "cell_pin" VALUES('proc_cell','s2p_3','INPUT',-1.0,-1.0);
 INSERT INTO "cell_pin" VALUES('proc_cell','p2s_3','OUTPUT',-1.0,-1.0);
 INSERT INTO "cell_pin" VALUES('snk_cell','p2s_3','INPUT',-1.0,-1.0);
+CREATE TABLE cell_pin_port ( cell     TEXT NOT NULL REFERENCES cell(name), pin_name TEXT NOT NULL, ord      INTEGER NOT NULL, layer    TEXT NOT NULL DEFAULT '', x1 REAL NOT NULL, y1 REAL NOT NULL, x2 REAL NOT NULL, y2 REAL NOT NULL, PRIMARY KEY (cell, pin_name, ord));
 CREATE TABLE cell_rect (
             cell TEXT NOT NULL REFERENCES cell(name),
             ord  INTEGER NOT NULL,
@@ -227,7 +228,7 @@ CREATE TABLE meta (
             key   TEXT PRIMARY KEY,
             value TEXT
         );
-INSERT INTO "meta" VALUES('schema_version','31');
+INSERT INTO "meta" VALUES('schema_version','32');
 INSERT INTO "meta" VALUES('bdb_tool','buda-bdb');
 CREATE TABLE ndr_rule (
             name         TEXT PRIMARY KEY,

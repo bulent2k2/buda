@@ -135,6 +135,8 @@ cell_layer_share cell→cell, layer_id, share (fraction of the layer's
                  signal tracks, v20)
                  PRIMARY KEY (cell, layer_id)
 
+cell_pin_port    cell→cell, pin_name, ord, layer, x1,y1,x2,y2  — one LEF pin PORT
+                 rectangle, cell-local layout units (v32); `from_pins` reads it
 cell_rect        cell→cell, ord, x1,y1,x2,y2  — one rectangle of the cell's
                  MULTI-RECT footprint, in CELL-LOCAL coordinates (v30; no
                  rows = the cell is its single width x height box).  The
@@ -175,7 +177,7 @@ meta             key (TEXT PK), value  — die_w, die_h, units, lu_per_um,
                  user_ops:<bundle_id>:<topo_uid>
 ```
 
-**31 tables, 240 columns** at schema v31 — counted from a fresh database
+**32 tables, 248 columns** at schema v32 — counted from a fresh database
 rather than carried forward: the line still read "30 tables, 232 columns"
 after v30 had added a whole table (`cell_rect`) and a column
 (`cell.teg_mode`).  A `bundle.ndr_rule` note for
@@ -344,6 +346,17 @@ region declared twice keeps its FIRST pattern — which is the one every lookup
 returns, where the upsert had stored the later one.  A pre-v31 checkpoint has
 every `ord` 0 and is read by the rowid tie-break, i.e. in exactly the order it
 always was.
+
+v32 added the **LEF pin port geometry** — the `cell_pin_port` table, one row per
+LEF `PORT` rectangle of a signal pin (cell-local layout units, relative to the
+macro's geometry origin, with the layer the LEF drew it on).  `cell_pin` keeps a
+pin's centroid, which on a multi-port pin can lie on no port; `fix_pin ...
+from_pins` reads these rows instead and derives the face and the window along
+it from the metal itself.  `import_def_lef` fills the table (and `clear_design`
+empties it before the cell rows); `BDB.cell_pin_ports(cell)` returns
+`(pin, layer, x1, y1, x2, y2)` rows and `set_cell_pin_ports(cell, pin, rects)`
+replaces one pin's.  A pre-v32 checkpoint never held the geometry, so an empty
+table is exactly the design it stored and `from_pins` says so for such a cell.
 
 `tools/bdb_serialize.py` preserves the version across the `*.bdb.sql`
 round-trip.

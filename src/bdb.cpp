@@ -971,6 +971,20 @@ void BDB::_migrate() {
             "ALTER TABLE grid_override ADD COLUMN ord INTEGER NOT NULL DEFAULT 0",
             nullptr, nullptr, nullptr);   // ignored if the column already exists
     }
+    if (v < 32) {
+        // v31 -> v32: LEF pin PORT geometry.  A pre-v32 checkpoint never held
+        // it (the importer kept only a centroid, and only in memory), so an
+        // empty table is exactly the design that was stored; `from_pins` says
+        // so for such a cell rather than inventing a position.
+        _exec("CREATE TABLE IF NOT EXISTS cell_pin_port ("
+              " cell     TEXT NOT NULL REFERENCES cell(name),"
+              " pin_name TEXT NOT NULL,"
+              " ord      INTEGER NOT NULL,"
+              " layer    TEXT NOT NULL DEFAULT '',"
+              " x1 REAL NOT NULL, y1 REAL NOT NULL,"
+              " x2 REAL NOT NULL, y2 REAL NOT NULL,"
+              " PRIMARY KEY (cell, pin_name, ord));");
+    }
     if (v < SCHEMA_VERSION) {
         // Refresh provenance (incl. the meta.schema_version mirror) on EVERY
         // forward migration, not just the initial v0 seed — otherwise an upgraded
@@ -1536,6 +1550,7 @@ void BDB::clear_design() {
     clear_bundles();
     _exec("DELETE FROM busterm; "
           "DELETE FROM pin; DELETE FROM net_props; DELETE FROM net; "
+          "DELETE FROM cell_pin_port; "            // FKs cell (v32)
           "DELETE FROM cell_pin; DELETE FROM cell_children; "
           "DELETE FROM cell_layer_share; "         // FKs cell (v20)
           "DELETE FROM cell_rect; "                // FKs cell (v30)
@@ -2304,6 +2319,23 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
             sqlite3_bind_double(sc, 3, um_to_lu(sz.h));
             sqlite3_bind_text  (sc, 4, sz.cls.c_str(), -1, SQLITE_TRANSIENT);
             sqlite3_step(sc); sqlite3_reset(sc);
+        }
+    }
+
+    // LEF pin PORT geometry (v32), cell-local layout units.  Same signal-pin
+    // filter as _lef_pins; relative to the geometry origin like the pin
+    // offsets, so an instance's port is the cell's port read through its
+    // orientation.  The cell rows above are what the FK needs.
+    for (const auto& m : lef.macros) {
+        for (const auto& p : m.pins) {
+            if (p.use == "POWER" || p.use == "GROUND" || p.use == "CLOCK") continue;
+            std::vector<std::tuple<std::string,double,double,double,double>> rs;
+            for (const auto& port : p.ports)
+                for (const auto& r : port.rects)
+                    rs.emplace_back(port.layer,
+                        um_to_lu(r.x1 - m.ox), um_to_lu(r.y1 - m.oy),
+                        um_to_lu(r.x2 - m.ox), um_to_lu(r.y2 - m.oy));
+            if (!rs.empty()) set_cell_pin_ports(m.name, p.name, rs);
         }
     }
 
@@ -3872,6 +3904,47 @@ BDB::cell_rects(const std::string& cell) const {
     while (sqlite3_step(q) == SQLITE_ROW)
         out.emplace_back(sqlite3_column_double(q,0), sqlite3_column_double(q,1),
                          sqlite3_column_double(q,2), sqlite3_column_double(q,3));
+    return out;
+}
+
+void BDB::set_cell_pin_ports(
+    const std::string& cell, const std::string& pin,
+    const std::vector<std::tuple<std::string,double,double,double,double>>& rects) {
+    {
+        Stmt d(_db, "DELETE FROM cell_pin_port WHERE cell=? AND pin_name=?");
+        sqlite3_bind_text(d, 1, cell.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(d, 2, pin.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_step(d);
+    }
+    Stmt ins(_db, "INSERT INTO cell_pin_port(cell,pin_name,ord,layer,x1,y1,x2,y2)"
+                  " VALUES(?,?,?,?,?,?,?,?)");
+    int ord = 0;
+    for (const auto& r : rects) {
+        sqlite3_bind_text  (ins, 1, cell.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text  (ins, 2, pin.c_str(),  -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int   (ins, 3, ord++);
+        sqlite3_bind_text  (ins, 4, std::get<0>(r).c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_double(ins, 5, std::get<1>(r));
+        sqlite3_bind_double(ins, 6, std::get<2>(r));
+        sqlite3_bind_double(ins, 7, std::get<3>(r));
+        sqlite3_bind_double(ins, 8, std::get<4>(r));
+        if (sqlite3_step(ins) != SQLITE_DONE)
+            throw std::runtime_error("set_cell_pin_ports: insert failed for: " + cell + "." + pin);
+        sqlite3_reset(ins);
+    }
+}
+
+std::vector<std::tuple<std::string,std::string,double,double,double,double>>
+BDB::cell_pin_ports(const std::string& cell) const {
+    Stmt q(_db, "SELECT pin_name,layer,x1,y1,x2,y2 FROM cell_pin_port"
+                " WHERE cell=? ORDER BY pin_name, ord");
+    sqlite3_bind_text(q, 1, cell.c_str(), -1, SQLITE_TRANSIENT);
+    std::vector<std::tuple<std::string,std::string,double,double,double,double>> out;
+    while (sqlite3_step(q) == SQLITE_ROW)
+        out.emplace_back((const char*)sqlite3_column_text(q,0),
+                         (const char*)sqlite3_column_text(q,1),
+                         sqlite3_column_double(q,2), sqlite3_column_double(q,3),
+                         sqlite3_column_double(q,4), sqlite3_column_double(q,5));
     return out;
 }
 

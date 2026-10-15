@@ -35,6 +35,7 @@ landing on one block under DIFFERENT effective fixes cannot share a bundle
 (a bundle lands on one face), so the bundler splits them, loudly.
 """
 import json
+import math
 import re
 
 # BUDA-1922 (no candidate lands on a fixed pin) is emitted by the topology
@@ -1149,7 +1150,7 @@ def _strips_with(session, block, fix):
     return _strips_in(session, fp, name, fix)
 
 
-def _cmd_fix_pin(session, cmd, args, cmd_line):
+def _cmd_fix_pin(session, cmd, args, cmd_line, exact=None):
     # fix_pin <block>[.*] [north|south|east|west|H|V ...] [rect <n>] [at <lo>..<hi>]
     # fix_pin <block> off
     if not args:
@@ -1164,7 +1165,11 @@ def _cmd_fix_pin(session, cmd, args, cmd_line):
     # declared name wins; only an explicit trailing `.*` is stripped, and a
     # suffix is read as a per-pin selector only when its prefix IS a known block
     # (or, for `cell:`, a known cell).
-    if target.startswith(CELL):
+    if exact is not None:
+        # an IMPORTED pin name is opaque: `A.B` or `d*` must not be re-read as
+        # selector syntax, so the caller names the (cell, exact pin) outright
+        block, sel = CELL + exact[0], ("name", exact[1])
+    elif target.startswith(CELL):
         body = target[len(CELL):]
         if _cell_dims(session, body) is not None:
             block = CELL + body
@@ -1470,9 +1475,138 @@ def _keys(session):
             {(b, k, n) for b, d in _sel_store(session).items() for (k, n) in d})
 
 
+# A port counts as sitting on a face when it lies within this fraction of the
+# cell's shorter side from it: a LEF pin rect is drawn a little INSIDE the macro
+# edge more often than on it, and an exact-zero test would read every such pin
+# as an interior one.
+_FROM_PINS_EDGE = 0.10
+
+
+def derive_pin_faces(ports, cw, ch):
+    """({face bits}, (lo, hi) or None, [layers]) for ONE pin's ports in the cell
+    frame, or None when no port lies on a boundary.  A port rect takes its
+    NEAREST face; the window along the face is the hull of the ports' along
+    extents, and exists only when every port lands on that one face (a pin on
+    two faces has two windows, which one `at` cannot say)."""
+    tol = _FROM_PINS_EDGE * min(cw, ch)
+    faces, along, by_face = {}, {}, {}
+    for layer, x1, y1, x2, y2 in ports:
+        # distance from the rect to each face LINE: zero when the rect spans it
+        # (a port overhanging the edge sits ON the face), else its nearer edge
+        def _to(c, lo, hi):
+            return 0 if lo <= c <= hi else min(abs(lo - c), abs(hi - c))
+        d = {"west": _to(0, x1, x2), "east": _to(cw, x1, x2),
+             "south": _to(0, y1, y2), "north": _to(ch, y1, y2)}
+        face, dist = min(d.items(), key=lambda kv: kv[1])
+        if dist > tol:
+            continue
+        faces[face] = faces.get(face, 0) + 1
+        lo, hi = (y1, y2) if face in ("east", "west") else (x1, x2)
+        a = along.setdefault(face, [lo, hi])
+        a[0], a[1] = min(a[0], lo), max(a[1], hi)
+        lf = by_face.setdefault(face, [])
+        if layer and layer not in lf:
+            lf.append(layer)
+    if not faces:
+        return None
+    # one layer set per selector: keep only layers drawn on EVERY face the pin
+    # lands on, so a west M6 / east M8 pin does not permit M8 at the west face
+    fl = list(by_face.values())
+    layers = [l for l in fl[0] if all(l in other for other in fl)]
+    window = None
+    if len(faces) == 1:
+        face = next(iter(faces))
+        span = cw if face in ("north", "south") else ch
+        lo = max(0, int(math.floor(along[face][0])))
+        hi = min(int(span), int(math.ceil(along[face][1])))
+        if hi > lo:
+            window = (lo, hi)
+    return set(faces), window, layers
+
+
+def _from_pins(session, cmd, target, cmd_line):
+    """`fix_pin cell:<name>|cell:* from_pins`: one pin selector per LEF pin with
+    boundary ports — the face(s) its ports lie on and, when they all lie on one
+    face, the window along it; the approach layer when the pin's own metal runs
+    the right way for that face.  Pre-v32 checkpoints and cells with no LEF hold
+    no ports and are said so rather than guessed at."""
+    import buda
+    bdb = getattr(session, "bdb", None)
+    if bdb is None or not target.startswith(CELL):
+        print("Error: fix_pin ... from_pins: name a cell (`cell:<name>` or "
+              "`cell:*`) with a BDB open — a pin's ports are a cell fact")
+        return
+    body = target[len(CELL):]
+    cells = ([c.name for c in bdb.all_cells()] if body == "*" else [body])
+    done = 0
+    for cell in cells:
+        dims = _cell_dims(session, cell)
+        if dims is None:
+            print(f"Error: fix_pin {target}: no BDB cell named '{cell}'")
+            return
+        rows = bdb.cell_pin_ports(cell)
+        if not rows:
+            if body != "*":
+                print(f"[PinFix] {cell}: no LEF pin ports stored (import_def_lef "
+                      f"with a LEF fills them; a pre-v32 checkpoint has none) — "
+                      f"nothing to derive")
+            continue
+        by_pin = {}
+        for pin, layer, x1, y1, x2, y2 in rows:
+            by_pin.setdefault(pin, []).append((layer, x1, y1, x2, y2))
+        n_fix = n_int = 0
+        for pin, ports in by_pin.items():
+            got = derive_pin_faces(ports, dims[0], dims[1])
+            if got is None:
+                n_int += 1
+                # a selector left from a typed fix or an earlier run was derived
+                # from geometry this pin no longer has: drop it, don't keep it
+                if ("name", pin) in _sel_store(session).get(CELL + cell, {}):
+                    _apply_fix_pin(session, cmd, [f"{CELL}{cell}.{pin}", "off"], cmd_line,
+                                exact=(cell, pin))
+                continue
+            faces, window, layers = got
+            toks = sorted(faces)
+            if window is not None:
+                toks += ["at", f"{window[0]}..{window[1]}"]
+            # The approach layer needs only that every face share one axis (an
+            # east/west face is reached by a horizontal wire): it does not depend
+            # on there being a window.
+            horiz = {f in ("east", "west") for f in faces}
+            if len(horiz) == 1:
+                ok = [n for n in layers if n in session._layer_name_map
+                      and ((session.layers.get_layer_dir(session._layer_name_map[n])
+                            == buda.LayerDir.HORIZONTAL) == next(iter(horiz)))]
+                if ok:
+                    toks += ["layer", ",".join(ok)]
+            _apply_fix_pin(session, cmd, [f"{CELL}{cell}.{pin}"] + toks, cmd_line,
+                        exact=(cell, pin))
+            n_fix += 1
+        # an exact selector for a pin the (re-)imported LEF no longer draws at
+        # all has no geometry behind it either: leave that pin free too
+        stale = [k[1] for k in list(_sel_store(session).get(CELL + cell, {}))
+                 if k[0] == "name" and k[1] not in by_pin]
+        for pin in stale:
+            _apply_fix_pin(session, cmd, [f"{CELL}{cell}.{pin}", "off"], cmd_line,
+                           exact=(cell, pin))
+        n_int += len(stale)
+        done += n_fix
+        print(f"[PinFix] {cell} from_pins: {n_fix} pin(s) fixed from LEF ports"
+              + (f", {n_int} interior (no boundary port) left free" if n_int else ""))
+    if not done and body == "*":
+        print("[PinFix] from_pins: no cell holds LEF pin ports")
+
+
 def cmd_fix_pin(session, cmd, args, cmd_line):
+    _apply_fix_pin(session, cmd, args, cmd_line)
+
+
+def _apply_fix_pin(session, cmd, args, cmd_line, exact=None):
+    if exact is None and len(args) == 2 and args[1].lower() == "from_pins":
+        _from_pins(session, cmd, args[0], cmd_line)
+        return
     before_b, before_s = _keys(session)
-    _cmd_fix_pin(session, cmd, args, cmd_line)
+    _cmd_fix_pin(session, cmd, args, cmd_line, exact)
     after_b, after_s = _keys(session)
     # A typed removal outranks any BDB opened later (typed wins), so remember it.
     tb = session.__dict__.setdefault("_pin_fix_removed_blocks", set())

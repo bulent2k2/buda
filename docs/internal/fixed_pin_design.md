@@ -706,3 +706,13 @@ down — would be a separate item, and it would emit `fix_pin` lines.
   undetectable for a square one), bottom-up rotation-class clones' own frames, a pin
   selector deeper than the bundle's landing block, per-bit `at <pos>`, `from_pins`, the
   endpoint-via kind.  Vehicles: `hier_cell.buda`, `hier_pins.buda`, `hier_cell_local.buda`.
+- **PR 4 (`from_pins`, schema v32)**: `fix_pin cell:<name>|cell:* from_pins` consumes the LEF
+  pin PORTS the BDB now stores (`cell_pin_port`, filled by `import_def_lef`, cell-local layout
+  units with the LEF layer) and writes one per-pin cell selector per pin with a boundary port:
+  the nearest face of each port (within 10 % of the short side), the set of those faces, the
+  hull window along the face when every port is on one face, and the pin's layer as the approach
+  layer only when its metal runs the way that face is reached.  A pre-v32 checkpoint or a cell
+  with no LEF is told it has no ports.  Not done: the endpoint-via kind (a pin whose own layer
+  runs the wrong way for its face is left with a free approach layer rather than bridged), per-bit
+  `at <pos>`, the CLASS BLOCK vs CORE distinction for which pins count.  Vehicle:
+  `flow/pin_fix/from_pins.buda` (+ `.lef`, `.def`).

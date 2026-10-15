@@ -1,0 +1,81 @@
+VERSION 5.8 ;
+BUSBITCHARS "[]" ;
+DIVIDERCHAR "/" ;
+UNITS
+  DATABASE MICRONS 1 ;
+END UNITS
+
+# A hard macro whose pin PORTS the LEF draws: `a` on the west face (M6, a
+# horizontal TOP layer, so it is reached by an H wire), `b` on the north face (M7,
+# vertical), `c` on the south face on M6 -- a horizontal layer on a face a
+# vertical wire reaches, so `from_pins` leaves its approach layer free -- and `i`
+# in the interior, which no face lands on.
+MACRO mac
+  CLASS BLOCK ;
+  ORIGIN 0 0 ;
+  SIZE 100 BY 100 ;
+  PIN a
+    DIRECTION INPUT ;
+    USE SIGNAL ;
+    PORT
+      LAYER M6 ;
+      RECT 0 20 2 60 ;
+    END
+  END a
+  PIN b
+    DIRECTION INPUT ;
+    USE SIGNAL ;
+    PORT
+      LAYER M7 ;
+      RECT 30 98 70 100 ;
+    END
+  END b
+  PIN c
+    DIRECTION INPUT ;
+    USE SIGNAL ;
+    PORT
+      LAYER M6 ;
+      RECT 20 0 80 2 ;
+    END
+  END c
+  PIN i
+    DIRECTION INPUT ;
+    USE SIGNAL ;
+    PORT
+      LAYER M4 ;
+      RECT 40 40 60 60 ;
+    END
+  END i
+END mac
+
+MACRO drv
+  CLASS BLOCK ;
+  ORIGIN 0 0 ;
+  SIZE 100 BY 500 ;
+  PIN oa
+    DIRECTION OUTPUT ;
+    USE SIGNAL ;
+    PORT
+      LAYER M4 ;
+      RECT 98 400 100 440 ;
+    END
+  END oa
+  PIN ob
+    DIRECTION OUTPUT ;
+    USE SIGNAL ;
+    PORT
+      LAYER M4 ;
+      RECT 98 300 100 340 ;
+    END
+  END ob
+  PIN oc
+    DIRECTION OUTPUT ;
+    USE SIGNAL ;
+    PORT
+      LAYER M4 ;
+      RECT 98 200 100 240 ;
+    END
+  END oc
+END drv
+
+END LIBRARY
