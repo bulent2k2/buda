@@ -1487,8 +1487,13 @@ def derive_pin_faces(ports, cw, ch):
     tol = _FROM_PINS_EDGE * min(cw, ch)
     faces, along, layers = {}, {}, []
     for layer, x1, y1, x2, y2 in ports:
-        d = {"west": x1, "east": cw - x2, "south": y1, "north": ch - y2}
-        face, dist = min(((f, abs(v)) for f, v in d.items()), key=lambda kv: kv[1])
+        # distance from the rect to each face LINE: zero when the rect spans it
+        # (a port overhanging the edge sits ON the face), else its nearer edge
+        def _to(c, lo, hi):
+            return 0 if lo <= c <= hi else min(abs(lo - c), abs(hi - c))
+        d = {"west": _to(0, x1, x2), "east": _to(cw, x1, x2),
+             "south": _to(0, y1, y2), "north": _to(ch, y1, y2)}
+        face, dist = min(d.items(), key=lambda kv: kv[1])
         if dist > tol:
             continue
         faces[face] = faces.get(face, 0) + 1
@@ -1545,15 +1550,23 @@ def _from_pins(session, cmd, target, cmd_line):
             got = derive_pin_faces(ports, dims[0], dims[1])
             if got is None:
                 n_int += 1
+                # a selector left from a typed fix or an earlier run was derived
+                # from geometry this pin no longer has: drop it, don't keep it
+                if ("name", pin) in _sel_store(session).get(CELL + cell, {}):
+                    cmd_fix_pin(session, cmd, [f"{CELL}{cell}.{pin}", "off"], cmd_line)
                 continue
             faces, window, layers = got
             toks = sorted(faces)
             if window is not None:
                 toks += ["at", f"{window[0]}..{window[1]}"]
-                face = next(iter(faces))
+            # The approach layer needs only that every face share one axis (an
+            # east/west face is reached by a horizontal wire): it does not depend
+            # on there being a window.
+            horiz = {f in ("east", "west") for f in faces}
+            if len(horiz) == 1:
                 ok = [n for n in layers if n in session._layer_name_map
                       and ((session.layers.get_layer_dir(session._layer_name_map[n])
-                            == buda.LayerDir.HORIZONTAL) == (face in ("east", "west")))]
+                            == buda.LayerDir.HORIZONTAL) == next(iter(horiz)))]
                 if ok:
                     toks += ["layer", ",".join(ok)]
             cmd_fix_pin(session, cmd, [f"{CELL}{cell}.{pin}"] + toks, cmd_line)

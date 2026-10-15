@@ -1908,6 +1908,8 @@ def test_derive_pin_faces_rules():
     assert got[0] == {"west", "east"} and got[1] is None
     # the window is clipped to the face
     assert d([("M6", 0, -5, 2, 30)], 100, 100)[1] == (0, 30)
+    # a port overhanging the edge by more than the tolerance still SITS on it
+    assert d([("M6", -20, 20, 2, 60)], 100, 100) == ({"west"}, (20, 60), ["M6"])
 
 
 def test_from_pins_says_so_for_a_cell_with_no_ports():
@@ -1935,3 +1937,29 @@ def test_from_pins_replaces_a_typed_selector_and_persists(tmp_path):
     assert s2.bdb.cell_pin_ports("mac")                              # the ports survive
     fx2 = pin_fix_cmds._sel_store(s2)["cell:mac"][("name", "a")]
     assert (fx2["faces"], fx2["lo"], fx2["hi"]) == (W, 20, 60)       # ... and so do the fixes
+
+
+def test_from_pins_keeps_the_layer_of_a_same_axis_multi_face_pin():
+    """P2 (#996): a pin with ports on east AND west has no window, which also
+    skipped the layer; both faces are reached by a horizontal wire."""
+    lef = (FLOW / "from_pins.lef").read_text().replace(
+        "      RECT 0 20 2 60 ;\n    END",
+        "      RECT 0 20 2 60 ;\n    END\n    PORT\n      LAYER M6 ;\n      RECT 98 20 100 60 ;\n    END", 1)
+    assert "RECT 98 20 100 60" in lef
+    import tempfile
+    d = Path(tempfile.mkdtemp())
+    (d / "m.lef").write_text(lef)
+    text = _from_pins_flow().replace(str(FLOW / "from_pins.lef"), str(d / "m.lef"))
+    s, out = _run_flow_text(text)
+    fx = pin_fix_cmds._sel_store(s)["cell:mac"][("name", "a")]
+    assert fx["faces"] == (E | W) and not fx["has_window"] and fx["layers"] == ["M6"], fx
+
+
+def test_from_pins_drops_a_selector_for_a_pin_that_derives_interior():
+    """P2 (#996): the interior branch only counted, leaving a stale selector."""
+    text = _from_pins_flow().replace(
+        "fix_pin cell:mac from_pins",
+        "fix_pin cell:mac.i west at 40..60\nfix_pin cell:mac from_pins")
+    s, out = _run_flow_text(text)
+    assert ("name", "i") not in pin_fix_cmds._sel_store(s).get("cell:mac", {}), out[-400:]
+    assert ("name", "a") in pin_fix_cmds._sel_store(s)["cell:mac"]
