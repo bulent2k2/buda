@@ -70,6 +70,7 @@
 #   -noripup        with -healabs: negotiate only (ripup's trials are most of the time)
 #   -healseats      with -healabs: the healers also count supply-doomed seats
 #                   (set_heal_seats on)
+#   -pp "n v ..."   planner knobs, applied before run_planner (`-pp "kPeak 1"`)
 #   -fponly         stop right after auto_floorplan (seconds, not a routing run):
 #                   the table's per-level utilization and the die's LEAF
 #                   utilization are the whole output -- for sweeping `-fp "..."`
@@ -114,6 +115,7 @@ set fponly 0
 set healabs 0
 set healseats 0
 set noripup 0
+set pparams {}
 set demand_pct 80
 set grow_f 1.25
 set widen_f 1.5
@@ -135,7 +137,7 @@ while {$argi < $argc} {
         -noripup  { set noripup 1; incr argi }
         -noheal   { set heal 0; incr argi }
         -caps     { set caps 1; incr argi }
-        -emit - -pdk - -fp - -save - -iterate - -demand - -grow - -widen - -fill - -npu - -low - -top {
+        -emit - -pdk - -fp - -save - -iterate - -demand - -grow - -widen - -fill - -npu - -low - -top - -pp {
             if {$argi + 1 >= $argc} { error "bigsoc.tcl: $opt needs a value" }
             set v [lindex $argv [expr {$argi+1}]]
             switch -- $opt {
@@ -149,6 +151,7 @@ while {$argi < $argc} {
                 -widen   { set widen_f $v }
                 -fill    { set fill $v }
                 -npu     { set npu $v }
+                -pp      { set pparams $v }
                 -top     {
                     if {![string is integer -strict $v] || $v < 0 || $v > 3} {
                         error "bigsoc.tcl: -top wants a count of EXTRA TOP layers to add above M7 (0..3: M8 H, M9 V, M10 H)"
@@ -258,6 +261,7 @@ proc bigsoc::round {vfile save pdk fpopts grows gap bottomup caps heal {npu arra
     }
     buda::set_planner_param healersAhead 1
     if {$::healseats} { buda::set_heal_seats on }
+    foreach {pn pv} $::pparams { buda::set_planner_param $pn $pv }
     buda::open_bdb $save
     buda::import_verilog $vfile
 

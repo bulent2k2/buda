@@ -79,7 +79,7 @@ class AutoFloorplanMixin:
                         seed=1, keep=5, wl_weight=0.5, snap=(1, 1),
                         bit_pitch=None, pad=None, aspect_cap=2.0,
                         grow=None, cols=None, sa_iter=0, top_margin=None,
-                        util=None, fixed=()):
+                        util=None, fixed=(), landings=0):
         """Size and place the whole cell tree of the open BDB.  Returns the
         report dict (`cells`, `die`, `issues`) or None after printing an
         error.  See the module docstring for the rules."""
@@ -169,12 +169,22 @@ class AutoFloorplanMixin:
                 x = parent_of.get(x)
             return None
 
+        # who drives each net (for splitting a face group into BUNDLES under
+        # `landings`: the bundler's STRICT signature is driver + receivers)
+        net_driver = {}
+        if landings:
+            for cid, plist in pins_by_comp.items():
+                for p in plist:
+                    d0 = p.dir if p.dir not in ("", "UNKNOWN") else \
+                        cell_pin_dir.get((by_id[cid].cell, p.pin_name), "UNKNOWN")
+                    if d0 == "OUTPUT":
+                        net_driver.setdefault(p.net_id, set()).add(cid)
         port_bits = {}
         face_bits = {}
         ext_bits = {}          # comp id -> bits through its parent's ports
         for cell, lst in insts.items():
             acc = {}
-            hb = lb = 0
+            hb = lb = nh = 0
             for c in lst:
                 cnt = {}
                 groups = {}
@@ -191,17 +201,25 @@ class AutoFloorplanMixin:
                         a = at_level(oid, c.parent_id)
                         far.append(local[a] if a is not None and a != c.id
                                    else "^")
-                    key = (tuple(sorted(set(far))), d)
+                    if landings:
+                        drv = sorted(
+                            ("self" if oid == c.id else
+                             (local[a] if (a := at_level(oid, c.parent_id))
+                              is not None and a != c.id else "^"))
+                            for oid in net_driver.get(p.net_id, ()))
+                        key = (tuple(sorted(set(far))), d, tuple(drv))
+                    else:
+                        key = (tuple(sorted(set(far))), d)
                     groups[key] = groups.get(key, 0) + 1
                     if "^" in far:
                         ext_n += 1
                 ext_bits[c.id] = ext_n
                 for b, n in cnt.items():
                     acc[b] = max(acc.get(b, 0), n)
-                h_, l_ = hf.face_bits_pair(groups.values())
-                hb, lb = max(hb, h_), max(lb, l_)
+                h_, l_, nh_, _nl = hf.face_bits_pair_n(groups.values())
+                hb, lb, nh = max(hb, h_), max(lb, l_), max(nh, nh_)
             port_bits[cell] = acc
-            face_bits[cell] = (hb, lb)
+            face_bits[cell] = (hb, lb, nh, 1 if lb else 0)
 
         # where a cell's PORT sits inside it: a leaf's at its centre, a
         # container's where the child carrying it sits (resolved after the
@@ -344,7 +362,7 @@ class AutoFloorplanMixin:
         for cell in order:
             ch = template[cell]
             f = float(grow.get(cell, 1.0))
-            fb = face_bits.get(cell, (0, 0))
+            fb = face_bits.get(cell, (0, 0, 0, 0))
             if cell in fixed:
                 size[cell] = cell_size[cell]
                 if ch:
@@ -383,7 +401,7 @@ class AutoFloorplanMixin:
             if not ch:
                 ls = hf.size_leaf(pdk, cell, [], bp, pd,
                                   total_bits=sum(port_bits.get(cell, {}).values()),
-                                  faces=fb)
+                                  faces=fb, landings=landings, lgap=gap)
                 w, h = int(math.ceil(ls.w * f)), int(math.ceil(ls.h * f))
                 if snap != (1, 1):
                     w, h = hf._ceil_to(w, snap[0]), hf._ceil_to(h, snap[1])
@@ -403,8 +421,13 @@ class AutoFloorplanMixin:
             ext = {local[k.id]: ext_bits.get(k.id, 0)
                    for k in kids.get(r.id, [])}
             g, m = int(round(gap * f)), int(round(margin * f))
-            floors = hf.face_pair([fb[0], fb[0], fb[1], fb[1]], bp, pd,
-                                  pdk.facepad if pdk else -1)
+            if landings:
+                floors = (hf.landing_floor(fb[0], fb[2], bp, pd, gap),
+                          max(hf.landing_floor(fb[1], fb[3], bp, pd, gap),
+                              hf.light_floor(pd, pdk.facepad if pdk else -1)))
+            else:
+                floors = hf.face_pair([fb[0], fb[0], fb[1], fb[1]], bp, pd,
+                                      pdk.facepad if pdk else -1)
             packing = self._pack_children(cell, items, nets, g, m, place,
                                           seed, keep, wl_weight, snap,
                                           aspect_cap, cols.get(cell, 0),

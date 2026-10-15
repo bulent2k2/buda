@@ -345,3 +345,10 @@ endmodule
     n, f = sizes["n.pdk"], sizes["f.pdk"]
     assert n[0] == f[0] and n[1] < 100 <= f[1], sizes
 
+
+
+def test_landing_floor_is_one_pad_per_landing():
+    """`landings` sizes a face per landing: one pad each plus a gap between."""
+    import hier_floorplan as hf
+    assert hf.landing_floor(64, 1, 4, 24, 16) == 64 * 4 + 24
+    assert hf.landing_floor(64, 2, 4, 24, 16) == 64 * 4 + 2 * 24 + 16

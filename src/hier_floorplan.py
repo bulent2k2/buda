@@ -209,6 +209,32 @@ def face_bits_pair(loads) -> tuple:
     return faces[0][0], light
 
 
+def face_bits_pair_n(loads) -> tuple:
+    """`face_bits_pair` plus the number of BUNDLES landing on the heavy face:
+    (heavy bits, light bits, heavy landings, light landings).  A face that
+    hosts n bundles has to give EACH its own window -- the pad at each end
+    of a landing, and a channel between neighbours -- which a sum of bits
+    plus ONE pad does not (the L1 tag: two 32-bit buses on one 64-bit face
+    got 280 units, 2 x 152 + a gap = 320 is what hosts both)."""
+    faces = [[0, []] for _ in range(4)]
+    for b in sorted(loads, reverse=True):
+        i = min(range(4), key=lambda k: faces[k][0])
+        faces[i][0] += b
+        faces[i][1].append(b)
+    faces.sort(key=lambda f: -f[0])
+    light = max([b for f in faces[2:] for b in f[1]] or [0])
+    return faces[0][0], light, len(faces[0][1]), 1 if light else 0
+
+
+def landing_floor(bits: int, n: int, bit_pitch: float, pad: int,
+                  gap: int) -> int:
+    """The side a face hosting `n` landings of `bits` bits in all needs:
+    the bits at the bit pitch, a pad per landing, a channel between
+    neighbouring landings."""
+    n = max(1, int(n))
+    return int(math.ceil(bits * bit_pitch)) + int(pad) * n + int(gap) * (n - 1)
+
+
 def light_floor(pad: int, facepad: int = -1) -> int:
     """The floor the LIGHT face keeps whatever its bundles ask: the PDK's
     `facepad` when it states one, else two pads (room for a pad at each
@@ -248,7 +274,8 @@ class LeafSize:
 
 def size_leaf(pdk: Pdk | None, cell: str, loads, bit_pitch: float | None = None,
               pad: int | None = None, total_bits: int | None = None,
-              faces: tuple | None = None) -> LeafSize:
+              faces: tuple | None = None, landings: int = 0,
+              lgap: int = 0) -> LeafSize:
     """A leaf's size: the face pair (`face_pair` over the cell's bundle
     `loads`) grown to the PDK's area — uniformly, so the face-implied
     aspect is kept, unless the rule names an aspect — and never below
@@ -262,8 +289,12 @@ def size_leaf(pdk: Pdk | None, cell: str, loads, bit_pitch: float | None = None,
     if faces is not None:
         # the heavy/light face bits already taken (the max over a cell's
         # instances, whose loads group differently at each occurrence)
-        heavy = int(math.ceil(faces[0] * bp)) + pd
-        light = max(int(math.ceil(faces[1] * bp)) + pd, fp)
+        if landings and len(faces) > 2:
+            heavy = landing_floor(faces[0], faces[2], bp, pd, lgap)
+            light = max(landing_floor(faces[1], faces[3], bp, pd, lgap), fp)
+        else:
+            heavy = int(math.ceil(faces[0] * bp)) + pd
+            light = max(int(math.ceil(faces[1] * bp)) + pd, fp)
     else:
         heavy, light = face_pair(loads, bp, pd, fp)
     floor = heavy
