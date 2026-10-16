@@ -536,3 +536,34 @@ viol_bundles) and strictly better on one.
   on the chip flows are inside basin noise; the policies are scored from the
   two uniform runs, not from a built adaptive pass, so a real redo (which
   re-runs NUTS and DetailedNUTS and re-heals) can land elsewhere.
+
+## Per-bundle adaptive junction reach (2026-10-16)
+
+`set_junction_reach adaptive` (top-down designs only). Every bundle starts on
+the SHORT spans. After `run_detailed_nuts`, if the result carries cross-bundle
+shorts, `_final_reach_heal` (`nutsflow.py`) puts the bundles on those shorts
+into a per-bundle set (`buda.set_junction_reach_bundles`, read by the four
+reach sites in `nuts.cpp` and the promotion in `detailed_nuts.cpp` through
+`junction_reach_on(bundle_id)`), re-runs NUTS + DetailedNUTS, and keeps the
+trial only if opens strictly drop and overlaps do not rise; otherwise it
+restores. The set is cleared by a fresh `run_nuts` and by any change of mode.
+Bottom-up (`hier.locked`) sessions are scoped out, because long spans measured
+much worse there; adaptive is then the short spans.
+
+Corpus (56 flows, the same sweep as above; `tools/experiment/adaptive_reach.py
+OUT.json adaptive`), against the short spans:
+
+| flow | short (ovl/unpl/viol, abstract WL, shorts) | adaptive | long everywhere |
+|---|---|---|---|
+| big_data_test/tc3a | 0/0/2, 78019, 1 | 0/0/0, 78072 (+53), 0 | 0/0/0, 79430 (+1411) |
+| chip/chip_topdown | 5/134/11, 2534991, 4 | 5/134/9, 2535520 (+529), 0 | 5/130/11, 2558512 (+23521), 1 |
+| chip/chip_stack_topdown | 22/263/21, 2281361, 0 | 22/263/21, 2281637 (+276) | 21/235/19, +20244 |
+
+Every other flow is byte-identical to the short spans, including the three
+bottom-up flows that carry shorts (scoped out). So the per-bundle form clears
+the shorts the whole-design form clears (tc3a, chip_topdown) at 2-5% of its
+abstract wirelength cost. `chip_stack_topdown` reads no final shorts under the
+short spans, yet its wire moved: a healer's intermediate DetailedNUTS carried
+shorts there and the heal was accepted mid-flow, ending at the same final
+QoR with slightly more wire. `ariane133_heal` needs fetched inputs and is
+excluded.

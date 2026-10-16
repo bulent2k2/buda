@@ -7,7 +7,7 @@ and DetailedNUTS treats that end as the junction so bits snap to their own
 vias. `BUDA_NUTS_JUNCTION_REACH` unset or `topdown` applies it unless the
 design carries bottom-up marks (a template solved once and copied: the lever
 lost bits there); `0`/`off` restores the earlier spans; `1` applies it to every
-design. A flow can say it itself: `set_junction_reach on|off|topdown|env`
+design. A flow can say it itself: `set_junction_reach on|off|topdown|adaptive|env` (`adaptive` = short spans, then only the bundles on a cross-bundle short are lengthened after `run_detailed_nuts` under a measured accept; top-down only — see cross_bundle_shorts_study.md)
 (`topdown` is the default policy, `on` forces every design, `off` restores
 the earlier spans, `env` hands the decision back to the variable; a typed
 setting outranks the variable and is session state, not stored in the BDB;
