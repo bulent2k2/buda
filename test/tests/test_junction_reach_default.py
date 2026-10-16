@@ -202,3 +202,21 @@ def test_adaptive_keeps_a_clean_design_byte_identical_to_short(monkeypatch,
     s.do_command(f"source {f}")
     assert s.nuts_result.num_overlaps == 0
     assert not s._reach_bundles
+
+
+def test_adaptive_set_is_persisted_with_the_routing_and_restored(
+        monkeypatch, tmp_path):
+    # The accepted bundle set describes the far-edge spans stored in the
+    # bus rows, so a resumed session must get it back with them.
+    monkeypatch.delenv(_VAR, raising=False)
+    db = buda.BDB(str(tmp_path / "r.bdb"))
+    s = buda_cli.BudaSession()
+    s.bdb = db
+    s._reach_bundles = {3, 5}
+    s.nuts_result = buda.NUTSResult()
+    s._persist_nuts()
+    assert db.meta_get("reach_bundles", "") == "3,5"
+    s._reach_bundles = set()
+    s.nuts_result = buda.NUTSResult()
+    s._persist_nuts()
+    assert db.meta_get("reach_bundles", "") == ""

@@ -891,6 +891,10 @@ class PersistMixin:
         """
         if self.bdb is None or self.nuts_result is None:
             return (0, 0)
+        # The adaptive reach heal's accepted bundle set describes the far-edge
+        # spans in the rows below: it travels with them (empty when none).
+        self.bdb.meta_set("reach_bundles", ",".join(
+            str(b) for b in sorted(getattr(self, '_reach_bundles', ()))))
         # Hard FK: bus rows reference bundle(id). Make sure every referenced parent
         # is present before inserting, else the FK would reject the row.
         referenced = {str(ts.bundle_id) for ts in self.nuts_result.segments}
@@ -1803,6 +1807,12 @@ class PersistMixin:
                     self.fp, self.layers).keepout_seats_of(ts_list)
                 nr.num_keepout_conflicts = len(nr.keepout_seats)
             self.nuts_result = nr             # persisted routing = final, clean
+            try:
+                raw = self.bdb.meta_get("reach_bundles", "")
+                self._reach_bundles = {int(x) for x in raw.split(",") if x}
+                self._sync_junction_reach()
+            except Exception:
+                pass
         elif (cap_voided or ndr_voided) and self.nuts_result is not None:
             # Every restored bundle with routing was voided: a nuts_result
             # left over from earlier in THIS session is stale (potentially

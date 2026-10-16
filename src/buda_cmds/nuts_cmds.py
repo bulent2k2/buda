@@ -94,6 +94,12 @@ def cmd_run_nuts(session, cmd, args, cmd_line):
         now = _time.perf_counter()
         _t[key] = _t.get(key, 0.0) + (now - _tmark[0])
         _tmark[0] = now
+    # A fresh abstract solve under the session's own verdict: the adaptive
+    # reach heal's per-bundle set belongs to the solve it was accepted on, so it
+    # is cleared (and pushed to the engine) BEFORE the new solve runs.
+    if getattr(session, '_reach_bundles', None):
+        session._reach_bundles = set()
+        session._sync_junction_reach()
     nuts = buda.NUTSEngine(session.fp, session.layers)
     nuts.set_track_pitch(pitch)
     # Tapered fan-in: (re)derive the selected candidates' per-segment bit
@@ -168,11 +174,6 @@ def cmd_run_nuts(session, cmd, args, cmd_line):
     # trial rerun (_run_nuts_internal) deliberately does NOT clear it —
     # trials re-run DNUTS themselves and restore refs via snapshot.
     session.detailed_result = None
-    # A fresh abstract solve under the session's own verdict: the adaptive
-    # reach heal's per-bundle set belongs to the solve it was accepted on.
-    if getattr(session, '_reach_bundles', None):
-        session._reach_bundles = set()
-        session._sync_junction_reach()
     # A handed-down plan's seats, audited against the placement (6c).
     session._report_plan_pins_seated()
     _lap("plan_pins")
