@@ -34,7 +34,7 @@ for f, d in sorted(by.items()):
     s, l = d['off'], d['on']
     pick = {'short': s, 'long': l, 'default': s if bottom_up(f) else l}
     pick['adapt_shorts'] = l if ((s.get('xshorts') or 0) > 0 and (better(l, s) or (
-        l.get('xshorts', 0) < s['xshorts'] and key(l) <= key(s)))) else s
+        l.get('xshorts', 0) < s['xshorts'] and all(x <= y for x, y in zip(key(l), key(s)))))) else s
     pick['adapt_dirty'] = l if (dirty(s) and better(l, s)) else s
     for k, r in pick.items():
         p = pol[k]; p[0] += r['ovl'] or 0; p[1] += r['unpl'] or 0; p[2] += r['viol'] or 0

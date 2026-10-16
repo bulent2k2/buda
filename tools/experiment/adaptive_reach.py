@@ -7,7 +7,7 @@ Then read it with tools/experiment/adaptive_reach_analyze.py OUT.json.
  every corpus flow under short ('off') and
 long ('on', every design) spans; record final QoR, cross shorts + their bundles,
 per-bundle abstract/detailed wirelength."""
-import contextlib, io, json, os, sys, time
+import contextlib, io, json, os, shutil, sys, time
 sys.path[:0] = ['build', 'src', 'tools']
 ROOT = os.getcwd()
 import qor_corpus as qc
@@ -19,6 +19,13 @@ def one(args):
     s = buda_cli.BudaSession(); s.no_viz = True
     s._junction_reach_mode = mode
     tmp = qc.private_log_dir(s)
+    try:
+        return _one(flow, mode, s)
+    finally:
+        if tmp:
+            shutil.rmtree(tmp, ignore_errors=True)   # the worker's throwaway log dir
+
+def _one(flow, mode, s):
     t0 = time.time()
     try:
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
