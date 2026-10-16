@@ -94,6 +94,12 @@ def cmd_run_nuts(session, cmd, args, cmd_line):
         now = _time.perf_counter()
         _t[key] = _t.get(key, 0.0) + (now - _tmark[0])
         _tmark[0] = now
+    # A fresh abstract solve under the session's own verdict: the adaptive
+    # reach heal's per-bundle set belongs to the solve it was accepted on, so it
+    # is cleared (and pushed to the engine) BEFORE the new solve runs.
+    if getattr(session, '_reach_bundles', None):
+        session._reach_bundles = set()
+        session._sync_junction_reach()
     nuts = buda.NUTSEngine(session.fp, session.layers)
     nuts.set_track_pitch(pitch)
     # Tapered fan-in: (re)derive the selected candidates' per-segment bit
@@ -250,6 +256,7 @@ def cmd_run_detailed_nuts(session, cmd, args, cmd_line):
     # cull-doomed LOW segments under the refold's accept contract, so
     # healerless flows get the cover ripup's refold gives healered ones.
     # No-op without culled bits; persists below only the accepted state.
+    session._final_reach_heal()
     session._final_cull_heal()
     # Measured TOP re-seat heal (#536 follow-up): re-seat supply-doomed TOP
     # segments — the class the LOW->TOP escalation family cannot reach — on

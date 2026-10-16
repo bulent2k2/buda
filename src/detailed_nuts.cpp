@@ -2303,7 +2303,7 @@ std::vector<BusSegment> make_bus_segments(
                             if (std::min(dlo, dhi) <= kEndTol) {
                                 c.is_endpoint = true;
                                 c.lo_end      = (dlo <= dhi);
-                            } else if (junction_reach_active()) {
+                            } else if (junction_reach_active(ts.bundle_id)) {
                                 // Junction reach ends the span at the partner's
                                 // far EDGE (track ± width/2), not its centre:
                                 // that end is the junction too, and a bit must

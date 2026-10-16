@@ -153,7 +153,7 @@ def test_set_junction_reach_rejects_a_bad_value_and_keeps_the_setting(
     s.bdb = _Bdb(False)
     s.do_command("set_junction_reach off")
     s.do_command("set_junction_reach maybe")
-    assert "expects on|off|topdown|env" in capsys.readouterr().out
+    assert "expects on|off|topdown|adaptive|env" in capsys.readouterr().out
     s.do_command("set_junction_reach")
     assert buda.junction_reach_active() is False
 
@@ -165,3 +165,58 @@ def test_a_flow_can_switch_it_off_itself(monkeypatch, tmp_path):
     assert _overlaps(monkeypatch, "1", tmp_path, keep_switch=True) == 0
     assert _overlaps(monkeypatch, None, tmp_path, keep_switch=True) == 0
     assert _overlaps(monkeypatch, "1", tmp_path, keep_switch=False) == 1
+
+
+def test_adaptive_starts_short_and_takes_a_per_bundle_set(monkeypatch):
+    # adaptive: the design verdict is SHORT; only the bundles the reach heal
+    # listed take the far-edge spans (the per-bundle form of the query).
+    monkeypatch.delenv(_VAR, raising=False)
+    s = buda_cli.BudaSession()
+    s.bdb = _Bdb(False)
+    s.do_command("set_junction_reach adaptive")
+    assert buda.junction_reach_active() is False
+    assert buda.junction_reach_active(7) is False
+    s._reach_bundles = {7}
+    s._sync_junction_reach()
+    assert buda.junction_reach_active(7) is True
+    assert buda.junction_reach_active(8) is False
+    # leaving adaptive clears the set
+    s.do_command("set_junction_reach off")
+    assert buda.junction_reach_active(7) is False
+
+
+def test_adaptive_keeps_a_clean_design_byte_identical_to_short(monkeypatch,
+                                                               tmp_path):
+    # nuts_corner_touch has no cross-bundle shorts: the heal never engages, so
+    # adaptive places exactly as the short spans do.
+    monkeypatch.delenv(_VAR, raising=False)
+    flow = os.path.abspath(_FLOW)
+    src = open(flow).read().replace("set_junction_reach off\n",
+                                    "set_junction_reach adaptive\n")
+    f = tmp_path / "nuts_corner_touch.buda"
+    f.write_text(src)
+    shutil.copy(flow.replace(".buda", ".json"),
+                str(tmp_path / "nuts_corner_touch.json"))
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    s.do_command(f"source {f}")
+    assert s.nuts_result.num_overlaps == 0
+    assert not s._reach_bundles
+
+
+def test_adaptive_set_is_persisted_with_the_routing_and_restored(
+        monkeypatch, tmp_path):
+    # The accepted bundle set describes the far-edge spans stored in the
+    # bus rows, so a resumed session must get it back with them.
+    monkeypatch.delenv(_VAR, raising=False)
+    db = buda.BDB(str(tmp_path / "r.bdb"))
+    s = buda_cli.BudaSession()
+    s.bdb = db
+    s._reach_bundles = {3, 5}
+    s.nuts_result = buda.NUTSResult()
+    s._persist_nuts()
+    assert db.meta_get("reach_bundles", "") == "3,5"
+    s._reach_bundles = set()
+    s.nuts_result = buda.NUTSResult()
+    s._persist_nuts()
+    assert db.meta_get("reach_bundles", "") == ""

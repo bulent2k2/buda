@@ -433,3 +433,137 @@ What the flip cost, found by running the fast tier with it on:
   tests no longer need the `no_junction_reach` fixture.
 - **Nothing here changes the converge repro**: its blind round is bottom-up,
   so the four motivating shorts stay (see the review section above).
+
+### How the junction-reach switch works, in detail (2026-10-15)
+
+**Who decides.**  `BudaSession._sync_junction_reach` runs before every
+command and hands the engine one verdict (`buda.set_junction_reach_allowed`;
+`buda.junction_reach_active()` reads it back).  Order of precedence: a typed
+`set_junction_reach on|off|topdown` first, then `BUDA_NUTS_JUNCTION_REACH`,
+then the default.  `topdown` (the default) is on unless the BDB carries
+`set_bottom_up` marks; `on` / `1` forces every design; `off` / `0` forces none;
+`env` drops the typed setting.  The engine holds no mode of its own (-1 = no
+session behind it, so the process environment decides), which is why a driver
+can flip it in-process and why the first caller no longer freezes it.
+
+**Where it acts: abstract NUTS and DetailedNUTS, never the planner.**  Four
+places read the verdict, none of them in `congestion_planner.cpp`:
+- `do_span_adjustments` (`src/nuts.cpp`): a stub that follows a perpendicular
+  partner no longer ends at the partner's track *centre* but at its far edge,
+  `track -+ width/2`, on the end that faces away (`sc.lo_end` picks the sign).
+- the same pass's cover step: the partner's two edges are covered, not just
+  its centre, so every bit of the partner is reachable.
+- `tighten_spans_to_reach`: the reach window is widened by half the partner's
+  width on both sides (`jh`).
+- `make_bus_segments` (`src/detailed_nuts.cpp`): a placed stub end that lies
+  on the partner's far edge, not only at its centre, is promoted to an
+  endpoint junction, so bits snap to their own vias there instead of keeping a
+  shared abstract end past it (which left dangling metal).
+The planner picks topologies and layers and charges bands from the *nominal*
+spans, so it never prices the extra half-width.  The cost shows up only in
+NUTS output: abstract wirelength +4.85 % on the corpus, detailed +0.01 %.
+Whether a planner that priced the longer spans would choose differently is
+not measured.
+
+**The two failure modes point in opposite directions.**
+- *Short spans* (the old behaviour) fail at DetailedNUTS: a bit snapped to its
+  partner's track past the stub's end lands on another bundle's metal, a
+  cross-bundle short (`DetailedNUTSResult.num_cross_shorts`).
+- *Long spans* (the new default) are what overlaps the corner in
+  `flow/nuts_corner_touch.buda`, which therefore declares
+  `set_junction_reach off` itself.
+
+**Consequence for an adaptive setting.**  "Start short, switch to long if
+corner overlaps appear" would switch the wrong way.  The trigger that matches
+the evidence is: run short, and if DetailedNUTS leaves cross-bundle shorts,
+redo with long spans.  Two costs make it more than a flag: the span is decided
+in abstract NUTS, so the redo is `run_nuts` + `run_detailed_nuts`, not
+DetailedNUTS alone; and the switch can be whole-design (simple, but lengthens
+bundles that were fine) or per bundle (needs a per-segment flag read by both
+NUTS and DetailedNUTS, and pays wire only where a short was actually found).
+Both would be accepted only when the redo has fewer shorts and no more
+overlaps or unplaced bits, the same rule the heals use.  An experiment over
+the corpus (every flow under short and under long spans, with the final
+shorts, the bundles they sit on and per-bundle wirelength) is the way to size
+the per-bundle saving before building it; its results go in the next section.
+
+### Adaptive junction reach, measured (2026-10-15)
+
+`tools/experiment/adaptive_reach.py` runs every corpus flow twice, short
+spans (`set_junction_reach off`) and long spans (`on`, every design, bottom-up
+included), recording the final overlaps / unplaced / violating bundles, the
+cross-bundle shorts and the bundles they sit on, and per-bundle abstract
+wirelength; `adaptive_reach_analyze.py` scores policies from that file.  One
+sweep, 56 flows (`ariane133_heal` needs its fetched inputs and was not run),
+healers on as each flow ships.  The two whole-design adaptive rules take the
+long run only when it is componentwise no worse on (overlaps, unplaced,
+viol_bundles) and strictly better on one.
+
+| policy | overlaps | unplaced | viol | clean flows | abstract WL (sum) | shorts left |
+|---|---|---|---|---|---|---|
+| always short | 289 | 1393 | 135 | 43 | 36,649,322 | 15 |
+| always long | 304 | 1536 | 152 | 46 | 38,287,457 | 5 |
+| shipped default (long, except bottom-up marks) | 287 | 1359 | 131 | 45 | 38,144,904 | 11 |
+| adaptive, trigger = short run left shorts | 288 | 1400 | 133 | 44 | 36,695,871 | 5 |
+| adaptive, trigger = short run is dirty | 286 | 1359 | 131 | 46 | 36,724,714 | 11 |
+
+- **Trigger on dirty, not on shorts.**  Only 5 flows leave shorts under short
+  spans, and the shorts-only rule misses the flows that long spans help
+  through overlaps (`mix2_fast_topdown` 1 -> 0 overlaps, `chip_stack_topdown`
+  263 -> 235 unplaced): 1400 unplaced against 1359.
+- **Dirty-triggered adaptive matches the shipped default on quality** (same
+  unplaced and violating bundles, one fewer overlap, one more clean flow:
+  `mix2_fast_bottomup` goes clean under long spans, which the default does not
+  give a bottom-up design) **at 3.7 % less abstract wire** (36.72 M against
+  38.14 M).  Nearly all of that wire is one flow: `rv/soc_conv_div`, clean under
+  short spans, grows 1.36 M under long (8 %); the next three are 30 k each.
+  Read it as "a clean design keeps its short wire", which is the point of the
+  rule, not as a broad saving.
+- **The accept rule is doing real work.**  Long spans are much worse on
+  `mix2_fast_bottomup_shared` ((0,0,2) -> (4,80,10)) and
+  `mix2_fast_bottomup_caps` ((2,0,0) -> (11,72,11)); blind "always long on a
+  dirty design" would take those.  `chip_stack_bottomup` and
+  `chip_bottomup` trade unplaced bits against shorts and are refused too.
+- **Per bundle looks promising, unproven.**  In every flow whose short run
+  leaves shorts, they sit on 2 bundles out of 80-660, and lengthening only
+  those costs 53-188 abstract units against 1,408-29,260 for lengthening all
+  (`tc3a` 53 against 1,408; `chip_topdown` 188 against 23,529;
+  `mix2_fast_bottomup_shared` is the exception, 2,644 of 12,143, and long
+  spans are worse there anyway).  This is the wire cost on the bundles
+  concerned in the all-long run; it does not show that lengthening only them
+  clears the shorts, nor how the packing reacts to a design with mixed spans.
+- **Caveats.**  One run per cell and greedy healers, so single-unit differences
+  on the chip flows are inside basin noise; the policies are scored from the
+  two uniform runs, not from a built adaptive pass, so a real redo (which
+  re-runs NUTS and DetailedNUTS and re-heals) can land elsewhere.
+
+## Per-bundle adaptive junction reach (2026-10-16)
+
+`set_junction_reach adaptive` (top-down designs only). Every bundle starts on
+the SHORT spans. After `run_detailed_nuts`, if the result carries cross-bundle
+shorts, `_final_reach_heal` (`nutsflow.py`) puts the bundles on those shorts
+into a per-bundle set (`buda.set_junction_reach_bundles`, read by the four
+reach sites in `nuts.cpp` and the promotion in `detailed_nuts.cpp` through
+`junction_reach_on(bundle_id)`), re-runs NUTS + DetailedNUTS, and keeps the
+trial only if opens strictly drop and overlaps do not rise; otherwise it
+restores. The set is cleared by a fresh `run_nuts` and by any change of mode.
+Bottom-up (`hier.locked`) sessions are scoped out, because long spans measured
+much worse there; adaptive is then the short spans.
+
+Corpus (56 flows, the same sweep as above; `tools/experiment/adaptive_reach.py
+OUT.json adaptive`), against the short spans:
+
+| flow | short (ovl/unpl/viol, abstract WL, shorts) | adaptive | long everywhere |
+|---|---|---|---|
+| big_data_test/tc3a | 0/0/2, 78019, 1 | 0/0/0, 78072 (+53), 0 | 0/0/0, 79430 (+1411) |
+| chip/chip_topdown | 5/134/11, 2534991, 4 | 5/134/9, 2535520 (+529), 0 | 5/130/11, 2558512 (+23521), 1 |
+| chip/chip_stack_topdown | 22/263/21, 2281361, 0 | 22/263/21, 2281637 (+276) | 21/235/19, +20244 |
+
+Every other flow is byte-identical to the short spans, including the three
+bottom-up flows that carry shorts (scoped out). So the per-bundle form clears
+the shorts the whole-design form clears (tc3a, chip_topdown) at 2-5% of its
+abstract wirelength cost. `chip_stack_topdown` reads no final shorts under the
+short spans, yet its wire moved: a healer's intermediate DetailedNUTS carried
+shorts there and the heal was accepted mid-flow, ending at the same final
+QoR with slightly more wire. `ariane133_heal` needs fetched inputs and is
+excluded.

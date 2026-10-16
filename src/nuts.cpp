@@ -788,6 +788,19 @@ static bool junction_reach_on() {
 }
 bool junction_reach_active() { return junction_reach_on(); }
 
+// Per-bundle junction reach (adaptive mode): bundles listed here take the
+// far-edge spans even when the design-wide verdict is off.  Set between
+// commands by the session's reach heal (never while a solve is running), so
+// the readers below take no lock.
+static std::set<int> g_junction_reach_bundles;
+void set_junction_reach_bundles(const std::vector<int>& ids) {
+    g_junction_reach_bundles = std::set<int>(ids.begin(), ids.end());
+}
+static bool junction_reach_on(int bundle_id) {
+    return junction_reach_on() || g_junction_reach_bundles.count(bundle_id) > 0;
+}
+bool junction_reach_active(int bundle_id) { return junction_reach_on(bundle_id); }
+
 static void do_span_adjustments(
     const std::vector<TrackSegment*>&                               layer_segs,
     const std::map<std::pair<int,int>, std::vector<SpanAdjConn>>&   rev_conn_map,
@@ -813,7 +826,7 @@ static void do_span_adjustments(
             if (jt == ts_ptr_map.end()) continue;
             TrackSegment* other = jt->second;
             if (only_unplaced && other->placed) continue;
-            const double jr = junction_reach_on()
+            const double jr = junction_reach_on(other->bundle_id)
                 ? (sc.lo_end ? -0.5 * ts->width : 0.5 * ts->width) : 0.0;
             adj_map[{sc.src_bid, sc.src_si}].push_back(
                 {ts->track_position + jr, sc.lo_end, sc.is_endpoint, ts->is_jog});
@@ -891,7 +904,7 @@ static void do_span_adjustments(
                 auto pj = ts_ptr_map.find({sc.src_bid, sc.src_si});
                 if (pj == ts_ptr_map.end() || !pj->second->placed) continue;
                 cover(pj->second->track_position);
-                if (junction_reach_on()) {
+                if (junction_reach_on(other->bundle_id)) {
                     cover(pj->second->track_position - 0.5 * pj->second->width);
                     cover(pj->second->track_position + 0.5 * pj->second->width);
                 }
@@ -1102,7 +1115,7 @@ static void tighten_spans_to_reach(std::vector<TrackSegment>& segments,
             for (const auto& sc : it->second) {
                 auto pj = ptr.find({sc.src_bid, sc.src_si});
                 if (pj == ptr.end()) continue;
-                const double jh = junction_reach_on() ? 0.5 * pj->second->width : 0.0;
+                const double jh = junction_reach_on(ts.bundle_id) ? 0.5 * pj->second->width : 0.0;
                 rmin = std::min(rmin, pj->second->track_position - jh);
                 rmax = std::max(rmax, pj->second->track_position + jh);
             }
