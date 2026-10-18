@@ -1320,7 +1320,7 @@ void DetailedNUTSEngine::place_by_layer(
                                          bs.interval_lo, bs.interval_hi,
                                          std::move(assigned),
                                          std::move(assigned_bits),
-                                         r_lo, r_hi});
+                                         r_lo, r_hi, {}, {}});
                 continue;
             }
 
