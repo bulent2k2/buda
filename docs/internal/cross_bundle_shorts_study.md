@@ -567,3 +567,27 @@ short spans, yet its wire moved: a healer's intermediate DetailedNUTS carried
 shorts there and the heal was accepted mid-flow, ending at the same final
 QoR with slightly more wire. `ariane133_heal` needs fetched inputs and is
 excluded.
+
+## Flipping the default to `adaptive`? A/B on main (2026-10-19)
+
+Today's default (`topdown`: far-edge spans on every top-down design, short
+spans on bottom-up ones) against `set_junction_reach adaptive`, the same 56-flow
+corpus on `f22fd507` (`tools/experiment/adaptive_reach.py OUT.json
+topdown,adaptive`, 4 workers, so seconds are indicative only).
+
+Totals over the flows that ran (ovl / unplaced / violating bundles, abstract WL,
+detailed WL, seconds): topdown 287 / 1359 / 131, 38.14M, 821.69M, 1242 s;
+adaptive 289 / 1393 / 131, 36.65M (-3.9 %), 821.52M (-0.02 %), 1338 s (+8 %).
+
+- 37 flows differ, 33 of them only in abstract WL (shorter by 0.5-9 %, QoR triple
+  identical, detailed WL equal or within a fraction of a percent).
+- Better: `chip_topdown` (shorts 1 -> 0, violating bundles 11 -> 9, but 130 -> 134
+  unplaced), `tc3a` (identical QoR, shorts already 0 under the default).
+- Worse: `chip_stack_topdown` 21/235/19 -> 22/263/21; `chip3_topdown` 266 -> 268
+  unplaced; `rnr/mix2_fast_topdown` 0/0/0 -> 1 overlap (a clean flow goes dirty) and
+  6 s -> 52 s in the sweep (4.5 s -> 17 s alone: the heal's trial is rejected at a
+  mid-flow DetailedNUTS, opens 112 -> 112, and the healers then run from the short
+  spans' basin).  `bigHalf` 54 -> 85 s, `rnr/mix2` 23 -> 32 s.
+
+Reading: adaptive buys abstract wire and no detailed wire, loses unplaced bits on
+the chip flows and one clean verdict, and costs heal trials.  Not flipped.
