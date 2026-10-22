@@ -219,10 +219,14 @@ the second rule live.  Three things make it read wrong today:
   reads the directions (`cell_pin_dir`, the `net_driver` map `landings`
   builds).  So the member tuple carries a fourth field, `role` in `{drv,
   rcv, unknown}`, behind its own accessor so nothing that unpacks the
-  geometry changes (§4.1), and for a net whose roles are all `unknown` the
-  rule falls back to the bundler's own positional reading: each member's
-  far end is the centroid of the OTHER members, which is the pairwise
-  reading for k = 2 and a defined one for k > 2.
+  geometry changes (§4.1) — resolved at the NET level by the bundler's
+  own rule, not copied from each pin's direction (§4.1 has the shapes
+  where the two differ: a second `OUTPUT`, an `INOUT`, an `UNKNOWN`),
+  which also settles the all-`UNKNOWN` case the way the route does (the
+  first pin is the driver), so E1 and the route name the same far end.
+  A net that rule DROPS (no driver, or a driver with no receiver) is
+  never routed and lands nothing, so E1 skips it rather than drawing a
+  demand the route will not place.
 * **Centres, not ports.**  Both functions use `pos + size/2`.  The packer
   resolves a container's ports to the child that carries them
   (`resolve_ports`, the `(name, dx, dy)` members `hpwl` reads) precisely
@@ -424,9 +428,21 @@ foreign database will feed: no handle, no transaction, no unit.  Keep it,
 and write the contract down in one docstring: names are opaque keys the
 adapter chose; coordinates are LAYOUT units of one container's frame;
 `dx, dy` are optional pin offsets inside the block; `role` is the
-endpoint's part in the net (`drv`, `rcv`, `unknown` — what the BDB's
-`pin.dir` / `cell_pin.dir` say, what an OA `oaTerm` type or a LEF `PIN
-DIRECTION` says, and the field the landing rule of §2.1 needs); a bus is
+endpoint's part in the NET as the bundler resolves it, which is not the
+pin's own direction: `_endpoints_at_depth` (`src/bundler.cpp:175`) takes
+the first `OUTPUT` as the driver and attaches every further `OUTPUT` as
+an endpoint, uses an `INOUT` as the driver only when no `OUTPUT` exists
+and the other `INOUT`s as receivers, and promotes `UNKNOWN` pins
+positionally (the first as driver when nothing else drives, the rest as
+receivers when a driver has no sink).  A per-pin copy of `pin.dir`
+disagrees with the route on every one of those shapes, so the adapter
+CALLS that rule rather than restating it — expose it through the
+binding, and give `hier_floorplan.py` a Python twin only if the no-build
+tests need one, its agreement pinned the way `_split_args`'s is — and
+once bundling has run it can read the resolved roles the BDB already
+stores per bit (`bundle_net.drv_path` / `rcv_paths`, v27).  The
+direction a foreign database supplies (an OA `oaTerm` type, a LEF `PIN
+DIRECTION`) is the INPUT to that rule, never the role itself.  A bus is
 however many nets share a member set (`aggregate_nets` folds them — no
 bus NAME is needed, which matters for OA, where every bit is its own
 `oaNet`).  Adding `role` is the one change to the shape this review
@@ -519,13 +535,25 @@ items in their parent's packing, stamped wherever the packer puts them
 `component` has no such column, and the `FIXED` a DEF states is read by
 `import_def_lef` and not kept.  So "write back as declarations" needs
 three things, not two: the minimum sizes, the `fixed` list, and a
-per-instance position lock (a `component` column, or a meta list of
-locked paths) that the Floorplanner's legalizer honours as an obstacle
-and the batch honours by LEGALIZING from the stored origins
-(`compact_pack`, the position-faithful mode of §3.3) rather than packing
-freely — a pack-around-an-obstacle mode the free packers do not have.
-Without the third, the designer's A4 slides are undone by the first
-re-run.
+position lock.  The lock's SCOPE follows the rule everything else here
+follows — one packing per cell TYPE: `auto_floorplan` packs a cell once
+and stamps the same `cell_children` offsets at every occurrence
+(`stamp`, `autofp.py:531`), and the Floorplanner already treats a
+child's move the same way (`sync_move_to_instances` moves that child in
+every sibling instance unless the parent cell is unique).  An absolute
+lock on ONE occurrence's child therefore has no meaning either tool can
+honour: it would be lost, or move the child in every sibling.  So a
+nested child's lock is CELL-LOCAL — a flag on its `cell_children` row,
+"this child keeps this offset in every occurrence" — honoured by the
+GUI's legalizer as an obstacle and by the batch by legalizing the rest
+of the container around it (`compact_pack` from the template's origins,
+the position-faithful mode of §3.3, which the free packers lack);
+locking one occurrence alone means Make Unique first, exactly as a
+resize does today; and a per-instance lock by path exists only for ROOT
+instances, which the top packing places once.  Nothing in the BDB holds
+either today — neither `cell_children` nor `component` has such a
+column.  Without the lock, the designer's A4 slides are undone by the
+first re-run.
 
 ### 4.5 Units, identity, locks
 
@@ -577,8 +605,9 @@ with a `SIZE`.  Three rules the toy lacks and the branch half-has:
   what A3/A4 need as an obstacle in the parent's frame (the page's risk
   list says so; the toy has no such block).  Today the GUI's flag is
   session state and the batch has no pack-around-an-obstacle mode, so
-  the lock has to be defined once (§4.4) and read by both; conflating it
-  with `fixed` would forbid moves the batch makes today.
+  the lock has to be defined once (§4.4: cell-local for a nested child,
+  per instance only for a root) and read by both; conflating it with
+  `fixed` would forbid moves the batch makes today.
 * **A hard macro is un-growable.**  `cell.cls` from LEF is the authority
   the BDB stores for exactly this question, and the rule is the
   repository's own: any stated class other than `CORE` is a hard macro
@@ -659,15 +688,15 @@ experiment with a table beside the existing one.
 1. **One demand rule** (§2.1–2.3): make `side_loads` / `side_overload`
    count landings with `landing_floor`, charge a k-member net as one
    landing per member on the side toward its far end (which needs the
-   `role` field of §4.1, read through `member_role()` with `member()`
-   unchanged, and the positional fallback for `unknown`), read member
-   offsets, and return tracks.  Pin it
+   `role` field of §4.1, resolved by the bundler's own net-level rule
+   and read through `member_role()` with `member()` unchanged), read
+   member offsets, and return tracks.  Pin it
    against `landings` with a test on the L1-tag shape (280 vs 320).
    Re-measure `facing` at NQ 2/8/16 under the unified rule — the +43 %
    may move.
 2. **The adapter** (§4.2): `container_view(db, cell)` out of
-   `_auto_floorplan`, carrying pin roles into the members, a
-   `cell_children` reader in the binding, the Floorplanner's
+   `_auto_floorplan`, carrying the bundler-resolved roles into the
+   members, a `cell_children` reader in the binding, the Floorplanner's
    `compute_hpwl` on it.  This is the prerequisite for
    every E card and it removes the per-draw database walk.
 3. **V1 + V3** as the page has them (small, no new model), V6 as a
@@ -681,9 +710,9 @@ experiment with a table beside the existing one.
    through the dry pass; A2 as the existing rule with its price beside
    Make Unique; A1 gated on a stated non-`CORE` class and on `fixed`
    (the size is declared either way); growth snapped per axis.
-6. **A7** as the exported flow's `minsize` + `fixed` + an instance
-   position lock first, a meta row second, with LEF precedence; then the
-   `-iterate` hand-down (§5.6).
+6. **A7** as the exported flow's `minsize` + `fixed` + the position lock
+   (cell-local below the roots, per instance at the roots) first, a meta
+   row second, with LEF precedence; then the `-iterate` hand-down (§5.6).
 
 Deferred, with the reason: a C++ legalizer (§3.4, no measured need); V5
 (right, large, and already indexed as the prerequisite in wishlist-ux.md
@@ -713,4 +742,4 @@ overwrite; the note is this review's.
 | A4 | slide before grow | M | want, first | lift `align_facing` off the slice-only path |
 | A5 | preview + price | M | want | two previews (re-pack, push), one undo snapshot, the Optimize status line |
 | A6 | compact into slack first | M | want, before A1 | the container outline as a constraint, "does not fit" as a result |
-| A7 | write back as declarations | M | want | minsize, `fixed` AND an instance position lock; flow text, then meta; LEF wins |
+| A7 | write back as declarations | M | want | minsize, `fixed` AND a position lock (cell-local below the roots); flow text, then meta; LEF wins |
