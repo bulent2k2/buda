@@ -10,6 +10,7 @@ This directory contains deep-dive architectural documents, cross-subsystem inter
 ## Hierarchical & Bottom-Up Planning
 - [hier_bottom_up_planning.md](hier_bottom_up_planning.md) — Bottom-up template planning (`set_bottom_up`), rotation-class clone templates (`<cell>90`), and track-phase alignment (`align_bottom_up`).
 - [bdb_hier_options.md](bdb_hier_options.md) — Hierarchical options, cell instantiations, and BDB database representation.
+- [floorplan_edge_playground_review.md](floorplan_edge_playground_review.md) — Review of the Floorplan Edge Playground proposal (edge demand on block sides and facing windows, in-place grow-and-compact, the V/E/A option cards) from five angles: UX principles, algorithmic effectiveness and efficiency, the data model and DB interface, and the fit in a hierarchical RTL + PNR flow; ends in a build order.
 
 ## Database & Physical Interchange
 - [bdb_test_data.md](bdb_test_data.md) — Diffable `*.bdb.sql` database text fixtures, SQLite serialization, and the `bdb_input` test fixture.
