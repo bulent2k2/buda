@@ -217,8 +217,9 @@ the second rule live.  Three things make it read wrong today:
   is handed do not carry them: `nets_among` (`autofp.py:271`) keeps
   `(name, dx, dy)` per member and drops `p.dir`, although the adapter
   reads the directions (`cell_pin_dir`, the `net_driver` map `landings`
-  builds).  So the member tuple grows a fourth field, `role` in `{drv,
-  rcv, unknown}` (§4.1), and for a net whose roles are all `unknown` the
+  builds).  So the member tuple carries a fourth field, `role` in `{drv,
+  rcv, unknown}`, behind its own accessor so nothing that unpacks the
+  geometry changes (§4.1), and for a net whose roles are all `unknown` the
   rule falls back to the bundler's own positional reading: each member's
   far end is the centroid of the OTHER members, which is the pairwise
   reading for k = 2 and a defined one for k > 2.
@@ -429,9 +430,18 @@ DIRECTION` says, and the field the landing rule of §2.1 needs); a bus is
 however many nets share a member set (`aggregate_nets` folds them — no
 bus NAME is needed, which matters for OA, where every bit is its own
 `oaNet`).  Adding `role` is the one change to the shape this review
-asks for; the three functions on the branch ignore it today, and the
-member tuple is read through `member()`, so a fourth field is one
-helper's change.
+asks for, and it is NOT one helper's change: `member()` normalises to a
+triple that `pin_xy` (`hier_floorplan.py:369`), `slice_pack` (667),
+`cluster_pack` (1124) and the annealer path (`autofp.py:678`) unpack
+into exactly three names, and `_span_hpwl` (775) iterates the normalised
+triples in its hot loop — a four-tuple returned by `member()` raises
+`ValueError` in ordinary packing.  So the geometry accessor stays what it
+is, `member(m) -> (name, dx, dy)` whether the input has three fields or
+four, a separate `member_role(m) -> role` reads the fourth (`unknown` for
+a triple), `aggregate_nets` keys on geometry plus role so the fold keeps
+it, and only `side_loads` / `facing_pairs` read the role.  Every present
+consumer is unchanged by construction; the adapter alone starts emitting
+four-tuples.
 
 ### 4.2 The adapter is the missing piece
 
@@ -649,8 +659,9 @@ experiment with a table beside the existing one.
 1. **One demand rule** (§2.1–2.3): make `side_loads` / `side_overload`
    count landings with `landing_floor`, charge a k-member net as one
    landing per member on the side toward its far end (which needs the
-   `role` field of §4.1 in the member tuple, with the positional fallback
-   for `unknown`), read member offsets, and return tracks.  Pin it
+   `role` field of §4.1, read through `member_role()` with `member()`
+   unchanged, and the positional fallback for `unknown`), read member
+   offsets, and return tracks.  Pin it
    against `landings` with a test on the L1-tag shape (280 vs 320).
    Re-measure `facing` at NQ 2/8/16 under the unified rule — the +43 %
    may move.
