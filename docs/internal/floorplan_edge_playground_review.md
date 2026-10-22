@@ -66,8 +66,11 @@ to 1,709 stranded bits for +5 % die, and NQ 16 to 4 static faults for
 3. **Growth has to be gated by what a cell IS.**  A hard macro's size is a
    LEF fact; the toy grows every block and the branch's `size_leaf` grows
    a `macro` rule to its heavy face.  The BDB already stores the class
-   (`cell.cls`, from LEF `MACRO … CLASS`): a `BLOCK`/`PAD` cell gets a
-   REPORT and a bundle-side remedy, never a resize (§5.2).
+   (`cell.cls`, from LEF `MACRO … CLASS`), and its own hard-macro rule is
+   any STATED class other than `CORE` (`cls <> '' AND cls <> 'CORE'`,
+   `src/bdb.cpp`'s `import_verilog` filter; an absent class reads as
+   `CORE`, LEF's default): such a cell gets a REPORT and a bundle-side
+   remedy, never a resize (§5.2).
 4. **The kernel is already DB-agnostic; the adapter is not.**  Every
    function the page names takes `(pos, size, nets)` dicts and returns
    tuples — that is the right shape and it should stay.  What is wrong is
@@ -242,7 +245,9 @@ have caught the 122-against-128 case.  Two corrections:
 
 The toy's `ratio = need / len` with `tight` at 0.85–1.0 mixes the pad
 into the number and picks a threshold from nowhere.  Tracks are the unit:
-`tracks(side) − landings(side) × (pad/pitch)` against bits, and "tight"
+`tracks(side) − landings(side) × (pad/pitch) − (landings(side) − 1) ×
+(gap/pitch)` against bits — the same three terms `landing_floor` charges,
+so the strip and the sizer cannot disagree — and "tight"
 is "fewer than one track of slack", which is what the healers need
 (`align_bottom_up` can nudge by a track, not by 15 %).
 
@@ -465,10 +470,20 @@ the faces now need is reported, not silently exceeded — otherwise the
 designer's fix and the engine's drift apart with nothing saying so.
 
 A7 as written also reproduces only the SIZE half of a designer's fix.
-Positions placed by hand are still re-packed by the next `auto_floorplan`
-unless the cell is in `fixed`, which keeps a cell exactly as the BDB holds
-it.  "Write back as declarations" should write both: the minimum sizes
-and the `fixed` list, or the designer's A4 slides are undone by the first
+Positions placed by hand are re-packed by the next `auto_floorplan`, and
+`fixed` does not keep them: `fixed <cell>` keeps the cell's SIZE and its
+children's offsets (`cell_children`) while the cell's instances remain
+items in their parent's packing, stamped wherever the packer puts them
+(`autofp.py:355–410`).  Nothing in the BDB locks an instance's POSITION —
+`component` has no such column, and the `FIXED` a DEF states is read by
+`import_def_lef` and not kept.  So "write back as declarations" needs
+three things, not two: the minimum sizes, the `fixed` list, and a
+per-instance position lock (a `component` column, or a meta list of
+locked paths) that the Floorplanner's legalizer honours as an obstacle
+and the batch honours by LEGALIZING from the stored origins
+(`compact_pack`, the position-faithful mode of §3.3) rather than packing
+freely — a pack-around-an-obstacle mode the free packers do not have.
+Without the third, the designer's A4 slides are undone by the first
 re-run.
 
 ### 4.5 Units, identity, locks
@@ -513,12 +528,20 @@ The NPU is written by `tpu_lib.tcl`'s array rule and handed over as
 `fixed pe_cell,row_cell,npu_cell`; an SRAM from a real PDK is a macro
 with a `SIZE`.  Three rules the toy lacks and the branch half-has:
 
-* **A `fixed` cell is an immovable obstacle** for A3/A4 (the page says so
-  in its risk list; the toy has no such block).  `PlacementOptimizer`
-  already has a Fixed flag per block; the legalizer should read the same
-  one.
-* **A hard macro is un-growable.**  `cell.cls` from LEF (`BLOCK`, `PAD`)
-  is the authority the BDB stores for exactly this question.  A1 on such
+* **An immovable INSTANCE is not a `fixed` cell.**  The batch's `fixed
+  <cell>` keeps the cell's size and its children's offsets and still
+  places the cell's instances in their parent's packing
+  (`autofp.py:355–410`); `PlacementOptimizer`'s Fixed flag pins one
+  block's position, which is what DEF's `FIXED` states per instance and
+  what A3/A4 need as an obstacle in the parent's frame (the page's risk
+  list says so; the toy has no such block).  Today the GUI's flag is
+  session state and the batch has no pack-around-an-obstacle mode, so
+  the lock has to be defined once (§4.4) and read by both; conflating it
+  with `fixed` would forbid moves the batch makes today.
+* **A hard macro is un-growable.**  `cell.cls` from LEF is the authority
+  the BDB stores for exactly this question, and the rule is the
+  repository's own: any stated class other than `CORE` is a hard macro
+  (`BLOCK`, `PAD`, `COVER`, `RING`, …; an absent class is `CORE`).  A1 on such
   a cell is a REPORT ("east face needs 152, macro is 100: split the
   bundle or move the landing"), never a resize.  The branch's `size_leaf`
   grows a PDK `macro` rule to its heavy face (`max(rule.w, heavy)`,
@@ -599,10 +622,11 @@ experiment with a table beside the existing one.
    `_face_extent` in the Visualizer, drawn distinguishably.
 5. **A4 → A6 → A1** behind A5's preview, re-pack and push both, priced
    through the dry pass; A2 as the existing rule with its price beside
-   Make Unique; A1 gated on `cell.cls` and `fixed`; growth snapped per
-   axis.
-6. **A7** as the exported flow's `minsize` + `fixed` first, a meta row
-   second, with LEF precedence; then the `-iterate` hand-down (§5.6).
+   Make Unique; A1 gated on a stated non-`CORE` class and on `fixed`
+   (the size is declared either way); growth snapped per axis.
+6. **A7** as the exported flow's `minsize` + `fixed` + an instance
+   position lock first, a meta row second, with LEF precedence; then the
+   `-iterate` hand-down (§5.6).
 
 Deferred, with the reason: a C++ legalizer (§3.4, no measured need); V5
 (right, large, and already indexed as the prerequisite in wishlist-ux.md
@@ -626,10 +650,10 @@ overwrite; the note is this review's.
 | E3 | facing windows | S | want | in tracks, margins subtracted, cap reported separately |
 | E4 | roll-up by cell | M | want | the Validation panel grouped by cell |
 | E5 | heat outline | S | want | the chip-zoom level of E1 |
-| A1 | grow short sides | S | want, gated | per axis, by the shortfall, snapped in y, never on `cls` BLOCK/PAD or `fixed` |
+| A1 | grow short sides | S | want, gated | per axis, by the shortfall, snapped in y, never on a stated non-`CORE` class or a `fixed` cell |
 | A2 | keep instances equal | S | want | the GUI's existing rule, priced beside Make Unique |
 | A3 | 1-D compaction | M | want, in Python | `compact_pack` with the compaction step optional; no C++ |
 | A4 | slide before grow | M | want, first | lift `align_facing` off the slice-only path |
 | A5 | preview + price | M | want | two previews (re-pack, push), one undo snapshot, the Optimize status line |
 | A6 | compact into slack first | M | want, before A1 | the container outline as a constraint, "does not fit" as a result |
-| A7 | write back as declarations | M | want | minsize AND `fixed`; flow text, then meta; LEF wins |
+| A7 | write back as declarations | M | want | minsize, `fixed` AND an instance position lock; flow text, then meta; LEF wins |
