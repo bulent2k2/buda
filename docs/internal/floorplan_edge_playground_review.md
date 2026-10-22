@@ -212,8 +212,16 @@ the second rule live.  Three things make it read wrong today:
   entirely (`len(names) != 2`).  The face rule charges each receiver the
   full 32.  The consistent reading is per LANDING: a k-member net is one
   landing of `w` bits on each member, on the side toward that landing's
-  far end (the driver for a receiver, the receivers' centroid for the
-  driver).
+  far end — the driver for a receiver, the receivers' centroid for the
+  driver.  That rule needs the endpoint ROLES, and the `nets` the kernel
+  is handed do not carry them: `nets_among` (`autofp.py:271`) keeps
+  `(name, dx, dy)` per member and drops `p.dir`, although the adapter
+  reads the directions (`cell_pin_dir`, the `net_driver` map `landings`
+  builds).  So the member tuple grows a fourth field, `role` in `{drv,
+  rcv, unknown}` (§4.1), and for a net whose roles are all `unknown` the
+  rule falls back to the bundler's own positional reading: each member's
+  far end is the centroid of the OTHER members, which is the pairwise
+  reading for k = 2 and a defined one for k > 2.
 * **Centres, not ports.**  Both functions use `pos + size/2`.  The packer
   resolves a container's ports to the child that carries them
   (`resolve_ports`, the `(name, dx, dy)` members `hpwl` reads) precisely
@@ -315,13 +323,29 @@ exists (E2).  A side sized for the bound never flips short.
 ### 3.1 The kernel
 
 Per container of `n` children, `m` aggregated nets with `k` members each:
-`side_loads` is O(Σ k²), `facing_pairs` O(m + pairs), `side_overload`
-O(n), `align_facing` O(passes × pairs × n) with `facing_shortfall`
-recomputed per candidate move (O(m) each).  A container has at most a few
-dozen children (81 at the top of the NQ 71 reticle dial; ≤ 8 per slicing
-group), so every one of these is microseconds to milliseconds in Python.
-The toy's O(n²) `overlapsOf` and `legalize` are the same story at n = 5.
-**Nothing here needs C++.**
+`side_loads` is O(m k²), `facing_pairs` O(m k + pairs), `side_overload`
+O(n + m k).  `align_facing` tries two candidate moves per short pair per
+pass (one block each way), and each candidate costs a `clear()` sweep
+over the container, O(n), plus a full `facing_shortfall`, which re-runs
+`facing_pairs`: O(passes × short_pairs × (n + m k)), with `short_pairs ≤
+pairs ≤ m`.  Measured rather than estimated, on the branch's
+`hier_floorplan.py` as it is (pure Python, no build; random layouts, 2-
+and 3-member nets, 4 passes, one core of this container):
+
+| n | m | k | `side_loads` | `facing_pairs` | `align_facing` |
+|---|---|---|---|---|---|
+| 8 | 20 | 2 | 0.03 ms | 0.02 ms | 0.04 ms |
+| 81 | 300 | 2 | 0.51 ms | 0.29 ms | 1.4 ms (12 short pairs) |
+| 81 | 300 | 3 | 1.1 ms | 0.17 ms | 0.2 ms (0 short pairs) |
+
+A container has at most a few dozen children (81 at the top of the NQ 71
+reticle dial; ≤ 8 per slicing group), so the kernel is milliseconds per
+container at the largest top this repository has floorplanned, and
+`align_facing` scales with the number of SHORT pairs, not with every
+net.  The flat O(n²) pair test at the page's 836 blocks is 9 ms in plain
+Python.  The toy's `overlapsOf` and `legalize` are the same story at
+n = 5.  **Nothing here needs C++** — the batch's cost is the re-pack
+(§3.3), not the kernel.
 
 ### 3.2 Interactive: what a drag has to recompute
 
@@ -398,9 +422,16 @@ tools (the batch packer, the Floorplanner, the Visualizer) and any
 foreign database will feed: no handle, no transaction, no unit.  Keep it,
 and write the contract down in one docstring: names are opaque keys the
 adapter chose; coordinates are LAYOUT units of one container's frame;
-`dx, dy` are optional pin offsets inside the block; a bus is however many
-nets share a member set (`aggregate_nets` folds them — no bus NAME is
-needed, which matters for OA, where every bit is its own `oaNet`).
+`dx, dy` are optional pin offsets inside the block; `role` is the
+endpoint's part in the net (`drv`, `rcv`, `unknown` — what the BDB's
+`pin.dir` / `cell_pin.dir` say, what an OA `oaTerm` type or a LEF `PIN
+DIRECTION` says, and the field the landing rule of §2.1 needs); a bus is
+however many nets share a member set (`aggregate_nets` folds them — no
+bus NAME is needed, which matters for OA, where every bit is its own
+`oaNet`).  Adding `role` is the one change to the shape this review
+asks for; the three functions on the branch ignore it today, and the
+member tuple is read through `member()`, so a fourth field is one
+helper's change.
 
 ### 4.2 The adapter is the missing piece
 
@@ -556,17 +587,28 @@ with a `SIZE`.  Three rules the toy lacks and the branch half-has:
 ### 5.3 E2 already exists, as `emit_block_size`
 
 "Measured side demand after routing: bits that actually landed on each
-face against the face's signal tracks" is what `_face_extent`
-(`src/buda_session/block_size.py:66`) computes for `emit_block_size`:
-per face, per LAYER, `eff_bus_width(bits)` on the layer the bits arrive
-on — the planner's own width model, so size and route agree by
-construction — read off the same `_plan_block` landings `emit_pin_def`
-writes pins at.  E2 should call it, not read `nuts_result` afresh.  Two
-things fall out: the strip is naturally per layer (a face carrying bits
-on two layers has two independent track supplies and one shared face,
-which `_face_extent` sums), and E2's number IS the block's
-`FP_SIZING`/`DIE_AREA` fragment, so the Visualizer and the handoff cannot
-disagree.
+face against the face's signal tracks" is what `emit_block_size`
+(`src/buda_session/block_size.py`) computes on its way to a `DIE_AREA`:
+the routed wires (`_wires`), each instance's pins (`_block_pins`), the
+landings `_plan_block` resolves — the same ones `emit_pin_def` writes
+pins at — counted per face and per LAYER, then `_face_extent` converting
+each face's per-layer counts to an extent with `eff_bus_width(bits)` on
+the layer the bits arrive on (the planner's own width model, so size and
+route agree by construction), and the maximum ACROSS instances taken per
+face.  Only the last conversion is a function of its own
+(`_face_extent`, line 66, which takes an already-aggregated `per_layer`
+map); the retrieval, the face assignment and the per-instance maximum
+are inline in the emitter, between its refusals and its JSON.  So E2
+cannot "call `_face_extent`" and get the measurement — it would have to
+repeat exactly the part that must stay shared.  The step is to EXTRACT
+it first: `routed_face_demand(session, target, inst=None) ->
+{instance: {face: {layer: bits}}}` (plus the extent per face), with
+`emit_block_size` reduced to that call, the area demand and the JSON.
+Then E2 reads the same function.  Two things fall out: the strip is
+naturally per layer (a face carrying bits on two layers has two
+independent track supplies and one shared face, which the extent sums),
+and E2's number IS the block's `FP_SIZING`/`DIE_AREA` fragment, so the
+Visualizer and the handoff cannot disagree.
 
 ### 5.4 The loop closes through the LEF, not only through `minsize`
 
@@ -606,20 +648,24 @@ experiment with a table beside the existing one.
 
 1. **One demand rule** (§2.1–2.3): make `side_loads` / `side_overload`
    count landings with `landing_floor`, charge a k-member net as one
-   landing per member, read member offsets, and return tracks.  Pin it
+   landing per member on the side toward its far end (which needs the
+   `role` field of §4.1 in the member tuple, with the positional fallback
+   for `unknown`), read member offsets, and return tracks.  Pin it
    against `landings` with a test on the L1-tag shape (280 vs 320).
    Re-measure `facing` at NQ 2/8/16 under the unified rule — the +43 %
    may move.
 2. **The adapter** (§4.2): `container_view(db, cell)` out of
-   `_auto_floorplan`, a `cell_children` reader in the binding, the
-   Floorplanner's `compute_hpwl` on it.  This is the prerequisite for
+   `_auto_floorplan`, carrying pin roles into the members, a
+   `cell_children` reader in the binding, the Floorplanner's
+   `compute_hpwl` on it.  This is the prerequisite for
    every E card and it removes the per-draw database walk.
 3. **V1 + V3** as the page has them (small, no new model), V6 as a
    `--dirty` flag that calls `dirty_bundles.draw`, which already exists on
    the branch.
 4. **E3 then E1**, as Validation issue kinds plus strips inside the
    drilled container, computed on release, with E5 at chip zoom.  E2 from
-   `_face_extent` in the Visualizer, drawn distinguishably.
+   `routed_face_demand`, extracted out of `emit_block_size` first (§5.3),
+   in the Visualizer, drawn distinguishably.
 5. **A4 → A6 → A1** behind A5's preview, re-pack and push both, priced
    through the dry pass; A2 as the existing rule with its price beside
    Make Unique; A1 gated on a stated non-`CORE` class and on `fixed`
@@ -646,7 +692,7 @@ overwrite; the note is this review's.
 | V5 | violations as data | L | later | the wishlist-ux item 3 prerequisite, unchanged |
 | V6 | annotated PNG | S | want | `--dirty` over the branch's `dirty_bundles.draw` |
 | E1 | predicted side demand | M | want, after §2.1 | unified rule, on release, inside the drilled container, dashed |
-| E2 | measured side demand | M | want | `_face_extent` per layer, solid |
+| E2 | measured side demand | M | want | `routed_face_demand` extracted from `emit_block_size`, per layer, solid |
 | E3 | facing windows | S | want | in tracks, margins subtracted, cap reported separately |
 | E4 | roll-up by cell | M | want | the Validation panel grouped by cell |
 | E5 | heat outline | S | want | the chip-zoom level of E1 |
