@@ -245,8 +245,10 @@ have caught the 122-against-128 case.  Two corrections:
   `corner_margin dx 5 dy 5` and M5's 32-unit period with eight signal
   slots (`POWER 3 1 (SIGNAL 2 1)x4 GROUND 3 1 (SIGNAL 2 1)x4`), so 132 →
   122 → 30 tracks.  The function should return `(have_units, have_tracks,
-  need_bits)` with the pitch and margin passed in, and the strip should
-  show tracks.
+  need_bits)` with the margin and the pitch passed in — the track count
+  read off the grid where one is declared (`signal_tracks_in` over the
+  window, the count DetailedNUTS admits on; the division by the pitch is
+  the gridless estimate) — and the strip should show tracks.
 * **The cap hides the unfixable case.**  `need = min(need, cap)` with
   `cap = min(aw, bw)` means a pair whose shorter block's side cannot host
   the bus reads as satisfied once the overlap equals that side.  Report
@@ -257,12 +259,21 @@ have caught the 122-against-128 case.  Two corrections:
 ### 2.3 Units and thresholds
 
 The toy's `ratio = need / len` with `tight` at 0.85–1.0 mixes the pad
-into the number and picks a threshold from nowhere.  Tracks are the unit:
-`tracks(side) − landings(side) × (pad/pitch) − (landings(side) − 1) ×
-(gap/pitch)` against bits — the same three terms `landing_floor` charges,
-so the strip and the sizer cannot disagree — and "tight"
-is "fewer than one track of slack", which is what the healers need
-(`align_bottom_up` can nudge by a track, not by 15 %).
+into the number and picks a threshold from nowhere.  The VERDICT is the
+sizer's own arithmetic in layout units — `landing_floor(bits, n, pitch,
+pad, gap) <= side`, the three terms it charges — so the strip and the
+sizer cannot disagree; what the strip SHOWS is tracks, derived from the
+same numbers in the right order: take the pads and the channels off the
+side first, in layout units, then floor the remainder to tracks —
+`⌊(side − n × pad − (n − 1) × gap) / pitch⌋` against `bits`.  The order
+matters: flooring the side to tracks first and subtracting `pad / pitch`
+afterwards throws the side's residual away, so a 105-unit side with
+pitch 10 and pad 5, which hosts a 10-bit landing by `landing_floor`
+(105), reads 9.5 tracks and short.  With an integer remainder `S` the
+two readings are one (`ceil(bits × pitch) ≤ S` iff `bits ≤ ⌊S /
+pitch⌋`), and where a grid is in force the exact count is the grid's own
+(§2.2).  "Tight" is "fewer than one track of slack", which is what the
+healers need (`align_bottom_up` can nudge by a track, not by 15 %).
 
 ### 2.4 The fixer: grow-then-compact versus what the batch does
 
@@ -428,9 +439,11 @@ foreign database will feed: no handle, no transaction, no unit.  Keep it,
 and write the contract down in one docstring: names are opaque keys the
 adapter chose; coordinates are LAYOUT units of one container's frame;
 a member may also be a PORT of the container itself — named for the
-port, placed at the boundary point the bus leaves through, so a bus that
-reaches one child and the outside world is a two-member net and not a
-dropped one (§4.2); `dx, dy` are optional pin offsets inside the block;
+port, placed at the boundary point the bus leaves through in the
+OCCURRENCE being read (the exit is the parent placement's, so it is per
+occurrence, and a cell-level view carries the worst over them, §4.2) —
+so a bus that reaches one child and the outside world is a two-member
+net and not a dropped one; `dx, dy` are optional pin offsets inside the block;
 `role` is the
 endpoint's part in the NET as the bundler resolves it, which is not the
 pin's own direction: `_endpoints_at_depth` (`src/bundler.cpp:175`) takes
@@ -492,8 +505,20 @@ the bus leaves through: once the level above is packed, that point is
 the container's side facing the far sibling (`resolve_ports` goes the
 other way, the container's port to the child that carries it, so the
 parent places against the real exit — the same resolution read top-down
-gives the child its exit); before the parent is packed the side is not
-knowable — AUTO_FLOORPLAN.md §5's "at an edge; which edge, the level
+gives the child its exit).  That exit is a property of each OCCURRENCE's
+parent placement, not of the cell: two instances of one cell can face
+their far siblings on different sides, so one template view cannot hold
+one boundary point per port.  The adapter therefore takes the
+occurrence — `container_view(db, cell, occurrence=None)`: given one, the
+port member is projected from THAT occurrence's parent, which is what
+the Floorplanner has when it is drilled into an instance (its breadcrumb
+is a path); given none, the view carries every occurrence's projection
+and a cell-level reading takes the WORST side per port over them, which
+is the rule the sizer already applies (`face_bits` is the max over a
+cell's instances, `_note_overloads` the worst occurrence per cell) and
+the price of one packing per cell type, said rather than hidden — the
+strip names the occurrence that binds.  Before the parent is packed the
+side is not knowable — AUTO_FLOORPLAN.md §5's "at an edge; which edge, the level
 above decides" — and E1 shows the bits as an EXTERNAL load on the
 child, drawn apart from the four sides, rather than inventing a face.
 The window for such a bus is then the parent level's business:
@@ -740,10 +765,11 @@ experiment with a table beside the existing one.
    against `landings` with a test on the L1-tag shape (280 vs 320).
    Re-measure `facing` at NQ 2/8/16 under the unified rule — the +43 %
    may move.
-2. **The adapter** (§4.2): `container_view(db, cell)` out of
-   `_auto_floorplan`, carrying the bundler-resolved roles into the
-   members, a `cell_children` reader in the binding, the Floorplanner's
-   `compute_hpwl` on it.  This is the prerequisite for
+2. **The adapter** (§4.2): `container_view(db, cell, occurrence=None)`
+   out of `_auto_floorplan`, carrying the bundler-resolved roles into the
+   members and the port exits per occurrence (the worst over them for
+   the cell view), a `cell_children` reader in the binding, the
+   Floorplanner's `compute_hpwl` on it.  This is the prerequisite for
    every E card and it removes the per-draw database walk.
 3. **V1 + V3** as the page has them (small, no new model), V6 as a
    `--dirty` flag that calls `dirty_bundles.draw`, which already exists on
