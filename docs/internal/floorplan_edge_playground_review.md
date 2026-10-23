@@ -427,7 +427,11 @@ tools (the batch packer, the Floorplanner, the Visualizer) and any
 foreign database will feed: no handle, no transaction, no unit.  Keep it,
 and write the contract down in one docstring: names are opaque keys the
 adapter chose; coordinates are LAYOUT units of one container's frame;
-`dx, dy` are optional pin offsets inside the block; `role` is the
+a member may also be a PORT of the container itself — named for the
+port, placed at the boundary point the bus leaves through, so a bus that
+reaches one child and the outside world is a two-member net and not a
+dropped one (§4.2); `dx, dy` are optional pin offsets inside the block;
+`role` is the
 endpoint's part in the NET as the bundler resolves it, which is not the
 pin's own direction: `_endpoints_at_depth` (`src/bundler.cpp:175`) takes
 the first `OUTPUT` as the driver and attaches every further `OUTPUT` as
@@ -474,7 +478,27 @@ page's E1/E2 would make a third.
 Extract it: `hier_netlist.container_view(db, cell) -> (items, nets,
 ext_bits)` in a module beside `hier_floorplan.py`, with a `cell_children`
 reader added to `bind_db.cpp`, and both the packer and the GUI calling
-it.  That is also the point where a proprietary database plugs in: an OA
+it.  One thing the extraction must ADD rather than move: `nets_among`
+feeds `aggregate_nets` the children's pins only, so a net that reaches
+one child and the container's own PORT has one block name and is dropped
+(`hier_floorplan.py:319`), and what survives of it is `ext_bits`, a bit
+COUNT per child with no far end and no role — enough for the boundary
+pull, not for a side.  The face rule counts those bits (the `^` far
+name in the groups), so an E1 built on today's adapter would read no
+demand on exactly the faces `auto_floorplan` sized for a port-bound bus.
+The adapter keeps such a net as a two-member net whose second member is
+the PORT (§4.1), with the bundler-resolved role, at the boundary point
+the bus leaves through: once the level above is packed, that point is
+the container's side facing the far sibling (`resolve_ports` goes the
+other way, the container's port to the child that carries it, so the
+parent places against the real exit — the same resolution read top-down
+gives the child its exit); before the parent is packed the side is not
+knowable — AUTO_FLOORPLAN.md §5's "at an edge; which edge, the level
+above decides" — and E1 shows the bits as an EXTERNAL load on the
+child, drawn apart from the four sides, rather than inventing a face.
+The window for such a bus is then the parent level's business:
+`facing_pairs` between the container and its sibling, which the two
+levels already compose.  That is also the point where a proprietary database plugs in: an OA
 adapter walks `oaInst` → items and `oaNet`/`oaInstTerm` → nets (the
 [OA bridge spec](gds_oa_interchange.md) already maps those onto the same
 BDB tables); a DEF/LEF adapter reads instances from `COMPONENTS`, sizes
@@ -641,10 +665,27 @@ are inline in the emitter, between its refusals and its JSON.  So E2
 cannot "call `_face_extent`" and get the measurement — it would have to
 repeat exactly the part that must stay shared.  The step is to EXTRACT
 it first: `routed_face_demand(session, target, inst=None) ->
-{instance: {face: {layer: bits}}}` (plus the extent per face), with
-`emit_block_size` reduced to that call, the area demand and the JSON.
-Then E2 reads the same function.  Two things fall out: the strip is
-naturally per layer (a face carrying bits on two layers has two
+{instance: {face: {layer: (bits, placed)}}}` (plus the extent per face),
+with `emit_block_size` reduced to that call, the area demand and the
+JSON.  Then E2 reads the same function.
+
+The extraction has to change WHAT is counted, not only where: `_wires`
+(`src/buda_session/pin_def.py:136`) reads `detailed_result.net_segments`
+whenever a detailed result exists and falls back to the abstract bus
+segments only when none does, and DetailedNUTS is all-or-nothing — a bus
+whose face lacks the tracks emits NO bit segments and counts every bit
+unplaced ([detailed_nuts.md](../detailed_nuts.md), "All-or-Nothing
+Semantics").  So the measurement as the emitter makes it today sees
+only the bits that WERE placed, and the bus this whole loop exists to
+repair — the one stranded on a short face — is the one it leaves out: a
+face short by 32 bits reads as needing 32 fewer.  `routed_face_demand`
+takes its DEMAND from the plan's landings (the abstract `nuts_result`
+segments ending on the block's faces, with their member bits — present
+for a stranded bus too) and uses the detailed result only to split each
+face into placed and stranded bits; `emit_block_size` sizes on the
+demand, and E2's strip shows both numbers, which is the honest picture
+("east: 64 bits planned, 32 placed").  Two more things fall out: the
+strip is naturally per layer (a face carrying bits on two layers has two
 independent track supplies and one shared face, which the extent sums),
 and E2's number IS the block's `FP_SIZING`/`DIE_AREA` fragment, so the
 Visualizer and the handoff cannot disagree.
@@ -678,8 +719,13 @@ the channel 1.5×.  AUTO_FLOORPLAN.md §4 measures that lever as blunt
 (528 → 441 → 302 while the endpoint gets worse).  The edge-demand rule is
 the per-AXIS, by-the-shortfall form of the same hand-down and the branch
 already has it (`facing`); what the loop lacks is the MEASURED version —
-hand `_face_extent`'s per-face numbers from round N down as round N + 1's
-`minsize`, which is E2 → A7 in batch.  That is a small change to
+hand `routed_face_demand`'s per-face numbers from round N down as round
+N + 1's `minsize`, which is E2 → A7 in batch.  That only works with the
+demand read from the PLAN (§5.3): a hand-down of the placed bits alone
+carries every face that fitted and none that did not, so round N + 1
+would reproduce round N's short faces exactly — the stranded bits are
+the signal, and `_wires` as it stands drops them once DetailedNUTS has
+run.  That is a small change to
 `bigsoc::round` and it would turn the proposal's two halves into one
 experiment with a table beside the existing one.
 
@@ -704,8 +750,9 @@ experiment with a table beside the existing one.
    the branch.
 4. **E3 then E1**, as Validation issue kinds plus strips inside the
    drilled container, computed on release, with E5 at chip zoom.  E2 from
-   `routed_face_demand`, extracted out of `emit_block_size` first (§5.3),
-   in the Visualizer, drawn distinguishably.
+   `routed_face_demand`, extracted out of `emit_block_size` first with
+   its demand read from the plan and its placed/stranded split from
+   DetailedNUTS (§5.3), in the Visualizer, drawn distinguishably.
 5. **A4 → A6 → A1** behind A5's preview, re-pack and push both, priced
    through the dry pass; A2 as the existing rule with its price beside
    Make Unique; A1 gated on a stated non-`CORE` class and on `fixed`
@@ -732,7 +779,7 @@ overwrite; the note is this review's.
 | V5 | violations as data | L | later | the wishlist-ux item 3 prerequisite, unchanged |
 | V6 | annotated PNG | S | want | `--dirty` over the branch's `dirty_bundles.draw` |
 | E1 | predicted side demand | M | want, after §2.1 | unified rule, on release, inside the drilled container, dashed |
-| E2 | measured side demand | M | want | `routed_face_demand` extracted from `emit_block_size`, per layer, solid |
+| E2 | measured side demand | M | want | `routed_face_demand` extracted from `emit_block_size`: demand from the plan, placed vs stranded from DetailedNUTS, per layer, solid |
 | E3 | facing windows | S | want | in tracks, margins subtracted, cap reported separately |
 | E4 | roll-up by cell | M | want | the Validation panel grouped by cell |
 | E5 | heat outline | S | want | the chip-zoom level of E1 |
